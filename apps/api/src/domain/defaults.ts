@@ -20,6 +20,7 @@ import { formulaFieldRefs, type FormulaValue } from "./formula.js";
 import { evaluateRecordFormula } from "./hydrate.js";
 import type { DefaultConfig, NumberRule, NumberSegment } from "@gx/shared-types";
 import { isNumberRuleEmpty, isTypeAssignable } from "@gx/shared-types";
+import { syncRecordsTx } from "./fieldIndex/sync.js";
 
 // 父记录 fields 中记录「某子表格字段已播种的种子行」的保留 key（cuid 不会与之冲突）
 const SEED_MARKER_KEY = "__gxSeeded";
@@ -299,6 +300,8 @@ export async function applyCreateDefaults(
   if (Object.keys(writes).length > 0) {
     const merged = { ...self, ...writes };
     await prisma.record.update({ where: { id: recordId }, data: { fields: JSON.stringify(merged) } });
+    // M1/S4：默认值/自动编号写入后同连接重建 sidecar（全局 client，自成语句）。
+    await syncRecordsTx(prisma, tableId, [recordId]);
   }
 }
 
@@ -350,6 +353,8 @@ export async function applyEditDefaults(
   if (Object.keys(writes).length > 0) {
     const merged = { ...self, ...writes };
     await prisma.record.update({ where: { id: recordId }, data: { fields: JSON.stringify(merged) } });
+    // M1/S4：编辑期联动重算写入后重建 sidecar（tableId 为本函数首参）。
+    await syncRecordsTx(prisma, tableId, [recordId]);
   }
 }
 
@@ -443,6 +448,8 @@ async function materializeSubtable(
       });
       childId = created.id;
       cloned = true;
+      // M1/S4：克隆播种的新行携带物理字段值，重建其 sidecar（目标表）。
+      await syncRecordsTx(prisma, targetTableId, [created.id]);
     }
     // 用 upsert 而非 create：可能残留同三元组的历史行（含软删行），否则会撞唯一约束
     await prisma.linkRow.upsert({
@@ -525,6 +532,8 @@ async function recomputeParentFormulaDefaults(parentTableId: string, parentRecor
           where: { id: rec.id },
           data: { fields: JSON.stringify({ ...self, ...writes }) },
         });
+        // M1/S4：父表点引用公式默认值重算写入后重建 sidecar（父表）。
+        await syncRecordsTx(prisma, parentTableId, [rec.id]);
       }
     }),
   );

@@ -3,6 +3,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma, withWriteTx, withWriteBatch, runWrite } from "../db.js";
 import {
   requireCanView,
@@ -15,6 +16,7 @@ import { makeOptions } from "../domain/fieldService.js";
 import { loadTableFields, queryRecords, parseViewConfig } from "../domain/recordService.js";
 import { recordsToCSV } from "../domain/csv.js";
 import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
+import { deleteTableStatement, rebuildTableTx } from "../domain/fieldIndex/sync.js";
 
 export const tables = new Hono();
 
@@ -331,6 +333,11 @@ tables.post("/:tableId/duplicate", async (c) => {
     data: { tableId: copy.id, name: "网格视图", type: "grid", order: 0, config: JSON.stringify(config) },
   });
 
+  // M1/S4：复制表的数据已按新字段 id 重映射落库，全量重建新表 sidecar（派生冗余）。
+  if (withData) {
+    await rebuildTableTx(prisma, copy.id);
+  }
+
   return { copy, primary };
   });
 
@@ -370,7 +377,7 @@ tables.post("/:tableId/clear", async (c) => {
     select: { id: true },
   });
   const ids = liveRecIds.map((r) => r.id);
-  const stmts = [];
+  const stmts: Prisma.PrismaPromise<unknown>[] = [];
   if (ids.length > 0) {
     // 软删记录，其关联数据同样只打软删标记（不清行），保证从回收站恢复后关联不丢
     stmts.push(
@@ -386,6 +393,10 @@ tables.post("/:tableId/clear", async (c) => {
       data: { deletedAt: new Date() },
     }),
   );
+  // M1/S4：表清空同批撤掉该表全部 sidecar 行（记录可从回收站恢复，恢复时不批量重建——
+  // 与「整表恢复」路径不同；单条记录恢复会各自重建）。
+  const clearSidecar = deleteTableStatement(tableId);
+  if (clearSidecar) stmts.push(clearSidecar);
   await withWriteBatch("table.clear", stmts);
   invalidateOrdinalCache(tableId);
   return c.json({ ok: true });
