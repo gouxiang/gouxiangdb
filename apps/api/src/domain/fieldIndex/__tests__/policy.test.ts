@@ -89,6 +89,25 @@ describe("extractEntries 各类型口径", () => {
     expect(extractEntries(meta("number"), null)[0]).toMatchObject({ isNull: 1 });
   });
 
+  it("rating：归数值组，valueNum=数字且 valueText 留档（S6 范围算子命中 valueNum）", () => {
+    const four = extractEntries(meta("rating"), 4)[0]!;
+    expect(four).toMatchObject({ valueNum: 4, valueText: "4", isNull: 0 });
+    // 0 星不是空（区别于未评分 null）：valueNum=0、isNull=0，不能误判为 NULL 桶
+    const zero = extractEntries(meta("rating"), 0)[0]!;
+    expect(zero).toMatchObject({ valueNum: 0, valueText: "0", isNull: 0 });
+    // 字符串数字也能转
+    expect(extractEntries(meta("rating"), "3")[0]).toMatchObject({ valueNum: 3 });
+    // 未评分（null/空串）才进 NULL 桶
+    expect(extractEntries(meta("rating"), null)[0]).toMatchObject({ isNull: 1, valueNum: null });
+  });
+
+  it("autoNumber：只入文本（可能是带前缀拼接串），valueNum 恒 null", () => {
+    expect(extractEntries(meta("autoNumber"), "ORD-202609-0001")[0]).toMatchObject({
+      valueText: "ORD-202609-0001",
+      valueNum: null,
+    });
+  });
+
   it("date/datetime：valueNum=Date.parse 毫秒，valueText 存原始串", () => {
     const e = extractEntries(meta("date"), "2026-09-13")[0]!;
     expect(e.valueNum).toBe(Date.parse("2026-09-13"));

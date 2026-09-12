@@ -4,7 +4,7 @@
 # Gitee Go / GitHub Actions 只负责拉起运行器并调用本脚本，门禁真相不依赖任何平台 YAML。
 #
 # 步骤：版本断言 → frozen 安装 → prisma 生成 → 三包 typecheck → api 构建 → 全量测试
-#       → 真 lint（基线告警卡 max-warnings，注入即红）→ migrate deploy 临时库干跑（11/11 + integrity）。
+#       → 真 lint（基线告警卡 max-warnings，注入即红）→ migrate deploy 临时库干跑（动态 N/N，数迁移目录 + integrity）。
 # 任一步失败立即退出（set -e + pipefail），不改业务库、不依赖任何密钥。
 
 set -euo pipefail
@@ -77,7 +77,7 @@ step "7/8 真 lint（基线卡 max-warnings：api=5 / web=114 / shared=0）"
 
 # ---------------------------------------------------------------------------
 # 8) migrate deploy 干跑：只在临时库，不碰业务库、不需要密钥
-#    断言 11/11 迁移全部落表 + integrity_check=ok。
+#    断言动态 N/N 迁移全部落表（N 由迁移目录实时计数，见下 EXPECTED_N）+ integrity_check=ok。
 #    优先用 better-sqlite3（已在依赖），runner 无 sqlite3 CLI 也能跑。
 # ---------------------------------------------------------------------------
 step "8/8 migrate deploy 临时库干跑"

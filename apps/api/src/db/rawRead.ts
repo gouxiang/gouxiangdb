@@ -1,12 +1,9 @@
 // apps/api/src/db/rawRead.ts
-// 只读 raw 连接网关 + COUNT/keyset 查询原语（M1/S2）。
-// 定位：本片刻画「可测原语」，不挂任何路由、不改 HTTP 输出、不读 sidecar。
-// 独立 better-sqlite3【只读】连接：WAL 下只读不阻塞写者，也不与 Prisma 写连接
-// 构成跨连接事务；只读打开本身阻止一切误写。排序固定 (createdAt ASC, id ASC)，
-// 与 recordService.recordFindMany 现状一致；游标谓词用可移植展开式（旧 SQLite/PG
-// 均不依赖行值比较）：("createdAt" > ? OR ("createdAt" = ? AND "id" > ?))。
-// 类型口径：Prisma 把 DateTime 以 epoch 毫秒【整数】存入 SQLite，故游标 createdAt
-// 统一用 number(ms) 绑定，id 为 TEXT。
+// 只读 raw 连接网关 + COUNT/keyset 原语（M1/S2）。只刻画「可测原语」，不挂路由、
+// 不改 HTTP 输出、不读 sidecar。独立 better-sqlite3【只读】连接，WAL 下不阻塞写者，
+// 只读打开本身阻止误写。排序固定 (createdAt ASC,id ASC)，游标谓词用可移植展开式
+// （旧 SQLite/PG 均不依赖行值比较）：("createdAt" > ? OR ("createdAt"=? AND "id" > ?))。
+// Prisma 把 DateTime 存为 epoch 毫秒【整数】，故游标 createdAt 用 number(ms)，id 为 TEXT。
 
 import path from "node:path";
 import Database from "better-sqlite3";
@@ -28,9 +25,10 @@ export interface KeysetPageArgs {
   tableId: string;
   cursor: KeysetCursor | null;
   limit: number;
-  /** 附加 WHERE 片段（不含 WHERE 关键字），必须为固定 SQL，值走 params 绑定防注入。 */
+  /** 附加 WHERE 片段（不含 WHERE），【必须以 AND 开头】（如 `AND "createdBy"=?`）；
+   *  固定 SQL、值走 params 绑定。漏 AND 内部自动补。 */
   whereSql?: string;
-  /** 与 whereSql 占位符顺序对应的绑定参数（不含 tableId 与游标三参）。 */
+  /** 与 whereSql 占位符同序的绑定参数（不含 tableId 与游标三参）。 */
   params?: SqlBindValue[];
   order?: KeysetOrder;
 }
@@ -55,7 +53,7 @@ export interface KeysetPage {
 export interface RawReader {
   /** 表内活行数（deletedAt IS NULL）。 */
   countLive(tableId: string): number;
-  /** 按附加谓词计数：whereSql 固定片段、params 顺序绑定；S6 queryPlan 用。 */
+  /** 按附加谓词计数：whereSql 固定片段【必须以 AND 开头】（漏 AND 自动补），S6 用。 */
   countByPlan(tableId: string, whereSql?: string, params?: SqlBindValue[]): number;
   /** keyset 翻一页；跨页不重不漏，排序在 (createdAt,id) 上稳定。 */
   keysetPage(args: KeysetPageArgs): KeysetPage;
@@ -72,12 +70,18 @@ function normalizeLimit(limit: number): number {
   return Math.min(limit, MAX_LIMIT);
 }
 
-/**
- * 用一个已打开的 better-sqlite3 连接构造原语（连接由调用方拥有，便于测试传临时库；
- * 只读保证来自 openRawReader 的 readonly:true，任何写语句在只读连接上直接抛错）。
- */
+/** 用已打开连接构造原语（连接由调用方拥有，便于测试传临时库；只读保证来自 readonly 打开）。 */
 export function createRawReader(db: Database.Database): RawReader {
-  const liveWhere = (extra = "") => `"tableId" = ? AND "deletedAt" IS NULL${extra ? ` ${extra}` : ""}`;
+  // 附加谓词须以 AND 开头。防御性规范化：S6 拼片段漏 AND 时自动补（避免
+  // `... IS NULL "createdBy"=?` 语法错）；空白片段忽略。
+  const anded = (extra = "") => {
+    const s = extra.trim();
+    return s ? (/^AND\b/i.test(s) ? s : `AND ${s}`) : "";
+  };
+  const liveWhere = (extra = "") => {
+    const c = anded(extra);
+    return `"tableId" = ? AND "deletedAt" IS NULL${c ? ` ${c}` : ""}`;
+  };
 
   function countLive(tableId: string): number {
     const row = db.prepare(`SELECT count(*) AS n FROM records WHERE ${liveWhere()}`).get(tableId) as { n: number };
@@ -124,22 +128,21 @@ export function openRawReader(file: string): RawReader {
   return createRawReader(db);
 }
 
-// ---- 进程级默认单例（惰性；测试用 createRawReader/openRawReader 传临时库，不碰它）----
-
+// ---- 进程级默认单例（惰性；测试传临时库不碰它）----
 let defaultReader: RawReader | undefined;
 
-/** 解析 config 指向的库文件绝对路径（相对 DATABASE_URL 相对 prisma/ 目录）。 */
+/** config 库文件绝对路径（相对 DATABASE_URL 相对 prisma/ 目录）。 */
 export function defaultDatabaseFile(): string {
   return resolveDatabaseFile(config.databaseUrl, path.dirname(config.migrationsDir));
 }
 
-/** 获取进程级只读 reader 单例；首调时打开文件（需库已由迁移创建）。 */
+/** 进程级只读 reader 单例；首调打开文件（需库已迁移）。 */
 export function getRawReader(): RawReader {
   if (!defaultReader) defaultReader = openRawReader(defaultDatabaseFile());
   return defaultReader;
 }
 
-/** 测试/优雅停机用：关闭并清空单例。 */
+/** 测试/优雅停机：关闭并清空单例。 */
 export function closeRawReader(): void {
   defaultReader?.close();
   defaultReader = undefined;

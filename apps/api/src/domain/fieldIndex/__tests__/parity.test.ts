@@ -90,6 +90,7 @@ beforeEach(async () => {
     ok: await mk("勾选", "checkbox"),
     status: await mk("状态", "singleSelect"),
     tags: await mk("标签", "multiSelect"),
+    stars: await mk("评分", "rating"),
     body: await mk("正文", "longText"),
     formula: await mk("计算", "formula"),
   };
@@ -126,6 +127,7 @@ describe("syncRecordsTx 与期望值对拍", () => {
       [fieldIds.ok]: true,
       [fieldIds.status]: opt("opt_run"),
       [fieldIds.tags]: [opt("t1"), opt("t2")],
+      [fieldIds.stars]: 4,
       [fieldIds.body]: "一段长正文不应入索引",
       [fieldIds.formula]: 999,
     });
@@ -140,8 +142,8 @@ describe("syncRecordsTx 与期望值对拍", () => {
     });
     const actual = sidecarRows();
     expectMatchesExpected(actual, expected);
-    // name/age/born/ok/status(1行)/tags(2行) = 7 行；body/formula 不入
-    expect(actual.length).toBe(7);
+    // name/age/born/ok/status(1行)/tags(2行)/stars = 8 行；body/formula 不入
+    expect(actual.length).toBe(8);
     const byField = new Map(actual.map((a) => [`${a.fieldId}|${a.ord}`, a]));
     expect(byField.get(`${fieldIds.name}|0`)!.valueText).toBe("张三");
     expect(byField.get(`${fieldIds.age}|0`)!.valueNum).toBe(30);
@@ -149,14 +151,18 @@ describe("syncRecordsTx 与期望值对拍", () => {
     expect(byField.get(`${fieldIds.ok}|0`)!.valueNum).toBe(1);
     expect(byField.get(`${fieldIds.status}|0`)!.valueText).toBe("opt_run");
     expect(byField.get(`${fieldIds.tags}|1`)!.valueText).toBe("t2");
+    // rating 必须走 valueNum（S6 评分 gt/lt 下推依赖），valueText 留 "4" 供文本 eq 回退
+    const stars = byField.get(`${fieldIds.stars}|0`)!;
+    expect(stars.valueNum).toBe(4);
+    expect(stars.valueText).toBe("4");
   });
 
   it("空值/草稿（RC-29）：未给值字段 isNull=1", async () => {
     const r = await makeRecord({ [fieldIds.name]: "" });
     await prisma.$transaction((tx) => syncRecordsTx(tx, tableId, [r]));
     const actual = sidecarRows();
-    // 所有 6 个索引字段各 1 行（多选空数组→1 null 行），全 isNull=1
-    const indexed = [fieldIds.name, fieldIds.age, fieldIds.born, fieldIds.ok, fieldIds.status, fieldIds.tags];
+    // 所有 7 个索引字段各 1 行（多选空数组→1 null 行），全 isNull=1
+    const indexed = [fieldIds.name, fieldIds.age, fieldIds.born, fieldIds.ok, fieldIds.status, fieldIds.tags, fieldIds.stars];
     expect(actual.length).toBe(indexed.length);
     expect(actual.every((a) => a.isNull === 1)).toBe(true);
   });

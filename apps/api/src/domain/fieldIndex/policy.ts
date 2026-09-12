@@ -35,22 +35,25 @@ export interface ExpectedRowsInput {
   records: Array<{ id: string; tableId: string; fields: string }>;
 }
 
-// 文本等值/排序组（autoNumber 虽在写入层不可写，但值是物理文本串，仍可索引）。
+// 文本等值/排序组。
+// autoNumber 只入文本：resolveAutoNumber 产出的可能是带前缀拼接串（如 ORD-202609-0001），
+// 非纯数字，故不进 valueNum（其数值比较局限属 S6 课题）。
 const TEXT_TYPES = new Set<string>([
   "singleLineText",
   "email",
   "url",
   "phone",
   "autoNumber",
-  "rating",
 ]);
 
-// 数值组：统一入 valueNum（currency/percent/duration/rating 本质都是数值列）。
+// 数值组：统一入 valueNum（currency/percent/duration/rating 本质都是数值列；
+// rating 在 shared type-groups/filters/formula 及前端均按数值处理，走 gt/lt 数值算子）。
 const NUMERIC_TYPES = new Set<string>([
   "number",
   "currency",
   "percent",
   "duration",
+  "rating",
 ]);
 
 const DATE_TYPES = new Set<string>(["date", "datetime"]);

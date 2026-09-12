@@ -192,6 +192,24 @@ describe("keysetPage 降序与谓词组合", () => {
     expect(p2.rows.map((r) => r.id)).toEqual(["d"]);
     expect(p2.nextCursor).toBeNull();
   });
+
+  it("whereSql 漏写 AND 前缀时自动补，不产生 SQL 语法错（S6 防御）", () => {
+    // 无 AND 前缀
+    const p = reader.keysetPage({
+      tableId: T1,
+      cursor: null,
+      limit: 10,
+      whereSql: '"createdBy" = ?',
+      params: ["u1"],
+    });
+    expect(p.rows.map((r) => r.id).sort()).toEqual(["a", "c", "d"]);
+    // countByPlan 同样自动补
+    expect(reader.countByPlan(T1, '"createdBy" = ?', ["u2"])).toBe(1); // 仅 b（e 软删）
+    // 小写 and 也识别，不重复补
+    expect(reader.countByPlan(T1, 'and "createdBy" = ?', ["u1"])).toBe(3);
+    // 空白谓词等同无谓词
+    expect(reader.countByPlan(T1, "   ")).toBe(reader.countLive(T1));
+  });
 });
 
 describe("limit 归一", () => {

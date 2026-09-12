@@ -7,7 +7,10 @@
 //   2) 只写不读业务结果——sidecar 是派生冗余，S6 前没有任何读路径查它；
 //      linkRow 变化不进 sidecar（links/subtable 已被 policy 排除）。
 //   3) GX_M1_SIDECAR 默认常开，=off 旁路；内存 fake prisma 无 $executeRawUnsafe 时
-//      自动跳过（路由 mock 单测不受影响）。维护异常是否阻断主业务由 safeSync 决定。
+//      自动跳过（路由 mock 单测不受影响）。
+//   4) 强一致、不吞错：维护异常随所在事务一起回滚（record JSON 与 sidecar 同生共死），
+//      不做 try/catch 静默降级（否则会制造 check-sidecar 抓不到的隐蔽 drift）；
+//      回退手段是 GX_M1_SIDECAR=off（写维护全旁路，派生表闲置无害，事后 backfill 重建）。
 
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../db.js";
