@@ -27,7 +27,11 @@ vi.mock("../../../auth.js", () => ({
   getUserId: () => Promise.resolve("u1"),
 }));
 
+// 写门面在 GET 路径不被调用；仍提供桩以忠实模拟 db 模块导出形态
 vi.mock("../../../db.js", () => ({
+  withWriteTx: async () => null,
+  withWriteBatch: async () => undefined,
+  runWrite: async () => null,
   prisma: {
     table: {
       findUnique: (args: { where: { id: string } }) =>

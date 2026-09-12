@@ -4,7 +4,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { prisma } from "../db.js";
+import { prisma, withWriteBatch } from "../db.js";
 import { HttpError, requireUserId, errorResponse } from "../guards.js";
 import {
   buildSearchText,
@@ -578,7 +578,8 @@ kb.post("/docs/:docId/share/internal", async (c) => {
     });
     // "仅可见"=viewer，"可编辑"=editor；commenter 归并（viewer 侧）
     const desired = target === "editor" ? "editor" : "viewer";
-    await prisma.$transaction(
+    await withWriteBatch(
+      "kb.internalShare",
       members
         .filter((m) => m.role !== desired)
         .map((m) =>

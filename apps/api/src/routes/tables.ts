@@ -3,7 +3,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { prisma } from "../db.js";
+import { prisma, withWriteTx, withWriteBatch, runWrite } from "../db.js";
 import {
   requireCanView,
   requireCanManageSchema,
@@ -71,7 +71,7 @@ tables.post("/", async (c) => {
 
   // U-9：建表多步写事务化——任何一步失败整体回滚，
   // 不再留下无 primaryField / 无视图的半截表。
-  const { table, primaryFieldId } = await prisma.$transaction(async (tx) => {
+  const { table, primaryFieldId } = await withWriteTx("table.create", async (tx) => {
     const t = await tx.table.create({
       data: { baseId, name: parsed.data.name, primaryFieldId: "", createdBy: userId },
     });
@@ -172,7 +172,9 @@ tables.patch("/:tableId", async (c) => {
   const parsed = updateSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
 
-  const t = await prisma.table.update({ where: { id: tableId }, data: parsed.data });
+  const t = await runWrite("table.update", () =>
+    prisma.table.update({ where: { id: tableId }, data: parsed.data }),
+  );
   return c.json({ table: { id: t.id, name: t.name, primaryFieldId: t.primaryFieldId } });
 });
 
@@ -182,10 +184,12 @@ tables.delete("/:tableId", async (c) => {
   await requireCanManageSchema(c, baseId);
 
   const now = new Date();
-  await prisma.table.update({ where: { id: tableId }, data: { deletedAt: now } });
-  await prisma.record.updateMany({ where: { tableId }, data: { deletedAt: now } });
-  await prisma.field.updateMany({ where: { tableId }, data: { deletedAt: now } });
-  await prisma.view.updateMany({ where: { tableId }, data: { order: -1 } });
+  await withWriteBatch("table.softDelete", [
+    prisma.table.update({ where: { id: tableId }, data: { deletedAt: now } }),
+    prisma.record.updateMany({ where: { tableId }, data: { deletedAt: now } }),
+    prisma.field.updateMany({ where: { tableId }, data: { deletedAt: now } }),
+    prisma.view.updateMany({ where: { tableId }, data: { order: -1 } }),
+  ]);
   invalidateOrdinalCache(tableId);
   return c.json({ ok: true });
 });
@@ -205,6 +209,7 @@ tables.post("/:tableId/duplicate", async (c) => {
   const name = typeof body?.name === "string" && body.name ? body.name : `${src.name} 副本`;
   const withData = body?.withData === true;
 
+  const { copy, primary } = await runWrite("table.duplicate", async () => {
   const copy = await prisma.table.create({
     data: { baseId, name, primaryFieldId: "", createdBy: userId },
   });
@@ -326,6 +331,9 @@ tables.post("/:tableId/duplicate", async (c) => {
     data: { tableId: copy.id, name: "网格视图", type: "grid", order: 0, config: JSON.stringify(config) },
   });
 
+  return { copy, primary };
+  });
+
   return c.json({ table: { id: copy.id, name: copy.name, primaryFieldId: primary } }, 201);
 });
 
@@ -362,16 +370,23 @@ tables.post("/:tableId/clear", async (c) => {
     select: { id: true },
   });
   const ids = liveRecIds.map((r) => r.id);
+  const stmts = [];
   if (ids.length > 0) {
-    await prisma.linkRow.updateMany({
-      where: { OR: [{ parentRowId: { in: ids } }, { childRowId: { in: ids } }], deletedAt: null },
-      data: { deletedAt: new Date() },
-    });
+    // 软删记录，其关联数据同样只打软删标记（不清行），保证从回收站恢复后关联不丢
+    stmts.push(
+      prisma.linkRow.updateMany({
+        where: { OR: [{ parentRowId: { in: ids } }, { childRowId: { in: ids } }], deletedAt: null },
+        data: { deletedAt: new Date() },
+      }),
+    );
   }
-  await prisma.record.updateMany({
-    where: { tableId, deletedAt: null },
-    data: { deletedAt: new Date() },
-  });
+  stmts.push(
+    prisma.record.updateMany({
+      where: { tableId, deletedAt: null },
+      data: { deletedAt: new Date() },
+    }),
+  );
+  await withWriteBatch("table.clear", stmts);
   invalidateOrdinalCache(tableId);
   return c.json({ ok: true });
 });

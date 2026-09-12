@@ -3,7 +3,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { prisma, type DbTx } from "../db.js";
+import { prisma, withWriteTx, withWriteBatch, runWrite, type DbTx } from "../db.js";
 import {
   requireCanView,
   requireCanEditData,
@@ -345,7 +345,7 @@ records.post("/", async (c) => {
   // 事务：创建记录 + 写入字段（含 link_row）要么一起成功，要么整体回滚，
   // 否则「字段校验失败但空记录已落库」会留下孤儿记录。
   const isDraft = parsed.data.draft === true;
-  const rec = await prisma.$transaction(async (tx) => {
+  const rec = await withWriteTx("record.create", async (tx) => {
     // 创建期必填兜底：对全表 required 字段统一校验（含 payload 完全省略的字段）。
     // draft 模式（就地新建空行草稿）跳过，与编辑期允许临时为空保持一致。
     if (!isDraft) {
@@ -365,7 +365,7 @@ records.post("/", async (c) => {
   // 创建期默认逻辑：static 填入、autoNumber 编号、lookup/formula 初值、subtable 整表抓取播种
   // 属于增强行为，失败不应回滚已创建的记录（与编辑期一致）。
   try {
-    await applyCreateDefaults(tableId, rec.id, userId);
+    await runWrite("defaults.create", () => applyCreateDefaults(tableId, rec.id, userId));
   } catch (e) {
     console.error("[defaults] create recalc failed:", e);
   }
@@ -376,10 +376,12 @@ records.post("/", async (c) => {
   // 重算父表点引用 formula 默认值；公式字段实时 hydrate，前端据返回失效父表即可。
   let affectedParents: { tableId: string; recordId: string }[] = [];
   try {
-    const rev = await applyReverseDefaultsForChild(tableId, [rec.id], userId);
-    affectedParents = rev.parents.flatMap((p) =>
-      p.recordIds.map((rid) => ({ tableId: p.tableId, recordId: rid })),
-    );
+    await runWrite("defaults.reverseOnCreate", async () => {
+      const rev = await applyReverseDefaultsForChild(tableId, [rec.id], userId);
+      affectedParents = rev.parents.flatMap((p) =>
+        p.recordIds.map((rid) => ({ tableId: p.tableId, recordId: rid })),
+      );
+    });
   } catch (e) {
     console.error("[defaults] reverse recalc on create failed:", e);
   }
@@ -554,7 +556,7 @@ records.patch("/:recordId", async (c) => {
 
   // 事务：unique 校验 + 物理字段写入 + link_row 写入 + updatedBy 落库，
   // 任一步失败整体回滚，避免「链接写了一半、文本没写」的中间态。
-  await prisma.$transaction(async (tx) => {
+  await withWriteTx("record.update", async (tx) => {
     await assertUnique(rec.tableId, fields, parsed.data.fields, recordId, undefined, tx);
     await applyFieldWrites(rec.tableId, recordId, parsed.data.fields, fields, tx);
     await tx.record.update({ where: { id: recordId }, data: { updatedBy: userId } });
@@ -564,7 +566,7 @@ records.patch("/:recordId", async (c) => {
   const changed = new Set(Object.keys(parsed.data.fields));
   if (changed.size > 0) {
     try {
-      await applyEditDefaults(rec.tableId, recordId, changed, userId);
+      await runWrite("defaults.edit", () => applyEditDefaults(rec.tableId, recordId, changed, userId));
     } catch (e) {
       // 默认值联动失败不应阻断用户本次保存
       console.error("[defaults] edit recalc failed:", e);
@@ -577,14 +579,16 @@ records.patch("/:recordId", async (c) => {
   // 公式字段（type=formula）读取时实时 hydrate，无需此处处理；这只补「落库的默认值公式」。
   let affectedParents: { tableId: string; recordId: string }[] = [];
   try {
-    const rev = await applyReverseDefaultsForChild(rec.tableId, [recordId], userId);
-    affectedParents = rev.parents.flatMap((p) =>
-      p.recordIds.map((rid) => ({ tableId: p.tableId, recordId: rid })),
-    );
-    const touchedLink = fields.some(
-      (f) => changed.has(f.id) && (f.type === "links" || f.type === "subtable"),
-    );
-    if (touchedLink) await applyLinkChangeDefaults(rec.tableId, [recordId]);
+    await runWrite("defaults.reverseOnUpdate", async () => {
+      const rev = await applyReverseDefaultsForChild(rec.tableId, [recordId], userId);
+      affectedParents = rev.parents.flatMap((p) =>
+        p.recordIds.map((rid) => ({ tableId: p.tableId, recordId: rid })),
+      );
+      const touchedLink = fields.some(
+        (f) => changed.has(f.id) && (f.type === "links" || f.type === "subtable"),
+      );
+      if (touchedLink) await applyLinkChangeDefaults(rec.tableId, [recordId]);
+    });
   } catch (e) {
     console.error("[defaults] reverse recalc failed:", e);
   }
@@ -606,7 +610,7 @@ records.delete("/:recordId", async (c) => {
   const rec = await prisma.record.findUnique({ where: { id: recordId } });
   if (!rec || rec.deletedAt) throw new HttpError(404, "记录不存在");
 
-  await prisma.$transaction([
+  await withWriteBatch("record.softDelete", [
     prisma.record.update({ where: { id: recordId }, data: { deletedAt: new Date() } }),
     // 关联数据只打软删标记（不清行）：记录从回收站恢复时，关联关系随之恢复，不会丢数据
     prisma.linkRow.updateMany({
@@ -620,10 +624,12 @@ records.delete("/:recordId", async (c) => {
   // linkRow 已在上面事务中软删，故 includeDeleted 才能据其定位父记录。
   let affectedParents: { tableId: string; recordId: string }[] = [];
   try {
-    const rev = await applyReverseDefaultsForChild(rec.tableId, [recordId], userId, { includeDeleted: true });
-    affectedParents = rev.parents.flatMap((p) =>
-      p.recordIds.map((rid) => ({ tableId: p.tableId, recordId: rid })),
-    );
+    await runWrite("defaults.reverseOnDelete", async () => {
+      const rev = await applyReverseDefaultsForChild(rec.tableId, [recordId], userId, { includeDeleted: true });
+      affectedParents = rev.parents.flatMap((p) =>
+        p.recordIds.map((rid) => ({ tableId: p.tableId, recordId: rid })),
+      );
+    });
   } catch (e) {
     console.error("[defaults] reverse recalc on delete failed:", e);
   }
@@ -654,7 +660,7 @@ records.post("/bulk-delete", async (c) => {
   if (scopedIds.length === 0) return c.json({ ok: true, count: 0 });
 
   // 记录软删与关联软删必须原子：否则可能出现「记录已删但关联仍生效」的脏数据
-  await prisma.$transaction([
+  await withWriteBatch("record.bulkSoftDelete", [
     prisma.record.updateMany({
       where: { id: { in: scopedIds } },
       data: { deletedAt: now },
@@ -670,7 +676,9 @@ records.post("/bulk-delete", async (c) => {
 
   // 反向联动：批量删除的子记录 → 父表点引用 formula 默认值重算（linkRow 已软删，includeDeleted）
   try {
-    await applyReverseDefaultsForChild(first.tableId, scopedIds, userId, { includeDeleted: true });
+    await runWrite("defaults.reverseOnBulkDelete", () =>
+      applyReverseDefaultsForChild(first.tableId, scopedIds, userId, { includeDeleted: true }),
+    );
   } catch (e) {
     console.error("[defaults] reverse recalc on bulk-delete failed:", e);
   }
@@ -708,7 +716,7 @@ records.post("/bulk-update", async (c) => {
   }
 
   // 一批记录要么全部写成功，要么全部回滚（避免「前几条改了后几条失败」的半成品）
-  await prisma.$transaction(async (tx) => {
+  await withWriteTx("record.bulkUpdate", async (tx) => {
     for (const id of scopedIds) {
       await applyFieldWrites(first.tableId, id, parsed.data.fields, fields, tx);
       await tx.record.update({ where: { id }, data: { updatedBy: userId } });
@@ -720,14 +728,16 @@ records.post("/bulk-update", async (c) => {
   if (changed.size > 0) {
     for (const id of scopedIds) {
       try {
-        await applyEditDefaults(first.tableId, id, changed, userId);
+        await runWrite("defaults.bulkEdit", () => applyEditDefaults(first.tableId, id, changed, userId));
       } catch {
         // 批量场景默认值联动失败不阻断主流程
       }
     }
     // 反向联动：批量修改的记录若是某父记录的子表行，重算父表点引用 formula 默认值
     try {
-      await applyReverseDefaultsForChild(first.tableId, scopedIds, userId);
+      await runWrite("defaults.reverseOnBulkUpdate", () =>
+        applyReverseDefaultsForChild(first.tableId, scopedIds, userId),
+      );
     } catch (e) {
       console.error("[defaults] reverse recalc on bulk-update failed:", e);
     }
@@ -789,7 +799,9 @@ records.post("/csv-import", async (c) => {
     const colValues = dataRows.map((r) => r[ci] ?? "");
     const type = inferFieldType(colValues);
     try {
-      const { field } = await createField({ tableId, name: colName || `列 ${ci + 1}`, type: type as never });
+      const { field } = await runWrite("field.createFromCsv", () =>
+        createField({ tableId, name: colName || `列 ${ci + 1}`, type: type as never }),
+      );
       columnFieldIds.push(field.id);
       createdFields += 1;
     } catch {
@@ -814,7 +826,8 @@ records.post("/csv-import", async (c) => {
     try {
       // U-4：单行「建记录 + 写字段」事务化——中途失败整行回滚，
       // 不再留下 fields 为空的裸记录；行级失败仍只记错误、继续后续行（部分导入语义不变）。
-      await prisma.$transaction(async (tx) => {
+      // M1/S1：每行作为一个独立写工作单元入队（默认逐行，避免长事务阻塞所有写）。
+      await withWriteTx("record.csvImportRow", async (tx) => {
         const rec = await tx.record.create({
           data: { tableId, fields: "{}", createdBy: userId, updatedBy: userId },
         });

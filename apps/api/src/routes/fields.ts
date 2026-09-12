@@ -3,7 +3,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { prisma } from "../db.js";
+import { prisma, withWriteBatch, runWrite } from "../db.js";
 import { requireCanView, requireCanManageSchema, HttpError } from "../guards.js";
 import { createField, updateField, deleteField, lookupTargetFields, relationDisplayName, relationIsMultiple } from "../domain/fieldService.js";
 import { loadTableFields } from "../domain/recordService.js";
@@ -134,31 +134,33 @@ fields.post("/", async (c) => {
   });
   if (validationError) return c.json({ error: validationError }, 400);
 
-  const result = await createField({
-    tableId,
-    name: parsed.data.name,
-    type: parsed.data.type,
-    description: parsed.data.description ?? null,
-    required: parsed.data.required,
-    unique: parsed.data.unique,
-    options: parsed.data.options ?? null,
-    precision: parsed.data.precision ?? null,
-    maxLength: parsed.data.maxLength ?? null,
-    defaultNow: parsed.data.defaultNow ?? false,
-    recordFilter: parsed.data.recordFilter ?? null,
-    relatedTableId: parsed.data.relatedTableId ?? null,
-    relationKind: parsed.data.relationKind ?? null,
-    linkDisplayFieldId: parsed.data.linkDisplayFieldId ?? null,
-    lookupFieldId: parsed.data.lookupFieldId ?? null,
-    linkFieldId: parsed.data.linkFieldId ?? null,
-    rollupFunction: parsed.data.rollupFunction ?? null,
-    formula: parsed.data.formula ?? null,
-    tabsConfig: parsed.data.tabsConfig ?? null,
-    displayedFieldIds: parsed.data.displayedFieldIds ?? null,
-    visibleFieldIds: parsed.data.visibleFieldIds ?? null,
-    defaultConfig: parsed.data.defaultConfig ?? null,
-    numberRule: parsed.data.numberRule ?? null,
-  });
+  const result = await runWrite("field.create", () =>
+    createField({
+      tableId,
+      name: parsed.data.name,
+      type: parsed.data.type,
+      description: parsed.data.description ?? null,
+      required: parsed.data.required,
+      unique: parsed.data.unique,
+      options: parsed.data.options ?? null,
+      precision: parsed.data.precision ?? null,
+      maxLength: parsed.data.maxLength ?? null,
+      defaultNow: parsed.data.defaultNow ?? false,
+      recordFilter: parsed.data.recordFilter ?? null,
+      relatedTableId: parsed.data.relatedTableId ?? null,
+      relationKind: parsed.data.relationKind ?? null,
+      linkDisplayFieldId: parsed.data.linkDisplayFieldId ?? null,
+      lookupFieldId: parsed.data.lookupFieldId ?? null,
+      linkFieldId: parsed.data.linkFieldId ?? null,
+      rollupFunction: parsed.data.rollupFunction ?? null,
+      formula: parsed.data.formula ?? null,
+      tabsConfig: parsed.data.tabsConfig ?? null,
+      displayedFieldIds: parsed.data.displayedFieldIds ?? null,
+      visibleFieldIds: parsed.data.visibleFieldIds ?? null,
+      defaultConfig: parsed.data.defaultConfig ?? null,
+      numberRule: parsed.data.numberRule ?? null,
+    }),
+  );
 
   return c.json({ field: result.field, reverseField: result.reverseField ?? null }, 201);
 });
@@ -196,7 +198,8 @@ fields.patch("/:fieldId", async (c) => {
 
   // 注意：直接透传 parsed.data 的值。zod 未提供的 key 为 undefined（service 跳过不改），
   // 显式 null 会原样转发（service 据此清空字段）。不能用 `?? undefined`，否则把清空用的 null 吞掉。
-  const updated = await updateField(fieldId, {
+  const updated = await runWrite("field.update", () =>
+    updateField(fieldId, {
     name: parsed.data.name,
     description: parsed.data.description,
     required: parsed.data.required,
@@ -219,7 +222,8 @@ fields.patch("/:fieldId", async (c) => {
     visibleFieldIds: parsed.data.visibleFieldIds,
     defaultConfig: parsed.data.defaultConfig,
     numberRule: parsed.data.numberRule,
-  });
+    }),
+  );
   if (!updated) throw new HttpError(404, "字段不存在");
   return c.json({ field: updated });
 });
@@ -230,7 +234,7 @@ fields.delete("/:fieldId", async (c) => {
   const fieldId = c.req.param("fieldId");
   const baseId = await baseIdOfField(fieldId);
   await requireCanManageSchema(c, baseId);
-  const { deleted } = await deleteField(fieldId);
+  const { deleted } = await runWrite("field.delete", () => deleteField(fieldId));
   return c.json({ ok: true, deleted });
 });
 
@@ -261,7 +265,8 @@ fields.post("/:fieldId/move", async (c) => {
   const [moved] = reordered.splice(from, 1);
   reordered.splice(to, 0, moved!);
 
-  await prisma.$transaction(
+  await withWriteBatch(
+    "field.reorder",
     reordered.map((x, i) => prisma.field.update({ where: { id: x.id }, data: { order: i } })),
   );
   return c.json({ fields: await loadTableFields(f.tableId) });
