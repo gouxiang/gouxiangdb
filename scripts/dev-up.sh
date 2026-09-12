@@ -68,7 +68,9 @@ stop_all() {
   echo "[stop] 清理占用端口的进程"
   for p in "$API_PORT" "$WEB_PORT"; do
     pids=$(lsof -ti :$p 2>/dev/null || true)
-    [ -n "$pids" ] && kill $pids 2>/dev/null && echo "[stop] 杀掉 :$p pid=$pids"
+    if [ -n "$pids" ]; then
+      kill $pids 2>/dev/null && echo "[stop] 杀掉 :$p pid=$pids"
+    fi
   done
 }
 
