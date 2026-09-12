@@ -22,6 +22,8 @@ import { kb } from "./routes/kb.js";
 import { pub } from "./routes/public.js";
 import { search } from "./routes/search.js";
 import { health } from "./routes/health.js";
+import { healthz } from "./routes/healthz.js";
+import { readyz } from "./routes/readyz.js";
 import { HttpError, errorResponse } from "./guards.js";
 import { config } from "./config.js";
 import { VERSION } from "./version.js";
@@ -75,6 +77,11 @@ app.use(
     allowMethods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
   }),
 );
+
+// 运维健康端点（根级、不鉴权）。放在鉴权/限流（S5b 豁免）之外；
+// /api/health 保留为兼容别名（桌面壳与旧脚本在用）。
+app.route("/healthz", healthz);
+app.route("/readyz", readyz);
 
 app.get("/", (c) =>
   c.json({

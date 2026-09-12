@@ -21,6 +21,14 @@ export default defineConfig({
         target: "http://localhost:3001",
         changeOrigin: true,
       },
+      "/healthz": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
+      "/readyz": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
       "/uploads": {
         target: "http://localhost:3001",
         changeOrigin: true,

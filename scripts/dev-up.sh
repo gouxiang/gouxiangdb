@@ -36,7 +36,7 @@ start_api() {
   nohup node "$PNPM_TSX" src/index.ts >"$API_LOG" 2>&1 < /dev/null &
   disown
   sleep 2
-  if curl -fsS -o /dev/null "http://localhost:$API_PORT/api/health"; then
+  if curl -fsS -o /dev/null "http://localhost:$API_PORT/healthz"; then
     echo "[api] ✓ http 200"
   else
     echo "[api] ✗ 启动失败，查看日志：$API_LOG"

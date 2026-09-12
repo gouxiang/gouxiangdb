@@ -17,14 +17,15 @@ health.get("/", async (c) => {
       timestamp: new Date().toISOString(),
       db: "ok",
     });
-  } catch (e) {
+  } catch {
+    // 不回传原始异常（可能含 SQL/绝对路径）；详情只进服务端日志，响应仅给短码。
     return c.json(
       {
         ok: false,
         service: "gouxiangdb-api",
         version: VERSION,
         db: "error",
-        error: String(e),
+        error: "DB_UNAVAILABLE",
       },
       503,
     );
