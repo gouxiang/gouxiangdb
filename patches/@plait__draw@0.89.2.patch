@@ -1,0 +1,75 @@
+diff --git a/fesm2022/plait-draw.mjs b/fesm2022/plait-draw.mjs
+index 617caa078e13269de44057e5018582e602d05de1..63410993297ffc14c9052874811e6f3285eec76a 100644
+--- a/fesm2022/plait-draw.mjs
++++ b/fesm2022/plait-draw.mjs
+@@ -7786,6 +7786,14 @@ const getBoundedArrowLineElements = (board, plaitShapes) => {
+     return lines.filter(line => plaitShapes.find(shape => PlaitArrowLine.isBoundElementOfSource(line, shape) || PlaitArrowLine.isBoundElementOfTarget(line, shape)));
+ };
+ 
++// [GouXiang patch] 连线工具手势标记：仅当用户用箭头线/向量线工具（pointer 为线型）起手
++// 拖拽建立连接时才把 board 加入此集合，松手（globalPointerUp）后移除。
++// 图形四周的延伸（auto-complete）控制点与悬停预览插件据此判断：
++// 连线工具手势期间一律不响应延伸，避免"连线同时误触延伸复制出相同图形+多一条线"。
++// 不能用指针类型判断——延伸手势自己的 pointerDown 也会把指针切成 elbow，
++// 若据此判断会把正常延伸也拦掉。
++const GX_CONNECTING_BOARDS = new WeakSet();
++
+ const withArrowLineCreateByDraw = (board) => {
+     const { pointerDown, pointerMove, globalPointerUp, touchStart } = board;
+     let start = null;
+@@ -7806,11 +7814,17 @@ const withArrowLineCreateByDraw = (board) => {
+         if (!PlaitBoard.isReadonly(board) && isLinePointer && isDrawingMode(board)) {
+             const point = toViewBoxPoint(board, toHostPoint(board, event.x, event.y));
+             start = point;
++            // [GouXiang patch] 标记本次为连线工具手势（自 pointerDown 起，globalPointerUp 止）
++            GX_CONNECTING_BOARDS.add(board);
+             const hitElement = getSnappingShape(board, point);
+             if (hitElement) {
+                 sourceElement = hitElement;
+             }
+         }
++        else {
++            // [GouXiang patch] 非连线工具起手：自愈清除可能残留的连线手势标记
++            GX_CONNECTING_BOARDS.delete(board);
++        }
+         pointerDown(event);
+     };
+     board.pointerMove = (event) => {
+@@ -7836,6 +7850,9 @@ const withArrowLineCreateByDraw = (board) => {
+         start = null;
+         temporaryElement = null;
+         globalPointerUp(event);
++        // [GouXiang patch] 内层插件（autoComplete/reaction）的 globalPointerUp 已执行完毕，
++        // 此时再清除连线手势标记，确保它们在提交判断时仍能读到标记并跳过延伸提交。
++        GX_CONNECTING_BOARDS.delete(board);
+     };
+     return board;
+ };
+@@ -8167,7 +8184,12 @@ const withArrowLineAutoComplete = (board) => {
+         const selectedElements = getSelectedDrawElements(board);
+         const targetElement = selectedElements.length === 1 && selectedElements[0];
+         const activePoint = toActivePoint(board, event.x, event.y);
+-        if (!PlaitBoard.isReadonly(board) && targetElement && PlaitDrawElement.isShapeElement(targetElement)) {
++        // [GouXiang patch] 互斥守卫：若本次按下是"连线工具手势"（由 withArrowLineCreateByDraw
++        // 起手时打标，此刻标记已置位），图形四周的延伸（auto-complete）控制点不得激活——
++        // 否则连线起手点落在控制点上会同时触发"延伸生成同形图形+连线"，导致连线完成时
++        // 多生成一个图形、多出一条连线。延伸手势只在选择模式、非连线工具时由用户明确起手才触发。
++        const isConnectGesture = GX_CONNECTING_BOARDS.has(board);
++        if (!PlaitBoard.isReadonly(board) && !isConnectGesture && targetElement && PlaitDrawElement.isShapeElement(targetElement)) {
+             const points = getAutoCompletePoints(board, targetElement, true);
+             const index = getHitIndexOfAutoCompletePoint(rotateAntiPointsByElement(board, activePoint, targetElement, true) || activePoint, points);
+             const hitPoint = points[index];
+@@ -8255,7 +8277,12 @@ const withArrowLineAutoCompleteReaction = (board) => {
+         temporaryShapeG?.remove();
+         const originElement = selectedElements.length === 1 && selectedElements[0];
+         const activePoint = toActivePoint(board, event.x, event.y);
+-        if (!PlaitBoard.isReadonly(board) && !isSelectionMoving(board) && originElement && PlaitDrawElement.isShapeElement(originElement)) {
++        // [GouXiang patch] 互斥守卫：悬停延伸控制点的"同形新框+连线"预览（会写入
++        // BOARD_TO_PRE_COMMIT 并在松手时提交）仅在非连线工具手势时出现。
++        // 用连线手势标记判断而非指针类型——延伸手势自身 pointerDown 后指针也会切成 elbow，
++        // 若用指针类型会把正常延伸也拦掉；只有连线工具起手才会置位 GX_CONNECTING_BOARDS。
++        const isConnectGestureReaction = GX_CONNECTING_BOARDS.has(board);
++        if (!PlaitBoard.isReadonly(board) && !isConnectGestureReaction && !isSelectionMoving(board) && originElement && PlaitDrawElement.isShapeElement(originElement)) {
+             const points = getAutoCompletePoints(board, originElement, true);
+             const hitIndex = getHitIndexOfAutoCompletePoint(rotateAntiPointsByElement(board, activePoint, originElement, true) || activePoint, points);
+             const hitPoint = points[hitIndex];

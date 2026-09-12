@@ -1,0 +1,1684 @@
+// apps/web/src/features/detail/FormDesigner.tsx
+// 表单设计器：左侧字段类型库 + 中间一整块表单画布（显式行模型）+ 右侧字段设置
+//
+// 设计要点：
+//  - 画布是「一整块表单」：字段在同一张卡片内按「行」组织，行内按宽度百分比流体排列。
+//  - 选项卡分组（tabs）是纯视觉容器：无字段名语义、不可被关联/公式/聚合引用；
+//    选项卡内部与顶层完全一致——也是显式行模型，字段可横向多列排列、可用 ▲/▼/⇄ 调整。
+//  - 字段库拖入 / 字段跨行移动：拖到字段卡上 = 插入该行（按左/右半定前后）；
+//    拖到行间虚线带 = 新建独立一行；拖进选项卡 = 落进该选项卡的行模型。
+//  - 字段操作：▲ 并入上一行（上一行放得下时）、▼ 向下拆成独立一行；
+//    同一行相邻字段之间，悬停时在卡片左缘出现「交换」按钮，点击与左侧字段互换。
+//  - 字段宽度统一在右侧设置面板调整，画布字段上不再放宽度浮条。
+
+import { clsx } from "clsx";
+import type { DetailLayout, DetailLayoutRow, DetailRowColumns, FieldDTO, FieldIdT, FieldType, FieldWidthPct, PermissionSet, TableDTO, TabConfig, TabFieldWidth } from "@gx/shared-types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Button, FieldIcon, toast } from "../../components/ui";
+import { Icon } from "../../components/icons";
+import { TYPE_GROUPS } from "../designer/FieldEditorSheet";
+import { FieldInput } from "../views/field-controls";
+import { useFields, useGXMutations } from "../../api/hooks";
+import { FieldSettingsPanel } from "./FieldSettingsPanel";
+
+export type TopTab = "design" | "flow" | "settings" | "publish";
+export type PreviewDevice = "desktop" | "mobile";
+
+interface FormDesignerProps {
+  open: boolean;
+  inline?: boolean;
+  fields: FieldDTO[];
+  layout: DetailLayout | null;
+  tableId: string;
+  baseId: string;
+  tables: TableDTO[];
+  permissions: PermissionSet;
+  onClose: () => void;
+  onSave: (next: DetailLayout) => void;
+}
+
+const TABS: { key: TopTab; label: string }[] = [
+  { key: "design", label: "表单设计" },
+  { key: "flow", label: "添加流程" },
+  { key: "settings", label: "拓展设置" },
+  { key: "publish", label: "应用发布" },
+];
+
+const fid = (s: string): FieldIdT => s as FieldIdT;
+
+const DT_SOURCE = "application/x-gx-form-designer-source";
+
+interface LayoutItem {
+  fieldId: FieldIdT;
+  widthPct: FieldWidthPct;
+}
+interface LayoutRow {
+  items: LayoutItem[];
+}
+
+/** 设计器内部使用的选项卡结构：rows 为显式行模型（与顶层同构） */
+interface TabInternal {
+  id: string;
+  name: string;
+  rows: LayoutRow[];
+}
+
+// 拖放目标：插到某行（card）、在 rowIndex 处新建一行（gap）、
+// 或放进某选项卡的某行（tab）/ 在选项卡内新建一行（tabLine）
+type DropTarget =
+  | { kind: "row"; rowIndex: number; beforeIndex: number }
+  | { kind: "line"; rowIndex: number }
+  | { kind: "tab"; containerFieldId: FieldIdT; tabId: string; rowIndex: number; beforeIndex: number }
+  | { kind: "tabLine"; containerFieldId: FieldIdT; tabId: string; rowIndex: number };
+
+// 宽字段：独占一行（内容长 / 容器）
+const WIDE_TYPES: ReadonlySet<FieldType> = new Set<FieldType>(["longText", "richText", "attachment", "links", "tabs", "subtable"]);
+// 紧凑字段：默认 1/4 宽，一行自然排 4 个（数字/勾选/评分等短内容）
+const COMPACT_TYPES: ReadonlySet<FieldType> = new Set<FieldType>(["number", "currency", "percent", "duration", "checkbox", "rating", "autoNumber"]);
+const isWide = (t: FieldType): boolean => WIDE_TYPES.has(t);
+/** 新建字段的默认宽度：宽字段 100%，紧凑字段 25%（一行 4 个），其余 50%（一行 2 个） */
+const defaultW = (t: FieldType): FieldWidthPct => (isWide(t) ? 100 : COMPACT_TYPES.has(t) ? 25 : 50);
+
+/** 一行最多容纳的字段数（与 25% 最小列宽对应：4 列） */
+const MAX_FIELDS_PER_ROW = 4;
+
+/**
+ * 合并到同一行后若总宽超 100%：按字段数均匀压缩到 25 档网格，把一行填满。
+ * n=2 → 50/50；n=3 → 50/25/25；n=4 → 25×4。保证「▲ 并入上一行」总能容纳（上一行 <4 字段时）。
+ */
+function packRowItems(items: LayoutItem[]): LayoutItem[] {
+  const sum = items.reduce((s, it) => s + it.widthPct, 0);
+  if (sum <= 100) return items;
+  const n = items.length;
+  let extra = 100 - 25 * n; // 基础 25 之后还剩多少可分配（25 的倍数）
+  return items.map((it) => {
+    let w: FieldWidthPct = 25;
+    if (extra >= 25) { w = 50; extra -= 25; }
+    return { ...it, widthPct: w };
+  });
+}
+
+// ============ 行模型纯函数（顶层与选项卡内共用） ============
+
+/** 扁平 items 按宽度累加切行（初始默认布局用） */
+function segmentToRows(items: LayoutItem[]): LayoutRow[] {
+  const rows: LayoutRow[] = [];
+  let cur: LayoutItem[] = [];
+  let sum = 0;
+  for (const it of items) {
+    if (cur.length > 0 && sum + it.widthPct > 100) {
+      rows.push({ items: cur });
+      cur = [];
+      sum = 0;
+    }
+    cur.push(it);
+    sum += it.widthPct;
+  }
+  if (cur.length > 0) rows.push({ items: cur });
+  return rows;
+}
+
+/** 宽度变化后的保守回流：只把超过 100% 的行拆到下一行，绝不合并用户显式拆出的行 */
+function reflowRows(rows: LayoutRow[]): LayoutRow[] {
+  const out: LayoutRow[] = [];
+  for (const r of rows) {
+    let cur: LayoutItem[] = [];
+    let sum = 0;
+    for (const it of r.items) {
+      if (cur.length > 0 && sum + it.widthPct > 100) {
+        out.push({ items: cur });
+        cur = [];
+        sum = 0;
+      }
+      cur.push(it);
+      sum += it.widthPct;
+    }
+    if (cur.length > 0) out.push({ items: cur });
+  }
+  return out.filter((r) => r.items.length > 0);
+}
+
+const rowWidth = (r: LayoutRow): number => r.items.reduce((s, it) => s + it.widthPct, 0);
+
+function cloneRows(rows: LayoutRow[]): LayoutRow[] {
+  return rows.map((r) => ({ items: r.items.map((it) => ({ ...it })) }));
+}
+
+function rowsRemoveField(rows: LayoutRow[], fieldId: FieldIdT): LayoutRow[] {
+  return rows
+    .map((r) => ({ items: r.items.filter((it) => it.fieldId !== fieldId) }))
+    .filter((r) => r.items.length > 0);
+}
+
+function locateFieldInRows(rows: LayoutRow[], fieldId: FieldIdT): { ri: number; ii: number } | null {
+  for (let ri = 0; ri < rows.length; ri++) {
+    const ii = rows[ri].items.findIndex((it) => it.fieldId === fieldId);
+    if (ii >= 0) return { ri, ii };
+  }
+  return null;
+}
+
+/** ▲ 能否并入上一行：存在上一行且上一行字段数 < 4（并入后按 25 档自动压缩填满，故不再要求宽度放得下） */
+function canJoinUp(rows: LayoutRow[], ri: number, _item: LayoutItem): boolean {
+  if (ri <= 0) return false;
+  const above = rows[ri - 1];
+  if (!above) return false;
+  return above.items.length < MAX_FIELDS_PER_ROW;
+}
+
+/** ▲ 并入上一行：字段移到上一行末尾，并对合并行自动压缩填满（支持 3/4 字段同行） */
+function joinUpField(rows: LayoutRow[], fieldId: FieldIdT): LayoutRow[] {
+  const next = cloneRows(rows);
+  for (let ri = 1; ri < next.length; ri++) {
+    const ii = next[ri].items.findIndex((it) => it.fieldId === fieldId);
+    if (ii < 0) continue;
+    if (next[ri - 1].items.length >= MAX_FIELDS_PER_ROW) return rows;
+    const [item] = next[ri].items.splice(ii, 1);
+    next[ri - 1].items = packRowItems([...next[ri - 1].items, item]);
+    return next.filter((r) => r.items.length > 0);
+  }
+  return rows;
+}
+
+/** ▼ 向下新建一行：字段从当前行移出，在下方拆成独立一行 */
+function splitDownField(rows: LayoutRow[], fieldId: FieldIdT): LayoutRow[] {
+  const next = cloneRows(rows);
+  for (let ri = 0; ri < next.length; ri++) {
+    const ii = next[ri].items.findIndex((it) => it.fieldId === fieldId);
+    if (ii < 0) continue;
+    if (next[ri].items.length <= 1) return rows; // 已独占一行
+    const [item] = next[ri].items.splice(ii, 1);
+    next.splice(ri + 1, 0, { items: [item] });
+    return next.filter((r) => r.items.length > 0);
+  }
+  return rows;
+}
+
+/** 交换同一行内两个相邻字段（fieldId 与它的左邻居） */
+function swapLeftField(rows: LayoutRow[], fieldId: FieldIdT): LayoutRow[] {
+  const next = cloneRows(rows);
+  for (const r of next) {
+    const i = r.items.findIndex((it) => it.fieldId === fieldId);
+    if (i > 0) {
+      [r.items[i - 1], r.items[i]] = [r.items[i], r.items[i - 1]];
+      return next;
+    }
+  }
+  return rows;
+}
+
+/** 修改某字段宽度后保守回流 */
+function setFieldWidthInRows(rows: LayoutRow[], fieldId: FieldIdT, widthPct: FieldWidthPct): LayoutRow[] {
+  return reflowRows(rows.map((r) => ({ items: r.items.map((it) => (it.fieldId === fieldId ? { ...it, widthPct } : it)) })));
+}
+
+// ============ 选项卡行模型 <-> TabConfig 转换 ============
+
+/** 从已落库 TabConfig 还原内部行模型（旧数据无 rows 时用 fieldIds+widths 自动切行） */
+function getTabRows(tab: TabConfig): LayoutRow[] {
+  if (tab.rows && tab.rows.length > 0) {
+    return tab.rows.map((r) => ({ items: r.items.map((it) => ({ fieldId: fid(it.fieldId), widthPct: it.widthPct as FieldWidthPct })) }));
+  }
+  return segmentToRows(
+    (tab.fieldIds ?? []).map((id) => ({
+      fieldId: fid(id),
+      widthPct: ((tab.widths?.[id] as FieldWidthPct) ?? 50) as FieldWidthPct,
+    })),
+  );
+}
+
+/** 把内部行模型写回 TabConfig：rows + 双写 fieldIds/widths（兼容旧渲染端） */
+function tabWithRows(tab: { id: string; name: string }, rows: LayoutRow[]): TabConfig {
+  const items = rows.flatMap((r) => r.items);
+  return {
+    id: tab.id,
+    name: tab.name,
+    rows: rows.map((r) => ({ items: r.items.map((it) => ({ fieldId: it.fieldId as string, widthPct: it.widthPct })) })),
+    fieldIds: items.map((it) => it.fieldId as string),
+    widths: Object.fromEntries(items.map((it) => [it.fieldId as string, it.widthPct])) as Record<string, TabFieldWidth>,
+  };
+}
+
+const toInternal = (t: TabConfig): TabInternal => ({ id: t.id, name: t.name, rows: getTabRows(t) });
+
+/** 提交前把内部 TabInternal[] 同步成落库 TabConfig[]（rows 与 fieldIds/widths 始终一致） */
+function syncTabs(m: Record<string, TabInternal[]>): Record<string, TabConfig[]> {
+  return Object.fromEntries(Object.entries(m).map(([k, tabs]) => [k, tabs.map((t) => tabWithRows({ id: t.id, name: t.name }, t.rows))]));
+}
+
+/**
+ * 从已保存布局还原显式行模型：逐行还原，**保留行边界**。
+ * 用户用 ▼ 拆出的独立行、用拖放新建的行，保存后必须原样还原，不能被按宽度重新合并。
+ * 缺失 widths 的旧字段用流体默认宽度；未出现在布局中的新字段追加到末尾（按宽度自动切行）。
+ * **选项卡（tabs）字段**：本身作为全宽容器项；其 tabsConfig 内承载的字段归属 tab，不进顶层行。
+ */
+function initialRows(layout: DetailLayout | null, fields: FieldDTO[]): LayoutRow[] {
+  const typeById = new Map<string, FieldType>(fields.map((f) => [f.id, f.type]));
+  const inTabs = new Set<string>();
+  for (const f of fields) {
+    if (f.type === "tabs") for (const t of f.tabsConfig ?? []) for (const id of t.fieldIds ?? []) inTabs.add(id);
+  }
+  const seen = new Set<string>();
+  const rows: LayoutRow[] = [];
+  for (const r of layout?.rows ?? []) {
+    const items: LayoutItem[] = [];
+    for (const id of r.fieldIds) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (inTabs.has(id)) continue;
+      const t = typeById.get(id);
+      const fallback: FieldWidthPct = t ? defaultW(t) : 50;
+      const w = r.widths && id in r.widths ? (r.widths[id] as FieldWidthPct) : fallback;
+      items.push({ fieldId: fid(id), widthPct: w });
+    }
+    if (items.length > 0) rows.push({ items });
+  }
+  const extras = fields
+    .filter((f) => !seen.has(f.id) && !inTabs.has(f.id))
+    .map((f) => ({ fieldId: f.id as FieldIdT, widthPct: defaultW(f.type) }));
+  if (extras.length > 0) rows.push(...segmentToRows(extras));
+  return rows;
+}
+
+/** 收集所有 tabs 字段的初始配置，并立即规整为内部行模型（TabInternal） */
+function initialTabsConfig(fields: FieldDTO[]): Record<string, TabInternal[]> {
+  const out: Record<string, TabInternal[]> = {};
+  for (const f of fields) {
+    if (f.type === "tabs") {
+      const raw = f.tabsConfig && f.tabsConfig.length > 0 ? f.tabsConfig : [{ id: `tab_${f.id}_0`, name: "基本信息", fieldIds: [] as string[] }];
+      out[f.id] = raw.map((t) => {
+        // 旧数据（无 rows）：用 fieldIds + widths（宽度按字段类型兜底）自动切行
+        const rows = t.rows && t.rows.length > 0
+          ? t.rows.map((r) => ({ items: r.items.map((it) => ({ fieldId: fid(it.fieldId), widthPct: it.widthPct as FieldWidthPct })) }))
+          : segmentToRows(
+              (t.fieldIds ?? []).map((id) => {
+                const cf = fields.find((x) => x.id === id);
+                return { fieldId: fid(id), widthPct: ((t.widths?.[id] as FieldWidthPct) ?? (cf ? defaultW(cf.type) : 50)) as FieldWidthPct };
+              }),
+            );
+        return { id: t.id, name: t.name, rows };
+      });
+    }
+  }
+  return out;
+}
+
+/** 字段是否归属任一选项卡容器 */
+function isFieldInAnyTab(fieldId: FieldIdT, map: Record<string, TabInternal[]>): boolean {
+  return Object.values(map).some((tabs) => tabs.some((t) => t.rows.some((r) => r.items.some((it) => it.fieldId === fieldId))));
+}
+
+function toSaved(rows: LayoutRow[]): DetailLayout {
+  const layoutRows: DetailLayoutRow[] = rows
+    .filter((r) => r.items.length > 0)
+    .map((r) => ({
+      colCount: 2 as DetailRowColumns,
+      fieldIds: r.items.map((i) => i.fieldId),
+      widths: Object.fromEntries(r.items.map((i) => [i.fieldId, i.widthPct])) as Record<string, FieldWidthPct>,
+    }));
+  return { defaultRowColumns: 2 as DetailRowColumns, rows: layoutRows };
+}
+
+export function FormDesigner({
+  open,
+  inline,
+  fields,
+  layout,
+  tableId,
+  baseId,
+  tables,
+  permissions,
+  onClose,
+  onSave,
+}: FormDesignerProps) {
+  const [rows, setRows] = useState<LayoutRow[]>(() => initialRows(layout, fields));
+  // 选项卡容器配置（内部行模型）：tabs 字段 id -> TabInternal[]
+  const [tabsConfigMap, setTabsConfigMap] = useState<Record<string, TabInternal[]>>(() => initialTabsConfig(fields));
+  const [activeTabMap, setActiveTabMap] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    for (const [k, cfg] of Object.entries(initialTabsConfig(fields))) init[k] = cfg[0]?.id ?? "";
+    return init;
+  });
+  const [selectedFieldId, setSelectedFieldId] = useState<FieldIdT | null>(null);
+  const [dragFieldId, setDragFieldId] = useState<FieldIdT | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const [previewDevice, setPreviewDevice] = useState<PreviewDevice>("desktop");
+  const [topTab, setTopTab] = useState<TopTab>("design");
+  const [creating, setCreating] = useState(false);
+  const canvasRef = useRef<HTMLDivElement>(null);
+
+  // ref 镜像最新行/选项卡状态：placeField 在 await 创建字段之后才执行，
+  // 闭包里的 rows/tabsConfigMap 可能已过期（用户期间拖过别的字段），用 ref 保证读到最新值。
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const tabsRef = useRef(tabsConfigMap);
+  tabsRef.current = tabsConfigMap;
+  const dropTargetRef = useRef<DropTarget | null>(null);
+  dropTargetRef.current = dropTarget;
+  // dragover 高频触发：用 rAF 合帧 + 落点浅比较，相同落点不重复 setState（消除闪烁）
+  const dragRafRef = useRef<number | null>(null);
+  const lastTargetKeyRef = useRef<string>("");
+
+  const m = useGXMutations();
+
+  const fieldById = new Map<FieldIdT, FieldDTO>();
+  for (const f of fields) fieldById.set(f.id, f);
+
+  const selectedField = selectedFieldId ? fieldById.get(selectedFieldId) ?? null : null;
+  // 顶层行内字段；或归属选项卡的字段（宽度取自 tab 行模型）
+  const selectedItem: LayoutItem | null = (() => {
+    if (!selectedFieldId) return null;
+    const top = rows.flatMap((r) => r.items).find((i) => i.fieldId === selectedFieldId);
+    if (top) return top;
+    for (const tabs of Object.values(tabsConfigMap)) {
+      for (const t of tabs) {
+        for (const r of t.rows) {
+          const it = r.items.find((x) => x.fieldId === selectedFieldId);
+          if (it) return it;
+        }
+      }
+    }
+    return null;
+  })();
+
+  // ---------- 字段定位 / 行模型操作（顶层与选项卡统一路由） ----------
+
+  type FieldLoc = { kind: "top" } | { kind: "tab"; containerId: string; tabId: string };
+
+  const locateFieldAnywhere = (fieldId: FieldIdT): FieldLoc | null => {
+    if (rows.some((r) => r.items.some((it) => it.fieldId === fieldId))) return { kind: "top" };
+    for (const [containerId, tabs] of Object.entries(tabsConfigMap)) {
+      for (const t of tabs) {
+        if (locateFieldInRows(t.rows, fieldId)) return { kind: "tab", containerId, tabId: t.id };
+      }
+    }
+    return null;
+  };
+
+  /** 对某个选项卡的行模型做纯函数变换 */
+  const mutateTabRows = (containerId: string, tabId: string, fn: (rs: LayoutRow[]) => LayoutRow[]) => {
+    setTabsConfigMap((prev) => ({
+      ...prev,
+      [containerId]: (prev[containerId] ?? []).map((t) => (t.id === tabId ? { ...t, rows: fn(cloneRows(t.rows)) } : t)),
+    }));
+  };
+
+  /** ▲ 并入上一行（自动路由顶层 / 选项卡） */
+  const joinUp = (fieldId: FieldIdT) => {
+    const loc = locateFieldAnywhere(fieldId);
+    if (loc?.kind === "top") setRows((prev) => joinUpField(prev, fieldId));
+    else if (loc?.kind === "tab") mutateTabRows(loc.containerId, loc.tabId, (rs) => joinUpField(rs, fieldId));
+  };
+
+  /** ▼ 向下新建一行 */
+  const splitDown = (fieldId: FieldIdT) => {
+    const loc = locateFieldAnywhere(fieldId);
+    if (loc?.kind === "top") setRows((prev) => splitDownField(prev, fieldId));
+    else if (loc?.kind === "tab") mutateTabRows(loc.containerId, loc.tabId, (rs) => splitDownField(rs, fieldId));
+  };
+
+  /** ⇄ 与左邻交换 */
+  const swapWithLeft = (fieldId: FieldIdT) => {
+    const loc = locateFieldAnywhere(fieldId);
+    if (loc?.kind === "top") setRows((prev) => swapLeftField(prev, fieldId));
+    else if (loc?.kind === "tab") mutateTabRows(loc.containerId, loc.tabId, (rs) => swapLeftField(rs, fieldId));
+  };
+
+  /** 右栏「字段占比」统一入口 */
+  const setSelectedWidth = (fieldId: FieldIdT, widthPct: FieldWidthPct) => {
+    const loc = locateFieldAnywhere(fieldId);
+    if (loc?.kind === "tab") mutateTabRows(loc.containerId, loc.tabId, (rs) => setFieldWidthInRows(rs, fieldId, widthPct));
+    else setRows((prev) => setFieldWidthInRows(prev, fieldId, widthPct));
+  };
+
+  const removeField = (fieldId: FieldIdT) => {
+    setRows((prev) => rowsRemoveField(prev, fieldId));
+    setTabsConfigMap((prev) => {
+      const next: Record<string, TabInternal[]> = {};
+      for (const [k, tabs] of Object.entries(prev)) {
+        next[k] = tabs.map((t) => ({ ...t, rows: rowsRemoveField(t.rows, fieldId) }));
+      }
+      return next;
+    });
+    if (selectedFieldId === fieldId) setSelectedFieldId(null);
+  };
+
+  /** 复制字段：新建同类型字段，插到源字段同位置后 */
+  const duplicateField = async (fieldId: FieldIdT) => {
+    const src = fieldById.get(fieldId);
+    if (!src) return;
+    if (!permissions.canManageSchema) {
+      toast("无表结构管理权限", "error");
+      return;
+    }
+    setCreating(true);
+    try {
+      const data: Record<string, unknown> = { name: `${src.name} 副本`, type: src.type };
+      // 完整复制字段配置，避免复制出无配置半成品
+      if (src.type === "singleSelect" || src.type === "multiSelect") data.options = src.options;
+      if (["number", "currency", "percent", "duration"].includes(src.type)) data.precision = src.precision ?? 0;
+      if (src.type === "formula") data.formula = src.formula ?? "";
+      if (src.type === "links" || src.type === "subtable") {
+        data.relatedTableId = src.relatedTableId ?? "";
+        data.relationKind = src.relationKind ?? "mm";
+        data.linkDisplayFieldId = src.linkDisplayFieldId ?? "";
+        if (src.type === "subtable") { data.displayedFieldIds = (src as { displayedFieldIds?: string[] }).displayedFieldIds ?? []; }
+      }
+      if (src.type === "lookup" || src.type === "rollup" || src.type === "count") {
+        data.linkFieldId = src.linkFieldId ?? "";
+        if (src.type === "lookup" || src.type === "rollup") data.lookupFieldId = src.lookupFieldId ?? "";
+        if (src.type === "rollup" || src.type === "count") data.rollupFunction = src.type === "count" ? "count" : (src.rollupFunction ?? "sum");
+      }
+      const srf = src as { recordFilter?: unknown };
+      if (srf.recordFilter) data.recordFilter = srf.recordFilter;
+      if (src.type === "tabs") data.tabsConfig = [{ id: `tab_new_${Date.now()}`, name: "基本信息", fieldIds: [] }];
+      const result = await m.createField.mutateAsync({ tableId, data });
+      const created = (result as { field?: FieldDTO }).field;
+      if (!created?.id) throw new Error("复制失败");
+
+      const tabsInject = src.type === "tabs"
+        ? { containerId: created.id as FieldIdT, tabs: [{ id: `tab_${created.id}_0`, name: "基本信息", fieldIds: [] as string[] }] as TabConfig[], activeTabId: `tab_${created.id}_0` }
+        : undefined;
+
+      // 定位源字段（基于 ref 最新状态）：顶层行 → 同行其后；选项卡内 → 同 tab 同行其后
+      let target: DropTarget | null = null;
+      const topLoc = locateFieldInRows(rowsRef.current, fieldId);
+      if (topLoc) target = { kind: "row", rowIndex: topLoc.ri, beforeIndex: topLoc.ii + 1 };
+      if (!target) {
+        for (const [containerId, tabs] of Object.entries(tabsRef.current)) {
+          for (const t of tabs) {
+            const loc = locateFieldInRows(t.rows, fieldId);
+            if (loc) target = { kind: "tab", containerFieldId: fid(containerId), tabId: t.id, rowIndex: loc.ri, beforeIndex: loc.ii + 1 };
+          }
+        }
+      }
+      // 复制 tabs 容器本身只能落顶层行（target 在此只会是 row/tab/null）
+      const finalTarget: DropTarget = src.type === "tabs" && target?.kind === "tab"
+        ? { kind: "line", rowIndex: rowsRef.current.length }
+        : (target ?? { kind: "line", rowIndex: rowsRef.current.length });
+      placeField(created.id, finalTarget, true, defaultW(created.type), tabsInject);
+      setSelectedFieldId(created.id);
+    } catch (err) {
+      toast((err as Error).message || "复制字段失败", "error");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // ---------- 选项卡（tabs）容器操作 ----------
+
+  const tabsCfg = (tabsFieldId: FieldIdT): TabInternal[] => tabsConfigMap[tabsFieldId] ?? [];
+
+  const addTab = (containerId: FieldIdT) => {
+    const cur = tabsConfigMap[containerId] ?? [];
+    const tab: TabInternal = { id: `tab_${containerId}_${Date.now()}`, name: `选项卡 ${cur.length + 1}`, rows: [] };
+    setTabsConfigMap({ ...tabsConfigMap, [containerId]: [...cur, tab] });
+    setActiveTabMap({ ...activeTabMap, [containerId]: tab.id });
+  };
+
+  const removeTab = (containerId: FieldIdT, tabId: string) => {
+    const tabs = tabsConfigMap[containerId] ?? [];
+    if (tabs.length <= 1) { toast("至少保留一个选项卡", "error"); return; }
+    const removed = tabs.find((t) => t.id === tabId);
+    const orphanItems = removed ? removed.rows.flatMap((r) => r.items).map((it) => ({ ...it })) : [];
+    const next = tabs.filter((t) => t.id !== tabId);
+    setTabsConfigMap({ ...tabsConfigMap, [containerId]: next });
+    if (activeTabMap[containerId] === tabId) {
+      setActiveTabMap({ ...activeTabMap, [containerId]: next[0]?.id ?? "" });
+    }
+    // 被删 tab 内的字段退回顶层末尾（保留宽度，自动切行）
+    if (orphanItems.length > 0) setRows((rp) => [...rp, ...segmentToRows(orphanItems)]);
+  };
+
+  const renameTab = (containerId: FieldIdT, tabId: string, name: string) => {
+    setTabsConfigMap((prev) => ({
+      ...prev,
+      [containerId]: (prev[containerId] ?? []).map((t) => (t.id === tabId ? { ...t, name } : t)),
+    }));
+  };
+
+  /**
+   * 删除整个选项卡容器字段（①）。
+   *  - 从顶层行移除该容器字段；
+   *  - 容器内承载的字段不丢失，退回顶层末尾（保留宽度，自动切行）；
+   *  - 物理删除该 tabs 字段本身（后端会清理字段定义）；tabsConfig 无需单独清理（字段没了）。
+   */
+  const deleteTabsContainer = async (containerId: FieldIdT) => {
+    const f = fieldById.get(containerId);
+    const containerName = f?.name ?? "选项卡分组";
+    if (!window.confirm(`确定删除「${containerName}」？\n容器内字段会退回表单末尾，不会被删除。`)) return;
+    if (!permissions.canManageSchema) { toast("无表结构管理权限", "error"); return; }
+
+    // 1) 先收集容器内字段，退回顶层（基于 ref 最新状态）
+    const orphans: LayoutItem[] = [];
+    for (const tabs of Object.values(tabsRef.current[containerId] ?? [])) {
+      for (const r of tabs.rows) for (const it of r.items) orphans.push({ ...it });
+    }
+    setRows((prev) => {
+      const removed = rowsRemoveField(prev, containerId);
+      return orphans.length > 0 ? [...removed, ...segmentToRows(orphans)] : removed;
+    });
+    // 2) 清掉本地 tabsConfig 中该容器
+    setTabsConfigMap((prev) => {
+      const next = { ...prev };
+      delete next[containerId as string];
+      return next;
+    });
+    if (selectedFieldId === containerId) setSelectedFieldId(null);
+
+    // 3) 物理删除字段（失败仅提示：布局已移除，不影响保存）
+    try {
+      await m.deleteField.mutateAsync({ fieldId: containerId as string, tableId });
+      toast(`已删除「${containerName}」`, "success");
+    } catch (err) {
+      toast((err as Error).message || "删除选项卡字段失败", "error");
+    }
+  };
+
+  const setActiveTab = (containerId: FieldIdT, tabId: string) => {
+    setActiveTabMap((prev) => ({ ...prev, [containerId]: tabId }));
+  };
+
+  /**
+   * 把字段放到指定位置（row/line/tab/tabLine）。移动时先从顶层行与所有选项卡摘除。
+   * injectTabs：新建 tabs 字段时，顺带注入该容器的初始配置（单次提交）。
+   */
+  const placeField = (fieldId: FieldIdT, target: DropTarget, isNew: boolean, width?: FieldWidthPct, injectTabs?: { containerId: FieldIdT; tabs: TabConfig[]; activeTabId: string }) => {
+    const nextRows: LayoutRow[] = cloneRows(rowsRef.current);
+    const nextTabs: Record<string, TabInternal[]> = {};
+    for (const [k, tabs] of Object.entries(tabsRef.current)) {
+      nextTabs[k] = tabs.map((t) => ({ id: t.id, name: t.name, rows: cloneRows(t.rows) }));
+    }
+    if (injectTabs) {
+      nextTabs[injectTabs.containerId] = injectTabs.tabs.map(toInternal);
+      setActiveTabMap((prev) => ({ ...prev, [injectTabs.containerId]: injectTabs.activeTabId }));
+    }
+
+    const f = fieldById.get(fieldId);
+    let w: FieldWidthPct = width ?? (f ? defaultW(f.type) : 50);
+    if (!isNew) {
+      for (const r of nextRows) {
+        const i = r.items.findIndex((it) => it.fieldId === fieldId);
+        if (i >= 0) { w = r.items[i].widthPct; r.items.splice(i, 1); }
+      }
+      for (const tabs of Object.values(nextTabs)) {
+        for (const t of tabs) {
+          for (const r of t.rows) {
+            const i = r.items.findIndex((it) => it.fieldId === fieldId);
+            if (i >= 0) { w = r.items[i].widthPct; r.items.splice(i, 1); }
+          }
+        }
+      }
+    }
+
+    const item: LayoutItem = { fieldId, widthPct: w };
+
+    // 合并进某行后：若该行无 100% 宽字段且 ≤4 个，则均匀压缩填满（让第 3/4 个字段能同行）；
+    // 含宽字段（长文本/附件/关联等 100%）时不压缩，交给 reflowRows 拆行。
+    const packIfFit = (rowItems: LayoutItem[]): LayoutItem[] => {
+      if (rowItems.some((it) => it.widthPct >= 100)) return rowItems;
+      if (rowItems.length > MAX_FIELDS_PER_ROW) return rowItems;
+      return packRowItems(rowItems);
+    };
+
+    if (target.kind === "tab" || target.kind === "tabLine") {
+      const tab = nextTabs[target.containerFieldId]?.find((t) => t.id === target.tabId);
+      if (tab) {
+        if (target.kind === "tabLine") {
+          tab.rows.splice(Math.max(0, Math.min(target.rowIndex, tab.rows.length)), 0, { items: [item] });
+        } else {
+          const ri = Math.max(0, Math.min(target.rowIndex, Math.max(0, tab.rows.length - 1)));
+          if (!tab.rows[ri]) tab.rows.push({ items: [] });
+          const idx = Math.max(0, Math.min(target.beforeIndex, tab.rows[ri].items.length));
+          tab.rows[ri].items.splice(idx, 0, item);
+          tab.rows[ri].items = packIfFit(tab.rows[ri].items);
+          tab.rows = reflowRows(tab.rows); // 保守回流（只拆不合）
+        }
+      }
+      setTabsConfigMap(nextTabs);
+      setRows(nextRows.filter((r) => r.items.length > 0));
+      return;
+    }
+
+    if (target.kind === "line") {
+      nextRows.splice(Math.max(0, Math.min(target.rowIndex, nextRows.length)), 0, { items: [item] });
+    } else {
+      const ri = Math.max(0, Math.min(target.rowIndex, nextRows.length - 1));
+      if (!nextRows[ri]) nextRows.push({ items: [] });
+      const idx = Math.max(0, Math.min(target.beforeIndex, nextRows[ri].items.length));
+      nextRows[ri].items.splice(idx, 0, item);
+      nextRows[ri].items = packIfFit(nextRows[ri].items);
+    }
+    setTabsConfigMap(nextTabs);
+    setRows(reflowRows(nextRows).filter((r) => r.items.length > 0));
+  };
+
+  // ---------- 拖放 ----------
+
+  const createFieldFromPalette = async (type: FieldType, target: DropTarget) => {
+    if (!permissions.canManageSchema) {
+      toast("无表结构管理权限", "error");
+      return;
+    }
+    const label = TYPE_GROUPS.flatMap((g) => g.items).find((it) => it.type === type)?.label ?? "新字段";
+    setCreating(true);
+    try {
+      const data: Record<string, unknown> = { name: `${label}${Date.now().toString().slice(-4)}`, type };
+      let defaultTab: TabConfig | null = null;
+      if (type === "tabs") {
+        defaultTab = { id: `tab_new_${Date.now()}`, name: "基本信息", fieldIds: [] };
+        data.tabsConfig = [defaultTab];
+      }
+      const result = await m.createField.mutateAsync({ tableId, data });
+      const created = (result as { field?: FieldDTO }).field;
+      if (!created?.id) throw new Error("创建字段失败");
+      if (type === "tabs" && defaultTab) {
+        const tab0 = { ...defaultTab, id: `tab_${created.id}_0` };
+        // 容器字段只能落顶层行
+        const safeTarget: DropTarget = target.kind === "tab" || target.kind === "tabLine" ? { kind: "line", rowIndex: rows.length } : target;
+        placeField(created.id, safeTarget, true, 100, { containerId: created.id, tabs: [tab0], activeTabId: tab0.id });
+      } else {
+        placeField(created.id, target, true, defaultW(type));
+      }
+      setSelectedFieldId(created.id);
+    } catch (err) {
+      toast((err as Error).message || "创建字段失败", "error");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const computeDropTarget = (clientX: number, clientY: number): DropTarget => {
+    const el = document.elementFromPoint(clientX, clientY);
+
+    // 1) 选项卡内字段卡 → 插入该 tab 的某行（按左/右半定前后）
+    const tabCard = el?.closest<HTMLElement>("[data-tab-field]");
+    if (tabCard) {
+      const containerFieldId = fid(tabCard.dataset.tabContainer!);
+      const tabId = tabCard.dataset.tabId!;
+      const rowIndex = Number(tabCard.dataset.tabRow);
+      const cardFieldId = fid(tabCard.dataset.tabField!);
+      const tab = (tabsConfigMap[containerFieldId] ?? []).find((t) => t.id === tabId);
+      const trs = tab?.rows ?? [];
+      const ii = trs[rowIndex]?.items.findIndex((it) => it.fieldId === cardFieldId) ?? -1;
+      const r = tabCard.getBoundingClientRect();
+      const after = clientX > r.left + r.width / 2;
+      return { kind: "tab", containerFieldId, tabId, rowIndex, beforeIndex: after ? ii + 1 : Math.max(0, ii) };
+    }
+    // 2) 选项卡内行间虚线带 → 在该 tab 内新建一行
+    const tabGap = el?.closest<HTMLElement>("[data-tab-gap]");
+    if (tabGap) {
+      return { kind: "tabLine", containerFieldId: fid(tabGap.dataset.tabContainer!), tabId: tabGap.dataset.tabId!, rowIndex: Number(tabGap.dataset.tabGap) };
+    }
+    // 3) 选项卡标题（拖到别的选项卡头）→ 追加到该选项卡末尾新行
+    const tabHeader = el?.closest<HTMLElement>("[data-tab-header]");
+    if (tabHeader) {
+      const containerFieldId = fid(tabHeader.dataset.tabContainer!);
+      const tabId = tabHeader.dataset.tabId!;
+      const rowCount = (tabsConfigMap[containerFieldId] ?? []).find((t) => t.id === tabId)?.rows.length ?? 0;
+      return { kind: "tabLine", containerFieldId, tabId, rowIndex: rowCount };
+    }
+    // 4) 选项卡内容空白区 → 末尾新建一行
+    const tabBody = el?.closest<HTMLElement>("[data-tab-body]");
+    if (tabBody) {
+      const containerFieldId = fid(tabBody.dataset.tabContainer!);
+      const tabId = tabBody.dataset.tabId!;
+      const rowCount = (tabsConfigMap[containerFieldId] ?? []).find((t) => t.id === tabId)?.rows.length ?? 0;
+      return { kind: "tabLine", containerFieldId, tabId, rowIndex: rowCount };
+    }
+    // 5) 顶层行间虚线带
+    const gap = el?.closest<HTMLElement>("[data-row-gap]");
+    if (gap) return { kind: "line", rowIndex: Number(gap.dataset.rowGap) };
+    // 6) 顶层字段卡（插入该行）
+    const cardEl = el?.closest<HTMLElement>("[data-field-card]");
+    if (cardEl) {
+      const cardFieldId = cardEl.dataset.fieldId as FieldIdT;
+      for (let ri = 0; ri < rows.length; ri++) {
+        for (let ii = 0; ii < rows[ri].items.length; ii++) {
+          if (rows[ri].items[ii].fieldId === cardFieldId) {
+            const r = cardEl.getBoundingClientRect();
+            const after = clientX > r.left + r.width / 2;
+            return { kind: "row", rowIndex: ri, beforeIndex: after ? ii + 1 : ii };
+          }
+        }
+      }
+    }
+    // 空白：新建一行到末尾
+    return { kind: "line", rowIndex: rowsRef.current.length };
+  };
+
+  const targetKey = (t: DropTarget | null): string => {
+    if (!t) return "";
+    if (t.kind === "line") return `line:${t.rowIndex}`;
+    if (t.kind === "row") return `row:${t.rowIndex}:${t.beforeIndex}`;
+    if (t.kind === "tabLine") return `tabLine:${t.containerFieldId}:${t.tabId}:${t.rowIndex}`;
+    return `tab:${t.containerFieldId}:${t.tabId}:${t.rowIndex}:${t.beforeIndex}`;
+  };
+
+  /** rAF 合帧 + 浅比较更新落点：同一帧多次 dragover 只算一次，落点不变不重渲染 */
+  const scheduleDropTarget = (compute: () => DropTarget) => {
+    if (dragRafRef.current != null) return; // 本帧已排队
+    dragRafRef.current = requestAnimationFrame(() => {
+      dragRafRef.current = null;
+      const t = compute();
+      const k = targetKey(t);
+      if (k !== lastTargetKeyRef.current) {
+        lastTargetKeyRef.current = k;
+        dropTargetRef.current = t;
+        setDropTarget(t);
+      }
+    });
+  };
+
+  const readDrag = (e: React.DragEvent): { fieldId: FieldIdT | null; source: "row" | "palette" | null; type: FieldType | null } => {
+    const raw = e.dataTransfer.getData("text/plain");
+    if (raw.startsWith("palette:")) return { fieldId: null, source: "palette", type: raw.slice(8) as FieldType };
+    return { fieldId: raw ? fid(raw) : null, source: e.dataTransfer.getData(DT_SOURCE) as "row" | null, type: null };
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    const { source } = readDrag(e);
+    e.dataTransfer.dropEffect = source === "palette" ? "copy" : "move";
+    const { clientX, clientY } = e;
+    scheduleDropTarget(() => computeDropTarget(clientX, clientY));
+  };
+
+  const handleGapDragOver = (rowIndex: number) => (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const { source } = readDrag(e);
+    e.dataTransfer.dropEffect = source === "palette" ? "copy" : "move";
+    scheduleDropTarget(() => ({ kind: "line", rowIndex }));
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const { fieldId, source, type } = readDrag(e);
+    // 复用 dragover 阶段已确定的落点（与高亮一致），避免在 drop 时重算导致「显示插这、落到那」
+    const target = dropTargetRef.current ?? computeDropTarget(e.clientX, e.clientY);
+    if (source === "palette" && type) void createFieldFromPalette(type, target);
+    else if (source === "row" && fieldId) {
+      // 仅 tabs 容器字段不能嵌套进选项卡（选项卡不能套选项卡）；
+      // subtable 是普通宽字段，允许放进选项卡内容区（②）。
+      const f = fieldById.get(fieldId);
+      const isTabTarget = target.kind === "tab" || target.kind === "tabLine";
+      const safeTarget: DropTarget = isTabTarget && f && f.type === "tabs"
+        ? { kind: "line", rowIndex: rowsRef.current.length }
+        : target;
+      placeField(fieldId, safeTarget, false);
+    }
+    endDrag();
+  };
+
+  const endDrag = () => {
+    if (dragRafRef.current != null) { cancelAnimationFrame(dragRafRef.current); dragRafRef.current = null; }
+    lastTargetKeyRef.current = "";
+    dropTargetRef.current = null;
+    setDragFieldId(null);
+    setDragActive(false);
+    setDropTarget(null);
+  };
+
+  const beginDragFromRow = (id: FieldIdT, e: React.DragEvent) => {
+    e.dataTransfer.setData("text/plain", id);
+    e.dataTransfer.setData(DT_SOURCE, "row");
+    e.dataTransfer.effectAllowed = "move";
+    setDragFieldId(id);
+    setDragActive(true);
+  };
+
+  const beginDragFromPalette = (type: FieldType, e: React.DragEvent) => {
+    e.dataTransfer.setData("text/plain", `palette:${type}`);
+    e.dataTransfer.setData(DT_SOURCE, "palette");
+    e.dataTransfer.effectAllowed = "copy";
+    setDragActive(true);
+  };
+
+  const savingRef = useRef(false);
+  const handleSave = async () => {
+    if (savingRef.current) return; // 防重复提交（快速连点）
+    savingRef.current = true;
+    try {
+      await doSave();
+    } finally {
+      savingRef.current = false;
+    }
+  };
+
+  const doSave = async () => {
+    // 先把所有选项卡容器的 tabsConfig 落库。
+    // 注意：必须遍历**本地 tabsConfigMap 的 key**，而不是 props.fields —— 设计器内新建的 tabs
+    // 容器可能还没异步加载进 fields 快照，用快照会漏掉新容器，导致它的 tab 内字段不保存（P0）。
+    const synced = syncTabs(tabsConfigMap);
+    try {
+      await Promise.all(
+        Object.keys(synced).map((containerId) => {
+          const f = fieldById.get(fid(containerId));
+          return m.updateField.mutateAsync({
+            fieldId: containerId,
+            tableId,
+            data: { name: f?.name ?? "选项卡分组", type: "tabs", tabsConfig: synced[containerId]! },
+          });
+        }),
+      );
+    } catch (err) {
+      toast((err as Error).message || "保存选项卡配置失败", "error");
+      return;
+    }
+    onSave(toSaved(rows));
+    toast("已保存布局", "success");
+    onClose();
+  };
+
+  const gapActive = (rowIndex: number) => dragActive && dropTarget?.kind === "line" && dropTarget.rowIndex === rowIndex;
+  const dropInTab = (c: FieldIdT, tabId: string) =>
+    !!dropTarget && (dropTarget.kind === "tab" || dropTarget.kind === "tabLine") && dropTarget.containerFieldId === c && dropTarget.tabId === tabId;
+  const tabGapActive = (c: FieldIdT, tabId: string, ri: number) =>
+    !!dropTarget && dropTarget.kind === "tabLine" && dropTarget.containerFieldId === c && dropTarget.tabId === tabId && dropTarget.rowIndex === ri;
+
+  // Esc 关闭（全屏容器自身管理，不依赖 Modal）
+  useEffect(() => {
+    if (!open || inline) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, inline, onClose]);
+
+  const body = (
+    <div className="flex h-full flex-col bg-gx-surface">
+      <FormDesignerToolbar
+        activeTab={topTab}
+        onTabChange={setTopTab}
+        device={previewDevice}
+        onDeviceChange={setPreviewDevice}
+        onClose={onClose}
+        onSave={handleSave}
+      />
+      <div className="flex flex-1 overflow-hidden">
+        {/* 移动端：字段库与设置面板收起为底部/抽屉，画布单列堆叠 */}
+        {previewDevice === "desktop" && <FieldPalette onBeginDrag={beginDragFromPalette} onEndDrag={endDrag} />}
+
+        {/* 中间：一整块表单画布（仅此区域与左右栏各自独立滚动，弹窗本身不滚动） */}
+        <div className="flex-1 overflow-y-auto bg-gx-bg/50 p-4">
+          <div className={clsx("mx-auto transition-all", previewDevice === "mobile" ? "max-w-[420px]" : "w-full max-w-3xl")}>
+            {topTab === "design" ? (
+              <div
+                ref={canvasRef}
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
+                className={clsx(
+                  "relative rounded-gx-lg border bg-gx-surface shadow-sm transition-colors",
+                  dragActive ? "border-gx-accent ring-1 ring-gx-accent/30" : "border-gx-border",
+                )}
+              >
+                <div className="flex items-center justify-between gap-2 border-b border-gx-separator px-4 py-2.5">
+                  <span className="shrink-0 text-gx-13 font-semibold text-gx-text-primary">表单</span>
+                  <span className="truncate text-gx-11 text-gx-text-hint max-md:hidden">
+                    {rows.reduce((s, r) => s + r.items.length, 0)} 个字段 · 拖入添加，▲ 并入上一行 / ▼ 向下新建一行，悬停字段可交换·复制·删除
+                  </span>
+                  <span className="truncate text-gx-11 text-gx-text-hint md:hidden">
+                    {rows.reduce((s, r) => s + r.items.length, 0)} 个字段
+                  </span>
+                </div>
+
+                {rows.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center gap-2 py-20 text-center">
+                    <Icon name="form" size={28} className="text-gx-text-hint" />
+                    <div className="text-gx-13 text-gx-text-secondary">从左侧字段库拖拽字段类型到此处</div>
+                    <div className="text-gx-11 text-gx-text-hint">字段会按宽度自动排列成行</div>
+                  </div>
+                ) : (
+                  <div className="p-3">
+                    {rows.map((row, ri) => (
+                      <div key={ri}>
+                        <RowGap rowIndex={ri} active={gapActive(ri)} onDragOver={handleGapDragOver(ri)} />
+                        {/* 移动端：所有字段强制单列堆叠（忽略桌面行内多列宽度） */}
+                        <div className={clsx("flex", previewDevice === "mobile" ? "flex-col" : "flex-wrap")}>
+                          {row.items.map((item, ii) => {
+                            const f = fieldById.get(item.fieldId);
+                            if (!f) return null;
+                            // 选项卡分组：全宽横向容器（所见即所得），独占一行
+                            if (f.type === "tabs") {
+                              const cfg = tabsCfg(f.id);
+                              const activeId = activeTabMap[f.id] ?? cfg[0]?.id ?? "";
+                              const activeTab = cfg.find((t) => t.id === activeId) ?? cfg[0];
+                              const activeRows = activeTab?.rows ?? [];
+                              return (
+                                <div key={item.fieldId} className="w-full min-w-0 px-2 py-2">
+                                  <TabsDesignerCard
+                                    field={f}
+                                    tabs={cfg}
+                                    activeTabId={activeTab?.id ?? ""}
+                                    activeRows={activeRows}
+                                    selectedFieldId={selectedFieldId}
+                                    isSelected={selectedFieldId === f.id}
+                                    device={previewDevice}
+                                    bodyDragOver={!!activeTab && dropInTab(f.id, activeTab.id)}
+                                    gapActive={(gri) => !!activeTab && tabGapActive(f.id, activeTab.id, gri)}
+                                    fieldById={fieldById}
+                                    dragFieldId={dragFieldId}
+                                    onSelectContainer={() => setSelectedFieldId(f.id)}
+                                    onSelectField={(id) => setSelectedFieldId(id)}
+                                    onActiveTab={(tid) => setActiveTab(f.id, tid)}
+                                    onAddTab={() => addTab(f.id)}
+                                    onRemoveTab={(tid) => removeTab(f.id, tid)}
+                                    onRenameTab={(tid, name) => renameTab(f.id, tid, name)}
+                                    onRemoveContainer={() => void deleteTabsContainer(f.id)}
+                                    onRemoveField={(id) => removeField(id)}
+                                    onDuplicateField={(id) => void duplicateField(id)}
+                                    onJoinUp={joinUp}
+                                    onSplitDown={splitDown}
+                                    onSwapLeft={swapWithLeft}
+                                    onBeginDrag={beginDragFromRow}
+                                    onEndDrag={endDrag}
+                                  />
+                                </div>
+                              );
+                            }
+                            const canJoin = canJoinUp(rows, ri, item);
+                            const canSplit = row.items.length > 1;
+                            return (
+                              <CanvasFieldCard
+                                key={item.fieldId}
+                                field={f}
+                                item={item}
+                                forceStack={previewDevice === "mobile"}
+                                isSelected={selectedFieldId === item.fieldId}
+                                isDragging={dragFieldId === item.fieldId}
+                                canSwapLeft={ii > 0}
+                                canJoinUp={canJoin}
+                                canSplitDown={canSplit}
+                                onSelect={() => setSelectedFieldId(item.fieldId)}
+                                onRemove={() => removeField(item.fieldId)}
+                                onDuplicate={() => void duplicateField(item.fieldId)}
+                                onSwapLeft={() => swapWithLeft(item.fieldId)}
+                                onJoinUp={() => joinUp(item.fieldId)}
+                                onSplitDown={() => splitDown(item.fieldId)}
+                                onBeginDrag={(e) => beginDragFromRow(item.fieldId, e)}
+                                onEndDrag={endDrag}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    <RowGap rowIndex={rows.length} active={gapActive(rows.length)} onDragOver={handleGapDragOver(rows.length)} />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex h-64 items-center justify-center rounded-gx-lg border border-dashed border-gx-border bg-gx-surface text-gx-13 text-gx-text-hint">
+                {topTab === "flow" && "流程功能敬请期待"}
+                {topTab === "settings" && "拓展设置敬请期待"}
+                {topTab === "publish" && "应用发布敬请期待"}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 右侧：字段设置（桌面三栏；移动端收到底部抽屉） */}
+        {previewDevice === "desktop" && (
+          <aside className="flex w-[300px] shrink-0 flex-col border-l border-gx-separator bg-gx-surface">
+            <FieldSettingsPanel
+              field={selectedField}
+              allFields={fields}
+              tables={tables}
+              tableId={tableId}
+              baseId={baseId}
+              permissions={permissions}
+              widthPct={selectedItem?.widthPct}
+              onWidthChange={(w) => selectedFieldId && setSelectedWidth(selectedFieldId, w)}
+            />
+          </aside>
+        )}
+      </div>
+
+      {/* 移动端：字段库 + 设置面板以底部抽屉方式呈现（画布占满，触控友好） */}
+      {previewDevice === "mobile" && (
+        <MobilePaletteSheet onBeginDrag={beginDragFromPalette} onEndDrag={endDrag}>
+          <div className="border-t border-gx-separator bg-gx-surface px-3 py-2">
+            <div className="mb-1 text-gx-12 font-semibold text-gx-text-primary">字段设置</div>
+            <FieldSettingsPanel
+              field={selectedField}
+              allFields={fields}
+              tables={tables}
+              tableId={tableId}
+              baseId={baseId}
+              permissions={permissions}
+              widthPct={selectedItem?.widthPct}
+              onWidthChange={(w) => selectedFieldId && setSelectedWidth(selectedFieldId, w)}
+            />
+          </div>
+        </MobilePaletteSheet>
+      )}
+
+      {creating && (
+        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-black/5">
+          <div className="rounded-gx-lg bg-gx-surface px-4 py-2 text-gx-13 text-gx-text-primary shadow-lg">创建字段中…</div>
+        </div>
+      )}
+    </div>
+  );
+
+  if (inline) return <div className="relative h-full">{body}</div>;
+  // 全屏抽屉式设计器（⑤）：近全屏、弹窗本身不滚动，三栏各自独立滚动。
+  // Portal 到 body：抽屉（RecordDrawer）带 transform 会破坏内部 fixed 定位与层叠上下文。
+  if (!open) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center p-3 sm:p-6">
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div className="relative flex w-full max-w-[1500px] flex-col overflow-hidden rounded-gx-xl bg-gx-surface shadow-2xl">
+        {body}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * 移动端底部抽屉（⑥）：小屏下字段库与字段设置不再挤占画布，
+ * 收为底部可展开面板；画布以单列手机宽度预览，触控友好。
+ */
+function MobilePaletteSheet({
+  onBeginDrag,
+  onEndDrag,
+  children,
+}: {
+  onBeginDrag: (type: FieldType, e: React.DragEvent) => void;
+  onEndDrag: () => void;
+  children: React.ReactNode;
+}) {
+  const [openSheet, setOpenSheet] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpenSheet((v) => !v)}
+        className="flex items-center justify-center gap-2 border-t border-gx-separator bg-gx-surface py-2.5 text-gx-13 font-medium text-gx-accent"
+      >
+        <Icon name="plus" size={14} />
+        {openSheet ? "收起字段库 / 设置" : "打开字段库 / 字段设置"}
+      </button>
+      {openSheet && (
+        <div className="flex max-h-[45vh] flex-col overflow-hidden border-t border-gx-separator bg-gx-surface">
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="border-b border-gx-separator">
+              <FieldPalette onBeginDrag={onBeginDrag} onEndDrag={onEndDrag} mobile />
+            </div>
+            <div className="max-h-56 overflow-y-auto">{children}</div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ---------- 小组件 ----------
+
+/**
+ * 行间拖放带：拖到这里新建独立一行。
+ * 命中区固定高度（激活不改变盒尺寸 → 不推挤内容、不引起落点抖动）；
+ * 激活时用绝对定位的插入线高亮，drop 统一冒泡到画布根处理。
+ */
+function RowGap({
+  rowIndex,
+  active,
+  onDragOver,
+  tabDrop,
+}: {
+  rowIndex: number;
+  active: boolean;
+  /** 顶层行间带用它强制 line 落点；选项卡内带不传（dragover 冒泡到根，按 data-tab-gap 算 tabLine） */
+  onDragOver?: (e: React.DragEvent) => void;
+  /** 落在选项卡内时提供：挂 data-tab-gap 等属性 */
+  tabDrop?: { containerFieldId: string; tabId: string };
+}) {
+  const dropData = tabDrop
+    ? {
+        "data-tab-gap": rowIndex,
+        "data-tab-container": tabDrop.containerFieldId,
+        "data-tab-id": tabDrop.tabId,
+      }
+    : { "data-row-gap": rowIndex };
+  return (
+    <div
+      {...dropData}
+      onDragOver={onDragOver}
+      data-gap-hit=""
+      className="relative flex h-4 items-center justify-center"
+    >
+      {active && (
+        <div className="pointer-events-none absolute inset-x-1 top-1/2 z-10 flex h-9 -translate-y-1/2 items-center justify-center rounded-gx-sm border-2 border-dashed border-gx-accent bg-gx-accent-bg/40">
+          <span className="flex items-center gap-1 text-gx-11 font-medium text-gx-accent">
+            <Icon name="plus" size={12} /> 放到此处新建一行
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ 顶部工具栏 ============
+
+interface FormDesignerToolbarProps {
+  activeTab: TopTab;
+  onTabChange: (t: TopTab) => void;
+  device: PreviewDevice;
+  onDeviceChange: (d: PreviewDevice) => void;
+  onClose: () => void;
+  onSave: () => void;
+}
+
+function FormDesignerToolbar({ activeTab, onTabChange, device, onDeviceChange, onClose, onSave }: FormDesignerToolbarProps) {
+  return (
+    <div className="flex items-center gap-4 border-b border-gx-separator bg-gx-surface px-4 py-2">
+      <div className="flex items-center gap-1">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => onTabChange(t.key)}
+            className={clsx(
+              "rounded-gx-sm px-3 py-1.5 text-gx-13 transition-colors",
+              activeTab === t.key ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-secondary hover:bg-gx-bg",
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div className="ml-auto flex items-center gap-2">
+        <div className="flex items-center rounded-gx-md border border-gx-border p-0.5">
+          <button
+            type="button"
+            onClick={() => onDeviceChange("desktop")}
+            className={clsx("flex items-center gap-1 rounded-gx-sm px-2 py-1 text-gx-12 transition-colors", device === "desktop" ? "bg-gx-accent-bg text-gx-accent" : "text-gx-text-secondary hover:bg-gx-bg")}
+          >
+            <Icon name="table" size={13} />
+            <span>桌面端</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onDeviceChange("mobile")}
+            className={clsx("flex items-center gap-1 rounded-gx-sm px-2 py-1 text-gx-12 transition-colors", device === "mobile" ? "bg-gx-accent-bg text-gx-accent" : "text-gx-text-secondary hover:bg-gx-bg")}
+          >
+            <Icon name="form" size={13} />
+            <span>移动端</span>
+          </button>
+        </div>
+        <Button size="sm" variant="ghost" onClick={onClose}>取消</Button>
+        <Button size="sm" variant="primary" onClick={onSave}>保存布局</Button>
+      </div>
+    </div>
+  );
+}
+
+// ============ 左侧字段库 ============
+
+interface FieldPaletteProps {
+  onBeginDrag: (type: FieldType, e: React.DragEvent) => void;
+  onEndDrag: () => void;
+  /** 移动端底部抽屉内：全宽、横向网格更紧凑 */
+  mobile?: boolean;
+}
+
+function FieldPalette({ onBeginDrag, onEndDrag, mobile }: FieldPaletteProps) {
+  const [filter, setFilter] = useState("");
+  const lower = filter.trim().toLowerCase();
+  const groups = lower
+    ? TYPE_GROUPS.map((g) => ({ ...g, items: g.items.filter((it) => it.label.toLowerCase().includes(lower)) })).filter((g) => g.items.length > 0)
+    : TYPE_GROUPS;
+
+  return (
+    <aside className={clsx("flex shrink-0 flex-col border-r border-gx-separator bg-gx-surface", mobile ? "w-full border-r-0" : "w-[220px]")}>
+      <div className="border-b border-gx-separator px-3 py-2.5 text-gx-14 font-semibold text-gx-text-primary">字段库</div>
+      <div className="px-3 py-2">
+        <div className="flex items-center gap-2 rounded-gx-md border border-gx-border bg-gx-bg px-2 py-1.5">
+          <Icon name="search" size={13} className="text-gx-text-hint" />
+          <input
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="搜索字段类型"
+            className="flex-1 appearance-none bg-transparent text-gx-12 text-gx-text-primary outline-none placeholder:text-gx-text-hint"
+          />
+        </div>
+      </div>
+      <div className={clsx("flex-1 overflow-y-auto px-2 pb-4", mobile && "max-h-56")}>
+        {groups.map((g) => (
+          <div key={g.group} className="mb-3">
+            <div className="px-1 py-1 text-gx-11 font-medium text-gx-text-tertiary">{g.group}字段</div>
+            <div className={clsx("grid gap-1", mobile ? "grid-cols-4" : "grid-cols-2")}>
+              {g.items.map((it) => (
+                <div
+                  key={it.type}
+                  draggable
+                  onDragStart={(e) => onBeginDrag(it.type, e)}
+                  onDragEnd={onEndDrag}
+                  className="flex cursor-grab items-center gap-1.5 rounded-gx-md border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 text-gx-text-secondary hover:border-gx-accent/50 hover:bg-gx-accent-bg/40 active:cursor-grabbing"
+                  title={`拖到表单中创建 ${it.label} 字段`}
+                >
+                  <FieldIcon type={it.type} size={13} />
+                  <span className="truncate">{it.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </aside>
+  );
+}
+
+// ============ 画布字段卡片（顶层与选项卡内共用） ============
+
+interface CanvasFieldCardProps {
+  field: FieldDTO;
+  item: LayoutItem;
+  isSelected: boolean;
+  isDragging: boolean;
+  canSwapLeft: boolean;
+  canJoinUp: boolean;
+  canSplitDown: boolean;
+  /** 移动端预览：强制单列堆叠，隐藏行内多列操作按钮 */
+  forceStack?: boolean;
+  /** 落在选项卡内时提供：用于挂 data-tab-* 落点属性；顶层为 null */
+  tabDrop?: { containerFieldId: string; tabId: string; rowIndex: number } | null;
+  onSelect: () => void;
+  onRemove: () => void;
+  onDuplicate: () => void;
+  onSwapLeft: () => void;
+  onJoinUp: () => void;
+  onSplitDown: () => void;
+  onBeginDrag: (e: React.DragEvent) => void;
+  onEndDrag: () => void;
+}
+
+/** 骑在字段边框上的圆形白底浮动小按钮 */
+function EdgeButton({
+  title,
+  onClick,
+  className,
+  children,
+}: {
+  title: string;
+  onClick: (e: React.MouseEvent) => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={(e) => { e.stopPropagation(); onClick(e); }}
+      onDragStart={(e) => e.preventDefault()}
+      onMouseDown={(e) => e.stopPropagation()}
+      className={clsx(
+        "absolute z-20 flex h-6 w-6 items-center justify-center rounded-full border border-gx-border bg-gx-surface text-gx-text-secondary opacity-0 shadow-sm transition-all",
+        "hover:border-gx-accent hover:text-gx-accent group-hover:opacity-100",
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function CanvasFieldCard({
+  field,
+  item,
+  isSelected,
+  isDragging,
+  canSwapLeft,
+  canJoinUp,
+  canSplitDown,
+  forceStack,
+  tabDrop,
+  onSelect,
+  onRemove,
+  onDuplicate,
+  onSwapLeft,
+  onJoinUp,
+  onSplitDown,
+  onBeginDrag,
+  onEndDrag,
+}: CanvasFieldCardProps) {
+  const dropData = tabDrop
+    ? {
+        "data-tab-field": field.id,
+        "data-tab-container": tabDrop.containerFieldId,
+        "data-tab-id": tabDrop.tabId,
+        "data-tab-row": String(tabDrop.rowIndex),
+      }
+    : { "data-field-card": field.id };
+  // 移动端单列：宽度强制 100%，并隐藏行内多列操作（▲▼⇄ 无意义）
+  const stack = !!forceStack;
+  return (
+    <div
+      style={stack ? { flex: "0 0 100%", maxWidth: "100%" } : { flex: `0 0 ${item.widthPct}%`, maxWidth: `${item.widthPct}%` }}
+      className="group relative min-w-0 px-2 py-2"
+      {...dropData}
+    >
+      <div
+        draggable
+        onDragStart={onBeginDrag}
+        onDragEnd={onEndDrag}
+        onClick={(e) => { e.stopPropagation(); onSelect(); }}
+        className={clsx(
+          "relative flex cursor-grab flex-col gap-1.5 rounded-gx-lg border p-3 transition-colors active:cursor-grabbing",
+          isSelected
+            ? "border-gx-accent/50 bg-gx-accent-bg/60"
+            : "border-gx-border bg-gx-surface hover:border-gx-accent/40 hover:bg-gx-accent-bg/20",
+          isDragging && "opacity-40",
+        )}
+      >
+        {/* ▲ 并入上一行：骑在顶边中点。仅当上一行没满（<4 字段且宽度放得下）时显示 */}
+        {!stack && canJoinUp && (
+          <EdgeButton title="并入上一行" onClick={onJoinUp} className="-top-3 left-1/2 -translate-x-1/2">
+            <Icon name="arrowUp" size={13} />
+          </EdgeButton>
+        )}
+
+        {/* ▼ 向下新建一行：骑在底边中点。本行还有其它字段时才可拆出 */}
+        {!stack && canSplitDown && (
+          <EdgeButton title="向下新建一行" onClick={onSplitDown} className="-bottom-3 left-1/2 -translate-x-1/2">
+            <Icon name="arrowDown" size={13} />
+          </EdgeButton>
+        )}
+
+        {/* ⇄ 与左邻交换：骑在左边中点 */}
+        {!stack && canSwapLeft && (
+          <EdgeButton title="与左侧字段交换位置" onClick={onSwapLeft} className="-left-3 top-1/2 -translate-y-1/2">
+            <Icon name="swap" size={12} />
+          </EdgeButton>
+        )}
+
+        {/* 右上角：复制 / 删除（悬停或选中显现） */}
+        <div
+          className={clsx(
+            "absolute -top-2.5 right-2 flex items-center gap-1 rounded-full border border-gx-border bg-gx-surface px-1 py-0.5 shadow-sm transition-opacity",
+            isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+          )}
+        >
+          <button
+            type="button"
+            title="复制字段"
+            onClick={(e) => { e.stopPropagation(); onDuplicate(); }}
+            onDragStart={(e) => e.preventDefault()}
+            className="flex h-5 w-5 items-center justify-center rounded-full text-gx-text-secondary hover:bg-gx-accent-bg hover:text-gx-accent"
+          >
+            <Icon name="copy" size={12} />
+          </button>
+          <button
+            type="button"
+            title="从表单移除"
+            onClick={(e) => { e.stopPropagation(); onRemove(); }}
+            onDragStart={(e) => e.preventDefault()}
+            className="flex h-5 w-5 items-center justify-center rounded-full text-gx-text-secondary hover:bg-gx-danger-bg hover:text-gx-danger"
+          >
+            <Icon name="trash" size={12} />
+          </button>
+        </div>
+
+        {/* 字段名 */}
+        <div className="flex items-center gap-1.5 pr-1 text-gx-13 font-semibold text-gx-text-primary">
+          <FieldIcon type={field.type} size={13} />
+          <span className="truncate">{field.name}</span>
+        </div>
+
+        {/* 子表格：设计器所见即所得（③）——渲染迷你表格（表头 + 空态），与详情页一致 */}
+        {field.type === "subtable" ? (
+          <SubtableMiniPreview field={field} />
+        ) : (
+          <FieldInput field={field} value={null} onChange={() => {}} disabled />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 子表格在设计器画布里的所见即所得预览（③）：
+ * 按该字段配置的 displayedFieldIds（未配置取对面表前若干字段）渲染目标表表头，
+ * 数据区给空态提示，保证设计师在画布上看到的就是详情页里的子表格形态。
+ */
+function SubtableMiniPreview({ field }: { field: FieldDTO }) {
+  const peerTableId = field.relatedTableId ?? null;
+  const { data: peerFieldsData } = useFields(peerTableId);
+  const columns = useMemo(() => {
+    const all = peerFieldsData ?? [];
+    if (field.displayedFieldIds && field.displayedFieldIds.length > 0) {
+      const order = new Map(field.displayedFieldIds.map((id, i) => [id as string, i]));
+      return all
+        .filter((f) => (field.displayedFieldIds as string[]).includes(f.id))
+        .sort((a, b) => (order.get(a.id) ?? 9999) - (order.get(b.id) ?? 9999));
+    }
+    return all.slice(0, 4);
+  }, [peerFieldsData, field.displayedFieldIds]);
+
+  return (
+    <div className="overflow-hidden rounded-gx-sm border border-gx-border">
+      <table className="w-full text-gx-11">
+        <thead>
+          <tr className="border-b border-gx-separator bg-gx-bg/60">
+            {columns.length === 0 && <th className="px-2 py-1 text-left font-medium text-gx-text-hint">关联表字段</th>}
+            {columns.map((c) => (
+              <th key={c.id} className="px-2 py-1 text-left font-medium text-gx-text-secondary">
+                <span className="inline-flex items-center gap-1">
+                  <FieldIcon type={c.type} size={10} />
+                  <span className="truncate">{c.name}</span>
+                </span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td colSpan={Math.max(1, columns.length)} className="px-2 py-3 text-center text-gx-11 text-gx-text-hint">
+              子表格 · 详情页中可添加 / 选择关联记录
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ============ 选项卡分组容器（所见即所得横向选项卡 + 内部行模型） ============
+
+interface TabsDesignerCardProps {
+  field: FieldDTO;
+  tabs: { id: string; name: string; rows: LayoutRow[] }[];
+  activeTabId: string;
+  activeRows: LayoutRow[];
+  selectedFieldId: FieldIdT | null;
+  isSelected: boolean;
+  device?: PreviewDevice;
+  bodyDragOver: boolean;
+  gapActive: (rowIndex: number) => boolean;
+  fieldById: Map<FieldIdT, FieldDTO>;
+  dragFieldId: FieldIdT | null;
+  onSelectContainer: () => void;
+  onSelectField: (id: FieldIdT) => void;
+  onActiveTab: (tabId: string) => void;
+  onAddTab: () => void;
+  onRemoveTab: (tabId: string) => void;
+  onRenameTab: (tabId: string, name: string) => void;
+  /** 删除整个选项卡容器字段（①） */
+  onRemoveContainer: () => void;
+  onRemoveField: (id: FieldIdT) => void;
+  onDuplicateField: (id: FieldIdT) => void;
+  onJoinUp: (id: FieldIdT) => void;
+  onSplitDown: (id: FieldIdT) => void;
+  onSwapLeft: (id: FieldIdT) => void;
+  onBeginDrag: (id: FieldIdT, e: React.DragEvent) => void;
+  onEndDrag: () => void;
+}
+
+function TabsDesignerCard({
+  field,
+  tabs,
+  activeTabId,
+  activeRows,
+  selectedFieldId,
+  isSelected,
+  device,
+  bodyDragOver,
+  gapActive,
+  fieldById,
+  dragFieldId,
+  onSelectContainer,
+  onSelectField,
+  onActiveTab,
+  onAddTab,
+  onRemoveTab,
+  onRenameTab,
+  onRemoveContainer,
+  onRemoveField,
+  onDuplicateField,
+  onJoinUp,
+  onSplitDown,
+  onSwapLeft,
+  onBeginDrag,
+  onEndDrag,
+}: TabsDesignerCardProps) {
+  const active = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
+  const mobile = device === "mobile";
+
+  return (
+    <div
+      data-tab-root={field.id}
+      onClick={(e) => { e.stopPropagation(); onSelectContainer(); }}
+      className={clsx(
+        "relative rounded-gx-lg border bg-gx-surface transition-colors",
+        isSelected ? "border-gx-accent/50 ring-1 ring-gx-accent/30" : "border-gx-border hover:border-gx-accent/40",
+      )}
+    >
+      {/* 横向选项卡栏 */}
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-gx-separator px-2 pt-1.5">
+        <span className="mr-1 flex shrink-0 items-center text-gx-text-hint">
+          <FieldIcon type={field.type} size={13} />
+        </span>
+        {tabs.map((tab) => {
+          const isActive = active?.id === tab.id;
+          return (
+            <div
+              key={tab.id}
+              data-tab-header=""
+              data-tab-container={field.id}
+              data-tab-id={tab.id}
+              className={clsx(
+                "group/tab flex shrink-0 items-center gap-1 rounded-t-gx-md border-b-2 px-3 pb-1.5 pt-1 transition-colors",
+                isActive ? "border-gx-accent" : "border-transparent hover:bg-gx-bg",
+              )}
+            >
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onActiveTab(tab.id); }}
+                className={clsx("text-gx-13 transition-colors", isActive ? "font-medium text-gx-accent" : "text-gx-text-secondary")}
+              >
+                <input
+                  value={tab.name}
+                  onClick={(e) => { e.stopPropagation(); onActiveTab(tab.id); }}
+                  onChange={(e) => onRenameTab(tab.id, e.target.value)}
+                  className="w-20 bg-transparent text-center outline-none placeholder:text-gx-text-hint"
+                  placeholder="选项卡名"
+                />
+              </button>
+              {tabs.length > 1 && (
+                <button
+                  type="button"
+                  title="删除该选项卡（卡内字段退回表单）"
+                  onClick={(e) => { e.stopPropagation(); onRemoveTab(tab.id); }}
+                  onDragStart={(e) => e.preventDefault()}
+                  className="flex h-4 w-4 items-center justify-center rounded-full text-gx-text-hint opacity-0 transition-opacity hover:bg-gx-danger-bg hover:text-gx-danger group-hover/tab:opacity-100"
+                >
+                  <Icon name="close" size={11} />
+                </button>
+              )}
+            </div>
+          );
+        })}
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onAddTab(); }}
+          onDragStart={(e) => e.preventDefault()}
+          title="添加选项卡"
+          className="mb-0.5 ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-gx-text-hint hover:bg-gx-accent-bg hover:text-gx-accent"
+        >
+          <Icon name="plus" size={14} />
+        </button>
+        {/* ① 删除整个选项卡容器字段 */}
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onRemoveContainer(); }}
+          onDragStart={(e) => e.preventDefault()}
+          title="删除整个选项卡分组（容器内字段退回表单）"
+          className="mb-0.5 ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-gx-text-hint hover:bg-gx-danger-bg hover:text-gx-danger"
+        >
+          <Icon name="trash" size={13} />
+        </button>
+      </div>
+
+      {/* 当前选项卡内容：与顶层一致的显式行模型（横向多列 + ▲/▼/⇄） */}
+      <div
+        data-tab-body=""
+        data-tab-container={field.id}
+        data-tab-id={active?.id ?? ""}
+        className={clsx(
+          "min-h-[96px] rounded-b-gx-lg p-2 transition-colors",
+          bodyDragOver ? "bg-gx-accent-bg/40 ring-1 ring-inset ring-gx-accent/40" : "",
+        )}
+      >
+        {!active || activeRows.length === 0 ? (
+          <div className="flex h-20 flex-col items-center justify-center gap-1 rounded-gx-md border border-dashed border-gx-border text-center">
+            <Icon name="form" size={18} className="text-gx-text-hint" />
+            <div className="text-gx-12 text-gx-text-secondary">该选项卡下还没有字段</div>
+            <div className="text-gx-11 text-gx-text-hint">从左侧字段库拖入，或把其它字段拖到此处</div>
+          </div>
+        ) : (
+          <div>
+            {activeRows.map((row, ri) => (
+              <div key={ri}>
+                <RowGap rowIndex={ri} active={gapActive(ri)} tabDrop={{ containerFieldId: field.id, tabId: active.id }} />
+                <div className={clsx("flex", mobile ? "flex-col" : "flex-wrap")}>
+                  {row.items.map((item, ii) => {
+                    const cf = fieldById.get(item.fieldId);
+                    if (!cf) return null;
+                    return (
+                      <CanvasFieldCard
+                        key={item.fieldId}
+                        field={cf}
+                        item={item}
+                        forceStack={mobile}
+                        isSelected={selectedFieldId === item.fieldId}
+                        isDragging={dragFieldId === item.fieldId}
+                        canSwapLeft={ii > 0}
+                        canJoinUp={canJoinUp(activeRows, ri, item)}
+                        canSplitDown={row.items.length > 1}
+                        tabDrop={{ containerFieldId: field.id, tabId: active.id, rowIndex: ri }}
+                        onSelect={() => onSelectField(item.fieldId)}
+                        onRemove={() => onRemoveField(item.fieldId)}
+                        onDuplicate={() => onDuplicateField(item.fieldId)}
+                        onSwapLeft={() => onSwapLeft(item.fieldId)}
+                        onJoinUp={() => onJoinUp(item.fieldId)}
+                        onSplitDown={() => onSplitDown(item.fieldId)}
+                        onBeginDrag={(e) => onBeginDrag(item.fieldId, e)}
+                        onEndDrag={onEndDrag}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            <RowGap rowIndex={activeRows.length} active={gapActive(activeRows.length)} tabDrop={{ containerFieldId: field.id, tabId: active.id }} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

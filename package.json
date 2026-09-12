@@ -1,0 +1,46 @@
+{
+  "name": "gouxiangdb-v2",
+  "version": "0.1.0",
+  "private": true,
+  "description": "前后端分离 · 客户端壳化 · 多端复用 · 1:1 复刻 GouXiangDB v1 体验",
+  "packageManager": "pnpm@9.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "dev:api": "pnpm --filter @gx/api run dev",
+    "dev:web": "pnpm --filter @gx/web run dev",
+    "dev:desktop": "pnpm --filter @gx/desktop run dev",
+    "build": "pnpm -r run build",
+    "build:api": "pnpm --filter @gx/api run build",
+    "build:web": "pnpm --filter @gx/web run build",
+    "build:desktop": "pnpm --filter @gx/desktop run build",
+    "test": "pnpm -r run test",
+    "test:unit": "pnpm -r run test:unit",
+    "test:e2e": "pnpm -r run test:e2e",
+    "compare-test": "bash scripts/compare-test.sh",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "db:migrate": "pnpm --filter @gx/api run db:migrate",
+    "db:seed": "pnpm --filter @gx/api run db:seed",
+    "db:reset": "pnpm --filter @gx/api run db:reset"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "@plait/draw@0.89.2": "patches/@plait__draw@0.89.2.patch"
+    }
+  }
+}

@@ -1,0 +1,291 @@
+// apps/web/src/features/settings/SettingsPage.tsx
+// 设置中心：左二级导航（概览/成员与权限/分享/数据表/危险操作）+ 内容区
+// 顶部返回按钮回到上一个视图；支持 #share 等 hash 直达 tab
+
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import {
+  useBase,
+  useBaseStats,
+  useTables,
+  useFields,
+  useGXMutations,
+} from "../../api/hooks";
+import { Button, ColorPicker, Input, Modal, toast } from "../../components/ui";
+import { Icon } from "../../components/icons";
+import { colors } from "@gx/design-tokens";
+import { MembersPanel } from "./MembersPanel";
+import { SharePanel } from "./SharePanel";
+
+type Tab = "overview" | "members" | "share" | "tables" | "danger";
+
+const TABS: { key: Tab; label: string; icon: "grid" | "users" | "share" | "table" | "alertCircle" }[] = [
+  { key: "overview", label: "概览", icon: "grid" },
+  { key: "members", label: "成员与权限", icon: "users" },
+  { key: "share", label: "分享", icon: "share" },
+  { key: "tables", label: "数据表", icon: "table" },
+  { key: "danger", label: "危险操作", icon: "alertCircle" },
+];
+
+function StatCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-gx-lg border border-gx-border bg-gx-card-bg p-4">
+      <div className="text-gx-24 font-semibold text-gx-text-primary">{value}</div>
+      <div className="mt-1 text-gx-12 text-gx-text-tertiary">{label}</div>
+    </div>
+  );
+}
+
+function TableStatRow({ baseId, tableId, name, recordCount, canManageSchema }: {
+  baseId: string;
+  tableId: string;
+  name: string;
+  recordCount: number;
+  canManageSchema: boolean;
+}) {
+  const navigate = useNavigate();
+  const { data: fields } = useFields(tableId);
+  const m = useGXMutations();
+
+  return (
+    <div className="flex items-center gap-3 border-b border-gx-separator px-3 py-2.5">
+      <Icon name="table" size={15} className="text-gx-text-tertiary" />
+      <button
+        type="button"
+        onClick={() => navigate(`/base/${baseId}/table/${tableId}`)}
+        className="flex-1 text-left text-gx-13 text-gx-text-primary hover:text-gx-accent"
+      >
+        {name}
+      </button>
+      <span className="text-gx-12 text-gx-text-tertiary">字段 {fields?.length ?? 0}</span>
+      <span className="text-gx-12 text-gx-text-tertiary">记录 {recordCount}</span>
+      {canManageSchema && (
+        <div className="flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={() => m.duplicateTable.mutate({ tableId })}>
+            复制
+          </Button>
+          <Button size="sm" variant="ghost" className="text-gx-danger" onClick={() => m.clearTable.mutate({ tableId })}>
+            清空
+          </Button>
+          <Button size="sm" variant="ghost" className="text-gx-danger" onClick={() => { if (baseId) { m.deleteTable.mutate({ tableId, baseId }); navigate(`/base/${baseId}`); } }}>
+            删除
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function SettingsPage() {
+  const { baseId } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const hashTab = location.hash.replace("#", "") as Tab;
+  const [tab, setTab] = useState<Tab>(TABS.some((t) => t.key === hashTab) ? hashTab : "overview");
+
+  const baseQ = useBase(baseId ?? null);
+  const statsQ = useBaseStats(baseId ?? null);
+  const { data: tables } = useTables(baseId ?? null);
+  const m = useGXMutations();
+
+  const perms = baseQ.data?.permissions;
+  const canManageBase = perms?.canManageBase ?? false;
+  const canManageSchema = perms?.canManageSchema ?? false;
+
+  const [name, setName] = useState(baseQ.data?.name ?? "");
+  const [iconColor, setIconColor] = useState(baseQ.data?.iconColor ?? colors.accent);
+  const [showDelete, setShowDelete] = useState(false);
+  const [confirmName, setConfirmName] = useState("");
+
+  // base 加载后同步名称
+  useEffect(() => {
+    if (baseQ.data) {
+      setName(baseQ.data.name);
+      setIconColor(baseQ.data.iconColor);
+    }
+  }, [baseQ.data]);
+
+  async function saveBase() {
+    if (!baseId || !canManageBase) return;
+    try {
+      await m.updateBase.mutateAsync({ baseId, data: { name, iconColor } });
+      toast("已保存", "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "保存失败", "error");
+    }
+  }
+
+  async function deleteBase() {
+    if (!baseId) return;
+    try {
+      await m.deleteBase.mutateAsync(baseId);
+      toast("已删除 Base", "success");
+      navigate("/");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "删除失败", "error");
+    }
+  }
+
+  return (
+    <div className="flex h-full bg-gx-surface">
+      {/* 左侧二级导航 */}
+      <div className="w-[180px] shrink-0 border-r border-gx-separator bg-gx-bg p-2">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => setTab(t.key)}
+            className={[
+              "flex w-full items-center gap-2 rounded-gx-md px-2 py-1.5 text-left text-gx-13",
+              tab === t.key ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-primary hover:bg-gx-row-hover",
+            ].join(" ")}
+          >
+            <Icon name={t.icon} size={15} />
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* 内容区 */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* 顶部返回 */}
+        <div className="flex h-12 items-center gap-2 border-b border-gx-separator px-3">
+          <button
+            type="button"
+            onClick={() => navigate(`/base/${baseId}`)}
+            className="rounded-gx-sm p-1 text-gx-text-tertiary hover:bg-gx-bg"
+            title="返回"
+          >
+            <Icon name="chevronLeft" size={16} />
+          </button>
+          <span className="text-gx-14 font-semibold text-gx-text-primary">
+            {TABS.find((t) => t.key === tab)?.label}
+          </span>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">
+          {tab === "overview" && (
+            <div className="flex flex-col gap-6">
+              {baseId && (
+                <div className="rounded-gx-lg border border-gx-border bg-gx-surface p-4">
+                  <div className="flex items-center gap-3">
+                    <Icon name="link" size={20} className="text-gx-accent" />
+                    <div className="flex-1">
+                      <div className="text-gx-14 font-medium text-gx-text-primary">数据库关系图</div>
+                      <div className="mt-0.5 text-gx-12 text-gx-text-tertiary">
+                        可视化当前数据库内所有数据表与跨表关联，便于梳理结构
+                      </div>
+                    </div>
+                    <Button variant="primary" icon="link" onClick={() => navigate(`/base/${baseId}/erd`)}>
+                      查看 ERD
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-4 gap-3">
+                <StatCard label="数据表" value={statsQ.data?.tableCount ?? 0} />
+                <StatCard label="记录" value={statsQ.data?.recordCount ?? 0} />
+                <StatCard label="字段" value={statsQ.data?.fieldCount ?? 0} />
+                <StatCard label="成员" value={statsQ.data?.memberCount ?? 0} />
+              </div>
+
+              <div className="rounded-gx-lg border border-gx-border p-4">
+                <div className="mb-3 text-gx-14 font-medium text-gx-text-primary">Base 信息</div>
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="h-8 w-8 rounded-lg" style={{ backgroundColor: iconColor }} />
+                    {canManageBase ? (
+                      <ColorPicker value={iconColor} onChange={setIconColor} />
+                    ) : (
+                      <span className="text-gx-12 text-gx-text-hint">仅所有者可修改</span>
+                    )}
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1">
+                      <div className="mb-1 text-gx-12 text-gx-text-tertiary">名称</div>
+                      <Input value={name} disabled={!canManageBase} onChange={(e) => setName(e.target.value)} />
+                    </div>
+                    {canManageBase && (
+                      <Button variant="primary" onClick={saveBase}>
+                        保存
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {tab === "members" && baseId && <MembersPanel baseId={baseId} canManageBase={canManageBase} />}
+
+          {tab === "share" && baseId && <SharePanel baseId={baseId} canManageBase={canManageBase} />}
+
+          {tab === "tables" && (
+            <div className="rounded-gx-lg border border-gx-border">
+              {(tables ?? []).map((t) => (
+                <TableStatRow
+                  key={t.id}
+                  baseId={baseId!}
+                  tableId={t.id}
+                  name={t.name}
+                  recordCount={t.recordCount}
+                  canManageSchema={canManageSchema}
+                />
+              ))}
+              {(!tables || tables.length === 0) && (
+                <div className="px-3 py-6 text-center text-gx-13 text-gx-text-hint">还没有数据表</div>
+              )}
+            </div>
+          )}
+
+          {tab === "danger" && (
+            <div className="rounded-gx-lg border border-gx-danger bg-gx-danger-bg p-4">
+              <div className="text-gx-14 font-medium text-gx-danger">删除 Base</div>
+              <div className="mt-1 text-gx-12 text-gx-text-secondary">
+                删除后所有数据表、记录与分享链接将被移入回收站，操作不可逆。
+              </div>
+              <div className="mt-3">
+                <Button variant="danger" disabled={!canManageBase} onClick={() => setShowDelete(true)}>
+                  删除整个 Base
+                </Button>
+                {!canManageBase && (
+                  <span className="ml-2 text-gx-12 text-gx-text-hint">仅所有者可执行此操作</span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 删除 Base 二次确认 */}
+      <Modal
+        open={showDelete}
+        title="确认删除 Base"
+        onClose={() => setShowDelete(false)}
+        footer={
+          <>
+            <button className="text-gx-13 text-gx-text-tertiary hover:text-gx-text-primary" onClick={() => setShowDelete(false)}>
+              取消
+            </button>
+            <button
+              className="rounded-gx-md bg-gx-danger px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
+              disabled={confirmName !== baseQ.data?.name}
+              onClick={deleteBase}
+            >
+              删除
+            </button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-2 text-gx-13 text-gx-text-secondary">
+          <span>
+            请输入 Base 名称 <span className="font-semibold text-gx-text-primary">{baseQ.data?.name}</span> 以确认删除：
+          </span>
+          <Input value={confirmName} onChange={(e) => setConfirmName(e.target.value)} placeholder="Base 名称" />
+        </div>
+      </Modal>
+    </div>
+  );
+}

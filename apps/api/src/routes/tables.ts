@@ -1,0 +1,377 @@
+// apps/api/src/routes/tables.ts
+// 数据表 CRUD + 复制 + 清空 + CSV 导出
+
+import { Hono } from "hono";
+import { z } from "zod";
+import { prisma } from "../db.js";
+import {
+  requireCanView,
+  requireCanManageSchema,
+  requireCanEditData,
+  resolveBaseIdByTable,
+  HttpError,
+} from "../guards.js";
+import { makeOptions } from "../domain/fieldService.js";
+import { loadTableFields, queryRecords, parseViewConfig } from "../domain/recordService.js";
+import { recordsToCSV } from "../domain/csv.js";
+import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
+
+export const tables = new Hono();
+
+const createSchema = z.object({
+  name: z.string().min(1).max(80),
+  withDefaults: z.boolean().optional(),
+});
+
+const updateSchema = z.object({
+  name: z.string().min(1).max(80).optional(),
+  primaryFieldId: z.string().optional(),
+});
+
+async function baseIdOf(tableId: string): Promise<string> {
+  const b = await resolveBaseIdByTable(tableId);
+  if (!b) throw new HttpError(404, "数据表不存在");
+  return b;
+}
+
+// ============ Base 下的表列表 ============
+
+tables.get("/", async (c) => {
+  const baseId = c.req.query("baseId");
+  if (!baseId) return c.json({ error: "缺少 baseId" }, 400);
+  await requireCanView(c, baseId);
+
+  const rows = await prisma.table.findMany({
+    where: { baseId, deletedAt: null },
+    include: { _count: { select: { records: { where: { deletedAt: null } } } } },
+    orderBy: { createdAt: "asc" },
+  });
+  return c.json({
+    tables: rows.map((t) => ({
+      id: t.id,
+      baseId: t.baseId,
+      name: t.name,
+      primaryFieldId: t.primaryFieldId,
+      createdAt: t.createdAt.toISOString(),
+      createdBy: t.createdBy,
+      recordCount: t._count.records,
+    })),
+  });
+});
+
+// ============ 创建 ============
+
+tables.post("/", async (c) => {
+  const baseId = c.req.query("baseId");
+  if (!baseId) return c.json({ error: "缺少 baseId" }, 400);
+  const { userId } = await requireCanManageSchema(c, baseId);
+
+  const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
+
+  // U-9：建表多步写事务化——任何一步失败整体回滚，
+  // 不再留下无 primaryField / 无视图的半截表。
+  const { table, primaryFieldId } = await prisma.$transaction(async (tx) => {
+    const t = await tx.table.create({
+      data: { baseId, name: parsed.data.name, primaryFieldId: "", createdBy: userId },
+    });
+
+    const nameField = await tx.field.create({
+      data: { tableId: t.id, name: "名称", type: "singleLineText", order: 0 },
+    });
+    await tx.table.update({ where: { id: t.id }, data: { primaryFieldId: nameField.id } });
+
+    if (parsed.data.withDefaults) {
+      await tx.field.create({
+        data: { tableId: t.id, name: "数量", type: "number", order: 1, precision: 0 },
+      });
+      await tx.field.create({
+        data: {
+          tableId: t.id,
+          name: "状态",
+          type: "singleSelect",
+          order: 2,
+          options: JSON.stringify(makeOptions(["未开始", "进行中", "已完成"])),
+        },
+      });
+      await tx.field.create({ data: { tableId: t.id, name: "日期", type: "date", order: 3 } });
+      await tx.field.create({ data: { tableId: t.id, name: "备注", type: "longText", order: 4 } });
+    }
+
+    const config = {
+      hiddenFieldIds: [],
+      fieldOrder: [],
+      rowHeight: "medium",
+      filters: null,
+      sorts: [],
+      search: "",
+      groupByFieldId: null,
+      collapsedGroupKeys: [],
+      aggregations: {},
+      rowColor: { mode: "none", conditions: [] },
+      coverFieldId: null,
+      cardFieldIds: [],
+      kanbanFieldId: null,
+      dateFieldId: null,
+      formFields: [],
+      formTitle: "",
+      formDescription: "",
+      detailFieldIds: [],
+      detailLayout: null,
+    };
+    await tx.view.create({
+      data: { tableId: t.id, name: "网格视图", type: "grid", order: 0, config: JSON.stringify(config) },
+    });
+    return { table: t, primaryFieldId: nameField.id };
+  });
+
+  return c.json({
+    table: {
+      id: table.id,
+      baseId,
+      name: table.name,
+      primaryFieldId,
+      createdAt: table.createdAt.toISOString(),
+      createdBy: userId,
+      recordCount: 0,
+    },
+  }, 201);
+});
+
+// ============ 详情 / 更新 / 删除 ============
+
+tables.get("/:tableId", async (c) => {
+  const tableId = c.req.param("tableId");
+  const baseId = await baseIdOf(tableId);
+  await requireCanView(c, baseId);
+
+  const t = await prisma.table.findUnique({
+    where: { id: tableId },
+    include: { _count: { select: { records: { where: { deletedAt: null } } } } },
+  });
+  if (!t || t.deletedAt) throw new HttpError(404, "数据表不存在");
+
+  return c.json({
+    table: {
+      id: t.id,
+      baseId: t.baseId,
+      name: t.name,
+      primaryFieldId: t.primaryFieldId,
+      createdAt: t.createdAt.toISOString(),
+      createdBy: t.createdBy,
+      recordCount: t._count.records,
+    },
+  });
+});
+
+tables.patch("/:tableId", async (c) => {
+  const tableId = c.req.param("tableId");
+  const baseId = await baseIdOf(tableId);
+  await requireCanManageSchema(c, baseId);
+
+  const parsed = updateSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
+
+  const t = await prisma.table.update({ where: { id: tableId }, data: parsed.data });
+  return c.json({ table: { id: t.id, name: t.name, primaryFieldId: t.primaryFieldId } });
+});
+
+tables.delete("/:tableId", async (c) => {
+  const tableId = c.req.param("tableId");
+  const baseId = await baseIdOf(tableId);
+  await requireCanManageSchema(c, baseId);
+
+  const now = new Date();
+  await prisma.table.update({ where: { id: tableId }, data: { deletedAt: now } });
+  await prisma.record.updateMany({ where: { tableId }, data: { deletedAt: now } });
+  await prisma.field.updateMany({ where: { tableId }, data: { deletedAt: now } });
+  await prisma.view.updateMany({ where: { tableId }, data: { order: -1 } });
+  invalidateOrdinalCache(tableId);
+  return c.json({ ok: true });
+});
+
+// ============ 复制表（含字段，不含数据）============
+
+tables.post("/:tableId/duplicate", async (c) => {
+  const tableId = c.req.param("tableId");
+  const baseId = await baseIdOf(tableId);
+  const { userId } = await requireCanManageSchema(c, baseId);
+
+  const src = await prisma.table.findUnique({ where: { id: tableId } });
+  if (!src || src.deletedAt) throw new HttpError(404, "数据表不存在");
+  const fields = await loadTableFields(tableId);
+
+  const body = await c.req.json().catch(() => ({}));
+  const name = typeof body?.name === "string" && body.name ? body.name : `${src.name} 副本`;
+  const withData = body?.withData === true;
+
+  const copy = await prisma.table.create({
+    data: { baseId, name, primaryFieldId: "", createdBy: userId },
+  });
+
+  // 字段 id 映射（tabsConfig 内部引用的字段 id 需要重映射）
+  // 跨表关系/聚合字段（links/subtable/lookup/rollup/count）依赖其它表或关联字段，
+  // 复制成独立表会产生悬挂引用/误配对反向字段，统一跳过（与 NocoDB 复制表语义一致）。
+  const SKIP_COPY_TYPES = new Set(["links", "subtable", "lookup", "rollup", "count"]);
+  const idMap = new Map<string, string>();
+  for (const f of fields) {
+    if (SKIP_COPY_TYPES.has(f.type)) continue;
+    const nf = await prisma.field.create({
+      data: {
+        tableId: copy.id,
+        name: f.name,
+        type: f.type,
+        description: f.description,
+        order: f.order,
+        required: f.required,
+        unique: f.unique,
+        options: f.options ? JSON.stringify(f.options) : null,
+        precision: f.precision,
+        maxLength: (f as { maxLength?: number | null }).maxLength ?? null,
+        defaultNow: Boolean((f as { defaultNow?: boolean }).defaultNow),
+        formula: f.formula,
+        // tabsConfig 内部字段 id 稍后重映射
+        tabsConfig: f.tabsConfig ? JSON.stringify(f.tabsConfig) : null,
+      },
+    });
+    idMap.set(f.id, nf.id);
+  }
+
+  // 重映射 tabsConfig 内部引用的字段 id（fieldIds / widths 的 key / rows.items.fieldId）
+  for (const f of fields) {
+    if (f.type !== "tabs" || !f.tabsConfig) continue;
+    const newId = idMap.get(f.id);
+    if (!newId) continue;
+    const remappedTabs = f.tabsConfig.map((t) => ({
+      ...t,
+      fieldIds: t.fieldIds.map((fid) => idMap.get(fid)).filter((x): x is string => Boolean(x)),
+      widths: t.widths
+        ? Object.fromEntries(
+            Object.entries(t.widths)
+              .filter(([k]) => idMap.has(k))
+              .map(([k, v]) => [idMap.get(k)!, v]),
+          )
+        : undefined,
+      rows: t.rows
+        ? t.rows.map((r) => ({
+            items: r.items
+              .filter((it) => idMap.has(it.fieldId))
+              .map((it) => ({ fieldId: idMap.get(it.fieldId)!, widthPct: it.widthPct })),
+          }))
+        : undefined,
+    }));
+    await prisma.field.update({
+      where: { id: newId },
+      data: { tabsConfig: JSON.stringify(remappedTabs) },
+    });
+  }
+
+  const primary = idMap.get(src.primaryFieldId) ?? fields[0]?.id ?? "";
+  await prisma.table.update({ where: { id: copy.id }, data: { primaryFieldId: primary } });
+
+  // 数据复制
+  if (withData) {
+    const recs = await prisma.record.findMany({ where: { tableId, deletedAt: null } });
+    const recMap = new Map<string, string>();
+    for (const r of recs) {
+      const nr = await prisma.record.create({
+        data: {
+          tableId: copy.id,
+          fields: r.fields,
+          createdBy: r.createdBy,
+          updatedBy: r.updatedBy,
+        },
+      });
+      recMap.set(r.id, nr.id);
+    }
+    // 重映射记录内的字段 id
+    for (const [oldId, newRecId] of recMap) {
+      const r = recs.find((x) => x.id === oldId);
+      if (!r) continue;
+      try {
+        const obj = JSON.parse(r.fields) as Record<string, unknown>;
+        const remapped: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(obj)) {
+          remapped[idMap.get(k) ?? k] = v;
+        }
+        await prisma.record.update({ where: { id: newRecId }, data: { fields: JSON.stringify(remapped) } });
+      } catch {
+        /* 忽略解析失败 */
+      }
+    }
+  }
+
+  const config = {
+    hiddenFieldIds: [],
+    fieldOrder: [],
+    rowHeight: "medium",
+    filters: null,
+    sorts: [],
+    search: "",
+    groupByFieldId: null,
+    collapsedGroupKeys: [],
+    aggregations: {},
+    rowColor: { mode: "none", conditions: [] },
+    coverFieldId: null,
+    cardFieldIds: [],
+    kanbanFieldId: null,
+    dateFieldId: null,
+    formFields: [],
+    formTitle: "",
+    formDescription: "",
+    detailFieldIds: [],
+    detailLayout: null,
+  };
+  await prisma.view.create({
+    data: { tableId: copy.id, name: "网格视图", type: "grid", order: 0, config: JSON.stringify(config) },
+  });
+
+  return c.json({ table: { id: copy.id, name: copy.name, primaryFieldId: primary } }, 201);
+});
+
+// ============ CSV 导出 ============
+
+tables.get("/:tableId/export.csv", async (c) => {
+  const tableId = c.req.param("tableId");
+  const baseId = await baseIdOf(tableId);
+  await requireCanView(c, baseId);
+
+  const fields = await loadTableFields(tableId);
+  const viewId = c.req.query("viewId");
+  const config = viewId
+    ? parseViewConfig((await prisma.view.findUnique({ where: { id: viewId } }))?.config ?? null)
+    : parseViewConfig(null);
+
+  const { records } = await queryRecords({ tableId, fields, config, noPaging: true });
+  const csv = recordsToCSV(records, fields);
+
+  c.header("Content-Type", "text/csv; charset=utf-8");
+  c.header("Content-Disposition", `attachment; filename="table-${tableId}.csv"`);
+  return c.body(csv);
+});
+
+// ============ 清空表数据 ============
+
+tables.post("/:tableId/clear", async (c) => {
+  const tableId = c.req.param("tableId");
+  const baseId = await baseIdOf(tableId);
+  await requireCanEditData(c, baseId);
+  // 软删记录，其关联数据同样只打软删标记（不清行），保证从回收站恢复后关联不丢
+  const liveRecIds = await prisma.record.findMany({
+    where: { tableId, deletedAt: null },
+    select: { id: true },
+  });
+  const ids = liveRecIds.map((r) => r.id);
+  if (ids.length > 0) {
+    await prisma.linkRow.updateMany({
+      where: { OR: [{ parentRowId: { in: ids } }, { childRowId: { in: ids } }], deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+  }
+  await prisma.record.updateMany({
+    where: { tableId, deletedAt: null },
+    data: { deletedAt: new Date() },
+  });
+  invalidateOrdinalCache(tableId);
+  return c.json({ ok: true });
+});

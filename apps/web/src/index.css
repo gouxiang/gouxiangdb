@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  * {
+    box-sizing: border-box;
+  }
+}
+
+/* ============ 个人中心弹窗动画（全局，任意视图可用） ============ */
+@keyframes kb-pcdialog-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes kb-pcdrawer-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-pcdialog-in {
+  animation: kb-pcdialog-in 0.18s cubic-bezier(.22, .61, .36, 1);
+}
+.animate-pcdrawer-fade {
+  animation: kb-pcdrawer-fade-in 0.18s ease-out;
+}

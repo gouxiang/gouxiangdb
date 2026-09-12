@@ -1,0 +1,652 @@
+// 单元格编辑器（点击/双击进入编辑态）
+// 按字段类型提供对应编辑控件，支持 Enter 提交 / Esc 取消 / Tab 提交并移动。
+// 计算字段与系统字段不进入编辑态（由上层 CellRenderer 拦截）。
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { clsx } from "clsx";
+import { evalFilter } from "@gx/shared-types";
+import type {
+  CellValue,
+  FieldDTO,
+  LinkRefDTO,
+  AttachmentDTO,
+  PermissionSet,
+  TableIdT,
+  RecordIdT,
+} from "@gx/shared-types";
+import { Icon } from "../../components/icons";
+import { Input, Textarea, Popover, toast } from "../../components/ui";
+import { useRecords } from "../../api/hooks";
+import { formatCell, isEmptyValue, resolveSelectOption } from "./format";
+
+export interface CellEditorProps {
+  value: CellValue;
+  field: FieldDTO;
+  allFields?: FieldDTO[];
+  /** 当前行记录的全部字段值（用于关联筛选「匹配字段」取本表值） */
+  recordFields?: Record<string, CellValue>;
+  permissions: PermissionSet;
+  // 提交下一个值；move 指示 GridView 提交后如何移动光标（默认不移动）
+  onCommit: (next: CellValue, move?: "down" | "right" | "none") => void;
+  onCancel: () => void;
+}
+
+const TEXT_TYPES = new Set([
+  "singleLineText",
+  "url",
+  "email",
+  "phone",
+  "json",
+]);
+
+const NUMERIC_TYPES = new Set(["number", "currency", "percent", "duration"]);
+
+export function CellEditor(props: CellEditorProps) {
+  const { field } = props;
+
+  // 计算字段 / 系统字段理论上不会进入编辑态，做一道保险
+  if (["formula", "rollup", "count", "lookup", "autoNumber", "createdTime", "lastModifiedTime", "createdBy", "lastModifiedBy"].includes(field.type)) {
+    return null;
+  }
+
+  switch (field.type) {
+    case "longText":
+      return <LongTextEditor {...props} />;
+    case "number":
+    case "currency":
+    case "percent":
+    case "duration":
+      return <NumericEditor {...props} />;
+    case "checkbox":
+      return <CheckboxEditor {...props} />;
+    case "singleSelect":
+      return <SingleSelectEditor {...props} />;
+    case "multiSelect":
+      return <MultiSelectEditor {...props} />;
+    case "date":
+    case "datetime":
+      return <DateEditor {...props} />;
+    case "rating":
+      return <RatingEditor {...props} />;
+    case "links":
+      return <LinksEditor {...props} />;
+    case "attachment":
+      return <AttachmentEditor {...props} />;
+    default:
+      if (TEXT_TYPES.has(field.type)) return <TextEditor {...props} />;
+      // 兜底：文本编辑
+      return <TextEditor {...props} />;
+  }
+}
+
+// ============ 文本 ============
+function TextEditor({ value, field, onCommit, onCancel }: CellEditorProps) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [draft, setDraft] = useState(typeof value === "string" ? value : value == null ? "" : String(value));
+  // 提交/取消后置位，避免随后 input 卸载触发的 blur 再发一次 PATCH（Enter 与 blur 双发）
+  const doneRef = useRef(false);
+  const finish = (fn: () => void) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    fn();
+  };
+
+  useEffect(() => {
+    ref.current?.focus();
+    ref.current?.select();
+  }, []);
+
+  return (
+    <Input
+      ref={ref}
+      value={draft}
+      placeholder={field.type === "url" ? "https://" : field.type === "email" ? "name@example.com" : ""}
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => {
+        // IME 组词期间 Enter/Tab 只用于选候选词，不提交
+        if (e.nativeEvent.isComposing) return;
+        if (e.key === "Enter") {
+          e.preventDefault();
+          finish(() => onCommit(draft, "down"));
+        } else if (e.key === "Tab") {
+          e.preventDefault();
+          finish(() => onCommit(draft, "right"));
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          finish(onCancel);
+        }
+      }}
+      onBlur={() => {
+        if (!doneRef.current) onCommit(draft);
+      }}
+    />
+  );
+}
+
+// ============ 长文本 ============
+function LongTextEditor({ value, onCommit, onCancel }: CellEditorProps) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const [draft, setDraft] = useState(typeof value === "string" ? value : "");
+  const doneRef = useRef(false);
+  const finish = (fn: () => void) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    fn();
+  };
+
+  useEffect(() => {
+    ref.current?.focus();
+    // 光标移到末尾
+    const len = ref.current?.value.length ?? 0;
+    ref.current?.setSelectionRange(len, len);
+  }, []);
+
+  return (
+    <Textarea
+      ref={ref}
+      value={draft}
+      className="h-full"
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing) return;
+        // Cmd/Ctrl+Enter 提交，否则换行
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          finish(() => onCommit(draft, "down"));
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          finish(onCancel);
+        }
+      }}
+      onBlur={() => {
+        if (!doneRef.current) onCommit(draft);
+      }}
+    />
+  );
+}
+
+// ============ 数字 ============
+function NumericEditor({ value, field, onCommit, onCancel }: CellEditorProps) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [draft, setDraft] = useState(value == null || value === "" ? "" : String(value));
+  const doneRef = useRef(false);
+  const finish = (fn: () => void) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    fn();
+  };
+
+  useEffect(() => {
+    ref.current?.focus();
+    ref.current?.select();
+  }, []);
+
+  const submit = (move: "down" | "right" | "none" = "none") => {
+    // 空串 → null（清空）
+    if (draft.trim() === "") {
+      onCommit(null, move);
+      return;
+    }
+    const num = Number(draft);
+    onCommit(isNaN(num) ? draft : num, move);
+  };
+
+  return (
+    <Input
+      ref={ref}
+      type="number"
+      value={draft}
+      className="text-right tabular-nums"
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          finish(() => submit("down"));
+        } else if (e.key === "Tab") {
+          e.preventDefault();
+          finish(() => submit("right"));
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          finish(onCancel);
+        }
+      }}
+      onBlur={() => {
+        if (!doneRef.current) submit();
+      }}
+    />
+  );
+}
+
+// 复选框：只读展示当前值。翻转的唯一权威入口是单元格单击（GridView.onCellClick）；
+// 这里绝不在挂载时 onCommit(!value)——双击/键盘进入若再翻转会产生重复、方向相反的 PATCH。
+function CheckboxEditor({ value }: CellEditorProps) {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <span
+        className={clsx(
+          "inline-flex h-4 w-4 items-center justify-center rounded border",
+          value ? "border-gx-accent bg-gx-accent text-white" : "border-gx-border",
+        )}
+      >
+        {value ? <Icon name="check" size={12} /> : null}
+      </span>
+    </div>
+  );
+}
+
+// ============ 单选 ============
+function SingleSelectEditor({ value, field, onCommit, onCancel }: CellEditorProps) {
+  const opts = field.options ?? [];
+  const commit = (next: CellValue) => {
+    onCommit(next);
+  };
+  return (
+    <Popover open onClose={onCancel} width={220} className="p-1">
+      <div className="max-h-64 overflow-y-auto">
+        {opts.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            className="flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 text-left text-gx-13 hover:bg-gx-bg"
+            onClick={() => commit(o.id)}
+          >
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: o.color }} />
+            <span className="flex-1 truncate text-gx-text-primary">{o.name}</span>
+            {value === o.id && <Icon name="check" size={13} className="text-gx-accent" />}
+          </button>
+        ))}
+        {opts.length === 0 && <div className="px-2 py-2 text-gx-12 text-gx-text-hint">无选项</div>}
+      </div>
+      <div className="mt-1 border-t border-gx-separator pt-1">
+        <button
+          type="button"
+          className="w-full rounded-gx-sm px-2 py-1.5 text-left text-gx-13 text-gx-text-tertiary hover:bg-gx-bg"
+          onClick={() => commit(null)}
+        >
+          清除
+        </button>
+      </div>
+    </Popover>
+  );
+}
+
+// ============ 多选 ============
+function MultiSelectEditor({ value, field, onCommit, onCancel }: CellEditorProps) {
+  const opts = field.options ?? [];
+  const initial = useMemo(() => {
+    if (!Array.isArray(value)) return new Set<string>();
+    return new Set(value.map((v) => (typeof v === "string" ? v : String(v))));
+  }, [value]);
+  const [draft, setDraft] = useState<Set<string>>(initial);
+
+  const toggle = (id: string) => {
+    setDraft((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // 点空白提交
+  const commit = () => onCommit(Array.from(draft));
+
+  return (
+    <Popover open onClose={commit} width={240} className="p-1">
+      <div className="max-h-64 overflow-y-auto">
+        {opts.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            className="flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 text-left text-gx-13 hover:bg-gx-bg"
+            onClick={() => toggle(o.id)}
+          >
+            <span
+              className={clsx(
+                "inline-flex h-4 w-4 items-center justify-center rounded border",
+                draft.has(o.id) ? "border-gx-accent bg-gx-accent text-white" : "border-gx-border",
+              )}
+            >
+              {draft.has(o.id) && <Icon name="check" size={12} />}
+            </span>
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: o.color }} />
+            <span className="flex-1 truncate text-gx-text-primary">{o.name}</span>
+          </button>
+        ))}
+        {opts.length === 0 && <div className="px-2 py-2 text-gx-12 text-gx-text-hint">无选项</div>}
+      </div>
+      <div className="mt-1 border-t border-gx-separator pt-1">
+        <button
+          type="button"
+          className="w-full rounded-gx-sm px-2 py-1.5 text-left text-gx-13 text-gx-text-tertiary hover:bg-gx-bg"
+          onClick={() => {
+            setDraft(new Set());
+            onCommit([]);
+          }}
+        >
+          清除
+        </button>
+      </div>
+    </Popover>
+  );
+}
+
+// ============ 日期 / 日期时间 ============
+function DateEditor({ value, field, onCommit, onCancel }: CellEditorProps) {
+  const ref = useRef<HTMLInputElement>(null);
+  // 把值转成 input 需要的 yyyy-MM-dd 或 yyyy-MM-ddTHH:mm
+  const toInput = (v: CellValue): string => {
+    if (typeof v !== "string" || !v) return "";
+    if (field.type === "date") return v.slice(0, 10);
+    // datetime-local 需要 yyyy-MM-ddThh:mm
+    return v.slice(0, 16);
+  };
+  const [draft, setDraft] = useState(toInput(value));
+
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+
+  return (
+    <input
+      ref={ref}
+      type={field.type === "date" ? "date" : "datetime-local"}
+      value={draft}
+      className="h-8 w-full rounded-gx-md border border-gx-accent bg-gx-surface px-2 text-gx-13 text-gx-text-primary focus:outline-none"
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          onCommit(draft || null, "down");
+        } else if (e.key === "Tab") {
+          e.preventDefault();
+          onCommit(draft || null, "right");
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
+      onBlur={() => onCommit(draft || null)}
+    />
+  );
+}
+
+// ============ 评分 ============
+function RatingEditor({ value, onCommit, onCancel }: CellEditorProps) {
+  const n = typeof value === "number" ? value : Number(value) || 0;
+  return (
+    <div className="flex h-full items-center gap-1 px-2" onKeyDown={(e) => e.key === "Escape" && onCancel()}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <button
+          key={i}
+          type="button"
+          className="p-0.5"
+          onClick={() => onCommit(i === n ? 0 : i)}
+        >
+          <Icon
+            name="star"
+            size={18}
+            className={i <= n ? "text-gx-warning" : "text-gx-text-hint"}
+            fill={i <= n ? "currentColor" : "none"}
+          />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ============ 关联：从关联表选记录 ============
+function LinksEditor({ value, field, recordFields, onCommit, onCancel }: CellEditorProps) {
+  const relatedTableId = field.relatedTableId;
+  const { data } = useRecords({ tableId: relatedTableId });
+  const records = data?.records ?? [];
+  const relFields = data?.fields ?? [];
+  const titleField = relFields[0];
+
+  // 先应用 field.recordFilter（FieldEditorSheet 配的「关联筛选条件」持久化的子集过滤），
+  // 之后用户的搜索 + 临时 filterFieldId/Op/Value 都在 baseRecords 之上再过滤。
+  const recordFilter = field.recordFilter ?? null;
+  const selfVals = recordFields ?? {};
+  const baseRecords = useMemo(() => {
+    if (!recordFilter) return records;
+    return records.filter((r) =>
+      evalFilter(
+        recordFilter,
+        (fid) => r.fields[fid] as never,
+        (selfFid) => selfVals[selfFid] as never,
+      ),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [records, recordFilter, recordFields]);
+
+  const initial = useMemo(() => {
+    if (!Array.isArray(value)) return new Map<string, LinkRefDTO>();
+    const m = new Map<string, LinkRefDTO>();
+    (value as LinkRefDTO[]).forEach((l) => m.set(l.recordId, l));
+    return m;
+  }, [value]);
+  const [draft, setDraft] = useState<Map<string, LinkRefDTO>>(initial);
+  const [query, setQuery] = useState("");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterFieldId, setFilterFieldId] = useState<string | null>(null);
+  const [filterOp, setFilterOp] = useState<"contains" | "eq" | "gt" | "lt">("contains");
+  const [filterValue, setFilterValue] = useState("");
+
+  const toggle = (recId: string, title: string) => {
+    setDraft((prev) => {
+      const next = new Map(prev);
+      if (next.has(recId)) next.delete(recId);
+      else next.set(recId, { tableId: (relatedTableId ?? "") as TableIdT, recordId: recId as RecordIdT, title });
+      return next;
+    });
+  };
+  const removeSelected = (recId: string) => {
+    setDraft((prev) => {
+      const next = new Map(prev);
+      next.delete(recId);
+      return next;
+    });
+  };
+  const commit = () => onCommit(Array.from(draft.values()));
+
+  const filtered = baseRecords.filter((r) => {
+    if (titleField && query.trim()) {
+      const t = String(r.fields[titleField.id] ?? "");
+      if (!t.toLowerCase().includes(query.toLowerCase())) return false;
+    }
+    if (filterFieldId && filterValue.trim()) {
+      const v = String(r.fields[filterFieldId] ?? "");
+      if (filterOp === "contains") { if (!v.toLowerCase().includes(filterValue.toLowerCase())) return false; }
+      if (filterOp === "eq") { if (v !== filterValue) return false; }
+      if (filterOp === "gt") { if (!(Number(v) > Number(filterValue))) return false; }
+      if (filterOp === "lt") { if (!(Number(v) < Number(filterValue))) return false; }
+    }
+    return true;
+  });
+
+  const selected = Array.from(draft.entries());
+
+  return (
+    <Popover open onClose={commit} width={320} className="p-2">
+      <div className="flex gap-1">
+        <Input
+          autoFocus
+          placeholder="搜索（按主字段）"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); commit(); }
+            if (e.key === "Escape") { e.preventDefault(); onCancel(); }
+          }}
+          className="flex-1"
+        />
+        <button
+          type="button"
+          title="按任意字段筛选"
+          onClick={() => setFilterOpen((v) => !v)}
+          className={clsx(
+            "flex h-8 items-center justify-center rounded-gx-sm border px-2 text-gx-12 transition-colors",
+            filterOpen || filterFieldId
+              ? "border-gx-accent bg-gx-accent-bg text-gx-accent"
+              : "border-gx-border bg-gx-surface text-gx-text-secondary hover:bg-gx-bg",
+          )}
+        >
+          <Icon name="filter" size={12} />
+        </button>
+      </div>
+      {recordFilter && (
+        <div className="mt-1.5 flex items-center gap-1 rounded-gx-sm bg-gx-accent-bg px-2 py-1 text-gx-11 text-gx-accent">
+          <Icon name="filter" size={11} />
+          <span>已应用字段默认筛选条件</span>
+        </div>
+      )}
+      {filterOpen && (
+        <div className="mt-2 space-y-1 rounded-gx-sm border border-gx-border bg-gx-bg p-2 text-gx-12">
+          <div className="flex gap-1">
+            <select value={filterFieldId ?? ""} onChange={(e) => setFilterFieldId(e.target.value || null)} className="flex-1 rounded-gx-sm border border-gx-border bg-gx-surface px-1 py-0.5">
+              <option value="">选字段</option>
+              {relFields.map((f) => (<option key={f.id} value={f.id}>{f.name}</option>))}
+            </select>
+            <select value={filterOp} onChange={(e) => setFilterOp(e.target.value as "contains" | "eq" | "gt" | "lt")} className="w-20 rounded-gx-sm border border-gx-border bg-gx-surface px-1 py-0.5">
+              <option value="contains">包含</option>
+              <option value="eq">等于</option>
+              <option value="gt">&gt;</option>
+              <option value="lt">&lt;</option>
+            </select>
+            <Input placeholder="值" value={filterValue} onChange={(e) => setFilterValue(e.target.value)} className="w-24" />
+            {filterFieldId && (
+              <button type="button" onClick={() => { setFilterFieldId(null); setFilterValue(""); }} className="px-1 text-gx-text-tertiary hover:text-gx-danger">×</button>
+            )}
+          </div>
+        </div>
+      )}
+      {selected.length > 0 && (
+        <div className="mt-2 flex max-h-20 flex-wrap gap-1 overflow-y-auto rounded-gx-sm border border-gx-border bg-gx-bg p-1.5">
+          {selected.map(([id, ref]) => (
+            <span key={id} className="inline-flex items-center gap-1 rounded-gx-sm bg-gx-accent-bg px-2 py-0.5 text-gx-11 text-gx-accent">
+              {ref.title}
+              <button type="button" onClick={() => removeSelected(id)} className="hover:text-gx-danger">×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="mt-2 max-h-48 overflow-y-auto">
+        {filtered.length === 0 ? (
+          <div className="px-2 py-2 text-gx-12 text-gx-text-hint">无匹配记录</div>
+        ) : filtered.map((r) => {
+          const title = titleField ? formatCell(r.fields[titleField.id], titleField) : r.id;
+          const checked = draft.has(r.id);
+          return (
+            <button key={r.id} type="button" onClick={() => toggle(r.id, title)} className="flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 text-left text-gx-13 hover:bg-gx-bg">
+              <span className={clsx("inline-flex h-4 w-4 items-center justify-center rounded border", checked ? "border-gx-accent bg-gx-accent text-white" : "border-gx-border")}>
+                {checked && <Icon name="check" size={12} />}
+              </span>
+              <span className="flex-1 truncate text-gx-text-primary">{title || "(空)"}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-2 flex items-center justify-between border-t border-gx-separator pt-1.5">
+        <span className="text-gx-11 text-gx-text-hint">已选 {selected.length}</span>
+        <div className="flex gap-1">
+          <button type="button" onClick={onCancel} className="rounded-gx-sm px-2 py-0.5 text-gx-12 text-gx-text-tertiary hover:bg-gx-bg">取消</button>
+          <button type="button" onClick={commit} className="rounded-gx-sm bg-gx-accent px-2 py-0.5 text-gx-12 text-white hover:brightness-95">确认</button>
+        </div>
+      </div>
+    </Popover>
+  );
+}
+
+// ============ 附件：本地读成 base64 ============
+function AttachmentEditor({ value, onCommit, onCancel }: CellEditorProps) {
+  const [files, setFiles] = useState<AttachmentDTO[]>(
+    Array.isArray(value) ? (value as AttachmentDTO[]) : [],
+  );
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const addFiles = (list: FileList | null) => {
+    if (!list) return;
+    // U-3：附件以 dataURL 存 records.fields JSON，无对象存储通道。
+    // 容量守卫：单文件 ≤2MB（base64 后 ~2.7MB）、单格 ≤20 个，超限拒绝并提示，
+    // 防大行拖垮 SQLite 读写/hydrate/导出。文件存储改造（独立附件表/对象存储）见审计 U-3 备注。
+    const MAX_FILE_BYTES = 2 * 1024 * 1024;
+    const MAX_COUNT = 20;
+    const incoming = Array.from(list);
+    const oversized = incoming.filter((f) => f.size > MAX_FILE_BYTES);
+    if (oversized.length > 0) {
+      toast(`以下文件超过 2MB，已跳过：${oversized.map((f) => f.name).join("、")}`, "error");
+    }
+    const acceptable = incoming.filter((f) => f.size <= MAX_FILE_BYTES);
+    const room = Math.max(0, MAX_COUNT - files.length);
+    if (acceptable.length > room) {
+      toast(`单个单元格最多 ${MAX_COUNT} 个附件，多余的已跳过`, "error");
+    }
+    const picked = acceptable.slice(0, room);
+    if (picked.length === 0) return;
+    const reads = picked.map(
+      (f) =>
+        new Promise<AttachmentDTO>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () =>
+            resolve({
+              id: `${Date.now()}-${f.name}`,
+              name: f.name,
+              size: f.size,
+              mime: f.type || "application/octet-stream",
+              url: typeof reader.result === "string" ? reader.result : "",
+            });
+          reader.readAsDataURL(f);
+        }),
+    );
+    void Promise.all(reads).then((added) => {
+      const next = [...files, ...added];
+      setFiles(next);
+      onCommit(next);
+    });
+  };
+
+  const remove = (id: string) => {
+    const next = files.filter((f) => f.id !== id);
+    setFiles(next);
+    onCommit(next);
+  };
+
+  return (
+    <div className="absolute inset-0 z-30 m-1 rounded-gx-md border border-gx-accent bg-gx-surface p-2 shadow-lg">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-gx-12 font-medium text-gx-text-secondary">附件</span>
+        <button type="button" className="text-gx-12 text-gx-text-hint hover:text-gx-danger" onClick={onCancel}>
+          关闭
+        </button>
+      </div>
+      <div className="max-h-40 space-y-1 overflow-y-auto">
+        {files.map((f) => (
+          <div key={f.id} className="flex items-center gap-1 text-gx-12 text-gx-text-primary">
+            <Icon name="paperclip" size={12} className="text-gx-text-hint" />
+            <span className="flex-1 truncate">{f.name}</span>
+            <button type="button" className="text-gx-danger" onClick={() => remove(f.id)}>
+              <Icon name="close" size={12} />
+            </button>
+          </div>
+        ))}
+        {files.length === 0 && <div className="text-gx-12 text-gx-text-hint">暂无附件</div>}
+      </div>
+      <button
+        type="button"
+        className="mt-2 w-full rounded-gx-md border border-dashed border-gx-border py-1.5 text-gx-12 text-gx-accent hover:bg-gx-bg"
+        onClick={() => inputRef.current?.click()}
+      >
+        添加文件
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => addFiles(e.target.files)}
+      />
+    </div>
+  );
+}
+
+export default CellEditor;

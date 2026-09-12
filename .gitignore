@@ -1,0 +1,46 @@
+# ============ 依赖与构建产物 ============
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+# Rust / Tauri 构建产物（保留 src-tauri/icons 等源资源）
+**/target/
+
+# ============ 密钥与环境（绝不入库） ============
+.env
+.env.*
+!.env.example
+
+# ============ 数据库与本地备份 ============
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+.db-backups/
+
+# ============ 系统 / 日志 / 临时 ============
+.DS_Store
+*.log
+_tmp_*
+
+# ============ 过程产物（仅本地，不进产品仓） ============
+.verify-shots/
+.playwright-cli/
+.workbuddy-artifacts/
+artifacts/
+screenshots/
+
+# ============ WorkBuddy 项目记忆 ============
+# 规则：知识“文本”随仓走（跨机继承约定/方案/技能/报告），重型二进制与机器本地数据忽略。
+# 保留：memory/**/*.md、skills/**/*.md、顶层 *.md 报告
+# 忽略：截图、verify 调试产物、临时文本
+.workbuddy/verify/
+.workbuddy/**/*.png
+.workbuddy/**/*.jpg
+.workbuddy/**/*.jpeg
+.workbuddy/**/*.gif
+.workbuddy/**/*.zip
+.workbuddy/**/*.log
+.workbuddy/**/*.tmp

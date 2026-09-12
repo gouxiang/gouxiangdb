@@ -1,0 +1,346 @@
+// apps/api/prisma/schema.prisma
+// v2 数据模型：从 v1 SQLite 1:1 移植到 SQLite
+// 设计决策：放弃 v1 "每字段一物理列 c_<fieldId>" 模式
+//   改用 JSON 存 records.fields（v2 字段类型系统丰富到 28 种，物理列维护成本太高）
+//   字段定义本身存 FieldMeta 表（结构化）
+//   link_row 表保留（关联数据存结构化 GXLinkRef）
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============ Base / 表 ============
+
+model Base {
+  id          String   @id @default(cuid())
+  name        String
+  iconColor   String   @default("#378ADD")
+  createdAt   DateTime @default(now())
+  createdBy   String
+  deletedAt   DateTime?
+
+  tables      Table[]
+  members     Member[]
+  shareLinks  ShareLink[]
+
+  @@map("bases")
+}
+
+model Table {
+  id             String   @id @default(cuid())
+  baseId         String
+  name           String
+  primaryFieldId String   // 主显示字段（决定 record 标题）
+  createdAt      DateTime @default(now())
+  createdBy      String
+  deletedAt      DateTime?
+
+  base           Base     @relation(fields: [baseId], references: [id], onDelete: Cascade)
+  fields         Field[]
+  records        Record[]
+  views          View[]
+
+  @@index([baseId])
+  @@map("tables")
+}
+
+// ============ Field 元数据 ============
+
+model Field {
+  id                String   @id @default(cuid())
+  tableId           String
+  name              String
+  type              String   // FieldType（28 种之一）
+  description       String   @default("")
+  order             Int
+  required          Boolean  @default(false)
+  unique            Boolean  @default(false)
+  deletedAt         DateTime?
+
+  // Select 选项
+  options           String?    // JSON 序列化的 SelectOption[]
+
+  // 文本/字段约束
+  maxLength         Int?       // 单行文本最大字数（null 不限制）
+
+  // 日期/日期时间：新建记录时默认填入当前时间
+  defaultNow        Boolean    @default(false)
+
+  // 数字/货币
+  precision         Int?
+
+  // Rollup/Lookup/Count 筛选条件
+  recordFilter      String?    // JSON 序列化的 FilterNode
+
+  // 关联字段
+  linkFieldId       String?
+  relatedTableId    String?
+  relationKind      String?  // mm / hm / bt
+  isReverse         Boolean  @default(false)
+  reverseFieldId    String?
+  linkDisplayFieldId String?
+
+  // Lookup/Rollup
+  lookupFieldId     String?
+  rollupFunction    String?  // sum / avg / min / max / count
+
+  // Formula
+  formula           String?
+
+  // Tabs 选项卡容器（仅 type=tabs）—— JSON 序列化的 TabConfig[]
+  tabsConfig        String?
+
+  // Subtable 显示字段列表（仅 type=subtable）—— JSON 序列化的 FieldIdT[]
+  // 子表格内嵌表格展示的列
+  displayedFieldIds String?
+
+  // Subtable「选择数据」弹窗可见字段列表（仅 type=subtable）—— JSON 序列化的 FieldIdT[]
+  // 与 displayedFieldIds 独立；为空时回退默认列。公式引用不受二者限制。
+  visibleFieldIds   String?
+
+  // 字段默认内容配置 —— JSON 序列化的 DefaultConfig（static/lookup/formula 三态）
+  defaultConfig     String?
+
+  // 自动编号规则（仅 type=autoNumber）—— JSON 序列化的 NumberRule
+  numberRule        String?
+
+  table             Table    @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@index([tableId])
+  @@index([linkFieldId])
+  @@index([reverseFieldId])
+  @@map("fields")
+}
+
+// ============ Record 数据 ============
+
+model Record {
+  id          String   @id @default(cuid())
+  tableId     String
+  fields      String   // JSON 序列化的 FieldValue map（key = fieldId）
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String
+  updatedBy   String
+  deletedAt   DateTime?
+
+  table       Table    @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  outboundLinks  LinkRow[] @relation("parentRow")
+  inboundLinks   LinkRow[] @relation("childRow")
+
+  @@index([tableId])
+  @@index([createdAt])
+  @@map("records")
+}
+
+// ============ 关联数据 ============
+
+model LinkRow {
+  id            String   @id @default(cuid())
+  linkFieldId   String
+  parentRowId   String
+  childRowId    String
+  ord           Int      @default(0)
+  createdAt     DateTime @default(now())
+  // 软删：删除记录时只标记，不清行；从回收站恢复记录时关联关系随之恢复
+  deletedAt     DateTime?
+
+  parentRow     Record   @relation("parentRow", fields: [parentRowId], references: [id], onDelete: Cascade)
+  childRow      Record   @relation("childRow", fields: [childRowId], references: [id], onDelete: Cascade)
+
+  @@unique([linkFieldId, parentRowId, childRowId])
+  @@index([linkFieldId, parentRowId])
+  @@index([linkFieldId, childRowId])
+  @@map("link_rows")
+}
+
+// ============ View ============
+
+model View {
+  id        String   @id @default(cuid())
+  tableId   String
+  name      String
+  type      String   // grid / gallery / form / detail / kanban / calendar
+  lockMode  String   @default("collaborative")
+  order     Int
+  config    String   // JSON 序列化的 ViewConfig
+  createdAt DateTime @default(now())
+
+  table     Table    @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@index([tableId])
+  @@map("views")
+}
+
+// ============ Member & RBAC ============
+
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  displayName String
+  passwordHash String
+  username    String?  @unique
+  phone       String?
+  avatarUrl   String?
+  bio         String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime?  @updatedAt
+
+  memberships  Member[]
+  kbMemberships KbMember[]
+  kbDocAcls    KbDocAcl[]
+  comments     Comment[]
+
+  @@map("users")
+}
+
+model Member {
+  id         String   @id @default(cuid())
+  baseId     String
+  userId     String
+  role       String   // owner / creator / editor / commenter / viewer
+  joinedAt   DateTime @default(now())
+
+  base       Base     @relation(fields: [baseId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([baseId, userId])
+  @@index([userId])
+  @@map("members")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  recordId  String
+  userId    String
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([recordId])
+  @@map("comments")
+}
+
+// ============ Share ============
+
+model ShareLink {
+  id        String    @id @default(cuid())
+  baseId    String
+  token     String    @unique
+  role      String    // editor / commenter / viewer（不允许分享成 owner）
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+
+  base      Base      @relation(fields: [baseId], references: [id], onDelete: Cascade)
+
+  @@index([baseId])
+  @@map("share_links")
+}
+
+// ============ 知识库（与 Base/Table 完全解耦的独立容器） ============
+
+model KnowledgeBase {
+  id        String   @id @default(cuid())
+  name      String
+  iconColor String   @default("#0F6E56")
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  members   KbMember[]
+  docs      KbDoc[]
+
+  @@map("knowledge_bases")
+}
+
+model KbMember {
+  id      String   @id @default(cuid())
+  kbId    String
+  userId  String
+  role    String   // owner / editor / commenter / viewer
+  joinedAt DateTime @default(now())
+
+  kb      KnowledgeBase @relation(fields: [kbId], references: [id], onDelete: Cascade)
+  user    User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([kbId, userId])
+  @@index([userId])
+  @@map("kb_members")
+}
+
+model KbDoc {
+  id          String   @id @default(cuid())
+  kbId        String
+  kind        String   // "doc"（Markdown 文档） | "canvas"（Drawnix 画布）
+  title       String
+  content     String   @default("") // doc=Markdown 正文；canvas=Drawnix PlaitElement[] JSON
+  searchText  String   @default("") // 冗余纯文本：md 去标记 / 画布节点文本，供 LIKE 全文检索
+  // 乐观锁：PUT content 携带 baseVersion 条件更新，冲突返回 409（防多窗口/多人 lost update）
+  contentVersion Int   @default(0)
+  createdBy   String
+  updatedBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  deletedBy   String?
+
+  // 多文档级联：父文档 id；null = 顶级。应用层维护树完整性（同库 / 非循环）。
+  parentId    String?
+
+  // 外链分享
+  shareEnabled        Boolean @default(false)
+  shareToken          String? @unique // 开启时生成；关闭置空（旧链接立即失效）
+  shareRole           String  @default("viewer") // viewer(仅可见) | editor(可编辑)
+  shareIncludeChildren Boolean @default(false) // 级联分享：本级及整棵子树一并可外链访问
+
+  kb          KnowledgeBase @relation(fields: [kbId], references: [id], onDelete: Cascade)
+  versions    KbDocVersion[]
+  acls        KbDocAcl[]
+
+  @@index([kbId])
+  @@index([kbId, kind])
+  @@index([kbId, parentId])
+  @@index([shareToken])
+  @@map("kb_docs")
+}
+
+model KbDocVersion {
+  id        String   @id @default(cuid())
+  docId     String
+  version   Int
+  label     String?  // 手动版本备注；null = 自动快照
+  title     String
+  content   String
+  searchText String  @default("")
+  createdBy String
+  createdAt DateTime @default(now())
+
+  doc       KbDoc    @relation(fields: [docId], references: [id], onDelete: Cascade)
+
+  @@unique([docId, version])
+  @@index([docId])
+  @@map("kb_doc_versions")
+}
+
+/// 单文档/画布独立权限（叠加在知识库成员角色之上）
+model KbDocAcl {
+  id      String @id @default(cuid())
+  docId   String
+  userId  String
+  role    String // editor / commenter / viewer
+
+  doc     KbDoc  @relation(fields: [docId], references: [id], onDelete: Cascade)
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([docId, userId])
+  @@index([docId])
+  @@map("kb_doc_acls")
+}
