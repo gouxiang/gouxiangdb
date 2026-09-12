@@ -1,13 +1,16 @@
 // apps/api/src/index.ts
 // API 入口（Hono + Node）
 
+// 配置闸门必须是第一行 side-effect import：在任何会牵出 @prisma/client（自动 dotenv）
+// 的模块求值之前完成生产环境校验（D3）。
+import "./config.js";
+
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { auth } from "./auth.js";
 import { bases } from "./routes/bases.js";
@@ -20,6 +23,7 @@ import { pub } from "./routes/public.js";
 import { search } from "./routes/search.js";
 import { health } from "./routes/health.js";
 import { HttpError, errorResponse } from "./guards.js";
+import { config } from "./config.js";
 import { VERSION } from "./version.js";
 
 const app = new Hono();
@@ -27,8 +31,8 @@ const app = new Hono();
 app.use("*", logger());
 
 // 上传文件静态服务：GET /uploads/avatars/<filename>（头像等）
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOAD_ROOT = path.resolve(__dirname, "../uploads");
+// 上传根目录由 config 单一来源解析（GX_DATA_DIR / UPLOAD_ROOT）。
+const UPLOAD_ROOT = config.uploadRoot;
 const AVATAR_MIME: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -56,9 +60,7 @@ app.get("/uploads/avatars/:filename", async (c) => {
 });
 
 // CORS：同源请求（无 Origin）放行；跨域仅允许白名单（开发环境 localhost 端口 + 生产 CORS_ORIGIN）。
-const ALLOWED_ORIGIN_PATTERNS: RegExp[] = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(",").map((s) => new RegExp(`^${s.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\*/g, ".*")}$`))
-  : [/^http:\/\/localhost(:\d+)?$/, /^http:\/\/127\.0\.0\.1(:\d+)?$/];
+const ALLOWED_ORIGIN_PATTERNS: RegExp[] = config.corsOriginPatterns;
 
 app.use(
   "*",
@@ -114,7 +116,7 @@ app.onError((err, c) => {
   return errorResponse(c, err);
 });
 
-const port = Number(process.env.PORT ?? 3001);
+const port = config.port;
 
 // 仅在直接运行时启动服务（测试里 import app 不应自动起服务）
 if (process.env.GX_NO_LISTEN !== "1") {

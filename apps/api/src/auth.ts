@@ -6,14 +6,12 @@ import { sign, verify } from "hono/jwt";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "./db.js";
+import { config } from "./config.js";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-// 上传根目录：apps/api/uploads（头像存 uploads/avatars/<userId>.<ext>）
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOAD_ROOT = path.resolve(__dirname, "../uploads");
-const AVATAR_DIR = path.join(UPLOAD_ROOT, "avatars");
+// 上传根目录来自 config（GX_DATA_DIR / UPLOAD_ROOT 单一来源，头像存 uploads/avatars/<userId>.<ext>）
+const AVATAR_DIR = path.join(config.uploadRoot, "avatars");
 const AVATAR_MAX_BYTES = 5 * 1024 * 1024; // 5MB
 const AVATAR_ALLOWED: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -22,13 +20,8 @@ const AVATAR_ALLOWED: Record<string, string> = {
   "image/gif": "gif",
 };
 
-// 生产环境必须显式提供足够强度的 JWT_SECRET；开发环境回落到本地固定密钥（仅 dev）。
-const IS_PROD = process.env.NODE_ENV === "production";
-const JWT_SECRET = process.env.JWT_SECRET ?? (IS_PROD ? "" : "dev-secret-change-me-in-production");
-if (IS_PROD && (!JWT_SECRET || JWT_SECRET.length < 16)) {
-  // fail-closed：生产缺密钥直接拒绝启动，避免用公开默认密钥签发可伪造 token。
-  throw new Error("FATAL: 生产环境必须设置环境变量 JWT_SECRET（至少 16 位随机字符串）");
-}
+// JWT 密钥来自 config 启动闸门：生产缺密钥/使用开发默认值时进程已在 import 阶段退出（fail-closed）。
+const JWT_SECRET = config.jwtSecret;
 
 // token 有效期 7 天（秒）
 const TOKEN_TTL_SEC = 7 * 24 * 60 * 60;
