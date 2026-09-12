@@ -29,6 +29,7 @@ import { config } from "./config.js";
 import { VERSION } from "./version.js";
 import { secureHeadersMiddleware } from "./middleware/secureHeaders.js";
 import { bodyLimitDispatch } from "./middleware/bodyLimit.js";
+import { rateLimitMiddleware } from "./middleware/rateLimit.js";
 
 const app = new Hono();
 
@@ -83,6 +84,8 @@ app.use(
 // 安全响应头与请求体上限（必须在业务路由与 body 解析之前；健康端点已在上方挂载，天然豁免）。
 app.use("*", secureHeadersMiddleware);
 app.use("*", bodyLimitDispatch);
+// 限流：auth 端点严格 10/60s，其余 /api 兜底 600/60s；健康/上传在选择器内豁免。
+app.use("*", rateLimitMiddleware);
 
 // 运维健康端点（根级、不鉴权）。放在鉴权/限流（S5b 豁免）之外；
 // /api/health 保留为兼容别名（桌面壳与旧脚本在用）。
