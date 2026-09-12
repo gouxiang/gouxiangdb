@@ -9,7 +9,12 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { config } from "../config.js";
 import { prisma } from "../db.js";
+import { resolveDatabaseFile } from "../db/databaseFile.js";
 import { VERSION } from "../version.js";
+
+// 历史导出口径保留：resolveDatabaseFile 实现已抽到 db/databaseFile.ts（M1/S2，
+// readiness 与 rawRead 共用同一解析），此处 re-export 不破坏既有测试/调用方导入。
+export { resolveDatabaseFile };
 
 export const SERVICE_NAME = "gouxiangdb-api";
 
@@ -46,16 +51,6 @@ export interface ReadinessDeps {
   uploadsWritable(): Promise<ProbeResult>;
   disk(): Promise<ProbeResult>;
   dispose(): void;
-}
-
-// 纯函数：DATABASE_URL 解析为数据库文件绝对路径。
-// 相对路径基准为 prisma/ 目录（与 Prisma 对 SQLite 相对 schema 目录解析一致）。
-export function resolveDatabaseFile(databaseUrl: string, prismaDir: string): string {
-  const raw = databaseUrl.startsWith("file:")
-    ? databaseUrl.slice("file:".length)
-    : databaseUrl;
-  const noQuery = raw.split("?")[0] ?? raw;
-  return path.isAbsolute(noQuery) ? noQuery : path.resolve(prismaDir, noQuery);
 }
 
 // 纯函数：磁盘迁移目录与库内 _prisma_migrations 对账。
