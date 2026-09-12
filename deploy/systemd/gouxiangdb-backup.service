@@ -1,0 +1,25 @@
+# /etc/systemd/system/gouxiangdb-backup.service
+# GouXiangDB 每日在线一致性备份（S6：better-sqlite3 .backup() + manifest + 保留 + 可选 age 加密）。
+# oneshot：由 gouxiangdb-backup.timer 每日触发；也可手动 systemctl start gouxiangdb-backup。
+
+[Unit]
+Description=GouXiangDB online SQLite backup
+After=network.target gouxiangdb-api.service
+# 备份需要可读在线库与 uploads、可写备份目录；不要求 API 一定在线（.backup 走独立只读连接）。
+
+[Service]
+Type=oneshot
+User=gouxiangdb
+Group=gouxiangdb
+WorkingDirectory=/srv/gouxiangdb/current/api
+EnvironmentFile=/etc/gouxiangdb/env.conf
+# DATABASE_URL / BACKUP_DIR / UPLOAD_ROOT / BACKUP_ENCRYPT_OFFSITE / AGE_RECIPIENT /
+# AGE_BIN / GX_OFFSITE_TARGET 均由 EnvironmentFile 提供（见 deploy/env.conf.example）。
+ExecStart=/usr/bin/node scripts/backup/online-backup.mjs
+
+# 退出码：0 本地备份成功；2 快照/校验失败；3 异地加密配置或执行失败（fail-loud）。
+# 不加 `-` 前缀：让非零退出反映为 failed unit，便于监控发现（本地明文备份在 rc=3 时仍已完成）。
+NoNewPrivileges=true
+PrivateTmp=true
+ReadWritePaths=/var/backups/gouxiangdb /var/log/gouxiangdb
+TimeoutStartSec=1800

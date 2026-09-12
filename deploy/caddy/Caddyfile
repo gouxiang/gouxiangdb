@@ -1,0 +1,54 @@
+# /etc/caddy/Caddyfile — GouXiangDB 反向代理（同域单端口，TLS）
+#
+# 部署：sudo install -m 0644 deploy/caddy/Caddyfile /etc/caddy/Caddyfile
+#       GX_DOMAIN 由 caddy 进程环境提供（systemd override 或 /etc/caddy/env），再 reload。
+#       例：GX_DOMAIN=gx.example.com
+#
+# 拓扑（ADR-0003）：客户端 ──TLS──> Caddy:443 ──回环明文──> 127.0.0.1:3001(Node 单实例)
+#   - Node 只监听回环，外部不能直连 3001（见 docs/runbooks/deploy.md 的防火墙步骤）。
+#   - 不为 MCP 新开端口：/mcp 路由 M6 才落地，这里仅预埋 matcher，先落到同一后端。
+#
+# 证书两条路径（择一，详见 docs/runbooks/deploy.md）：
+#   A. 公网正式域名：保留下方站点块，Caddy 自动申请并续期 Let's Encrypt/ZeroSSL 证书，
+#      此时可开 HSTS（见块内注释）。
+#   B. 内网/自签（无公网 80/443 或内部 CA）：改 tls 指令指向内部 CA 证书与私钥；
+#      自签/内部 CA 不要发 HSTS（浏览器可能强制拒绝后续访问），故 HSTS 默认不开。
+
+{$GX_DOMAIN} {
+	encode gzip zstd
+
+	# 应用 API、健康检查与预埋的 MCP：同域反代到单实例 Node。
+	@api path /api/* /healthz /readyz /mcp /mcp/*
+	reverse_proxy @api 127.0.0.1:3001
+
+	# 附件/头像（M0 维持直供现状；M1 附件外置后改鉴权下载路由）。
+	reverse_proxy /uploads/* 127.0.0.1:3001
+
+	# 静态 Web（vite build 产物，SPA history 回退到 index.html）。
+	handle {
+		root * /srv/gouxiangdb/current/web
+		try_files {path} /index.html
+		file_server
+		# 带内容哈希的构建产物可强缓存一年。
+		header /assets/* Cache-Control "public, max-age=31536000, immutable"
+	}
+
+	# 上传体积第一道闸（与应用 body-limit 双保险：应用 JSON 1MB / 上传 6MB，这里预留到 12MB）。
+	request_body {
+		max_size 12MB
+	}
+
+	# HSTS 仅在“公网正式证书域名”下开启；内网 CA/自签请勿开启。
+	# 确认证书为公信 CA 后取消下行注释：
+	# header /api/* Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	# 内网/自签路径示例（取消注释并替换路径）：
+	# tls /etc/gouxiangdb/certs/server.crt /etc/gouxiangdb/certs/server.key
+
+	log {
+		output file /var/log/caddy/gouxiangdb.log {
+			roll_size 100mb
+			roll_keep 14
+		}
+	}
+}

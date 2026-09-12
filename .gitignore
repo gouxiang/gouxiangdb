@@ -52,3 +52,6 @@ screenshots/
 .workbuddy/**/*.zip
 .workbuddy/**/*.log
 .workbuddy/**/*.tmp
+
+# ============ S8 裸机发布物（构建机本地产物，由 deploy/bin/package-release.mjs 生成）============
+/release/

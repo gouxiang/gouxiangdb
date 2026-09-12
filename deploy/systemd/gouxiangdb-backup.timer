@@ -1,0 +1,22 @@
+# /etc/systemd/system/gouxiangdb-backup.timer
+# 每日 02:00 触发 gouxiangdb-backup.service（S6 在线备份）。
+# 安装：sudo install -m 0644 deploy/systemd/gouxiangdb-backup.{service,timer} /etc/systemd/system/
+#       sudo systemctl daemon-reload
+#       sudo systemctl enable --now gouxiangdb-backup.timer
+# 查看：systemctl list-timers gouxiangdb-backup.timer
+# 立即试跑：sudo systemctl start gouxiangdb-backup.service && journalctl -u gouxiangdb-backup -n 50
+
+[Unit]
+Description=Daily GouXiangDB online backup (02:00)
+
+[Timer]
+# 每日 02:00（目标机本地时区）。
+OnCalendar=*-*-* 02:00:00
+# 关机错过窗口后开机补跑一次，避免长期停机后无新备份。
+Persistent=true
+# 最多 15 分钟随机抖动，分散同一备份机上多实例的磁盘/网络峰值。
+RandomizedDelaySec=900
+Unit=gouxiangdb-backup.service
+
+[Install]
+WantedBy=timers.target

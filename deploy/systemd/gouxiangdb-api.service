@@ -1,0 +1,35 @@
+# /etc/systemd/system/gouxiangdb-api.service
+# GouXiangDB API（裸机单实例，Caddy 同机反代）。
+# 安装：sudo install -m 0644 deploy/systemd/gouxiangdb-api.service /etc/systemd/system/
+#       sudo systemctl daemon-reload && sudo systemctl enable --now gouxiangdb-api
+
+[Unit]
+Description=GouXiangDB API
+After=network.target
+
+[Service]
+Type=simple
+User=gouxiangdb
+Group=gouxiangdb
+# current 是指向 releases/<ts> 的符号链接；发布时 ln -sfn 原子切换。
+WorkingDirectory=/srv/gouxiangdb/current/api
+EnvironmentFile=/etc/gouxiangdb/env.conf
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=3
+
+# 基本加固
+NoNewPrivileges=true
+PrivateTmp=true
+# 服务只允许写数据/日志/备份目录；发布目录视为只读（迁移由 deploy.sh 在受控窗口执行）。
+ReadWritePaths=/var/lib/gouxiangdb /var/log/gouxiangdb /var/backups/gouxiangdb
+
+# 迁移【不】放 ExecStartPre：统一由 deploy.sh 在“先在线快照”后显式
+# `prisma migrate deploy`，避免每次重启都触发迁移；迁移只增、失败按 restore runbook 处理。
+
+# 日志走 journald：journalctl -u gouxiangdb-api -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
