@@ -20,6 +20,7 @@ import { pub } from "./routes/public.js";
 import { search } from "./routes/search.js";
 import { health } from "./routes/health.js";
 import { HttpError, errorResponse } from "./guards.js";
+import { VERSION } from "./version.js";
 
 const app = new Hono();
 
@@ -76,7 +77,7 @@ app.use(
 app.get("/", (c) =>
   c.json({
     name: "GouXiangDB API",
-    version: "0.2.0",
+    version: VERSION,
     endpoints: [
       "/api/health",
       "/api/auth/signup",

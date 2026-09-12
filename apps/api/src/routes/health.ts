@@ -3,6 +3,7 @@
 
 import { Hono } from "hono";
 import { prisma } from "../db.js";
+import { VERSION } from "../version.js";
 
 export const health = new Hono();
 
@@ -12,7 +13,7 @@ health.get("/", async (c) => {
     return c.json({
       ok: true,
       service: "gouxiangdb-api",
-      version: "0.1.0",
+      version: VERSION,
       timestamp: new Date().toISOString(),
       db: "ok",
     });
@@ -21,7 +22,7 @@ health.get("/", async (c) => {
       {
         ok: false,
         service: "gouxiangdb-api",
-        version: "0.1.0",
+        version: VERSION,
         db: "error",
         error: String(e),
       },
