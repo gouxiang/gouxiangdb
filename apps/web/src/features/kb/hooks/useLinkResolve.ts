@@ -92,7 +92,6 @@ export function useLinkResolve() {
     cache.set(href, { expires: Date.now() + TTL_MS, result });
     return result;
     // 引入 useKbCache 是为了让编辑态被识别为合法成员；若用 useDoc 会拉整文档内容，过重
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }
 

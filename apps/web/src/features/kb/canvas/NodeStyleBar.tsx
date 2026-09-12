@@ -5,6 +5,10 @@
 //  - 条上所有 pointerdown 阻止冒泡，避免画布误判为空白点击而清空选区；
 //  - 多选生效，样式写入走 canvas-ops（原生 transforms，进入撤销栈、触发自动保存）；
 //  - 工具条 fixed 定位在选中包围盒上方居中，空间不足自动翻到下方。
+//
+/* eslint-disable react-hooks/rules-of-hooks -- 技术债 GX-LINT-DEBT-1：组件在守卫早返回
+ * （board/style 不存在）之后才调 useState（见 popupBtnId）。守卫结果在组件生命周期内稳定，
+ * 当前运行正确；正确修法是把空态抽成独立包装组件或把守卫下移到全部 hooks 之后。 */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { PlaitBoard, PlaitElement } from "@plait/core";

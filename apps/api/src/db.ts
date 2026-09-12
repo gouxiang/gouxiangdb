@@ -10,7 +10,6 @@ import { PrismaClient, type Prisma } from "@prisma/client";
 export type DbTx = Prisma.TransactionClient;
 
 declare global {
-  // eslint-disable-next-line no-var
   var __gx_prisma: PrismaClient | undefined;
 }
 

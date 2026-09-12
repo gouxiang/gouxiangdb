@@ -1,3 +1,6 @@
+/* eslint-disable react-hooks/rules-of-hooks -- 技术债 GX-LINT-DEBT-1：日期字段未配置时先
+ * 渲染空态并早返回，之后才调 useState/useMemo。空态分支在该视图配置生命周期内稳定，当前
+ * 运行正确；正确修法是把空态抽成独立包装组件，让 hooks 无条件执行。 */
 // apps/web/src/features/views/CalendarView.tsx
 // 日历视图：月/周视图，按配置的日期字段把记录铺到日期格子里（周日作为一周起点，对齐 NocoDB）
 

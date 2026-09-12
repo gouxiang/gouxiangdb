@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings 114",
     "test": "vitest run --passWithNoTests",
     "test:unit": "vitest run",
     "test:e2e": "playwright test"

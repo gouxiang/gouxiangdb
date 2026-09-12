@@ -116,7 +116,6 @@ export function errorResponse(c: Context, e: unknown) {
       e.status as 400 | 401 | 403 | 404 | 409,
     );
   }
-  // eslint-disable-next-line no-console
   console.error("[api error]", e);
   // U-10：500 不回传内部错误消息（可能含 SQL/路径/堆栈信息），仅开发环境附带便于调试
   const isDev = process.env.NODE_ENV === "development";

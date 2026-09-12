@@ -137,7 +137,6 @@ const port = config.port;
 // 仅在直接运行时启动服务（测试里 import app 不应自动起服务）
 if (process.env.GX_NO_LISTEN !== "1") {
   serve({ fetch: app.fetch, port }, () => {
-    // eslint-disable-next-line no-console
     console.log(`[GouXiangDB API] http://localhost:${port}`);
   });
 }

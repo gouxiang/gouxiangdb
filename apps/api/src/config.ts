@@ -185,7 +185,6 @@ function formatIssues(issues: ConfigIssue[]): string {
 // —— 顶层闸门：本模块被 import 的瞬间即校验（先于任何 prisma 求值）——
 const startupIssues = validateEnv(process.env);
 if (startupIssues.length > 0) {
-  // eslint-disable-next-line no-console
   console.error(formatIssues(startupIssues));
   process.exit(2);
 }
@@ -194,7 +193,6 @@ const resolved = buildConfig(process.env);
 
 // 迁移目录缺失不阻断启动（只读提示）；readyz 探针会给出权威失败结论。
 if (!fs.existsSync(resolved.migrationsDir)) {
-  // eslint-disable-next-line no-console
   console.warn(`[config] 迁移目录不存在：${resolved.migrationsDir}`);
 }
 

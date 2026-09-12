@@ -211,7 +211,7 @@ export function CanvasBoardProvider({
       toLocalY,
       getLocalRect,
     }),
-    // eslint-disable-next-line react-hooks/react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [board, container, frame, selectedIds, viewport, ctx, toLocalX, toLocalY, getLocalRect],
   );
 

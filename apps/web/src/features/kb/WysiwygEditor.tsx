@@ -227,7 +227,6 @@ export function WysiwygEditor({
   const historyRef = useRef(createEditorHistory());
   useEffect(() => {
     historyRef.current.push(blocksRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -464,7 +463,6 @@ export function WysiwygEditor({
         }
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readOnly]);
 
   const onBlockInput = useCallback(

@@ -107,7 +107,6 @@ export function writeAudit(
   try {
     sink(path.join(auditDir, "audit.logl"), `${line}\n`);
   } catch (e) {
-    // eslint-disable-next-line no-console
     console.error("[audit] 写入失败（不阻断业务）:", (e as Error).message);
   }
   return record;

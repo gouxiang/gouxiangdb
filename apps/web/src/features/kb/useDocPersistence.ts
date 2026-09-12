@@ -174,7 +174,6 @@ export function useDocPersistence(
       window.removeEventListener("pagehide", onHide);
       flush(); // 路由切换卸载时
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flush]);
 
   // 恢复草稿

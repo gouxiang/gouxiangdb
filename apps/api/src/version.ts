@@ -40,7 +40,6 @@ function resolveVersion(): string {
   const fromRoot = readRootVersion();
   if (fromRoot) return fromRoot;
   if (process.env.NODE_ENV !== "production") {
-    // eslint-disable-next-line no-console
     console.warn(
       "[version] 未能定位根 package.json（name=gouxiangdb-v2），版本回落为 0.0.0-dev",
     );

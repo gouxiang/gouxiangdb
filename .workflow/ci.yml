@@ -1,0 +1,56 @@
+# =============================================================================
+# GouXiangDB CI（Gitee Go 模板）—— M0 S7
+#
+# 重要：本文件仅为"示意模板"。Gitee Go 存在新旧两版流水线 YAML 语法，且插件名/入参
+#       以仓库【开通 Gitee Go 时控制台自动生成的 schema】为准，本文件不保证逐字可粘贴。
+#       门禁的唯一事实源是仓内平台中立脚本 scripts/ci-quality.sh：
+#         bash scripts/ci-quality.sh
+#       任何 runner / 本机只要有 Node>=20、pnpm>=9 都能复现全部 8 步质量门。
+#       因此平台 YAML 语法漂移不会影响门禁本身——流水线只负责"拉起环境 + 调脚本"。
+#
+# 开通前置（见 docs/runbooks/ci.md）：
+#   - Gitee Go 已对该私有仓库开通，有可用 PAT/runner；
+#   - runner：Linux x86_64（建议 2 vCPU / 4GB），Node 20 LTS、pnpm 9（corepack）；
+#   - 缓存键建议取 pnpm-lock.yaml 哈希（pnpm store）；
+#   - migrate 干跑只写 runner 临时库，不连真实数据库、不需要任何密钥。
+#
+# 下面是【新版语法】骨架示意（开通时请以控制台生成结构为准对齐）：
+# =============================================================================
+version: '1.0'
+name: gx-ci
+displayName: GouXiangDB CI
+triggers:
+  push:
+    branches: { precise: [master, main] }
+  pullRequest:
+    branches: { precise: [master, main] }
+stages:
+  - stage: quality
+    displayName: 质量门
+    # 任一步失败即判失败；脚本内部已 set -euo pipefail。
+    steps:
+      - step: shell@1            # 插件名/版本以开通时控制台可用项为准
+        name: ci_quality
+        displayName: install/typecheck/build/test/lint/migrate-dryrun
+        inputs:
+          nodeVersion: '20'     # 仅示意，实际入参字段以控制台 schema 为准
+          goals: |
+            set -euo pipefail
+            corepack enable
+            corepack prepare pnpm@9 --activate
+            pnpm -v
+            bash scripts/ci-quality.sh
+        # 缓存（示意，字段名以控制台为准）：~/.local/share/pnpm/store，键=pnpm-lock.yaml 哈希。
+
+# =============================================================================
+# 附：GitHub Actions 等价写法要点（本仓库远程为 Gitee，刻意【不创建】.github/workflows，
+#     以下仅备将来迁移参考，避免死配置）：
+#
+#   steps:
+#     - uses: actions/checkout@v4
+#     - uses: pnpm/action-setup@v4
+#       with: { version: 9 }
+#     - uses: actions/setup-node@v4
+#       with: { node-version: 20, cache: pnpm }
+#     - run: bash scripts/ci-quality.sh
+# =============================================================================
