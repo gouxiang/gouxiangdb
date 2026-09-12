@@ -20,6 +20,10 @@ dist/
 *.sqlite3
 .db-backups/
 
+# 用户上传与运行时探针文件（绝不入库；部署时由部署脚本建目录）
+apps/api/uploads/*
+!apps/api/uploads/.gitkeep
+
 # ============ 系统 / 日志 / 临时 ============
 .DS_Store
 *.log
