@@ -344,3 +344,18 @@ model KbDocAcl {
   @@index([docId])
   @@map("kb_doc_acls")
 }
+
+// ============================================================================
+// 手写维护表（不经 Prisma 管理，禁止在此添加 model）
+// ============================================================================
+// record_field_index —— M1/S3 起存在的 EAV 旁路索引（records.fields JSON 的
+// 可重建派生冗余），由手写迁移
+//   migrations/20260913062000_record_field_index_sidecar/migration.sql
+// 建表建索引，由应用层 raw SQL（src/domain/fieldIndex/sync.ts，S4）同事务维护，
+// 回填用 scripts/bench/backfill-sidecar.mjs（S4）。
+//
+// 刻意不在此声明 model：避免 `prisma migrate dev` 把它纳入漂移检测/生成客户端。
+// 若 Prisma 提示该表「不在 schema 中」属预期（introspection 差异），不要据其
+// 生成迁移或 DROP。变更该表结构请新增手写迁移并同步
+// prisma/docs/rollback/20260913062000_record_field_index_sidecar.down.sql。
+// ============================================================================

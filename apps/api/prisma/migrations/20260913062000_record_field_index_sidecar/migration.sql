@@ -1,0 +1,44 @@
+-- M1/S3 / ADR-0004：热物理字段 EAV 旁路索引（record_field_index，可重建派生数据）。
+--
+-- 设计约束：
+--   1. 刻意【不用】WITHOUT ROWID（SQLite 专有语法），保 ADR-0008 的 PostgreSQL 通道；
+--      普通 rowid 表 + AUTOINCREMENT 主键，两库 DDL 均可平移。
+--   2. 本表是 records.fields JSON 的【派生冗余】，任何时候都可由 S4 的回填脚本
+--      全量重建；因此回填【不】放进本迁移——迁移只建空表/索引，避免大表迁移期锁库。
+--   3. schema.prisma 【不加 model】（避免 Prisma migrate 试图管理/漂移它），
+--      该表完全由手写迁移 + 应用层 raw SQL（domain/fieldIndex/sync.ts，S4）维护。
+--   4. valueText/valueNum 双列：文本等值/排序走 valueText，数字/日期/勾选走 valueNum
+--      （date 存 Date.parse 毫秒，与 filter 日期口径一致）；isNull 单列 NULL 桶。
+--   5. ord：multiSelect 摊平多行时的选项序号（0..n），标量字段恒 0；
+--      唯一键含 ord 以容纳一条记录的同一多选字段对应多行。
+
+CREATE TABLE "record_field_index" (
+    "id"         INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "recordId"   TEXT NOT NULL,
+    "tableId"    TEXT NOT NULL,
+    "fieldId"    TEXT NOT NULL,
+    "valueText"  TEXT,
+    "valueNum"   REAL,
+    "isNull"     INTEGER NOT NULL DEFAULT 0,
+    "ord"        INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT "rfi_record_fkey" FOREIGN KEY ("recordId") REFERENCES "records" ("id") ON DELETE CASCADE
+);
+
+-- 一条记录的一个字段在同一摊平序号上最多一行（幂等删插的去重保证）。
+CREATE UNIQUE INDEX "rfi_record_field_ord_key"
+    ON "record_field_index" ("recordId", "fieldId", "ord");
+
+-- S6 物理谓词下推：WHERE tableId=? AND fieldId=? AND valueNum ? / valueText ?。
+CREATE INDEX "rfi_table_field_num"
+    ON "record_field_index" ("tableId", "fieldId", "valueNum");
+CREATE INDEX "rfi_table_field_text"
+    ON "record_field_index" ("tableId", "fieldId", "valueText");
+
+-- 按记录/表批量删插（syncRecordsTx 先删后插）与巡检 join。
+CREATE INDEX "rfi_table_record"
+    ON "record_field_index" ("tableId", "recordId");
+
+-- 默认列表热路径：WHERE "tableId"=? AND "deletedAt" IS NULL ORDER BY "createdAt","id"。
+-- 部分列前缀 (tableId, deletedAt) 先等值过滤，后两列覆盖排序，避免 filesort。
+CREATE INDEX "records_table_live_created_id"
+    ON "records" ("tableId", "deletedAt", "createdAt", "id");
