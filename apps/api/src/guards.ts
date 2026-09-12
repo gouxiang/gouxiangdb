@@ -94,15 +94,35 @@ export async function requireCanComment(c: Context, baseId: string): Promise<{ u
   return { userId: r.userId, role: r.role };
 }
 
+/** 状态码 → 机器可读错误码（仅增补字段，不改变 HTTP 状态码与中文 error 文案）。 */
+function errorCodeForStatus(status: number): string {
+  switch (status) {
+    case 400: return "BAD_REQUEST";
+    case 401: return "UNAUTHORIZED";
+    case 403: return "FORBIDDEN";
+    case 404: return "NOT_FOUND";
+    case 409: return "CONFLICT";
+    case 413: return "PAYLOAD_TOO_LARGE";
+    case 429: return "TOO_MANY_REQUESTS";
+    default: return `HTTP_${status}`;
+  }
+}
+
 /** 统一错误出口 */
 export function errorResponse(c: Context, e: unknown) {
   if (e instanceof HttpError) {
-    return c.json({ error: e.message }, e.status as 400 | 401 | 403 | 404 | 409);
+    return c.json(
+      { error: e.message, code: errorCodeForStatus(e.status) },
+      e.status as 400 | 401 | 403 | 404 | 409,
+    );
   }
   // eslint-disable-next-line no-console
   console.error("[api error]", e);
   // U-10：500 不回传内部错误消息（可能含 SQL/路径/堆栈信息），仅开发环境附带便于调试
   const isDev = process.env.NODE_ENV === "development";
   const msg = e instanceof Error ? e.message : String(e);
-  return c.json({ error: "服务器内部错误", ...(isDev ? { message: msg } : {}) }, 500);
+  return c.json(
+    { error: "服务器内部错误", code: "INTERNAL", ...(isDev ? { message: msg } : {}) },
+    500,
+  );
 }

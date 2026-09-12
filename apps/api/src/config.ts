@@ -19,6 +19,8 @@ const BLOCKED_JWT_SECRETS = new Set([
 const DEV_JWT_SECRET = "dev-secret-change-me-in-production";
 const DEFAULT_PORT = 3001;
 const DEFAULT_MIN_DISK_MB = 1024;
+const DEFAULT_BODY_LIMIT_JSON_MB = 1;
+const DEFAULT_BODY_LIMIT_UPLOAD_MB = 6;
 
 export interface ConfigIssue {
   variable: string;
@@ -83,7 +85,27 @@ export function validateEnv(env: NodeJS.ProcessEnv): ConfigIssue[] {
     issues.push({ variable: "GX_MIN_DISK_MB", reason: `必须为正整数（MB），当前 "${env.GX_MIN_DISK_MB}"` });
   }
 
+  for (const [name, raw] of [
+    ["GX_BODY_LIMIT_JSON", env.GX_BODY_LIMIT_JSON],
+    ["GX_BODY_LIMIT_UPLOAD", env.GX_BODY_LIMIT_UPLOAD],
+  ] as const) {
+    if (raw !== undefined && raw !== "") {
+      const mb = Number(raw);
+      if (!Number.isFinite(mb) || mb <= 0) {
+        issues.push({ variable: name, reason: `必须为正数（MB），当前 "${raw}"` });
+      }
+    }
+  }
+
   return issues;
+}
+
+// 请求体上限环境变量按 MB（正整数）解释；非法值回退默认，生产侧另在 validateEnv 报错。
+function parseBodyLimit(raw: string | undefined, fallbackBytes: number): number {
+  if (raw === undefined || raw.trim() === "") return fallbackBytes;
+  const mb = Number(raw);
+  if (!Number.isFinite(mb) || mb <= 0) return fallbackBytes;
+  return Math.round(mb * 1024 * 1024);
 }
 
 function buildCorsPatterns(raw: string | undefined): RegExp[] {
@@ -106,6 +128,8 @@ export interface AppConfig {
   uploadRoot: string;
   migrationsDir: string;
   minDiskMb: number;
+  bodyLimitJsonBytes: number;
+  bodyLimitUploadBytes: number;
   auditDir: string;
   backupDir: string;
   rateLimitEnabled: boolean;
@@ -131,6 +155,14 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     uploadRoot,
     migrationsDir,
     minDiskMb: Number(env.GX_MIN_DISK_MB ?? DEFAULT_MIN_DISK_MB),
+    bodyLimitJsonBytes: parseBodyLimit(
+      env.GX_BODY_LIMIT_JSON,
+      DEFAULT_BODY_LIMIT_JSON_MB * 1024 * 1024,
+    ),
+    bodyLimitUploadBytes: parseBodyLimit(
+      env.GX_BODY_LIMIT_UPLOAD,
+      DEFAULT_BODY_LIMIT_UPLOAD_MB * 1024 * 1024,
+    ),
     auditDir: env.GX_AUDIT_DIR?.trim()
       || (prod ? "/var/log/gouxiangdb" : path.join(dataDir, ".audit")),
     backupDir: env.BACKUP_DIR?.trim()

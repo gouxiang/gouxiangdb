@@ -27,6 +27,8 @@ import { readyz } from "./routes/readyz.js";
 import { HttpError, errorResponse } from "./guards.js";
 import { config } from "./config.js";
 import { VERSION } from "./version.js";
+import { secureHeadersMiddleware } from "./middleware/secureHeaders.js";
+import { bodyLimitDispatch } from "./middleware/bodyLimit.js";
 
 const app = new Hono();
 
@@ -78,6 +80,10 @@ app.use(
   }),
 );
 
+// 安全响应头与请求体上限（必须在业务路由与 body 解析之前；健康端点已在上方挂载，天然豁免）。
+app.use("*", secureHeadersMiddleware);
+app.use("*", bodyLimitDispatch);
+
 // 运维健康端点（根级、不鉴权）。放在鉴权/限流（S5b 豁免）之外；
 // /api/health 保留为兼容别名（桌面壳与旧脚本在用）。
 app.route("/healthz", healthz);
@@ -114,8 +120,8 @@ api.route("/public", pub);
 api.route("/search", search);
 app.route("/api", api);
 
-// 404
-app.notFound((c) => c.json({ error: "接口不存在", path: c.req.path }, 404));
+// 404（增补机器码 NOT_FOUND，保留原 error/path 契约）
+app.notFound((c) => c.json({ error: "接口不存在", code: "NOT_FOUND", path: c.req.path }, 404));
 
 // 统一错误处理
 app.onError((err, c) => {
