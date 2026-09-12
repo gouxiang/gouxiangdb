@@ -1,5 +1,7 @@
 # GouXiangDB v2 第二轮 6 类问题修复自测报告
 
+> **历史档案声明（2026-09-12 加注）**：本文件是 2026-09-04 单次迭代的自测记录，保留原貌用于追溯，**不是当前部署 / 配置依据**。文中「DATABASE_URL 用绝对路径」「PostgreSQL」等说法均已过时——数据库已确定为 SQLite 且使用相对路径 `file:./dev.db`。当前真相以 [README.md](README.md) §数据库说明、[ADR-0002](docs/adr/0002-database-sqlite.md) 与 `docs/baseline/2026-09-12-stability-baseline.md` 为准。
+
 ## 元信息
 - 日期：2026-09-04
 - 测试范围：用户第二轮反馈的 6 类问题修复

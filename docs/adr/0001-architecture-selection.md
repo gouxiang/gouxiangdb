@@ -1,6 +1,8 @@
 # ADR-0001：GouXiangDB v2 架构选型（前后端分离 · 客户端壳化 · 多端复用）
 
-**状态**：Accepted（2026-09-04 拍板）
+> **修订说明（2026-09-12）**：本文「数据库 = PostgreSQL」一项在落地阶段调整为 **SQLite**，详见 [ADR-0002](0002-database-sqlite.md)。其余选型（Hono / Prisma / React / Vite / Tailwind / Tauri / B-S 三层）维持有效。下文涉及 PostgreSQL 的表述为拍板当时的历史记录，保留以追溯决策过程。
+
+**状态**：Accepted（2026-09-04 拍板；数据库一项见 ADR-0002 修订）
 **作者**：经用户授权按"最优方案"自主决策
 **约束**：功能 1:1 对等当前 macOS 版 · 零新增 bug · 深度对比测试通过
 
