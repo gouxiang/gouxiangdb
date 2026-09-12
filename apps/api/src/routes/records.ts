@@ -239,7 +239,9 @@ export async function assertRequiredOnCreate(
  * 检查同表其它未删除记录是否已存在相同值。
  * （旧实现 PATCH 里 findFirst 没带字段值过滤、POST 完全不校验，等于没校验。）
  */
-async function assertUnique(
+// 导出仅供 M1/S0 characterization 测试直接注入 fake db 锁行为（S6 unique 走索引后对拍）；
+// 行为零改动，路由内部仍按原名调用。
+export async function assertUnique(
   tableId: string,
   fields: Awaited<ReturnType<typeof loadTableFields>>,
   values: Record<string, unknown>,
