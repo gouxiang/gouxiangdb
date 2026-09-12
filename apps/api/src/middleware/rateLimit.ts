@@ -7,8 +7,9 @@
 // - 开关：GX_RATE_LIMIT=off 关闭；NODE_ENV=test 默认关闭（保测试稳定）。
 // 超限 429 + Retry-After（距窗口重置秒数），周期清理过期键防内存增长。
 
-import type { Context, MiddlewareHandler } from "hono";
+import type { MiddlewareHandler } from "hono";
 import { config } from "../config.js";
+import { sourceIp } from "../utils/client-ip.js";
 
 export interface RateRule {
   match: (path: string, method: string) => boolean;
@@ -116,29 +117,8 @@ export class FixedWindowCounter {
   }
 }
 
-const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
-
-// @hono/node-server 把 Node 请求对象放在 c.env.incoming。
-function remoteAddress(c: Context): string | undefined {
-  const bindings = c.env as
-    | { incoming?: { socket?: { remoteAddress?: string } } }
-    | undefined;
-  return bindings?.incoming?.socket?.remoteAddress;
-}
-
-// 仅当 TCP 对端是回环（Caddy/vite 同机反代）时才采纳 X-Forwarded-For 首段，
-// 并做基本合法性过滤；直连请求伪造的 XFF 不被采纳，改用 socket 对端地址。
-export function clientKey(c: Context): string {
-  const remote = remoteAddress(c);
-  if (remote && LOOPBACK.has(remote)) {
-    const xff = c.req.header("x-forwarded-for");
-    if (xff) {
-      const first = xff.split(",")[0]?.trim();
-      if (first && /^[0-9a-fA-F:.]{3,45}$/.test(first)) return first;
-    }
-  }
-  return remote || "unknown";
-}
+// 限流键与审计来源 IP 共用同一判定（utils/client-ip.ts）。
+export { sourceIp as clientKey, sourceIp } from "../utils/client-ip.js";
 
 export interface RateLimiterDeps {
   enabled: () => boolean;
@@ -158,7 +138,7 @@ export function createRateLimitMiddleware(deps: RateLimiterDeps): MiddlewareHand
       deps.counter.prune(now);
       lastPrune = now;
     }
-    const key = clientKey(c);
+    const key = sourceIp(c);
     const decision = deps.counter.hit(key, rule, now);
     c.header("X-RateLimit-Limit", String(decision.limit));
     c.header("X-RateLimit-Remaining", String(decision.remaining));

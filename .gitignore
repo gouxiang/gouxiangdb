@@ -24,6 +24,10 @@ dist/
 apps/api/uploads/*
 !apps/api/uploads/.gitkeep
 
+# 本地开发态审计 JSONL（生产在 /var/log/gouxiangdb）
+apps/api/.audit/
+*.logl
+
 # ============ 系统 / 日志 / 临时 ============
 .DS_Store
 *.log

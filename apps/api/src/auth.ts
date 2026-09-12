@@ -7,6 +7,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "./db.js";
 import { config } from "./config.js";
+import { audit as recordAudit } from "./audit/emit.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -57,6 +58,7 @@ auth.post("/signup", async (c) => {
     data: { email, displayName, passwordHash },
   });
   const token = await issueToken(user.id);
+  recordAudit(c, { event: "signup", status: 200, actorId: user.id });
   return c.json({ token, user: publicUser(user) });
 });
 
@@ -73,13 +75,16 @@ auth.post("/login", async (c) => {
   }
   const user = await prisma.user.findUnique({ where: { email: parsed.data.email } });
   if (!user) {
+    recordAudit(c, { event: "login_failure", status: 401, detail: { reason: "unknown_email" } });
     return c.json({ error: "Invalid credentials" }, 401);
   }
   const ok = await bcrypt.compare(parsed.data.password, user.passwordHash);
   if (!ok) {
+    recordAudit(c, { event: "login_failure", status: 401, actorId: user.id, detail: { reason: "bad_password" } });
     return c.json({ error: "Invalid credentials" }, 401);
   }
   const token = await issueToken(user.id);
+  recordAudit(c, { event: "login_success", status: 200, actorId: user.id });
   return c.json({ token, user: publicUser(user) });
 });
 
@@ -175,6 +180,7 @@ auth.post("/me/change-password", async (c) => {
   if (!ok) return c.json({ error: "当前密码错误" }, 401);
   const passwordHash = await bcrypt.hash(parsed.data.newPassword, 10);
   await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+  recordAudit(c, { event: "change_password", status: 200, actorId: userId });
   return c.json({ ok: true });
 });
 
@@ -214,6 +220,7 @@ auth.delete("/me", async (c) => {
   }
   // 删除 user：cascade 会带走 memberships / kbMemberships / docAcls / comments（已配置）
   await prisma.user.delete({ where: { id: userId } });
+  recordAudit(c, { event: "account_delete", status: 200, actorId: userId });
   return c.json({ ok: true });
 });
 
@@ -265,6 +272,7 @@ auth.delete("/me/avatar", async (c) => {
     where: { id: userId },
     data: { avatarUrl: null },
   });
+  recordAudit(c, { event: "avatar_delete", status: 200, actorId: userId });
   return c.json({ user: publicUser(updated) });
 });
 
