@@ -209,8 +209,15 @@ function assemble(
     const inner = g.terms
       .map((t) => t.expr.replace(/\bc\./g, `${alias}.`))
       .join(g.comb === "OR" ? " OR " : " AND ");
+    // INDEXED BY 强制该 JOIN 内表走 (recordId,fieldId,ord) 唯一索引按 recordId 回表 seek，
+    // 而不能选 rfi_table_field_num/text（tableId,fieldId,value…）当【驱动】。
+    // 关键：宽范围数值 AND 在高命中（实测 ≥80%）时，若优化器以 rfi 范围索引为外层驱动，
+    // 多 JOIN 会退化成内层 records 嵌套探测（双字段 26s/三字段 52s）。钉死 recordId 唯一索引后，
+    // 规划器稳定以 records 的覆盖索引 records_table_live_created_id 为外层、每个 cN 内表
+    // 按 recordId 等值 seek（双/三字段均毫秒级）。CROSS JOIN 不需要，单 INDEXED BY 即可改向。
     joins.push(
-      `JOIN "record_field_index" ${alias} ON ${alias}."recordId"=r."id" ` +
+      `JOIN "record_field_index" ${alias} INDEXED BY "rfi_record_field_ord_key" ` +
+      `ON ${alias}."recordId"=r."id" ` +
       `AND ${alias}."tableId"=? AND ${alias}."fieldId"=? AND (${inner})`,
     );
     // 占位符出现顺序：JOIN ON 内先 tableId、fieldId，再各谓词值。

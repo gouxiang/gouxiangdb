@@ -10,6 +10,14 @@ import type Database from "better-sqlite3";
 import type { SqlBindValue } from "../../db/rawRead.js";
 import type { SortJoin } from "./compile.js";
 import type { CountPlan } from "./compileCount.js";
+import {
+  countSql,
+  countAllBinds,
+  keysetSql,
+  keysetAllBinds,
+  explainCountSql,
+  explainKeysetSql,
+} from "./explainSql.js";
 
 export interface PhysicalFilter {
   /** compile.ts 产出的 WHERE 片段（别名 r），不含前导 AND；null=无物理谓词。 */
@@ -76,6 +84,10 @@ export interface SidecarQuerier {
   sortNumericClean(q: PhysicalFilter & { tableId: string; fieldIds: string[] }): boolean;
   /** EXPLAIN QUERY PLAN（供测试断言索引命中 / 无全表 SCAN）。 */
   explain(q: CandidateQuery): string[];
+  /** countPhysical 的 countPlan JOIN 计数 SQL 的 EXPLAIN（钉死 JOIN 内表索引形态）。 */
+  explainCount(q: PhysicalFilter & { tableId: string }): string[];
+  /** physicalKeysetOnCreatedAt 的 countPlan JOIN 取页 SQL 的 EXPLAIN（首页形态）。 */
+  explainKeyset(q: KeysetPageArgs): string[];
 }
 
 function liveWhere(filterSql: string | null): string {
@@ -115,44 +127,19 @@ function orderBySql(sortJoins: SortJoin[] | null): string {
  */
 export function createSidecarQuerier(db: Database.Database): SidecarQuerier {
   function countPhysical(q: PhysicalFilter & { tableId: string }): number {
-    // 计数快速路径：rfi INNER JOIN 驱动（占位符按 SQL 文本顺序：各 JOIN 的 tableId/fieldId/
-    // 谓词值在前，records 的 tableId 在 WHERE）。标量字段 JOIN 不重复计数，见 compileCount 头注。
-    if (q.countPlan) {
-      const sql =
-        `SELECT count(*) AS n FROM records r ${q.countPlan.joins} ` +
-        `WHERE r."tableId"=? AND r."deletedAt" IS NULL`;
-      const row = db
-        .prepare(sql)
-        .get(...q.countPlan.joinParams, q.tableId) as { n: number };
-      return Number(row.n);
-    }
-    const row = db
-      .prepare(`SELECT count(*) AS n FROM records r WHERE ${liveWhere(q.filterSql)}`)
-      .get(q.tableId, ...q.filterParams) as { n: number };
+    // 计数：有 countPlan 走 rfi JOIN 快速路径（INDEXED BY 钉 recordId 唯一索引，见 compileCount），
+    // 否则走 records 驱动相关 EXISTS。SQL/绑定由 explainSql 单一事实源提供。
+    const row = db.prepare(countSql(q)).get(...countAllBinds(q)) as { n: number };
     return Number(row.n);
   }
 
   function physicalKeysetOnCreatedAt(q: KeysetPageArgs): KeysetIdPage {
-    const cursorClause = q.cursor
-      ? `AND (r."createdAt" > ? OR (r."createdAt" = ? AND r."id" > ?))`
-      : "";
-    // 有 countPlan（纯合取/同字段 OR 标量正向谓词）走 rfi JOIN：range seek 命中索引后取页，
-    // 避免 records 驱动相关 EXISTS 在「过滤列≠排序列」全表逐行探测（100k 实测 5-51s vs 0.13-0.32s）。
-    const from = q.countPlan ? `records r ${q.countPlan.joins}` : "records r";
-    const liveFilter = q.countPlan
-      ? `r."tableId"=? AND r."deletedAt" IS NULL`
-      : liveWhere(q.filterSql);
-    const sql =
-      `SELECT r."id" AS id, r."createdAt" AS createdAt FROM ${from} ` +
-      `WHERE ${liveFilter} ${cursorClause} ORDER BY r."createdAt" ASC, r."id" ASC LIMIT ?`;
-    // 绑定顺序：JOIN 路径各 cN 的 tableId/fieldId/谓词值（或回退 tableId→filter 参数）→
-    // records tableId（仅 JOIN 路径）→ 游标三参 → limit。
-    const bind: SqlBindValue[] = q.countPlan
-      ? [...q.countPlan.joinParams, q.tableId]
-      : [q.tableId, ...q.filterParams];
-    if (q.cursor) bind.push(q.cursor.createdAt, q.cursor.createdAt, q.cursor.id);
-    bind.push(q.limit + 1);
-    const fetched = db.prepare(sql).all(...bind) as { id: string; createdAt: number }[];
+    // 有 countPlan 走 rfi JOIN（避免 records 驱动全表探测；100k 实测 5-51s→0.13-0.32s）；
+    // JOIN 内表被 compileCount 用 INDEXED BY 钉在 recordId 唯一索引，故多数值字段高命中 AND
+    // 也不会让优化器改以 rfi 范围索引驱动（双/三字段实测毫秒）。回退路径走 filterSql。
+    const fetched = db
+      .prepare(keysetSql(q))
+      .all(...keysetAllBinds(q, q.limit + 1)) as { id: string; createdAt: number }[];
     const hasMore = fetched.length > q.limit;
     return { rows: hasMore ? fetched.slice(0, q.limit) : fetched, hasMore };
   }
@@ -292,6 +279,8 @@ export function createSidecarQuerier(db: Database.Database): SidecarQuerier {
     physicalGroupBuckets,
     sortNumericClean,
     explain,
+    explainCount: (q) => explainCountSql(db, q),
+    explainKeyset: (q) => explainKeysetSql(db, q),
   };
 }
 

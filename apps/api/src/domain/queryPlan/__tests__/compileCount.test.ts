@@ -42,13 +42,41 @@ describe("compileCountPlan rfi JOIN 计数快速路径", () => {
     expect((cp!.joins.match(/\?/g) ?? []).length).toBe(4);
   });
 
-  it("不同字段 AND → 两个 JOIN（c0/c1），各绑 tableId/fieldId/值", () => {
+  it("不同字段 AND → 两个 JOIN（c0/c1），各绑 tableId/fieldId/值，且每个 JOIN 都钉 INDEXED BY", () => {
     const cp = countOf(and([cond("age", "gt", "10"), cond("stars", "lte", "4")]));
     expect(cp).not.toBeNull();
     expect((cp!.joins.match(/JOIN "record_field_index"/g) ?? []).length).toBe(2);
     expect(cp!.joins).toContain("c0.");
     expect(cp!.joins).toContain("c1.");
     expect(cp!.joinParams).toEqual(["T1", "age", 10, "T1", "stars", 4]);
+  });
+
+  it("三数值字段 AND：每个 JOIN 片段都含 INDEXED BY rfi_record_field_ord_key（P0 防多 JOIN 嵌套循环回归）", () => {
+    // 宽范围数值 AND 在高命中时，若优化器以 rfi_table_field_num 当驱动会退化成嵌套循环
+    // （双字段 26s/三字段 52s）。compileCount.assemble 必须在每个 JOIN 内表钉死
+    // (recordId,fieldId,ord) 唯一索引，强制 records 覆盖索引驱动。
+    const cp = countOf(and([
+      cond("age", "gte", "0"),
+      cond("stars", "gte", "0"),
+      cond("born", "gte", "2026-01-01"),
+    ]));
+    expect(cp).not.toBeNull();
+    const joinCount = (cp!.joins.match(/JOIN "record_field_index"/g) ?? []).length;
+    expect(joinCount).toBe(3);
+    const indexedCount = (cp!.joins.match(/INDEXED BY "rfi_record_field_ord_key"/g) ?? []).length;
+    expect(indexedCount).toBe(3);
+    // 每个别名 c0/c1/c2 的 JOIN 都带各自的 INDEXED BY，且别名不重复。
+    for (const alias of ["c0", "c1", "c2"]) {
+      const re = new RegExp(`JOIN "record_field_index" ${alias} INDEXED BY "rfi_record_field_ord_key"`);
+      expect(cp!.joins).toMatch(re);
+    }
+  });
+
+  it("单字段 range 与同字段 OR 的 JOIN 同样钉 INDEXED BY（单/双 JOIN 形态一致）", () => {
+    const single = countOf(and([cond("age", "gte", "10"), cond("age", "lte", "20")]))!;
+    expect((single.joins.match(/INDEXED BY "rfi_record_field_ord_key"/g) ?? []).length).toBe(1);
+    const sameFieldOr = countOf(or([cond("age", "gt", "90"), cond("age", "lt", "5")]))!;
+    expect((sameFieldOr.joins.match(/INDEXED BY "rfi_record_field_ord_key"/g) ?? []).length).toBe(1);
   });
 
   it("同字段 OR → 单 JOIN 内 OR 连接（一个 fieldId）", () => {

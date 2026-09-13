@@ -94,6 +94,25 @@ export function buildSceneDefs(F: Fields, rows: number, pageLimit: number): Scen
     });
   }
 
+  // ---- T1：两个不同数值字段的宽范围高命中 AND（ADR-0008 T0 窄口径补门）----
+  // 专压 compileCount 多 JOIN：money 与 rate 各取极宽区间（命中约 90%+），AND 后仍高命中。
+  // 若 JOIN 内表被规划器选 rfi_table_field_num 当驱动，多 JOIN 退化为嵌套循环（实测 26s+）；
+  // compileCount.assemble 的 INDEXED BY rfi_record_field_ord_key 钉 records 覆盖索引驱动。
+  if (has("money") && has("rate")) {
+    scenes.push({
+      name: "filter_range_multi_num", kind: "view",
+      desc: "金额+比率两个数值字段宽范围高命中 AND（多 rfi JOIN，INDEXED BY 强制 recordId 回表）",
+      config: {
+        filters: and([
+          cond(id("money"), "gte", "500"),
+          cond(id("money"), "lte", "95000"),
+          cond(id("rate"), "gte", "2"),
+          cond(id("rate"), "lte", "98"),
+        ]),
+      },
+    });
+  }
+
   // ---- T1：物理 isAnyOf（单选 IN）----
   if (has("status")) {
     scenes.push({
