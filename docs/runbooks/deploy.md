@@ -97,7 +97,7 @@ sudo systemctl reload caddy
 
 # 6.5 验收
 curl -fsS http://127.0.0.1:3001/healthz
-curl -fsS http://127.0.0.1:3001/readyz      # 五探针 true、migrations applied=11
+curl -fsS http://127.0.0.1:3001/readyz      # 五探针 true、migrations applied 与迁移目录数一致（M1 起为 12）
 curl -fsS https://gx.example.com/healthz
 systemctl list-timers gouxiangdb-backup.timer
 ```

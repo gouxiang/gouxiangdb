@@ -10,11 +10,14 @@ M0 生产基座的可执行运维流程。所有手册与仓内脚本/配置一�
 | [backup.md](backup.md) | 在线一致性备份、daily7/weekly4 保留、异地 age 加密、手动备份 | `apps/api/scripts/backup/online-backup.mjs`、`deploy/systemd/gouxiangdb-backup.{service,timer}` |
 | [restore.md](restore.md) | 从备份恢复：临时库校验、隔离现网、就位、migrate deploy、readyz 验收 | `apps/api/scripts/backup/verify-restore.mjs` |
 | [wal-crash-recovery.md](wal-crash-recovery.md) | SQLite WAL/-shm 崩溃恢复纪律（禁止凭感觉手删旁路文件） | 库文件三件套处理流程 |
+| [m1-sidecar.md](m1-sidecar.md) | M1 数据底座：sidecar 巡检/重建、功能 flag 回退、大表与搜索有界预览边界 | `scripts/bench/{check,backfill}-sidecar.ts`、`GX_M1_*` flag |
 | [ci.md](ci.md) | 平台中立质量门、真 ESLint 基线、本地复现 CI、Gitee Go 开通与 runner | `scripts/ci-quality.sh`、`eslint.config.mjs`、`.workflow/ci.yml` |
 
 ## 相关架构决策（ADR）
 
 - [ADR-0003](../adr/0003-bare-metal-topology.md)：私有部署拓扑（Caddy + systemd 单实例 + WAL 单写者）
+- [ADR-0004](../adr/0004-eav-sidecar-index.md)：动态字段 EAV 旁路索引与写时同事务维护
+- [ADR-0005](../adr/0005-fulltext-search.md)：全文检索边界（M1 只定边界，M5 落地统一检索）
 - [ADR-0007](../adr/0007-sqlite-online-backup.md)：SQLite 在线备份、保留与季度恢复演练
 - [ADR-0009](../adr/0009-deployment-dual-track-probe.md)：部署双轨与 Docker 探针（占位）
 - [ADR-0010](../adr/0010-offsite-age-encryption.md)：异地备份 age X25519 加密、解密身份分离

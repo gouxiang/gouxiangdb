@@ -4,6 +4,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
+import { SEARCH_PREVIEW_LIMIT, boundedPreviewMarker } from "./searchBounds.js";
 import { prisma, withWriteTx, withWriteBatch, runWrite, type DbTx } from "../db.js";
 import {
   requireCanView,
@@ -544,10 +545,12 @@ records.get("/search", async (c) => {
 
   for (const t of tables) {
     const fields = await loadTableFields(t.id);
+    // ADR-0005：每表只取前 SEARCH_PREVIEW_LIMIT 条活记录做内存子串匹配（有界预览，
+    // 非全量召回）；M5 统一检索派生库落地后替换。截断事实随响应 boundedPreview 标记返回。
     const recs = await prisma.record.findMany({
       where: { tableId: t.id, deletedAt: null },
       orderBy: { createdAt: "asc" },
-      take: 2000,
+      take: SEARCH_PREVIEW_LIMIT,
     });
     for (const r of recs) {
       const stored = parseStoredFields(r.fields);
@@ -575,7 +578,8 @@ records.get("/search", async (c) => {
     if (results.length >= 100) break;
   }
 
-  return c.json({ results });
+  // additive：保留 results 既有形状，另挂有界预览标记（ADR-0005，前端可提示"结果为预览"）。
+  return c.json({ results, ...boundedPreviewMarker() });
 });
 
 function recordTitle(raw: unknown): string {

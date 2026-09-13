@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { prisma } from "../db.js";
 import { requireUserId, errorResponse } from "../guards.js";
 import { isComputedFieldType } from "../domain/types.js";
+import { SEARCH_PREVIEW_LIMIT, boundedPreviewMarker } from "./searchBounds.js";
 
 export const search = new Hono();
 
@@ -73,10 +74,12 @@ search.get("/", async (c) => {
           select: { id: true, name: true, type: true },
         });
         const searchable = fields.filter((f) => !isComputedFieldType(f.type));
+        // ADR-0005：每表只取前 SEARCH_PREVIEW_LIMIT 条活记录做内存子串匹配（有界预览，
+        // 非全量召回）；知识库 docs 支路不受此限。M5 统一检索派生库落地后替换该口径。
         const recs = await prisma.record.findMany({
           where: { tableId: t.id, deletedAt: null },
           orderBy: { createdAt: "asc" },
-          take: 2000,
+          take: SEARCH_PREVIEW_LIMIT,
         });
         for (const r of recs) {
           const stored = parseStoredFields(r.fields);
@@ -149,7 +152,8 @@ search.get("/", async (c) => {
       }
     }
 
-    return c.json({ records: recordHits, docs: docHits });
+    // additive：records 为有界预览（ADR-0005），docs 支路有自己的 take；挂标记供前端提示。
+    return c.json({ records: recordHits, docs: docHits, ...boundedPreviewMarker() });
   } catch (e) {
     return errorResponse(c, e);
   }
