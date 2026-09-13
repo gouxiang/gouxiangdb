@@ -13,11 +13,17 @@
 import type Database from "better-sqlite3";
 import type { SqlBindValue } from "../../db/rawRead.js";
 import type { SortJoin } from "./compile.js";
+import type { CountPlan } from "./compileCount.js";
 
 export interface PhysicalFilter {
   /** compile.ts 产出的 WHERE 片段（别名 r），不含前导 AND；null=无物理谓词。 */
   filterSql: string | null;
   filterParams: SqlBindValue[];
+  /**
+   * 可选 rfi JOIN 驱动计数快速计划（S10）：提供时 countPhysical 用 JOIN range seek 而非
+   * records 全表相关 EXISTS（标量正向谓词下约快 1000 倍）；null 回退 filterSql 口径。
+   */
+  countPlan?: CountPlan | null;
 }
 
 export interface CandidateQuery extends PhysicalFilter {
@@ -67,6 +73,16 @@ export interface SidecarQuerier {
   physicalKeysetOnCreatedAt(q: KeysetPageArgs): KeysetIdPage;
   /** 物理过滤 + 物理排序后的有序候选 recordId（tie-break createdAt,id 升序）。 */
   physicalOrderedIds(q: CandidateQuery): string[];
+  /**
+   * 无排序（createdAt,id 升序）候选集上直接按 offset/limit 取一页 id，不物化全量候选。
+   * 仅供 S6 A 档【无排序】分页（keyset=off 的 planner）；用不超过 ceil(offset/limit)+1 次
+   * 索引 seek 快进到 offset（与 S7 T1 同策略，无 SQL OFFSET）。
+   */
+  physicalCreatedPage(
+    q: PhysicalFilter & { tableId: string },
+    offset: number,
+    limit: number,
+  ): string[];
   /** 物理字段表尾聚合（percent* 由 count/empty/filled 推导）。 */
   physicalAggregates(req: PhysicalAggRequest): Record<string, number | null>;
   /** singleSelect/checkbox 分桶（不在 SQL 排序，顺序交应用层）。 */
@@ -119,6 +135,17 @@ function orderBySql(sortJoins: SortJoin[] | null): string {
  */
 export function createSidecarQuerier(db: Database.Database): SidecarQuerier {
   function countPhysical(q: PhysicalFilter & { tableId: string }): number {
+    // 计数快速路径：rfi INNER JOIN 驱动（占位符按 SQL 文本顺序：各 JOIN 的 tableId/fieldId/
+    // 谓词值在前，records 的 tableId 在 WHERE）。标量字段 JOIN 不重复计数，见 compileCount 头注。
+    if (q.countPlan) {
+      const sql =
+        `SELECT count(*) AS n FROM records r ${q.countPlan.joins} ` +
+        `WHERE r."tableId"=? AND r."deletedAt" IS NULL`;
+      const row = db
+        .prepare(sql)
+        .get(...q.countPlan.joinParams, q.tableId) as { n: number };
+      return Number(row.n);
+    }
     const row = db
       .prepare(`SELECT count(*) AS n FROM records r WHERE ${liveWhere(q.filterSql)}`)
       .get(q.tableId, ...q.filterParams) as { n: number };
@@ -151,6 +178,28 @@ export function createSidecarQuerier(db: Database.Database): SidecarQuerier {
       .prepare(sql)
       .all(...join.params, q.tableId, ...q.filterParams) as { id: string }[];
     return rows.map((r) => r.id);
+  }
+
+  function physicalCreatedPage(
+    q: PhysicalFilter & { tableId: string },
+    offset: number,
+    limit: number,
+  ): string[] {
+    // 用 keyset seek 快进 offset 行（每步至多 limit 行，全走覆盖索引），再取目标页；
+    // 全程不物化全量候选，与 S7 T1 physicalKeysetOnCreatedAt 同一索引路径。
+    let cursor: { createdAt: number; id: string } | null = null;
+    let remaining = Math.max(0, offset);
+    while (remaining > 0) {
+      const step = Math.min(remaining, limit);
+      const p = physicalKeysetOnCreatedAt({ ...q, cursor, limit: step });
+      if (p.rows.length === 0) return []; // offset 越过集合末尾
+      const last = p.rows[p.rows.length - 1]!;
+      cursor = { createdAt: last.createdAt, id: last.id };
+      remaining -= p.rows.length;
+      if (!p.hasMore) return []; // 已到集合末尾，目标页为空
+    }
+    const page = physicalKeysetOnCreatedAt({ ...q, cursor, limit });
+    return page.rows.map((r) => r.id);
   }
 
   function physicalAggregates(req: PhysicalAggRequest): Record<string, number | null> {
@@ -254,6 +303,7 @@ export function createSidecarQuerier(db: Database.Database): SidecarQuerier {
     countPhysical,
     physicalKeysetOnCreatedAt,
     physicalOrderedIds,
+    physicalCreatedPage,
     physicalAggregates,
     physicalGroupBuckets,
     sortNumericClean,

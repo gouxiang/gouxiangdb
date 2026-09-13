@@ -195,6 +195,76 @@ describe("AND/OR/NOT 布尔组合", () => {
   });
 });
 
+describe("同字段范围谓词合并为单 EXISTS", () => {
+  it("同字段 gte+lte 合并成一个 EXISTS（一次 tableId/fieldId 绑定，双谓词同 inner）", () => {
+    const tree: FilterNode = {
+      kind: "and",
+      children: [cond("age", "gte", "10"), cond("age", "lte", "20")],
+    };
+    const p = compileOne(tree);
+    expect(p.residual).toBeNull();
+    // 只有一个 EXISTS（不是两个相关子查询）。
+    expect((p.filterSql!.match(/EXISTS\(/g) ?? []).length).toBe(1);
+    expect(p.filterSql).toContain('"valueNum" >= ?');
+    expect(p.filterSql).toContain('"valueNum" <= ?');
+    expect(p.filterSql).toContain(" AND ");
+    // 绑定：tableId → fieldId → 下界 → 上界（与 inner 中 ? 同序）。
+    expect(p.filterParams).toEqual(["T1", "age", 10, 20]);
+    expect((p.filterSql!.match(/\?/g) ?? []).length).toBe(p.filterParams.length);
+  });
+
+  it("同字段三个正向谓词（gt+lt+eq）全部并入单 EXISTS，按 children 原序", () => {
+    const tree: FilterNode = {
+      kind: "and",
+      children: [cond("age", "gt", "1"), cond("age", "lt", "9"), cond("age", "eq", "5")],
+    };
+    const p = compileOne(tree);
+    expect((p.filterSql!.match(/EXISTS\(/g) ?? []).length).toBe(1);
+    expect(p.filterParams).toEqual(["T1", "age", 1, 9, 5]);
+  });
+
+  it("日期字段同字段范围同样合并为单 EXISTS（valueNum 毫秒）", () => {
+    const tree: FilterNode = {
+      kind: "and",
+      children: [cond("born", "gte", "2026-01-01"), cond("born", "lt", "2026-02-01")],
+    };
+    const p = compileOne(tree);
+    expect((p.filterSql!.match(/EXISTS\(/g) ?? []).length).toBe(1);
+    expect(p.filterParams).toEqual(["T1", "born", Date.parse("2026-01-01"), Date.parse("2026-02-01")]);
+  });
+
+  it("neq（NOT 折叠）不参与合并，仍独立成 NOT EXISTS", () => {
+    const tree: FilterNode = {
+      kind: "and",
+      children: [cond("age", "gte", "10"), cond("age", "neq", "15")],
+    };
+    const p = compileOne(tree);
+    // 一个正向范围 EXISTS + 一个 NOT EXISTS。
+    expect((p.filterSql!.match(/EXISTS\(/g) ?? []).length).toBe(2);
+    expect(p.filterSql).toContain("NOT EXISTS");
+  });
+
+  it("不同字段的范围谓词不合并（各一个 EXISTS）", () => {
+    const tree: FilterNode = {
+      kind: "and",
+      children: [cond("age", "gte", "10"), cond("stars", "lte", "4")],
+    };
+    const p = compileOne(tree);
+    expect((p.filterSql!.match(/EXISTS\(/g) ?? []).length).toBe(2);
+    expect(p.filterParams).toEqual(["T1", "age", 10, "T1", "stars", 4]);
+  });
+
+  it("多选字段 isAnyOf 不参与范围合并（多行，∃P1∧∃P2≠∃(P1∧P2)）", () => {
+    // tags 两次 isAnyOf 应各自一个 EXISTS，不被当 valueNum 合并。
+    const tree: FilterNode = {
+      kind: "and",
+      children: [cond("tags", "isAnyOf", "a,b"), cond("tags", "isAnyOf", "c")],
+    };
+    const p = compileOne(tree);
+    expect((p.filterSql!.match(/EXISTS\(/g) ?? []).length).toBe(2);
+  });
+});
+
 describe("排序下推分类", () => {
   it("全物理过滤 + valueNum 族排序 → sortJoins", () => {
     const p = compileOne(cond("age", "gt", "0"), [{ fieldId: "stars", direction: "desc" }]);

@@ -131,6 +131,18 @@ export function renderMarkdown(meta: RunMeta, results: ScenarioResult[], verdict
     ].join(" | "));
   }
   lines.push("");
+  // 失败原因分布（仅在有失败时）：传输层错误码 / 非预期 HTTP 状态，便于定位连接层问题。
+  const failed = results.filter((r) => r.stats.failures > 0 && Object.keys(r.stats.errors).length > 0);
+  if (failed.length > 0) {
+    lines.push("## 失败原因分布");
+    for (const r of failed) {
+      const detail = Object.entries(r.stats.errors)
+        .map(([code, n]) => `${code}×${n}`)
+        .join("，");
+      lines.push(`- \`${r.scene}\`：${detail}`);
+    }
+    lines.push("");
+  }
   if (verdict.breaches.length > 0) {
     lines.push("## 未达标项");
     for (const b of verdict.breaches) lines.push(`- ${b}`);

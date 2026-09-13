@@ -14,6 +14,12 @@ export interface Sample {
   status: number;
   /** 是否客户端超时（AbortController）；超时是失败的一类但单列计数。 */
   timedOut: boolean;
+  /**
+   * fetch 抛出时的传输层错误码（ECONNRESET/ECONNREFUSED/UND_ERR_SOCKET…），成功为 null。
+   * S9 C≥8 排障用：区分「服务端返回非 2xx」与「请求根本没拿到响应（连接层失败）」，
+   * 后者旧实现被 catch 吞成裸 status=0，无法定位 keep-alive 竞态/连接池打爆。
+   */
+  errorCode: string | null;
 }
 
 export interface Percentiles {
@@ -61,6 +67,8 @@ export interface ScenarioStats {
   prismaCallsAvg: number;
   prismaCallsMax: number;
   rssPeakBytes: number;
+  /** 传输层失败错误码直方图（码 → 次数；含连接重置/拒绝/套接字错误与非 2xx 状态码）。 */
+  errors: Record<string, number>;
 }
 
 /**
@@ -68,23 +76,30 @@ export interface ScenarioStats {
  * QPS = 成功+失败采样总数 / 墙钟秒（反映真实并发吞吐，而非串行均值倒数）。
  */
 export function summarizeSamples(samples: Sample[], wallMs: number): ScenarioStats {
-  const failures = samples.filter((s) => !s.ok).length;
+  const failures = samples.filter((s) => !s.ok);
   const timeouts = samples.filter((s) => s.timedOut).length;
-  const ok = samples.filter((s) => s.ok);
+  const okSamples = samples.filter((s) => s.ok);
   const avg = (xs: number[]): number => (xs.length === 0 ? 0 : xs.reduce((a, v) => a + v, 0) / xs.length);
+  // 失败原因直方图：传输层错误码优先；服务端有响应但非预期状态记 HTTP<status>。
+  const errors: Record<string, number> = {};
+  for (const s of failures) {
+    const key = s.errorCode ?? `HTTP${s.status}`;
+    errors[key] = (errors[key] ?? 0) + 1;
+  }
   return {
     samples: samples.length,
-    failures,
+    failures: failures.length,
     timeouts,
-    failureRate: samples.length === 0 ? 0 : failures / samples.length,
+    failureRate: samples.length === 0 ? 0 : failures.length / samples.length,
     qps: wallMs > 0 ? samples.length / (wallMs / 1000) : 0,
     client: summarize(samples.map((s) => s.clientMs)),
-    serve: summarize(ok.map((s) => s.serveMs)),
-    physicalSqlAvg: avg(ok.map((s) => s.physicalSql)),
-    physicalSqlMax: ok.reduce((m, s) => Math.max(m, s.physicalSql), 0),
-    prismaCallsAvg: avg(ok.map((s) => s.prismaCalls)),
-    prismaCallsMax: ok.reduce((m, s) => Math.max(m, s.prismaCalls), 0),
+    serve: summarize(okSamples.map((s) => s.serveMs)),
+    physicalSqlAvg: avg(okSamples.map((s) => s.physicalSql)),
+    physicalSqlMax: okSamples.reduce((m, s) => Math.max(m, s.physicalSql), 0),
+    prismaCallsAvg: avg(okSamples.map((s) => s.prismaCalls)),
+    prismaCallsMax: okSamples.reduce((m, s) => Math.max(m, s.prismaCalls), 0),
     rssPeakBytes: samples.reduce((m, s) => Math.max(m, s.rssBytes), 0),
+    errors,
   };
 }
 

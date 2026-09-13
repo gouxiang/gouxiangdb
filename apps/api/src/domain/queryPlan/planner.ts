@@ -90,14 +90,6 @@ export async function runQueryPlan(
   const hasGroup = Boolean(config.groupByFieldId);
   const aggPhysical = aggregationsFullyPhysical(fields, config);
 
-  // 物理有序候选 ids（物理过滤 + 物理排序，tie-break createdAt,id）。
-  const candidateIds = q.physicalOrderedIds({
-    tableId,
-    filterSql: plan.filterSql,
-    filterParams: plan.filterParams,
-    sortJoins: plan.sortJoins,
-  });
-
   const cleanSort =
     plan.sortJoins === null
       ? sorts.length === 0 // 无排序：无所谓洁净
@@ -118,24 +110,38 @@ export async function runQueryPlan(
     aggPhysical,
   });
 
+  const filter = { filterSql: plan.filterSql, filterParams: plan.filterParams, countPlan: plan.countPlan };
+
   // ---- A. 纯物理快速档 ----
   if (eligible) {
-    const filteredTotal = q.countPhysical({
-      tableId,
-      filterSql: plan.filterSql,
-      filterParams: plan.filterParams,
-    });
-    const pageIds = input.noPaging
+    const filteredTotal = q.countPhysical({ tableId, ...filter });
+    // 无排序 + 分页：直接按 (createdAt,id) 索引 seek 取当页，不物化全量候选
+    //（高命中范围过滤从全表 N 行降到一页，消除双相关 EXISTS 的 O(n²) 放大）。
+    const pageIds =
+      !input.noPaging && sorts.length === 0
+        ? q.physicalCreatedPage({ tableId, ...filter }, input.offset, input.limit)
+        : null;
+    if (pageIds !== null) {
+      const raw = await fetchRawByIds(tableId, pageIds);
+      const hydrated = orderByIds(await hydrateRecords(raw, fields, prismaDeps), pageIds);
+      const aggregations = physicalAggregations(q, tableId, fields, config, plan);
+      return { records: hydrated, total, filteredTotal, groups: null, aggregations, mode: "physical", degraded: false };
+    }
+    // 导出（noPaging）或物理排序档：仍需完整有序候选序列。
+    const candidateIds = q.physicalOrderedIds({ tableId, ...filter, sortJoins: plan.sortJoins });
+    const sliceIds = input.noPaging
       ? candidateIds
       : candidateIds.slice(input.offset, input.offset + input.limit);
-    const raw = await fetchRawByIds(tableId, pageIds);
-    const hydrated = orderByIds(await hydrateRecords(raw, fields, prismaDeps), pageIds);
+    const raw = await fetchRawByIds(tableId, sliceIds);
+    const hydrated = orderByIds(await hydrateRecords(raw, fields, prismaDeps), sliceIds);
     const aggregations = physicalAggregations(q, tableId, fields, config, plan);
     return { records: hydrated, total, filteredTotal, groups: null, aggregations, mode: "physical", degraded: false };
   }
 
   // ---- B. 受限宽口径 ----
   // 进入此档必然至少一项需内存：残余过滤/搜索/分组/排序未全下推/聚合不可全下推。
+  // 物理粗筛得到候选【超集】（无排序即 createdAt 序），后续整段 hydrate + S5 同一精修。
+  const candidateIds = q.physicalOrderedIds({ tableId, ...filter, sortJoins: plan.sortJoins });
   const needsMemSort = sorts.length > 0 && plan.sortJoins === null;
   const degraded =
     candidateIds.length > resolveInMemLimit() &&

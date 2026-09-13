@@ -192,6 +192,33 @@ describe("mod.runQueryPlan(计划器) vs mod.queryRecordsLegacy(S5) 逐值对拍
     expect(planned.records).toHaveLength(25);
   });
 
+  it("同字段数值 range(gte+lte)：rfi JOIN 计数与旧路径 filteredTotal/当页逐值一致", async () => {
+    // S10：range 计数走 compileCount 的 rfi JOIN 快速路径，必须与内存口径完全相等。
+    const config: ViewConfig = {
+      ...baseConfig(),
+      filters: { kind: "and", children: [
+        { kind: "condition", fieldId: F.age, op: "gte", value: "18" },
+        { kind: "condition", fieldId: F.age, op: "lte", value: "60" },
+      ] } as ViewConfig["filters"],
+    };
+    const { planned, legacy } = await expectParity(config, { limit: 30, offset: 0 });
+    expect(planned.mode).toBe("physical");
+    expect(planned.filteredTotal, "filteredTotal").toBe(legacy.filteredTotal);
+  });
+
+  it("同字段数值 OR（>90 或 <10）：rfi JOIN 计数与旧路径一致", async () => {
+    const config: ViewConfig = {
+      ...baseConfig(),
+      filters: { kind: "or", children: [
+        { kind: "condition", fieldId: F.age, op: "gt", value: "90" },
+        { kind: "condition", fieldId: F.age, op: "lt", value: "10" },
+      ] } as ViewConfig["filters"],
+    };
+    const { planned, legacy } = await expectParity(config);
+    expect(planned.mode).toBe("physical");
+    expect(planned.filteredTotal, "filteredTotal").toBe(legacy.filteredTotal);
+  });
+
   it("无过滤无排序默认 createdAt,id 升序：物理档全量当页", async () => {
     const { planned } = await expectParity(baseConfig(), { limit: 50, offset: 0 });
     expect(planned.mode).toBe("physical");

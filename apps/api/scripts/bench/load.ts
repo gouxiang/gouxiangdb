@@ -42,6 +42,19 @@ function headerNum(h: Headers, name: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * 沿 cause 链提取首个传输层错误码（ECONNRESET/ECONNREFUSED/UND_ERR_SOCKET…）。
+ * Node 全局 fetch（undici）常把系统错误包在 error.cause 里，故不能只看顶层 code。
+ */
+function errorCode(e: unknown): string | null {
+  let cur: any = e;
+  for (let depth = 0; cur && depth < 5; depth++) {
+    if (typeof cur.code === "string" && cur.code) return cur.code;
+    cur = cur.cause;
+  }
+  return e instanceof Error ? e.name : "UNKNOWN";
+}
+
 /** 该场景是否走 keyset cursor 翻页（仅 on 档响应带 nextCursor）。 */
 function useCursor(o: RunOptions): boolean {
   return o.mode === "on";
@@ -74,6 +87,7 @@ async function fire(url: string, init: RequestInit | undefined, t0: number, time
   let h = new Headers();
   let body: any = null;
   let timedOut = false;
+  let errorCodeStr: string | null = null;
   try {
     const res = await fetch(url, { ...(init ?? {}), signal: ctrl.signal });
     status = res.status;
@@ -81,6 +95,7 @@ async function fire(url: string, init: RequestInit | undefined, t0: number, time
     body = await res.json().catch(() => null);
   } catch (e) {
     timedOut = (e as Error).name === "AbortError";
+    errorCodeStr = errorCode(e);
   } finally {
     clearTimeout(timer);
   }
@@ -95,6 +110,7 @@ async function fire(url: string, init: RequestInit | undefined, t0: number, time
       ok,
       status,
       timedOut,
+      errorCode: errorCodeStr,
     },
     body,
   };

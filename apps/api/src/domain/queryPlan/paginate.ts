@@ -82,21 +82,11 @@ export async function runKeysetPaging(
   const hasGroup = Boolean(config.groupByFieldId);
   const aggPhysical = aggregationsFullyPhysical(fields, config);
 
-  const candidateIds = q.physicalOrderedIds({
-    tableId,
-    filterSql: plan.filterSql,
-    filterParams: plan.filterParams,
-    sortJoins: plan.sortJoins,
-  });
+  const filter = { filterSql: plan.filterSql, filterParams: plan.filterParams, countPlan: plan.countPlan };
   const cleanSort =
     plan.sortJoins === null
       ? sorts.length === 0
-      : q.sortNumericClean({
-          tableId,
-          fieldIds: plan.sortJoins.map((s) => s.fieldId),
-          filterSql: plan.filterSql,
-          filterParams: plan.filterParams,
-        });
+      : q.sortNumericClean({ tableId, fieldIds: plan.sortJoins.map((s) => s.fieldId), ...filter });
   const eligible = physicalPathEligible({
     filtersFullyPhysical: plan.filtersFullyPhysical,
     hasSearch,
@@ -107,9 +97,14 @@ export async function runKeysetPaging(
     aggPhysical,
   });
 
+  // T1（无排序且全物理）走原生 createdAt keyset 索引取页，【绝不】物化全量候选序列；
+  // 旧实现无条件先跑 physicalOrderedIds，让高命中范围过滤在分页前就把整表物化（S10 6.9s 真因）。
   if (eligible && sorts.length === 0) {
     return await pageCreated(q, input, plan, rawCursor, total);
   }
+
+  // T2（物理排序）/ T3（宽口径）才需要物化候选序列：T2 在其上续点，T3 整段 hydrate 精修。
+  const candidateIds = q.physicalOrderedIds({ tableId, ...filter, sortJoins: plan.sortJoins });
   if (eligible) {
     return await pageSorted(q, input, plan, candidateIds, rawCursor, total);
   }
@@ -125,7 +120,7 @@ async function pageCreated(
   total: number,
 ): Promise<KeysetPageResult> {
   const { tableId, fields, config, limit, offset } = input;
-  const filter = { filterSql: plan.filterSql, filterParams: plan.filterParams };
+  const filter = { filterSql: plan.filterSql, filterParams: plan.filterParams, countPlan: plan.countPlan };
   const filteredTotal = q.countPhysical({ tableId, ...filter });
 
   // 无游标但带老 offset：逐页 seek 恰好前进 offset 行，把游标定位到目标行的【前一行】。
