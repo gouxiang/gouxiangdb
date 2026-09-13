@@ -149,8 +149,9 @@ flag 生命周期（shadow→on 时间表、稳定一迭代后删旧路径的条
 
 - [ADR-0002](0002-database-sqlite.md)：SQLite 基线、手写迁移与 raw SQL 纪律
 - [ADR-0005](0005-fulltext-search.md)：全文检索边界（占位）；sidecar 不管子串召回
-- ADR-0008（预留不写）：迁 PostgreSQL 的客观阈值；本 ADR 的方言中性为其留通道；
-  S10 已据客观条件判定本轮不触发
+- [ADR-0008](0008-sqlite-capacity-falsification-gate.md)：SQLite 容量证伪门与 PG 切换阈值
+  （Proposed）；本 ADR 的方言中性为其 PG 通道留路。S10 客观门判定本轮**不触发**迁库——
+  物理索引层 50 万行 0.4–12ms 无 SCAN，剩余瓶颈在应用 hydration 扇出而非 SQLite 物理能力。
 - 迁移：`apps/api/prisma/migrations/20260913062000_record_field_index_sidecar/migration.sql`
 - 策略/维护：`apps/api/src/domain/fieldIndex/{policy,sync}.ts`
 - 读下推：`apps/api/src/domain/queryPlan/*`（flags/planner/compile/sidecarQuery）
