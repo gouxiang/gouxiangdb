@@ -191,7 +191,10 @@ describe("取数批次：A 旧串行 N+1 基线 vs B 两阶段常量（M1/S5）"
     expect(counts.recordBatchSizes.filter((n) => n === 1).length).toBe(17);
   });
 
-  it("B：两阶段批量化把 getRecordsByIds/getLinkRows 收敛为常量（不随页内 N 线性涨）", async () => {
+  // GX_HYDRATE_PREFETCH=off 时 hydrateRecords 明确回退 legacy（19/20），常量形状不成立 → 跳过；
+  // A/legacy 与逐值快照两态都跑。
+  const itBatch = it.skipIf(process.env.GX_HYDRATE_PREFETCH === "off");
+  itBatch("B：两阶段批量化把 getRecordsByIds/getLinkRows 收敛为常量（不随页内 N 线性涨）", async () => {
     const { counts } = await hydrateEmp();
     // 改造后（BatchStore BFS 预热 + 组级去重，同一夹具，注入计数 deps 无 bulk 实现）：
     //   getRecordsByIds=1（对端 dept 一条 IN；emp 自引用根记录已在缓存，0 额外查询）；

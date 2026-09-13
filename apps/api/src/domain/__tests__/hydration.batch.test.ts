@@ -224,7 +224,10 @@ describe("S5 查询常量化：调用次数不随页内行数 N 增长", () => {
     return d.counts;
   }
 
-  it("N=10 与 N=100 的 getFields/getRecordsByIds/getLinkRows 调用次数完全相等", async () => {
+  // GX_HYDRATE_PREFETCH=off 时 hydrateRecords 回退 legacy，调用数随 N 增长，常量断言不成立 → 跳过；
+  // 下方 legacy 线性对照与上方 batch↔legacy 逐值对拍两态都跑（off 时 batch 即 legacy，仍全等）。
+  const itBatchConst = it.skipIf(process.env.GX_HYDRATE_PREFETCH === "off");
+  itBatchConst("N=10 与 N=100 的 getFields/getRecordsByIds/getLinkRows 调用次数完全相等", async () => {
     const c10 = await run(10);
     const c100 = await run(100);
     // 三种查询的【次数】是 schema 常量，不随行数增长：
