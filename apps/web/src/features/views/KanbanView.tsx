@@ -5,9 +5,12 @@
 // 看板视图：按 singleSelect 字段分列，支持 HTML5 拖拽换列
 
 import { useMemo, useState } from "react";
-import { useRecords, useFields, useGXMutations } from "../../api/hooks";
+import { useFields, useGXMutations } from "../../api/hooks";
+import { useRecordsBounded } from "../../api/records-paging-hooks";
+import { isComputedInMem } from "../../api/records-paging";
 import type { FieldDTO, RecordDTO } from "@gx/shared-types";
 import { Button, EmptyState, Spinner, Select, toast } from "../../components/ui";
+import { ResultNotice, boundedResultText, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
 import { FieldValue, resolveSelectOption, type ViewProps } from "./field-controls";
 
 export default function KanbanView({
@@ -17,12 +20,16 @@ export default function KanbanView({
   permissions,
   onOpenRecord,
 }: ViewProps) {
-  const { data: recordsRes, isLoading } = useRecords({ tableId, viewId });
+  const bounded = useRecordsBounded({ tableId, viewId });
   const { data: fieldsRes } = useFields(tableId);
   const m = useGXMutations();
 
   const fields = fieldsRes ?? [];
-  const records = recordsRes?.records ?? [];
+  const records = bounded.records;
+  const isLoading = bounded.isLoading;
+  const truncated = bounded.bounded;
+  const shownCount = bounded.records.length;
+  const degraded = isComputedInMem(bounded.degraded);
   const kanbanField = fields.find((f) => f.id === view.config.kanbanFieldId);
 
   // 未配置分组字段：引导用户选择一个 singleSelect 字段
@@ -123,7 +130,21 @@ export default function KanbanView({
   }
 
   return (
-    <div className="h-full overflow-x-auto bg-gx-card-bg p-gx-lg">
+    <div className="flex h-full flex-col bg-gx-card-bg">
+      {(truncated || degraded) && (
+        <div className="shrink-0 px-gx-lg pt-gx-md">
+          {degraded ? (
+            <ResultNotice tone="warning" role="alert">
+              {DEGRADED_RESULT_TEXT}
+            </ResultNotice>
+          ) : (
+            <ResultNotice tone="warning">
+              {boundedResultText(bounded.declaredTotal, shownCount)}
+            </ResultNotice>
+          )}
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-x-auto p-gx-lg">
       <div className="flex h-full gap-3" style={{ minWidth: columns.length * 280 }}>
         {columns.map((col) => {
           const colRecords = grouped.get(col.key) ?? [];
@@ -196,6 +217,7 @@ export default function KanbanView({
             </div>
           );
         })}
+      </div>
       </div>
     </div>
   );

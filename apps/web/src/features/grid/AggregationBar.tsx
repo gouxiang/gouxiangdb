@@ -43,6 +43,12 @@ export interface AggregationBarProps {
   rowHeaderWidth: number;
   primaryFieldId: string;
   onPick: (fieldId: string, func: AggFunc | null) => void;
+  /**
+   * S8：服务端 degraded 含 computedInMem 时，聚合为受限/降级口径。
+   * 已配置聚合的单元格不再展示精确数值，改为「受限」标注，仍可点击改聚合函数；
+   * 数据行本身不受影响（在调用方处理），这里只处理统计口径。
+   */
+  degraded?: boolean;
 }
 
 export function AggregationBar({
@@ -53,6 +59,7 @@ export function AggregationBar({
   rowHeaderWidth,
   primaryFieldId,
   onPick,
+  degraded = false,
 }: AggregationBarProps) {
   const [openField, setOpenField] = useState<string | null>(null);
 
@@ -62,7 +69,9 @@ export function AggregationBar({
         className="sticky left-0 z-20 border-b border-r border-gx-separator bg-gx-bg"
         style={{ width: rowHeaderWidth, minWidth: rowHeaderWidth }}
       >
-        <div className="flex h-8 items-center px-2 text-gx-11 text-gx-text-hint">聚合</div>
+        <div className="flex h-8 items-center px-2 text-gx-11 text-gx-text-hint">
+          {degraded ? "聚合·受限" : "聚合"}
+        </div>
       </td>
       {fields.map((field) => {
         const func = config[field.id] ?? null;
@@ -88,10 +97,17 @@ export function AggregationBar({
               onClick={() => setOpenField((v) => (v === field.id ? null : field.id))}
             >
               {func ? (
-                <>
-                  <span className="text-gx-text-hint">{AGG_FUNC_LABEL[func]}</span>
-                  <span className="font-medium text-gx-text-primary">{fmtAgg(value)}</span>
-                </>
+                degraded ? (
+                  <>
+                    <span className="text-gx-text-hint">{AGG_FUNC_LABEL[func]}</span>
+                    <span className="font-medium text-gx-text-hint">受限</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-gx-text-hint">{AGG_FUNC_LABEL[func]}</span>
+                    <span className="font-medium text-gx-text-primary">{fmtAgg(value)}</span>
+                  </>
+                )
               ) : (
                 <Icon name="plus" size={12} className="text-gx-text-hint" />
               )}

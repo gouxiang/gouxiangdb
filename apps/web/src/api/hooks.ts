@@ -216,6 +216,8 @@ export interface UseRecordsParams {
   limit?: number;
   offset?: number;
   search?: string;
+  /** S7 keyset 游标（分页 hook 在 records-paging-hooks.ts 管理，直接用本 hook 的场景一般不传）。 */
+  cursor?: string;
 }
 
 export interface RecordsResult {
@@ -226,13 +228,17 @@ export interface RecordsResult {
   allFields: FieldDTO[];
   groups: GroupBucketDTO[] | null;
   aggregations: Record<string, number | null> | null;
+  // S7 additive 三键：仅服务端 keyset 开启时出现，缺省即「未开启」（能力探测依据）。
+  nextCursor?: string | null;
+  hasMore?: boolean;
+  degraded?: string[];
 }
 
 export function useRecords(params: UseRecordsParams): UseQueryResult<RecordsResult> {
-  const { tableId, viewId, limit, offset, search } = params;
+  const { tableId, viewId, limit, offset, search, cursor } = params;
   return useQuery({
     queryKey: QK.records(tableId ?? "", viewId),
-    queryFn: async () => await Records.list({ tableId: tableId!, viewId, limit, offset, search }),
+    queryFn: async () => await Records.list({ tableId: tableId!, viewId, limit, offset, search, cursor }),
     enabled: enabledOf(tableId),
   });
 }

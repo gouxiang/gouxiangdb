@@ -11,6 +11,8 @@ import { Button, FieldIcon, Modal, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { MdContent } from "../../components/MdContent";
 import { useFields, useGXMutations, useRecords } from "../../api/hooks";
+import { useLinkCandidates } from "../../api/records-paging-hooks";
+import { ResultNotice, LINK_NARROW_TEXT } from "../common/ResultNotice";
 import { FieldInput, FieldValue, isReadonlyField } from "../views/field-controls";
 import { FormDesigner } from "./FormDesigner";
 
@@ -539,17 +541,17 @@ function PeerRecordPickerModal({
   onClose: () => void;
   onConfirm: (picked: SubRef[]) => void;
 }) {
-  const { data } = useRecords({ tableId: peerTableId });
   const [query, setQuery] = useState("");
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  // 服务端限量（50/页）+ 关键字搜索（hook 内 250ms 防抖），绝不一次拉全表。
+  const candidatesQuery = useLinkCandidates({ tableId: peerTableId, search: query });
 
   const titleField = columns[0];
   const selfVals = selfValues ?? {};
   const candidates = useMemo(() => {
-    const recs = data?.records ?? [];
-    return recs.filter((r) => {
+    return candidatesQuery.records.filter((r) => {
       if (linkedIds.has(r.id)) return false;
-      // 应用字段级关联筛选（「匹配字段」取父记录本表值）
+      // 应用字段级关联筛选（「匹配字段」取父记录本表值）。关键字搜索由服务端完成。
       if (recordFilter) {
         const ok = evalFilter(
           recordFilter,
@@ -558,14 +560,10 @@ function PeerRecordPickerModal({
         );
         if (!ok) return false;
       }
-      if (query.trim() && titleField) {
-        const t = String((r.fields as Record<string, unknown>)[titleField.id] ?? "");
-        if (!t.toLowerCase().includes(query.trim().toLowerCase())) return false;
-      }
       return true;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, linkedIds, recordFilter, query, titleField, selfValues]);
+  }, [candidatesQuery.records, linkedIds, recordFilter, selfValues]);
 
   const toggle = (id: string) => {
     setChecked((prev) => {
@@ -578,10 +576,15 @@ function PeerRecordPickerModal({
 
   const confirm = () => {
     const picked: SubRef[] = [];
-    for (const r of data?.records ?? []) {
+    for (const r of candidatesQuery.records) {
       if (checked.has(r.id)) {
-        picked.push({ recordId: r.id, title: peerTitle(r, columns, r.id) });
+        picked.push({ recordId: r.id, title: peerTitle(r as { fields: Record<string, unknown> }, columns, r.id) });
       }
+    }
+    // 已勾选但不在当前候选页（搜索后翻页/换关键字）的项：用 columns 首列取不到标题时回退 id 前缀。
+    for (const id of checked) {
+      if (candidatesQuery.records.some((r) => r.id === id)) continue;
+      picked.push({ recordId: id, title: id.slice(0, 8) });
     }
     onConfirm(picked);
   };
@@ -610,6 +613,11 @@ function PeerRecordPickerModal({
       {recordFilter && (
         <div className="mb-2 rounded-gx-sm bg-gx-accent-bg/50 px-2 py-1 text-gx-11 text-gx-accent">已应用字段默认筛选条件</div>
       )}
+      {candidatesQuery.needNarrow && (
+        <div className="mb-2">
+          <ResultNotice tone="warning">{LINK_NARROW_TEXT}</ResultNotice>
+        </div>
+      )}
       <div className="max-h-[50vh] overflow-y-auto rounded-gx-md border border-gx-border">
         <table className="w-full text-gx-12">
           <thead className="sticky top-0">
@@ -621,10 +629,11 @@ function PeerRecordPickerModal({
             </tr>
           </thead>
           <tbody>
-            {candidates.length === 0 && (
+            {candidatesQuery.isLoading ? (
+              <tr><td colSpan={columns.length + 1} className="px-2 py-8 text-center text-gx-12 text-gx-text-hint">加载中…</td></tr>
+            ) : candidates.length === 0 ? (
               <tr><td colSpan={columns.length + 1} className="px-2 py-8 text-center text-gx-12 text-gx-text-hint">没有可选择的记录</td></tr>
-            )}
-            {candidates.map((r) => (
+            ) : candidates.map((r) => (
               <tr
                 key={r.id}
                 onClick={() => toggle(r.id)}

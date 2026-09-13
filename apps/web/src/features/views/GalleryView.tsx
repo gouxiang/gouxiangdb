@@ -2,10 +2,13 @@
 // 画廊视图：响应式卡片流，封面 + 标题 + 配置字段，点击打开记录抽屉
 
 import { useMemo } from "react";
-import { useRecords, useFields, useTables, useGXMutations } from "../../api/hooks";
+import { useFields, useTables, useGXMutations } from "../../api/hooks";
+import { useRecordsBounded } from "../../api/records-paging-hooks";
+import { isComputedInMem } from "../../api/records-paging";
 import type { FieldDTO, RecordDTO } from "@gx/shared-types";
 import { colors } from "@gx/design-tokens";
 import { Button, EmptyState, Spinner, toast } from "../../components/ui";
+import { ResultNotice, boundedResultText, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
 import { FieldValue, type ViewProps } from "./field-controls";
 
 // 卡片占位封面：accent + secondary 的低饱和渐变，沿用 v1 视觉语言
@@ -19,7 +22,7 @@ export default function GalleryView({
   permissions,
   onOpenRecord,
 }: ViewProps) {
-  const { data: recordsRes, isLoading } = useRecords({ tableId, viewId });
+  const bounded = useRecordsBounded({ tableId, viewId });
   const { data: fieldsRes } = useFields(tableId);
   const { data: tables } = useTables(baseId);
   const m = useGXMutations();
@@ -27,7 +30,11 @@ export default function GalleryView({
   const table = tables?.find((t) => t.id === tableId);
   const primaryFieldId = table?.primaryFieldId;
   const fields = fieldsRes ?? [];
-  const records = recordsRes?.records ?? [];
+  const records = bounded.records;
+  const isLoading = bounded.isLoading;
+  const truncated = bounded.bounded;
+  const shownCount = bounded.records.length;
+  const degraded = isComputedInMem(bounded.degraded);
 
   const fieldMap = useMemo(() => {
     const map = new Map<string, FieldDTO>();
@@ -66,6 +73,15 @@ export default function GalleryView({
 
   return (
     <div className="h-full overflow-auto bg-gx-card-bg p-gx-lg">
+      {(truncated || degraded) && (
+        <div className="mb-3">
+          <ResultNotice tone="warning" role={degraded ? "alert" : "status"}>
+            {degraded
+              ? DEGRADED_RESULT_TEXT
+              : boundedResultText(bounded.declaredTotal, shownCount)}
+          </ResultNotice>
+        </div>
+      )}
       {records.length === 0 ? (
         <EmptyState
           icon="gallery"

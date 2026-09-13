@@ -15,8 +15,9 @@ import type {
   RecordIdT,
 } from "@gx/shared-types";
 import { Icon } from "../../components/icons";
-import { Input, Textarea, Popover, toast } from "../../components/ui";
-import { useRecords } from "../../api/hooks";
+import { Input, Textarea, Popover, Spinner, toast } from "../../components/ui";
+import { useLinkCandidates } from "../../api/records-paging-hooks";
+import { LINK_NARROW_TEXT } from "../common/ResultNotice";
 import { formatCell, isEmptyValue, resolveSelectOption } from "./format";
 
 export interface CellEditorProps {
@@ -398,27 +399,8 @@ function RatingEditor({ value, onCommit, onCancel }: CellEditorProps) {
 // ============ 关联：从关联表选记录 ============
 function LinksEditor({ value, field, recordFields, onCommit, onCancel }: CellEditorProps) {
   const relatedTableId = field.relatedTableId;
-  const { data } = useRecords({ tableId: relatedTableId });
-  const records = data?.records ?? [];
-  const relFields = data?.fields ?? [];
-  const titleField = relFields[0];
 
-  // 先应用 field.recordFilter（FieldEditorSheet 配的「关联筛选条件」持久化的子集过滤），
-  // 之后用户的搜索 + 临时 filterFieldId/Op/Value 都在 baseRecords 之上再过滤。
-  const recordFilter = field.recordFilter ?? null;
-  const selfVals = recordFields ?? {};
-  const baseRecords = useMemo(() => {
-    if (!recordFilter) return records;
-    return records.filter((r) =>
-      evalFilter(
-        recordFilter,
-        (fid) => r.fields[fid] as never,
-        (selfFid) => selfVals[selfFid] as never,
-      ),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [records, recordFilter, recordFields]);
-
+  // 已选项（来自当前值）：即便不在当前搜索结果里也必须能回显/取消，不依赖候选页是否包含它。
   const initial = useMemo(() => {
     if (!Array.isArray(value)) return new Map<string, LinkRefDTO>();
     const m = new Map<string, LinkRefDTO>();
@@ -431,6 +413,28 @@ function LinksEditor({ value, field, recordFields, onCommit, onCancel }: CellEdi
   const [filterFieldId, setFilterFieldId] = useState<string | null>(null);
   const [filterOp, setFilterOp] = useState<"contains" | "eq" | "gt" | "lt">("contains");
   const [filterValue, setFilterValue] = useState("");
+
+  // 服务端限量 + 关键字搜索（hook 内部 250ms 防抖）：limit 50，绝不一次拉全表。
+  const candidates = useLinkCandidates({ tableId: relatedTableId ?? null, search: query });
+  const relFields = candidates.fields;
+  const titleField = relFields[0];
+
+  // 先应用 field.recordFilter（FieldEditorSheet 配的「关联筛选条件」持久化的子集过滤），
+  // 再叠加临时 filterFieldId/Op/Value；都在当前候选页（≤50 条）之上做客户端收窄。
+  const recordFilter = field.recordFilter ?? null;
+  const selfVals = recordFields ?? {};
+  const baseRecords = useMemo(() => {
+    const records = candidates.records;
+    if (!recordFilter) return records;
+    return records.filter((r) =>
+      evalFilter(
+        recordFilter,
+        (fid) => r.fields[fid] as never,
+        (selfFid) => selfVals[selfFid] as never,
+      ),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidates.records, recordFilter, recordFields]);
 
   const toggle = (recId: string, title: string) => {
     setDraft((prev) => {
@@ -449,11 +453,8 @@ function LinksEditor({ value, field, recordFields, onCommit, onCancel }: CellEdi
   };
   const commit = () => onCommit(Array.from(draft.values()));
 
+  // 关键字由服务端 search 处理；这里只叠加临时的「任意字段」过滤。
   const filtered = baseRecords.filter((r) => {
-    if (titleField && query.trim()) {
-      const t = String(r.fields[titleField.id] ?? "");
-      if (!t.toLowerCase().includes(query.toLowerCase())) return false;
-    }
     if (filterFieldId && filterValue.trim()) {
       const v = String(r.fields[filterFieldId] ?? "");
       if (filterOp === "contains") { if (!v.toLowerCase().includes(filterValue.toLowerCase())) return false; }
@@ -464,7 +465,10 @@ function LinksEditor({ value, field, recordFields, onCommit, onCancel }: CellEdi
     return true;
   });
 
+  // 候选页中已存在的记录 id，用于把「已选但不在候选里」的项单独置顶回显。
+  const candidateIds = useMemo<Set<string>>(() => new Set(candidates.records.map((r) => r.id)), [candidates.records]);
   const selected = Array.from(draft.entries());
+  const selectedNotInCandidates = selected.filter(([id]) => !candidateIds.has(id));
 
   return (
     <Popover open onClose={commit} width={320} className="p-2">
@@ -530,21 +534,46 @@ function LinksEditor({ value, field, recordFields, onCommit, onCancel }: CellEdi
           ))}
         </div>
       )}
+      {/* 候选满页：可能还有更多未列出，明确提示输入关键字，绝不假装已列全。 */}
+      {candidates.needNarrow && (
+        <div className="mt-2 flex items-start gap-1 rounded-gx-sm bg-gx-warning-bg px-2 py-1 text-gx-11 text-gx-warning">
+          <Icon name="alertCircle" size={12} className="mt-0.5 shrink-0" />
+          <span>{LINK_NARROW_TEXT}</span>
+        </div>
+      )}
       <div className="mt-2 max-h-48 overflow-y-auto">
-        {filtered.length === 0 ? (
+        {candidates.isLoading ? (
+          <div className="flex items-center justify-center gap-2 px-2 py-3 text-gx-12 text-gx-text-hint">
+            <Spinner size={14} />
+            <span>加载中…</span>
+          </div>
+        ) : filtered.length === 0 && selectedNotInCandidates.length === 0 ? (
           <div className="px-2 py-2 text-gx-12 text-gx-text-hint">无匹配记录</div>
-        ) : filtered.map((r) => {
-          const title = titleField ? formatCell(r.fields[titleField.id], titleField) : r.id;
-          const checked = draft.has(r.id);
-          return (
-            <button key={r.id} type="button" onClick={() => toggle(r.id, title)} className="flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 text-left text-gx-13 hover:bg-gx-bg">
-              <span className={clsx("inline-flex h-4 w-4 items-center justify-center rounded border", checked ? "border-gx-accent bg-gx-accent text-white" : "border-gx-border")}>
-                {checked && <Icon name="check" size={12} />}
-              </span>
-              <span className="flex-1 truncate text-gx-text-primary">{title || "(空)"}</span>
-            </button>
-          );
-        })}
+        ) : (
+          <>
+            {/* 已选但不在当前候选页：置顶回显，标题沿用已存 LinkRef.title。 */}
+            {selectedNotInCandidates.map(([id, ref]) => (
+              <button key={`sel-${id}`} type="button" onClick={() => toggle(id, ref.title)} className="flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 text-left text-gx-13 hover:bg-gx-bg">
+                <span className="inline-flex h-4 w-4 items-center justify-center rounded border border-gx-accent bg-gx-accent text-white">
+                  <Icon name="check" size={12} />
+                </span>
+                <span className="flex-1 truncate text-gx-text-primary">{ref.title || "(空)"}</span>
+              </button>
+            ))}
+            {filtered.map((r) => {
+              const title = titleField ? formatCell(r.fields[titleField.id], titleField) : r.id;
+              const checked = draft.has(r.id);
+              return (
+                <button key={r.id} type="button" onClick={() => toggle(r.id, title)} className="flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 text-left text-gx-13 hover:bg-gx-bg">
+                  <span className={clsx("inline-flex h-4 w-4 items-center justify-center rounded border", checked ? "border-gx-accent bg-gx-accent text-white" : "border-gx-border")}>
+                    {checked && <Icon name="check" size={12} />}
+                  </span>
+                  <span className="flex-1 truncate text-gx-text-primary">{title || "(空)"}</span>
+                </button>
+              );
+            })}
+          </>
+        )}
       </div>
       <div className="mt-2 flex items-center justify-between border-t border-gx-separator pt-1.5">
         <span className="text-gx-11 text-gx-text-hint">已选 {selected.length}</span>

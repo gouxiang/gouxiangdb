@@ -307,6 +307,8 @@ export const Records = {
     limit?: number;
     offset?: number;
     search?: string;
+    /** S7 keyset 游标：首页不传，翻页传上一页 nextCursor；服务端未开启时被忽略。 */
+    cursor?: string;
   }) =>
     apiFetch<{
       records: RecordDTO[];
@@ -316,6 +318,11 @@ export const Records = {
       allFields: FieldDTO[];
       groups: GroupBucketDTO[] | null;
       aggregations: Record<string, number | null> | null;
+      // S7 additive：仅服务端 keyset 灰度开启时出现，默认（off）响应不含这三个键。
+      // 前端据此做特性探测：有游标→无限滚动；无游标→维持单页行为。
+      nextCursor?: string | null;
+      hasMore?: boolean;
+      degraded?: string[];
     }>(`/api/records${qs({ ...params })}`),
 
   create: (

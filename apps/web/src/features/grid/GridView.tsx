@@ -14,8 +14,11 @@ import type {
   CellValue,
 } from "@gx/shared-types";
 import { ROW_HEIGHT_PX } from "@gx/shared-types";
-import { useRecords, useFields, useTables, useGXMutations } from "../../api/hooks";
+import { useFields, useTables, useGXMutations } from "../../api/hooks";
+import { useRecordsInfinite } from "../../api/records-paging-hooks";
+import { isComputedInMem } from "../../api/records-paging";
 import { Spinner, EmptyState, IconButton, Modal, Select, Input, Button, toast } from "../../components/ui";
+import { ResultNotice, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
 import { GridToolbar } from "./GridToolbar";
 import { GridHeaderCell } from "./GridHeaderCell";
 import { GridRow } from "./GridRow";
@@ -67,22 +70,28 @@ function defaultColWidth(field: FieldDTO): number {
 }
 
 export default function GridView({ baseId, tableId, viewId, view, permissions, onOpenRecord }: GridViewProps) {
-  const { data, isLoading } = useRecords({ tableId, viewId });
+  const infiniteData = useRecordsInfinite({ tableId, viewId });
   const { data: allFieldsData } = useFields(tableId);
   const m = useGXMutations();
 
-  const records = useMemo(() => data?.records ?? [], [data]);
+  const records = infiniteData.records;
+  const hasNextPage = infiniteData.hasNextPage;
+  const isFetchingNextPage = infiniteData.isFetchingNextPage;
+  const loadMore = infiniteData.loadMore;
+  const isLoading = infiniteData.isLoading;
   // v2 新增：tabs/subtable 字段在 grid view 不显示（无独立 cell 表现）
   const visibleFields = useMemo(
-    () => (data?.fields ?? []).filter((f) => f.type !== "tabs" && f.type !== "subtable"),
-    [data],
+    () => infiniteData.fields.filter((f) => f.type !== "tabs" && f.type !== "subtable"),
+    [infiniteData.fields],
   );
   // 全字段（含 tabs/subtable）—— 只给 FieldEditorSheet 用，让用户能编辑/管理布局字段
   const allSchemaFields = useMemo(() => allFieldsData ?? [], [allFieldsData]);
-  const groups = data?.groups ?? null;
-  const aggregations = data?.aggregations ?? null;
-  const filteredTotal = data?.filteredTotal ?? records.length;
-  const total = data?.total ?? records.length;
+  const groups = infiniteData.groups;
+  const aggregations = infiniteData.aggregations;
+  const filteredTotal = infiniteData.filteredTotal;
+  const total = infiniteData.total;
+  // S8：受限口径（computedInMem）——聚合/统计置灰标注，数据行仍正常显示可编辑。
+  const degraded = isComputedInMem(infiniteData.degraded);
 
   const primaryFieldId = visibleFields[0]?.id ?? "";
 
@@ -112,6 +121,20 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
   useEffect(() => {
     if (scrollRef.current) setContainerH(scrollRef.current.clientHeight);
   }, [isLoading]);
+
+  // S8 无限滚动：仅在服务端启用 keyset 且有下一页时，触底（约 480px 提前量）自动续翻。
+  // 未启用（hasNextPage=false，含服务端 off 的单页退化）时永不触发，行为与旧版一致。
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !hasNextPage) return;
+    const onScroll = () => {
+      if (isFetchingNextPage) return;
+      const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (remaining < 480) loadMore();
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [hasNextPage, isFetchingNextPage, loadMore, records.length]);
 
   // 写回 view.config
   const updateConfig = useCallback(
@@ -363,7 +386,11 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
                       {Object.entries(g.aggregations).map(([fid, val]) => (
                         <span key={fid}>
                           {visibleFields.find((f) => f.id === fid)?.name}：
-                          <b className="text-gx-text-primary">{val == null ? "—" : val}</b>
+                          {degraded ? (
+                            <b className="text-gx-text-hint">受限</b>
+                          ) : (
+                            <b className="text-gx-text-primary">{val == null ? "—" : val}</b>
+                          )}
                         </span>
                       ))}
                     </span>
@@ -460,6 +487,14 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
         className="hidden"
         onChange={(e) => void onImportFile(e.target.files?.[0])}
       />
+
+      {degraded && (
+        <div className="shrink-0 border-b border-gx-separator px-3 py-1.5">
+          <ResultNotice tone="warning" role="alert">
+            数据量较大，当前为受限结果，精确统计需增加筛选条件。数据行仍可正常查看与编辑。
+          </ResultNotice>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="flex flex-1 items-center justify-center">
@@ -565,9 +600,25 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
                 onPick={(fieldId, func: AggFunc | null) =>
                   updateConfig({ aggregations: { ...cfg.aggregations, [fieldId]: func } })
                 }
+                degraded={degraded}
               />
             </tfoot>
           </table>
+
+          {/* S8 续翻入口：仅服务端启用 keyset 且有下一页时出现。
+              可见按钮保证键盘/读屏可达；平时滚动到底也会自动加载（见上方 scroll 监听）。 */}
+          {hasNextPage && (
+            <div className="flex justify-center py-3">
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={isFetchingNextPage}
+                onClick={() => loadMore()}
+              >
+                加载更多
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

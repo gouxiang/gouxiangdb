@@ -5,9 +5,12 @@
 // 日历视图：月/周视图，按配置的日期字段把记录铺到日期格子里（周日作为一周起点，对齐 NocoDB）
 
 import { useMemo, useState } from "react";
-import { useRecords, useFields, useGXMutations } from "../../api/hooks";
+import { useFields, useGXMutations } from "../../api/hooks";
+import { useRecordsBounded } from "../../api/records-paging-hooks";
+import { isComputedInMem } from "../../api/records-paging";
 import type { FieldDTO, RecordDTO } from "@gx/shared-types";
 import { Button, EmptyState, IconButton, SegmentedControl, Spinner, Select } from "../../components/ui";
+import { ResultNotice, boundedResultText, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
 import { type ViewProps } from "./field-controls";
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
@@ -24,12 +27,16 @@ export default function CalendarView({
   permissions,
   onOpenRecord,
 }: ViewProps) {
-  const { data: recordsRes, isLoading } = useRecords({ tableId, viewId });
+  const bounded = useRecordsBounded({ tableId, viewId });
   const { data: fieldsRes } = useFields(tableId);
   const m = useGXMutations();
 
   const fields = fieldsRes ?? [];
-  const records = recordsRes?.records ?? [];
+  const records = bounded.records;
+  const isLoading = bounded.isLoading;
+  const truncated = bounded.bounded;
+  const shownCount = bounded.records.length;
+  const degraded = isComputedInMem(bounded.degraded);
   const dateField = fields.find((f) => f.id === view.config.dateFieldId);
 
   // 未配置日期字段：引导选择
@@ -144,6 +151,15 @@ export default function CalendarView({
 
   return (
     <div className="flex h-full flex-col bg-gx-card-bg">
+      {(truncated || degraded) && (
+        <div className="shrink-0 px-4 pt-2">
+          <ResultNotice tone="warning" role={degraded ? "alert" : "status"}>
+            {degraded
+              ? DEGRADED_RESULT_TEXT
+              : boundedResultText(bounded.declaredTotal, shownCount)}
+          </ResultNotice>
+        </div>
+      )}
       {/* 顶部工具栏 */}
       <div className="flex items-center gap-3 border-b border-gx-separator bg-gx-surface px-4 py-2">
         <div className="text-gx-16 font-semibold text-gx-text-primary">{titleText}</div>

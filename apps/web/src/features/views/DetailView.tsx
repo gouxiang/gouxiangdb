@@ -6,9 +6,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useRecords, useFields, useTables, useGXMutations } from "../../api/hooks";
+import { useFields, useTables, useGXMutations } from "../../api/hooks";
+import { useRecordsInfinite } from "../../api/records-paging-hooks";
+import { isComputedInMem } from "../../api/records-paging";
 import type { DetailLayout, FieldDTO, RecordDTO } from "@gx/shared-types";
 import { Button, EmptyState, IconButton, Menu, MenuItem, Popover, Spinner, toast } from "../../components/ui";
+import { ResultNotice, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
 import { DetailLayoutEditor, DetailLayoutRenderer } from "../detail/DetailLayout";
 import type { ViewProps } from "./field-controls";
 
@@ -20,14 +23,16 @@ export default function DetailView({
   permissions,
   onOpenRecord,
 }: ViewProps) {
-  const { data: recordsRes, isLoading } = useRecords({ tableId, viewId });
+  const infinite = useRecordsInfinite({ tableId, viewId });
   const { data: fieldsRes } = useFields(tableId);
   const { data: tables } = useTables(baseId);
   const m = useGXMutations();
 
   const table = tables?.find((t) => t.id === tableId);
   const fields = (fieldsRes ?? []).filter((f) => !f.isReverse);
-  const records = recordsRes?.records ?? [];
+  const records = infinite.records;
+  const isLoading = infinite.isLoading;
+  const degraded = isComputedInMem(infinite.degraded);
   const primaryField = table?.primaryFieldId
     ? fields.find((f) => f.id === table.primaryFieldId)
     : undefined;
@@ -120,6 +125,11 @@ export default function DetailView({
   return (
     <div className="h-full overflow-auto bg-gx-card-bg p-gx-lg">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+        {degraded && (
+          <ResultNotice tone="warning" role="alert">
+            {DEGRADED_RESULT_TEXT}
+          </ResultNotice>
+        )}
         {/* 顶部工具栏：齿轮菜单（编辑表单 / 重置布局） */}
         {canEditLayout && records.length > 0 && (
           <div className="flex items-center justify-end">
@@ -200,11 +210,23 @@ export default function DetailView({
           })
         )}
 
-        {records.length > 0 && permissions.canEditData && (
-          <div className="mx-auto mt-2 flex max-w-5xl justify-center">
-            <Button variant="secondary" icon="plus" onClick={handleNew}>
-              新建记录
-            </Button>
+        {records.length > 0 && (infinite.hasNextPage || permissions.canEditData) && (
+          <div className="mx-auto mt-2 flex max-w-5xl items-center justify-center gap-2">
+            {infinite.hasNextPage && (
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={infinite.isFetchingNextPage}
+                onClick={() => infinite.loadMore()}
+              >
+                加载更多
+              </Button>
+            )}
+            {permissions.canEditData && (
+              <Button variant="secondary" icon="plus" onClick={handleNew}>
+                新建记录
+              </Button>
+            )}
           </div>
         )}
       </div>
