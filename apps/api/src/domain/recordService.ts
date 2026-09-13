@@ -10,8 +10,7 @@ import { toFieldMeta, toRawRecord, prismaDeps } from "./prismaDeps.js";
 import { hydrateRecords } from "./hydrate.js";
 import { evalFilter, matchesSearch } from "./filter.js";
 import { sortRows } from "./sort.js";
-import { computeGroups } from "./group.js";
-import { aggregateAll } from "./aggregate.js";
+import { assembleGroups, assembleAggregations } from "./queryPlan/assemble.js";
 import { isGridSkipType } from "@gx/shared-types";
 import type { FilterNode, SortSpec, ViewConfig } from "@gx/shared-types";
 
@@ -91,7 +90,99 @@ export function applyViewQuery(
   return out;
 }
 
+/**
+ * 列表查询入口（S6 起按 GX_M1_SIDECAR_READ 分派）：
+ *   off（默认）→ queryRecordsLegacy：全表 hydrate + 内存 filter/search/sort（S5 行为，完全回退）；
+ *   shadow      → 旧结果照返回，额外跑 queryPlan 计划器并只记差异（不影响响应）；
+ *   on          → 走 sidecar queryPlan 计划器（physical 下推 + 当页 hydrate）。
+ * 写侧 GX_M1_SIDECAR=off 或派生表不可用时强制回退旧路径（计划器异常也安全回退）。
+ */
 export async function queryRecords(opts: QueryOptions): Promise<QueryResult> {
+  const { resolveSidecarReadMode, sidecarReadUsable } = await import("./queryPlan/flags.js");
+  const mode = resolveSidecarReadMode();
+  if (mode === "off" || !sidecarReadUsable()) return await queryRecordsLegacy(opts);
+
+  if (mode === "shadow") {
+    const legacyP = queryRecordsLegacy(opts);
+    // shadow 对拍失败绝不影响旧结果：计划器报错只记日志。
+    const [legacy, planned] = await Promise.all([
+      legacyP,
+      runPlannerSafe(opts).catch((e) => {
+        console.warn("[queryPlan][shadow] 计划器异常（忽略，返回旧结果）:", (e as Error).message);
+        return null;
+      }),
+    ]);
+    if (planned) logShadowDiff(opts, legacy, planned);
+    return legacy;
+  }
+
+  // on：计划器异常时安全回退旧路径（读可用性不因 sidecar 问题受损）。
+  try {
+    return await runPlannerOnce(opts);
+  } catch (e) {
+    console.warn("[queryPlan][on] 计划器失败，回退旧路径:", (e as Error).message);
+    return await queryRecordsLegacy(opts);
+  }
+}
+
+async function runPlannerOnce(opts: QueryOptions) {
+  const [{ getSidecarQuerier }, { runQueryPlan }] = await Promise.all([
+    import("./queryPlan/connection.js"),
+    import("./queryPlan/planner.js"),
+  ]);
+  const search = (opts.search ?? opts.config.search ?? "").trim();
+  const r = await runQueryPlan(getSidecarQuerier(), {
+    tableId: opts.tableId,
+    fields: opts.fields,
+    config: opts.config,
+    search,
+    limit: opts.limit ?? 200,
+    offset: opts.offset ?? 0,
+    noPaging: opts.noPaging ?? false,
+  });
+  return {
+    records: r.records,
+    total: r.total,
+    filteredTotal: r.filteredTotal,
+    groups: r.groups,
+    aggregations: r.aggregations,
+  } satisfies QueryResult;
+}
+
+async function runPlannerSafe(opts: QueryOptions) {
+  return await runPlannerOnce(opts);
+}
+
+/** shadow 对拍：recordId 序列 / total / filteredTotal / 表尾聚合差异，只记日志（脱敏，无字段值）。 */
+function logShadowDiff(opts: QueryOptions, legacy: QueryResult, planned: QueryResult): void {
+  const diffs: string[] = [];
+  if (legacy.total !== planned.total) diffs.push(`total ${legacy.total}!=${planned.total}`);
+  if (legacy.filteredTotal !== planned.filteredTotal) {
+    diffs.push(`filteredTotal ${legacy.filteredTotal}!=${planned.filteredTotal}`);
+  }
+  const lids = legacy.records.map((r) => r.id);
+  const pids = planned.records.map((r) => r.id);
+  if (lids.length !== pids.length || lids.some((id, i) => id !== pids[i])) {
+    const first = lids.findIndex((id, i) => id !== pids[i]);
+    diffs.push(`recordId 序列分歧 firstAt=${first} legacyN=${lids.length} plannedN=${pids.length}`);
+  }
+  const la = legacy.aggregations ?? {};
+  const pa = planned.aggregations ?? {};
+  for (const fid of new Set([...Object.keys(la), ...Object.keys(pa)])) {
+    if (Math.abs((la[fid] ?? NaN) - (pa[fid] ?? NaN)) > 1e-6) {
+      diffs.push(`agg[${fid}] ${la[fid]}!=${pa[fid]}`);
+    }
+  }
+  if (diffs.length > 0) {
+    console.warn(`[queryPlan][shadow] 差异 table=${opts.tableId}: ${diffs.join("; ")}`);
+  }
+}
+
+/**
+ * S5 旧列表路径（GX_M1_SIDECAR_READ=off 的完整行为，shadow/on 异常回退亦用此）：
+ * 全表 hydrate → 内存 filter/search/sort → 分组/聚合 → 分页。行为一个值不变。
+ */
+export async function queryRecordsLegacy(opts: QueryOptions): Promise<QueryResult> {
   const { tableId, fields, config } = opts;
   const search = (opts.search ?? config.search ?? "").trim();
 
@@ -114,54 +205,9 @@ export async function queryRecords(opts: QueryOptions): Promise<QueryResult> {
 
   const filteredTotal = hydrated.length;
 
-  // 6. 分组 + 聚合
-  let groups: QueryResult["groups"] = null;
-  if (config.groupByFieldId) {
-    const gf = fields.find((f) => f.id === config.groupByFieldId);
-    if (gf && !config.collapsedGroupKeys?.length) {
-      // 聚合函数按字段配置
-      const aggFuncs = config.aggregations ?? {};
-      const byId = new Map(hydrated.map((r) => [r.id, r]));
-      groups = computeGroups(
-        { recordIds: hydrated.map((r) => r.id), get: (rid, fid) => byId.get(rid)?.fields[fid] },
-        { id: gf.id, type: gf.type, options: gf.options ?? undefined },
-        (ids) => {
-          const out: Record<string, number | null> = {};
-          for (const [fid, fn] of Object.entries(aggFuncs)) {
-            if (!fn) continue;
-            out[fid] = aggregateAll(ids.map((i) => byId.get(i)?.fields[fid]), { [fid]: fn })[fid] ?? null;
-          }
-          return out;
-        },
-      );
-    } else if (gf) {
-      const byId = new Map(hydrated.map((r) => [r.id, r]));
-      const aggFuncs = config.aggregations ?? {};
-      groups = computeGroups(
-        { recordIds: hydrated.map((r) => r.id), get: (rid, fid) => byId.get(rid)?.fields[fid] },
-        { id: gf.id, type: gf.type, options: gf.options ?? undefined },
-        (ids) => {
-          const out: Record<string, number | null> = {};
-          for (const [fid, fn] of Object.entries(aggFuncs)) {
-            if (!fn) continue;
-            out[fid] = aggregateAll(ids.map((i) => byId.get(i)?.fields[fid]), { [fid]: fn })[fid] ?? null;
-          }
-          return out;
-        },
-      );
-    }
-  }
-
-  // 表尾聚合
-  let aggregations: Record<string, number | null> | null = null;
-  const aggFuncs = config.aggregations ?? {};
-  if (Object.keys(aggFuncs).length > 0) {
-    aggregations = {};
-    for (const [fid, fn] of Object.entries(aggFuncs)) {
-      if (!fn) continue;
-      aggregations[fid] = aggregateAll(hydrated.map((r) => r.fields[fid]), { [fid]: fn })[fid] ?? null;
-    }
-  }
+  // 6. 分组 + 表尾聚合（组装纯函数由旧路径与 S6 queryPlan 计划器共用，两路径同源零分歧）。
+  const groups = assembleGroups(hydrated, fields, config);
+  const aggregations = assembleAggregations(hydrated, config.aggregations ?? {});
 
   // 7. 分页
   if (!opts.noPaging) {

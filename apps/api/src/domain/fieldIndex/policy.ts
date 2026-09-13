@@ -58,6 +58,15 @@ const NUMERIC_TYPES = new Set<string>([
 
 const DATE_TYPES = new Set<string>(["date", "datetime"]);
 
+/**
+ * sidecar 数值列判定（抽进 valueNum）。
+ * 单独导出谓词（而非集合），供类型一致性守卫测试与 shared type-groups 的
+ * number 分组全量对拍：任何一侧增删数值类型（如再发生 rating 漂移）测试即红。
+ */
+export function isNumericIndexType(t: string): boolean {
+  return NUMERIC_TYPES.has(t);
+}
+
 // 严格日期形态（同 shared-types/filter.ts DATE_LIKE）。
 const DATE_LIKE =
   /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;

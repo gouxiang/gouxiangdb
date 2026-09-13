@@ -28,6 +28,8 @@ import { createField } from "../domain/fieldService.js";
 import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
 import { applyCreateDefaults, applyEditDefaults, applyReverseDefaultsForChild, applyLinkChangeDefaults } from "../domain/defaults.js";
 import { syncRecordsTx, deleteRecordsStatement, restoreRecordsTx } from "../domain/fieldIndex/sync.js";
+import { sidecarUniqueMatch, findUniqueConflictTx } from "../domain/queryPlan/uniqueSidecar.js";
+import { resolveSidecarReadMode, resolveSidecarWriteEnabled } from "../domain/queryPlan/flags.js";
 import { isNumberRuleEmpty } from "@gx/shared-types";
 
 export const records = new Hono();
@@ -264,6 +266,40 @@ export async function assertUnique(
   if (uniqueFields.length === 0) return;
 
   const exclude = new Set<string>(excludeRecordIds ?? (excludeRecordId ? [excludeRecordId] : []));
+
+  // M1/S6：读计划器 on 且写侧在维护、且 tx 具备 raw 能力时，unique 走 sidecar 等值索引
+  //（同事务强一致）。shadow/off/写停/fake prisma/任一非空字段不能精确单列匹配 → 回退全表校验。
+  const readOn = resolveSidecarReadMode() === "on" && resolveSidecarWriteEnabled();
+  const txHasRaw = typeof (db as { $queryRawUnsafe?: unknown }).$queryRawUnsafe === "function";
+  const checked = uniqueFields
+    .map((f) => ({ f, v: values[f.id] }))
+    .filter((x) => x.v !== undefined && x.v !== null && x.v !== "");
+  const allMatchable = checked.every((x) => sidecarUniqueMatch(x.f, x.v) !== null);
+
+  if (readOn && txHasRaw && allMatchable) {
+    for (const { f, v } of checked) {
+      const conflictId = await findUniqueConflictTx({
+        tx: db as unknown, tableId, field: f, value: v, exclude,
+        readEnabled: true, writeEnabled: true,
+      });
+      if (conflictId) {
+        throw new HttpError(409, `字段「${f.name}」要求唯一，该值已存在`);
+      }
+    }
+    return;
+  }
+
+  await assertUniqueFullScan(tableId, uniqueFields, values, exclude, db);
+}
+
+/** S5 前的全表唯一校验（回退路径；sidecar 不可用/不可精确匹配时使用，行为与文案不变）。 */
+async function assertUniqueFullScan(
+  tableId: string,
+  uniqueFields: Awaited<ReturnType<typeof loadTableFields>>,
+  values: Record<string, unknown>,
+  exclude: Set<string>,
+  db: DbTx,
+): Promise<void> {
   const others = await db.record.findMany({
     where: { tableId, deletedAt: null },
     select: { id: true, fields: true },

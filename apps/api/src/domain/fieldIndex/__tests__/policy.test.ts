@@ -3,7 +3,8 @@
 // 与 shared-types/filter.ts 的日期/数字归一保持一致；多选摊平 ord；空值 isNull=1（RC-29 草稿）。
 
 import { describe, expect, it } from "vitest";
-import { extractEntries, isIndexedField } from "../policy.js";
+import { FIELD_TYPES, fieldTypeGroup } from "@gx/shared-types";
+import { extractEntries, isIndexedField, isNumericIndexType } from "../policy.js";
 
 const meta = (type: string, id = "f", extra: { isPrimary?: boolean } = {}) => ({
   id,
@@ -62,6 +63,35 @@ describe("isIndexedField 字段准入矩阵", () => {
     // 但主字段若是计算/关联类型仍不索引
     expect(isIndexedField(meta("formula", "f", { isPrimary: true }))).toBe(false);
     expect(isIndexedField(meta("links", "f", { isPrimary: true }))).toBe(false);
+  });
+});
+
+// S6-1 单一事实源守卫（S4 欠账）：sidecar policy 的数值集合必须与 shared
+// type-groups 的 number 分组逐类型一致。shared 的 NUMBER_TYPES 未导出，
+// 用 fieldTypeGroup(t)==='number' 在【全部】FieldType 上反推，任何一侧
+// 增删数值类型（rating 漂移那类事故）本测试立即红，从根上锁死两个事实源。
+describe("类型一致性：policy 数值集合 == shared type-groups number 分组", () => {
+  it("对全部 FieldType 逐类型判定，两侧集合完全相等", () => {
+    const policyNumeric: string[] = [];
+    const sharedNumeric: string[] = [];
+    for (const t of FIELD_TYPES) {
+      if (isNumericIndexType(t)) policyNumeric.push(t);
+      if (fieldTypeGroup(t) === "number") sharedNumeric.push(t);
+    }
+    // 两侧成员集合严格相等（顺序无关），并显式锁死当前五个成员，
+    // 使新增数值类型时必须同时改两边并主动更新此断言。
+    expect(new Set(policyNumeric)).toEqual(new Set(sharedNumeric));
+    expect(new Set(policyNumeric)).toEqual(
+      new Set(["number", "currency", "percent", "duration", "rating"]),
+    );
+  });
+
+  it("非数值类型一律不进 valueNum 数值组（防误纳）", () => {
+    for (const t of FIELD_TYPES) {
+      if (fieldTypeGroup(t) !== "number") {
+        expect(isNumericIndexType(t), t).toBe(false);
+      }
+    }
   });
 });
 
