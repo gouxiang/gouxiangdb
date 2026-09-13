@@ -1,6 +1,6 @@
 # ADR-0004：动态字段的 EAV 旁路索引（record_field_index）与写时同事务维护
 
-**状态（Status）**：Accepted（M1 落地：S3 迁移 / S4 写维护与回填 / S6 读下推 / S7 keyset，2026-09-13）
+**状态（Status）**：Accepted（M1 落地：S3 迁移 / S4 写维护与回填 / S6 读下推 / S7 keyset。技术内容由后端在 `4d889a3` 落档，该提交系未逐片放行提交，其 ADR 状态为作者自置；项目总监于 2026-09-14 独立终检全文并对照已复验的 S3/S4/S6/S7 事实追认 Accepted，同次订正 D3 索引计数与 ADR-0008 状态引用。）
 **作者**：后端（mvp-dev-expert-team-backend）
 **编号来源**：生产化架构 §6「新增 ADR 清单」预留 0004「动态字段模型的旁路索引表（EAV sidecar）与写时维护」。
 
@@ -66,20 +66,26 @@ JSON 的冗余索引；它不承载任何真相，任何时刻都可由 fields J
 checkbox JSON boolean→0/1。标量字段恒一行（`ord=0`），空值写
 `valueText/valueNum=NULL, isNull=1` 形成显式 NULL 桶（支撑 isEmpty/isNotEmpty）。
 
-### D3. 双类型列 + 三个索引，覆盖下推热路径
+### D3. 双类型列 + 四个 sidecar 索引（另加主表一个复合索引），覆盖下推热路径
 
 列：`valueText TEXT`、`valueNum REAL`、`isNull INT`、`ord INT`。文本等值/排序/
-选项命中走 `valueText`，数字/日期/勾选走 `valueNum`。索引：
+选项命中走 `valueText`，数字/日期/勾选走 `valueNum`。迁移实际创建 **5 个索引**
+（`grep "CREATE INDEX"` 可核），其中 sidecar 表 4 个：
 
-- 唯一键 `(recordId, fieldId, ord)`：保证一条记录同一字段同一摊平序号最多一行，
-  支撑"先删后插"的幂等维护。
+- 唯一键 `rfi_record_field_ord_key (recordId, fieldId, ord)`：保证一条记录同一字段
+  同一摊平序号最多一行，支撑"先删后插"的幂等维护；
 - `rfi_table_field_num (tableId, fieldId, valueNum)` 与
   `rfi_table_field_text (tableId, fieldId, valueText)`：S6 物理谓词下推的
   `WHERE tableId=? AND fieldId=? AND value…`。
-- `rfi_table_record (tableId, recordId)`：按记录/表批量删插与巡检 join。
+- `rfi_table_record (tableId, recordId)`：按记录/表批量删插与巡检 join；
 - 另给主表加 `records (tableId, deletedAt, createdAt, id)` 复合索引
   `records_table_live_created_id`：默认列表热路径等值过滤活记录后覆盖
   `(createdAt,id)` 排序，避免 filesort。
+
+> S10 #94 修复（`e656abb`，ADR-0008 §3.2）在 COUNT/keyset 的 rfi JOIN 内表显式
+> `INDEXED BY "rfi_record_field_ord_key"`，强制 records 覆盖索引线性驱动、每个
+> rfi JOIN 按 (recordId,fieldId) 单行 seek，修掉多标量字段高命中 AND 下优化器误拿
+> 范围索引当 JOIN 外层驱动的近 O(n³) 计划缺陷（修前 100k 三字段数小时→修后约 1s）。
 
 ### D4. 写时同事务维护；强一致、不吞错、可整体回滚
 
@@ -150,8 +156,9 @@ flag 生命周期（shadow→on 时间表、稳定一迭代后删旧路径的条
 - [ADR-0002](0002-database-sqlite.md)：SQLite 基线、手写迁移与 raw SQL 纪律
 - [ADR-0005](0005-fulltext-search.md)：全文检索边界（占位）；sidecar 不管子串召回
 - [ADR-0008](0008-sqlite-capacity-falsification-gate.md)：SQLite 容量证伪门与 PG 切换阈值
-  （Proposed）；本 ADR 的方言中性为其 PG 通道留路。S10 客观门判定本轮**不触发**迁库——
-  物理索引层 50 万行 0.4–12ms 无 SCAN，剩余瓶颈在应用 hydration 扇出而非 SQLite 物理能力。
+  （Accepted）；本 ADR 的方言中性为其 PG 通道留路。S10 客观门判定本轮**不触发**迁库——
+  物理索引层 50 万行窄命中 0.4–12ms 无 SCAN、多字段高命中 AND 计划缺陷已由 #94 修复，
+  剩余端到端慢点在应用 hydration 扇出而非 SQLite 物理能力（端到端 T3/百万终验仍 INCONCLUSIVE）。
 - 迁移：`apps/api/prisma/migrations/20260913062000_record_field_index_sidecar/migration.sql`
 - 策略/维护：`apps/api/src/domain/fieldIndex/{policy,sync}.ts`
 - 读下推：`apps/api/src/domain/queryPlan/*`（flags/planner/compile/sidecarQuery）
