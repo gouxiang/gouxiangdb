@@ -30,10 +30,13 @@ import { VERSION } from "./version.js";
 import { secureHeadersMiddleware } from "./middleware/secureHeaders.js";
 import { bodyLimitDispatch } from "./middleware/bodyLimit.js";
 import { rateLimitMiddleware } from "./middleware/rateLimit.js";
+import { benchMetricsMiddleware } from "./ops/benchMetrics.js";
 
 const app = new Hono();
 
 app.use("*", logger());
+// S9 bench 观测（仅 GX_BENCH=on 生效）：挂 x-gx-serve-ms / x-gx-physical-sql / x-gx-prisma-calls / x-gx-rss-bytes，默认直通零开销。
+app.use("*", benchMetricsMiddleware);
 
 // 上传文件静态服务：GET /uploads/avatars/<filename>（头像等）
 // 上传根目录由 config 单一来源解析（GX_DATA_DIR / UPLOAD_ROOT）。

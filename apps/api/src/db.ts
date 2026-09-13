@@ -3,6 +3,7 @@
 
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { createWriteQueue, resolveWriteQueueEnabled, type WriteQueue } from "./db/writeQueue.js";
+import { benchEnabled, notePrismaCall } from "./ops/benchMetrics.js";
 
 /**
  * 事务客户端 / 全局 client 的公共类型。
@@ -15,7 +16,14 @@ declare global {
   var __gx_write_queue: WriteQueue | undefined;
 }
 
-export const prisma =
+// S9 bench 说明：Prisma 在 SQLite connector 上不支持 query 日志事件（类型判 never），
+// 无法用 $on("query") 逐条计 SQL。改为两个应用层口径（见 ops/benchMetrics）：
+//   - 物理下推 SQL：sidecar/raw 只读连接 instrumentDatabase 精确计数；
+//   - Prisma 模型操作往返：bench 模式在 client 外包一层计数 Proxy（instrumentPrisma），
+//     覆盖全部模型的 find*/create/update/count/aggregate 等，含交互事务内的 tx.*。
+// 两口径仅 GX_BENCH=on 生效，默认关闭零开销、零行为变化。
+
+const baseClient: PrismaClient =
   globalThis.__gx_prisma ??
   new PrismaClient({
     log:
@@ -23,6 +31,55 @@ export const prisma =
         ? ["warn", "error"]
         : ["error"],
   });
+
+/**
+ * 包模型委托：任一函数式属性被调用即计为一次 ORM 往返（findMany/count/aggregate 等均为 IO）。
+ * 非函数属性（fields/元数据）与 symbol 透传。
+ */
+function instrumentDelegate(delegate: unknown): unknown {
+  if (delegate === null || typeof delegate !== "object") return delegate;
+  return new Proxy(delegate as object, {
+    get(target, prop, receiver) {
+      if (typeof prop === "symbol") return Reflect.get(target, prop, receiver);
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        notePrismaCall();
+        return Reflect.apply(value as (...a: unknown[]) => unknown, target, args);
+      };
+    },
+  });
+}
+
+/**
+ * 递归计数 Proxy：`prisma.<model>.<op>(...)` 计一次；`$transaction(fn)` 回调收到的 tx
+ * 同样被包裹，故事务内操作也计数。`$`/`_` 前缀的内部属性与 raw 查询原样透传。
+ * 仅压测使用，返回类型仍声明为 PrismaClient，调用方零类型涟漪。
+ */
+function instrumentPrisma(client: PrismaClient): PrismaClient {
+  const wrap = (target: object): PrismaClient =>
+    new Proxy(target, {
+      get(t, prop, receiver) {
+        if (prop === "$transaction") {
+          const orig = Reflect.get(t, prop, receiver) as (arg: unknown) => Promise<unknown>;
+          return (arg: unknown) => {
+            if (typeof arg !== "function") return Reflect.apply(orig, t, [arg]);
+            return Reflect.apply(orig, t, [
+              (tx: object) => Reflect.apply(arg as (...a: unknown[]) => unknown, undefined, [wrap(tx)]),
+            ]);
+          };
+        }
+        if (typeof prop === "symbol" || prop.startsWith("$") || prop.startsWith("_")) {
+          const value = Reflect.get(t, prop, receiver);
+          return typeof value === "function" ? value.bind(t) : value;
+        }
+        return instrumentDelegate(Reflect.get(t, prop, receiver));
+      },
+    }) as PrismaClient;
+  return wrap(client);
+}
+
+export const prisma: PrismaClient = benchEnabled() ? instrumentPrisma(baseClient) : baseClient;
 
 if (process.env.NODE_ENV !== "production") {
   globalThis.__gx_prisma = prisma;

@@ -5,6 +5,7 @@
 import Database from "better-sqlite3";
 import { defaultDatabaseFile, closeRawReader } from "../../db/rawRead.js";
 import { createSidecarQuerier, type SidecarQuerier } from "./sidecarQuery.js";
+import { benchEnabled, instrumentDatabase } from "../../ops/benchMetrics.js";
 
 let querier: SidecarQuerier | undefined;
 let conn: Database.Database | undefined;
@@ -12,9 +13,11 @@ let conn: Database.Database | undefined;
 /** 进程级 sidecar 只读 querier 单例（惰性打开，需库已迁移）。 */
 export function getSidecarQuerier(): SidecarQuerier {
   if (!querier) {
-    conn = new Database(defaultDatabaseFile(), { readonly: true, fileMustExist: true });
-    conn.pragma("busy_timeout = 5000");
-    querier = createSidecarQuerier(conn);
+    const raw = new Database(defaultDatabaseFile(), { readonly: true, fileMustExist: true });
+    raw.pragma("busy_timeout = 5000");
+    conn = raw;
+    const db = benchEnabled() ? instrumentDatabase(raw) : raw;
+    querier = createSidecarQuerier(db);
   }
   return querier;
 }

@@ -9,6 +9,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { config } from "../config.js";
 import { resolveDatabaseFile } from "./databaseFile.js";
+import { benchEnabled, instrumentDatabase } from "../ops/benchMetrics.js";
 
 /** keyset 游标：createdAt 为 epoch 毫秒；null 表示从头一页取起。 */
 export interface KeysetCursor {
@@ -123,8 +124,9 @@ export function createRawReader(db: Database.Database): RawReader {
 
 /** 以只读方式打开文件并构造 reader；busy_timeout 与 db.ts 写连接同口径 5000ms。 */
 export function openRawReader(file: string): RawReader {
-  const db = new Database(file, { readonly: true, fileMustExist: true, timeout: 5000 });
-  db.pragma("busy_timeout = 5000");
+  const raw = new Database(file, { readonly: true, fileMustExist: true, timeout: 5000 });
+  raw.pragma("busy_timeout = 5000");
+  const db = benchEnabled() ? instrumentDatabase(raw) : raw;
   return createRawReader(db);
 }
 
