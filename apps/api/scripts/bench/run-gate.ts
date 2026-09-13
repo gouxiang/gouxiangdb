@@ -10,7 +10,11 @@
 //   pnpm tsx scripts/bench/run-gate.ts --manifest /abs/x.manifest.json \
 //     --mode off|shadow|on [--concurrency 8] [--warmup 50] [--samples 200] [--limit 100] \
 //     [--read-p95-ms 1500] [--max-failure-rate 0.01] [--tag <name>] [--out-dir <dir>] \
-//     [--keep-db] [--skip-build] [--host "local:Apple M?/16G"]
+//     [--keep-db] [--skip-build] [--host "local:Apple M?/16G"] \
+//     [--cpu-prof] [--cpu-prof-dir <dir>]
+//   --cpu-prof：S5b-P2 结构归因。给被测 node 透传 --cpu-prof（进程退出落 .cpuprofile），
+//     读/写两阶段各一个：<dir 或 out-dir>/cpu-prof/<tag>.read|write.cpuprofile。
+//     仅 bench 采集，不影响取值；配合 --scenes 单场景 + C=1 做 CPU self time 归因。
 // 退出码：0=PASS；2=门未过（有失败/超时/drift≠0/shadow drift）；1=运行错误。
 // 铁律：写场景真实建 records，必须指向 gen-data 专用库副本，严禁打生产库。
 
@@ -131,6 +135,16 @@ async function main(): Promise<number> {
   const host = cli.host ?? `local:${os.cpus()[0]?.model ?? "unknown"}/${Math.round(os.totalmem() / 1024 / 1024 / 1024)}G/${process.platform}`;
   fs.mkdirSync(outDir, { recursive: true });
 
+  // S5b-P2：--cpu-prof 时读/写被测进程各产一个 isolate profile；默认关，argv 字节不变。
+  const cpuProfOn = cli["cpu-prof"] === "true";
+  const cpuProfDir = cli["cpu-prof-dir"] ?? path.join(outDir, "cpu-prof");
+  const profOpt = (phase: "read" | "write") =>
+    cpuProfOn ? { dir: cpuProfDir, name: `${tag}.${phase}.cpuprofile` } : undefined;
+  if (cpuProfOn) {
+    fs.mkdirSync(cpuProfDir, { recursive: true });
+    console.log(`[run-gate] --cpu-prof 已启用，profile 输出目录：${cpuProfDir}`);
+  }
+
   // 隔离工作目录：母库 → 模板（预置视图）→ read.db / write.db 两份干净副本。
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "gx-gate-"));
   const template = path.join(workDir, "template.db");
@@ -188,7 +202,7 @@ async function main(): Promise<number> {
   const readLog = path.join(outDir, `${tag}.read.server.log`);
   const readServer = await startServer({
     apiRoot, dbFile: readDb, email: sf.ownerEmail, password: sf.ownerPassword,
-    flags, logFile: readLog, skipBuild: cli["skip-build"] === "true",
+    flags, logFile: readLog, skipBuild: cli["skip-build"] === "true", cpuProf: profOpt("read"),
   });
   const results = [];
   try {

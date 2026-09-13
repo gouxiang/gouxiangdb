@@ -11,6 +11,7 @@ import type { ChildProcess } from "node:child_process";
 import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface ServerHandle {
   baseUrl: string;
@@ -23,6 +24,34 @@ export interface ServerFlags {
   read: "off" | "shadow" | "on";
   keyset: "off" | "shadow" | "on";
   prefetch: "on" | "off";
+}
+
+/**
+ * S5b-P2 可选 CPU profile（仅 bench，不碰 src/index.ts）。
+ * 启用时给被测 node 透传 --cpu-prof 系列 argv；dir 落 bench 输出目录（gitignored），
+ * name 为场景 tag。Node 在进程退出时把 isolate-*.cpuprofile 写到 dir。
+ */
+export interface CpuProfOpt {
+  dir: string;
+  name: string;
+}
+
+/**
+ * 被测进程 argv 纯构造（便于单测锁定 off 字节一致）。
+ * 关：恒为 [script]，与接入前完全相同；开：注入 bench 专用 SIGTERM 预加载（让 --cpu-prof
+ * 在 SIGTERM 下仍 flush，见 cpu-prof-exit.mjs）+ 三个 --cpu-prof 参数，再接 script。
+ * 仍由调用方用受管 process.execPath 启动，这里只决定参数。
+ */
+export function buildServerArgs(script: string, prof?: CpuProfOpt, preloadPath?: string): string[] {
+  if (!prof) return [script];
+  const head = preloadPath ? [`--import=${preloadPath}`] : [];
+  return [
+    ...head,
+    "--cpu-prof",
+    `--cpu-prof-dir=${prof.dir}`,
+    `--cpu-prof-name=${prof.name}`,
+    script,
+  ];
 }
 
 /** 找一个当前空闲的 TCP 端口（监听后立刻释放，降低竞态；起服务失败再重试由调用方处理）。 */
@@ -90,6 +119,8 @@ export async function startServer(opts: {
   logFile: string;
   port?: number;
   skipBuild?: boolean;
+  /** 传入即给被测 node 加 --cpu-prof（S5b-P2）；name 建议带阶段（read/write）+场景 tag。 */
+  cpuProf?: CpuProfOpt;
 }): Promise<ServerHandle> {
   const { apiRoot, dbFile, email, password, flags, logFile } = opts;
   if (!opts.skipBuild) buildProduction(apiRoot);
@@ -119,12 +150,24 @@ export async function startServer(opts: {
   };
 
   const out = fs.openSync(logFile, "w");
+  // --cpu-prof 要求目标目录存在（Node 不会自建），先建好；dir 落 bench 输出目录（gitignored）。
+  if (opts.cpuProf) fs.mkdirSync(opts.cpuProf.dir, { recursive: true });
+  // bench 专用 SIGTERM 预加载（与本文件同目录），使 --cpu-prof 在 stop() 的 SIGTERM 下落盘；
+  // 仅 cpuProf 启用时传入，正常门 argv 不含它（buildServerArgs off 分支恒 [script]）。
+  const profPreload = opts.cpuProf
+    ? path.join(path.dirname(fileURLToPath(import.meta.url)), "cpu-prof-exit.mjs")
+    : undefined;
   // 用与 harness 同一个受管 Node（process.execPath），避免 PATH 上的 node 版本漂移。
-  const child: ChildProcess = spawn(process.execPath, ["dist/index.js"], {
-    cwd: apiRoot,
-    env,
-    stdio: ["ignore", out, out],
-  });
+  // argv 仅在显式传 cpuProf 时变化；不传与接入前字节一致（buildServerArgs 单测锁定）。
+  const child: ChildProcess = spawn(
+    process.execPath,
+    buildServerArgs("dist/index.js", opts.cpuProf, profPreload),
+    {
+      cwd: apiRoot,
+      env,
+      stdio: ["ignore", out, out],
+    },
+  );
   const stop = (): void => {
     if (!child.killed) {
       child.kill("SIGTERM");
