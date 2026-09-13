@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "note": "S5b-P1 点引用环/钻石/跨表/链式现状 golden。锁现状可复现，不判 bug、不动取值算法。参与 --check 等值判定的只有 graph + captures（图结构 + 捕获值与拉取次数序列）；provenance 仅作来源元数据，绝不出现在等值比对中（S5b 计划 §5.1）。",
+  "provenance": {
+    "capturedAtCommit": "6e01a48",
+    "node": "v22.22.2",
+    "runtime": "vitest 内存 deps（_ringFixture.ts），无 DB；GX_HYDRATE_PREFETCH: batch=on, legacy=off 回退分支",
+    "reminder": "本块不参与 --check；commit/node 变化只做并排归因，不使比对变红"
+  },
+  "graph": {
+    "tables": ["ring_a", "ring_b", "ring_c", "ring_p", "ring_d", "ring_x", "ring_y"],
+    "records": {
+      "a1": { "table": "ring_a", "physical": { "a_name": "A1", "a_num": 100 } },
+      "a0": { "table": "ring_a", "physical": { "a_name": "A0", "a_num": 101 } },
+      "b1": { "table": "ring_b", "physical": { "b_name": "B1", "b_num": 200 } },
+      "b0": { "table": "ring_b", "physical": { "b_name": "B0", "b_num": 201 } },
+      "c1": { "table": "ring_c", "physical": { "c_name": "C1", "cv": 7 } },
+      "p1": { "table": "ring_p", "physical": { "p_name": "P1" } },
+      "p2": { "table": "ring_p", "physical": { "p_name": "P2" } },
+      "d1": { "table": "ring_d", "physical": { "d_name": "D1", "dv": 42 } },
+      "x1": { "table": "ring_x", "physical": { "x_name": "X1" } },
+      "y1": { "table": "ring_y", "physical": { "y_name": "Y1" } }
+    },
+    "edges": [
+      { "field": "ab", "from": "a1", "to": "b1", "note": "R3 环正向" },
+      { "field": "ba", "from": "b1", "to": "a1", "note": "R3 环反向" },
+      { "field": "ac", "from": "a1", "to": "c1", "note": "R6 a1 的 lookup 边（与环无关）" },
+      { "field": "bc", "from": "b1", "to": "c1", "note": "R7 链式第二跳（现状不解析）" },
+      { "field": "pd", "from": "p1", "to": "d1", "note": "R4 钻石路径 1" },
+      { "field": "pd", "from": "p2", "to": "d1", "note": "R4 钻石路径 2（共享 d1）" },
+      { "field": "dl", "from": "d1", "to": "c1", "note": "d1 自身 lookup 边" },
+      { "field": "x_ylink", "from": "x1", "to": "y1", "note": "双侧 null 环" },
+      { "field": "y_xlink", "from": "y1", "to": "x1", "note": "双侧 null 环" }
+    ],
+    "formulas": {
+      "ring_a.fa": "{AB.fb}",
+      "ring_a.f7": "{AB.BC.cv}",
+      "ring_b.fb": "{BA.fa}",
+      "ring_p.g1": "{PD.dv}",
+      "ring_p.g2": "{PD.dv}",
+      "ring_x.xf": "{Y.yf}",
+      "ring_y.yf": "{X.xf}"
+    },
+    "lookups": {
+      "ring_a.la": "lookup(ac -> cv)",
+      "ring_d.dlup": "lookup(dl -> cv)"
+    }
+  },
+  "captures": {
+    "batch": {
+      "r3-root-a": {
+        "start": "a1",
+        "bucket": "P0",
+        "values": [{ "id": "a1", "fa": null, "la": [7], "f7": null }],
+        "fetchSequence": ["link(ab)", "link(ac)", "rec[b1]", "rec[c1]", "link(ba)", "link(bc)"],
+        "peerFetchCounts": { "a1": 0, "a0": 0, "b1": 1, "b0": 0, "c1": 1, "p1": 0, "p2": 0, "d1": 0, "x1": 0, "y1": 0 }
+      },
+      "r3-root-b": {
+        "start": "b1",
+        "bucket": "P1",
+        "values": [{ "id": "b1", "fb": null }],
+        "fetchSequence": ["link(ba)", "link(bc)", "rec[a1]", "rec[c1]", "link(ab)", "link(ac)"],
+        "peerFetchCounts": { "a1": 1, "a0": 0, "b1": 0, "b0": 0, "c1": 1, "p1": 0, "p2": 0, "d1": 0, "x1": 0, "y1": 0 }
+      },
+      "r3-root-b0-unrelated": {
+        "start": "b0",
+        "bucket": "P1",
+        "values": [{ "id": "b0", "fb": null }],
+        "fetchSequence": ["link(ba)", "link(bc)"],
+        "peerFetchCounts": { "a1": 0, "a0": 0, "b1": 0, "b0": 0, "c1": 0, "p1": 0, "p2": 0, "d1": 0, "x1": 0, "y1": 0 }
+      },
+      "r4-diamond": {
+        "start": "p1,p2",
+        "bucket": "P0",
+        "values": [
+          { "id": "p1", "g1": 42, "g2": 42 },
+          { "id": "p2", "g1": 42, "g2": 42 }
+        ],
+        "fetchSequence": ["link(pd)", "rec[d1]", "link(dl)", "rec[c1]"],
+        "peerFetchCounts": { "a1": 0, "a0": 0, "b1": 0, "b0": 0, "c1": 1, "p1": 0, "p2": 0, "d1": 1, "x1": 0, "y1": 0 }
+      },
+      "r2-root-x": {
+        "start": "x1",
+        "bucket": "P0",
+        "values": [{ "id": "x1", "xf": null }],
+        "fetchSequence": ["link(x_ylink)", "rec[y1]", "link(y_xlink)"],
+        "peerFetchCounts": { "a1": 0, "a0": 0, "b1": 0, "b0": 0, "c1": 0, "p1": 0, "p2": 0, "d1": 0, "x1": 0, "y1": 1 }
+      },
+      "r2-root-y": {
+        "start": "y1",
+        "bucket": "P0",
+        "values": [{ "id": "y1", "yf": null }],
+        "fetchSequence": ["link(y_xlink)", "rec[x1]", "link(x_ylink)"],
+        "peerFetchCounts": { "a1": 0, "a0": 0, "b1": 0, "b0": 0, "c1": 0, "p1": 0, "p2": 0, "d1": 0, "x1": 1, "y1": 0 }
+      },
+      "d1-own": {
+        "start": "d1",
+        "bucket": "P0",
+        "values": [{ "id": "d1", "dv": 42, "dlup": [7] }],
+        "fetchSequence": ["link(dl)", "rec[c1]"],
+        "peerFetchCounts": { "a1": 0, "a0": 0, "b1": 0, "b0": 0, "c1": 1, "p1": 0, "p2": 0, "d1": 0, "x1": 0, "y1": 0 }
+      }
+    },
+    "legacy": {
+      "r3-root-a": {
+        "start": "a1",
+        "bucket": "P0",
+        "values": [{ "id": "a1", "fa": null, "la": [7], "f7": null }],
+        "fetchSequence": ["link(ab)", "rec[b1]", "link(ac)", "rec[c1]", "link(ac)", "rec[c1]", "rec[b1]", "link(ba)", "rec[a1]", "link(bc)", "rec[c1]"],
+        "peerFetchCounts": { "a1": 1, "a0": 0, "b1": 2, "b0": 0, "c1": 3, "p1": 0, "p2": 0, "d1": 0, "x1": 0, "y1": 0 }
+      },
+      "r3-root-b": {
+        "start": "b1",
+        "bucket": "P1",
+        "values": [{ "id": "b1", "fb": null }],
+        "fetchSequence": ["link(ba)", "rec[a1]", "link(bc)", "rec[c1]", "rec[a1]", "link(ab)", "rec[b1]", "link(ac)", "rec[c1]", "link(ac)", "rec[c1]"],
+        "peerFetchCounts": { "a1": 2, "a0": 0, "b1": 1, "b0": 0, "c1": 3, "p1": 0, "p2": 0, "d1": 0, "x1": 0, "y1": 0 }
+      },
+      "r3-root-b0-unrelated": {
+        "start": "b0",
+        "bucket": "P1",
+        "values": [{ "id": "b0", "fb": null }],
+        "fetchSequence": ["link(ba)", "link(bc)"],
+        "peerFetchCounts": { "a1": 0, "a0": 0, "b1": 0, "b0": 0, "c1": 0, "p1": 0, "p2": 0, "d1": 0, "x1": 0, "y1": 0 }
+      },
+      "r4-diamond": {
+        "start": "p1,p2",
+        "bucket": "P0",
+        "values": [
+          { "id": "p1", "g1": 42, "g2": 42 },
+          { "id": "p2", "g1": 42, "g2": 42 }
+        ],
+        "fetchSequence": ["link(pd)", "rec[d1]", "rec[d1]", "link(dl)", "rec[c1]", "link(dl)", "rec[c1]", "link(pd)", "rec[d1]"],
+        "peerFetchCounts": { "a1": 0, "a0": 0, "b1": 0, "b0": 0, "c1": 2, "p1": 0, "p2": 0, "d1": 3, "x1": 0, "y1": 0 }
+      },
+      "r2-root-x": {
+        "start": "x1",
+        "bucket": "P0",
+        "values": [{ "id": "x1", "xf": null }],
+        "fetchSequence": ["link(x_ylink)", "rec[y1]", "rec[y1]", "link(y_xlink)", "rec[x1]"],
+        "peerFetchCounts": { "a1": 0, "a0": 0, "b1": 0, "b0": 0, "c1": 0, "p1": 0, "p2": 0, "d1": 0, "x1": 1, "y1": 2 }
+      },
+      "r2-root-y": {
+        "start": "y1",
+        "bucket": "P0",
+        "values": [{ "id": "y1", "yf": null }],
+        "fetchSequence": ["link(y_xlink)", "rec[x1]", "rec[x1]", "link(x_ylink)", "rec[y1]"],
+        "peerFetchCounts": { "a1": 0, "a0": 0, "b1": 0, "b0": 0, "c1": 0, "p1": 0, "p2": 0, "d1": 0, "x1": 2, "y1": 1 }
+      }
+    }
+  },
+  "buckets": {
+    "_criterion": "P0=捕获值与编排形状都不依赖『选哪条记录作为 hydrate 根』这一外部顺序（r4 固定双根钻石、d1 自身单根）；P1=专门刻画『同一环从不同记录起 hydrate』的起始态（r3 三态、r2 两侧）——这些态的 values 跨态/跨 mode 全等（真正的 P0 不变量，在测试 R3/R4/R2 专项 describe 里强断言），仅 fetchSequence/peerFetchCounts 随起始态分叉，逐态锁各自形状、不做跨态相等断言，差异登记 D1；P2=字段投影器三态（待 S5b-Ⅱ）。",
+    "P0": [
+      "batch:r4-diamond", "batch:d1-own", "legacy:r4-diamond"
+    ],
+    "P1": [
+      "batch:r3-root-a", "batch:r3-root-b", "batch:r3-root-b0-unrelated",
+      "batch:r2-root-x", "batch:r2-root-y",
+      "legacy:r3-root-a", "legacy:r3-root-b", "legacy:r3-root-b0-unrelated",
+      "legacy:r2-root-x", "legacy:r2-root-y"
+    ],
+    "P2": []
+  },
+  "pendingDifferences": [
+    {
+      "id": "D1",
+      "kind": "拉取序列随起始态不同（取值无差异）",
+      "detail": "R3 非对称环 A.fa={AB.fb}、B.fb={BA.fa} 从三个起始态捕获，环公式值三态全部为 null（a1.fa=null、b1/b0.fb=null），不存在取值分叉；分叉只在触底拉取序列：a 根触底对端 b1×1/c1×1（batch），b 根触底 a1×1/c1×1，无关记录 b0 仅产生 link(ba)/link(bc) 元数据查询、零 records 触底。",
+      "arbitration": "待总监裁决：起始顺序不同只改变取数编排、不改变任何 cell 值，是否视为可接受现状。"
+    },
+    {
+      "id": "D2",
+      "kind": "batch vs legacy 触底次数不同（取值全等）",
+      "detail": "同一起始态 batch 与 legacy 的 values 逐值全等；legacy 因点引/title 走逐行 N+1 放大触底（如 r3-root-a：b1 1→2 次、c1 1→3 次；r2-root-x：y1 1→2 次）。fetchSequence 按 mode 分别锁定，不做跨 mode 相等断言。",
+      "arbitration": "已知取数编排差异（M1/S5 批量化的优化对象），非取值差异，无需取值裁决。"
+    },
+    {
+      "id": "D3",
+      "kind": "钻石共享子记录 d1 的物化次数（取值全等 42）",
+      "detail": "p1/p2 经同一 pd 字段汇聚到 d1，g1/g2 两公式都取 {PD.dv}=42，四格全等。batch 模式 d1 底层 records 触底 1 次（prefetch 与点引 merged、title linkref 共用同一请求级缓存）；legacy 模式 d1 底层触底 3 次 = p1 title linkref 1 + p1 点引 getMergedCached 物化 1 + p2 title linkref 1，而 p1.g2 与 p2.g1/g2 均命中 hydrate.ts:420 的 ctx.mergedCache（若不命中 d1 触底至少 4 次）。注意（计划 §5.2）：顶层 hydrateOne 不查 mergedCache，真正的『单次物化』只体现在点引路径 getMergedCached 命中，勿与 title linkref 的 getRecordsByIds 混数。",
+      "arbitration": "值与去重语义锁死；batch/legacy 触底数差异归取数编排。"
+    }
+  ],
+  "knownBoundaries": [
+    {
+      "id": "R7",
+      "detail": "【已知能力边界，非缺陷】{AB.BC.cv} 链式点引用现状只切第一个点：linkName=AB、subName='BC.cv'，B 表无名为 'BC.cv' 的字段（bc 边确实 b1→c1、c1.cv=7），故 f7=null，不做真两跳。S5b-Ⅱ 若改为真两跳取到 7，即对本 golden 构成 drift，须走差异流程。"
+    }
+  ]
+}
