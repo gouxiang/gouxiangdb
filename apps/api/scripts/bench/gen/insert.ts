@@ -115,8 +115,11 @@ function insertRecords(
   );
   const liveIds: string[] = [];
   const deadIdx = new Set<number>();
-  const txn = db.transaction((specs: RowSpec[]) => {
-    specs.forEach((r, idx) => {
+  // 关键：offset 为本批在整表中的全局起始下标。事务回调里的 j 只是批内局部下标，
+  // 直接用它编 id/createdAt 会在第二批起从 0 重新编号，撞第一批主键（>BATCH 行才暴露）。
+  const txn = db.transaction((specs: RowSpec[], offset: number) => {
+    specs.forEach((r, j) => {
+      const idx = offset + j;
       const id = recId(prefix, idx);
       const ms = createdAtMs(idx);
       const deleted = r.softDelete ? ms + 10 : null;
@@ -125,7 +128,7 @@ function insertRecords(
       else liveIds.push(id);
     });
   });
-  for (let i = 0; i < rows.length; i += BATCH) txn(rows.slice(i, i + BATCH));
+  for (let i = 0; i < rows.length; i += BATCH) txn(rows.slice(i, i + BATCH), i);
   return { liveIds, deadIdx };
 }
 
