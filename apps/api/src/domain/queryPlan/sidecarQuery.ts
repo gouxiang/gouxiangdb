@@ -1,14 +1,10 @@
 // apps/api/src/domain/queryPlan/sidecarQuery.ts
-// M1/S6 sidecar 读执行器（better-sqlite3 只读连接）。这是 sidecar【第一次接入读路径】。
-// 只负责在 record_field_index / records 上把 compile.ts 的物理计划跑成：
-//   - 物理过滤后的有序候选 recordId 集合（+ 精确计数）；
-//   - 物理数字/日期/勾选字段的表尾聚合；
-//   - singleSelect/checkbox 的分桶（选项顺序/空白桶在应用层重排，SQL 只分桶）；
-//   - EXPLAIN QUERY PLAN（供测试断言命中索引、无全表 SCAN）。
-// 不算任何 cell、不 hydrate：计算字段/残余过滤/搜索/文本排序一律回 recordService 内存口径。
-//
-// 安全：表 id/字段 id/值全部 ? 绑定；SQL 片段仅来自 compile.ts（固定白名单模板），
-// 不接受外部传入的裸 SQL。连接只读打开，与 S2 raw 网关一致，WAL 下不阻塞写者。
+// M1/S6 sidecar 读执行器（better-sqlite3 只读连接）：在 record_field_index / records 上跑
+// compile.ts 的物理计划——物理过滤后有序候选 recordId（+精确计数）、数值/日期/勾选表尾聚合、
+// singleSelect/checkbox 分桶（顺序交应用层）、EXPLAIN QUERY PLAN。不算 cell、不 hydrate：
+// 计算字段/残余过滤/搜索/文本排序回 recordService 内存口径。
+// 安全：表/字段 id 与值全部 ? 绑定；SQL 片段仅来自 compile.ts 白名单模板，不接受裸 SQL；
+// 连接只读打开（同 S2 raw 网关），WAL 下不阻塞写者。
 
 import type Database from "better-sqlite3";
 import type { SqlBindValue } from "../../db/rawRead.js";
@@ -66,33 +62,17 @@ export interface KeysetIdPage {
 export interface SidecarQuerier {
   /** 物理过滤命中的活记录数（无 filter 时即表内活行数）。 */
   countPhysical(q: PhysicalFilter & { tableId: string }): number;
-  /**
-   * 原生 (createdAt ASC,id ASC) keyset 一页：物理过滤 + 游标谓词（可移植展开式，不用行值比较）。
-   * 仅用于无排序、过滤全物理的 T1 档；返回 limit+1 探测行由调用方截。
-   */
+  /** 原生 (createdAt,id ASC) keyset 一页（可移植展开式游标，不用行值比较）；limit+1 探测行由调用方截。 */
   physicalKeysetOnCreatedAt(q: KeysetPageArgs): KeysetIdPage;
   /** 物理过滤 + 物理排序后的有序候选 recordId（tie-break createdAt,id 升序）。 */
   physicalOrderedIds(q: CandidateQuery): string[];
-  /**
-   * 无排序（createdAt,id 升序）候选集上直接按 offset/limit 取一页 id，不物化全量候选。
-   * 仅供 S6 A 档【无排序】分页（keyset=off 的 planner）；用不超过 ceil(offset/limit)+1 次
-   * 索引 seek 快进到 offset（与 S7 T1 同策略，无 SQL OFFSET）。
-   */
-  physicalCreatedPage(
-    q: PhysicalFilter & { tableId: string },
-    offset: number,
-    limit: number,
-  ): string[];
+  /** 无排序候选集按 offset/limit 取一页 id（≤ceil(offset/limit)+1 次索引 seek，不物化全量、无 SQL OFFSET）。 */
+  physicalCreatedPage(q: PhysicalFilter & { tableId: string }, offset: number, limit: number): string[];
   /** 物理字段表尾聚合（percent* 由 count/empty/filled 推导）。 */
   physicalAggregates(req: PhysicalAggRequest): Record<string, number | null>;
   /** singleSelect/checkbox 分桶（不在 SQL 排序，顺序交应用层）。 */
   physicalGroupBuckets(req: GroupBucketRequest): GroupBucket[];
-  /**
-   * 数值排序洁净度：候选集中这些 valueNum 排序字段是否【不存在】非空但转不成数的脏值
-   *（isNull=0 AND valueNum IS NULL，如 number 列存 "abc"）。存在脏值时内存 sortRows 会退化为
-   *  文本比较而非排末尾，SQL 无法逐值复现 zh-CN numeric，编排层须整体回退内存排序。
-   *  checkbox 恒 0/1 可不查（调用方对 checkbox 字段无需传入）。
-   */
+  /** 排序字段是否无脏值（isNull=0 AND valueNum IS NULL）；有脏值则整体回退内存排序（SQL 无法复现 zh-CN numeric）。 */
   sortNumericClean(q: PhysicalFilter & { tableId: string; fieldIds: string[] }): boolean;
   /** EXPLAIN QUERY PLAN（供测试断言索引命中 / 无全表 SCAN）。 */
   explain(q: CandidateQuery): string[];
@@ -156,11 +136,20 @@ export function createSidecarQuerier(db: Database.Database): SidecarQuerier {
     const cursorClause = q.cursor
       ? `AND (r."createdAt" > ? OR (r."createdAt" = ? AND r."id" > ?))`
       : "";
+    // 有 countPlan（纯合取/同字段 OR 标量正向谓词）走 rfi JOIN：range seek 命中索引后取页，
+    // 避免 records 驱动相关 EXISTS 在「过滤列≠排序列」全表逐行探测（100k 实测 5-51s vs 0.13-0.32s）。
+    const from = q.countPlan ? `records r ${q.countPlan.joins}` : "records r";
+    const liveFilter = q.countPlan
+      ? `r."tableId"=? AND r."deletedAt" IS NULL`
+      : liveWhere(q.filterSql);
     const sql =
-      `SELECT r."id" AS id, r."createdAt" AS createdAt FROM records r ` +
-      `WHERE ${liveWhere(q.filterSql)} ${cursorClause} ORDER BY r."createdAt" ASC, r."id" ASC LIMIT ?`;
-    // 绑定顺序：tableId → filter 参数 → 游标三参 → limit（多取 1 行判断 hasMore）。
-    const bind: SqlBindValue[] = [q.tableId, ...q.filterParams];
+      `SELECT r."id" AS id, r."createdAt" AS createdAt FROM ${from} ` +
+      `WHERE ${liveFilter} ${cursorClause} ORDER BY r."createdAt" ASC, r."id" ASC LIMIT ?`;
+    // 绑定顺序：JOIN 路径各 cN 的 tableId/fieldId/谓词值（或回退 tableId→filter 参数）→
+    // records tableId（仅 JOIN 路径）→ 游标三参 → limit。
+    const bind: SqlBindValue[] = q.countPlan
+      ? [...q.countPlan.joinParams, q.tableId]
+      : [q.tableId, ...q.filterParams];
     if (q.cursor) bind.push(q.cursor.createdAt, q.cursor.createdAt, q.cursor.id);
     bind.push(q.limit + 1);
     const fetched = db.prepare(sql).all(...bind) as { id: string; createdAt: number }[];
@@ -180,13 +169,8 @@ export function createSidecarQuerier(db: Database.Database): SidecarQuerier {
     return rows.map((r) => r.id);
   }
 
-  function physicalCreatedPage(
-    q: PhysicalFilter & { tableId: string },
-    offset: number,
-    limit: number,
-  ): string[] {
-    // 用 keyset seek 快进 offset 行（每步至多 limit 行，全走覆盖索引），再取目标页；
-    // 全程不物化全量候选，与 S7 T1 physicalKeysetOnCreatedAt 同一索引路径。
+  function physicalCreatedPage(q: PhysicalFilter & { tableId: string }, offset: number, limit: number): string[] {
+    // keyset seek 快进 offset 行（每步至多 limit，全走覆盖索引），不物化全量候选，无 SQL OFFSET。
     let cursor: { createdAt: number; id: string } | null = null;
     let remaining = Math.max(0, offset);
     while (remaining > 0) {

@@ -203,6 +203,29 @@ describe("T1 keyset-created（无排序，原生 createdAt 游标）", () => {
     expect(seen).toEqual(expected);
   });
 
+  it("同字段 range(age gte+lte) 走 rfi JOIN 取页，翻页拼接 == 过滤后有序集合且不重不漏", async () => {
+    // S10：有 countPlan 时 T1 keyset 改走 rfi JOIN（非相关 EXISTS），双边界 range 拼接必须
+    // 与旧路径逐 id 相等，验证 JOIN 取页无重复（标量字段 1 行/记录）、无遗漏、序正确。
+    const config: ViewConfig = {
+      ...baseConfig(),
+      filters: { kind: "and", children: [
+        { kind: "condition", fieldId: F.age, op: "gte", value: "18" },
+        { kind: "condition", fieldId: F.age, op: "lte", value: "70" },
+      ] } as ViewConfig["filters"],
+    };
+    const q = createSidecarQuerier(raw);
+    const first = await mod.runKeysetPaging(q, {
+      tableId, fields, config, search: "", limit: PAGE, offset: 0, cursor: null,
+    });
+    expect(first.mode).toBe("keyset-created");
+    const expected = await legacyIds(config);
+    expect(first.filteredTotal).toBe(expected.length);
+    const { seen, modes } = await walkAll(config);
+    expect(modes).toEqual(new Set(["keyset-created"]));
+    expect(seen).toEqual(expected);
+    expect(new Set(seen).size).toBe(seen.length);
+  });
+
   it("首页 hasMore/nextCursor 正确；末页 hasMore=false", async () => {
     const q = createSidecarQuerier(raw);
     const first = await mod.runKeysetPaging(q, {

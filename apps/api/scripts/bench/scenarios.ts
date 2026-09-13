@@ -116,8 +116,17 @@ export function buildSceneDefs(F: Fields, rows: number, pageLimit: number): Scen
   if (has("money")) {
     scenes.push({
       name: "sort_number_desc", kind: "view",
-      desc: "金额降序（T2 keyset-sorted，valueNum 物理排序 + 物化序列续点）",
+      desc: "金额降序（money 含 0.5% 脏值→sortNumericClean 回退，实测宽口径回退路径，非证伪门场景）",
       config: { sorts: sort(id("money"), "desc") },
+    });
+  }
+  // 干净数值字段（rate 恒为数值、生成器不掺脏）下的真实 T2 物理排序——S10 证伪门场景
+  //（plan §S10「物理字段排序/筛选 P95」）。与 money 脏值回退场景区分，避免把门场景被脏值污染。
+  if (has("rate")) {
+    scenes.push({
+      name: "sort_clean_number_desc", kind: "view",
+      desc: "比率降序（rate 恒数值无脏值，T2 keyset-sorted 真物理排序，证伪门场景）",
+      config: { sorts: sort(id("rate"), "desc") },
     });
   }
   if (has("date")) {

@@ -148,8 +148,15 @@ async function main(): Promise<number> {
 
   const titleFieldId = sf.fieldIds?.title?.id ?? "";
   if (!titleFieldId) throw new Error("scenes.json 缺 fieldIds.title");
-  const readScenes = sf.scenes.filter((s) => s.kind !== "write" && s.kind !== "mixed");
-  const writeScenes = sf.scenes.filter((s) => s.kind === "write" || s.kind === "mixed");
+  // 可选场景白名单（逗号分隔）；不传跑完整矩阵（S9 默认）。S10 证伪门只测物理索引命中场景时
+  // 用它裁掉随行数线性劣化的 T3 宽口径（文本排序/分组/搜索/残余 OR），使 50 万档可在本机完成；
+  // T3 仍可在全量小样本中单独留证（其不算 ADR-0008 触发项，见 plan §S10/SPEC AC-M1-1）。
+  const sceneFilter = cli.scenes
+    ? new Set(cli.scenes.split(",").map((s) => s.trim()).filter(Boolean))
+    : null;
+  const keepScene = (name: string): boolean => sceneFilter === null || sceneFilter.has(name);
+  const readScenes = sf.scenes.filter((s) => s.kind !== "write" && s.kind !== "mixed" && keepScene(s.name));
+  const writeScenes = sf.scenes.filter((s) => (s.kind === "write" || s.kind === "mixed") && keepScene(s.name));
 
   console.log(`[run-gate] ${sf.rows} 行 ${sf.shape} mode=${mode}(read=${flags.read},keyset=${flags.keyset}) C=${concurrency} 场景=${sf.scenes.length}`);
 
