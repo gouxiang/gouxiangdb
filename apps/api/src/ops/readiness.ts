@@ -130,23 +130,45 @@ export async function runChecks(deps: ReadinessDeps): Promise<ReadinessReport> {
   };
 }
 
-// 真实探针：独立 better-sqlite3 连接 + Prisma ping + 文件系统探测。
+// 探针连接必须是【进程级常驻单例】，不能在每次 /readyz 响应后关闭：
+// SQLite 当"最后一个打开的连接关闭"时会自动 checkpoint 并 unlink -wal/-shm。
+// 启动探针（systemd/k8s）几乎总是在 Prisma 建库后、其它常驻只读单例建立前第一个、
+// 也是当时唯一的 better-sqlite3 连接；若请求结束即 close，会删掉 Prisma 引擎正持有的
+// wal/shm，导致其首个写事务 SQLITE_IOERR_FSYNC(extended 522)（库越大 checkpoint 窗口
+// 越宽，竞态越稳定复现）。常驻后该连接永不成为"关闭瞬间的最后连接"，仅随进程退出回收。
+let probeConn: Database.Database | undefined;
+let probeConnFile: string | undefined;
+
+function getProbeConn(dbFile: string): Database.Database {
+  if (!probeConn || probeConnFile !== dbFile) {
+    closeProbeConn();
+    probeConn = new Database(dbFile, { timeout: 1000 });
+    probeConnFile = dbFile;
+  }
+  return probeConn;
+}
+
+/** 关闭常驻探针连接（进程退出随句柄回收；仅供优雅停机与测试在换库时收尾）。 */
+export function closeProbeConn(): void {
+  try {
+    probeConn?.close();
+  } catch {
+    /* 文件被替换/已关闭时安全收尾 */
+  }
+  probeConn = undefined;
+  probeConnFile = undefined;
+}
+
+// 真实探针：进程级常驻 better-sqlite3 连接 + Prisma ping + 文件系统探测。
 export function createDefaultDeps(): ReadinessDeps {
   const prismaDir = path.dirname(config.migrationsDir);
   const dbFile = resolveDatabaseFile(config.databaseUrl, prismaDir);
-  let db: Database.Database | undefined;
 
-  const sqlite = (): Database.Database => {
-    if (!db) db = new Database(dbFile, { timeout: 1000 });
-    return db;
-  };
-  const resetSqlite = () => {
-    try {
-      db?.close();
-    } catch {
-      /* ignore */
-    }
-    db = undefined;
+  const sqlite = (): Database.Database => getProbeConn(dbFile);
+  // 连接是进程单例，不在请求末关闭（见文件头说明）；BUSY 重试复用同一连接即可
+  // （BEGIN IMMEDIATE 失败时并无残留事务，直接重开事务）。
+  const resetSqlite = (): void => {
+    /* no-op：探针连接常驻，关闭会触发 WAL 末连接 unlink，毒化 Prisma */
   };
 
   return {
