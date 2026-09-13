@@ -256,3 +256,52 @@ describe("S5 查询常量化：调用次数不随页内行数 N 增长", () => {
     expect(d100.counts.getLinkRows).toBeGreaterThan(20);
   });
 });
+
+// M1/S9 内存安全闸回归：有界预取（depth=0 / 极小 budget）下，几乎所有对端记录都被排除在
+// 预热之外，只能靠 wrappedDeps 的 cache-miss 单条兜底取数。断言 batch 结果仍与 legacy
+// 逐值全等（截断预热只少省查询，绝不改变取值），并确实退化为更多次 getRecordsByIds 往返。
+describe("S9 有界预取截断不改变取值（cache-miss 兜底）", () => {
+  const prevDepth = process.env.GX_HYDRATE_PREFETCH_DEPTH;
+  const prevBudget = process.env.GX_HYDRATE_PREFETCH_BUDGET;
+  function clampPrefetch(): void {
+    // depth=0：不沿 links BFS（连直接邻居都不预热）；budget=1：只允许根记录在缓存。
+    process.env.GX_HYDRATE_PREFETCH_DEPTH = "0";
+    process.env.GX_HYDRATE_PREFETCH_BUDGET = "1";
+  }
+  function restore(): void {
+    if (prevDepth === undefined) delete process.env.GX_HYDRATE_PREFETCH_DEPTH;
+    else process.env.GX_HYDRATE_PREFETCH_DEPTH = prevDepth;
+    if (prevBudget === undefined) delete process.env.GX_HYDRATE_PREFETCH_BUDGET;
+    else process.env.GX_HYDRATE_PREFETCH_BUDGET = prevBudget;
+  }
+
+  it("depth=0/budget=1：batch 与 legacy 对 N=100 逐行完整 fields 全等", async () => {
+    clampPrefetch();
+    try {
+      const n = 100;
+      const fx = build(n);
+      const db = countingDeps(fx.store, fx.links);
+      const dl = countingDeps(fx.store, fx.links);
+      const batch = await hydrateRecords(orderRows(fx), orderFields, db);
+      const legacy = await hydrateRecordsLegacy(orderRows(fx), orderFields, dl);
+
+      const bMap = new Map(batch.map((r) => [r.id, r]));
+      for (const lr of legacy) {
+        const br = bMap.get(lr.id)!;
+        expect(br.fields).toEqual(lr.fields); // 截断预热，值逐字不变
+      }
+      // 截断确实生效：lookup/rollup/点引用所需的客户记录全部 cache-miss 单取，
+      // getRecordsByIds 往返数显著多于默认档（默认 N=100 仅 1 次对端 IN）。
+      expect(db.counts.getRecordsByIds).toBeGreaterThan(1);
+      // 关键值仍正确（经 cache-miss 补回）。
+      const o0 = bMap.get("ord0")!.fields;
+      expect(o0[O_CUSTNAME]).toEqual(["客户0"]);
+      expect(o0[O_RATESUM]).toBe(100);
+      expect(o0[O_CUSTCOUNT]).toBe(1);
+      expect(o0[O_FDOT]).toBe(100);
+      expect(o0[O_CUST]).toEqual([{ tableId: TC, recordId: "cust0", title: "客户0" }]);
+    } finally {
+      restore();
+    }
+  });
+});

@@ -7,7 +7,11 @@ import type { ScenarioResult } from "./load.js";
 import { round3 } from "./stats.js";
 
 export interface GateConfig {
-  /** 读场景服务端 P95 阈值毫秒（M1 目标：100万物理索引命中 <1500，见 ADR-0008）。 */
+  /**
+   * 读场景服务端 P95 阈值毫秒（M1/S10 证伪目标：物理索引命中 <1500，见 ADR-0008）。
+   * 传 0 表示【关闭性能门】，仅裁决正确性（失败率/超时/drift）——用于 S9 harness 自检，
+   * P95 数据仍完整落 JSON/MD，不因真实性能信号把脚手架本身判失败。
+   */
   readP95Ms: number;
   /** 允许的失败率上限（0..1）。 */
   maxFailureRate: number;
@@ -56,7 +60,8 @@ export function judge(results: ScenarioResult[], gate: GateConfig, sidecarDrift?
     if (r.stats.timeouts > 0) {
       breaches.push(`${r.scene}: 超时 ${r.stats.timeouts} 次`);
     }
-    if (isRead && r.stats.serve.p95 >= gate.readP95Ms) {
+    // readP95Ms=0：性能门关闭（S9 自检只验正确性），P95 仍在报告中呈现。
+    if (isRead && gate.readP95Ms > 0 && r.stats.serve.p95 >= gate.readP95Ms) {
       breaches.push(`${r.scene}: 读 P95 ${round3(r.stats.serve.p95)}ms ≥ ${gate.readP95Ms}ms（${r.desc}）`);
     }
   }
@@ -89,7 +94,9 @@ export function renderMarkdown(meta: RunMeta, results: ScenarioResult[], verdict
   lines.push(`- 机型：${meta.host}；Node ${meta.node}`);
   lines.push(`- flag：read=${meta.flags.read} keyset=${meta.flags.keyset} prefetch=${meta.flags.prefetch}`);
   lines.push(`- 采样：预热丢弃 ${meta.warmup}，每场景 ${meta.samples} 次，并发 ${meta.concurrency}，limit=${meta.limit}`);
-  lines.push(`- 门：读 serve-P95 < ${verdict.readP95Ms}ms，失败率 ≤ ${verdict.maxFailureRate * 100}%`);
+  lines.push(verdict.readP95Ms > 0
+    ? `- 门：读 serve-P95 < ${verdict.readP95Ms}ms，失败率 ≤ ${verdict.maxFailureRate * 100}%`
+    : `- 门：性能门已关闭（--read-p95-ms 0，仅裁决正确性）；失败率 ≤ ${verdict.maxFailureRate * 100}%。各场景 P95 仍见下表，供 S10 证伪使用。`);
   lines.push(`- 裁决：**${verdict.pass ? "PASS" : "FAIL"}**`);
   if (meta.timeoutMs) lines.push(`- 单请求超时阈值：${meta.timeoutMs}ms`);
   if (meta.sidecarDrift) {

@@ -136,9 +136,17 @@ export async function startServer(opts: {
     }
   };
   child.on("exit", (code, signal) => {
-    // 非正常退出（OOM SIGKILL/崩溃）必须可见，否则 harness 只看到 connection refused。
-    if (code !== 0 && code !== null) {
-      fs.appendFileSync(logFile, `[server] 子进程异常退出 code=${code} signal=${signal}\n`);
+    // 任何非正常退出都必须可见，否则 harness 只看到 connection refused：
+    //  - code≠0：非零退出；
+    //  - code=null 且 signal 非 SIGTERM：被信号杀死。stop() 主动发的是 SIGTERM（优雅停机），
+    //    属正常；SIGKILL 典型是 OOM jetsam，SIGSEGV/SIGABRT 是 native 崩溃，必须记录。
+    const abnormal = code !== 0 && (code !== null || (signal !== "SIGTERM"));
+    if (abnormal) {
+      fs.appendFileSync(
+        logFile,
+        `[server] 子进程异常退出 code=${code} signal=${signal}` +
+          (signal === "SIGKILL" ? "（疑似 OOM 被系统杀死，检查 RSS 峰值/内存压力）" : "") + "\n",
+      );
     }
     try {
       fs.closeSync(out);

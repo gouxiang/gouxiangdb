@@ -20,10 +20,36 @@ import type { FieldMeta, RawRecord } from "./types.js";
 import type { HydrateDeps, LinkBatchQuery } from "./hydrate.js";
 import { LinkLoader } from "./hydrateBatchLinks.js";
 
-/** BFS 预热最大关联跳数（从页内根记录算起）；超出后靠 cache-miss 单条兜底，值仍正确。 */
-const MAX_PREFETCH_DEPTH = 8;
+/**
+ * BFS 预热最大关联跳数（从页内根记录算起）；超出后靠 cache-miss 单条兜底，值仍正确。
+ * 取值依据：单页渲染的 lookup/rollup/count 只读直接邻居（d1），链式公式/点引用最多到 d2，
+ * 预留到 d3 覆盖嵌套关联字段；再深在密集多对多图上指数膨胀却几乎不被当页公式引用。
+ * 可用 GX_HYDRATE_PREFETCH_DEPTH 覆盖（仅供压测/调参；S10 证伪用）。
+ */
+const DEFAULT_PREFETCH_DEPTH = 3;
+/**
+ * 单次预热允许载入记录缓存的【总量上限】。这是内存安全闸：
+ * 密集多对多图上 BFS 4 跳即可达全表约 87%（实测 44MB/7k 行库，100 根→6100 行），
+ * depth-8 无界预热会把整库按每请求物化（稳态 RSS 约为库体积 23 倍，C=8 叠加深翻时
+ * 瞬时 OOM 被 jetsam 杀进程）。预热只填缓存，预算外记录由 cache-miss 单条兜底，
+ * 取值逐字不变（对拍锁定），仅少省若干查询。按页内根记录数比例给预算，并夹在绝对上下限内。
+ */
+const BUDGET_PER_ROOT = 16;
+const MIN_PREFETCH_BUDGET = 400;
+const MAX_PREFETCH_BUDGET = 2000;
 /** 每层并发上限（常量，不随页内行数 N 增长）。 */
 const CONCURRENCY = 8;
+
+function resolvePrefetchDepth(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env.GX_HYDRATE_PREFETCH_DEPTH);
+  return Number.isInteger(n) && n >= 0 ? n : DEFAULT_PREFETCH_DEPTH;
+}
+
+function resolvePrefetchBudget(rootCount: number, env: NodeJS.ProcessEnv = process.env): number {
+  const override = Number(env.GX_HYDRATE_PREFETCH_BUDGET);
+  if (Number.isInteger(override) && override >= 0) return override;
+  return Math.min(MAX_PREFETCH_BUDGET, Math.max(MIN_PREFETCH_BUDGET, rootCount * BUDGET_PER_ROOT));
+}
 
 /** links/subtable 字段在「本行」视角下，数据实际挂载的（正向字段 id, 本行所在方向）。 */
 function fieldOrientation(f: FieldMeta): { forwardId: string; dir: "parent" | "child" } | null {
@@ -106,15 +132,22 @@ export class BatchStore {
     return name;
   }
 
-  /** 沿 links 依赖图 BFS 预热（只暖缓存，不算值）。 */
+  /**
+   * 沿 links 依赖图 BFS 预热（只暖缓存，不算值）。
+   * 深度 + 总量双界：密集多对多图上无界 BFS 会把整库按每请求物化（OOM 风险，见常量注释）；
+   * 预算外记录不预热，hydrate.ts 取值时走 cache-miss 单条兜底，结果逐字不变。
+   */
   async prefetch(roots: RawRecord[]): Promise<void> {
     this.seedRecords(roots);
     await this.collectUsers(roots);
 
+    const maxDepth = resolvePrefetchDepth();
+    const budget = resolvePrefetchBudget(roots.length);
     const visited = new Set<string>(roots.map((r) => r.id));
     let frontier = roots;
-    for (let depth = 0; depth < MAX_PREFETCH_DEPTH && frontier.length > 0; depth++) {
-      frontier = await this.expandLevel(frontier, visited);
+    for (let depth = 0; depth < maxDepth && frontier.length > 0; depth++) {
+      if (this.recordCache.size >= budget) break;
+      frontier = await this.expandLevel(frontier, visited, budget - this.recordCache.size);
       await this.collectUsers(frontier);
     }
     await this.flushUsers();
@@ -153,8 +186,12 @@ export class BatchStore {
     }
   }
 
-  /** 预热一层：每 (字段,方向) 一条批量 linkRows，再每对端表一条 IN 取记录。 */
-  private async expandLevel(frontier: RawRecord[], visited: Set<string>): Promise<RawRecord[]> {
+  /**
+   * 预热一层：每 (字段,方向) 一条批量 linkRows，再每对端表一条 IN 取记录。
+   * @param budget 本层允许新载入记录缓存的条数上限（总量预算的剩余额度）；
+   *   对端 id 超过额度时按集合迭代顺序截断——仅少预热，不影响正确性（cache-miss 兜底）。
+   */
+  private async expandLevel(frontier: RawRecord[], visited: Set<string>, budget: number): Promise<RawRecord[]> {
     const rowsByTable = new Map<string, Set<string>>();
     for (const r of frontier) {
       const s = rowsByTable.get(r.tableId) ?? new Set<string>();
@@ -191,11 +228,17 @@ export class BatchStore {
     }
 
     // 每对端表一条 IN 拉未缓存记录，作为下一层 frontier（去环）。
+    // 跨对端表共享剩余预算：全局计数 newCount 上限 budget，超出即不再拉取（未暖记录
+    // 由 hydrate.ts cache-miss 单条兜底，值不变）。
     const fresh: RawRecord[] = [];
+    let newCount = 0;
     await mapPool([...peerIdsByTable.values()], async (idSet) => {
+      if (newCount >= budget) return;
       const ids = [...idSet].filter((id) => !this.recordCache.has(id));
       if (ids.length === 0) return;
-      const fetched = await this.deps.getRecordsByIds(ids);
+      const room = budget - newCount;
+      const limited = ids.length <= room ? ids : ids.slice(0, room);
+      const fetched = await this.deps.getRecordsByIds(limited);
       for (const r of fetched) {
         this.recordCache.set(r.id, r);
         if (!visited.has(r.id)) {
@@ -203,6 +246,7 @@ export class BatchStore {
           fresh.push(r);
         }
       }
+      newCount += limited.length;
     });
     return fresh;
   }

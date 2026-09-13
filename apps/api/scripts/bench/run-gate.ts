@@ -45,7 +45,16 @@ function parseCli(): Cli {
   const out: Cli = {};
   for (let i = 2; i < process.argv.length; i++) {
     const a = process.argv[i]!;
-    if (a.startsWith("--")) out[a.slice(2)] = process.argv[i + 1] ?? "";
+    if (!a.startsWith("--")) continue;
+    const next = process.argv[i + 1];
+    // 裸布尔 flag（--skip-build / --keep-db）：下一个 token 缺失或本身是 flag 时记 "true"，
+    // 绝不把后续 flag 名吞成它的值。
+    if (next === undefined || next.startsWith("--")) {
+      out[a.slice(2)] = "true";
+    } else {
+      out[a.slice(2)] = next;
+      i += 1;
+    }
   }
   return out;
 }
