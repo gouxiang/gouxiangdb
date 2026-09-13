@@ -186,9 +186,9 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
 );
 
 export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
-  options?: { value: string; label: string }[];
+  options?: { value: string; label: string; disabled?: boolean }[];
   /** 分组渲染（optgroup）；与 options 二选一，groups 优先 */
-  groups?: { label: string; options: { value: string; label: string }[] }[];
+  groups?: { label: string; options: { value: string; label: string; disabled?: boolean }[] }[];
 }
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
@@ -208,14 +208,14 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
       {groups?.map((g) => (
         <optgroup key={g.label} label={g.label}>
           {g.options.map((o) => (
-            <option key={o.value} value={o.value}>
+            <option key={o.value} value={o.value} disabled={o.disabled}>
               {o.label}
             </option>
           ))}
         </optgroup>
       ))}
       {options?.map((o) => (
-        <option key={o.value} value={o.value}>
+        <option key={o.value} value={o.value} disabled={o.disabled}>
           {o.label}
         </option>
       ))}

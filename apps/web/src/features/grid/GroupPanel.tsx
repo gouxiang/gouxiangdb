@@ -3,6 +3,7 @@
 import type { FieldDTO } from "@gx/shared-types";
 import { Icon } from "../../components/icons";
 import { Select, Button } from "../../components/ui";
+import { isSortGroupRestricted } from "../../api/records-paging";
 
 // 可作分组字段的类型
 function canGroup(field: FieldDTO): boolean {
@@ -22,11 +23,27 @@ function canGroup(field: FieldDTO): boolean {
 export interface GroupPanelProps {
   fields: FieldDTO[];
   groupByFieldId: string | null;
+  /** S8：降级原因码；computedInMem 时对非物理可分组字段（links/非主字段 longText 等）逐项禁用。 */
+  degradedCodes?: string[];
   onChange: (fieldId: string | null) => void;
 }
 
-export function GroupPanel({ fields, groupByFieldId, onChange }: GroupPanelProps) {
+export function GroupPanel({ fields, groupByFieldId, degradedCodes, onChange }: GroupPanelProps) {
   const groupable = fields.filter(canGroup);
+
+  const options = [
+    { value: "", label: "不分组" },
+    ...groupable.map((f) => {
+      // 降级态下非物理字段分组会逼查询走内存路径 → 置灰；物理字段（单选/多选/勾选/短文本等）不受影响。
+      const disabled = isSortGroupRestricted(degradedCodes, f);
+      return {
+        value: f.id,
+        label: disabled ? `${f.name}（量大时不可用）` : f.name,
+        // 已选中的当前分组值保持可用，避免原生 select 把 value 落到 disabled option 上。
+        disabled: disabled && f.id !== groupByFieldId,
+      };
+    }),
+  ];
 
   return (
     <div className="flex w-72 flex-col gap-3 p-3">
@@ -36,10 +53,7 @@ export function GroupPanel({ fields, groupByFieldId, onChange }: GroupPanelProps
         <Select
           value={groupByFieldId ?? ""}
           onChange={(e) => onChange(e.target.value || null)}
-          options={[
-            { value: "", label: "不分组" },
-            ...groupable.map((f) => ({ value: f.id, label: f.name })),
-          ]}
+          options={options}
         />
       </div>
       {groupByFieldId && (

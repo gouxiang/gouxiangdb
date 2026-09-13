@@ -447,6 +447,7 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
         config={cfg}
         allFields={visibleFields}
         visibleFields={visibleFields}
+        degradedCodes={infiniteData.degraded ?? []}
         filteredTotal={filteredTotal}
         permissions={{ canEditData: permissions.canEditData, canManageSchema: permissions.canManageSchema }}
         selectionCount={selection.count}

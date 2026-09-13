@@ -20,11 +20,14 @@ import { FilterPanel } from "./FilterPanel";
 import { GroupPanel } from "./GroupPanel";
 import { RowColorPanel } from "./RowColorPanel";
 import FieldEditorSheet from "../designer/FieldEditorSheet";
+import { isSortGroupRestricted } from "../../api/records-paging";
 
 export interface GridToolbarProps {
   config: ViewConfig;
   allFields: FieldDTO[];
   visibleFields: FieldDTO[];
+  /** S8：服务端降级原因码（如 computedInMem），用于排序/分组对非物理字段逐项置灰。 */
+  degradedCodes?: string[];
   filteredTotal: number;
   permissions: { canEditData: boolean; canManageSchema: boolean };
   selectionCount: number;
@@ -82,6 +85,7 @@ export function GridToolbar(props: GridToolbarProps) {
     config,
     allFields,
     visibleFields,
+    degradedCodes,
     filteredTotal,
     permissions,
     selectionCount,
@@ -250,6 +254,7 @@ export function GridToolbar(props: GridToolbarProps) {
             <GroupPanel
               fields={visibleFields}
               groupByFieldId={config.groupByFieldId}
+              degradedCodes={degradedCodes}
               onChange={(id) => onUpdateConfig({ groupByFieldId: id })}
             />
           </Popover>
@@ -268,6 +273,7 @@ export function GridToolbar(props: GridToolbarProps) {
             <SortPanel
               fields={visibleFields}
               sorts={config.sorts}
+              degradedCodes={degradedCodes}
               onChange={(sorts) => onUpdateConfig({ sorts })}
             />
           </Popover>
@@ -337,10 +343,12 @@ function countConditions(node: unknown): number {
 function SortPanel({
   fields,
   sorts,
+  degradedCodes,
   onChange,
 }: {
   fields: FieldDTO[];
   sorts: SortSpec[];
+  degradedCodes?: string[];
   onChange: (sorts: SortSpec[]) => void;
 }) {
   const toggle = (fieldId: string, dir: SortDirection) => {
@@ -359,15 +367,30 @@ function SortPanel({
       <span className="text-gx-13 font-semibold text-gx-text-primary">排序</span>
       {fields.map((f) => {
         const cur = sorts.find((s) => s.fieldId === f.id)?.direction;
+        // S8：降级态下，依赖非物理字段（计算/lookup/links/长正文等）的排序会把查询逼进内存路径，禁用新切换。
+        // 已生效的旧排序保持原样显示（不清、不崩），仅阻止再次切换。
+        const restricted = isSortGroupRestricted(degradedCodes, f);
+        const hint = "数据量较大，该字段排序需先收窄筛选";
         return (
           <div key={f.id} className="flex items-center justify-between rounded-gx-sm px-1 py-1 hover:bg-gx-bg">
-            <span className="truncate text-gx-13 text-gx-text-primary">{f.name}</span>
+            <span
+              className={clsx(
+                "truncate text-gx-13",
+                restricted ? "text-gx-text-hint" : "text-gx-text-primary",
+              )}
+            >
+              {f.name}
+            </span>
             <div className="flex gap-1">
               <IconButton
                 icon="arrowUp"
                 size={14}
                 active={cur === "asc"}
                 label="升序"
+                title={restricted ? hint : "升序"}
+                aria-label={restricted ? `升序：${f.name}（${hint}）` : "升序"}
+                disabled={restricted}
+                className={restricted ? "disabled:cursor-not-allowed disabled:opacity-40" : undefined}
                 onClick={() => toggle(f.id, "asc")}
               />
               <IconButton
@@ -375,6 +398,10 @@ function SortPanel({
                 size={14}
                 active={cur === "desc"}
                 label="降序"
+                title={restricted ? hint : "降序"}
+                aria-label={restricted ? `降序：${f.name}（${hint}）` : "降序"}
+                disabled={restricted}
+                className={restricted ? "disabled:cursor-not-allowed disabled:opacity-40" : undefined}
                 onClick={() => toggle(f.id, "desc")}
               />
             </div>
