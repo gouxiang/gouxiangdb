@@ -32,21 +32,78 @@ M1/S10 在 1 万 / 10 万 / 50 万本机档执行了证伪压测门，物理索�
 
 反例（本 ADR 不得出现）：把 E4 待实现项以完成时态陈述、把 E3 写进结论表、跨量级（5k 与 7k）混用一个 P95。
 
-## 3. 物理索引层：健康（E1）
+## 3. 物理索引层：按选择性分层的三种形态（窄命中健康 E1；多字段高命中计划缺陷已修复 E1+E3；宽命中 COUNT 线性为遗留边界 E3）
 
-依据 `docs/baseline/2026-09-13-m1-s10-gate.md` §2（50 万 main / 70 万 records，best-of-5，热缓存，页 100，生产同款物理 SQL）：
+### 3.0 判据修正：EXPLAIN 无 SCAN、physical-sql 条数少，不等于物理层快
+
+> 本判据修正来自**项目总监独立实测/独立复验**（2026-09-13，better-sqlite3 只读、best-of 预热），是对其本人此前在证伪门评审中"physical-sql 恒 4 + 无 SCAN → 物理层健康"判断的自我修正；非架构师独立发现。
+
+相关子查询即使每一次都 `SEARCH ... USING INDEX` 命中索引，在**高命中嵌套循环**下仍可达到秒级乃至小时级。因此物理层判据不得只看 EXPLAIN 形态或 SQL 语句条数，必须同时包含**端到端实测时延并按选择性分档**：
+
+1. EXPLAIN 形态：命中谓词须 `SEARCH ... USING INDEX`，窄命中不出现 `SCAN record_field_index`/`SCAN records`；多 JOIN 必须由 `records` 覆盖索引线性驱动、每个 rfi 内表按唯一索引单行 seek，不得由连接键不在其前缀的范围索引当 JOIN 驱动（见 §3.2）；
+2. 端到端实测：在窄/宽命中与单/多字段组合下分别取 best-of 实测时延，而非仅断言"用了索引"；
+3. 区分 COUNT 与首页取页：filteredTotal COUNT 可能随行数线性（§3.3），首页 keyset 取页则可由覆盖索引 + `LIMIT 101` 短路而恒定。
+
+本节据此把物理层从"健康/不健康"二分细化为三种形态：(a) 窄命中 range/等值 seek 健康；(b) 多标量字段高命中 AND 的多 JOIN 计划形状缺陷（已修复）；(c) 宽命中 COUNT 线性的遗留边界。三者都不涉及应用 hydration 成本，后者仍归 §4。
+
+### 3.1 (a) 窄命中 range seek / 等值：亚毫秒~毫秒，健康（E1）
+
+依据 `docs/baseline/2026-09-13-m1-s10-gate.md` §2（50 万 main / 70 万 records，best-of-5，热缓存，页 100，生产同款物理 SQL）；下表 COUNT 12.153 ms 为该门所用窄过滤档位，与 §3.3 的宽命中 COUNT（11–12 s 级）并非同档，勿混用：
 
 | 物理场景 | best 耗时 | EXPLAIN |
 |---|---|---|
 | home keyset 首页 | 0.386 ms | COVERING INDEX `records_table_live_created_id` |
 | 单选等值 status | 1.133 ms | records COVERING INDEX + sidecar EXISTS INDEX |
 | 金额范围 1000..8000 | 1.231 ms | sidecar 数值索引 SEARCH |
-| COUNT 过滤后 | 12.153 ms | 索引 SEARCH |
+| COUNT 过滤后（窄档） | 12.153 ms | 索引 SEARCH |
 | 无过滤 valueNum DESC 排序（T2 全量物化，固有 SCAN） | 26.011 ms | `SCAN r`（非索引命中场景） |
 
-带过滤的命中场景全部满足"出现 `SEARCH ... USING INDEX`、不出现 `SCAN record_field_index`/`SCAN records`"判据。10 万档同型查询约 1 ms，1 万档 1.0–1.7 ms。
+窄命中场景全部满足"出现 `SEARCH ... USING INDEX`、不出现 `SCAN record_field_index`/`SCAN records`"。10 万档同型查询约 1 ms，1 万档 1.0–1.7 ms。
 
-**结论**：50 万行内，SQLite 物理索引路径亚毫秒~12 ms，ADR-0008"物理索引被证伪"的前提不成立。S9/S10 三档端到端写后离线对拍 sidecar drift=0（E1，`ad684d2`，S10 改动仅在读路径预取/readyz 探针/生成器，不触碰写维护逻辑）。
+**结论（仅针对窄命中）**：50 万行内，SQLite 物理索引在窄命中/等值路径亚毫秒~12 ms，ADR-0008"窄命中物理索引被证伪"的前提不成立。S9/S10 三档端到端写后离线对拍 sidecar drift=0（E1，`ad684d2`，S10 改动仅在读路径预取/readyz 探针/生成器，不触碰写维护逻辑）。
+
+### 3.2 (b) 多标量字段高命中 AND 多 JOIN：计划形状缺陷，已修复（修复 E1 / 前后对比时延 E3）
+
+filteredTotal COUNT 与 keyset 取页编译为 rfi `INNER JOIN`（任务 #90，`38d4d57`/`89e381d`）后，多个标量字段的宽范围谓词**同时高命中**（实测约 60%–80%）时暴露物理计划形状缺陷：修复前优化器可能选 rfi 范围索引 `rfi_table_field_num(tableId,fieldId,valueNum)` 当 JOIN 外层驱动，而连接键 `recordId` 不在其前缀；多个高命中 rfi 集合随之嵌套探测 `records`。每个相关 EXISTS 自身都命中索引 SEARCH，但嵌套循环成本随行数近三次方级膨胀——正是 §3.0 判据修正所指的形态。
+
+项目总监在真库上的独立实测（better-sqlite3 只读、预热后 best-of，Apple M5/16G 本机、非规格机，**E3，待 4C8G+SSD 规格机 best-of-5 复核**）修复前：
+
+| 形态 | 规模/命中 | 时延 |
+|---|---|---|
+| 单字段数值范围（9493 行） | 合并后相关 EXISTS | 17.4 s |
+| 同上 | 旧 S6 双 EXISTS | 52 s |
+| 同上 | compileCount 单 JOIN | 0.4 s |
+| 单字段窄命中 | 100k / 9% | count 0.026 s |
+| 单字段宽命中 | 100k / 63% | count 0.64 s / 首页 0.18 s |
+| 单字段宽命中 | 100k / 81% | count 2.5 s / 首页 3.1 s |
+| 双字段宽 AND | 100k | 22.8 s（count 与取页皆 22.8 s） |
+| 三字段宽 AND | 100k | 数小时级（O(n³)） |
+
+**修复**（commit `e656abb`，任务 #94，E1）：在每个 rfi JOIN 内表加 `INDEXED BY "rfi_record_field_ord_key"`，钉死按 `(recordId,fieldId,ord)` 唯一索引对 `records` 行单行等值 seek，规划器随之稳定以 `records` 覆盖索引 `records_table_live_created_id` 线性驱动外层；COUNT 随行数线性、与 JOIN 数无关。取值口径不变，仍只对标量正向谓词生成，NOT/多选/跨字段 OR/残余回退不受影响。
+
+修复后同批独立实测（**E3，待规格机 best-of-5 复核**）：
+
+| 规模 | 形态/命中 | COUNT | 首页取页 |
+|---|---|---|---|
+| 100k | 单字段 63% | 0.62 s | 0 ms |
+| 100k | 单字段窄 9% | 0.80 s | 0 ms |
+| 100k | 单字段宽 81% | 0.42 s | 0 ms |
+| 100k | 双字段宽 AND | 0.14 s | 22 ms |
+| 100k | 三字段宽 AND | 1.05 s | 52 ms |
+| 500k（475001 活行） | 单字段 63%（约 29.7 万） | 11.2 s | 5 ms |
+| 500k（475001 活行） | 双字段 57%（约 27.2 万） | 12.6 s | 5 ms |
+
+**定性**：这是**物理计划形状（驱动表选择）问题，不是引擎容量问题**，已随 #94/#90 闭环，真库测试 `countJoinMultiNum.test.ts` 以 EXPLAIN 断言钉死计划形状（多 JOIN 由 records 覆盖索引驱动、JOIN 计划不得出现 `USING INDEX rfi_table_field_num` 当驱动），防回归。**不构成迁 PostgreSQL 依据。** 上述前后对比时延仅 E3，结论以规格机 best-of-5 E1 复核为准。
+
+### 3.3 (c) 遗留边界：宽命中 filteredTotal COUNT 随行数线性（E3，非缺陷、非迁库依据，登记后续优化）
+
+修复后，命中数十万行的**宽命中 filteredTotal COUNT 仍随行数线性**（§3.2 表：500k 约 11–12 s）。机制：records 覆盖索引外层驱动需对大表大部分活行逐行做 rfi 主键回表探测并计数，这是"统计一张表的大部分"的固有成本，非 §3.2 那类可由改计划形状消除的缺陷。
+
+交互**首页取页不受影响**：createdAt 覆盖索引 + `LIMIT 101` 短路，宽命中下首页恒定 5 ms（修复前宽命中首页取页曾达 24–25 s）。
+
+潜在优化为 rfi-only 计数（以 rfi 侧计数消除对 records 的逐行回表），但须**先核实软删记录的 rfi 行是否随删除同事务清理**，以保证软删/恢复场景的计数一致性；该一致性未核实前不得改计数路径。此优化登记为 **S5b 之后的独立候选片，本轮不做**，不改变 §6 S5b 顺序。
+
+上述 500k 时延来自项目总监本机（M5/16G，非规格机）E3 手动观察，仅供方向参考、不得进入阈值裁决；§8 T1 的判定只认 4C8G+SSD 规格机 best-of-5 的 E1 数据。
 
 ## 4. 应用 hydration 层：两个相互独立的成本
 
@@ -133,8 +190,8 @@ pnpm tsx apps/api/scripts/bench/run-gate.ts \
 
 ## 6. 裁决
 
-1. **本轮不触发 ADR-0008，不立项迁 PostgreSQL。** 物理索引层在 50 万行亚毫秒命中（§3）；端到端慢点定位于应用层两类独立成本（§4），切库不改变取数形状。
-2. **S10 性能侧维持 INCONCLUSIVE。** 理由：① C≥8 下 harness 自身不可信（§5），修复待 #84；② 治理 C-compute 的 S5b-Ⅱ 字段投影器尚未上线，应用层手段未穷尽；③ 100 万行终验待固定规格机（4C8G+SSD）。物理层结论不受 INCONCLUSIVE 影响，为 pass。
+1. **本轮不触发 ADR-0008，不立项迁 PostgreSQL。** 物理索引层按 §3 分三形态：窄命中 range/等值在 50 万行亚毫秒~毫秒（§3.1，E1 pass）；多字段高命中 AND 多 JOIN 是计划形状缺陷、已由 `e656abb` 修复并有 EXPLAIN 形状测试防回归（§3.2，E1 修复，前后对比时延为 E3 待规格机复核）；宽命中 filteredTotal COUNT 随行数线性（500k 约 11–12 s，E3）是登记在案的后续优化边界、首页取页恒定 5 ms，非缺陷、非迁库依据（§3.3）。端到端慢点定位于应用层两类独立成本（§4），切库不改变取数形状。
+2. **S10 性能侧维持 INCONCLUSIVE。** 理由：① C≥8 下 harness 自身不可信（§5），修复待 #84；② 治理 C-compute 的 S5b-Ⅱ 字段投影器尚未上线，应用层手段未穷尽；③ 100 万行终验待固定规格机（4C8G+SSD）。物理层窄命中结论不受 INCONCLUSIVE 影响，为 pass（§3.1）；§3.3 的宽命中 COUNT 线性为 E3 本机观察，不进入本轮裁决、不构成迁库依据，其 rfi-only 计数优化列 S5b 之后独立候选片。
 3. 应用层未完手段拆为两个独立切片，各自独立 flag / 对拍 / 度量，**不得互相冒领收益**（文件级实施计划另文送审，本节只锁定边界）：
    - **S5b-Ⅰ prefetch 边剪枝**：按"被引用 link 字段闭包"过滤 `expandLevel` 的 groups（治 C-io/oof）。度量只允许声称：被剪边本会 `loadGroups` 的 link 行数、prefetch recordCache 峰值/RSS、prefetch-on 下 home 墙钟与 prisma 调用数。**不得**声称降低点引用 CPU 或达成任何 CPU 时延目标。红线：展示用 links/subtable 列的对端 LinkRef 永远解析（`resolveForwardLinks`/`resolveReverseLinks` 不剪）。
    - **S5b-Ⅱ 字段投影器**：点引用分支只解析被引用子字段的最小依赖闭包，替代整记录 `buildFirstPassMerged + computeFormulas`（治 C-compute）。度量：cpu-prof 中 `getMergedCached`/`buildFirstPassMerged`/`computeFormulas` 自身耗时下降、点引用路径 prisma 调用数随"被引字段闭包"而非"30 字段 × link 数"变化；214+ hydration 逐值对拍、环基线 on 态逐值全等、shadow drift=0。§4.1 的 CPU 时延改善预期归属本片，且数值必须由 cpu-prof 证实/证伪。
@@ -181,6 +238,9 @@ T1 失败也必须先出"调索引 / 调 bound / 升 better-sqlite3 / 完成 S5b
 |---|---|---|
 | S10 门报告（物理层/扇出/三 fixup/质量门） | E1 | `docs/baseline/2026-09-13-m1-s10-gate.md`（`413f4a2`） |
 | BFS 双界 / readyz WAL / 生成器跨批修复 | E1 | commits `7c7b3c0`、`3b6b367`、`22b1fa2` |
+| 多字段高命中 AND 多 JOIN 计划形状修复（`INDEXED BY rfi_record_field_ord_key` 强制 records 驱动） | E1 | commit `e656abb`（任务 #94）；EXPLAIN 形状防回归 `apps/api/src/domain/queryPlan/__tests__/countJoinMultiNum.test.ts` |
+| §3.2 修复前/后 100k、500k 单/双/三字段高命中 AND 对比时延 | E3 | 项目总监独立实测（better-sqlite3 只读、best-of 预热，M5/16G 本机、非规格机），无报告文件，待 4C8G+SSD 规格机 best-of-5 E1 复核，禁止用于阈值裁决 |
+| §3.3 宽命中 filteredTotal COUNT 线性（500k 约 11–12 s）、首页取页恒定 5 ms | E3 | 同上项目总监本机观察；rfi-only 计数优化（须先核实软删 rfi 行是否随删除同事务清理）列 S5b 之后独立候选片，本轮不做 |
 | 5k C=8 harness 客户端结果 | E2 | `artifacts/bench/5000-c8-on.json`（gitignored，§5 复跑命令） |
 | 5k C=8 服务端读写日志 | E2 | `artifacts/bench/5000-c8-on.{read,write}.server.log` |
 | 7k v_range 14.1 s/prisma 214、C8 85 s | E3 | 手动观察，待 #84 后在固定规格机重测，禁止用于裁决 |
