@@ -25,6 +25,12 @@ export interface RunOptions {
   mode: GateMode;
   /** 单次请求超时毫秒（默认 30000），超时记为一个失败+超时样本。 */
   timeoutMs: number;
+  /**
+   * on 档深页场景的预置边界游标（run-gate 用只读连接在覆盖索引上一次性定位，避免逐 HTTP 翻
+   * 上千页：每页都要当页 hydrate，10 万行翻到 80% 页要数千秒）。采样仍打真实 HTTP keyset。
+   * 仅 on 档提供；off/shadow 走 offset（continuationForDeep 直接换算、不翻页）。
+   */
+  deepCursor?: string | null;
 }
 
 export interface ScenarioResult {
@@ -216,7 +222,13 @@ export async function runScene(scene: ResolvedScene, o: RunOptions): Promise<Sce
 
   let fixedCont: { cursor: string | null; offset: number } = { cursor: null, offset: 0 };
   if (!isWrite && scene.cursorPage && scene.cursorPage > 1) {
-    fixedCont = await continuationForDeep(o, scene, scene.cursorPage);
+    // on 档优先用 run-gate 预置的边界游标（一次性只读定位，见 RunOptions.deepCursor）；
+    // 未预置时才逐 HTTP 翻页（小库/兼容用，大库过慢）。off/shadow 直接换算 offset。
+    if (useCursor(o) && o.deepCursor) {
+      fixedCont = { cursor: o.deepCursor, offset: 0 };
+    } else {
+      fixedCont = await continuationForDeep(o, scene, scene.cursorPage);
+    }
   }
 
   const wallStart = performance.now();

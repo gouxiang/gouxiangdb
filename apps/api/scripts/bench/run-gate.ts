@@ -160,6 +160,30 @@ async function main(): Promise<number> {
 
   console.log(`[run-gate] ${sf.rows} 行 ${sf.shape} mode=${mode}(read=${flags.read},keyset=${flags.keyset}) C=${concurrency} 场景=${sf.scenes.length}`);
 
+  // on 档深页游标准备：用只读连接在覆盖索引上一次性定位 home_deep 边界行，避免 load.ts 逐
+  // HTTP 翻到 cursorPage（10 万行 80% 页=800 次当页 hydrate，数千秒）。游标格式与
+  // queryPlan/cursor.ts encodeCursor 严格一致（base64url JSON{v:1,c,id}）。仅无过滤 T1 首页
+  // 深页需要；带 viewId 的场景无 cursorPage（矩阵里只有 home_deep）。
+  const deepScene = readScenes.find((s) => s.cursorPage && s.cursorPage > 1);
+  let deepCursor: string | null = null;
+  if (mode === "on" && deepScene) {
+    const boundaryOffset = (deepScene.cursorPage! - 1) * limit - 1;
+    const ro = new Database(readDb, { readonly: true });
+    try {
+      const row = ro
+        .prepare(
+          `SELECT "id" AS id, "createdAt" AS c FROM records ` +
+          `WHERE "tableId"=? AND "deletedAt" IS NULL ORDER BY "createdAt" ASC, "id" ASC LIMIT 1 OFFSET ?`,
+        )
+        .get(sf.mainTableId, boundaryOffset) as { id: string; c: number } | undefined;
+      if (row) {
+        deepCursor = Buffer.from(JSON.stringify({ v: 1, c: row.c, id: row.id }), "utf8").toString("base64url");
+      }
+    } finally {
+      ro.close();
+    }
+  }
+
   // ---- 读轮（read.db）----
   const readLog = path.join(outDir, `${tag}.read.server.log`);
   const readServer = await startServer({
@@ -172,6 +196,7 @@ async function main(): Promise<number> {
       const r = await runScene(scene, {
         baseUrl: readServer.baseUrl, token: readServer.token, tableId: sf.mainTableId,
         titleFieldId, limit, warmup, samples, concurrency, mode, timeoutMs,
+        deepCursor: scene === deepScene ? deepCursor : null,
       });
       logLine(r);
       results.push(r);
