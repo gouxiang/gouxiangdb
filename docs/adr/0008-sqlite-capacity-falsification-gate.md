@@ -1,8 +1,8 @@
 # ADR-0008：SQLite 容量证伪门与 PostgreSQL 切换阈值（S10 裁决）
 
-**状态**：Proposed（2026-09-13 三审：第 5 节客户端口径、第 5.2 节/附录 B 服务端 FIFO 账目 verdict=pass，获准落盘；全文转 Accepted 须由项目总监在【提交后】读提交全文做残留完成时态字样（"已修复/100% 到达"类）终检。作者不得自行置为 Accepted。）
+**状态**：Accepted（2026-09-13 项目总监终检 `b119697`：§3 选择性三形态分层经总监独立实测数字逐项复核采纳；同次终检发现 §5/§6/附录 仍把已闭环的 #84 当 E4「待实现 undici Agent」、审计脚本路径陈旧（`.py`，实际入库 `.mjs`）、闭环轮 19 场景证据未回填，由总监本人在终检提交中更正这些事实后置 Accepted。**本 Accepted 仅覆盖物理索引层与 T0 连接层结论；端到端 T3 亚秒与 100 万行终验仍 INCONCLUSIVE（见 §6.2），不被本状态覆盖。** 作者不得自行置为 Accepted。）
 **作者**：架构师 高见远
-**评审**：项目总监 大湾区靓仔（三审：机制根因切分、PG 切换阈值、证据分级规则 pass；第 5 节数字经其对 `5000-c8-on.json` 独立重算 3201/625/2576、对 `*.read.server.log` 独立 FIFO 配对得 540/540/0 与 82/74/8 而采纳，非采信作者口径。全文最终验收结论以其提交后终检为准，本稿不预写。）
+**评审**：项目总监 大湾区靓仔（三审：机制根因切分、PG 切换阈值、证据分级规则 pass；第 5 节失败轮数字经其对 `5000-c8-on.json` 独立重算 3201/625/2576、对 `*.read.server.log` 独立 FIFO 配对得 540/540/0 与 82/74/8 而采纳，非采信作者口径。四审（2026-09-13）：#84 闭环轮 `t0-rerun-on-c8-full` 19 场景/3,601 采样与读/写两日志 FIFO 账目（home 501/501、view-search 3,500/3,500、write home 120/120、POST 350/350，全 0 尾挂）由总监独立跑 `audit-server-log.mjs` 对账采纳，并据此把连接雪崩根因从"undici 池不足"更正为"高命中慢查询同步阻塞事件循环"，§5 随之回填。）
 **上游依据**：`docs/planning/phase2/M1-implementation-plan.md` §S10（493–516 行）、§8（561–579 行）；`docs/planning/phase1/ARCH-production.md` §3.4；S10 留证 `docs/baseline/2026-09-13-m1-s10-gate.md`（commit `413f4a2`）
 **关联 ADR**：ADR-0002（SQLite 选型）、ADR-0003（裸机拓扑）
 
@@ -136,7 +136,11 @@ filteredTotal COUNT 与 keyset 取页编译为 rfi `INNER JOIN`（任务 #90，`
 
 两层成本都是应用层取数/物化形状问题：PostgreSQL 不减少应用发出的查询数，不会让"把 hub 全部关联行读进 JS 算 sum/count"变快，也不会让"为取一个 cell 而整记录重算"消失。计划 §S10 明确"计算字段/全文慢不算触发项"。
 
-## 5. 5000 行 / C=8 harness 运行：客户端连接层失败（E2，工具缺陷，修复待实现）
+## 5. 5000 行 / C=8 harness 连接层：失败轮（5.1–5.3，E2 历史）与闭环轮（5.4，E1 留证）
+
+> **本节为两段式**：5.1–5.3 是 2026-09-13 14:13 失败轮的原始账目与 T0 三条件定义（保留为根因分析输入）；**5.4 是同日晚些时候慢查询消除后的闭环轮，#84 据 5.4 判闭环**。5.3 中"#84 待实现、拟 undici Agent 池化"的**选型假设已被四审证伪**：真因是高命中慢查询经 better-sqlite3 同步调用全程阻塞事件循环，而非 undici 连接池容量不足；慢查询消除后未加任何 Agent 池/队列/背压即满足 T0。读 5.3 时须以本注与 5.4 为准。
+
+### 5.0 失败轮产物（E2，历史）
 
 产物（2026-09-13 14:13 本地，flags read/keyset/prefetch 全 on，warmup 50 / samples 200 / C=8 / limit 100）：
 
@@ -172,15 +176,17 @@ pnpm tsx apps/api/scripts/bench/run-gate.ts \
 
 ### 5.2 服务端口径（日志 `<--`/`-->` FIFO 配对审计）
 
-审计方法见附录 B（脚本拟随任务 #84 入库 `scripts/bench/audit-server-log.py`，当前为待入库状态）。
+审计方法见附录 B。零依赖对账器已随任务 #84 收尾入库为 **`apps/api/scripts/bench/audit-server-log.mjs`**（commit `e9916da`，附 `__tests__/audit-server-log.test.ts`），exit 0=t0Pass、exit 2=有尾挂/失败；早期草稿曾拟 `.py`，以实际入库的 `.mjs` 为准。
 
 - 读库 home（无 viewId）：540 进 / 540 出 / 0 尾挂（539 个 200 + 1 个 400）；
 - 读库 view/search（带 viewId）：82 进 / 74 出 / **8 尾挂**，尾挂全部属于最后 C=8 同 viewId（`view_scn...5cwg0`）一批，落在日志 1232–1241 行——客户端放弃等待，非服务端挂死；
 - 写库：250 个 POST 全 201；另有 5 个 GET 写后校验，末行在 teardown 时被截断。
 
-### 5.3 定性与处置
+### 5.3 定性与处置（失败轮，历史；选型假设置 5.4 已证伪）
 
-该轮证据证明的是 **harness 在 C≥8 下把自身 undici 连接层压爆**，不是 SQLite 或 hydration 的服务端时延；因此 5k C=8 不产出任何性能裁决。任务 #84（后端，状态待实现）拟为 load 侧引入显式 undici Agent 连接池/队列或背压；`apps/api/scripts/bench/load.ts:82` 的 catch 当前只置 timedOut、吞掉 error 对象，#84 须先采集 `e.name`/`e.code` 完成 undici 归因，再谈修复选型。
+该轮证据证明的是 **harness 在 C≥8 下客户端连接层雪崩**，不是 SQLite 容量或 hydration 正确性问题；因此 5k C=8 失败轮不产出任何性能裁决。失败轮曾假设根因为"undici 连接池/队列/背压不足"，拟为 load 侧引入显式 undici Agent；`apps/api/scripts/bench/load.ts` 的 catch 早期只置 timedOut、吞掉 error 对象。
+
+**四审更正（2026-09-13）**：① 沿 `error.cause` 链提取传输层错误码的 `errorCode()` 已落地（`load.ts:52-61`），逐采样记录 `ECONNRESET` 等，归因可核；② 真因不是连接池容量，而是高命中物理查询全量物化/相关 EXISTS 致单请求 7–20 s，better-sqlite3 同步调用全程阻塞 Node 事件循环，C=8 排队请求的 keep-alive 空闲连接超服务端 `keepAliveTimeout` 被半关，undici 复用死连接即 `ECONNRESET`（client <1 ms、serve=0、physicalSql/prismaCalls=0）；③ 慢查询由 #94（`e656abb` 钉多 JOIN 计划形状）等消除后，闭环轮（5.4）在**未加任何 undici Agent 池/队列/背压**下即满足 T0 三条件。undici Agent 池化降级为可选韧性项，**不再是 T0 前置**。
 
 **T0 解锁三条件（全部满足后 C≥8 数据才可进入性能门）**：
 
@@ -188,14 +194,31 @@ pnpm tsx apps/api/scripts/bench/run-gate.ts \
 2. status=0 样本归零；
 3. 目标并发下 harness 自身连接失败率 = 0。
 
+### 5.4 闭环轮（E1 留证，#84 判闭环依据）
+
+慢查询消除后，在**全新生成的干净 5k 库**（不复用失败轮写污染库）按 §5 原参数重跑**全量默认场景矩阵（19 场景，未用 `--scenes` 裁剪）**，留证 `docs/baseline/2026-09-13-m1-s10-t0-closure-multinum.md`（commit `53b3663`，E1；产物 `t0-rerun-on-c8-full.{json,read,write}.server.log` 为 E2 gitignored）。参数：C=8 / warmup 50 / samples 200 / limit 100，flags read/keyset/prefetch 全 on，全量含新增多数值字段宽命中 AND 场景 `filter_range_multi_num`。
+
+结果（项目总监独立跑 `audit-server-log.mjs` 对两日志对账、解析 gate JSON 逐项核对）：
+
+| 口径 | 数 |
+|---|---|
+| 全量 19 场景采样 | 3,601，failures=0、timeouts=0、每场景 `errors={}` |
+| read 日志 home 流 | 进 501 / 出 501 / 尾挂 0（200×500，400×1） |
+| read 日志 view-search 流 | 进 3,500 / 出 3,500 / 尾挂 0（全 200） |
+| write 日志 home 流 | 进 120 / 出 120 / 尾挂 0（全 200） |
+| write 日志 POST 流 | 进 350 / 出 350 / 尾挂 0（全 201） |
+| 写后对拍 | sidecarDrift=0、shadowDrift.count=0 |
+
+唯一非 2xx 为 `deep_window_edge` 对 keyset-on 超窗 offset=600 的预期 400（n=1，该场景 failures=0）。多 JOIN 场景 `filter_range_multi_num` 200 采样 0 失败、physicalSqlAvg=3（证走真多 rfi JOIN 非回退）、serve P95=1,374.61 ms。T0 三条件全部满足，**#84 闭环、harness 在 C=8 可信**。run-gate 退出码 2 仅来自 7 条读 P95≥1,500 ms 的 **T3/应用层** breach（sort_number_desc/sort_select_text/filter_and_or_residual/aggregations/group_by_select/search_short/search_word3，全部 failures=0、prisma 约 14,030–14,320 次/请求），属 §4 应用 hydration/内存计算成本、归 S5b（#89），**不记 #84、不属连接层、不动"物理索引层 pass / 不迁 PG"结论**。
+
 ## 6. 裁决
 
 1. **本轮不触发 ADR-0008，不立项迁 PostgreSQL。** 物理索引层按 §3 分三形态：窄命中 range/等值在 50 万行亚毫秒~毫秒（§3.1，E1 pass）；多字段高命中 AND 多 JOIN 是计划形状缺陷、已由 `e656abb` 修复并有 EXPLAIN 形状测试防回归（§3.2，E1 修复，前后对比时延为 E3 待规格机复核）；宽命中 filteredTotal COUNT 随行数线性（500k 约 11–12 s，E3）是登记在案的后续优化边界、首页取页恒定 5 ms，非缺陷、非迁库依据（§3.3）。端到端慢点定位于应用层两类独立成本（§4），切库不改变取数形状。
-2. **S10 性能侧维持 INCONCLUSIVE。** 理由：① C≥8 下 harness 自身不可信（§5），修复待 #84；② 治理 C-compute 的 S5b-Ⅱ 字段投影器尚未上线，应用层手段未穷尽；③ 100 万行终验待固定规格机（4C8G+SSD）。物理层窄命中结论不受 INCONCLUSIVE 影响，为 pass（§3.1）；§3.3 的宽命中 COUNT 线性为 E3 本机观察，不进入本轮裁决、不构成迁库依据，其 rfi-only 计数优化列 S5b 之后独立候选片。
+2. **S10 性能侧维持 INCONCLUSIVE，但范围已收敛。** #84/harness 连接层已闭环（§5.4，T0 三条件满足，C=8 可信），不再是 INCONCLUSIVE 理由；继续 INCONCLUSIVE 的理由仅剩：① 治理 C-compute 的 S5b-Ⅱ 字段投影器尚未上线、应用层手段未穷尽（§4/§6.3）；② 端到端 T3 亚秒在 7 个应用层场景仍 breach（§5.4，归 S5b）；③ 100 万行终验待固定规格机（4C8G+SSD）best-of-5。物理层窄命中结论为 pass（§3.1），多字段计划形状缺陷已修（§3.2，E1）；§3.3 宽命中 COUNT 线性为 E3 本机观察，不进入本轮裁决、不构成迁库依据，其 rfi-only 计数优化列 S5b 之后独立候选片。
 3. 应用层未完手段拆为两个独立切片，各自独立 flag / 对拍 / 度量，**不得互相冒领收益**（文件级实施计划另文送审，本节只锁定边界）：
    - **S5b-Ⅰ prefetch 边剪枝**：按"被引用 link 字段闭包"过滤 `expandLevel` 的 groups（治 C-io/oof）。度量只允许声称：被剪边本会 `loadGroups` 的 link 行数、prefetch recordCache 峰值/RSS、prefetch-on 下 home 墙钟与 prisma 调用数。**不得**声称降低点引用 CPU 或达成任何 CPU 时延目标。红线：展示用 links/subtable 列的对端 LinkRef 永远解析（`resolveForwardLinks`/`resolveReverseLinks` 不剪）。
    - **S5b-Ⅱ 字段投影器**：点引用分支只解析被引用子字段的最小依赖闭包，替代整记录 `buildFirstPassMerged + computeFormulas`（治 C-compute）。度量：cpu-prof 中 `getMergedCached`/`buildFirstPassMerged`/`computeFormulas` 自身耗时下降、点引用路径 prisma 调用数随"被引字段闭包"而非"30 字段 × link 数"变化；214+ hydration 逐值对拍、环基线 on 态逐值全等、shadow drift=0。§4.1 的 CPU 时延改善预期归属本片，且数值必须由 cpu-prof 证实/证伪。
-   - 顺序：P0 #84（harness）→ 点引用环语义 characterization（非对称环 A→B→A 不同起始根逐值基线，现测试仅覆盖双侧 null）→ Ⅰ/Ⅱ 实现；先做哪片以 characterization 后的 cpu-prof 归因数据为准。**在 S5b-Ⅱ 落地、或 cpu-prof 用数据证伪 C-compute 主导性之前，本 ADR 不得声称应用层手段已穷尽，也不得据 hydration 指标谈迁 PG。**
+   - 顺序：**P0 #84（harness）已闭环（§5.4）** → 点引用环语义 characterization（非对称环 A→B→A 不同起始根逐值基线，现测试仅覆盖双侧 null）→ Ⅰ/Ⅱ 实现；先做哪片以 characterization 后的 cpu-prof 归因数据为准。**在 S5b-Ⅱ 落地、或 cpu-prof 用数据证伪 C-compute 主导性之前，本 ADR 不得声称应用层手段已穷尽，也不得据 hydration 指标谈迁 PG。**
 
 ## 7. 测量纪律（三约束）
 
@@ -228,7 +251,7 @@ T1 失败也必须先出"调索引 / 调 bound / 升 better-sqlite3 / 完成 S5b
 
 负面/代价：
 
-- S10 性能侧 INCONCLUSIVE 意味着 100 万终验与容量签核延后，依赖 #84、环 characterization、S5b-Ⅱ 与固定规格机；
+- S10 性能侧 INCONCLUSIVE 意味着 100 万终验与容量签核延后；harness 连接层（#84）已闭环，剩余依赖为环 characterization、S5b-Ⅱ 与固定规格机；
 - S5b-Ⅱ 触碰 `hydrate.ts` 点引用核心路径，须在 214+ 既有 hydration 对拍之外补非对称环基线，评审通过前不得实施；
 - 500k 端到端 OOM 形态未抓到显式退出标记，固定规格机复跑时须同步采集系统 OOM/jetsam 证据闭环。
 
@@ -243,11 +266,12 @@ T1 失败也必须先出"调索引 / 调 bound / 升 better-sqlite3 / 完成 S5b
 | §3.3 宽命中 filteredTotal COUNT 线性（500k 约 11–12 s）、首页取页恒定 5 ms | E3 | 同上项目总监本机观察；rfi-only 计数优化（须先核实软删 rfi 行是否随删除同事务清理）列 S5b 之后独立候选片，本轮不做 |
 | 5k C=8 harness 客户端结果 | E2 | `artifacts/bench/5000-c8-on.json`（gitignored，§5 复跑命令） |
 | 5k C=8 服务端读写日志 | E2 | `artifacts/bench/5000-c8-on.{read,write}.server.log` |
-| 7k v_range 14.1 s/prisma 214、C8 85 s | E3 | 手动观察，待 #84 后在固定规格机重测，禁止用于裁决 |
+| 7k v_range 14.1 s/prisma 214、C8 85 s | E3 | 手动观察，待固定规格机重测，禁止用于裁决 |
 | 100 万行终验 | — | 不硬跑、不伪造；待 4C8G+SSD 与 S5b-Ⅱ 后执行 |
-| harness C≥8 连接层修复 | E4 | 任务 #84，待实现（拟 undici Agent 池化/队列/背压） |
-| 日志审计脚本 | E4 | 拟随 #84 入库 `apps/api/scripts/bench/audit-server-log.py` |
-| S5b-Ⅰ/Ⅱ 实施计划 | E4 | 另文送项目总监终审，评审通过前不实施 |
+| harness C≥8 连接层 #84 闭环轮（19 场景/3,601 采样 0 失败，FIFO 全 0 尾挂） | E1 | `docs/baseline/2026-09-13-m1-s10-t0-closure-multinum.md`（`53b3663`）；根因为慢查询同步阻塞事件循环而非连接池，未加 undici Agent 即达 T0（§5.4） |
+| harness 失败轮结果（5k C=8，625/2,576） | E2 | `artifacts/bench/5000-c8-on.json`（gitignored，§5 复跑命令）；历史根因分析输入 |
+| 服务端日志 FIFO 对账器 | E1 | `apps/api/scripts/bench/audit-server-log.mjs` + `__tests__/audit-server-log.test.ts`（`e9916da`），exit 0=t0Pass，T0 自动化对账工具 |
+| S5b-Ⅰ/Ⅱ 文件级实施计划 | Proposed 终审稿 | `docs/planning/phase2/S5b-hydration-projection-plan.md`（任务 #93 已送总监终审；评审通过前不派单、不写生产代码） |
 
 数据生成复跑：
 
