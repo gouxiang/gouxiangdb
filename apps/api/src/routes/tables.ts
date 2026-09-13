@@ -13,8 +13,8 @@ import {
   HttpError,
 } from "../guards.js";
 import { makeOptions } from "../domain/fieldService.js";
-import { loadTableFields, queryRecords, parseViewConfig } from "../domain/recordService.js";
-import { recordsToCSV } from "../domain/csv.js";
+import { loadTableFields } from "../domain/recordService.js";
+import { exportTableCsv } from "../domain/csvExport.js";
 import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
 import { deleteTableStatement, rebuildTableTx } from "../domain/fieldIndex/sync.js";
 
@@ -351,14 +351,16 @@ tables.get("/:tableId/export.csv", async (c) => {
   const baseId = await baseIdOf(tableId);
   await requireCanView(c, baseId);
 
-  const fields = await loadTableFields(tableId);
   const viewId = c.req.query("viewId");
-  const config = viewId
-    ? parseViewConfig((await prisma.view.findUnique({ where: { id: viewId } }))?.config ?? null)
-    : parseViewConfig(null);
+  let viewConfigRaw: string | null = null;
+  if (viewId) {
+    const v = await prisma.view.findUnique({ where: { id: viewId } });
+    if (v && v.tableId === tableId) viewConfigRaw = v.config;
+  }
 
-  const { records } = await queryRecords({ tableId, fields, config, noPaging: true });
-  const csv = recordsToCSV(records, fields);
+  // M1/S5：走只读网关 keyset 分批拉取 + 批量化 hydrate（每批 500），不全表入堆；
+  // 视图 filters/sorts/search 的逐值口径由 csvExport 复用 applyViewQuery 保持。
+  const { csv } = await exportTableCsv(tableId, viewConfigRaw);
 
   c.header("Content-Type", "text/csv; charset=utf-8");
   c.header("Content-Disposition", `attachment; filename="table-${tableId}.csv"`);

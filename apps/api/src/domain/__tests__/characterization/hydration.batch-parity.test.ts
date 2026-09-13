@@ -12,7 +12,7 @@
 // 夹具定义见同目录 _hydrationFixture.ts（不计入测试文件）。
 
 import { describe, it, expect } from "vitest";
-import { hydrateRecords, type HydrateDeps } from "../../hydrate.js";
+import { hydrateRecords, hydrateRecordsLegacy, type HydrateDeps } from "../../hydrate.js";
 import type { HydratedRecord } from "../../types.js";
 import {
   T, empFields, xFields, yFields,
@@ -29,6 +29,20 @@ async function hydrateEmp(): Promise<{ out: HydratedRecord[]; counts: ReturnType
     deps as HydrateDeps,
   );
   return { out, counts: deps.counts };
+}
+
+/** 旧逐行串行实现（A 基线）：单独跑一次取计数，快照值与上方 batch 路径共用同一份 inline 快照。 */
+async function hydrateEmpLegacy(): Promise<ReturnType<typeof countingDeps>["counts"]> {
+  const { store, links } = buildStore();
+  const deps = countingDeps(store, links);
+  const out = await hydrateRecordsLegacy(
+    store.filter((r) => r.tableId === T.emp),
+    empFields,
+    deps as HydrateDeps,
+  );
+  // 顺带锁死：旧实现产出与逐值快照结构一致（sanity，真值由上面 batch 的 inline 快照对拍）。
+  expect(out).toHaveLength(3);
+  return deps.counts;
 }
 
 describe("员工表逐值快照（正/反向 links, lookup, rollup, count, 链式公式, 点引用, 自引用）", () => {
@@ -162,9 +176,9 @@ describe("双向点引用环：不无限递归，环上公式置 null", () => {
   });
 });
 
-describe("取数批次基线（改造前 N+1 精确形状）", () => {
-  it("锁死 getFields/getRecordsByIds/getLinkRows 次数与批大小分布", async () => {
-    const { counts } = await hydrateEmp();
+describe("取数批次：A 旧串行 N+1 基线 vs B 两阶段常量（M1/S5）", () => {
+  it("A：legacy 锁死 getFields/getRecordsByIds/getLinkRows=1/19/20 精确形状", async () => {
+    const counts = await hydrateEmpLegacy();
     // 改造前（2026-09-13，三员工 + 两部门 + 自引用夹具）实测：
     //   本表 fields 由调用方传入，getFields 仅因跨表发生一次；
     //   getRecordsByIds=19、getLinkRows=20 为逐行/逐字段 N+1 真实形状。
@@ -175,5 +189,24 @@ describe("取数批次基线（改造前 N+1 精确形状）", () => {
     expect(counts.recordBatchSizes).toEqual([1, 2, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
     expect(counts.linkBatchSizes).toEqual([1, 2, 0, 1, 1, 1, 2, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1]);
     expect(counts.recordBatchSizes.filter((n) => n === 1).length).toBe(17);
+  });
+
+  it("B：两阶段批量化把 getRecordsByIds/getLinkRows 收敛为常量（不随页内 N 线性涨）", async () => {
+    const { counts } = await hydrateEmp();
+    // 改造后（BatchStore BFS 预热 + 组级去重，同一夹具，注入计数 deps 无 bulk 实现）：
+    //   getRecordsByIds=1（对端 dept 一条 IN；emp 自引用根记录已在缓存，0 额外查询）；
+    //   getLinkRows=2（= 夹具里不同的正向 linkFieldId 数：e_dept、e_mgr 各整查一次；
+    //     正/反方向共享同字段一次查询，跨层环上的重复组由 wholeLoaded/wholeLoading 去重，与行数无关）；
+    //   getFields 仍 1；本表无 createdBy/lastModifiedBy 系统字段 → resolveUserName=0（与 legacy 对齐）。
+    expect(counts.getFields).toBe(1);
+    expect(counts.getRecordsByIds).toBe(1);
+    expect(counts.getLinkRows).toBe(2);
+    expect(counts.countLinkRows).toBe(0);
+    expect(counts.resolveUserName).toBe(0);
+    // 唯一一次记录 IN 一次取全 2 个对端部门（批大小 2），不再有 17 次单点查。
+    expect(counts.recordBatchSizes).toEqual([2]);
+    expect(counts.recordBatchSizes.every((n) => n > 1)).toBe(true);
+    // 每次 linkRows 整查都带回该字段的全部行（3/2），而非逐行 [1,2,0,1,...] 的 N+1 形状。
+    expect(counts.linkBatchSizes).toEqual([3, 2]);
   });
 });

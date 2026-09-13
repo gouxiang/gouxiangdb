@@ -51,6 +51,46 @@ export function visibleFields(fields: FieldMeta[], config: ViewConfig): FieldMet
   return base;
 }
 
+/**
+ * 视图后处理（M1/S5 抽出为纯函数）：对已 hydrate 的记录依次套用 视图过滤 → 搜索 → 排序。
+ * 列表 queryRecords 与导出（keyset 分批 hydrate 后）共用，保证两条路径筛选/排序口径零漂移。
+ * 不含分页/分组/聚合（导出不需要；列表在调用方继续处理）。
+ */
+export function applyViewQuery(
+  hydrated: HydratedRecord[],
+  fields: FieldMeta[],
+  config: ViewConfig,
+  search: string,
+): HydratedRecord[] {
+  let out = hydrated;
+
+  // 过滤
+  if (config.filters) {
+    out = out.filter((r) => evalFilter(config.filters as FilterNode | null, (fid) => r.fields[fid]));
+  }
+
+  // 搜索（全部可见字段文本化后 contains）
+  const q = search.trim();
+  if (q !== "") {
+    const searchable = visibleFields(fields, config).filter(
+      (f) => !["attachment", "links", "lookup", "rollup", "count", "formula"].includes(f.type),
+    );
+    out = out.filter((r) => matchesSearch(searchable.map((f) => r.fields[f.id]), q));
+  }
+
+  // 排序
+  const fieldTypes: Record<string, string> = {};
+  for (const f of fields) fieldTypes[f.id] = f.type;
+  if (config.sorts && config.sorts.length > 0) {
+    out = sortRows(
+      out.map((r) => ({ id: r.id, rec: r, get: (fid: string) => r.fields[fid] })),
+      config.sorts as SortSpec[],
+      fieldTypes,
+    ).map((x) => x.rec);
+  }
+  return out;
+}
+
 export async function queryRecords(opts: QueryOptions): Promise<QueryResult> {
   const { tableId, fields, config } = opts;
   const search = (opts.search ?? config.search ?? "").trim();
@@ -69,31 +109,10 @@ export async function queryRecords(opts: QueryOptions): Promise<QueryResult> {
     prismaDeps,
   );
 
-  // 3. 过滤
-  if (config.filters) {
-    hydrated = hydrated.filter((r) => evalFilter(config.filters as FilterNode | null, (fid) => r.fields[fid]));
-  }
-
-  // 4. 搜索（全部可见字段文本化后 contains）
-  if (search !== "") {
-    const searchable = visibleFields(fields, config).filter(
-      (f) => !["attachment", "links", "lookup", "rollup", "count", "formula"].includes(f.type),
-    );
-    hydrated = hydrated.filter((r) => matchesSearch(searchable.map((f) => r.fields[f.id]), search));
-  }
+  // 3-5. 视图过滤 / 搜索 / 排序（纯内存，导出与列表共用同一后处理，口径零漂移）
+  hydrated = applyViewQuery(hydrated, fields, config, search);
 
   const filteredTotal = hydrated.length;
-
-  // 5. 排序
-  const fieldTypes: Record<string, string> = {};
-  for (const f of fields) fieldTypes[f.id] = f.type;
-  if (config.sorts && config.sorts.length > 0) {
-    hydrated = sortRows(
-      hydrated.map((r) => ({ id: r.id, rec: r, get: (fid: string) => r.fields[fid] })),
-      config.sorts as SortSpec[],
-      fieldTypes,
-    ).map((x) => x.rec);
-  }
 
   // 6. 分组 + 聚合
   let groups: QueryResult["groups"] = null;
@@ -161,6 +180,23 @@ export async function loadTableFields(tableId: string): Promise<FieldMeta[]> {
     orderBy: { order: "asc" },
   });
   return rows.map(toFieldMeta);
+}
+
+/**
+ * M1/S5 单行 hydration：只取目标 RawRecord + 对该行跑完整两阶段 hydrate，
+ * 替代 POST/PATCH/详情里「queryRecords(noPaging) 拉全表再 .find」的全表回查。
+ * 取值算法与列表完全一致（同一个 hydrateRecords + prismaDeps），故返回的那一条与
+ * 旧全表回查 .find 结果逐值 deep-equal（见 S5 对拍测试）。记录软删/不存在/表不符返回 null。
+ */
+export async function hydrateRecordById(
+  tableId: string,
+  recordId: string,
+): Promise<HydratedRecord | null> {
+  const row = await prisma.record.findUnique({ where: { id: recordId } });
+  if (!row || row.deletedAt || row.tableId !== tableId) return null;
+  const fields = await loadTableFields(tableId);
+  const [hydrated] = await hydrateRecords([toRawRecord(row)], fields, prismaDeps);
+  return hydrated ?? null;
 }
 
 /** 解析视图配置（View.config 是 JSON 字符串） */

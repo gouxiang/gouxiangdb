@@ -20,6 +20,7 @@ import {
   queryRecords,
   parseViewConfig,
   visibleFields,
+  hydrateRecordById,
 } from "../domain/recordService.js";
 import { isComputedFieldType, isSystemFieldType } from "../domain/types.js";
 import { parseCSV, inferFieldType, coerceCellValue } from "../domain/csv.js";
@@ -396,9 +397,10 @@ records.post("/", async (c) => {
     console.error("[defaults] reverse recalc on create failed:", e);
   }
 
-  const hydrated = await queryRecords({ tableId, fields, config: parseViewConfig(null), noPaging: true });
-  const found = hydrated.records.find((r) => r.id === rec.id);
-  return c.json({ record: found ?? null, affectedParents }, 201);
+  // M1/S5：写后只 hydrate 本行返回（单行主键取数），替代旧 queryRecords(noPaging) 全表回查。
+  // 取值与列表同一 hydrate 引擎，逐值等于旧全表结果里 .find(r=>r.id===rec.id) 的那一条。
+  const found = await hydrateRecordById(tableId, rec.id);
+  return c.json({ record: found, affectedParents }, 201);
 });
 
 // ============ 回收站列表 ============
@@ -540,8 +542,8 @@ records.get("/:recordId", async (c) => {
   if (!rec || rec.deletedAt) throw new HttpError(404, "记录不存在");
 
   const fields = await loadTableFields(rec.tableId);
-  const result = await queryRecords({ tableId: rec.tableId, fields, config: parseViewConfig(null), noPaging: true });
-  const found = result.records.find((r) => r.id === recordId);
+  // M1/S5：详情只 hydrate 本行（单行主键取数），替代旧 queryRecords(noPaging) 全表回查再 .find。
+  const found = await hydrateRecordById(rec.tableId, recordId);
   if (!found) throw new HttpError(404, "记录不存在");
 
   return c.json({ record: found, fields });
@@ -603,9 +605,10 @@ records.patch("/:recordId", async (c) => {
     console.error("[defaults] reverse recalc failed:", e);
   }
 
-  const result = await queryRecords({ tableId: rec.tableId, fields, config: parseViewConfig(null), noPaging: true });
+  // M1/S5：写后只 hydrate 本行返回（单行主键取数），替代旧 queryRecords(noPaging) 全表回查。
+  const found = await hydrateRecordById(rec.tableId, recordId);
   return c.json({
-    record: result.records.find((r) => r.id === recordId) ?? null,
+    record: found,
     affectedParents,
   });
 });

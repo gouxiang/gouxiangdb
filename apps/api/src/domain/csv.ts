@@ -99,22 +99,35 @@ export function buildCSV(headers: string[], rows: string[][]): string {
 /** 把 hydration 后的记录导出为 CSV 字符串 */
 export function recordsToCSV(records: HydratedRecord[], fields: FieldMeta[]): string {
   const headers = fields.map((f) => f.name);
-  const rows = records.map((r) =>
-    fields.map((f) => {
-      const v = r.fields[f.id];
-      if (Array.isArray(v)) {
-        // links → title；multiSelect → 值
-        const parts = (v as unknown[]).map((x) =>
-          typeof x === "object" && x !== null && "title" in (x as object)
-            ? (x as { title: string }).title
-            : String(x),
-        );
-        return parts.join("; ");
-      }
-      return formatCellValue((v ?? null) as FieldValue, f);
-    }),
-  );
+  const rows = records.map((r) => recordToRow(r, fields));
   return buildCSV(headers, rows);
+}
+
+/** 单条 hydrated 记录 → 一列列原始单元格字符串（未转义；拼入 buildCSV/escapeCell 完成 RC-04 防护）。 */
+export function recordToRow(r: HydratedRecord, fields: FieldMeta[]): string[] {
+  return fields.map((f) => {
+    const v = r.fields[f.id];
+    if (Array.isArray(v)) {
+      // links → title；multiSelect → 值
+      const parts = (v as unknown[]).map((x) =>
+        typeof x === "object" && x !== null && "title" in (x as object)
+          ? (x as { title: string }).title
+          : String(x),
+      );
+      return parts.join("; ");
+    }
+    return formatCellValue((v ?? null) as FieldValue, f);
+  });
+}
+
+/** 已转成原始字符串的一批行 → 仅拼数据行文本（不含表头，供分批导出逐批 flush；RC-04 在 escapeCell 保持）。 */
+export function rowsToCSVBody(rows: string[][]): string {
+  return rows.map((r) => r.map(escapeCell).join(",")).join("\r\n");
+}
+
+/** 表头行文本（含 BOM，仅首批调用一次）。 */
+export function csvHeaderLine(fields: FieldMeta[]): string {
+  return "\uFEFF" + fields.map((f) => f.name).map(escapeCell).join(",");
 }
 
 /** 记录导出为 TSV（便于粘贴到 Excel / 对比测试 diff） */

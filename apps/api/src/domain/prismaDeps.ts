@@ -2,7 +2,7 @@
 // HydrateDeps 的 Prisma 实现（domain 层与 ORM 解耦，单测可换内存实现）
 
 import { prisma } from "../db.js";
-import type { HydrateDeps, LinkRowRef } from "./hydrate.js";
+import type { HydrateDeps, LinkBatchQuery, LinkRowRef } from "./hydrate.js";
 import type { FieldMeta, RawRecord, SelectOption, TabConfig } from "./types.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -134,6 +134,46 @@ export const prismaDeps: HydrateDeps = {
         ...(q.childRowId ? { childRowId: q.childRowId } : {}),
       },
     });
+  },
+
+  // M1/S5 批量：每组 (linkFieldId, 方向) 一条 IN 查询，随 ord 升序返回；hydrateBatch 按行分桶。
+  async getLinkRowsBulk(qs: LinkBatchQuery[]): Promise<LinkRowRef[][]> {
+    return await Promise.all(
+      qs.map(async (g) => {
+        const rows = await prisma.linkRow.findMany({
+          where: {
+            deletedAt: null,
+            linkFieldId: g.linkFieldId,
+            ...(g.dir === "parent"
+              ? { parentRowId: { in: g.rowIds } }
+              : { childRowId: { in: g.rowIds } }),
+          },
+          orderBy: { ord: "asc" },
+        });
+        return rows.map((r) => ({
+          id: r.id,
+          linkFieldId: r.linkFieldId,
+          parentRowId: r.parentRowId,
+          childRowId: r.childRowId,
+          ord: r.ord,
+        }));
+      }),
+    );
+  },
+
+  // M1/S5 批量：页内去重 user id 一次 IN 解析显示名；结果同时回填单名缓存。
+  async resolveUserNames(userIds: string[]): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    if (userIds.length === 0) return out;
+    const users = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, displayName: true },
+    });
+    for (const u of users) {
+      out[u.id] = u.displayName;
+      userNameCache.set(u.id, { name: u.displayName, at: Date.now() });
+    }
+    return out;
   },
 
   async getRecordOrdinal(tableId, recordId) {

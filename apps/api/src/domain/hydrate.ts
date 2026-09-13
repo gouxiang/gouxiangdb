@@ -36,6 +36,24 @@ export interface HydrateDeps {
   /** autoNumber 用：该记录在表内的序号（1-based） */
   getRecordOrdinal(tableId: string, recordId: string): Promise<number>;
   resolveUserName(userId: string): Promise<string>;
+  /**
+   * M1/S5 可选批量：按 (linkFieldId, 方向) 分组，每组一条 parentRowId IN / childRowId IN 查询。
+   * 只增不改：未实现时 hydrate 回退到逐条 getLinkRows（值完全一致，仅查询数不收敛）。
+   * 返回与 qs 同序、同组的 linkRows（已排除软删，顺序不要求，解析侧按 ord 重排）。
+   */
+  getLinkRowsBulk?(qs: LinkBatchQuery[]): Promise<LinkRowRef[][]>;
+  /**
+   * M1/S5 可选批量：一次 user IN 解析页内去重后的 createdBy/updatedBy。
+   * 未实现时回退逐条 resolveUserName（值一致）。返回 userId -> 显示名（缺失键由调用方回退 id）。
+   */
+  resolveUserNames?(userIds: string[]): Promise<Record<string, string>>;
+}
+
+/** 批量 linkRows 查询的一组：dir="parent" 表示本组记录是 parent（正向，取 child）；"child" 反之。 */
+export interface LinkBatchQuery {
+  linkFieldId: string;
+  dir: "parent" | "child";
+  rowIds: string[];
 }
 
 interface HydrationContext {
@@ -64,7 +82,46 @@ function createContext(deps: HydrateDeps, firstTableId: string, fields: FieldMet
 
 // ============ 主入口 ============
 
+/**
+ * M1/S5 两阶段批量化开关：GX_HYDRATE_PREFETCH=off 回退旧逐行串行实现（紧急回滚，
+ * 行为与取值完全一致，仅查询数不收敛）。未设置/=on 均走批量预取（NODE_ENV=test 也默认开，
+ * 由 S0 逐值快照对拍保证一致）。
+ */
+export function resolvePrefetchEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.GX_HYDRATE_PREFETCH !== "off";
+}
+
 export async function hydrateRecords(
+  records: RawRecord[],
+  fields: FieldMeta[],
+  deps: HydrateDeps,
+): Promise<HydratedRecord[]> {
+  if (records.length === 0) return [];
+  if (!resolvePrefetchEnabled()) return await hydrateRecordsLegacy(records, fields, deps);
+
+  // 两阶段：BatchStore 沿 links 依赖图 BFS 预热（每字段×方向一条 linkRows IN、每对端表一条
+  // records IN、每表一次 fields、页内用户一次 IN），随后逐行跑【原封不动】的第一轮 + 公式。
+  // 缓存未命中仍回退单条查询，故正确性不依赖预热完整度；cell 取值与旧实现逐值一致。
+  const { BatchStore } = await import("./hydrateBatch.js");
+  const store = new BatchStore(deps);
+  const tableId = records[0]!.tableId;
+  store.seedFields(tableId, fields);
+  await store.prefetch(records);
+
+  const ctx = createContext(store.wrappedDeps(), tableId, fields);
+  const out: HydratedRecord[] = [];
+  for (const r of records) {
+    ctx.stack.clear();
+    out.push(await hydrateOne(r, fields, ctx));
+  }
+  return out;
+}
+
+/**
+ * 旧逐行串行实现（M1/S5 前的行为）：每行新建递归上下文，逐字段/逐对端 N+1 查询。
+ * 保留为 GX_HYDRATE_PREFETCH=off 的回滚分支与逐值 A/B 对照基线，不得改其取值算法。
+ */
+export async function hydrateRecordsLegacy(
   records: RawRecord[],
   fields: FieldMeta[],
   deps: HydrateDeps,
