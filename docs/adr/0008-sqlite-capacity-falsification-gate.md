@@ -1,8 +1,8 @@
 # ADR-0008：SQLite 容量证伪门与 PostgreSQL 切换阈值（S10 裁决）
 
-**状态**：Proposed（2026-09-13；待项目总监对提交后全文做一致性终检后转 Accepted）
+**状态**：Accepted（2026-09-13；项目总监提交后终检通过：核心计数独立重算一致、FIFO 独立复核一致、无完成时态虚报、emoji 0；唯一措辞修正见附录 B 署名口径）
 **作者**：架构师 高见远
-**评审**：项目总监 大湾区靓仔（三审：机制 pass、证据口径经两轮打回后 §7.2 pass，本稿按其裁决落盘）
+**评审**：项目总监 大湾区靓仔（终检：机制 pass、证据口径 §5/§7 pass；数字经独立重算而非采信）
 **上游依据**：`docs/planning/phase2/M1-implementation-plan.md` §S10（493–516 行）、§8（561–579 行）；`docs/planning/phase1/ARCH-production.md` §3.4；S10 留证 `docs/baseline/2026-09-13-m1-s10-gate.md`（commit `413f4a2`）
 **关联 ADR**：ADR-0002（SQLite 选型）、ADR-0003（裸机拓扑）
 
@@ -198,4 +198,4 @@ DATABASE_URL=file:/abs/bench-<n>.db pnpm tsx apps/api/scripts/bench/gen-data.ts 
 
 ## 附录 B：服务端日志审计方法
 
-对 `*.server.log` 按连接内顺序做 `<--`（进入）/`-->`（响应）FIFO 配对：先按登录态与 path 分 home（无 viewId）/ view-search（带 viewId）/ write（POST）三流，各自统计进入数、响应数、按状态码分桶、以及流末无配对的尾挂行号；尾挂须回查同批 viewId 与客户端 samples 时间窗，区分"服务端挂死"与"客户端放弃"。5000-c8-on 的审计结果（home 540/540/0、view 82/74/8、write 250 POST 全 201 + 5 GET 校验）已由项目总监独立手工 FIFO 复核与脚本复算双重对齐。脚本化版本拟随 #84 入库，作为 T0 的对账工具。
+对 `*.server.log` 按连接内顺序做 `<--`（进入）/`-->`（响应）FIFO 配对：先按登录态与 path 分 home（无 viewId）/ view-search（带 viewId）/ write（POST）三流，各自统计进入数、响应数、按状态码分桶、以及流末无配对的尾挂行号；尾挂须回查同批 viewId 与客户端 samples 时间窗，区分"服务端挂死"与"客户端放弃"。5000-c8-on 的审计结果（home 540/540/0、view 82/74/8、write 250 POST 全 201 + 5 GET 校验）已经项目总监终审独立复核：对 `5000-c8-on.json` 逐场景重算 3201/625/2576，并对 `5000-c8-on.read.server.log` 按行序 FIFO 配对独立得出 home 540/540/0、view 82/74/8，与本 ADR 一致。可复跑的脚本化对账器随 #84 入库，作为 T0 的自动化对账工具（入库前此口径以人工 FIFO 复核为准）。
