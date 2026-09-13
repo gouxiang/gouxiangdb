@@ -44,9 +44,27 @@ export interface GroupBucket {
   recordIds: string[];
 }
 
+export interface KeysetPageArgs extends PhysicalFilter {
+  tableId: string;
+  /** 上一页末行游标；null=首页。createdAt 为 epoch 毫秒。 */
+  cursor: { createdAt: number; id: string } | null;
+  /** 期望返回行数（内部多取 1 行判断 hasMore）。 */
+  limit: number;
+}
+
+export interface KeysetIdPage {
+  rows: { id: string; createdAt: number }[];
+  hasMore: boolean;
+}
+
 export interface SidecarQuerier {
   /** 物理过滤命中的活记录数（无 filter 时即表内活行数）。 */
   countPhysical(q: PhysicalFilter & { tableId: string }): number;
+  /**
+   * 原生 (createdAt ASC,id ASC) keyset 一页：物理过滤 + 游标谓词（可移植展开式，不用行值比较）。
+   * 仅用于无排序、过滤全物理的 T1 档；返回 limit+1 探测行由调用方截。
+   */
+  physicalKeysetOnCreatedAt(q: KeysetPageArgs): KeysetIdPage;
   /** 物理过滤 + 物理排序后的有序候选 recordId（tie-break createdAt,id 升序）。 */
   physicalOrderedIds(q: CandidateQuery): string[];
   /** 物理字段表尾聚合（percent* 由 count/empty/filled 推导）。 */
@@ -105,6 +123,22 @@ export function createSidecarQuerier(db: Database.Database): SidecarQuerier {
       .prepare(`SELECT count(*) AS n FROM records r WHERE ${liveWhere(q.filterSql)}`)
       .get(q.tableId, ...q.filterParams) as { n: number };
     return Number(row.n);
+  }
+
+  function physicalKeysetOnCreatedAt(q: KeysetPageArgs): KeysetIdPage {
+    const cursorClause = q.cursor
+      ? `AND (r."createdAt" > ? OR (r."createdAt" = ? AND r."id" > ?))`
+      : "";
+    const sql =
+      `SELECT r."id" AS id, r."createdAt" AS createdAt FROM records r ` +
+      `WHERE ${liveWhere(q.filterSql)} ${cursorClause} ORDER BY r."createdAt" ASC, r."id" ASC LIMIT ?`;
+    // 绑定顺序：tableId → filter 参数 → 游标三参 → limit（多取 1 行判断 hasMore）。
+    const bind: SqlBindValue[] = [q.tableId, ...q.filterParams];
+    if (q.cursor) bind.push(q.cursor.createdAt, q.cursor.createdAt, q.cursor.id);
+    bind.push(q.limit + 1);
+    const fetched = db.prepare(sql).all(...bind) as { id: string; createdAt: number }[];
+    const hasMore = fetched.length > q.limit;
+    return { rows: hasMore ? fetched.slice(0, q.limit) : fetched, hasMore };
   }
 
   function physicalOrderedIds(q: CandidateQuery): string[] {
@@ -218,6 +252,7 @@ export function createSidecarQuerier(db: Database.Database): SidecarQuerier {
 
   return {
     countPhysical,
+    physicalKeysetOnCreatedAt,
     physicalOrderedIds,
     physicalAggregates,
     physicalGroupBuckets,

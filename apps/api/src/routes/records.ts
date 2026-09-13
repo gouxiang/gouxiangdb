@@ -29,7 +29,8 @@ import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
 import { applyCreateDefaults, applyEditDefaults, applyReverseDefaultsForChild, applyLinkChangeDefaults } from "../domain/defaults.js";
 import { syncRecordsTx, deleteRecordsStatement, restoreRecordsTx } from "../domain/fieldIndex/sync.js";
 import { sidecarUniqueMatch, findUniqueConflictTx } from "../domain/queryPlan/uniqueSidecar.js";
-import { resolveSidecarReadMode, resolveSidecarWriteEnabled } from "../domain/queryPlan/flags.js";
+import { resolveSidecarReadMode, resolveSidecarWriteEnabled, keysetPagingActive } from "../domain/queryPlan/flags.js";
+import { InvalidCursorError, OffsetWindowError } from "../domain/queryPlan/cursor.js";
 import { isNumberRuleEmpty } from "@gx/shared-types";
 
 export const records = new Hono();
@@ -329,6 +330,10 @@ records.get("/", async (c) => {
   const limit = Math.min(Number(c.req.query("limit") ?? 200) || 200, 1000);
   const offset = Math.max(Number(c.req.query("offset") ?? 0) || 0, 0);
   const search = c.req.query("search") ?? undefined;
+  // S7：仅 keyset 分页正式生效时才识别 cursor；未生效（默认 off/read 未 on）时忽略该参数，
+  // 老客户端行为一字不变。深翻窗口/坏游标的 400 也只在 keyset 生效时施加。
+  const keysetOn = keysetPagingActive();
+  const cursor = keysetOn ? (c.req.query("cursor") || null) : null;
 
   const fields = await loadTableFields(tableId);
   let config = parseViewConfig(null);
@@ -338,9 +343,19 @@ records.get("/", async (c) => {
     if (v && v.tableId === tableId) config = parseViewConfig(v.config);
   }
 
-  const result = await queryRecords({ tableId, fields, config, limit, offset, search });
+  let result;
+  try {
+    result = await queryRecords({ tableId, fields, config, limit, offset, search, cursor });
+  } catch (e) {
+    // keyset 客户端错误统一转 400（错误类定义不牵 db.js，这里桥接到 HttpError 信封）。
+    if (e instanceof InvalidCursorError || e instanceof OffsetWindowError) {
+      throw new HttpError(400, e.message);
+    }
+    throw e;
+  }
 
-  return c.json({
+  // additive：仅 keyset 生效路径带 nextCursor/hasMore/degraded；其余路径键集合与 S0 快照一致。
+  const body: Record<string, unknown> = {
     records: result.records,
     total: result.total,
     filteredTotal: result.filteredTotal,
@@ -348,7 +363,13 @@ records.get("/", async (c) => {
     allFields: fields,
     groups: result.groups,
     aggregations: result.aggregations,
-  });
+  };
+  if (keysetOn && "nextCursor" in result) {
+    body.nextCursor = result.nextCursor ?? null;
+    body.hasMore = result.hasMore ?? false;
+    body.degraded = result.degraded ?? [];
+  }
+  return c.json(body);
 });
 
 // ============ 创建 ============

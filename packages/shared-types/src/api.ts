@@ -238,8 +238,18 @@ export interface RecordDTO {
 export interface ListRecordsQuery {
   viewId?: ViewIdT;
   limit?: number;
+  /**
+   * 老客户端偏移量。keyset 灰度（GX_M1_KEYSET=on）启用后，服务端仅接受
+   * offset < limit × 兼容窗口（默认 5 页）；超窗返回 400，请改用 cursor。
+   */
   offset?: number;
   search?: string;
+  /**
+   * S7 keyset 不透明游标（base64url）。首页不传；翻页传上一页响应的 nextCursor。
+   * 仅在服务端 keyset 灰度开启时被识别；未开启时忽略，行为与旧版一致。
+   * 游标非法/过期（边界行已删除等）返回 400，客户端应丢弃游标回到首页。
+   */
+  cursor?: string;
 }
 
 export interface ListRecordsResponse {
@@ -248,6 +258,18 @@ export interface ListRecordsResponse {
   fields: FieldDTO[];
   groups: GroupBucketDTO[] | null;
   aggregations: Record<string, number | null> | null;
+  /**
+   * S7 additive：下一页游标；无下一页为 null。仅在服务端 keyset 灰度开启时出现，
+   * 未开启（默认）时响应不含该字段——老客户端与旧快照不受影响。
+   */
+  nextCursor?: string | null;
+  /** S7 additive：是否还有下一页（与 nextCursor !== null 等价，便于前端直用）。 */
+  hasMore?: boolean;
+  /**
+   * S7 additive：降级原因码。空数组=完整口径；M1 仅可能出现
+   * "computedInMem"（宽口径内存精修超阈值，结果为受限/降级口径，前端 S8 据此提示）。
+   */
+  degraded?: string[];
 }
 
 export interface GroupBucketDTO {

@@ -30,6 +30,44 @@ export function sidecarReadUsable(env: NodeJS.ProcessEnv = process.env): boolean
 }
 
 /**
+ * S7 keyset 分页开关（独立于读开关；实现上是 queryPlan 读路径的分页形态，故仅在
+ * GX_M1_SIDECAR_READ=on 时才可能对外生效，见 keysetPagingActive）：
+ *   off（默认，含未设置/未知值）→ 分页完全是 S6/S5 旧形态（offset slice），响应无游标键；
+ *   shadow                      → 旧结果照返回，额外跑 keyset 编排并对拍（只记日志）；
+ *   on（且 read=on）            → GET 列表走 keyset 续点，响应 additive 带 nextCursor/hasMore/degraded。
+ * 灰度纪律与读开关一致：shadow 连续一迭代差异 0 才允许切 on。
+ */
+export type KeysetMode = "off" | "shadow" | "on";
+
+export function resolveKeysetMode(env: NodeJS.ProcessEnv = process.env): KeysetMode {
+  const v = (env.GX_M1_KEYSET ?? "off").trim().toLowerCase();
+  if (v === "on" || v === "shadow") return v;
+  return "off";
+}
+
+/**
+ * keyset 分页是否真正对外生效：读计划器已正式启用（read=on 且写侧在维护）且 keyset=on。
+ * read=shadow/off 时恒 false——keyset 与 queryPlan 读路径同源，不允许绕过读灰度直接开游标。
+ * 路由据此决定：是否解析/校验 cursor、是否施加 offset 深翻窗口、响应是否挂游标键。
+ */
+export function keysetPagingActive(env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveSidecarReadMode(env) === "on" && sidecarReadUsable(env) && resolveKeysetMode(env) === "on";
+}
+
+/**
+ * 老客户端 offset 兼容窗口页数：keyset 生效后仅接受 offset < limit × 该值
+ *（默认 5 页），窗口内用 keyset 多取快进实现，不用 SQL OFFSET；超窗 400 引导改 cursor。
+ */
+export const DEFAULT_OFFSET_WINDOW_PAGES = 5;
+
+export function resolveOffsetWindowPages(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.GX_M1_OFFSET_WINDOW;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_OFFSET_WINDOW_PAGES;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : DEFAULT_OFFSET_WINDOW_PAGES;
+}
+
+/**
  * 受限宽口径阈值：含计算字段残余筛选/排序时，物理粗筛候选数超过该值则不硬算，
  * 由服务端返回 degraded 提示（S8 才在 UI 置灰，S6 只保证服务端口径、不伪造全量）。
  */

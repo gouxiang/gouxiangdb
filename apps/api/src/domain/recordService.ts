@@ -21,8 +21,10 @@ export interface QueryOptions {
   search?: string;
   limit?: number;
   offset?: number;
-  /** 跳过分页（导出全量用） */
+  /** 跳过分页（导出全量用；与 S7 keyset 互斥，noPaging 恒走非游标路径） */
   noPaging?: boolean;
+  /** S7：不透明分页游标（base64url）；仅 GX_M1_KEYSET=on 且读=on 时被解析。 */
+  cursor?: string | null;
 }
 
 export interface QueryResult {
@@ -31,6 +33,14 @@ export interface QueryResult {
   filteredTotal: number;
   groups: { key: string; label: string; color: string | null; recordIds: string[]; aggregations: Record<string, number | null> }[] | null;
   aggregations: Record<string, number | null> | null;
+  /**
+   * S7 additive 三键：仅 keyset 分页真正生效（GX_M1_KEYSET=on 且 GX_M1_SIDECAR_READ=on）
+   * 时出现；其余任何 flag 组合（含默认全 off）响应不含这三个键，旧客户端/S0 快照字节不变。
+   */
+  nextCursor?: string | null;
+  hasMore?: boolean;
+  /** 降级原因码，M1 仅 "computedInMem"（宽口径内存精修超阈值）。 */
+  degraded?: string[];
 }
 
 /** 取视图实际可见字段（按 fieldOrder 重排，剔除 hidden；tabs/subtable 仅在 detail 显示，不进列表） */
@@ -91,18 +101,32 @@ export function applyViewQuery(
 }
 
 /**
- * 列表查询入口（S6 起按 GX_M1_SIDECAR_READ 分派）：
- *   off（默认）→ queryRecordsLegacy：全表 hydrate + 内存 filter/search/sort（S5 行为，完全回退）；
- *   shadow      → 旧结果照返回，额外跑 queryPlan 计划器并只记差异（不影响响应）；
- *   on          → 走 sidecar queryPlan 计划器（physical 下推 + 当页 hydrate）。
- * 写侧 GX_M1_SIDECAR=off 或派生表不可用时强制回退旧路径（计划器异常也安全回退）。
+ * 列表查询入口（S6 读分派 + S7 keyset 分派，两级 flag）：
+ *   GX_M1_SIDECAR_READ=off（默认）→ queryRecordsLegacy：全表 hydrate + 内存口径；
+ *   =shadow                       → 旧结果照返回，额外跑 S6 计划器只记差异；
+ *   =on 且 GX_M1_KEYSET=off（默认）→ 走 S6 queryPlan 计划器（offset slice）；
+ *   =on 且 =shadow                 → S6 计划器结果照返回，额外跑 keyset 只记差异；
+ *   =on 且 =on（且非 noPaging）    → 走 S7 keyset 分页（响应 additive 带游标三键）。
+ * GX_M1_KEYSET=shadow 是【纯观测】档，在任意 read 档（含默认 off）都额外跑 keyset 并对拍
+ * 当前主路径结果，只记差异、绝不影响响应；故默认环境即可开 shadow 收集 drift。
+ * 写侧 GX_M1_SIDECAR=off、派生表异常、keyset 运行时异常均安全回退旧路径；
+ * 唯坏游标/offset 超窗属客户端错误（400），不回退、直接抛给路由。
  */
 export async function queryRecords(opts: QueryOptions): Promise<QueryResult> {
-  const { resolveSidecarReadMode, sidecarReadUsable } = await import("./queryPlan/flags.js");
-  const mode = resolveSidecarReadMode();
-  if (mode === "off" || !sidecarReadUsable()) return await queryRecordsLegacy(opts);
+  const { resolveSidecarReadMode, sidecarReadUsable, resolveKeysetMode, resolveSidecarWriteEnabled } =
+    await import("./queryPlan/flags.js");
+  const readMode = resolveSidecarReadMode();
+  const keysetMode = resolveKeysetMode();
+  // shadow 是纯观测档，不要求 read=on；但写侧必须在维护 sidecar（否则派生表过期/缺失，drift 是噪音）。
+  const keysetShadow = keysetMode === "shadow" && !opts.noPaging && resolveSidecarWriteEnabled();
 
-  if (mode === "shadow") {
+  if (readMode === "off" || !sidecarReadUsable()) {
+    const legacy = await queryRecordsLegacy(opts);
+    if (keysetShadow) await runKeysetShadowAgainst(opts, legacy);
+    return legacy;
+  }
+
+  if (readMode === "shadow") {
     const legacyP = queryRecordsLegacy(opts);
     // shadow 对拍失败绝不影响旧结果：计划器报错只记日志。
     const [legacy, planned] = await Promise.all([
@@ -113,15 +137,43 @@ export async function queryRecords(opts: QueryOptions): Promise<QueryResult> {
       }),
     ]);
     if (planned) logShadowDiff(opts, legacy, planned);
+    if (keysetShadow) await runKeysetShadowAgainst(opts, legacy);
     return legacy;
   }
 
-  // on：计划器异常时安全回退旧路径（读可用性不因 sidecar 问题受损）。
+  // read=on
+  if (keysetMode === "on" && !opts.noPaging) {
+    try {
+      const { runKeysetQuery } = await import("./queryPlan/keysetEntry.js");
+      return await runKeysetQuery(opts);
+      // 400 客户端错误（坏游标/超窗）必须透传，不能回退成「错误的一页」；其余异常安全回退。
+    } catch (e) {
+      const { isKeysetClientError } = await import("./queryPlan/keysetEntry.js");
+      if (isKeysetClientError(e)) throw e;
+      console.warn("[queryPlan][keyset-on] keyset 失败，回退计划器:", (e as Error).message);
+    }
+  }
+
+  let planned: QueryResult;
   try {
-    return await runPlannerOnce(opts);
+    planned = await runPlannerOnce(opts);
   } catch (e) {
     console.warn("[queryPlan][on] 计划器失败，回退旧路径:", (e as Error).message);
-    return await queryRecordsLegacy(opts);
+    planned = await queryRecordsLegacy(opts);
+  }
+  if (keysetShadow) await runKeysetShadowAgainst(opts, planned);
+  return planned;
+}
+
+/** keyset shadow 双跑：跑一遍 keyset 并与当前主路径结果对拍；任何异常只记日志。 */
+async function runKeysetShadowAgainst(opts: QueryOptions, baseline: QueryResult): Promise<void> {
+  try {
+    const { runKeysetQuery, logKeysetShadowDiff } = await import("./queryPlan/keysetEntry.js");
+    const keyset = await runKeysetQuery(opts);
+    logKeysetShadowDiff(opts, baseline, keyset, "shadow");
+  } catch (e) {
+    // 坏游标在 shadow 下也不影响旧结果（on 时才转 400）；环境无 sidecar 库等同样吞掉。
+    console.warn("[queryPlan][keyset-shadow] keyset 异常（忽略，返回旧结果）:", (e as Error).message);
   }
 }
 

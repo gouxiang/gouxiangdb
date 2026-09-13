@@ -13,17 +13,20 @@
 //
 // 搜索（跨字段 contains）、计算字段残余筛选/排序、分组一律走宽口径；候选超 GX_M1_INMEM_LIMIT
 // 且含残余/计算排序/搜索时打 degraded 标志（S6 仅内部标记+日志，S7 additive 暴露，S8 置灰）。
+//
+// M1/S7：plan 编译与取数/重排原语抽到 planBuild.ts/fetch.ts 供 keyset 分页同源复用。
 
 import type { AggFunc, ViewConfig, SortSpec } from "@gx/shared-types";
-import { prisma } from "../../db.js";
-import type { HydratedRecord, FieldMeta, RawRecord } from "../types.js";
-import { toRawRecord, prismaDeps } from "../prismaDeps.js";
+import type { HydratedRecord, FieldMeta } from "../types.js";
 import { hydrateRecords } from "../hydrate.js";
 import { applyViewQuery } from "../recordService.js";
 import { assembleGroups, assembleAggregations } from "./assemble.js";
-import { compilePlan, physicalAggFuncs } from "./compile.js";
+import { physicalAggFuncs } from "./compile.js";
 import type { SidecarQuerier } from "./sidecarQuery.js";
 import { resolveInMemLimit } from "./flags.js";
+import { buildViewPlan, aggregationsFullyPhysical } from "./planBuild.js";
+import { fetchRawByIds, orderByIds } from "./fetch.js";
+import { prismaDeps } from "../prismaDeps.js";
 
 export interface PlannerInput {
   tableId: string;
@@ -41,7 +44,7 @@ export interface PlannerResult {
   filteredTotal: number;
   groups: PlannerGroups;
   aggregations: Record<string, number | null> | null;
-  /** 走了哪一档（供日志/对拍/后续 S7 观测）。 */
+  /** 走了哪一档（供日志/对拍/S7 观测）。 */
   mode: "physical" | "wide";
   /** 宽口径候选超限时为 true（计算字段大表，S8 置灰候选）。 */
   degraded: boolean;
@@ -49,39 +52,24 @@ export interface PlannerResult {
 
 type PlannerGroups = Awaited<ReturnType<typeof assembleGroups>>;
 
-const IN_BATCH = 900; // SQLite 变量上限保守批
-
-async function fetchRawByIds(tableId: string, ids: string[]): Promise<RawRecord[]> {
-  const out: RawRecord[] = [];
-  for (let i = 0; i < ids.length; i += IN_BATCH) {
-    const slice = ids.slice(i, i + IN_BATCH);
-    const rows = await prisma.record.findMany({ where: { id: { in: slice }, tableId, deletedAt: null } });
-    for (const r of rows) out.push(toRawRecord(r));
-  }
-  return out;
-}
-
-/** 按给定 id 顺序重排（IN 不保证顺序）。 */
-function orderByIds(records: HydratedRecord[], ids: string[]): HydratedRecord[] {
-  const byId = new Map(records.map((r) => [r.id, r]));
-  const ordered: HydratedRecord[] = [];
-  for (const id of ids) {
-    const r = byId.get(id);
-    if (r) ordered.push(r);
-  }
-  return ordered;
-}
-
-/** 表尾聚合是否每个字段的每个函数都能物理下推；否则整查询回宽口径。 */
-function aggregationsFullyPhysical(fields: FieldMeta[], config: ViewConfig): boolean {
-  const funcs = config.aggregations ?? {};
-  for (const [fid, fn] of Object.entries(funcs)) {
-    if (!fn) continue;
-    const f = fields.find((x) => x.id === fid);
-    if (!f) return false;
-    if (physicalAggFuncs(f.type, [fn]).length !== 1) return false;
-  }
-  return true;
+/** S6 A 档门控：过滤/搜索/分组/排序/聚合是否全部可走纯物理路径。 */
+export function physicalPathEligible(args: {
+  filtersFullyPhysical: boolean;
+  hasSearch: boolean;
+  hasGroup: boolean;
+  cleanSort: boolean;
+  hasSorts: boolean;
+  sortJoinsReady: boolean;
+  aggPhysical: boolean;
+}): boolean {
+  return (
+    args.filtersFullyPhysical &&
+    !args.hasSearch &&
+    !args.hasGroup &&
+    args.cleanSort &&
+    (!args.hasSorts || args.sortJoinsReady) &&
+    args.aggPhysical
+  );
 }
 
 /**
@@ -95,18 +83,7 @@ export async function runQueryPlan(
   const { tableId, fields, config } = input;
   const filters = (config.filters ?? null) as PlannerInput["config"]["filters"];
   const sorts = (config.sorts ?? []) as SortSpec[];
-  // 主字段即便物理类型是 longText 也按文本入索引（compilePlan 需 isPrimary 标记）。
-  const table = await prisma.table.findUnique({
-    where: { id: tableId },
-    select: { primaryFieldId: true },
-  });
-  const primaryFieldId = table?.primaryFieldId ?? "";
-  const planFields = fields.map((f) => ({
-    id: f.id,
-    type: f.type,
-    isPrimary: f.id === primaryFieldId || undefined,
-  }));
-  const plan = compilePlan(tableId, planFields, filters, sorts);
+  const { plan } = await buildViewPlan(tableId, fields, filters, sorts);
 
   const total = q.countPhysical({ tableId, filterSql: null, filterParams: [] });
   const hasSearch = input.search.trim() !== "";
@@ -131,16 +108,18 @@ export async function runQueryPlan(
           filterParams: plan.filterParams,
         });
 
-  const physicalEligible =
-    plan.filtersFullyPhysical &&
-    !hasSearch &&
-    !hasGroup &&
-    cleanSort &&
-    (sorts.length === 0 || plan.sortJoins !== null) &&
-    aggPhysical;
+  const eligible = physicalPathEligible({
+    filtersFullyPhysical: plan.filtersFullyPhysical,
+    hasSearch,
+    hasGroup,
+    cleanSort,
+    hasSorts: sorts.length > 0,
+    sortJoinsReady: plan.sortJoins !== null,
+    aggPhysical,
+  });
 
   // ---- A. 纯物理快速档 ----
-  if (physicalEligible) {
+  if (eligible) {
     const filteredTotal = q.countPhysical({
       tableId,
       filterSql: plan.filterSql,
@@ -157,7 +136,6 @@ export async function runQueryPlan(
 
   // ---- B. 受限宽口径 ----
   // 进入此档必然至少一项需内存：残余过滤/搜索/分组/排序未全下推/聚合不可全下推。
-  // 候选超限且确有内存精修负担（残余过滤 或 搜索 或 排序需内存）→ 标记计算字段大表降级。
   const needsMemSort = sorts.length > 0 && plan.sortJoins === null;
   const degraded =
     candidateIds.length > resolveInMemLimit() &&
@@ -182,12 +160,16 @@ export async function runQueryPlan(
   return { records: hydrated, total, filteredTotal, groups, aggregations, mode: "wide", degraded };
 }
 
-function physicalAggregations(
+/**
+ * A 档表尾物理聚合（S7 keyset T1/T2 同源复用）：逐字段按 physicalAggFuncs 下推，
+ * percent* 在执行器内推导。调用前须已用 aggregationsFullyPhysical 门控。
+ */
+export function physicalAggregations(
   q: SidecarQuerier,
   tableId: string,
   fields: FieldMeta[],
   config: ViewConfig,
-  plan: ReturnType<typeof compilePlan>,
+  plan: Awaited<ReturnType<typeof buildViewPlan>>["plan"],
 ): Record<string, number | null> | null {
   const funcs = config.aggregations ?? {};
   if (Object.keys(funcs).length === 0) return null;
@@ -197,7 +179,7 @@ function physicalAggregations(
     const f = fields.find((x) => x.id === fid)!;
     const pushable = physicalAggFuncs(f.type, [fn]);
     if (pushable.length !== 1) {
-      out[fid] = null; // 理论不可达（physicalEligible 已门控），防御性
+      out[fid] = null; // 理论不可达（门控已保证），防御性
       continue;
     }
     const got = q.physicalAggregates({
