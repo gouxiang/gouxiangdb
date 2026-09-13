@@ -1,5 +1,6 @@
 // S8 纯函数单测：能力探测降级、游标续翻判定、有界截断、400 分类、degraded 置灰判定。
 import { describe, it, expect } from "vitest";
+import { FIELD_TYPES, type FieldType } from "@gx/shared-types";
 import {
   BOUNDED_PAGE_SIZE,
   GRID_PAGE_SIZE,
@@ -108,6 +109,125 @@ describe("isPhysicalField 物理下推口径（对齐后端 isIndexedField）", 
   it("主字段即便物理类型是 longText 也可下推，但计算型主字段仍不可", () => {
     expect(isPhysicalField({ type: "longText", isPrimary: true })).toBe(true);
     expect(isPhysicalField({ type: "formula", isPrimary: true })).toBe(false);
+  });
+});
+
+// ============================================================================
+// 全 FieldType 穷举守卫（防新增第 31 种类型时静默落入隐式默认值）。
+// 本矩阵与后端 apps/api/src/domain/fieldIndex/policy.ts 的 isIndexedField 逐个类型对齐：
+// 任一侧修改类型准入（新增字段类型 / 调整某类型是否物化进索引）都必须同步改这里，
+// 否则「并集 == FIELD_TYPES 全集」断言会立即变红。前端不跨包引后端 policy，靠本测试钉死口径。
+// ============================================================================
+
+// 非主字段：期望【不可】物理下推（不入 sidecar 索引列），共 15 种。
+const NON_PHYSICAL_TYPES: readonly FieldType[] = [
+  "longText",
+  "richText",
+  "json",
+  "attachment",
+  "links",
+  "subtable",
+  "lookup",
+  "rollup",
+  "count",
+  "formula",
+  "tabs",
+  "createdTime",
+  "lastModifiedTime",
+  "createdBy",
+  "lastModifiedBy",
+];
+
+// 非主字段：期望【可】物理下推，共 15 种。
+const PHYSICAL_TYPES: readonly FieldType[] = [
+  "singleLineText",
+  "email",
+  "url",
+  "phone",
+  "autoNumber",
+  "number",
+  "currency",
+  "percent",
+  "duration",
+  "rating",
+  "date",
+  "datetime",
+  "checkbox",
+  "singleSelect",
+  "multiSelect",
+];
+
+// 主字段维度：即便作为主字段也【不可】下推的计算/关联/容器/系统类型，共 11 种。
+const NON_PHYSICAL_EVEN_PRIMARY_TYPES: readonly FieldType[] = [
+  "lookup",
+  "rollup",
+  "count",
+  "formula",
+  "links",
+  "subtable",
+  "tabs",
+  "createdTime",
+  "lastModifiedTime",
+  "createdBy",
+  "lastModifiedBy",
+];
+
+function sorted(types: readonly FieldType[]): string[] {
+  return [...types].sort();
+}
+
+describe("isPhysicalField 全 FieldType 穷举守卫（对齐后端 isIndexedField）", () => {
+  it("FIELD_TYPES 当前共 30 种（若数量变化，须显式更新本矩阵与后端口径）", () => {
+    expect(FIELD_TYPES).toHaveLength(30);
+  });
+
+  it("可下推与不可下推两个显式数组的并集 == FIELD_TYPES 全集（无遗漏、无重复、无越界）", () => {
+    // 各自内部不允许重复
+    expect(new Set(NON_PHYSICAL_TYPES).size).toBe(NON_PHYSICAL_TYPES.length);
+    expect(new Set(PHYSICAL_TYPES).size).toBe(PHYSICAL_TYPES.length);
+    // 两个数组互不相交
+    const overlap = NON_PHYSICAL_TYPES.filter((t) => PHYSICAL_TYPES.includes(t));
+    expect(overlap).toEqual([]);
+    // 并集必须深度等于全集排序结果——新增类型而未在此显式决策即变红
+    expect(sorted([...NON_PHYSICAL_TYPES, ...PHYSICAL_TYPES])).toEqual(sorted([...FIELD_TYPES]));
+  });
+
+  it("非主字段：逐类型断言 isPhysicalField 与矩阵一致", () => {
+    for (const t of FIELD_TYPES) {
+      const expectedPhysical = PHYSICAL_TYPES.includes(t);
+      expect(isPhysicalField({ type: t }), `非主字段 ${t}`).toBe(expectedPhysical);
+    }
+    // 显式钉死两个分组的数量
+    expect(NON_PHYSICAL_TYPES).toHaveLength(15);
+    expect(PHYSICAL_TYPES).toHaveLength(15);
+  });
+
+  it("主字段：逐类型断言 isPrimary=true 与矩阵一致（11 不可 / 19 可）", () => {
+    for (const t of FIELD_TYPES) {
+      // 主字段放行：非主字段不可、但不在「主字段也不可」名单里的类型（longText/richText/json/attachment 等）
+      const expectedPhysical = !NON_PHYSICAL_EVEN_PRIMARY_TYPES.includes(t);
+      expect(isPhysicalField({ type: t, isPrimary: true }), `主字段 ${t}`).toBe(expectedPhysical);
+    }
+    expect(NON_PHYSICAL_EVEN_PRIMARY_TYPES).toHaveLength(11);
+    expect(FIELD_TYPES.length - NON_PHYSICAL_EVEN_PRIMARY_TYPES.length).toBe(19);
+  });
+
+  it("特别保留：longText 主字段放行=true、formula 主字段=false", () => {
+    expect(isPhysicalField({ type: "longText", isPrimary: true })).toBe(true);
+    expect(isPhysicalField({ type: "formula", isPrimary: true })).toBe(false);
+    // 且这两个特判与穷举矩阵自洽
+    expect(NON_PHYSICAL_EVEN_PRIMARY_TYPES.includes("longText")).toBe(false);
+    expect(NON_PHYSICAL_EVEN_PRIMARY_TYPES.includes("formula")).toBe(true);
+  });
+
+  it("主字段放行集合与非主字段矩阵自洽（longText/richText/json/attachment/autoNumber 主字段均可下推）", () => {
+    // 非主字段不可但主字段被 isPrimary 放行的 4 种
+    for (const t of ["longText", "richText", "json", "attachment"] as const) {
+      expect(isPhysicalField({ type: t })).toBe(false);
+      expect(isPhysicalField({ type: t, isPrimary: true })).toBe(true);
+    }
+    // autoNumber 非主字段已可下推，主字段同样可下推
+    expect(isPhysicalField({ type: "autoNumber", isPrimary: true })).toBe(true);
   });
 });
 
