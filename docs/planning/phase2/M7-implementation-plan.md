@@ -13,7 +13,7 @@
 ## 0. 结论先行
 
 1. **M7 = 八道门，一门一证，无证不过**：①五主线端到端对抗回归（AC-M2~M6 逐条映射到测试位置）；②v0.1.0→M7 直升抽样零损坏（AC-UPG-1）；③全 flag 回滚演练（30 分钟内一键收回）；④RC-40 + 各里程碑新增对抗用例总台账全绿；⑤性能门证据汇总（区分开发机留档与 Tier-L 真机承诺）；⑥三环境部署物（飞牛 fpk / Docker / macOS）更新清单与冒烟；⑦发布 checklist；⑧总验收报告与签字。
-2. **发布默认姿态在本文件锁死，发布时不得临场发明**（§4.1 矩阵为唯一真源）：组织/导航门默认 on；权限引擎代码默认 off、**生产建议 shadow**（是否随发布置 shadow 由项目总监在部署配置下令，ADR-0036）；**embedding 默认 off + FTS trigram 为默认发布姿态，cloud 语义检索是高配能力**——Tier-L 双真机门不过不阻塞 M7，但对外材料禁止出现"10 万 chunk P95<500ms"承诺（M5 B-5）；MCP 随 GX_ENTERPRISE_ORG 门控，off 即 /mcp 与 /api/v1/pats 404。
+2. **发布默认姿态在本文件锁死，发布时不得临场发明**（§4.1 矩阵为唯一真源）：组织/导航门默认 on；权限引擎代码默认 off、**生产建议 shadow**（是否随发布置 shadow 由项目总监在部署配置下令，ADR-0037）；**embedding 默认 off + FTS trigram 为默认发布姿态，cloud 语义检索是高配能力**——Tier-L 双真机门不过不阻塞 M7，但对外材料禁止出现"10 万 chunk P95<500ms"承诺（M5 B-5）；MCP 随 GX_ENTERPRISE_ORG 门控，off 即 /mcp 与 /api/v1/pats 404。
 3. **升级零损坏是 P0 硬门不是抽样仪式**：AC-UPG-1 的五类对象（记录数/附件/正文/画布/旧分享链接）逐项有抽样口径、命令、判定阈值（§3），从 tag v0.1.0 的真实旧库一路 `migrate deploy` 到 M7 终态迁移（现 14 个，预计约 24 个，以落地为准），任何一类出现损坏即不通过。
 4. **回滚是肌肉记忆不是文档想象**：每面旗一次真实 off 演练并计时，硬指标 = 从做出回滚决定到旧行为恢复服务 **≤30 分钟**（SPEC:60 铁律）；代码回滚走 deploy.sh/rollback.sh 既有原子切换（deploy.md §8），数据回滚走发布前在线快照（主路径），down SQL 仅辅助。
 5. **M1 读路径翻门遗留必须在 M7 前结清姿态**：keyset/sidecar 读生产默认（task #103/#106/#107/#110 在途）要么带 shadow 双零证据翻 on，要么明确以 off 姿态发布并在报告中写清；不允许"默认值是什么没人说得清"地进入总验收。
@@ -40,7 +40,7 @@
 |---|---|---|---|---|
 | GX_ENTERPRISE_ORG | M2（config.ts:175/:229，`!== "off"`） | on | on/off | /api/v1 全挂载、邀请公开路由；**M6 起同管 /mcp 与 /api/v1/pats（C-5 定稿）** |
 | GX_ENTERPRISE_NAV | M3（计划 S5） | on | on/off | v1 nav 路由 + 前端新外壳（探测 404 回退旧两壳） |
-| GX_AUTHZ_ENGINE | M4（计划，仿 flags.ts 三态） | **off** | off/shadow/on | 旧 guards.ts/kb.ts 包壳、fieldMask 投影、tree/menu 剪枝；**M4 出口生产建议 shadow，翻 on 五前置 + 总监下令（ADR-0036）** |
+| GX_AUTHZ_ENGINE | M4（计划，仿 flags.ts 三态） | **off** | off/shadow/on | 旧 guards.ts/kb.ts 包壳、fieldMask 投影、tree/menu 剪枝；**M4 出口生产建议 shadow，翻 on 五前置 + 总监下令（ADR-0037）** |
 | GX_M1_SIDECAR / GX_M1_SIDECAR_READ / GX_M1_KEYSET | M1（queryPlan/flags.ts:16-57） | write=on；read=**off**；keyset=**off** | on/off；off/shadow/on | sidecar 写维护、物理读计划器、keyset 分页 |
 | GX_HYDRATE_PREFETCH(_BUDGET/_DEPTH) | M1（hydrateBatch） | 在库 | 数值 | 两阶段批量化 hydration |
 | GX_EMBEDDING_MODE | M5（B-1 后两态） | **off** | off/cloud | 向量路；cloud 需四与门（配置齐+探活+dim 一致），失败回落 off |
@@ -209,7 +209,7 @@ bash scripts/acceptance/check-share-links.sh "$WORK/share-links.txt"            
 |---|---|---|---|---|
 | 组织管理面 | GX_ENTERPRISE_ORG=on | on | =off，v1/邀请/mcp/pats 全不挂载（404），旧 /api 与登录主流程不受影响 | 五表保留无害 |
 | 新导航外壳 | GX_ENTERPRISE_NAV=on | on | =off，前端探 404 回退旧两壳（保留一个迭代，PRD:258）；nav 同步无开关（强一致，回滚靠代码回退+快照） | nav/menu 表保留 |
-| 权限引擎 | GX_AUTHZ_ENGINE=**shadow**（生产建议值，总监下令；代码默认仍 off） | off | 立即 =off：旧 guards/kb.ts 按旧表决策，投影双写保证旧表新鲜（M4 §4.6/ADR-0036） | auth_policies 保留；旧表在投影期完好 |
+| 权限引擎 | GX_AUTHZ_ENGINE=**shadow**（生产建议值，总监下令；代码默认仍 off） | off | 立即 =off：旧 guards/kb.ts 按旧表决策，投影双写保证旧表新鲜（M4 §4.6/ADR-0037） | auth_policies 保留；旧表在投影期完好 |
 | M1 sidecar 写 | GX_M1_SIDECAR 沿用在库值 | on（非 off） | =off 停写（读侧自动不可用） | sidecar 表保留，可 backfill |
 | M1 物理读/keyset | **门时定姿态**：要么 shadow 双零后 on，要么明确 off 发布（§0-5） | off/off | read=off（keyset 连带恒 false，flags.ts:51-57）回全表 hydrate 旧行为 | 无数据回滚 |
 | Embedding | GX_EMBEDDING_MODE=**off**（Tier-L 门未过前的默认发布姿态） | off | off 即纯 FTS trigram+短词 LIKE，零外网 | search.db 可删可重建 |

@@ -1,6 +1,6 @@
 # M3 统一导航资源树 — 可执行实施切片（设计与现状核对，不改业务码）
 
-- 日期：2026-09-16（2026-09-16 按项目总监 §10 十项裁决终审修订）
+- 日期：2026-09-16（2026-09-16 按项目总监 §10 十项裁决终审修订；**2026-09-14 按总监方案 A（裁决日 2026-09-12）修订 §5.3/§5.4/S2-S4/§10/DoD 的 C4 分级与运行期收纳口径，新增 ADR-0025，M3 候选 ADR 顺延为 0026-0031，M4-M7 计划候选编号连锁顺延一位**）
 - 作者：架构师 高见远
 - 状态：**终审通过（Accepted，总监十项裁决已回填，见 §10）**；实施排期由项目总监统一调度，S1-S4 虽可先行但未获派工不得开工（裁决 10：M2-S2 在途，后端实施保持单线 M2 收口 → M3）
 - 上游依据：SPEC-enterprise-v1.0 §2（M3 行，:23 P0）/§5（:62-69 `/api/v1/workspaces/current/tree|menu`、openapi 冻结点 :62）/§6（:85 nav_nodes/menu_items/auth_policies 表清单）/§7（:95-96 工作区外壳/一级三类列表）/§8（:109 单一 SVG 图标体系）/§9（AC-M3-1，:119）/§10（:134 资源 10 万节点首屏 <1s）/§11（:144 画布坑位）/§12；PRD-enterprise §支柱2（N1 :132 / N2 :133 / N3 :134 / N4 :135 / N5 :136 / N6 :137）/C-1（:308）/C-7（:314）/C-11（:318）/C-12（:319）/§六 M3（:253-258）；ARCH-enterprise §3.1（两层模型，:135-166）/§3.2（Prisma 草案，:168-278）/§3.3（迁移回填，:280-294）/§3.4（menu_items 行为级联，:296-313）/§9（:849 openapi M3 冻结）；UIUX-enterprise §1（:51-77）/§2（线框:84-179、设置收拢:203-234）/§5（路由建议:531-545）；M2 实施计划（`docs/planning/phase2/M2-implementation-plan.md`）§2.2（:105 明确划给 M3 的边界）、§4.1（GX_ENTERPRISE_ORG flag）、§5-A（manage_menu 留 M3，:193）
@@ -15,10 +15,10 @@
 ## 0. 结论先行
 
 1. **M3 同样是"加一层 + 换外壳"，不是搬迁资产**：新增 `nav_nodes`（权威实体树，唯一父级）与 `menu_items`（引用编排层）两张旁路表，base/kb/table/view/doc/canvas 六类实体的物理归属、URL、旧 RBAC 守卫**一行不动**；`auth_policies` 按 SPEC §6 同期建表冻结，**不写策略、不接判定**（M4 启用）。权限纪律与 M2 完全一致：M3 不做任何 enforce，**菜单零剪枝——tree/menu 对所有登录用户返回全量**，软删项由前端隐藏；M4 才做服务端剪枝（总监裁决 1，终审定案，不增加粗剪枝切片）。
-2. **两层模型按 SPEC §6 落地，对 ARCH §3 的三处事实性裁剪经总监裁决 3/4 全部批准定案**：①**建 view 节点、不建 field 节点**（字段可见性归 M4 fieldMask，建 field 节点只带来 ~10x 行数膨胀）；②**建 kb 节点**（kb 是六类实体之一）；③doc 层级在 nav_nodes 用 parentId 镜像 `kb_docs.parentId`，**默认菜单不嵌套复刻文档树**（裁决 4：文档层级走 nav_nodes 子树，默认菜单只挂 base/kb 容器 + 零入口丢失所需的一级项；容器嵌套 2 层上限保留）。六类 base/kb/table/view/doc/canvas + group 七节点种类定稿。
+2. **两层模型按 SPEC §6 落地，对 ARCH §3 的三处事实性裁剪经总监裁决 3/4 全部批准定案**：①**建 view 节点、不建 field 节点**（字段可见性归 M4 fieldMask，建 field 节点只带来 ~10x 行数膨胀）；②**建 kb 节点**（kb 是六类实体之一）；③doc 层级在 nav_nodes 用 parentId 镜像 `kb_docs.parentId`，**默认菜单不嵌套复刻文档树**（裁决 4：文档层级走 nav_nodes 子树，默认菜单只挂 base/kb 容器 + 存量初始全收纳所需的一级项，且该全收纳仅为 S2 迁移基线、运行期实体默认未收纳（ADR-0025）；容器嵌套 2 层上限保留）。六类 base/kb/table/view/doc/canvas + group 七节点种类定稿。
 3. **nav_nodes 树结构选用 M2 同款 `parentId 真相 + path 物化派生`，不引入闭包表/CTE**：M4 权限引擎要求沿权威树收集祖先链（ARCH §5），物化 path 前缀切分即可在无递归 SQL 下完成，且与 M2 部门树同一套纯函数/方言纪律；menu_items 是浅树（一级+二级，容器嵌套限 2 层），只保留 parentId + 应用层防环。
-4. **内容深链 URL 永不改名（总监裁决 2 确认）**：`/base/:id/table/:id/view/:id`、`/kb/:id/doc|canvas/:id` 永久有效，是被 Markdown 正文（`lib/internal-links.ts`）、画布引用卡（`DocRefCard`/`GxLinkBlockView`）、匿名公开分享（`/s/:token`）持久化存储的资源身份；**不引入 `/w/node/:id` 内容路径**，N5 用 SPA 别名实现旧外壳入口可达，**不做服务端 301**。ADR-0027 照写（§8）。
-5. **回填分两个只增迁移 + 一个可重跑对账脚本**：迁移 A 建三表 + workspaces 加 `navVersion/menuVersion`；迁移 B 用 `INSERT...SELECT` 幂等回填实体节点与默认菜单（零入口丢失：每个活表/根级活文档/画布至少一条 shortcut）。对账脚本输出 A/B/C 三类差异，**0 差异定义见 §5**。实体写点接线覆盖五个路由文件（bases/tables/views/kb/records），§4.4 表逐条列出 18 个条目，全部在既有 `withWriteTx/withWriteBatch` 事务内接 `domain/nav/sync.ts` 原语，不新增写队列。
+4. **内容深链 URL 永不改名（总监裁决 2 确认）**：`/base/:id/table/:id/view/:id`、`/kb/:id/doc|canvas/:id` 永久有效，是被 Markdown 正文（`lib/internal-links.ts`）、画布引用卡（`DocRefCard`/`GxLinkBlockView`）、匿名公开分享（`/s/:token`）持久化存储的资源身份；**不引入 `/w/node/:id` 内容路径**，N5 用 SPA 别名实现旧外壳入口可达，**不做服务端 301**。ADR-0028 照写（§8）。
+5. **回填分两个只增迁移 + 一个可重跑对账脚本**：迁移 A 建三表 + workspaces 加 `navVersion/menuVersion`；迁移 B 用 `INSERT...SELECT` 幂等回填实体节点与**存量初始全收纳**默认菜单（S2 迁移基线：每个活表/根级活文档/画布恰好一条 shortcut）。**S2 基线之后，运行期新建实体默认"未收纳"，不自动写任何 shortcut（总监方案 A，ADR-0025）**——复制表不加快捷项（§4.4 #7）、建表/建文档/建画布同样只建 nav 节点；菜单收纳的唯一运行期入口是 S6 菜单写 API（manage_menu 显式编排）。对账脚本输出 A/B/C 三类差异，**阻断差异 = A/B/C1/C2/C3 计数全 0；C4/C5 为 warning 只报告（§5.4）**。实体写点接线覆盖五个路由文件（bases/tables/views/kb/records），§4.4 表逐条列出 18 个条目，全部在既有 `withWriteTx/withWriteBatch` 事务内接 `domain/nav/sync.ts` 原语，不新增写队列。
 6. **删除悬挂按三态处理（C-12）**：活（alive）/ 软删悬挂（资源 `deletedAt` 非空：节点与 shortcut 保留、读接口给 `state` 字段、前端对全员隐藏、随既有恢复路径自动还原）/ 失效悬挂（资源物理消失：shortcut 标 `broken`，**仅管理编排态显灰**可清理，清理入审计）。现状删除语义不对称（base/kb 软删无恢复端点；view 是物理删；table 走回收站 order=-1 隐藏视图），§4.4 逐写点列清。**裁决 6：M3 不补 base/kb 软删恢复端点**，全局回收站聚合列 P1 backlog；M3 只保证 soft_dangling 节点随 table/doc 既有恢复路径自动还原。
 7. M3 切成 **S0–S11 共 12 片**：S0 特征 → S1 DDL → S2 回填 → S3 写点接线 → S4 对账脚本 → S5 读 API → S6 写 API（含 manage_menu 第四动作位）→ S7 openapi.yaml 首版冻结 → S8 新外壳骨架（含 M2 通讯录入口收敛）→ S9 一级导航/编排器/二级三分区 → S10 旧链兼容+AC-M3-1 对抗+10 万节点性能 → S11 出口收口。openapi 冻结片（S7）明确排在后端契约稳定（S6）之后、前端大改（S8/S9）之前。
 8. flag：新增 `GX_ENTERPRISE_NAV`（默认 on，test 默认 on），与 M2 的 `GX_ENTERPRISE_ORG` 正交：off 时不挂 v1 nav 路由、前端探测 404 回退旧 AppShell/KbShell（双壳保留一个迭代，PRD :258 回滚承诺）。旧 `/api` 与旧页面零行为变化。
@@ -109,7 +109,7 @@
 
 1. **nav_nodes 权威实体树**：六类系统节点 base/kb/table/view/doc/canvas（外加 M3 可手工建的 group 分组节点，N4）；字段 parentId/ord/name/kind/图标（iconName 走菜单层，实体节点用类型默认图标）/path 物化；`@@unique([workspaceId,resourceType,resourceId])` 保证一资源一权威挂载；workspaceId 恒为 M2 的 `ws_default`。
 2. **menu_items 引用层**：type=container|shortcut；shortcut.nodeId 可重复（同一实体多处挂载）、label 可空（回落实体真名）、可起别名、可拖拽排序/换容器；删除 shortcut/container 不触 nav_nodes 父级与任何策略（AC-M3-1 前半句）。
-3. **存量自动回填 + 0 差异对账**：迁移回填全部活实体节点与默认菜单（每 base 一个同名容器挂全部 table；每 kb 一个同名容器挂全部根级 doc/canvas；doc 树层级由 nav_nodes parentId 镜像承载）；独立可重跑对账脚本（§5）。
+3. **存量初始全收纳回填 + 分级对账**：迁移回填全部活实体节点与默认菜单（每 base 一个同名容器挂全部 table；每 kb 一个同名容器挂全部根级 doc/canvas；doc 树层级由 nav_nodes parentId 镜像承载）——**"零入口全收纳"仅是 S2 存量初始迁移基线的不变量，由迁移 DML + nav-backfill-s2 测试保证；S2 之后新实体默认未收纳**（ADR-0025）；独立可重跑对账脚本（§5，阻断=A/B/C1-C3，C4/C5 warning）。
 4. **实体写点同事务同步 nav_nodes**：§4.4 表 18 个条目，含软删/恢复/物理删/移动/改名/建复制；重复回填安全（upsert by 唯一键，软删行原地复活，不新增行）。
 5. **新工作区外壳（N1）**：顶部 Logo 区 + 全局搜索（⌘K 提权顶栏）+ 左下设置/通用功能区 + 左一级导航 + 可选二级内容栏 + 内容区；M2 的 `/workspace/contacts` 通讯录入口并入左下设置区（M2 S7 临时侧栏入口在 S8 摘除）；**工作区设置中心首版定稿三个真实条目（裁决 7）：通讯录、导航编排、资产（base/kb）入口**——不放假入口、不放"即将上线"占位；安全/备份/embedding/MCP 各项随对应里程碑自然增列。
 6. **一级导航编排（N2）与三类统一分组（N4）**：管理员对 menu_items 增删改排、多处添加、别名；建 group 节点与"移动到其他分组"走 nav_nodes.parentId 变更 + N6 粗粒度影响预览（M3 用旧 members/kb_members 口径计算受影响人数，M4 自动升级三源并集）。
@@ -266,7 +266,7 @@ apps/api/src/
     tree.ts          // 纯函数：path 拼接/前缀/防环/深度/子树重写（与 M2 deptTree 同构，抽公共 util 或复制小函数）
     menu.ts          // 菜单批量 diff 应用、容器嵌套/环校验、iconName 白名单校验、broken 派生
     backfill.ts      // 回填逻辑的可调用实现（迁移 SQL 负责首跑；此文件供对账修复脚本复用，禁止另写一套规则）
-    reconcile.ts     // A/B/C 三类差异计算与 --apply 修复
+    reconcile.ts     // A/B/C 差异计算与 --apply 修复（阻断=A/B/C1-C3；C4/C5 warnings 只报告）
   routes/v1/
     workspace.ts     // GET /workspaces/current/tree、GET/PATCH /workspaces/current/menu
     nodes.ts         // group CRUD、POST /nodes/:id/move-impact、POST /nodes/:id/move
@@ -324,7 +324,7 @@ scripts/nav/
 
 ---
 
-## 5. 回填与对账（0 差异定义）
+## 5. 回填与对账（阻断差异 0 定义）
 
 ### 5.1 迁移拆分（两个只增目录）
 
@@ -345,26 +345,32 @@ scripts/nav/
 6. path/depth 回填：节点插入后无法在纯 SQL 里轻易递归拼 path——用应用层脚本步骤（迁移内用 Node 脚本不行；migrate 只跑 SQL）。两个可选实现：
    - **方案 i（选定）**：path 在回填 SQL 中先插 parentId，path 初值 = 根节点 `'/'||id||'/'`；非根 path 由**对账/修复脚本首跑** `rebuildPathsTx` 全量重算（脚本在部署手册中作为迁移后必跑一步，幂等）。理由：实体深度小（base/table/view 3 层；doc 树 SQL 递归拼 path 方言风险高），path 是可重算派生数据。
    - 方案 ii（否决）：迁移 SQL 用 SQLite CTE 递归——违 M2 已定方言边界。
-   - S2 验收把"deploy 后立即跑 scripts/nav/reconcile-nav.mjs --apply"作为部署步骤固化进 runbook；CI 干跑迁移后也跑该脚本断言 0 差异。
+   - S2 验收把"deploy 后立即跑 scripts/nav/reconcile-nav.mjs --apply"作为部署步骤固化进 runbook；CI 干跑迁移后也跑该脚本，断言**阻断差异 0 且 C4 warning 也为 0（存量初始全收纳基线：迁移 B 已给每个活 table/根级 doc/canvas 恰好一条 shortcut）**。
 7. group 节点：无（存量无此概念）。
 
-### 5.3 默认菜单回填（零入口丢失）
+### 5.3 存量初始全收纳默认菜单（仅 S2 迁移基线）
+
+> 本节回填**只在迁移 B 首跑时对存量活实体执行一次**，产出"零入口全收纳"基线。S2 之后运行期新建的实体默认**未收纳**，不适用本节规则（ADR-0025；§5.4 C4）。
 
 - 每个活 base：一个一级 `container`（label=base.name，iconName='database'，ord 同 base 节点），其下每个活 table 一条 shortcut（nodeId=table 节点，ord 同 table 序）。
 - 每个活 kb：一个一级 `container`（iconName='book'），其下挂**根级** doc（parentId 为 null 的活 doc）与全部活 canvas 的 shortcut（与 KbTree 顶级视觉一致）；子文档不生成 shortcut（二级文档树从 tree 接口的节点子树呈现，不在菜单层复制层级——对 ARCH §3.3-4"复刻文档层级为容器嵌套"的裁剪，§12-10）。
 - 不生成 view 级 shortcut（视图通过表页 TopBar/ViewTabs 到达，不是一级导航对象；菜单加视图留给后续需求，M3 有节点无默认引用）。
 - 幂等键：menu_items 无业务唯一键，回填用"存在性相关子查询"防重（同 parent + type=shortcut + nodeId 已存在则跳过）。
 
-### 5.4 对账脚本：差异分类与 0 差异定义
+### 5.4 对账脚本：差异分类与阻断差异 0 定义
 
-`scripts/nav/reconcile-nav.mjs [--apply]`，只读默认，输出 JSON + 人类摘要，exit code：有差异=1：
+`scripts/nav/reconcile-nav.mjs [--apply]`，只读默认，输出 JSON + 人类摘要。exit code：**存在阻断差异（A/B/C1/C2/C3 任一计数非 0）=1；仅 C4/C5 warnings 时 exit 0**：
 
-- **A 类（实体→节点缺失/不一致）**：每个活实体必须恰好有 1 个活节点，且 kind/parentId/name/ord 符合映射规则。
+- **A 类（实体→节点缺失/不一致，阻断）**：每个活实体必须恰好有 1 个活节点，且 kind/parentId/name/ord 符合映射规则。
   - A1 缺节点；A2 多个活节点（违反唯一意图）；A3 父节点错（table 不挂其 base、doc 父不镜像 parentId 等）；A4 name 与实体不一致（改名漏同步）；A5 ord 不符排序规则；A6 path/depth 与 parentId 链不一致。
-- **B 类（节点→实体悬挂）**：每个活系统节点的 (resourceType, resourceId) 必须能解析到活实体行：B1 实体行不存在（broken）；B2 实体软删而节点活（soft 漏同步）；B3 实体活而节点软删（restore 漏同步）。
-- **C 类（菜单引用）**：C1 shortcut.nodeId 不存在/软删（broken/soft_dangling 计数）；C2 容器环或层级 >2；C3 iconName 不在白名单；C4 **零入口丢失**：每个活 table/根级 doc/canvas 至少被 1 条活 shortcut 引用（view/base/kb 不计此条）；C5 menu ord 同父重复（允许但报告，拖拽并发可产生，修复为稳定排序）。
-- **0 差异**：A/B/C 三组计数全 0（C5 报告为 warning 不计阻断）。`--apply` 用 backfill.ts 同一套 upsert/修复原语（重建 path、补缺失节点、修正 name/ord、清理 broken shortcut 需显式 `--purge-broken` 才删，否则只报告），重跑幂等。
-- 重复回填安全性：迁移 B 重跑（migrate deploy 已应用会跳过；对手动执行 SQL 的场景）与 reconcile --apply 连跑两次，第二次必须 0 变化（输出"no changes"）。
+- **B 类（节点→实体悬挂，阻断）**：每个活系统节点的 (resourceType, resourceId) 必须能解析到活实体行：B1 实体行不存在（broken）；B2 实体软删而节点活（soft 漏同步）；B3 实体活而节点软删（restore 漏同步）。
+- **C 类（菜单引用）分级**：
+  - **C1（阻断）** shortcut.nodeId 指向的节点行物理消失（broken）；shortcut.nodeId 缺失同计 C1。**shortcut 指向软删节点（soft_dangling）不阻断**：按裁决 6 这是正常悬挂态（shortcut 保留、读接口给 `state=soft_dangling`、前端全员隐藏、实体恢复时由 sync restore 原语连同节点原地复活），以 warning（代码 `C1S`）留痕，不计数阻断、不自动清理；**C2（阻断）** 容器环或层级 >2；**C3（阻断）** iconName 不在白名单。
+  - **C4（warning，不阻断）未收纳**：活 table/根级活 doc/活 canvas 无任何活 shortcut 引用（view/base/kb 不计此条）。这是**正常编排态而非缺陷**——该实体经 `nav_nodes` 权威树（tree 接口）与二级"全部"列表可达（S9 三视角），**不阻断 exit 0，`--apply` 不自动补**。
+  - **C5（warning，不阻断）** menu ord 同父重复（拖拽并发可产生，修复为稳定排序）。
+- **阻断差异 0**：A/B/C1/C2/C3 计数全 0；C4/C5 进 `warnings` 段只报告。**"零入口全收纳"不变量仅约束 S2 存量初始迁移基线**（每个活 table/根级 doc/canvas 恰好一条 shortcut），由迁移 B 的回填 DML + `nav-backfill-s2` 测试逐 id 断言保证；**S2 之后新实体默认未收纳，shortcut 的唯一创建路径是 S6 菜单写 API（manage_menu 显式编排），reconcile 永不在运行期自动收纳实体**（ADR-0025）。
+- `--apply` 用 backfill.ts 同一套 upsert/修复原语：重建 path、补缺失/复活节点、修正 name/ord；**不做 C4 默认菜单补齐**（不得在 reconcile.ts/脚本中自动为运行期实体创建容器或 shortcut——存量基线的容器/shortcut 已由迁移 B 落好，缺失本身属 C1/A 类阻断，按对应原语修）；**broken shortcut（C1）需显式 `--purge-broken` 才物理清理**（先删 shortcut 再删节点，FK RESTRICT 顺序，写审计）；soft_dangling shortcut（C1S）`--apply` 只置 deletedAt 与软删节点对齐、**不物理删**（实体恢复时由 sync restore 原地复活）；重跑幂等。
+- 重复回填安全性：迁移 B 重跑（migrate deploy 已应用会跳过；对手动执行 SQL 的场景）与 reconcile --apply 连跑两次，第二次必须 0 变化（输出"no changes"，warnings 集合也不增长）。
 
 ---
 
@@ -374,7 +380,7 @@ scripts/nav/
 |---|---|---|---|---|---|---|
 | S0 | M3 基线留证 + 导航/URL/删除语义 Characterization | 后端+文档 | docs/baseline；domain/nav/__tests__；web lib 测试 | 只增测试 | — | 与 S1 并行 |
 | S1 | 迁移 A：nav_nodes/menu_items/auth_policies DDL + ws 两列 | 纯后端 | 1 迁移；schema.prisma 三 model+workspace 改；rollback SQL | 无（CI 干跑 14→15） | S0 | 先行阻塞 |
-| S2 | 迁移 B：实体节点+默认菜单幂等回填 + path 重算脚本首跑 | 纯后端 | 1 迁移；domain/nav/{tree,backfill}.ts；scripts/nav/reconcile-nav.mjs（只读版先行） | 无 | S1 | S1 后立即 |
+| S2 | 迁移 B：实体节点+存量全收纳菜单幂等回填 + path 重算脚本首跑 | 纯后端 | 1 迁移；domain/nav/{tree,backfill}.ts；scripts/nav/reconcile-nav.mjs（只读版先行） | 无 | S1 | S1 后立即 |
 | S3 | nav 同步原语 + §4.4 全部写点事务接线 | 纯后端 | domain/nav/sync.ts；bases/tables/views/kb/records 五路由；hooks 失效 | **中敏**（动 5 个业务路由的写事务形态），S0 对拍保护 | S2 | 与 S5 准备并行 |
 | S4 | 对账脚本 --apply/purge + 幂等/重复回填 + 异常库演练 | 纯后端 | scripts/nav；reconcile.ts；测试夹具 | 只增 | S2、S3 | S3 后 |
 | S5 | v1 读 API：tree/menu GET + DTO/shared-types + flag 挂载 | 纯后端 | routes/v1/workspace.ts；config.ts；app 装配 | 无（新路由，flag off 404） | M2-S2（v1 骨架）、S2 | S2 后即可（可与 S3 并行） |
@@ -429,7 +435,7 @@ bash scripts/ci-quality.sh
 
 ---
 
-### S2 — 迁移 B：回填实体节点与默认菜单（幂等）
+### S2 — 迁移 B：实体节点与存量初始全收纳菜单回填（幂等）
 
 **新增**
 - `migrations/20260916093000_enterprise_nav_backfill/migration.sql`：§5.2/§5.3 全部 INSERT...SELECT，带 `WHERE NOT EXISTS` 与活实体过滤；根节点 path 初值；非根 path 留脚本补。
@@ -440,9 +446,10 @@ bash scripts/ci-quality.sh
 **独立验收**
 ```bash
 # 旧库快照升级：节点数 = 活(base+kb+table+view(order>=0)+doc+canvas)；菜单容器数 = 活 base+活 kb
-node scripts/nav/reconcile-nav.mjs --apply    # 首次：path 补齐
-node scripts/nav/reconcile-nav.mjs            # 第二次：A/B/C 全 0、no changes
+node scripts/nav/reconcile-nav.mjs --apply    # 首次：path 补齐；不补任何 shortcut（存量基线已由迁移 B 全收纳）
+node scripts/nav/reconcile-nav.mjs            # 第二次：阻断差异（A/B/C1/C2/C3）全 0；C4/C5 warnings 也为 0（S2 存量全收纳基线）；no changes
 # 重跑迁移 SQL（手动）：行数零增长
+# 存量基线保证（nav-backfill-s2）：C4 条目集逐 id 等于空集；迁移后每个活 table/根级活 doc/活 canvas 恰好一条活 shortcut
 ```
 **回滚**：新表数据清空（表是 M3 新增，TRUNCATE 无副作用）；快照恢复。
 
@@ -455,17 +462,22 @@ node scripts/nav/reconcile-nav.mjs            # 第二次：A/B/C 全 0、no cha
 - 五路由按 §4.4 接线；#1/#3/#8/#11-13 涉及把裸多写**收紧进 withWriteTx/withWriteBatch**——这是本片刻唯一对旧代码的结构性触碰，每处单独 commit 语义清晰，S0 characterization 对拍。
 - view 物理删（#10）与 table purge（#15）：shortcut 存在性检查，有引用抛 NAV_NODE_IN_USE 409（C-12：先清引用）。
 - web：hooks.ts / kb-hooks.ts 资源 mutation onSuccess 追加 nav query 失效（仅在 flag on 时有消费者，失效空 query 无害）。
-**陷阱**：table 软删后视图 order=-1：节点树状态以 table 节点软删为准（视图子节点连带软删），恢复时 views order 重排后节点连带 restore；doc move 必须重算子树 path（复用 tree.ts）；复制表不自动加菜单。
+**陷阱**：table 软删后视图 order=-1：节点树状态以 table 节点软删为准（视图子节点连带软删），恢复时 views order 重排后节点连带 restore；doc move 必须重算子树 path（复用 tree.ts）；**复制表不自动加菜单（ADR-0025：运行期实体一律默认未收纳，C4 只报告，禁止在 sync.ts/reconcile.ts 补 shortcut）**。
 **独立验收（裁决 9 硬性配套：每条写点双向回滚证明）**
 ```bash
 pnpm -w test
-# 正向：建/改名/删/恢复/移动实体后 reconcile 立刻 0 差异（每个写点一条真库测试）
+# 正向：建/改名/删/恢复/移动实体后 reconcile 立刻 0 阻断差异（每个写点一条真库测试）
+# 未收纳口径（方案 A/ADR-0025，必须逐写点断言，不允许抽样）：
+#   操作中新建的每个活 table/根级活 doc/活 canvas（如复制表、建表、建文档、建画布）都出现在 C4 warnings 中，
+#   C4 条目数恰好等于本次操作预期未收纳实体数，ref（节点 id）集合与预期逐 id 相等；
+#   其余 C4 条目为 0——即 C4 集合 == 预期未收纳集合，不多不少。
 # 回滚证明（18 个写点逐条，可用夹具注入失败，不允许抽样）：
 #   ① 注入 nav 写失败 → 事务整体回滚，实体行不存在（建）/实体字段未变（改名/移动）；
 #   ② 注入实体写失败 → nav 行不存在/无半截子树节点；
-#   ③ 代码审查 grep 证明 domain/nav/sync.ts 与五路由接线处无 try/catch 吞错降级 best-effort。
+#   ③ 代码审查 grep 证明 domain/nav/sync.ts 与五路由接线处无 try/catch 吞错降级 best-effort，
+#      且 grep 证明接线处与 reconcile.ts 均无 menuItem 写（运行期不自动收纳，菜单只有 S2 迁移与 S6 API 两源）。
 # 视图物理删遇 shortcut → 409 NAV_NODE_IN_USE；清 shortcut 后删除成功
-node scripts/nav/reconcile-nav.mjs   # 全套操作随机序列后 0 差异
+node scripts/nav/reconcile-nav.mjs   # 全套操作随机序列后：0 阻断差异；C4 计数恰好等于预期未收纳实体数、条目逐 id 相等
 ```
 **回滚**：每写点接线独立可 revert；表数据保留；紧急时 GX_ENTERPRISE_NAV=off 只摘新路由（不摘同步——同步无开关，因其与实体强一致且失败即回滚；若接线引发故障回退代码发布 + 快照恢复）。
 
@@ -473,10 +485,10 @@ node scripts/nav/reconcile-nav.mjs   # 全套操作随机序列后 0 差异
 
 ### S4 — 对账脚本完工与异常库演练
 
-- reconcile 增 B1 broken 清理（`--purge-broken` 连带删 shortcut，写审计 JSONL 复用 audit emit 需要脚本侧最小写入——脚本直接 append 同格式行并注明 actor='reconcile-script'）、C 类修复、C5 ord 稳定化。
-- 造 3 个异常夹具：①手工删实体行模拟 broken；②把节点 name 改错；③复制 menu shortcut 制造多处引用后软删资源——分别验证报告/修复/幂等。
-- 10 万节点前的小规模演演练（1k/1w）：reconcile 全表扫耗时留证（S10 扩到 10 万）。
-**验收**：三夹具报告正确、--apply 后 0 差异、再跑 no changes。
+- reconcile 增 B1 broken 清理（`--purge-broken` 连带物理删 shortcut 与节点，写审计 JSONL 复用 audit emit 需要脚本侧最小写入——脚本直接 append 同格式行并注明 actor='reconcile-script'）、C2/C3 阻断修复、C5 ord 稳定化；**C4 未收纳不补（--apply 永不创建 shortcut），C1S soft_dangling 不清理（保留待恢复自动还原）**。
+- 造 3 个异常夹具：①手工删实体行模拟 broken（报 C1/B1 阻断，--purge-broken 清）；②把节点 name 改错（A4 阻断，--apply 修）；③复制 menu shortcut 制造多处引用后软删资源（引用变 C1S warning，不阻断；实体恢复后 shortcut 与节点原地复活、warning 消失）——分别验证报告/修复/幂等。
+- 10 万节点前的小规模演练（1k/1w）：reconcile 全表扫耗时留证（S10 扩到 10 万）。
+**验收**：三夹具按新分级报告正确（阻断进 A/B/C、预期项进 warnings）、--apply 后 0 阻断差异、再跑 no changes（warnings 集合稳定不增长）；C4 在无运行期新实体的夹具上为 0，在刻意未收纳夹具上条目集与预期逐 id 相等。
 **回滚**：纯脚本。
 
 ---
@@ -517,7 +529,7 @@ GX_ENTERPRISE_ORG=off GX_ENTERPRISE_NAV=off pnpm --filter @gx/api test  # v1 全
 - `domain/nav/menu.ts`：operations diff 单事务应用（insert/update/delete/reorder）、容器环/2 层校验、iconName 白名单、shortcut nodeId 存在性；bump menuVersion。
 - `routes/v1/nodes.ts`：group 三端点 + move-impact + move（§4.5）。影响预览 M3 口径：沿移动子树收集受影响实体（table/doc/canvas），按现有 members/kb_members 求**去重成员数**（owner/creator 豁免口径与 M4 对齐预留），返回 `{affectedUserCount, subtreeItemCount, shortcutCount, willBreakInheritanceHint:false}`（hint 恒 false，M4 才有继承语义——但 UI 文案按 N6 展示人数）。
 - move 端点 confirmed 闸门 + 审计事件（nav_group_created/deleted、nav_node_moved、menu_changed）。
-- 测试：同节点三处快捷项、别名、拖拽换容器、环拒绝、超层拒绝、坏图标 400、move 未确认 409、确认后 path 子树重写、reconcile 仍 0 差异；**manage_menu 白名单穷举测试 + 迁移幂等重跑测试**（连跑两次 UPDATE，role_owner permissions 恒为四动作且 updatedAt 语义不被无意义改写——SQLite 无 updatedAt 触发器时 UPDATE 同值幂等可接受，断言值而非时间戳）。
+- 测试：同节点三处快捷项、别名、拖拽换容器、环拒绝、超层拒绝、坏图标 400、move 未确认 409、确认后 path 子树重写、reconcile 仍 0 阻断差异（菜单编排只动 menu_items，不制造 A/B 类节点差异；收纳/取消收纳改变的是 C4 warnings 集合，不影响 exit code）；**manage_menu 白名单穷举测试 + 迁移幂等重跑测试**（连跑两次 UPDATE，role_owner permissions 恒为四动作且 updatedAt 语义不被无意义改写——SQLite 无 updatedAt 触发器时 UPDATE 同值幂等可接受，断言值而非时间戳）。
 **验收**：api 全绿；manage_menu 非授权写 403；owner 外系统角色 403；M2 三动作既有端点不受第四枚影响（M2 org 路由回归）。
 **回滚**：新模块摘除；owner 动作位多一枚无副作用（M2 不消费该位）；数据层回退用 down SQL 把 role_owner permissions 改回三动作（仅供回滚演练，主路径=发布前快照）。
 
@@ -572,7 +584,7 @@ pnpm --filter @gx/web typecheck && pnpm --filter @gx/web build && pnpm -w test
 - **AC-M3-1 自动化对抗**（`routes/v1/__tests__/ac-m3-1.nav.test.ts` + 一组 web 测试）：
   1. 同一 table 经菜单加到 3 个容器；各容器拖拽排序/删除快捷项后，nav_nodes.parentId 与 base 归属不变、GET table 200、权限矩阵不变；
   2. 仅"移动到其他分组"改 parentId，必须弹影响预览（未确认 409），确认后 path 子树重写正确；
-  3. 软删表→快捷项隐藏、reconcile 0 差异、回收站恢复→引用自动还原；视图物理删遇引用 409；
+  3. 软删表→快捷项隐藏（shortcut 转 C1S warning、不阻断）、回收站恢复→引用自动还原（warning 消失）、阻断差异恒 0；视图物理删遇引用 409；
   4. doc 移动 parentId 后 nav 子树与 KbTree 双视图一致；
   5. 画布 R10：新壳打开画布→矩形/箭头/连线手势/右键菜单/参考卡跳转全通过（SPEC :144-146）；
   6. flag off 全链路回退旧壳；
@@ -587,22 +599,23 @@ pnpm --filter @gx/web typecheck && pnpm --filter @gx/web build && pnpm -w test
 
 ### S11 — 出口收口
 
-- ADR（docs/adr/）候选见 §8；40 RC + S0 characterization 复跑逐值绿。
+- ADR（docs/adr/）：ADR-0025 已归档（方案 A，2026-09-14），其余候选见 §8；40 RC + S0 characterization 复跑逐值绿。
 - openapi.yaml 与 shared-types/真实响应对拍无 diff；`docs/api/` 下补一份"枚举/错误码表"。
 - flag 生命周期文档：GX_ENTERPRISE_NAV 稳定一个迭代后随 M4 或下一期删旧壳与 off 分支（PRD :258 承诺保留一个迭代）；菜单不剪枝的 M4 翻转点写入 M4 输入清单。
-- runbook 增章："导航树差异排查与 reconcile 执行"、"菜单丢失/实体找不到（0 入口丢失校验）"、"新壳回退旧壳（flag）"、"move 误操作恢复（快照指引）"。
-- baseline 收口：测试计数、迁移数 14→16、10 万节点性能、升级演练（v0.1.0 风格库 → deploy → reconcile → 菜单零丢失抽样）。
+- runbook 增章："导航树差异排查与 reconcile 执行（阻断 A/B/C1-C3 vs warning C4 未收纳/C5/C1S 的处置口径）"、"实体在菜单里找不到（未收纳是正常编排态：经二级'全部'列表或 S6 编排收纳）"、"新壳回退旧壳（flag）"、"move 误操作恢复（快照指引）"。
+- baseline 收口：测试计数、迁移数 14→16、10 万节点性能、升级演练（v0.1.0 风格库 → deploy → reconcile → 存量基线零阻断且 C4=0 抽样：每个活 table/根级活 doc/活 canvas 恰好一条 shortcut）。
 
 ---
 
 ## 8. 关键设计决策（ADR 候选）
 
-- **ADR-0025 权威节点层 vs 菜单引用层**：记录两表拆分、shortcut 可重复/nodeId 非唯一、唯一父级决定 M4 继承边界；AC-M3-1 两类拖拽的分流（菜单拖拽零副作用 vs 权威移动走预览）；menu→nav RESTRICT FK 的取舍（对 ARCH Cascade 的覆盖理由）。
-- **ADR-0026 nav_nodes 物化 path（与 M2 部门树同构）**：parentId 真相 + path 派生、32 护栏、否决闭包表/CTE、doc 子树移动重写、path 由对账脚本可全量重建（派生数据定位）。
-- **ADR-0027 内容 URL 不可变 + 外壳别名策略**：内部链接已落库（正文/画布/分享），资源身份即 URL；N5 以"不改名 + 外壳级 SPA 别名 + 双壳 flag 回退"实现，而非 UIUX §5 的 /w/node 新路径；列出被否决方案（全量新 URL + 301：服务端 SPA 无 301 落点、存量正文链接全部失效或需双解析）。
-- **ADR-0028 删除悬挂三态（C-12）**：alive/soft_dangling/broken；软删保留引用（恢复自动还原）、物理删 RESTRICT 先清引用、broken 管理员显灰可清理并入审计；现状删除语义不对称清单（view 物理删、base/kb 无恢复、table order=-1）作为附件。
-- **ADR-0029 M3 不做权限剪枝 + openapi 写实信封**：与 M2 同纪律（空跑一层）；菜单全员可见、数据守卫照旧；M4 翻转计划（裁决 1/5 已定稿，本文措辞按裁决）；冻结契约描述真实 `{error,code}` 信封，不借冻结切信封。
-- **ADR-0030（候选）实体范围：六类节点，无 field 节点**：view 建节点、field 不建（fieldMask 承载字段权限）；kb 建节点（覆盖 ARCH "kb 退化属性"草案）；M4 若证伪的只增回填路径。
+- **ADR-0025（已 Accepted，方案 A 裁决 2026-09-12、ADR 归档 2026-09-14，文件 `docs/adr/0025-runtime-entities-uncollected-by-default.md`）运行期实体默认未收纳**：shortcut 仅 S2 存量迁移基线 + S6 菜单写 API 两源；可达性不依赖菜单（nav_nodes 权威树 + 二级"全部"列表）；reconcile C4/C5 为 warning 不阻断、--apply 不自动收纳；被否决方案 B（运行期同事务自动写 shortcut）的噪音菜单与三视角冲突记录在案。
+- **ADR-0026 权威节点层 vs 菜单引用层**：记录两表拆分、shortcut 可重复/nodeId 非唯一、唯一父级决定 M4 继承边界；AC-M3-1 两类拖拽的分流（菜单拖拽零副作用 vs 权威移动走预览）；menu→nav RESTRICT FK 的取舍（对 ARCH Cascade 的覆盖理由）。
+- **ADR-0027 nav_nodes 物化 path（与 M2 部门树同构）**：parentId 真相 + path 派生、32 护栏、否决闭包表/CTE、doc 子树移动重写、path 由对账脚本可全量重建（派生数据定位）。
+- **ADR-0028 内容 URL 不可变 + 外壳别名策略**：内部链接已落库（正文/画布/分享），资源身份即 URL；N5 以"不改名 + 外壳级 SPA 别名 + 双壳 flag 回退"实现，而非 UIUX §5 的 /w/node 新路径；列出被否决方案（全量新 URL + 301：服务端 SPA 无 301 落点、存量正文链接全部失效或需双解析）。
+- **ADR-0029 删除悬挂三态（C-12）**：alive/soft_dangling/broken；软删保留引用（恢复自动还原；对账中 soft_dangling shortcut 为非阻断 warning `C1S`，见 §5.4/ADR-0025）、物理删 RESTRICT 先清引用、broken 管理员显灰可清理并入审计；现状删除语义不对称清单（view 物理删、base/kb 无恢复、table order=-1）作为附件。
+- **ADR-0030 M3 不做权限剪枝 + openapi 写实信封**：与 M2 同纪律（空跑一层）；菜单全员可见、数据守卫照旧；M4 翻转计划（裁决 1/5 已定稿，本文措辞按裁决）；冻结契约描述真实 `{error,code}` 信封，不借冻结切信封。
+- **ADR-0031（候选）实体范围：六类节点，无 field 节点**：view 建节点、field 不建（fieldMask 承载字段权限）；kb 建节点（覆盖 ARCH "kb 退化属性"草案）；M4 若证伪的只增回填路径。
 
 ---
 
@@ -611,7 +624,7 @@ pnpm --filter @gx/web typecheck && pnpm --filter @gx/web build && pnpm -w test
 | 触碰源 | 切片 | 保护 |
 |---|---|---|
 | 三新表 + ws 两列迁移 | S1/S2 | 只增；CI 临时库干跑 14→16；现有查询不读新表 |
-| 5 个业务路由写事务接线 | S3 | **中敏**：S0 characterization 对拍；每写点独立测试 reconcile=0；事务形态收紧（裸多写→withWrite*）本身修一致性隐患，行为等价 |
+| 5 个业务路由写事务接线 | S3 | **中敏**：S0 characterization 对拍；每写点独立测试 reconcile 阻断差异=0 且 C4 集恰为预期未收纳集；事务形态收紧（裸多写→withWrite*）本身修一致性隐患，行为等价 |
 | roles owner 动作 +manage_menu | S6 | 只增一枚动作位；M2 不消费即无效果；自定义角色白名单只增 |
 | /api/v1 新路由 + 新 flag | S5/S6 | flag off 不挂载；旧 /api 零 diff；限流选择器按 /api/ 前缀自动覆盖 |
 | 审计事件名只增 | S6 | 联合类型只增；现有 6 事件不变 |
@@ -639,10 +652,10 @@ bash scripts/ci-quality.sh
 
 | # | 议题 | 裁决结论 | 回填位置 |
 |---|---|---|---|
-| 1 | 菜单是否按旧角色粗剪枝 | **批准零剪枝**：M3 tree/menu 对所有登录用户返回全量，软删项由前端按 state 隐藏；服务端剪枝在 M4 做。不增加粗剪枝切片 | §0-1、§2.1-12、ADR-0029 |
-| 2 | 内容深链是否改名/引 /w/node | **确认永不改名、不引入 /w/node**：`/base/:id/table/:id/view/:id`、`/kb/:id/doc|canvas/:id` 永久有效；N5 用 SPA 别名，不做服务端 301。ADR-0027 候选照写 | §0-4、§3-1、ADR-0027 |
-| 3 | 实体节点类型 | **批准**：view 建节点、field 不建（字段可见性归 M4 fieldMask）、kb 建节点。六类 base/kb/table/view/doc/canvas + group 定稿 | §0-2、§4.1、ADR-0030 |
-| 4 | 默认菜单是否嵌套复刻文档树 | **批准不复刻**：文档层级走 nav_nodes 子树，默认菜单只挂 base/kb 容器 + 零入口丢失所需一级项；容器嵌套 2 层上限保留 | §0-2、§5.3 |
+| 1 | 菜单是否按旧角色粗剪枝 | **批准零剪枝**：M3 tree/menu 对所有登录用户返回全量，软删项由前端按 state 隐藏；服务端剪枝在 M4 做。不增加粗剪枝切片 | §0-1、§2.1-12、ADR-0030 |
+| 2 | 内容深链是否改名/引 /w/node | **确认永不改名、不引入 /w/node**：`/base/:id/table/:id/view/:id`、`/kb/:id/doc|canvas/:id` 永久有效；N5 用 SPA 别名，不做服务端 301。ADR-0028 候选照写 | §0-4、§3-1、ADR-0028 |
+| 3 | 实体节点类型 | **批准**：view 建节点、field 不建（字段可见性归 M4 fieldMask）、kb 建节点。六类 base/kb/table/view/doc/canvas + group 定稿 | §0-2、§4.1、ADR-0031 |
+| 4 | 默认菜单是否嵌套复刻文档树 | **批准不复刻**：文档层级走 nav_nodes 子树，默认菜单只挂 base/kb 容器 + 存量初始全收纳所需一级项（全收纳仅 S2 迁移基线，运行期实体默认未收纳，ADR-0025）；容器嵌套 2 层上限保留 | §0-2、§5.3、ADR-0025 |
 | 5 | openapi 信封与 CI 校验 | **按真实信封 `{error,code}` 写实**（与 M2 裁决 2 一致，全企业版 v1 在 M3 出口冻结成现网风格，不切 `{code,data,message}`）；**不引 swagger/redoc CI 校验依赖**，手写请求/响应形状对拍测试 | §0-9、S7 |
 | 6 | base/kb 软删恢复端点 | **M3 不补，批准**；全局回收站聚合列 P1 backlog。M3 只保证 soft_dangling 节点随既有恢复路径（table/doc 有）自动还原 | §0-6、§2.2 |
 | 7 | 工作区设置中心首版条目 | **仅三个真实条目**：通讯录、导航编排、资产（base/kb）入口；不放假入口和"即将上线"占位 | §2.1-5、S8 |
@@ -665,10 +678,10 @@ bash scripts/ci-quality.sh
 ## 11. M3 出口 Definition of Done（摘）
 
 1. AC-M3-1 自动化全绿：同一资源多处菜单引用下，快捷项拖拽/删除不改权威父级与权限结果；仅"移动到其他分组"改 nav_nodes.parentId 且必经影响预览+确认；移动后子树 path/权限边界（M3 口径=旧成员可见性）正确。
-2. 回填对账：v0.1.0 风格旧库升级后 A/B/C 三类差异 0；默认菜单零入口丢失（每个活表/根级文档/画布可达）；迁移与 reconcile 重跑幂等；10 万节点 menu 首屏 <1s 有留证、关键查询无全表 SCAN。
+2. 回填对账：v0.1.0 风格旧库升级后 A/B/C1-C3 阻断差异 0；**存量初始全收纳基线**：每个活表/根级活文档/画布恰好一条活 shortcut（C4 warning 集与未收纳集合一致——S2 基线为 0，运行期新建实体后恰为新实体集）；迁移与 reconcile 重跑幂等；10 万节点 menu 首屏 <1s 有留证、关键查询无全表 SCAN。
 3. N5：§1.3 全部旧链接在新壳可达，操作步数 ≤ 旧版 +1；正文内链/画布引用/匿名分享抽样 0 损坏；flag off 一键回退旧两壳；子路径部署验证通过；画布 R10 回归全过。
 4. 三新表只增迁移在干净库/旧库快照均可 deploy；auth_policies 全里程碑零写入（有断言）；旧 RBAC 矩阵与 40 RC 逐值不变；641+N/33+M/typecheck/lint/ci-quality 全绿。
-5. openapi.yaml 冻结并与真实响应/TS 类型对拍无 diff；ADR-0025~0030 归档；runbook/baseline 齐备；manage_menu 第四动作位 owner 默认持有、非授权 403。
+5. openapi.yaml 冻结并与真实响应/TS 类型对拍无 diff；ADR-0025~0031 归档（0025 已于 2026-09-14 Accepted）；runbook/baseline 齐备；manage_menu 第四动作位 owner 默认持有、非授权 403。
 6. 边界用例全自动：菜单环/超层 400、坏图标 400、shortcut 指向缺失 400/标 broken、视图物理删遇引用 409、移动未确认 409、删组未选 strategy 409、doc 移入自身子树 400。
 
 ---
@@ -681,13 +694,13 @@ bash scripts/ci-quality.sh
 4. **v1 挂载点行号**：M2 计划说"app.ts:136 后条件挂载"——现 app.ts:136 正是 `mount.route("/api", api)`，:140-142 是 SPA 兜底；v1 必须在 :136 之后、SPA 之前插入，且 flag 合并挂载条件（S5 已写明），basePath 双副本（:162-164）自动覆盖。
 5. **views 无软删列**（schema.prisma:164-178）：删除是物理删（views.ts:186 `prisma.view.delete`），table 软删时视图不打 deletedAt 而置 `order=-1`（tables.ts:193），table 恢复时 order 重排（records.ts:1086-1090）。nav view 节点生命周期必须照此三态接线，ARCH §3.1-2"删表/删字段软删→节点 isSystem 隐藏"的笼统描述对 view 不成立。
 6. **base/kb 软删没有恢复端点**（bases.ts:212-218、kb.ts:199-211；grep 全路由无 base/kb restore）；table/field/record 的恢复在 records.ts:1027 回收站，doc 恢复在 kb.ts:607。nav"软删自动还原"只对 table/doc 成立，base/kb 只能靠快照。**裁决 6 已定案：M3 不补，列 P1 backlog。**
-7. **ARCH §3.1 树层次含 field 节点、§3.3-3 回填 field**，SPEC §6 与派工的实体枚举是"base/table/view/kb/doc 等"且字段权限走 fieldMask——本计划裁掉 field 节点（ADR-0030），避免节点数 ~10x 膨胀且 M4 不消费。
+7. **ARCH §3.1 树层次含 field 节点、§3.3-3 回填 field**，SPEC §6 与派工的实体枚举是"base/table/view/kb/doc 等"且字段权限走 fieldMask——本计划裁掉 field 节点（ADR-0031），避免节点数 ~10x 膨胀且 M4 不消费。
 8. **ARCH §3.1-4/§3.3 把 kb 退化为"kbId 属性/系统分组"，不建独立节点**；派工明确 kb 是实体类型之一，且 UIUX 一级导航收纳知识库需要可点容器客体。本计划建 kb 节点（doc/canvas 的权威父），覆盖 ARCH 该点。
 9. **文档排序口径**：侧栏表列表按 `createdAt asc`（tables.ts:50），KbTree 视觉序实际是 `updatedAt desc`（kb.ts:305 + 前端按返回序组树，KbTree.tsx:20-33）。回填 ord 已分别对齐，ARCH/UIUX 未给此细节。
 10. **ARCH §3.3-4 要求菜单回填"复刻文档层级为容器嵌套"**：本计划改为菜单只挂根级、层级由 nav_nodes 子树在二级呈现（每文档一个容器行既无意义又放大 menu_items 行数，且容器不承载授权）。**裁决 4 已批准此裁剪。**
 11. **ARCH §3.4 的级联用 onDelete Cascade 清 shortcut**：本计划改 RESTRICT + 显式清理事务（§4.1-2），以强制 C-12 可解释性；软删不走数据库级联（要保留引用待恢复）。
 12. **菜单剪枝口径冲突**：ARCH §3.1-5/§3.4 读接口按引擎 can() 剪枝、空容器隐藏；M3 时引擎不存在（M4 才有），PRD M3 行说"先按旧角色跑"。**裁决 1 已定案：M3 零剪枝，登录即全量，M4 做服务端剪枝**（翻转点已登记 §10 移交 M4 输入）。
-13. **UIUX §5 路由建议**（/w/node、/contacts、/settings/workspace）与 M2 已定的 `/workspace/contacts` 不一致；本计划统一为 `/workspace/*` 工作区级前缀，资产内容路由保持旧形（ADR-0027）。
+13. **UIUX §5 路由建议**（/w/node、/contacts、/settings/workspace）与 M2 已定的 `/workspace/contacts` 不一致；本计划统一为 `/workspace/*` 工作区级前缀，资产内容路由保持旧形（ADR-0028）。
 14. **现状无工作区级设置/回收站聚合**：左下设置是资产级（Sidebar.tsx:251、KbSidebar.tsx:106），两个 TrashPage 分属 base/kb。N1 设置收敛在 M3 只做"入口收敛 + 资产设置可达"，不搬迁资产设置页（UIUX :220-234 同口径）。
 15. **M2 owner 系统角色只播种三枚动作**（M2 迁移 `20260915090000_enterprise_org_ddl/migration.sql:122` 固定 id `role_owner` + 固定 JSON 串；M2-S2 在途 `middleware/authActive.ts:11,:34` 的 `OrgAction` 联合与 `allowed` 白名单当前均为三枚，M2-S5 规划的 `domain/org/roles.ts` 与 shared-types OrgAction 常量尚不存在）：manage_menu 是 M3 新增的第四枚，S6 用只增 UPDATE 迁移幂等补到 owner，且**必须同改在途 M2 文件的动作枚举/白名单**（跨里程碑改动点清单见 S6，实施时逐点 grep 不漏）。
 16. **测试基线在编写期间移动一次，已复核**：32f7bea（2026-09-14）= 598/3（47 文件）、web 33、迁移 12；f8ddde3（M2-S0/S1 后，2026-09-16 复跑）= **641/3（51 文件）、web 33、shared-types 56（4 文件）、迁移 14**。本文计数以新基线为准，旧数字仅在 baseline 双记录中保留。
@@ -702,13 +715,13 @@ bash scripts/ci-quality.sh
 |---|---|---|---|---|
 | S0 | 基线+特征测试 | docs/baseline/2026-09-16-m3-baseline.md；domain/nav/__tests__ | 641/33/56 全绿，锁实体生命周期/成员列表/RBAC/URL 清单 | 否 |
 | S1 | 三表 DDL+ws 两列 | 迁移 A；schema.prisma；down SQL | 干净库 deploy 15 迁移成功，641 基线全绿 | 否 |
-| S2 | 实体/菜单回填 | 迁移 B；domain/nav/{tree,backfill}.ts；scripts/nav/reconcile-nav.mjs | 旧库升级节点/菜单数与实体精确一致，重跑 0 变化 | 否 |
-| S3 | 写点同步接线 | domain/nav/sync.ts；bases/tables/views/kb/records 五路由 | §4.4 全部写点操作后 reconcile 0 差异，旧 characterization 逐值绿 | 否 |
-| S4 | 对账完工+异常库演练 | reconcile.ts；脚本 | broken/改名/多引用三夹具可报告可修复且幂等 | 否 |
+| S2 | 实体节点+存量全收纳菜单回填 | 迁移 B；domain/nav/{tree,backfill}.ts；scripts/nav/reconcile-nav.mjs | 旧库升级节点/菜单数与实体精确一致；存量基线阻断与 C4 双 0；重跑 0 变化 | 否 |
+| S3 | 写点同步接线 | domain/nav/sync.ts；bases/tables/views/kb/records 五路由 | §4.4 全部写点操作后 reconcile 0 阻断差异，C4 集恰为预期未收纳实体集，旧 characterization 逐值绿 | 否 |
+| S4 | 对账完工+异常库演练 | reconcile.ts；脚本 | broken/改名/软删悬挂三夹具按新分级（阻断 vs C1S/C4 warning）可报告可修复且幂等 | 否 |
 | S5 | tree/menu 读 API+flag | routes/v1/workspace.ts；config.ts；shared-types | 登录可读树/菜单，flag off 404，旧 /api 零影响 | 否 |
 | S6 | 菜单写/group/move+manage_menu | routes/v1/nodes.ts；domain/nav/menu.ts；动作位迁移 | 多处引用/别名/拖拽/防环/409 预览全正确，非授权 403 | 否 |
 | S7 | openapi 首版冻结 | docs/api/openapi.yaml；契约对拍测试 | M2+M3 端点全覆盖且与真实响应形状一致 | 否 |
 | S8 | 新外壳骨架+设置收敛+通讯录并入 | features/workspace/*；App.tsx；featureFlags | flag on 新壳达全部旧 URL；off 自动回退旧两壳 | **是** |
 | S9 | 一级导航/编排器/二级三分区/N6 模态 | PrimaryNav/NavComposer/SecondaryNav/MoveImpactModal | N2/N4/N6 + N3 二级 P0（无收藏无最近）端到端可用，AC 预演通过 | **是** |
 | S10 | 兼容/对抗/画布/10 万性能 | v1 __tests__；web 测试；造数脚本；RC | AC-M3-1 八条全绿、旧链 0 损坏、menu 首屏 <1s、无 SCAN | 混合 |
-| S11 | 收口 | ADR-0025~0030；40RC；runbook；baseline | RC/characterization 逐值绿、升级演练 0 丢失、文档齐备 | 否 |
+| S11 | 收口 | ADR-0025~0031；40RC；runbook；baseline | RC/characterization 逐值绿、升级演练存量基线 C4=0、文档齐备 | 否 |

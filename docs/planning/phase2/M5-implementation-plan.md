@@ -595,15 +595,15 @@ DELETE /api/v1/admin/embedding/api-key → role_owner        （B-2 清除端点
 
 ## 10. 关键设计决策（ADR 候选）
 
-- **ADR-0041 独立 search.db 分库连接（非 ATTACH、非主库内虚表）**：spike §4 实测；Prisma 无法 loadExtension、备份单文件边界、WAL/锁解耦、可 rm 重建、LanceDB 替换面。
-- **ADR-0042 同进程 outbox + 可重建派生库（主写零等待）**：change_events 同事务、worker 异步、退避 dead、reindex 扫表不依赖事件史；否决同步索引/双写搜索库。
-- **ADR-0043 sqlite-vec 暴力 KNN 与降级一等公民**：无 ANN、BigInt/LIMIT/BLOB 三铁律、glibc/vec0.so 文件名约束、加载失败即 FTS+LIKE；50 万/500ms 阈值升级 LanceDB。
-- **ADR-0044 embedding 收敛为 off/cloud 两态（取消本地模型）**：按 spike §6.2 最新裁决，推翻 ARCH §7.2 local（Xenova）；默认 off、不出域、无权重、无 Worker 推理；cloud 四与门与降级。
-- **ADR-0045 先收敛后召回（temp_scope 物化 + RRF）**：AC-M5-2 的工程定义；否决先召回后过滤；二次 decide 纵深；scope 截断诚实标记。
-- **ADR-0046 FTS5 trigram + 短词 LIKE 的中文策略**：实测 3 码元门槛；无词库；BM25+标题 boost+RRF；不引分词器。
-- **ADR-0047 授权信息不入索引——权限变更零索引失效**：per-user 可见性完全由查询时 M4 scope 承担；版本号仅缓存失效；字段 mask 在摘要层最小泄漏（接 M4 A-4）。
-- **ADR-0048 reindex 双库原子切换与派生库损坏自愈**：临时库 rebuild + rename；损坏隔离 + 自动重建 + 主库 LIKE 应急。
-- **ADR-0049 embedding 凭据存储（env 只读种子 + AES-256-GCM 加密落库，B-2 定稿）**：JWT_SECRET 派生密钥（SHA-256 双域分隔）、随机 IV、零新加密依赖；只回显 configured/maskedLast4；轮换/清除端点；JWT_SECRET 变更解密失败优雅回落未配置；PATCH 两步 reindex（B-6）与 role_owner 限定（B-4）一并记录。
+- **ADR-0042 独立 search.db 分库连接（非 ATTACH、非主库内虚表）**：spike §4 实测；Prisma 无法 loadExtension、备份单文件边界、WAL/锁解耦、可 rm 重建、LanceDB 替换面。
+- **ADR-0043 同进程 outbox + 可重建派生库（主写零等待）**：change_events 同事务、worker 异步、退避 dead、reindex 扫表不依赖事件史；否决同步索引/双写搜索库。
+- **ADR-0044 sqlite-vec 暴力 KNN 与降级一等公民**：无 ANN、BigInt/LIMIT/BLOB 三铁律、glibc/vec0.so 文件名约束、加载失败即 FTS+LIKE；50 万/500ms 阈值升级 LanceDB。
+- **ADR-0045 embedding 收敛为 off/cloud 两态（取消本地模型）**：按 spike §6.2 最新裁决，推翻 ARCH §7.2 local（Xenova）；默认 off、不出域、无权重、无 Worker 推理；cloud 四与门与降级。
+- **ADR-0046 先收敛后召回（temp_scope 物化 + RRF）**：AC-M5-2 的工程定义；否决先召回后过滤；二次 decide 纵深；scope 截断诚实标记。
+- **ADR-0047 FTS5 trigram + 短词 LIKE 的中文策略**：实测 3 码元门槛；无词库；BM25+标题 boost+RRF；不引分词器。
+- **ADR-0048 授权信息不入索引——权限变更零索引失效**：per-user 可见性完全由查询时 M4 scope 承担；版本号仅缓存失效；字段 mask 在摘要层最小泄漏（接 M4 A-4）。
+- **ADR-0049 reindex 双库原子切换与派生库损坏自愈**：临时库 rebuild + rename；损坏隔离 + 自动重建 + 主库 LIKE 应急。
+- **ADR-0050 embedding 凭据存储（env 只读种子 + AES-256-GCM 加密落库，B-2 定稿）**：JWT_SECRET 派生密钥（SHA-256 双域分隔）、随机 IV、零新加密依赖；只回显 configured/maskedLast4；轮换/清除端点；JWT_SECRET 变更解密失败优雅回落未配置；PATCH 两步 reindex（B-6）与 role_owner 限定（B-4）一并记录。
 
 ---
 
@@ -631,7 +631,7 @@ DELETE /api/v1/admin/embedding/api-key → role_owner        （B-2 清除端点
 3. 调岗/收权/继承中断/move 后下次搜索即变（S8 全绿），无 reindex/缓存等待。
 4. outbox 同事务共生死、主写 P95 无回退；首启自动播种建索引；覆盖度对账 A-E=0 可复跑。
 5. Tier-L 真机双架构 10 万 chunk P95<500ms（或如实记录不达标 + 降杠杆证据与降级发布结论）；Tier-S 1-10 万流畅；目标机 .so 冒烟过门；开发机数字只留档不作承诺。
-6. openapi 冻结并对拍；ADR-0041~0049 归档；40RC 全绿；678+N/3、lint/typecheck/ci-quality；旧 `/api/search/` 字节零 diff；M1 flags 四组合/M2/M3/M4 回归全绿。
+6. openapi 冻结并对拍；ADR-0042~0050 归档；40RC 全绿；678+N/3、lint/typecheck/ci-quality；旧 `/api/search/` 字节零 diff；M1 flags 四组合/M2/M3/M4 回归全绿。
 7. 密钥零泄漏审计（响应/日志/审计/库文件检查：明文密文均不出响应，只回 configured/source/maskedLast4）；JWT_SECRET 轮换后解密失败回落未配置且不 500（B-2 对抗）；默认 off 下零外网连接抓包留证；runbook 五章齐备；M5-FE 输入清单可派工。
 
 ---
@@ -651,4 +651,4 @@ DELETE /api/v1/admin/embedding/api-key → role_owner        （B-2 清除端点
 | S8 | 权限即时失效 | __tests__ | 调岗/继承/move 下次搜索即变 | S5、M4-S7 |
 | S9 | 降级自愈 | 演练脚本；runbook | 五类故障 fts-only 且主应用可写 | 全部 |
 | S10 | 真机规模门 | bench；m5-gate.md | Tier-L 双架构 10 万 P95 留证（不达标给降级结论） | S5/S9 |
-| S11 | 收口 | ADR-0041~0049；RC；runbook；FE 清单 | 全门绿、旧搜索零 diff、可派工 M5-FE | S10 |
+| S11 | 收口 | ADR-0042~0050；RC；runbook；FE 清单 | 全门绿、旧搜索零 diff、可派工 M5-FE | S10 |

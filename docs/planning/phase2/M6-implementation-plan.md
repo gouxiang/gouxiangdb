@@ -417,17 +417,17 @@ DELETE /api/v1/pats/:id    仅本人行；→ 204；非本人/不存在统一 40
 - 回滚：测试。
 
 ### S9 — 出口收口
-- ADR-0050~0054（§10）；openapi 只增 pats + /mcp 说明段（/mcp 非 REST，用 x-mcp 扩展或独立小节描述，不强行造 REST path）；形状手写对拍；runbook §5.4 全章；《MCP 客户端接入说明》（协议无关，三客户端示例）；40RC 全绿 + 710+N；fpk/Docker 核查（SDK 在生产依赖、bin 产物、反代 11m）；M6-FE 输入清单评审；旧路由零 diff 证明；M1-M5 flags/对抗回归。
+- ADR-0051~0055（§10）；openapi 只增 pats + /mcp 说明段（/mcp 非 REST，用 x-mcp 扩展或独立小节描述，不强行造 REST path）；形状手写对拍；runbook §5.4 全章；《MCP 客户端接入说明》（协议无关，三客户端示例）；40RC 全绿 + 710+N；fpk/Docker 核查（SDK 在生产依赖、bin 产物、反代 11m）；M6-FE 输入清单评审；旧路由零 diff 证明；M1-M5 flags/对抗回归。
 
 ---
 
 ## 10. 关键设计决策（ADR 候选）
 
-- **ADR-0050 官方 SDK WebStandard 直桥 + 每请求无状态 transport**：spike §1 实测；否决手写 300 行自维护协议；1.30.0 精确 pin；无状态 JSON 先行、SSE 二期。
-- **ADR-0051 PAT 凭证模型与 M2 用户态联动**：gxpat_ 一次明文/hash 库存/scope 粗档/资源授权归 M4；停用同事务批量吊销 + 边缘 status 双保险；cascade 删除；lastUsedAt 节流；JWT OAuth 留扩展点。
-- **ADR-0052 双闸门与 UNKNOWN_TOOL 不泄漏口径**：动态注册 + service 首行 engine.decide；被裁工具与不存在同文案；FORBIDDEN_* 二分；MCP 只走新引擎不接旧 guards。
-- **ADR-0053 /mcp 11MB 豁免与 patId 独立限流内聚 mcpApp**：spike 实测 413；全局只增第三档 body；限流不进全局规则表，子应用两段式（IP/patId）。
-- **ADR-0054 块模型下沉 shared 与画布最小写入（C-2 终审定稿）**：blocks.ts/markdown.ts 零行为移动，api/web 同源；画布写入保 AC-M6-3 P0——S6b 将 Plait 六不变量数据层规则抽 shared 服务端校验器，M6 仅开 canvas.commit_elements/element.create（geometry/rectangle + 乐观锁），完整操作集二期，未支持操作 UNSUPPORTED_OPERATION 显式拒绝；frontend 后续画布改动以 shared 为唯一规则源。
+- **ADR-0051 官方 SDK WebStandard 直桥 + 每请求无状态 transport**：spike §1 实测；否决手写 300 行自维护协议；1.30.0 精确 pin；无状态 JSON 先行、SSE 二期。
+- **ADR-0052 PAT 凭证模型与 M2 用户态联动**：gxpat_ 一次明文/hash 库存/scope 粗档/资源授权归 M4；停用同事务批量吊销 + 边缘 status 双保险；cascade 删除；lastUsedAt 节流；JWT OAuth 留扩展点。
+- **ADR-0053 双闸门与 UNKNOWN_TOOL 不泄漏口径**：动态注册 + service 首行 engine.decide；被裁工具与不存在同文案；FORBIDDEN_* 二分；MCP 只走新引擎不接旧 guards。
+- **ADR-0054 /mcp 11MB 豁免与 patId 独立限流内聚 mcpApp**：spike 实测 413；全局只增第三档 body；限流不进全局规则表，子应用两段式（IP/patId）。
+- **ADR-0055 块模型下沉 shared 与画布最小写入（C-2 终审定稿）**：blocks.ts/markdown.ts 零行为移动，api/web 同源；画布写入保 AC-M6-3 P0——S6b 将 Plait 六不变量数据层规则抽 shared 服务端校验器，M6 仅开 canvas.commit_elements/element.create（geometry/rectangle + 乐观锁），完整操作集二期，未支持操作 UNSUPPORTED_OPERATION 显式拒绝；frontend 后续画布改动以 shared 为唯一规则源。
 - **ADR-0019 已存在**（协议无关标准 MCP server 总纲，ARCH:941）：本计划是其实施细化，不重复立项。
 
 ---
@@ -439,7 +439,7 @@ DELETE /api/v1/pats/:id    仅本人行；→ 204；非本人/不存在统一 40
 | # | 议题 | 终审判定 | 落地位置 |
 |---|---|---|---|
 | C-1 | MCP 独立限流档默认值与超限口径 | **批准**：认证后 patId 桶 **120/60s** + 认证前 IP 预桶 **300/60s**，PAT 管理 REST **30/60s/人**；`GX_MCP_RATE_*` 可配；超限 **429 + Retry-After**。NAS 上若证实 AI 调用更陡再调，不阻塞 | §0-2；S2；§5.3；runbook |
-| C-2 | 画布写是否必须 M6 交付 | **【与架构师建议不同】画布写入必须进 M6**：SPEC:127 AC-M6-3 是冻结 P0 明文，不得在实施切片里悄悄降为只读。S6 后插入 **S6b**：canvas-ops 六不变量数据层规则抽 packages/shared 服务端校验器，交付 canvas.commit_elements 的 **element.create 最小集（geometry/rectangle + 乐观锁 + 409）**；update/move/delete/connect 完整操作集列二期；**未支持操作返明确 "unsupported operation" 错误，不得静默成功**。若 S6b 证明六不变量服务端化远超一个切片，先报总监评估，不许自行再降级。S6b 不依赖 M3/M4，理论上可与 M3 并行准备，按单线纪律排序列，排期总监调度；frontend 后续画布改动以 shared 为唯一规则源 | §0-7/11；S6b；§7；ADR-0054 |
+| C-2 | 画布写是否必须 M6 交付 | **【与架构师建议不同】画布写入必须进 M6**：SPEC:127 AC-M6-3 是冻结 P0 明文，不得在实施切片里悄悄降为只读。S6 后插入 **S6b**：canvas-ops 六不变量数据层规则抽 packages/shared 服务端校验器，交付 canvas.commit_elements 的 **element.create 最小集（geometry/rectangle + 乐观锁 + 409）**；update/move/delete/connect 完整操作集列二期；**未支持操作返明确 "unsupported operation" 错误，不得静默成功**。若 S6b 证明六不变量服务端化远超一个切片，先报总监评估，不许自行再降级。S6b 不依赖 M3/M4，理论上可与 M3 并行准备，按单线纪律排序列，排期总监调度；frontend 后续画布改动以 shared 为唯一规则源 | §0-7/11；S6b；§7；ADR-0055 |
 | C-3 | PAT 有效期策略与永不过期 | **批准**：默认 **90 天**，可选 **30/90/365 天** 与 **null 永不过期**（UI 强警示）；tokenPrefix 仅存展前 **14 字符**供辨识，不可认证 | §4.3；§5.2；S1；M6-FE |
 | C-4 | 停用即批量吊销、重新激活不恢复 PAT | **确认**：停用用户同事务批量 revokedAt 吊销其全部 PAT；重新激活**不自动恢复**（安全优先，需重新签发） | §5.1；S1 |
 | C-5 | /mcp 与 /api/v1/pats 门控；stdio bin 产物 | **批准**：两者同受 **GX_ENTERPRISE_ORG 门控**（off 即不挂载/404）；stdio bin **进 fpk/Docker 产物**（只是文件、不起第二服务） | §3-9；S2/S6；部署物 |
@@ -458,7 +458,7 @@ DELETE /api/v1/pats/:id    仅本人行；→ 204；非本人/不存在统一 40
 4. AC-M6-4：吊销（含用户停用连带吊销）后下一次调用立即拒绝（HTTP 与 stdio 两入口）；每次 tools/call 与每次认证失败入审计，参数脱敏且无业务值。
 5. 三客户端（curl/SDK client/Inspector）+ stdio 客户端真实连通留证；根/子路径/unix socket 三形态至少各一轮；IDOR 三族对抗零泄漏。
 6. 11MB 豁免只对 /mcp 生效（既有 /api 1MB 行为零变化，S0 golden 证明）；独立限流生效可观测；30s 超时不挂连接。
-7. openapi 增补冻结并对拍；ADR-0050~0054 归档；710+N/3 全绿、lint/typecheck/ci-quality；M1 flags 四组合/M2 停用闭环/M3/M4/M5 回归全绿；旧路由字节零 diff；zod4 不越 mcp/。
+7. openapi 增补冻结并对拍；ADR-0051~0055 归档；710+N/3 全绿、lint/typecheck/ci-quality；M1 flags 四组合/M2 停用闭环/M3/M4/M5 回归全绿；旧路由字节零 diff；zod4 不越 mcp/。
 8. PAT 零泄漏审计（响应/日志/审计/库/产物文件）；runbook 与协议无关《接入说明》齐备；M6-FE 输入清单可派工；发版冒烟含目标机 /mcp initialize 与反代 11m 核查。
 
 ---
@@ -477,7 +477,7 @@ DELETE /api/v1/pats/:id    仅本人行；→ 204；非本人/不存在统一 40
 | S6b | 六不变量 shared + 最小写入 | shared canvas 规则；canvas.tools.ts commit_elements | golden 0 diff、坏输入六拒、element.create 后 Web 打开完整、未支持操作明确报错不静默 | S6、S5；**不依赖 M3/M4** |
 | S7 | 审计/幂等落库/超时 | audit.ts；idempotency.ts；mcp_idempotency 迁移 | 每 call 审计脱敏、重启后重放仍幂等、TIMEOUT 不挂死 | S4/S5/S6b |
 | S8 | 连通/对抗门 | e2e；m6-connectivity.md | 三客户端+stdio、AC-M6 全项（含画布写入）、IDOR 四族零泄漏 | 全部 |
-| S9 | 收口 | ADR-0050~54；openapi；runbook；接入说明 | 全门绿、旧路由零 diff、可派 M6-FE | S8 |
+| S9 | 收口 | ADR-0051~55；openapi；runbook；接入说明 | 全门绿、旧路由零 diff、可派 M6-FE | S8 |
 
 ---
 

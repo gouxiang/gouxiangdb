@@ -17,10 +17,10 @@
 
 1. **引擎形态：一次授权判定 = 主体三源展开 × 客体祖先链收集，纯 allow 并集，无 deny 分支**。主体侧：role 源（M2 `effectiveOrgRoles`：role_assignments 的 user 直授 + 用户部门经 dept path 祖先展开的 dept 授角色）命中 `auth_policies(subjectType='role')`；dept 源（`auth_policies(subjectType='dept')`，按用户各部门 path 前缀匹配）；direct 源（`subjectType='user'`）。客体侧：nav_nodes 祖先链（M3 物化 path，一次查询），内容叶子 `inheritAncestors=0` 时不收集祖先。任一策略行动作命中即 allow；无 allow 即拒。确定性优先级：**role_owner/资源 createdBy 兜底 → 节点直接 allow →（开关开时）祖先 allow 并集 → 拒绝**（ARCH :460-502 定稿口径，本计划照实现，不重新发明）。
 2. **旧三表（members/kb_members/kb_doc_acls）关系选型——选定"回填为 auth_policies allow 行 + shadow 零漂移对拍 + enforce 后旧表降级为投影（同事务双写）"，否决"运行时双读合并"**（§4.6 给两方案风险对比）。理由：运行时双读合并意味着判定逻辑永久两套，而 fieldMask、中断继承、角色/部门授予三个新能力在旧表无承载，合并语义必然产生永久漂移面，且无法回滚到单一心智；回填+投影方案下旧表是 auth_policies 的一份物化缓存，**权威只有一个**，双写在同一 `withWriteTx` 内共生死（M3 裁决 9 同纪律），flag off 时旧守卫读旧表工作照旧，回滚路径物理存在。
-3. **回填映射对 ARCH §6.2 做防膨胀裁剪（裁决 A-1 已批准）**：ARCH 草案要求每个 kb_members 行"对该库下每个 doc/canvas 节点写一行"（:600），1000 成员 × 1000 文档 = 100 万行且与 nav 继承重复。定稿 **kb_members → kb 节点上一行 user allow，文档/canvas 经 nav 祖先链继承覆盖**（引擎本来就爬祖树，逐 doc 物化是冗余拷贝，违反单一事实源）；kb_doc_acls 仍逐行映射到具体 doc 节点 direct 行（这是真正的单内容例外）。members 同理 → base 节点一行，table/view 经继承覆盖。**回退条件按裁决写成可执行断言（非定性）**：S1 对拍夹具中，对任一 kb_member (kb=K, user=U) 与其下任意 N 层（夹具深度 ≥4）的每个 doc/canvas 节点 D，`decide(U, D, x)`（x∈{r,c,u,d,comment} 全集）必须与"D 上存在直挂 user allow 同动作行"的假想判定**逐文档、逐动作等价**；任一 (U,D,action) 不等价即 A-1 证伪，回退逐 doc 物化。断言代码化进 S1 测试与 ADR-0033 的"判定标准"段，不靠人工读代码下结论。
-4. **fieldMask 挂在 table 节点的策略行上，不建 field 导航节点**（M3 裁决 3 已定 field 不建节点，ADR-0030）。`fieldMask` JSON 形状 `{allowFields?: string[], readOnlyFields?: string[]}`，缺省=全量；多来源并集取**最宽**：可见=任一来源可见之并，可写=任一来源可写（且该字段非各来源只读——纯 allow 下"只读"是该来源的能力裁剪不是 deny，故另一来源给可写则可写）。下推点逐个实查锁定为 5 个出口：records 列表（`records.ts:359-373` 响应体）、records 详情（`:610`）、记录写 payload 键白名单（`:632-636` applyFieldWrites 之前，越权字段键整条 403 不静默丢弃）、CSV 导出（`csvExport.ts:85-103`）、hydrate 内关联标题/公式依赖（`hydrate.ts:499-524` primaryTitle：依赖列照常参与服务端计算但**不下发原值**）。search 旧预览路由（`search.ts:84-115`）M4 不动（M5 统一检索替换，AC-M4-3 的"检索"口径在 M4 只覆盖 records 列表搜索框同链路；M5 凭 §4.7 可见集接口交付零泄漏，AC-M5-2）。
+3. **回填映射对 ARCH §6.2 做防膨胀裁剪（裁决 A-1 已批准）**：ARCH 草案要求每个 kb_members 行"对该库下每个 doc/canvas 节点写一行"（:600），1000 成员 × 1000 文档 = 100 万行且与 nav 继承重复。定稿 **kb_members → kb 节点上一行 user allow，文档/canvas 经 nav 祖先链继承覆盖**（引擎本来就爬祖树，逐 doc 物化是冗余拷贝，违反单一事实源）；kb_doc_acls 仍逐行映射到具体 doc 节点 direct 行（这是真正的单内容例外）。members 同理 → base 节点一行，table/view 经继承覆盖。**回退条件按裁决写成可执行断言（非定性）**：S1 对拍夹具中，对任一 kb_member (kb=K, user=U) 与其下任意 N 层（夹具深度 ≥4）的每个 doc/canvas 节点 D，`decide(U, D, x)`（x∈{r,c,u,d,comment} 全集）必须与"D 上存在直挂 user allow 同动作行"的假想判定**逐文档、逐动作等价**；任一 (U,D,action) 不等价即 A-1 证伪，回退逐 doc 物化。断言代码化进 S1 测试与 ADR-0034 的"判定标准"段，不靠人工读代码下结论。
+4. **fieldMask 挂在 table 节点的策略行上，不建 field 导航节点**（M3 裁决 3 已定 field 不建节点，ADR-0031）。`fieldMask` JSON 形状 `{allowFields?: string[], readOnlyFields?: string[]}`，缺省=全量；多来源并集取**最宽**：可见=任一来源可见之并，可写=任一来源可写（且该字段非各来源只读——纯 allow 下"只读"是该来源的能力裁剪不是 deny，故另一来源给可写则可写）。下推点逐个实查锁定为 5 个出口：records 列表（`records.ts:359-373` 响应体）、records 详情（`:610`）、记录写 payload 键白名单（`:632-636` applyFieldWrites 之前，越权字段键整条 403 不静默丢弃）、CSV 导出（`csvExport.ts:85-103`）、hydrate 内关联标题/公式依赖（`hydrate.ts:499-524` primaryTitle：依赖列照常参与服务端计算但**不下发原值**）。search 旧预览路由（`search.ts:84-115`）M4 不动（M5 统一检索替换，AC-M4-3 的"检索"口径在 M4 只覆盖 records 列表搜索框同链路；M5 凭 §4.7 可见集接口交付零泄漏，AC-M5-2）。
    - **LinkRef.title 最小泄漏定稿（裁决 A-4）**：不显示空、不伪造标题。① 主体对目标表有表级 r 但展示字段被 mask：title 回退 **record id**，旁注统一中性文案（前端片与设计师共同定稿，建议"未命名记录"级中性提示，悬浮详情仅在此类"表可见、字段 mask"用户下给出解释）；② 主体对目标表**表级完全不可见**：该引用整体走不可见通道，LinkRef **不出现 id**（不出现在链接数组下发中或置为统一不可见占位，由 S6 按响应形状选破坏最小的实现，AC 锁"无 id/无标题/无字段值"）；③ 对①类用户不得出现"无权限"字样——该措辞对无权者反证字段存在。现状 `primaryTitle` 兜底串 `"(无标题)"`（hydrate.ts:529）在 on 态被上述策略替换。
-   - **公式依赖同口径（裁决 A-4，S6 专项断言）**：隐藏字段值以 **null** 注入公式求值，且 mask 注入的 null 必须与真实空值**不可区分**。已核对现有引擎 null 语义（2026-09-18，formula.ts）：SUM/AVERAGE/MIN/MAX 先 `asNum` 再 `filter(x!==null && Number.isFinite(x))`（:579/:625/:630 等），CONCAT/CONCATENATE 经 `asString`，null→空串（:39-40、:537-539），算术与比较遇 null → FNULL（:442/:448/:454/:460）。S6 必须加专项断言：同一记录在"字段真空值"与"字段有值但对该用户 mask"两种状态下，其全部下游公式结果与错误文案**逐字节一致**（含 ISBLANK :598 类探测函数——mask 注入 null 会使 ISBLANK=true，这是与真实空值不可区分原则的必然推论，记入 ADR-0034，防止 mask 值经错误文案/布尔结果泄漏）。
+   - **公式依赖同口径（裁决 A-4，S6 专项断言）**：隐藏字段值以 **null** 注入公式求值，且 mask 注入的 null 必须与真实空值**不可区分**。已核对现有引擎 null 语义（2026-09-18，formula.ts）：SUM/AVERAGE/MIN/MAX 先 `asNum` 再 `filter(x!==null && Number.isFinite(x))`（:579/:625/:630 等），CONCAT/CONCATENATE 经 `asString`，null→空串（:39-40、:537-539），算术与比较遇 null → FNULL（:442/:448/:454/:460）。S6 必须加专项断言：同一记录在"字段真空值"与"字段有值但对该用户 mask"两种状态下，其全部下游公式结果与错误文案**逐字节一致**（含 ISBLANK :598 类探测函数——mask 注入 null 会使 ISBLANK=true，这是与真实空值不可区分原则的必然推论，记入 ADR-0035，防止 mask 值经错误文案/布尔结果泄漏）。
 5. **inheritAncestors EARS（AC-M4-2）**：M3 恒 1 的列在 M4 开放 `PATCH /api/v1/nodes/:id/inheritance`，**仅 doc/canvas 内容叶子可关**（table/view/group 不可，400）。关闭前必须经 `GET .../inheritance/impact`（或 PATCH 未带 confirmed 返回 409 + 载荷，M3 move 同款）：后端展开"当前经继承可见、关闭后将失访"的去重用户集（多部门只计 1，去重到 userId；排除 createdBy、节点直接 allow 主体、role_owner），返回人数与按角色/部门聚合的清单；确认后写 nav_nodes.inheritAncestors=0 + bump navVersion 与 policyVersion + 审计前后 diff。重开对称（恢复访问人数预览）。
 6. **shadow → enforce 翻转仿 M1 三态 flag 先例**（`GX_M1_SIDECAR_READ=off|shadow|on`，`flags.ts:14-20` 是仓内既有成熟形态）：新增 `GX_AUTHZ_ENGINE=off|shadow|on`，**代码默认 off（裁决 A-3）**；M4 出口**生产建议值 shadow**（由项目总监在部署配置设定，代码默认不改）。shadow 期旧 guards.ts/kb.ts 决策照跑、响应照返回，引擎在**同一请求内**并行判定并对拍，差异写结构化日志 + 内存计数（`/readyz` 可选带 drift 摘要，不入响应）。drift 分两类：**DRIFT_OVERDENY（旧 allow / 引擎 deny，误拦/可用性风险）** 与 **DRIFT_OVERALLOW（旧 deny / 引擎 allow，越权/安全风险，零容忍）**。**翻 on 的前置（裁决 A-3，五条全满足且仅由项目总监下令）**：见 §4.8 五条。on 后先跑**一个迭代反向 shadow**（引擎决策生效、旧结果只记录）；旧守卫决策分支**再保留两个迭代**才允许删除（删除动作在另开切片，M4 不删）。回滚 = flag 回 off，旧守卫与旧表投影数据完好。
 7. **给 M5 的权限查询接口（先收敛后召回）定稿两形态**（§4.7）：`resolveVisibleNodeIds(userId, action, kinds, opts)` 返回节点/资源 id 集合（带 budget，默认 5000，超限拒绝全量模式）与 `buildVisibleScopeSql(userId, action, resourceType)` 返回**参数化 SQL 片段 + 参数数组**（可下推：JOIN auth_policies/nav_nodes/departments/dept_members/role_assignments，全部走 path 前缀索引，无 CTE、无全表 SCAN），M5 在 search.db 召回时以临时表或分批 IN（≤ 参数上限）收敛候选，**无权 id 不进入向量/FTS 召回**。M4 只交付接口、契约、规模测试（500 用户/1 万节点：单用户 scope 定数查询、P95 留证），不接任何检索路由。
@@ -68,7 +68,7 @@
 | 5 | hydrate 内计算依赖 | `domain/hydrate.ts:94` hydrateRecords、`:499-529` primaryTitle（关联显示名优先 linkDisplayFieldId 否则 primaryFieldId :505-527，无标题兜底 `"(无标题)"` :529；link title 拼接 :390-392）；lookup/rollup/formula 计算读依赖列 | 依赖列**照常取数参与服务端计算**，但计算结果字段本身若不可见则不下发；隐藏列用于 LinkRef.title 时按裁决 A-4 最小泄漏两档处理（表级 r+字段 mask→回退 record id + 中性旁注；表级不可见→引用整体不可见、无 id），见 §0-4；公式依赖列以 null 注入且与真实空值不可区分（formula.ts null 语义已核，见 §0-4） |
 | — | 列表内搜索/排序/过滤 | `recordService.ts:68-101` applyViewQuery：搜索可见字段 :84-87、filters :77-78、sorts :93-98 | 隐藏字段不参与内存搜索匹配（M1 物理下推路径另需在 compile 阶段禁止以隐藏字段做物理 filter/sort，S6 验收含此断言）；这是 AC-M4-3"检索不出现"在 records 域的边界 |
 
-- M3 不建 field 节点（M3 计划 §0-2/ADR-0030），故字段掩码**没有 field 级 nav 客体可挂**；本计划定稿挂在 table 节点策略行的 fieldMask（§4.4），view 节点不挂掩码（视图 hiddenFieldIds 是个人/视图配置，与权限掩码正交且已在 visibleFields :54-57 生效）。
+- M3 不建 field 节点（M3 计划 §0-2/ADR-0031），故字段掩码**没有 field 级 nav 客体可挂**；本计划定稿挂在 table 节点策略行的 fieldMask（§4.4），view 节点不挂掩码（视图 hiddenFieldIds 是个人/视图配置，与权限掩码正交且已在 visibleFields :54-57 生效）。
 
 ### 1.4 M2 接口（M4 消费方；M2-S3 已随 6f7dc29 落地，S4-S6 在途，签名以 M2 计划/落地代码为准，开工复核）
 
@@ -100,7 +100,7 @@
 
 ### 2.1 必做（SPEC M4 + O4-O10 + AC-M4-1/2/3）
 
-1. **纯函数权限引擎**（domain/authz/）：三源主体展开、nav 祖先链收集、inheritAncestors 裁剪、动作命中、fieldMask 合并、conditions 求值钩子（**裁决 A-7：行级分组条件（group bucket）正式顺延 P1**——PRD :167 明确"记录（行）级权限本期不做"，ARCH §5.3 的 group 条件下推随之顺延；auth_policies.conditions 列保留但 M4 **只接受 null，写入非 null 一律 400 POLICY_CONDITION_UNSUPPORTED**；引擎留 ctx.row 参数位不实现谓词。该限制在 §2.2 与 ADR-0031 登记为已知限制，move-impact/inheritance-impact 的人数展开**不含行谓词**，仅按节点级三源计算）。
+1. **纯函数权限引擎**（domain/authz/）：三源主体展开、nav 祖先链收集、inheritAncestors 裁剪、动作命中、fieldMask 合并、conditions 求值钩子（**裁决 A-7：行级分组条件（group bucket）正式顺延 P1**——PRD :167 明确"记录（行）级权限本期不做"，ARCH §5.3 的 group 条件下推随之顺延；auth_policies.conditions 列保留但 M4 **只接受 null，写入非 null 一律 400 POLICY_CONDITION_UNSUPPORTED**；引擎留 ctx.row 参数位不实现谓词。该限制在 §2.2 与 ADR-0032 登记为已知限制，move-impact/inheritance-impact 的人数展开**不含行谓词**，仅按节点级三源计算）。
 2. **旧三表回填为 auth_policies allow 行**（只增迁移 + 幂等 + 对账脚本，§5）：members → base 节点、kb_members → kb 节点、kb_doc_acls → doc 节点；角色→动作按 §6.1 映射表；回填后 0 漂移对账（旧守卫决策 vs 引擎决策全量对拍）。
 3. **shadow 对拍适配层**：guards.ts 五函数 + kb.ts 两函数体内并行调引擎，差异分类记日志/计数，响应与现状字节一致。
 4. **策略管理 v1 API**（SPEC :71-73）：GET/PUT `/api/v1/nodes/:id/policies`（批量 upsert-delete，纯 allow）、PATCH `/api/v1/nodes/:id/inheritance`（二次确认门）、GET `/api/v1/nodes/:id/effective`（来源链：role/dept/direct/owner_fallback，O8）；manage_share 第五组织动作位 + owner 幂等补位迁移。
@@ -117,7 +117,7 @@
 
 | 不做 | 归属 | M4 临时姿态 |
 |---|---|---|
-| 行级/分组桶条件授权（ARCH §5.3 group.conditions 下推） | **P1（PRD :167 明确记录行级本期不做；裁决 A-7 已批准顺延）** | conditions 列只收 null；非 null 写入 400 POLICY_CONDITION_UNSUPPORTED；引擎留 ctx.row 参数位不实现谓词；move/inheritance impact 人数不含行谓词；ADR-0031 登记为已知限制 |
+| 行级/分组桶条件授权（ARCH §5.3 group.conditions 下推） | **P1（PRD :167 明确记录行级本期不做；裁决 A-7 已批准顺延）** | conditions 列只收 null；非 null 写入 400 POLICY_CONDITION_UNSUPPORTED；引擎留 ctx.row 参数位不实现谓词；move/inheritance impact 人数不含行谓词；ADR-0032 登记为已知限制 |
 | 向量/FTS 统一检索接入、change_events/outbox | M5 | search.ts 旧预览一行不动；M5 凭 buildVisibleScopeSql 实现 AC-M5-2 |
 | PAT、MCP 通道鉴权 | M6 | 引擎决策核心设计为通道无关（userId 入参），M6 直接复用 enforce()，M4 不提供 MCP 入口 |
 | 字段结构权限（建列/删列/改类型 O5 结构语义） | 现状守卫承接 | M4 用 manage_schema 动作位表达表结构写，仍由 requireCanManageSchema 适配层映射，不新增字段结构 CRUD 的细分策略 UI |
@@ -431,10 +431,10 @@ apps/api/scripts/authz/
 ### 5.2 映射规则（逐条，与 §4.1 表一致）
 
 1. members 活行（用户未物理删除；含 DISABLED——行保留）→ base nav 节点（resourceType='base', resourceId=members.baseId）上 subjectType=user 策略，actions=base 角色映射，reason='legacy:member'。
-2. kb_members 活行 → **kb 节点一行**（reason='legacy:kb_member'）；doc/canvas 不逐行物化（§0-3，裁决 A-1 已批准）。S1 必须先过 ADR-0033 的可执行证伪断言（逐文档逐动作等价，深度 ≥4），断言失败则本规则作废、回退 ARCH :600 逐 doc 物化，回填行数与对账 A 类预期同步改文档。
+2. kb_members 活行 → **kb 节点一行**（reason='legacy:kb_member'）；doc/canvas 不逐行物化（§0-3，裁决 A-1 已批准）。S1 必须先过 ADR-0034 的可执行证伪断言（逐文档逐动作等价，深度 ≥4），断言失败则本规则作废、回退 ARCH :600 逐 doc 物化，回填行数与对账 A 类预期同步改文档。
 3. kb_doc_acls 活行 → doc 节点（resourceType='doc'）user 行，reason='legacy:acl'。
 4. 唯一键冲突（nodeId,user 已存在，如 kb_member 与 acl 在 kb 节点不可能同节点；真正冲突在多次回填）：actions = 动作并集（等价比"取较高角色"，kb.ts:54-55 的并集语义：两档角色动作集是包含关系，取动作超集即取较高；非包含关系在旧角色体系不存在）。
-5. **owner 行不自动授予 role_owner 组织角色（裁决 A-2 已批准不抬升）**：资源 owner 不自动授 workspace role_owner，只持本资源 manage_share 动作（owner 映射串含 manage_share，见 §4.1）；workspace 管理面（通讯录/角色/菜单）仍只归 M2 自举的 role_owner。ADR-0038 以"资源 owner ≠ 工作区管理员"为题写清边界；ARCH :602"owner 成员额外写 workspace_admin"草案否决。回填 SQL 不得向 role_assignments 写任何行。
+5. **owner 行不自动授予 role_owner 组织角色（裁决 A-2 已批准不抬升）**：资源 owner 不自动授 workspace role_owner，只持本资源 manage_share 动作（owner 映射串含 manage_share，见 §4.1）；workspace 管理面（通讯录/角色/菜单）仍只归 M2 自举的 role_owner。ADR-0039 以"资源 owner ≠ 工作区管理员"为题写清边界；ARCH :602"owner 成员额外写 workspace_admin"草案否决。回填 SQL 不得向 role_assignments 写任何行。
 6. 回填不产生任何 inheritAncestors=0 行（M3 全 1，PRD :603 同口径：不制造私密节点）。
 7. 幂等：INSERT...SELECT + `WHERE NOT EXISTS (SELECT 1 FROM auth_policies ... 唯一键)`；actions 收敛用 §4.1 规范化串；重跑零行增长（第二次全被 NOT EXISTS 挡）。
 8. 实体悬挂过滤：JOIN nav 节点必须是活节点（M3 回填后资源-节点 0 差异是本迁移前置门，M3 reconcile A/B 类=0 才允许跑 C）。
@@ -682,16 +682,16 @@ pnpm --filter @gx/web build   # 仅确认 shared-types 重建不爆类型（前�
 
 ## 8. 关键设计决策（ADR 候选）
 
-- **ADR-0031 纯 allow 三源并集与无 deny 收权模型**：owner_fallback → direct → 祖先 allow → 拒；收权=移除全部来源；与 kb.ts:54 取较高语义的连续性证明（动作集包含关系）；否决 deny 列/后写覆盖/优先级数。**含裁决 A-7 已知限制登记：conditions 行谓词顺延 P1，列保留、非 null 400。**
-- **ADR-0032 旧三表回填为 allow 投影而非运行时双读合并**：§4.6 七维对比；权威单一、可回滚、零漂移可验证；双写共生死纪律（M3 裁决 9 延伸）；旧表退役路径。
-- **ADR-0033 kb_members 映射到 kb 节点单行（裁决 A-1 已批准，覆盖 ARCH §6.2 逐 doc 物化）**：nav 祖先继承已是引擎一等能力，逐 doc 拷贝冗余且随新增文档失效（新建文档瞬间两系统不一致窗口）；量化 1000×1000 省百万行。**必含"证伪判定标准"段：把 §0-3 的可执行断言原文收录（任 kb_member 对其 kb 下 N≥4 层每个 doc/canvas 的逐文档逐动作 decide 等价），断言在 S1 测试代码化；断言失败即回退逐 doc 物化，本 ADR 增 Superseded 链接。**
-- **ADR-0034 fieldMask 挂 table 策略行而非 field 节点**：M3 ADR-0030 不建 field 节点的下游定稿；allowFields/readOnlyFields 收窄语义与并集最宽；五出口单一投影纯函数；计算字段依赖取数不下发。**含裁决 A-4 最小泄漏两档（表可见+字段 mask→record id+中性旁注；表不可见→引用整体不可见无 id）与公式 mask-null 不可区分原则（ISBLANK 等 null 探测函数同口径）。**
-- **ADR-0035 继承中断的 cutoff 停止规则（非简单布尔）**：K 关继承保护 K 自身；子孙链在 K 截断但 K 自身策略仍及于子孙；impact 去重展开算法；二次确认 EARS。
-- **ADR-0036 GX_AUTHZ_ENGINE 三态 shadow/enforce 翻转门（裁决 A-3 定稿）**：仿 M1 三态先例；代码默认 off、M4 出口生产建议值 shadow；五条前置全满足且项目总监下令；DRIFT_OVERALLOW/OVERDENY 双零连续一迭代；on 后反向 shadow 一迭代；旧守卫分支再保两迭代才许另开切片删除；与 M3 GX_ENTERPRISE_NAV 的正交关系。
-- **ADR-0037 M5 先收敛后召回的 scope 契约**：两形态（id 集 budget / 参数化 SQL 片段）；无 CTE 集合运算上移应用层；禁止先召回后过滤；规模上界证据。
-- **ADR-0038 资源 owner ≠ 工作区管理员（裁决 A-2 定稿）**：兜底口径 = workspace role_owner ∪ 实体 createdBy；**资源 owner 不批量抬升 workspace role_owner**（ARCH :602 草案否决），资源 owner 仅持本资源 manage_share；工作区通讯录/角色/菜单管理面只归 M2 自举 role_owner。
-- **ADR-0039（新增）legacyUnmappable：不可映射授权不阻断写入（裁决 A-5）**：v1 写角色/部门等旧表不可映射授权时 200 + `legacyUnmappable` 标记 + 面板警示，不扩旧表 schema；off 态该类授权不生效但数据行保留，重开引擎即恢复；含开关往返恢复语义。
-- **ADR-0040（新增）组织动作扩充的跨里程碑单一检查清单（manage_menu/manage_share）**：§4.10 八项清单两次复用；manage_share 双重身份（组织动作 vs 资源动作串）的词汇线隔离。
+- **ADR-0032 纯 allow 三源并集与无 deny 收权模型**：owner_fallback → direct → 祖先 allow → 拒；收权=移除全部来源；与 kb.ts:54 取较高语义的连续性证明（动作集包含关系）；否决 deny 列/后写覆盖/优先级数。**含裁决 A-7 已知限制登记：conditions 行谓词顺延 P1，列保留、非 null 400。**
+- **ADR-0033 旧三表回填为 allow 投影而非运行时双读合并**：§4.6 七维对比；权威单一、可回滚、零漂移可验证；双写共生死纪律（M3 裁决 9 延伸）；旧表退役路径。
+- **ADR-0034 kb_members 映射到 kb 节点单行（裁决 A-1 已批准，覆盖 ARCH §6.2 逐 doc 物化）**：nav 祖先继承已是引擎一等能力，逐 doc 拷贝冗余且随新增文档失效（新建文档瞬间两系统不一致窗口）；量化 1000×1000 省百万行。**必含"证伪判定标准"段：把 §0-3 的可执行断言原文收录（任 kb_member 对其 kb 下 N≥4 层每个 doc/canvas 的逐文档逐动作 decide 等价），断言在 S1 测试代码化；断言失败即回退逐 doc 物化，本 ADR 增 Superseded 链接。**
+- **ADR-0035 fieldMask 挂 table 策略行而非 field 节点**：M3 ADR-0031 不建 field 节点的下游定稿；allowFields/readOnlyFields 收窄语义与并集最宽；五出口单一投影纯函数；计算字段依赖取数不下发。**含裁决 A-4 最小泄漏两档（表可见+字段 mask→record id+中性旁注；表不可见→引用整体不可见无 id）与公式 mask-null 不可区分原则（ISBLANK 等 null 探测函数同口径）。**
+- **ADR-0036 继承中断的 cutoff 停止规则（非简单布尔）**：K 关继承保护 K 自身；子孙链在 K 截断但 K 自身策略仍及于子孙；impact 去重展开算法；二次确认 EARS。
+- **ADR-0037 GX_AUTHZ_ENGINE 三态 shadow/enforce 翻转门（裁决 A-3 定稿）**：仿 M1 三态先例；代码默认 off、M4 出口生产建议值 shadow；五条前置全满足且项目总监下令；DRIFT_OVERALLOW/OVERDENY 双零连续一迭代；on 后反向 shadow 一迭代；旧守卫分支再保两迭代才许另开切片删除；与 M3 GX_ENTERPRISE_NAV 的正交关系。
+- **ADR-0038 M5 先收敛后召回的 scope 契约**：两形态（id 集 budget / 参数化 SQL 片段）；无 CTE 集合运算上移应用层；禁止先召回后过滤；规模上界证据。
+- **ADR-0039 资源 owner ≠ 工作区管理员（裁决 A-2 定稿）**：兜底口径 = workspace role_owner ∪ 实体 createdBy；**资源 owner 不批量抬升 workspace role_owner**（ARCH :602 草案否决），资源 owner 仅持本资源 manage_share；工作区通讯录/角色/菜单管理面只归 M2 自举 role_owner。
+- **ADR-0040（新增）legacyUnmappable：不可映射授权不阻断写入（裁决 A-5）**：v1 写角色/部门等旧表不可映射授权时 200 + `legacyUnmappable` 标记 + 面板警示，不扩旧表 schema；off 态该类授权不生效但数据行保留，重开引擎即恢复；含开关往返恢复语义。
+- **ADR-0041（新增）组织动作扩充的跨里程碑单一检查清单（manage_menu/manage_share）**：§4.10 八项清单两次复用；manage_share 双重身份（组织动作 vs 资源动作串）的词汇线隔离。
 
 ---
 
@@ -730,15 +730,15 @@ GX_AUTHZ_ENGINE=shadow pnpm --filter @gx/api test   # S3 起每片必跑：drift
 
 | # | 议题 | 裁决 | 落锤位置 |
 |---|---|---|---|
-| A-1 | kb_members 回填粒度：kb 节点单行继承 vs ARCH :600 逐 doc 物化 | **批准单行 + 祖树继承，否决逐 doc 物化**；回退条件必须写成**可执行断言**（某 kb_member 对其 kb 下 N≥4 层子文档的 decide 逐文档逐动作等价），S1 证伪才回退 | §0-3、§5.2-2、ADR-0033"证伪判定标准"段 |
-| A-2 | 资源 owner 是否自动授 workspace role_owner | **批准不抬升**；资源 owner ≠ 工作区管理员，只持本资源 manage_share；workspace 管理面仍只归 M2 自举 owner | ADR-0038、§5.2-5、§4.10 |
-| A-3 | enforce 翻转姿态 | **批准**：GX_AUTHZ_ENGINE 代码默认 off；M4 出口生产建议值 shadow；翻 on = §4.8 五条全满足且总监下令；DRIFT_OVERALLOW/DRIFT_OVERDENY 双零连续一迭代；on 后反向 shadow 一迭代；旧守卫分支再保两迭代才许删（另开切片） | §0-6、§4.8、ADR-0036、S10/S11 |
-| A-4 | LinkRef.title 命中不可见字段的呈现 + 公式依赖口径 | **批准但按"最小泄漏"收紧**：不显示空、不伪造标题——表级 r+字段 mask → 回退 record id + 统一中性旁注（不写"无权限"，建议"未命名记录"级，文案前端片与设计师定；悬浮解释仅对此档）；表级完全不可见 → 引用整体走不可见通道、不出现 id。公式：隐藏字段值以 null 参与计算，mask-null 与真实空值不可区分；S6 专项断言复核 SUM/AVERAGE（过滤非有限值）、CONCAT（null→空串）、算术（null→null）、ISBLANK 等现有语义（formula.ts:28-72/436-460/537-539/579-632），防 mask 值经结果或错误文案泄漏 | §0-4、§1.3-#5、§4.4 末、S6、ADR-0034 |
-| A-5 | v1 写不可映射授权的告知 | **批准 legacyUnmappable**：200 成功 + 响应带 legacyUnmappable:true（批量可带明细）+ 面板警示；不阻断、不扩旧表 schema；runbook 写清"关引擎后这类授权失效，重开引擎即恢复（数据行保留）" | §4.6 切换点表下注、S5、S8、S11 runbook、ADR-0039 |
+| A-1 | kb_members 回填粒度：kb 节点单行继承 vs ARCH :600 逐 doc 物化 | **批准单行 + 祖树继承，否决逐 doc 物化**；回退条件必须写成**可执行断言**（某 kb_member 对其 kb 下 N≥4 层子文档的 decide 逐文档逐动作等价），S1 证伪才回退 | §0-3、§5.2-2、ADR-0034"证伪判定标准"段 |
+| A-2 | 资源 owner 是否自动授 workspace role_owner | **批准不抬升**；资源 owner ≠ 工作区管理员，只持本资源 manage_share；workspace 管理面仍只归 M2 自举 owner | ADR-0039、§5.2-5、§4.10 |
+| A-3 | enforce 翻转姿态 | **批准**：GX_AUTHZ_ENGINE 代码默认 off；M4 出口生产建议值 shadow；翻 on = §4.8 五条全满足且总监下令；DRIFT_OVERALLOW/DRIFT_OVERDENY 双零连续一迭代；on 后反向 shadow 一迭代；旧守卫分支再保两迭代才许删（另开切片） | §0-6、§4.8、ADR-0037、S10/S11 |
+| A-4 | LinkRef.title 命中不可见字段的呈现 + 公式依赖口径 | **批准但按"最小泄漏"收紧**：不显示空、不伪造标题——表级 r+字段 mask → 回退 record id + 统一中性旁注（不写"无权限"，建议"未命名记录"级，文案前端片与设计师定；悬浮解释仅对此档）；表级完全不可见 → 引用整体走不可见通道、不出现 id。公式：隐藏字段值以 null 参与计算，mask-null 与真实空值不可区分；S6 专项断言复核 SUM/AVERAGE（过滤非有限值）、CONCAT（null→空串）、算术（null→null）、ISBLANK 等现有语义（formula.ts:28-72/436-460/537-539/579-632），防 mask 值经结果或错误文案泄漏 | §0-4、§1.3-#5、§4.4 末、S6、ADR-0035 |
+| A-5 | v1 写不可映射授权的告知 | **批准 legacyUnmappable**：200 成功 + 响应带 legacyUnmappable:true（批量可带明细）+ 面板警示；不阻断、不扩旧表 schema；runbook 写清"关引擎后这类授权失效，重开引擎即恢复（数据行保留）" | §4.6 切换点表下注、S5、S8、S11 runbook、ADR-0040 |
 | A-6 | "父无权、子 direct 有权"节点在权威树的呈现 | **批准**：权威树不出现节点位置（不造伪父链），直达 URL/menu shortcut 可正常打开；**新增 AC：子节点打开后面包屑不得泄漏无权父节点名称**（从有权祖先起渲染或中性截断） | §0-8、S7、AC 入 S10 |
-| A-7 | 行级 conditions 顺延 P1 | **批准顺延**：M4 conditions 只收 null、非 null 写入 400（POLICY_CONDITION_UNSUPPORTED）；move-impact 人数不含行谓词；§2.2 与 ADR-0031 登记为已知限制 | §2.1-1、§2.2、S7、S8 错误码 |
+| A-7 | 行级 conditions 顺延 P1 | **批准顺延**：M4 conditions 只收 null、非 null 写入 400（POLICY_CONDITION_UNSUPPORTED）；move-impact 人数不含行谓词；§2.2 与 ADR-0032 登记为已知限制 | §2.1-1、§2.2、S7、S8 错误码 |
 | A-8 | 前端面板交付方式 | **批准同里程碑独立 M4-FE 片**：后端 S8 openapi 契约冻结后派工；本文档保持纯后端切片，前端片只消费 §7-S9 输入清单 | §0-8、§6 排期 3、S9 |
-| 补充 | manage_share（M4 第五枚组织动作；第四枚 manage_menu 归 M3）的跨里程碑改动 | 两次只增迁移（M3 manage_menu、M4 manage_share）对 role_owner 幂等补位，**同一检查清单**覆盖：M2 种子 SQL、shared-types OrgAction 联合、域白名单（在途 authorization.ts:14-20）、authActive 中间件、角色端点校验、幂等迁移、穷举测试；M4 文档须明确列出两次改动 | §4.10（新增）、ADR-0040、S5 |
+| 补充 | manage_share（M4 第五枚组织动作；第四枚 manage_menu 归 M3）的跨里程碑改动 | 两次只增迁移（M3 manage_menu、M4 manage_share）对 role_owner 幂等补位，**同一检查清单**覆盖：M2 种子 SQL、shared-types OrgAction 联合、域白名单（在途 authorization.ts:14-20）、authActive 中间件、角色端点校验、幂等迁移、穷举测试；M4 文档须明确列出两次改动 | §4.10（新增）、ADR-0041、S5 |
 
 ---
 
@@ -748,7 +748,7 @@ GX_AUTHZ_ENGINE=shadow pnpm --filter @gx/api test   # S3 起每片必跑：drift
 2. v0.1.0 风格库直升演练：迁移后 reconcile A/B/C=0、D 类对拍 0 漂移；旧分享链接与抽样资源权限逐值等价；幂等重跑 no changes。
 3. shadow 门证据齐备（S10 gate 文档）：全 characterization + 类生产演练流量 DRIFT 双零；切 on/回滚操作手册；**代码默认 off**，生产取值由总监下令。
 4. 500 用户/万节点：decide 与 scope 定数 SQL、无 SCAN、P95 留证；调岗/收权下次请求即生效（无决策缓存）。
-5. openapi 增补冻结并与真实响应/DTO 对拍（含 legacyUnmappable 字段）；ADR-0031~0040 归档；40RC 全绿；657+N/3 + lint/typecheck/ci-quality 全门；匿名三通道零引擎查询断言。
+5. openapi 增补冻结并与真实响应/DTO 对拍（含 legacyUnmappable 字段）；ADR-0032~0041 归档；40RC 全绿；657+N/3 + lint/typecheck/ci-quality 全门；匿名三通道零引擎查询断言。
 6. 旧三表 11 写点双写双向回滚证明齐全；旧 /api URL/信封/文案零变化；M1 flags 四组合与 M3 画布/内链 RC 通过。
 7. scope 契约可供 M5 直接消费（含 maskedTableFields），M5 接入时不需改引擎。
 
@@ -790,4 +790,4 @@ GX_AUTHZ_ENGINE=shadow pnpm --filter @gx/api test   # S3 起每片必跑：drift
 | S8 | openapi 增补 | docs/api/openapi.yaml；形状对拍测试 | 四组新端点+错误码（含 POLICY_CONDITION_UNSUPPORTED）+legacyUnmappable 全覆盖且与真实响应一致 | S5/S7 |
 | S9 | 后端契约片 | shared-types DTO；v1 __tests__；枚举/错误码表 | 三身份快照齐、api/web typecheck 双过，可供 M4-FE 派工 | S8 |
 | S10 | 对抗/规模/翻转演练 | ac-m4-*.test.ts；造数夹具；RC；m4-gate.md | AC-M4-1/2/3 + 越权矩阵全绿、双零漂移、A-3 五前置与 on/off 演练闭环 | 全部 |
-| S11 | 收口 | ADR-0031~0040；runbook；baseline；旧守卫清理裁决（on+反向 shadow 后再保两迭代） | RC/golden 逐值绿、升级 0 漂移、文档齐备 | S10 |
+| S11 | 收口 | ADR-0032~0041；runbook；baseline；旧守卫清理裁决（on+反向 shadow 后再保两迭代） | RC/golden 逐值绿、升级 0 漂移、文档齐备 | S10 |
