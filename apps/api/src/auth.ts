@@ -75,23 +75,23 @@ auth.post("/login", async (c) => {
   const user = await prisma.user.findUnique({ where: { email: parsed.data.email } });
   if (!user) {
     recordAudit(c, { event: "login_failure", status: 401, detail: { reason: "unknown_email" } });
-    return c.json({ error: "Invalid credentials" }, 401);
+    return c.json({ error: "Invalid credentials", code: "UNAUTHORIZED" }, 401);
   }
   // M2 账号生命周期：状态判定先于密码比对。
   // INVITED 尚未激活 -> 403（邀请账号持随机占位密码，若先比密码会恒为 401，无法表达"未激活"，
   // 见计划 §5-D.1：管理员域内系统取 403 + 审计）；DISABLED -> 401。
   if (user.status === USER_STATUS.INVITED) {
     recordAudit(c, { event: "login_failure", status: 403, actorId: user.id, detail: { reason: "invited" } });
-    return c.json({ error: "账号尚未激活" }, 403);
+    return c.json({ error: "账号尚未激活", code: "FORBIDDEN" }, 403);
   }
   if (user.status === USER_STATUS.DISABLED) {
     recordAudit(c, { event: "login_failure", status: 401, actorId: user.id, detail: { reason: "disabled" } });
-    return c.json({ error: "账号已停用" }, 401);
+    return c.json({ error: "账号已停用", code: "UNAUTHORIZED" }, 401);
   }
   const ok = await bcrypt.compare(parsed.data.password, user.passwordHash);
   if (!ok) {
     recordAudit(c, { event: "login_failure", status: 401, actorId: user.id, detail: { reason: "bad_password" } });
-    return c.json({ error: "Invalid credentials" }, 401);
+    return c.json({ error: "Invalid credentials", code: "UNAUTHORIZED" }, 401);
   }
   const token = await issueToken(user.id, user.tokenVersion);
   recordAudit(c, { event: "login_success", status: 200, actorId: user.id });
@@ -102,9 +102,9 @@ auth.get("/me", async (c) => {
   // 复用共享解析核心：验签 + status/tv 校验。DISABLED/tv 不符/用户不存在/坏 token 一律 401
   // （旧"用户不存在 404"在账号物理删除后不再可达为合法身份，统一按未认证处理，更安全）。
   const resolved = await resolveActiveAuth(c);
-  if (!resolved) return c.json({ error: "Invalid token" }, 401);
+  if (!resolved) return c.json({ error: "Invalid token", code: "UNAUTHORIZED" }, 401);
   const user = await prisma.user.findUnique({ where: { id: resolved.userId } });
-  if (!user) return c.json({ error: "Invalid token" }, 401);
+  if (!user) return c.json({ error: "Invalid token", code: "UNAUTHORIZED" }, 401);
   return c.json({ user: publicUser(user) });
 });
 
@@ -126,7 +126,7 @@ const updateMeSchema = z.object({
 
 auth.patch("/me", async (c) => {
   const userId = await getUserId(c);
-  if (!userId) return c.json({ error: "Unauthorized" }, 401);
+  if (!userId) return c.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, 401);
   const body = await c.req.json().catch(() => null);
   const parsed = updateMeSchema.safeParse(body);
   if (!parsed.success) {
@@ -154,7 +154,7 @@ const changePasswordSchema = z.object({
 
 auth.post("/me/change-password", async (c) => {
   const userId = await getUserId(c);
-  if (!userId) return c.json({ error: "Unauthorized" }, 401);
+  if (!userId) return c.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, 401);
   const body = await c.req.json().catch(() => null);
   const parsed = changePasswordSchema.safeParse(body);
   if (!parsed.success) {
@@ -163,7 +163,7 @@ auth.post("/me/change-password", async (c) => {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return c.json({ error: "User not found" }, 404);
   const ok = await bcrypt.compare(parsed.data.currentPassword, user.passwordHash);
-  if (!ok) return c.json({ error: "当前密码错误" }, 401);
+  if (!ok) return c.json({ error: "当前密码错误", code: "UNAUTHORIZED" }, 401);
   const passwordHash = await bcrypt.hash(parsed.data.newPassword, 10);
   await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
   recordAudit(c, { event: "change_password", status: 200, actorId: userId });
@@ -178,7 +178,7 @@ const deleteAccountSchema = z.object({
 
 auth.delete("/me", async (c) => {
   const userId = await getUserId(c);
-  if (!userId) return c.json({ error: "Unauthorized" }, 401);
+  if (!userId) return c.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, 401);
   const body = await c.req.json().catch(() => null);
   const parsed = deleteAccountSchema.safeParse(body);
   if (!parsed.success) {
@@ -187,7 +187,7 @@ auth.delete("/me", async (c) => {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return c.json({ error: "User not found" }, 404);
   const ok = await bcrypt.compare(parsed.data.password, user.passwordHash);
-  if (!ok) return c.json({ error: "密码错误" }, 401);
+  if (!ok) return c.json({ error: "密码错误", code: "UNAUTHORIZED" }, 401);
   // 检查是否还是某 base 的唯一 owner：是 → 拒绝注销（避免数据归属孤悬）
   const ownerOf = await prisma.member.findMany({
     where: { userId, role: "owner" },
