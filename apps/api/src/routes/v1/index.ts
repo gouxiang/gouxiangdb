@@ -9,11 +9,15 @@
 
 import { Hono } from "hono";
 import { requireActiveUser } from "../../middleware/authActive.js";
+import { org } from "./org/index.js";
 
 export const v1 = new Hono();
 
 // v1 全部端点要求登录且账号 ACTIVE/tv 匹配（S3 起的子路由共享此链）。
 v1.use("*", requireActiveUser);
+
+// 组织通讯录管理面（部门/成员/角色）。
+v1.route("/org", org);
 
 // 装配探针：返回当前登录主体的组织态，供冒烟/端到端确认 v1 已挂载且鉴权核心生效。
 v1.get("/meta", (c) => {
