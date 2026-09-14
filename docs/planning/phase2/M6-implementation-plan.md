@@ -485,6 +485,6 @@ DELETE /api/v1/pats/:id    仅本人行；→ 204；非本人/不存在统一 40
 
 - 本文档入库 commit：`679ba74`（2026-09-18，纯文档）。
 - 上一文档动作：M5 终审八裁决回填 `2c52196`（同日，B-1~B-8）。
-- **终审九裁决回填 commit：（提交后回填短 hash）**——C-1 限流默认定稿、**C-2 画布写入保 P0（新增 S6b：shared 六不变量校验器 + canvas.commit_elements/element.create 最小集 + UNSUPPORTED_OPERATION 显式拒绝；scope 五→六位加 canvas:write；切片 11→12）**、C-3 有效期 90 天默认+30/365/null、C-4 停用同事务批量吊销不恢复、C-5 同门控+stdio bin 进产物、C-6 delete_record 进 M6/batch 二期、C-7 record.search 进 M6、C-8 幂等落 mcp_idempotency 不用 Map、C-9 接入说明协议无关。
+- **终审九裁决回填 commit：`78c2676`（2026-09-18，纯文档；与 M7 总验收门同批）**——C-1 限流默认定稿、**C-2 画布写入保 P0（新增 S6b：shared 六不变量校验器 + canvas.commit_elements/element.create 最小集 + UNSUPPORTED_OPERATION 显式拒绝；scope 五→六位加 canvas:write；切片 11→12）**、C-3 有效期 90 天默认+30/365/null、C-4 停用同事务批量吊销不恢复、C-5 同门控+stdio bin 进产物、C-6 delete_record 进 M6/batch 二期、C-7 record.search 进 M6、C-8 幂等落 mcp_idempotency 不用 Map、C-9 接入说明协议无关。
 - 关联文档：同批产出 `docs/planning/phase2/M7-implementation-plan.md`（企业版总验收门，AC-M6-3 按本文件 S6b 最小集口径验收）。
 - 待裁决：无（C-1~C-9 全部关闭）。
