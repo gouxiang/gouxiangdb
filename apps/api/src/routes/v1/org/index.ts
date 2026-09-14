@@ -3,8 +3,10 @@
 import { Hono } from "hono";
 import { departments } from "./departments.js";
 import { memberRoutes } from "./members.js";
+import { roles } from "./roles.js";
 
 export const org = new Hono();
 
 org.route("/departments", departments);
 org.route("/members", memberRoutes);
+org.route("/roles", roles);

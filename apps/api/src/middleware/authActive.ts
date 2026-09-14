@@ -6,10 +6,8 @@
 
 import type { Context, Next } from "hono";
 import { resolveActiveAuth, type ResolvedAuth } from "../domain/org/authState.js";
-import { hasOrgAction, ORG_ACTIONS, type OrgActionString } from "../domain/org/authorization.js";
+import { hasOrgAction, ORG_ACTIONS, type OrgAction } from "../domain/org/authorization.js";
 import { HttpError } from "../guards.js";
-
-export type OrgAction = OrgActionString;
 
 declare module "hono" {
   interface ContextVariableMap {

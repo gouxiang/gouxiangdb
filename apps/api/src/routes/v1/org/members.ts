@@ -31,6 +31,15 @@ memberRoutes.get("/:id", async (c) => {
   return c.json(found);
 });
 
+// 指定成员有效组织角色（直接授予 ∪ 活部门祖先闭包，附来源）：GET /org/members/:id/effective-roles
+memberRoutes.get("/:id/effective-roles", async (c) => {
+  const id = c.req.param("id");
+  const target = await members.getMemberById(id);
+  if (!target) return c.json({ error: "成员不存在", code: "NOT_FOUND" }, 404);
+  const roles = await effectiveRoleRows(id);
+  return c.json({ userId: id, roles });
+});
+
 // 邀请：POST /org/members/invite {email,displayName} -> 201，明文激活码仅本次返回
 memberRoutes.post("/invite", requireOrgAction("manage_members"), async (c) => {
   const body = await c.req.json().catch(() => null);

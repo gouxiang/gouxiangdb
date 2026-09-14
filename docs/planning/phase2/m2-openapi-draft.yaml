@@ -1,0 +1,622 @@
+openapi: 3.0.3
+info:
+  title: GouXiangDB 企业组织通讯录 API（M2 分册草案）
+  version: 0.2.0-m2
+  description: >-
+    M2 组织通讯录 /api/v1 契约冻结草案（S5 产出，M3 S7 并入正式 openapi）。
+    仅覆盖 M2 后端 S3-S6 交付的组织面端点；旧 /api/* 不在本分册，契约零变化。
+    响应风格沿用现网（总监裁决 2）：成功返回资源本体或分页对象
+    {items,total,page,limit,hasMore}；错误统一为 {error, code}，不使用 {code:0,data,message} 信封。
+    除邀请接受外，全部端点要求 Authorization: Bearer <JWT>，且账号 ACTIVE、tv 与 users.tokenVersion 匹配。
+  x-m2-scope:
+    - "S3 部门树 /api/v1/org/departments"
+    - "S4 成员多部门/邀请/直接建号 /api/v1/org/members + /api/v1/auth/invite/accept"
+    - "S5 角色/授予/有效角色求值 /api/v1/org/roles + effective-roles"
+    - "S6 停用/重新激活端点将在 S6 合入后追加（POST /members/{id}/disable|reactivate）"
+servers:
+  - url: /api/v1
+    description: 根路径部署（经 Caddy/网关；basePath 部署同样适用）
+
+tags:
+  - name: meta
+  - name: auth-invite
+  - name: departments
+  - name: members
+  - name: roles
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+  responses:
+    BadRequest:
+      description: 请求参数/动作白名单/作用域非法
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: 未登录、token 失效、账号停用或 tv 不匹配
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: 已登录但缺少所需组织管理动作
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: 同名冲突/悬挂授予/前置条件未满足
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    MethodNotAllowed:
+      description: 对系统角色执行了不允许的操作（删/改 key/改动作）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      required: [error, code]
+      properties:
+        error: { type: string, description: 中文错误文案 }
+        code:
+          type: string
+          enum: [BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, HTTP_405, TOO_MANY_REQUESTS, INTERNAL]
+          description: 405 的机器码为 HTTP_405（系统角色锁定操作）
+        path: { type: string, description: 仅 404 顶层 notFound 附带 }
+    Dept:
+      type: object
+      properties:
+        id: { type: string }
+        workspaceId: { type: string, example: ws_default }
+        parentId: { type: string, nullable: true }
+        path: { type: string, example: "/dept_a/dept_b/" }
+        name: { type: string }
+        ord: { type: integer }
+        status: { type: string, example: active }
+        memberCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time, nullable: true }
+    DeptCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+        parentId: { type: string, nullable: true }
+        ord: { type: integer }
+    DeptUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+        ord: { type: integer }
+        parentId: { type: string, nullable: true, description: 变化则触发子树 path 事务重写 }
+    OrgRole:
+      type: object
+      properties:
+        id: { type: string }
+        workspaceId: { type: string }
+        systemKey: { type: string, nullable: true, enum: [owner, creator, editor, commenter, viewer, null] }
+        name: { type: string }
+        description: { type: string }
+        isSystem: { type: boolean }
+        actions:
+          type: array
+          items: { type: string, enum: [manage_departments, manage_members, manage_roles] }
+        createdAt: { type: string, format: date-time }
+        deletedAt: { type: string, format: date-time, nullable: true }
+    RoleCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+        description: { type: string, maxLength: 200 }
+        actions:
+          type: array
+          items: { type: string, enum: [manage_departments, manage_members, manage_roles] }
+    RoleUpdate:
+      type: object
+      properties:
+        name: { type: string, maxLength: 60, description: 系统角色传该字段 -> 405 }
+        description: { type: string, maxLength: 200, description: 系统角色仅此字段可改 }
+        actions:
+          type: array
+          items: { type: string, enum: [manage_departments, manage_members, manage_roles] }
+    RoleAssignment:
+      type: object
+      properties:
+        id: { type: string }
+        roleId: { type: string }
+        subjectType: { type: string, enum: [user, dept] }
+        subjectId: { type: string }
+        scopeType: { type: string, enum: [workspace] }
+        scopeNodeId: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        createdBy: { type: string, nullable: true }
+    AssignmentSubject:
+      type: object
+      required: [subjectType, subjectId]
+      properties:
+        subjectType: { type: string, enum: [user, dept] }
+        subjectId: { type: string }
+    AssignmentReplace:
+      type: object
+      required: [subjects]
+      properties:
+        subjects:
+          type: array
+          items: { $ref: '#/components/schemas/AssignmentSubject' }
+      description: 批量主体集；M2 固定 workspace 作用域，传 nodeId/scopeType!=workspace -> 400
+    OrgMember:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string }
+        displayName: { type: string }
+        status: { type: string, enum: [INVITED, ACTIVE, DISABLED] }
+        avatarUrl: { type: string, nullable: true }
+        invitedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        deptMemberships:
+          type: array
+          items:
+            type: object
+            properties:
+              departmentId: { type: string }
+              isMain: { type: boolean }
+              joinedAt: { type: string, format: date-time }
+        directRoles:
+          type: array
+          items:
+            type: object
+            properties:
+              roleId: { type: string }
+              systemKey: { type: string, nullable: true }
+              name: { type: string }
+    MemberPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OrgMember' } }
+        total: { type: integer }
+        page: { type: integer }
+        limit: { type: integer }
+        hasMore: { type: boolean }
+    MemberInvite:
+      type: object
+      required: [email, displayName]
+      properties:
+        email: { type: string, format: email }
+        displayName: { type: string, minLength: 1, maxLength: 60 }
+    MemberInviteResult:
+      type: object
+      properties:
+        userId: { type: string }
+        email: { type: string }
+        status: { type: string, example: INVITED }
+        inviteToken: { type: string, description: 明文一次性激活码（64 hex），仅本次返回 }
+    MemberCreate:
+      type: object
+      required: [email, displayName, password]
+      properties:
+        email: { type: string, format: email }
+        displayName: { type: string, minLength: 1, maxLength: 60 }
+        password: { type: string, minLength: 8, maxLength: 72 }
+    DeptAssign:
+      type: object
+      properties:
+        add: { type: array, items: { type: string } }
+        remove: { type: array, items: { type: string } }
+        mainDeptId: { type: string, nullable: true }
+    InviteAccept:
+      type: object
+      required: [token, password]
+      properties:
+        token: { type: string }
+        password: { type: string, minLength: 8, maxLength: 72 }
+        displayName: { type: string, maxLength: 60 }
+    AuthResult:
+      type: object
+      properties:
+        token: { type: string, description: 带 tv claim 的 JWT }
+        user:
+          type: object
+          properties:
+            id: { type: string }
+            email: { type: string }
+            displayName: { type: string }
+            status: { type: string, enum: [ACTIVE] }
+    EffectiveRole:
+      type: object
+      properties:
+        roleId: { type: string }
+        systemKey: { type: string, nullable: true }
+        name: { type: string }
+        isSystem: { type: boolean }
+        actions:
+          type: array
+          items: { type: string, enum: [manage_departments, manage_members, manage_roles] }
+        sources:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string, enum: [user, dept] }
+              id: { type: string }
+              name: { type: string, nullable: true }
+    EffectiveRoles:
+      type: object
+      properties:
+        userId: { type: string }
+        roles: { type: array, items: { $ref: '#/components/schemas/EffectiveRole' } }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /meta:
+    get:
+      tags: [meta]
+      summary: v1 探针，返回当前登录主体组织态
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  apiVersion: { type: string, example: v1 }
+                  enterpriseOrg: { type: boolean }
+                  auth:
+                    type: object
+                    properties:
+                      userId: { type: string }
+                      status: { type: string }
+                      workspaceId: { type: string, nullable: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/invite/accept:
+    post:
+      tags: [auth-invite]
+      summary: 接受邀请（公开，不要求登录），一次性激活码兑换 ACTIVE 与 JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InviteAccept' }
+      responses:
+        '200':
+          description: 激活成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: 激活码无效或已被使用（重放同码），统一 404 避免账号枚举
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /org/departments:
+    get:
+      tags: [departments]
+      summary: 平铺列全部活部门（含 memberCount），树组装在前端
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Dept' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [departments]
+      summary: 建部门（需 manage_departments）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeptCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dept' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /org/departments/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    patch:
+      tags: [departments]
+      summary: 改名/排序/移动（parentId 变化触发子树 path 重写、防环、32 层护栏）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeptUpdate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dept' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [departments]
+      summary: 软删（有子部门或成员 -> 409 并返回 counts）
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  deleted: { type: boolean, example: true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /org/members:
+    get:
+      tags: [members]
+      summary: 成员目录（登录全员可读），分页/q/deptId 含子树/status
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - { name: q, in: query, schema: { type: string }, description: email/displayName 模糊（参数化 LIKE） }
+        - { name: deptId, in: query, schema: { type: string }, description: 含该部门整棵子树 }
+        - { name: status, in: query, schema: { type: string, enum: [INVITED, ACTIVE, DISABLED] } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [members]
+      summary: 管理员直接建 ACTIVE 账号（需 manage_members）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemberCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  userId: { type: string }
+                  email: { type: string }
+                  status: { type: string, example: ACTIVE }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /org/members/invite:
+    post:
+      tags: [members]
+      summary: 邀请建 INVITED 账号（需 manage_members），明文激活码仅返一次
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemberInvite' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberInviteResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /org/members/me/effective-roles:
+    get:
+      tags: [members]
+      summary: 当前登录者有效组织角色（直接授予 ∪ 活部门祖先闭包，附来源）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EffectiveRoles' }
+
+  /org/members/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [members]
+      summary: 成员详情（含活部门归属与直接角色）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrgMember' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /org/members/{id}/effective-roles:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [members]
+      summary: 指定成员有效组织角色（求值为常量查询，调岗/兼岗下一次请求即变）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EffectiveRoles' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /org/members/{id}/departments:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [members]
+      summary: 增量调岗/兼岗/设主部门（需 manage_members）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeptAssign' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  userId: { type: string }
+                  deptMemberships:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        departmentId: { type: string }
+                        isMain: { type: boolean }
+                        joinedAt: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /org/roles:
+    get:
+      tags: [roles]
+      summary: 列角色（系统角色固定序在前，自定义随后）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OrgRole' }
+    post:
+      tags: [roles]
+      summary: 建自定义角色（需 manage_roles），actions 仅三枚组织动作
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrgRole' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /org/roles/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    patch:
+      tags: [roles]
+      summary: 改角色（系统角色仅 description，其余 405）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleUpdate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrgRole' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [roles]
+      summary: 软删自定义角色（有悬挂授予 -> 409 带数；?reassignTo= 迁移后删；系统角色 405）
+      parameters:
+        - { name: reassignTo, in: query, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  deleted: { type: boolean, example: true }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /org/roles/{id}/assignments:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [roles]
+      summary: 列角色授予
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RoleAssignment' }
+    put:
+      tags: [roles]
+      summary: 批量替换主体集（事务 diff 授予/撤销；需 manage_roles）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignmentReplace' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assignments:
+                    type: array
+                    items: { $ref: '#/components/schemas/RoleAssignment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
