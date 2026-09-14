@@ -377,11 +377,17 @@ model Workspace {
   id            String       @id
   name          String       @default("默认工作区")
   policyVersion Int          @default(0)
+  // M3 统一导航资源树（迁移 20260916090000_enterprise_nav_ddl 只增两列）：
+  // nav_nodes/menu_items 各自写事务 bump 对应版本；M3 无缓存消费者，为 M4/前端失效留口。
+  navVersion    Int          @default(0)
+  menuVersion   Int          @default(0)
   createdAt     DateTime     @default(now())
   updatedAt     DateTime?    @updatedAt
 
   departments   Department[]
   roles         Role[]
+  navNodes      NavNode[]
+  menuItems     MenuItem[]
 
   @@map("workspaces")
 }
@@ -456,6 +462,91 @@ model RoleAssignment {
 
   @@index([subjectType, subjectId])
   @@map("role_assignments")
+}
+
+// ============================================================================
+// M3 统一导航资源树（迁移 20260916090000_enterprise_nav_ddl / *_backfill）
+//   - nav_nodes 权威实体树（parentId 真相 + path 物化派生，规则同 departments）；
+//   - menu_items 引用编排层（shortcut.nodeId 可重复，RESTRICT FK）；
+//   - auth_policies M3 冻结结构、全里程碑无业务读写，M4 才启用。
+// nav_nodes 与六张实体表之间刻意不建关系/FK（实体表无 workspaceId 且删除语义不一），
+// 引用完整性由 domain/nav/sync.ts 同事务原语 + reconcile-nav 脚本应用层保证。
+// ============================================================================
+
+model NavNode {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  parentId         String?
+  kind             String // base | kb | table | view | doc | canvas | group
+  resourceType     String? // 资源节点同 kind；group 为 null
+  resourceId       String?
+  name             String
+  ord              Int       @default(0)
+  path             String    @default("")
+  depth            Int       @default(0)
+  isSystem         Int       @default(1) // 1=实体自动节点；0=管理员 group
+  config           String?
+  iconName         String?
+  inheritAncestors Int       @default(1) // M3 恒 1，M4 才可置 0
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime? @updatedAt
+  deletedAt        DateTime?
+
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent           NavNode?  @relation("NavNodeTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children         NavNode[] @relation("NavNodeTree")
+  shortcuts        MenuItem[]
+
+  @@unique([workspaceId, resourceType, resourceId])
+  @@index([workspaceId, parentId])
+  @@index([workspaceId, kind])
+  @@index([resourceType, resourceId])
+  @@index([path])
+  @@map("nav_nodes")
+}
+
+model MenuItem {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  parentId     String?
+  type         String // container | shortcut
+  nodeId       String? // shortcut -> nav_nodes.id（不唯一，可多处引用）；container 为 null
+  label        String?
+  iconName     String?
+  ord          Int       @default(0)
+  brokenReason String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime? @updatedAt
+  deletedAt    DateTime?
+
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent       MenuItem? @relation("MenuTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children     MenuItem[] @relation("MenuTree")
+  node         NavNode?  @relation(fields: [nodeId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, parentId])
+  @@index([nodeId])
+  @@map("menu_items")
+}
+
+// M3 冻结、M4 启用：禁止在 M3 的业务代码里读写本表（有特征测试锁定表存在但为空）。
+model AuthPolicy {
+  id          String   @id @default(cuid())
+  workspaceId String
+  nodeId      String
+  subjectType String // user | dept | role
+  subjectId   String
+  actions     String   @default("r")
+  fieldMask   String?
+  conditions  String?
+  reason      String?
+  createdAt   DateTime @default(now())
+  createdBy   String
+
+  @@unique([nodeId, subjectType, subjectId])
+  @@index([workspaceId, subjectType, subjectId])
+  @@index([nodeId])
+  @@map("auth_policies")
 }
 
 // ============================================================================

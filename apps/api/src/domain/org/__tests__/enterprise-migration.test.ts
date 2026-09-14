@@ -50,9 +50,9 @@ afterAll(() => {
 });
 
 describe("迁移清单与部署", () => {
-  it("迁移目录数为 14，且两条新迁移落表为 applied", () => {
+  it("M2 两条迁移在目录中且落表为 applied（目录总数随后续里程碑只增，M3 起 >=14）", () => {
     const dirs = migDirs();
-    expect(dirs.length).toBe(14);
+    expect(dirs.length).toBeGreaterThanOrEqual(14);
     expect(dirs).toContain("20260915090000_enterprise_org_ddl");
     expect(dirs).toContain("20260915090100_enterprise_org_backfill");
     const applied = db.prepare("SELECT migration_name, finished_at, rolled_back_at FROM _prisma_migrations")
