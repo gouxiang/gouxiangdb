@@ -1,34 +1,43 @@
-// M2/S2 /api/v1 装配骨架。
+// /api/v1 装配骨架（M2/S2 建，M3/S5 改双 flag 条件挂载）。
 //
-// 与旧 /api 平级独立 Hono 实例：app.ts 在 GX_ENTERPRISE_ORG!=off 时 mount.route("/api/v1", v1)。
-// 本片刻只挂一个需登录的 GET /meta 探针，验证"鉴权链 + 条件挂载"打通；
-// S3 起在其下挂 /org/departments、/org/members、/org/roles。
+// app.ts 在 config.enterpriseOrg || config.enterpriseNav 时 mount.route("/api/v1", v1)；
+// 子路由在本实例内按各自 flag 条件挂载，未启用时落入 v1 自身 404：
+//   - enterpriseOrg：/org/*、/meta、公开邀请（app.ts 侧）；
+//   - enterpriseNav：/workspaces/current/tree|menu。
+// 两个 flag 正交：仅一个 on 时只暴露对应子面。
 //
 // 响应风格沿用现网：成功返回资源本体，错误经全局 errorResponse 输出 {error,code}
-// （不引入 {code,data,message} 信封，见计划 §4.4/总监裁决 2）。
+// （不引入 {code,data,message} 信封，见计划 §4.4/总监裁决 2/5）。
 
 import { Hono } from "hono";
 import { requireActiveUser } from "../../middleware/authActive.js";
+import { config } from "../../config.js";
 import { org } from "./org/index.js";
+import { workspaceRoutes } from "./workspace.js";
 
 export const v1 = new Hono();
 
-// v1 全部端点要求登录且账号 ACTIVE/tv 匹配（S3 起的子路由共享此链）。
+// v1 全部端点要求登录且账号 ACTIVE/tv 匹配（条件挂载的子路由共享此链）。
 v1.use("*", requireActiveUser);
 
-// 组织通讯录管理面（部门/成员/角色）。
-v1.route("/org", org);
-
-// 装配探针：返回当前登录主体的组织态，供冒烟/端到端确认 v1 已挂载且鉴权核心生效。
-v1.get("/meta", (c) => {
-  const auth = c.get("auth");
-  return c.json({
-    apiVersion: "v1",
-    enterpriseOrg: true,
-    auth: {
-      userId: auth.userId,
-      status: auth.status,
-      workspaceId: auth.workspaceId,
-    },
+if (config.enterpriseOrg) {
+  // 组织通讯录管理面（部门/成员/角色）+ 装配探针。
+  v1.route("/org", org);
+  v1.get("/meta", (c) => {
+    const auth = c.get("auth");
+    return c.json({
+      apiVersion: "v1",
+      enterpriseOrg: true,
+      auth: {
+        userId: auth.userId,
+        status: auth.status,
+        workspaceId: auth.workspaceId,
+      },
+    });
   });
-});
+}
+
+if (config.enterpriseNav) {
+  // M3 统一导航资源树读（tree 权威树 + menu 引用树）。
+  v1.route("/workspaces", workspaceRoutes);
+}

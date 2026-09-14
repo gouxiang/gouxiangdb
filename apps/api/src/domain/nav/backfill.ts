@@ -84,6 +84,11 @@ export async function buildExpectedNodes(tx: DbTx): Promise<ExpectedNode[]> {
  * 注意：本函数【不】重算 path/depth——path 重建由编排方（reconcile applyFixesTx /
  * S3 sync 原语）在节点对齐完成后显式统一调用 rebuildPathsTx 一次，避免重复全表扫描。
  * group 节点不被本函数改写。返回 upsert/update 计数。
+ *
+ * 创建按 parentId 拓扑序多趟推进：期望集中 doc 按 updatedAt desc 排序，子文档可能排在
+ * 父文档之前，而 nav_nodes.parentId 自引用 FK（RESTRICT）逐行校验，先建子会 P2003。
+ * 每趟只建"父为根或父已在库/本轮已建"的行，余下下一趟；期望集由 buildExpectedNodes
+ * 保证父链闭合（doc 仅挂活父），故必在有限趟内收敛。
  */
 export async function reconcileNodesTx(
   tx: DbTx,
@@ -93,33 +98,58 @@ export async function reconcileNodesTx(
   let updated = 0;
   let revived = 0;
 
-  for (const e of expected) {
-    const existing = await tx.navNode.findUnique({ where: { id: e.id } });
-    if (!existing) {
+  // 已存在节点 id（含软删）：首轮一次全量取，供拓扑判定。
+  const existingRows = await tx.navNode.findMany({ select: { id: true } });
+  const knownIds = new Set(existingRows.map((r) => r.id));
+  let pending = expected;
+
+  while (pending.length > 0) {
+    const next: ExpectedNode[] = [];
+    for (const e of pending) {
+      if (e.parentId !== null && !knownIds.has(e.parentId)) {
+        next.push(e); // 父尚未建，下一趟再试。
+        continue;
+      }
+      const existing = await tx.navNode.findUnique({ where: { id: e.id } });
+      if (!existing) {
+        await tx.navNode.create({
+          data: {
+            id: e.id, workspaceId: WS_ID, parentId: e.parentId, kind: e.kind,
+            resourceType: e.kind, resourceId: e.resourceId, name: e.name, ord: e.ord,
+            isSystem: 1, inheritAncestors: 1,
+          },
+        });
+        knownIds.add(e.id);
+        created++;
+        continue;
+      }
+      const changed =
+        existing.name !== e.name ||
+        existing.parentId !== e.parentId ||
+        existing.ord !== e.ord ||
+        existing.resourceType !== e.kind ||
+        existing.resourceId !== e.resourceId;
+      if (changed || existing.deletedAt) {
+        await tx.navNode.update({
+          where: { id: e.id },
+          data: { name: e.name, parentId: e.parentId, ord: e.ord, resourceType: e.kind, resourceId: e.resourceId, deletedAt: null },
+        });
+        if (existing.deletedAt) revived++;
+        else if (changed) updated++;
+      }
+    }
+    if (next.length === pending.length) {
+      // 无进展说明期望集父链未闭合（不应发生：buildExpectedNodes 只挂活父）；
+      // 交 FK 报错暴露根因，不静默吞。
       await tx.navNode.create({
         data: {
-          id: e.id, workspaceId: WS_ID, parentId: e.parentId, kind: e.kind,
-          resourceType: e.kind, resourceId: e.resourceId, name: e.name, ord: e.ord,
-          isSystem: 1, inheritAncestors: 1,
+          id: pending[0].id, workspaceId: WS_ID, parentId: pending[0].parentId, kind: pending[0].kind,
+          resourceType: pending[0].kind, resourceId: pending[0].resourceId,
+          name: pending[0].name, ord: pending[0].ord, isSystem: 1, inheritAncestors: 1,
         },
       });
-      created++;
-      continue;
     }
-    const changed =
-      existing.name !== e.name ||
-      existing.parentId !== e.parentId ||
-      existing.ord !== e.ord ||
-      existing.resourceType !== e.kind ||
-      existing.resourceId !== e.resourceId;
-    if (changed || existing.deletedAt) {
-      await tx.navNode.update({
-        where: { id: e.id },
-        data: { name: e.name, parentId: e.parentId, ord: e.ord, resourceType: e.kind, resourceId: e.resourceId, deletedAt: null },
-      });
-      if (existing.deletedAt) revived++;
-      else if (changed) updated++;
-    }
+    pending = next;
   }
 
   return { created, updated, revived };

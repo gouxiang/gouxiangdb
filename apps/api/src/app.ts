@@ -140,11 +140,14 @@ function createMount(webRoot: string | null): Hono {
   api.route("/search", search);
   mount.route("/api", api);
 
-  // M2 企业组织管理面：/api/v1 与 /api 平级独立实例；GX_ENTERPRISE_ORG=off 时不挂载
-  // （请求落入既有 notFound 404），旧 /api 与资源鉴权不受任何影响。
-  if (config.enterpriseOrg) {
-    // 公开邀请接受（登录前，不要求 ACTIVE）挂在受保护 v1 之前；路径不重叠。
-    mount.route("/api/v1/auth/invite", inviteRoutes);
+  // M2/M3 企业面：/api/v1 与 /api 平级独立实例；两个 flag 任一 on 即挂载，
+  // 子路由在 v1/index.ts 内按各自 flag 条件挂载，未启用的子面请求落入 notFound 404。
+  // 两 flag 全 off 时整个 /api/v1 不挂载（与未升级一致），旧 /api 不受影响。
+  if (config.enterpriseOrg || config.enterpriseNav) {
+    // 公开邀请接受（登录前，不要求 ACTIVE）仅组织面启用，挂在受保护 v1 之前；路径不重叠。
+    if (config.enterpriseOrg) {
+      mount.route("/api/v1/auth/invite", inviteRoutes);
+    }
     mount.route("/api/v1", v1);
   }
 

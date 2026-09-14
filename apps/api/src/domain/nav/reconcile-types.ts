@@ -6,8 +6,11 @@
 //   C4 未收纳（活 table/根级活 doc/活 canvas 无活 shortcut，正常编排态，可经"全部"列表到达；
 //      零入口全收纳仅约束 S2 存量基线）；C5 同父菜单 ord 重复。
 
-// S5 会把图标白名单下沉 shared-types 单一真源；S2/S4 脚本先用与 icons.tsx 对齐的最小集合。
-export const MENU_ICONS = new Set(["database", "book", "table", "doc", "canvas", "folder", "folderOpen"]);
+import { NAV_ICONS } from "@gx/shared-types";
+
+// 图标白名单单一真源在 shared-types（NAV_ICONS，与 web icons.tsx 镜像）；
+// reconcile 以 Set 形态消费。只增不删：新增菜单图标先在 icons.tsx 落地再进 NAV_ICONS。
+export const MENU_ICONS = new Set<string>(NAV_ICONS);
 
 export interface DiffEntry {
   code: string;

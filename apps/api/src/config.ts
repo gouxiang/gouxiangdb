@@ -174,6 +174,13 @@ export interface AppConfig {
    */
   enterpriseOrg: boolean;
   /**
+   * M3 统一导航资源树开关（GX_ENTERPRISE_NAV）：
+   * on（默认，含 test）= 挂载 /api/v1/workspaces/current/tree|menu 读端点；
+   * off = 这两个子路由 404（/api/v1 是否挂载由 enterpriseOrg || enterpriseNav 决定）。
+   * 与 enterpriseOrg 正交：nav on / org off 时仅导航读可达，org 子路由仍 404。
+   */
+  enterpriseNav: boolean;
+  /**
    * 鉴权状态缓存 TTL 毫秒（GX_AUTH_STATE_TTL_MS，默认 0=完全旁路零缓存，每请求一次 PK 点查，
    * 严格满足"停用后下一次请求即 401"）。>0 时启用进程内有界缓存，停用时同进程主动 invalidate。
    */
@@ -225,8 +232,10 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     rateLimitEnabled: env.NODE_ENV === "test"
       ? env.GX_RATE_LIMIT === "on"
       : env.GX_RATE_LIMIT !== "off",
-    // M2：组织管理面默认 on（test 亦默认 on，便于新测试直跑；显式 off 摘除 v1 路由）。
+    // M2：组织管理面默认 on（test 亦默认 on，便于新测试直跑；显式 off 摘除 org 子路由）。
     enterpriseOrg: env.GX_ENTERPRISE_ORG !== "off",
+    // M3：统一导航读默认 on（同纪律）；显式 off 摘除 tree/menu 子路由。
+    enterpriseNav: env.GX_ENTERPRISE_NAV !== "off",
     authStateTtlMs: parseNonNegInt(env.GX_AUTH_STATE_TTL_MS, 0),
     socketPath: env.GX_SOCKET_PATH?.trim() ?? "",
     basePath: normalizeBasePath(env.GX_BASE_PATH),
