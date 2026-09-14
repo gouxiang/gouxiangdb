@@ -2,37 +2,19 @@
 // JWT 鉴权 + 路由级 RBAC（owner/creator/editor/commenter/viewer 5 角色）
 
 import { Hono } from "hono";
-import { sign, verify } from "hono/jwt";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "./db.js";
-import { config } from "./config.js";
 import { audit as recordAudit } from "./audit/emit.js";
-import fs from "node:fs";
-import path from "node:path";
+import { issueToken, resolveActiveAuth, USER_STATUS } from "./domain/org/authState.js";
+import { publicUser } from "./domain/userProjection.js";
 
-// 上传根目录来自 config（GX_DATA_DIR / UPLOAD_ROOT 单一来源，头像存 uploads/avatars/<userId>.<ext>）
-const AVATAR_DIR = path.join(config.uploadRoot, "avatars");
-const AVATAR_MAX_BYTES = 5 * 1024 * 1024; // 5MB
-const AVATAR_ALLOWED: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "image/gif": "gif",
-};
-
-// JWT 密钥来自 config 启动闸门：生产缺密钥/使用开发默认值时进程已在 import 阶段退出（fail-closed）。
-const JWT_SECRET = config.jwtSecret;
-
-// token 有效期 7 天（秒）
-const TOKEN_TTL_SEC = 7 * 24 * 60 * 60;
-
+// token 有效期常量与 JWT/状态解析核心已下沉到 domain/org/authState.ts（旧 /api 与 v1 共享）。
 export type Role = "owner" | "creator" | "editor" | "commenter" | "viewer";
 
-function issueToken(userId: string): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
-  return sign({ userId, iat: now, exp: now + TOKEN_TTL_SEC }, JWT_SECRET, "HS256");
-}
+// 对外保持从 auth.ts 可导入（v1 中间件/后续 S6 复用），实现单一真源在 domain/org/authState.ts。
+export { USER_STATUS, issueToken, resolveActiveAuth };
+export type { UserStatus, ResolvedAuth } from "./domain/org/authState.js";
 
 export const auth = new Hono();
 
@@ -57,7 +39,8 @@ auth.post("/signup", async (c) => {
   const user = await prisma.user.create({
     data: { email, displayName, passwordHash },
   });
-  const token = await issueToken(user.id);
+  // 注册直接 ACTIVE（status 默认），tokenVersion=0。
+  const token = await issueToken(user.id, user.tokenVersion);
   recordAudit(c, { event: "signup", status: 200, actorId: user.id });
   return c.json({ token, user: publicUser(user) });
 });
@@ -83,46 +66,31 @@ auth.post("/login", async (c) => {
     recordAudit(c, { event: "login_failure", status: 401, actorId: user.id, detail: { reason: "bad_password" } });
     return c.json({ error: "Invalid credentials" }, 401);
   }
-  const token = await issueToken(user.id);
+  // M2 账号生命周期：INVITED 尚未激活 -> 403（与密码错误 401 区分）；DISABLED -> 401。
+  if (user.status === USER_STATUS.INVITED) {
+    recordAudit(c, { event: "login_failure", status: 403, actorId: user.id, detail: { reason: "invited" } });
+    return c.json({ error: "账号尚未激活" }, 403);
+  }
+  if (user.status === USER_STATUS.DISABLED) {
+    recordAudit(c, { event: "login_failure", status: 401, actorId: user.id, detail: { reason: "disabled" } });
+    return c.json({ error: "账号已停用" }, 401);
+  }
+  const token = await issueToken(user.id, user.tokenVersion);
   recordAudit(c, { event: "login_success", status: 200, actorId: user.id });
   return c.json({ token, user: publicUser(user) });
 });
 
 auth.get("/me", async (c) => {
-  const auth = c.req.header("Authorization") ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (!token) return c.json({ error: "No token" }, 401);
-  try {
-    const payload = await verify(token, JWT_SECRET, "HS256");
-    const user = await prisma.user.findUnique({ where: { id: payload.userId as string } });
-    if (!user) return c.json({ error: "User not found" }, 404);
-    return c.json({ user: publicUser(user) });
-  } catch {
-    return c.json({ error: "Invalid token" }, 401);
-  }
+  // 复用共享解析核心：验签 + status/tv 校验。DISABLED/tv 不符/用户不存在/坏 token 一律 401
+  // （旧"用户不存在 404"在账号物理删除后不再可达为合法身份，统一按未认证处理，更安全）。
+  const resolved = await resolveActiveAuth(c);
+  if (!resolved) return c.json({ error: "Invalid token" }, 401);
+  const user = await prisma.user.findUnique({ where: { id: resolved.userId } });
+  if (!user) return c.json({ error: "Invalid token" }, 401);
+  return c.json({ user: publicUser(user) });
 });
 
-/**
- * 公共用户字段投影：剥离 passwordHash，前端能直接使用。
- * 所有返回 /me /signup /login 字段均走此函数，避免个别字段遗漏导致前端解析异常。
- */
-function publicUser(u: {
-  id: string; email: string; displayName: string; passwordHash: string;
-  username: string | null; phone: string | null; avatarUrl: string | null;
-  bio: string | null; createdAt: Date; updatedAt: Date | null;
-}) {
-  return {
-    id: u.id,
-    email: u.email,
-    displayName: u.displayName,
-    username: u.username,
-    phone: u.phone,
-    avatarUrl: u.avatarUrl,
-    bio: u.bio,
-    createdAt: u.createdAt.toISOString(),
-    updatedAt: u.updatedAt?.toISOString() ?? null,
-  };
-}
+// 公共用户字段投影 publicUser 已抽到 domain/userProjection.ts（与 meAvatar 路由共用）。
 
 // PATCH /me：更新昵称 / 用户名 / 手机 / 简介
 const updateMeSchema = z.object({
@@ -224,74 +192,18 @@ auth.delete("/me", async (c) => {
   return c.json({ ok: true });
 });
 
-// POST /me/avatar：上传头像（multipart form-data，字段名 "file"）
-auth.post("/me/avatar", async (c) => {
-  const userId = await getUserId(c);
-  if (!userId) return c.json({ error: "Unauthorized" }, 401);
-  const body = await c.req.parseBody().catch(() => null);
-  const file = (body as { file?: unknown } | null)?.file;
-  if (!(file instanceof File)) {
-    return c.json({ error: "需要 file 字段（multipart form-data）" }, 400);
-  }
-  const ext = AVATAR_ALLOWED[file.type];
-  if (!ext) {
-    return c.json({ error: "仅支持 JPG / PNG / WebP / GIF 格式" }, 400);
-  }
-  if (file.size > AVATAR_MAX_BYTES) {
-    return c.json({ error: "头像不能超过 5MB" }, 400);
-  }
-  try {
-    fs.mkdirSync(AVATAR_DIR, { recursive: true });
-    const buf = Buffer.from(await file.arrayBuffer());
-    // 覆盖同名旧文件（同一 userId 只会有一个头像）
-    fs.writeFileSync(path.join(AVATAR_DIR, `${userId}.${ext}`), buf);
-    const avatarUrl = `/uploads/avatars/${userId}.${ext}?v=${Date.now()}`;
-    const updated = await prisma.user.update({
-      where: { id: userId },
-      data: { avatarUrl },
-    });
-    return c.json({ user: publicUser(updated) });
-  } catch {
-    return c.json({ error: "头像保存失败" }, 500);
-  }
-});
-
-// DELETE /me/avatar：移除头像（恢复默认首字母头像）
-auth.delete("/me/avatar", async (c) => {
-  const userId = await getUserId(c);
-  if (!userId) return c.json({ error: "Unauthorized" }, 401);
-  // 删除磁盘上所有该 userId 的头像（jpg/png/webp/gif）
-  for (const ext of Object.values(AVATAR_ALLOWED)) {
-    try {
-      fs.rmSync(path.join(AVATAR_DIR, `${userId}.${ext}`), { force: true });
-    } catch {
-      /* 文件不存在则忽略 */
-    }
-  }
-  const updated = await prisma.user.update({
-    where: { id: userId },
-    data: { avatarUrl: null },
-  });
-  recordAudit(c, { event: "avatar_delete", status: 200, actorId: userId });
-  return c.json({ user: publicUser(updated) });
-});
-
 export type AuthPayload = {
   userId: string;
   iat: number;
 };
 
-// 鉴权工具：从 Authorization 头解析 userId
+// 鉴权工具：从 Authorization 头解析 userId。
+// 签名保持 (c) => Promise<string|null> 不变（records-keyset.test.ts 的 vi.mock 依赖此形态）；
+// 内部改为走 resolveActiveAuth：ACTIVE 且 tv 匹配时与旧版"仅验签"结果等价（存量无 tv token
+// 视 tv=0、users.tokenVersion 默认 0 平滑通过）；DISABLED/tv 不符/用户不存在则 null。
 export async function getUserId(c: { req: { header: (k: string) => string | undefined } }): Promise<string | null> {
-  const auth = c.req.header("Authorization") ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (!token) return null;
-  try {
-    const payload = await verify(token, JWT_SECRET, "HS256");
-    return payload.userId as string;
-  } catch {
-    return null;
-  }
+  const resolved = await resolveActiveAuth(c);
+  return resolved?.userId ?? null;
 }
 
 // 帮助函数：检查 user 对 base 的角色

@@ -97,6 +97,14 @@ export function validateEnv(env: NodeJS.ProcessEnv): ConfigIssue[] {
     }
   }
 
+  const authTtlRaw = env.GX_AUTH_STATE_TTL_MS;
+  if (authTtlRaw !== undefined && authTtlRaw !== "") {
+    const n = Number(authTtlRaw);
+    if (!Number.isInteger(n) || n < 0) {
+      issues.push({ variable: "GX_AUTH_STATE_TTL_MS", reason: `必须为非负整数毫秒，当前 "${authTtlRaw}"` });
+    }
+  }
+
   return issues;
 }
 
@@ -126,6 +134,14 @@ function parseBodyLimit(raw: string | undefined, fallbackBytes: number): number 
   return Math.round(mb * 1024 * 1024);
 }
 
+// 非负整数毫秒；缺省/空白/非法回退默认值（生产侧非法值另在 validateEnv 报错）。
+function parseNonNegInt(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) return fallback;
+  return n;
+}
+
 function buildCorsPatterns(raw: string | undefined): RegExp[] {
   if (!raw) return [/^http:\/\/localhost(:\d+)?$/, /^http:\/\/127\.0\.0\.1(:\d+)?$/];
   return raw
@@ -151,6 +167,17 @@ export interface AppConfig {
   auditDir: string;
   backupDir: string;
   rateLimitEnabled: boolean;
+  /**
+   * M2 企业组织管理面开关（GX_ENTERPRISE_ORG）：
+   * on（默认，含 test）= 挂载 /api/v1 组织路由、启用工作区自举；
+   * off = 不挂 /api/v1（请求 404，与未升级一致），组织表/列闲置，旧 /api 不受影响。
+   */
+  enterpriseOrg: boolean;
+  /**
+   * 鉴权状态缓存 TTL 毫秒（GX_AUTH_STATE_TTL_MS，默认 0=完全旁路零缓存，每请求一次 PK 点查，
+   * 严格满足"停用后下一次请求即 401"）。>0 时启用进程内有界缓存，停用时同进程主动 invalidate。
+   */
+  authStateTtlMs: number;
   /**
    * 以下三项为【可选部署适配】（默认全空 = 与历史行为逐字节一致）：
    * - socketPath：非空时监听 unix socket（飞牛网关转发）而非 TCP。env GX_SOCKET_PATH。
@@ -198,6 +225,9 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     rateLimitEnabled: env.NODE_ENV === "test"
       ? env.GX_RATE_LIMIT === "on"
       : env.GX_RATE_LIMIT !== "off",
+    // M2：组织管理面默认 on（test 亦默认 on，便于新测试直跑；显式 off 摘除 v1 路由）。
+    enterpriseOrg: env.GX_ENTERPRISE_ORG !== "off",
+    authStateTtlMs: parseNonNegInt(env.GX_AUTH_STATE_TTL_MS, 0),
     socketPath: env.GX_SOCKET_PATH?.trim() ?? "",
     basePath: normalizeBasePath(env.GX_BASE_PATH),
     webDist: env.GX_WEB_DIST?.trim() ?? "",

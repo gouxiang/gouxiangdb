@@ -16,6 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { auth } from "./auth.js";
+import { meAvatar } from "./routes/meAvatar.js";
 import { bases } from "./routes/bases.js";
 import { tables } from "./routes/tables.js";
 import { fields } from "./routes/fields.js";
@@ -24,6 +25,7 @@ import { views } from "./routes/views.js";
 import { kb } from "./routes/kb.js";
 import { pub } from "./routes/public.js";
 import { search } from "./routes/search.js";
+import { v1 } from "./routes/v1/index.js";
 import { health } from "./routes/health.js";
 import { healthz } from "./routes/healthz.js";
 import { readyz } from "./routes/readyz.js";
@@ -125,6 +127,8 @@ function createMount(webRoot: string | null): Hono {
   const api = new Hono();
   api.route("/health", health);
   api.route("/auth", auth);
+  // 头像上传/删除从 auth.ts 抽出为独立路由，仍挂在 /api/auth/me/avatar 原路径（契约不变）。
+  api.route("/auth/me/avatar", meAvatar);
   api.route("/bases", bases);
   api.route("/tables", tables);
   api.route("/fields", fields);
@@ -134,6 +138,12 @@ function createMount(webRoot: string | null): Hono {
   api.route("/public", pub);
   api.route("/search", search);
   mount.route("/api", api);
+
+  // M2 企业组织管理面：/api/v1 与 /api 平级独立实例；GX_ENTERPRISE_ORG=off 时不挂载
+  // （请求落入既有 notFound 404），旧 /api 与资源鉴权不受任何影响。
+  if (config.enterpriseOrg) {
+    mount.route("/api/v1", v1);
+  }
 
   // Web 静态（SPA）挂最后：仅在 webDist 有效目录含 index.html 时注册；
   // 无效时不注册，未知 GET 路径继续走 app 顶层 JSON 404（API-only 部署与现状一致）。
