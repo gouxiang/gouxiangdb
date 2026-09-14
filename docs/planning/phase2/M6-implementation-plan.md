@@ -1,8 +1,8 @@
 # M6 鉴权 MCP 服务 — 可执行实施切片（设计与现状核对，不改业务码）
 
-- 日期：2026-09-18
+- 日期：2026-09-18（2026-09-18 终审九裁决回填，状态见下）
 - 作者：架构师 高见远
-- 状态：**待项目总监终审**（§11 待裁决清单未关闭前不得派工实施）
+- 状态：**项目总监终审通过（C-1~C-9 全部定稿，见 §11），可派工实施**；唯一口径变化 = C-2 画布写入保 P0，新增 **S6b** 切片（§7/§9），切片总数 11 → **12**
 - 上游依据：SPEC-enterprise-v1.0 §4（版本/方言铁律 `:60`）、§5（`:74` `GET/POST/DELETE /api/v1/pats`、`:77` `ANY /mcp`、`:78` OAuth 可选、MCP 工具命名空间 `:79`）、§6（`:88` `personal_access_tokens`：hash/name/scope/lastUsedAt/expiresAt/revoked；可选 oauth 表）、§7（`:102` 设置 → MCP 接入 PatList）、§9（AC-M6-1 `:126` 只读凭证无写工具+直调 UNKNOWN_TOOL、AC-M6-2 `:127` 字段收窄+参数二次拦截、AC-M6-3 `:128` 块/图元写入 Web 端结构完整+409+confirm、AC-M6-4 `:129` 吊销即时+调用全审计）、§10（`:135` op≤100/文本≤100KB/10MB/工具 30s/长任务 jobId）；ARCH-enterprise §8.1-8.6（`:749-841` 双传输/双闸门/工具全集/三语言/协议无关）、§10.2 M6 验收（`:917`）、ADR-0019（`:941`）、§13-4（`:989` OAuth 客户驱动）；PRD-enterprise MC2/MC6（语言可学、无权不可调）；**硬约束来源：`spike-mcp-transport.md`（2026-09-14，spike-mcp-transport 实测报告，已入库）**
 - 适用代码基线：`main` @ `5f05d19`（M2-S6 收口；M3/M4/M5 均未开工实施，只有切片文档）；本计划入库提交见文末自报。根 package.json engines node>=20（实际 Node 22 验证）、v0.1.0
 - 测试基线（项目总监复验给定，本文不重跑）：api **60 文件 710 passed / 3 skipped**（5f05d19）；迁移目录 **14 个**。M3 后预期 17、M4 后 19（索引补强可能 20）、M5 后约 22（change_events/app_settings 两迁移）；**M6 第一个数据迁移（personal_access_tokens）编号排在 M5 全部迁移之后**
@@ -15,16 +15,16 @@
 ## 0. 结论先行
 
 1. **传输定稿：官方 `@modelcontextprotocol/sdk@1.30.0` 的 `WebStandardStreamableHTTPServerTransport` 与 Hono 直桥**（spike §0/§1 实测，不可重新讨论）：`transport.handleRequest(c.req.raw)` 直接吃 WHATWG Request 返回标准 Response，d.ts 内即给 Hono 示例；**不需要** `@hono/node-server` 桥接 express/node 版 transport。首版**无状态 JSON 形态**：每请求 `new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })` + **必须 `await server.connect(transport)`**（漏 connect 请求永久挂起，spike §1.2 实测踩坑）；无状态 transport 实例 SDK 硬校验不可跨请求复用，形态 = 每请求新建 transport + 按该请求身份 build 一个 McpServer，处理完即弃。SSE/有状态会话留待长任务推送再开，M6 不做。
-2. **两处部署硬改动（spike §0-5/§9.2 实测复现）**：① **/mcp 豁免全局 1MB body 上限**（bodyLimit.ts:37-38 现状只分 json 1MB/avatar 6MB 两档），独立 `GX_MCP_BODY_LIMIT` 默认 **11MB**（对齐文档/画布 10MB + JSON 开销；实测 2MB 画布 call 在 1MB 下 413、11MB 放行）；② **/mcp 独立限流档**——rateLimit.ts:71-78 `selectRule` 现状对 `/mcp` 不匹配任何规则（DEFAULT_RULE 只认 `/api/` 前缀，:64），即**当前天然零限流**，M6 必须新增按 patId 的独立档（建议值待裁决 C-1），不留裸奔。
-3. **PAT 是首版唯一凭证，OAuth 只留扩展点不实现**（spike §6 + ARCH §13-4）：明文 `gxpat_` + 24 字节随机 base64url，**只在创建响应中明文返回一次**，库存 SHA-256 hash（tokenHash 唯一索引）+ scope + expiresAt + revokedAt（用时间戳非 boolean）+ lastUsedAt；常量时间比对；lastUsedAt 进程内 Map 节流 60s 批量落库。scope 首版用粗粒度动作位（record:read/record:write/doc:read/doc:write/canvas:read），**不把资源授权复制进 token**——能访问哪些库表文档一律由 M4 引擎按 userId 现算。
+2. **两处部署硬改动（spike §0-5/§9.2 实测复现）**：① **/mcp 豁免全局 1MB body 上限**（bodyLimit.ts:37-38 现状只分 json 1MB/avatar 6MB 两档），独立 `GX_MCP_BODY_LIMIT` 默认 **11MB**（对齐文档/画布 10MB + JSON 开销；实测 2MB 画布 call 在 1MB 下 413、11MB 放行）；② **/mcp 独立限流档**——rateLimit.ts:71-78 `selectRule` 现状对 `/mcp` 不匹配任何规则（DEFAULT_RULE 只认 `/api/` 前缀，:64），即**当前天然零限流**，M6 必须新增按 patId 的独立档，不留裸奔。**C-1 终审定稿**：认证后 **patId 桶 120 次/60s**、认证前 **IP 预桶 300 次/60s**、PAT 管理 REST（/api/v1/pats）**30 次/60s/人**，三者均可经 `GX_MCP_RATE_*` 环境变量配置（命名 S2 落 config 时按 §5.3 语义给定）；超限 **HTTP 429 + Retry-After**。NAS 上若实测 AI 调用模式更陡再调（runbook 留调档位），不阻塞 M6。
+3. **PAT 是首版唯一凭证，OAuth 只留扩展点不实现**（spike §6 + ARCH §13-4）：明文 `gxpat_` + 24 字节随机 base64url，**只在创建响应中明文返回一次**，库存 SHA-256 hash（tokenHash 唯一索引）+ scope + expiresAt + revokedAt（用时间戳非 boolean）+ lastUsedAt；常量时间比对；lastUsedAt 进程内 Map 节流 60s 批量落库。scope 首版用粗粒度动作位（record:read/record:write/doc:read/doc:write/canvas:read/**canvas:write（C-2 追加）**），**不把资源授权复制进 token**——能访问哪些库表文档一律由 M4 引擎按 userId 现算。
 4. **PAT 鉴权与 M2 用户态强联动（AC-M6-4 的另一半）**：每请求边缘不信任任何会话，顺序 = Bearer 解析 → hash 查 PAT（查不到/伪造一律 401 同口径）→ revokedAt/expiresAt → **再查 subject 用户 `status=ACTIVE`**（复用 resolveActiveAuth 的 status 现查思路，authState.ts:80-86 同款 PK 点查，默认零缓存）：用户被停用（lifecycle.disableUser 置 DISABLED+tokenVersion+1，lifecycle.ts:115-137）→ 其全部 PAT **同事务批量 revokedAt**（M6 给在库停用路径追加一行）+ 边缘 status 兜底双保险，下一请求即 401；用户物理删除 → FK `onDelete: Cascade` 带走 PAT。改密码/tokenVersion 不杀 PAT（PAT 是独立凭据，不比对 tv）。
 5. **双闸门 R-MCP-1 是强制架构，不是可选层**：闸门一 = buildServer 时按 M4 有效权限动态注册工具（`listAccessibleResources` 非空才注册该工具，schema 枚举/字段随权限收窄），只读凭证 tools/list 物理没有写工具；闸门二 = **MCP 工具只走 M4 新引擎、不走旧 guards.ts**——每个 tool handler 调 service，**service 首行 `engine.decide(user, node, action)` 或 scope 接口强制鉴权**，handler 不直接 import prisma、不 import 旧 requireCanView/requireCanEditData。被裁工具绕过 list 直调 → **UNKNOWN_TOOL（-32602，与"工具不存在"逐字节一致，不泄漏存在性，AC-M6-1）**；工具可见但本次资源无权 → MCP `isError:true` + `{code:"FORBIDDEN_RESOURCE"|"FORBIDDEN_FIELD", requiredAction, currentRoleSources}`（AC-M6-2）。
 6. **三语言机器说明书对所有连接者可发现，业务数据不进 Resources**：表/文档块/画布图元三套纯语言文档（无真实库名/字段值）经 MCP `server.registerResource` 静态承载，任何 PAT（含只读）均可读——"语言可学、无权不可调"；Resources 本期**仅此一用途**，不做业务数据读通道（ARCH §12）。
-7. **三语言工具范围按 spike §5 收敛**：数据表 6 个（table.list_bases/get_schema、record.list_records/query_records/create_record/update_record；record.delete/batch 待裁决 C-6，建议 delete 进 M6、batch 二期）；文档块 4 个（doc.get_doc_blocks/append_blocks/update_block/delete_blocks，锚 contentVersion 乐观锁，复用 kb.ts:423-435 现有 409 机制）；**画布 M6 只读**（canvas.get_board 一个，写留二期——Plait 六不变量需要把前端 canvas-ops.ts 747 行规则抽 shared 服务端校验器，工作量独立成片，待裁决 C-2）。前置事实：块模型纯函数 `mdToBlocks/blocksToMd` 当前在 **apps/web/src/features/kb/blocks.ts（993 行，零 document/window 调用，已实测纯函数）+ markdown.ts（473 行）**，S5 须先下沉到 packages/shared 供 api 消费，这是文档语言切片的真实成本，不是零成本复用。
+7. **三语言工具范围按 spike §5 收敛 + 终审 C-2/C-6/C-7 定稿**：数据表 **8 个**（table.list_bases/get_schema、record.list_records/query_records/create_record/update_record/**delete_record（C-6 进 M6：confirm:true、软删同 REST 语义、走引擎 d 判定）**、**record.search（C-7 进 M6：薄封装 M5 searchService，scope 收敛由 M5 保证，MCP 不重复鉴权）**；record.batch/jobId 二期）；文档块 4 个（doc.get_doc_blocks/append_blocks/update_block/delete_blocks，锚 contentVersion 乐观锁，复用 kb.ts:423-435 现有 409 机制）；**画布 = 只读 get_board + 最小写入 commit_elements（C-2 终审判定 AC-M6-3 是冻结 P0，画布写入不得在实施切片中悄悄降为只读）**：S6 后插入 **S6b**，把 canvas-ops.ts（747 行）的 Plait 六不变量规则抽成 **packages/shared 服务端校验器**（与 S5 blocks 下沉同模式，是画布双向能力的关键件；frontend 后续画布改动必须以 shared 为唯一规则源），交付 `canvas.commit_elements` 的 **element.create 最小集**（geometry/rectangle 图元 + contentVersion 乐观锁 + 409），保证"AI 按图元语言写入的内容在 Web 端打开结构完整、不破坏 Plait 不变量"；update/move/delete/connect 等完整操作集列二期，**未支持的操作必须返回明确 `UNSUPPORTED_OPERATION` 错误，不得静默成功**。前置事实：块模型纯函数 `mdToBlocks/blocksToMd` 当前在 **apps/web/src/features/kb/blocks.ts（993 行，零 document/window 调用，已实测纯函数）+ markdown.ts（473 行）**，S5 须先下沉到 packages/shared 供 api 消费，这是文档语言切片的真实成本，不是零成本复用。
 8. **审计 mcp_* 事件全量落 JSONL**：扩 AuditEventName（audit.ts:9-26 现状 16 枚）增 `mcp_auth_failure/mcp_tool_call/mcp_pat_create/mcp_pat_revoke`；每次 tools/call 必审计（含被拒）、认证失败也审计；detail 只记 patId/tool/资源 id/resultCode/分页元信息并过 redactSecrets（audit.ts:50-59 已覆盖 token/secret/bearer），业务字段值不入日志；写审计失败只告警不阻断（audit.ts:111 writeAudit 现有纪律）。
-9. **三客户端真实连通 + 三对抗拒绝是出口硬门**（spike §7 已在隔离 PoC 全绿，M6 要在真库真服务复跑入回归）：客户端 = curl 裸 JSON-RPC、官方 SDK `StreamableHTTPClientTransport`、MCP Inspector CLI（`--transport http`），外加 stdio 第二入口的本机客户端 PoC（Claude Desktop 配置形态或等价 stdio client）；对抗 = ①只读凭证 list 无写工具且直调返 UNKNOWN_TOOL、②字段受限凭证 schema/返回无不可见字段且参数越权被二次拦截、③无权资源 id 直传（IDOR）返 FORBIDDEN_RESOURCE 且不泄漏存在性；另加无/伪造/过期/吊销 PAT 四态 401 与吊销后下一请求即时拒绝。
+9. **三客户端真实连通 + 四对抗拒绝是出口硬门**（spike §7 已在隔离 PoC 全绿，M6 要在真库真服务复跑入回归）：客户端 = curl 裸 JSON-RPC、官方 SDK `StreamableHTTPClientTransport`、MCP Inspector CLI（`--transport http`），外加 stdio 第二入口的本机客户端 PoC（Claude Desktop 配置形态或等价 stdio client）；对抗 = ①只读凭证 list 无写工具且直调返 UNKNOWN_TOOL（AC-M6-1）、②字段受限凭证 schema/返回无不可见字段且参数越权被二次拦截（AC-M6-2）、③**文档块/画布图元写入后 Web 端打开结构完整、409/confirm 生效、未支持画布操作返 UNSUPPORTED_OPERATION 不静默（AC-M6-3，含 S6b）**、④无权资源 id 直传（IDOR）返 FORBIDDEN_RESOURCE 且不泄漏存在性；另加无/伪造/过期/吊销/停用主体五态 401 与吊销后下一请求即时拒绝（AC-M6-4）。
 10. **协议无关、去任何单一平台绑定**（R-MCP-2）：交付标准 MCP server + 一份通用《MCP 客户端接入说明》，不内置聊天 UI、不做模型编排、不为任何连接器做专属适配；历史 WorkBuddy 调研文档归档不作为实施输入（ARCH §8.6）。新增运行时依赖仅 `@modelcontextprotocol/sdk@1.30.0`（纯 JS 传递依赖 ajv/zod4/eventsource，无原生模块；esbuild external 后产物增量约 8.4KB）；SDK 内部 zod4 与仓内 zod3 靠 pnpm 隔离共存，zod4 仅限 src/mcp/tools/schemas.ts 使用，不扩散（spike §1.6）。
-11. **切片 S0-S10 共 11 片**：S0 characterization/baseline → S1 PAT 基座（**可提前，仅依赖 M2**）→ S2 传输骨架（/mcp 直桥/11MB/限流档/401/ping）→ S3 双闸门适配层（M4 PermissionService/动态注册/UNKNOWN_TOOL 口径）→ S4 表/记录语言 → S5 文档块语言（blocks 下沉先行）→ S6 画布只读+stdio+Resources 说明书 → S7 审计与幂等 → S8 三客户端/三对抗回归 → S9 出口收口（ADR/openapi/runbook/接入说明/M6-FE 输入）。前端 PatList 管理页是独立 M6-FE 片（§8）。
+11. **切片 S0-S10 共 12 片（含终审 C-2 追加的 S6b）**：S0 characterization/baseline → S1 PAT 基座（**可提前，仅依赖 M2**）→ S2 传输骨架（/mcp 直桥/11MB/限流档/401/ping）→ S3 双闸门适配层（M4 PermissionService/动态注册/UNKNOWN_TOOL 口径）→ S4 表/记录语言（含 delete_record、record.search）→ S5 文档块语言（blocks 下沉先行）→ S6 画布只读+stdio+Resources 说明书 → **S6b 画布六不变量 shared 校验器 + canvas.commit_elements（element.create 最小集，保 AC-M6-3 P0）** → S7 审计与幂等 → S8 三客户端/三对抗回归 → S9 出口收口（ADR/openapi/runbook/接入说明/M6-FE 输入）。前端 PatList 管理页是独立 M6-FE 片（§8）。S6b **不依赖 M3/M4（在 PAT/引擎之外）**：其消费对象是 KbDoc content 存储与 S5 已下沉的 shared 包模式，技术上可与 M3 实施并行准备；但按后端单线纪律仍排入序列，具体排期由项目总监调度。
 
 ---
 
@@ -50,7 +50,7 @@
 | 安全头/CORS/日志 | app.ts:95-98 挂载序（secureHeaders→bodyLimit→rateLimit）；CORS :80-92 allowHeaders 仅 Content-Type/Authorization（MCP 浏览器 host 够用，MCP 另有 Accept 要求由非浏览器客户端发送） |
 | mount/basePath 双挂 | app.ts:51 createMount 单例；:176-177 外层先 basePath 后根双挂——**MCP 只要挂进 mount 即自动同时有 `/mcp` 与 `/app/gouxiangdb/mcp`**（spike §2.1 实测路径不参与协议），无需自己挂第二份 |
 | unix socket 形态 | index.ts:27-40 createServer(getRequestListener(app.fetch)).listen(sock) + 0660；MCP 不开第二端口（spike §2.3 网关→unix→SSE/JSON 透传实测） |
-| 企业能力门控 | config.ts:175 AppConfig.enterpriseOrg；:229 `env.GX_ENTERPRISE_ORG !== "off"`（默认开）；/mcp 与 /api/v1/pats 是否同受此门控待裁决 C-5（建议受门控） |
+| 企业能力门控 | config.ts:175 AppConfig.enterpriseOrg；:229 `env.GX_ENTERPRISE_ORG !== "off"`（默认开）；**C-5 定稿：/mcp 与 /api/v1/pats 同受此门控（off 即不挂载/404）** |
 | 错误信封 | guards.ts:9 HttpError、:112 errorResponse 统一出口；MCP 协议内错误（-32602/isError）不经 HTTP 信封，仅边缘 401/413/429 走信封 |
 
 ### 1.3 三语言要接的 service 现状
@@ -62,7 +62,7 @@
 | 文档乐观锁（原样复用） | routes/kb.ts:423 条件更新 `contentVersion: {increment:1}`、:429 where id+contentVersion=baseVersion、:433-435 更新 0 行读当前版本返 409 `{code:"VERSION_CONFLICT", currentVersion}`；doc service 原语 domain/kb.ts:73 maybeAutoSnapshot、:115 createManualVersion |
 | **块模型在前端、但是纯函数** | apps/web/src/features/kb/blocks.ts（993 行，mdToBlocks/blocksToMd/newBlock，全文件 0 处 document/window/navigator 调用，已实测）、markdown.ts（473 行，:6 import blocks 的 isSafeUrl/sanitizeInlineStyle/parseTableSpans 等）；内容存储 = KbDoc.content（Markdown 文本 / Plait JSON，schema.prisma:302），服务端目前不解析块 |
 | 画布 | apps/web/src/features/kb/canvas/canvas-ops.ts（747 行，六不变量逻辑在前端）；服务端只存取 content JSON（kind="canvas"）；domain/kb.ts:28-57 canvasToSearchText 已能递归提取文本 |
-| 检索 | M5 将交付 `GET /api/v1/search`；ARCH 工具全集含 record.search，**M6 是否暴露 record.search 工具待裁决 C-7（建议 M6 暴露，直接薄封装 M5 端点 service，scope 收敛由 M5 保证）** |
+| 检索 | M5 将交付 `GET /api/v1/search`；ARCH 工具全集含 record.search，**C-7 定稿 M6 暴露 record.search：薄封装 M5 searchService，scope 收敛由 M5 保证，MCP 不重复鉴权（M6 排在 M5 后，依赖天然满足）** |
 
 ### 1.4 审计/迁移/构建现状
 
@@ -80,12 +80,12 @@
 
 ### 2.1 必做（SPEC M6 + AC-M6-1~4 + ARCH §8）
 
-1. **PAT 全生命周期**：只增迁移 personal_access_tokens；tokens 原语（生成/hash/常量时间比对/校验/lastUsedAt 节流）；`/api/v1/pats` 本人 REST（创建明文一次、列表只回元数据+前缀、吊销）；PAT scope 五位与过期/吊销；mcp_pat_* 审计。
+1. **PAT 全生命周期**：只增迁移 personal_access_tokens；tokens 原语（生成/hash/常量时间比对/校验/lastUsedAt 节流）；`/api/v1/pats` 本人 REST（创建明文一次、列表只回元数据+前缀、吊销）；PAT scope 六位（C-2 追加 canvas:write）与过期/吊销（C-3：默认 90 天，可选 30/90/365 与 null 永不过期，UI 强警示）；mcp_pat_* 审计。
 2. **/mcp Streamable HTTP 无状态服务**：SDK 1.30.0 WebStandard 直桥挂入 mount（自动双路径）；每请求身份认证 + 按身份 build server；协议方法 initialize/notifications/initialized/tools(list/call)/resources(list/read)；401 边缘口径（WWW-Authenticate、JSON-RPC -32001 id:null）；11MB body 豁免；MCP 独立限流档。
 3. **双闸门**：M4 PermissionService 适配层（工具可见性 = listAccessibleResources 非空；schema 资源/字段收窄）；执行期 service 首行 engine.decide/scope；UNKNOWN_TOOL 不泄漏口径；FORBIDDEN_RESOURCE/FIELD/GROUP 结构化拒绝；字段出参投影（AC-M6-2）。
-4. **数据表语言**：table.list_bases/get_schema、record.list_records/query_records/create_record/update_record（+C-6 裁定 delete）；keyset 分页（limit≤200）、受控 filter 白名单（禁任意 SQL/公式）、写工具 confirm:true 与 requestId 幂等（24h）。
+4. **数据表语言**：table.list_bases/get_schema、record.list_records/query_records/create_record/update_record/**delete_record（C-6 定稿进 M6：confirm:true、软删同 REST 语义、走引擎 d 判定）**、**record.search（C-7 定稿进 M6：薄封装 M5 searchService，scope 先收敛由 M5 保证，MCP 不重复鉴权）**；keyset 分页（limit≤200）、受控 filter 白名单（禁任意 SQL/公式）、写工具 confirm:true 与 requestId 幂等（24h，C-8 定稿落库 mcp_idempotency）。record.batch/大导入 jobId 二期。
 5. **文档块语言**：blocks.ts/markdown.ts 下沉 shared 包（api/web 同源消费，web 改 import 路径行为等价）；doc.get_doc_blocks/append_blocks/update_block/delete_blocks；contentVersion 乐观锁（VERSION_CONFLICT+currentVersion）；op≤100/批文本≤100KB；align 只走注释通道。
-6. **画布只读 + stdio + 说明书**：canvas.get_board；`src/mcp/stdio.ts` 独立 bin（GX_MCP_TOKEN 启动即校验，复用同一 registry）；三语言 Resources 静态 markdown 对所有连接者可读。
+6. **画布只读 + 最小写入 + stdio + 说明书（C-2 定稿）**：canvas.get_board；**canvas.commit_elements（element.create 最小集：geometry/rectangle 图元 + contentVersion 乐观锁 + 409，由 S6b 的 shared 六不变量校验器保证 Web 端打开结构完整；update/move/delete/connect 等完整操作集二期，未支持操作返 UNSUPPORTED_OPERATION 不静默成功）**；`src/mcp/stdio.ts` 独立 bin（GX_MCP_TOKEN 启动即校验，复用同一 registry；**C-5 定稿：stdio bin 进 fpk/Docker 产物，只是文件、不起第二服务**）；三语言 Resources 静态 markdown 对所有连接者可读。
 7. **审计与幂等**：四枚 mcp_* 事件；requestId 24h 去重（同主体+同工具+同 requestId 返首次结果）；30s 工具超时（AbortController，超时结构化错误，不挂死连接）。
 8. **连通与对抗回归**：curl/SDK client/Inspector 三客户端真库连通（含子路径 + unix socket 经伪网关至少一次留证）；stdio 客户端连通；AC-M6-1/2/3(doc)/4 全对抗入自动化/手测基线；《MCP 客户端接入说明》。
 9. **openapi 增补 + M6-FE 契约片**：pats 端点进 M3 冻结的 openapi；M6-FE 输入清单（设置 → MCP 接入 PatList，§8）。
@@ -94,9 +94,9 @@
 
 | 不做 | 归属/依据 | M6 临时姿态 |
 |---|---|---|
-| OAuth 2.1/PKCE 全套（注册/授权页/回调/刷新） | ARCH §13-4 客户驱动；spike §6 建议 | 仅在 authenticate() 留"Bearer PAT 或 Bearer JWT"分支扩展点与注释，不预埋端点/表/代码；oauth 表不建 |
-| 画布写（canvas.commit_elements 全操作集） | spike §5.3 建议二期；待裁决 C-2 | M6 仅 canvas.get_board；AC-M6-3 画布写入部分若裁定必须 M6 交付则追加独立切片（§7 注） |
-| record.batch / 大导入 jobId / 长任务推送 | SPEC:135 长任务属二期；M5 worker 可复用但 M6 不接 | 超限直接 -32602；无 jobs.get；SSE 不开 |
+| OAuth 2.1/PKCE 全套（注册/授权页/回调/刷新） | ARCH §13-4 客户驱动；spike §6 建议；C-9 说明书不含市场指引 | 仅在 authenticate() 留"Bearer PAT 或 Bearer JWT"分支扩展点与注释，不预埋端点/表/代码；oauth 表不建 |
+| 画布写完整操作集（element.update/move/delete/connect 等） | C-2 终审：element.create 最小集保 P0 进 S6b，完整操作集二期 | M6 画布写 = canvas.commit_elements 仅 element.create（geometry/rectangle + 乐观锁）；其余操作名被直调时返明确 `UNSUPPORTED_OPERATION` 错误，**绝不静默成功** |
+| record.batch / 大导入 jobId / 长任务推送 | SPEC:135 长任务属二期；C-6 终审仅 delete 进 M6；M5 worker 可复用但 M6 不接 | 超限直接 -32602；无 jobs.get；SSE 不开 |
 | MCP prompts 原语、Resources 业务数据通道 | ARCH §12 | Resources 仅静态说明书 |
 | 服务端模型编排/内置聊天 UI/单一平台适配 | R-MCP-2 | 协议无关标准件 |
 | 旧 /api 守卫改造、旧五角色下线 | 后续统一切片 | MCP 物理隔离只认 M4 引擎，旧路由字节不动 |
@@ -117,7 +117,7 @@
 6. **密钥/token 零泄漏**：PAT 明文仅创建响应一次；库存/日志/审计/错误消息/列表接口只出现 name/tokenPrefix（前 8 字符级）/lastUsedAt；GET pats 永不回 hash；审计 detail 过 redactSecrets；openAPI 示例用 `gxpat_example` 占位；异常栈不回客户端（沿用 errorResponse）。
 7. **协议合规面**：Content-Type 必须 application/json、Accept 须含 application/json 与 text/event-stream（SDK 强制 415/406，保持默认不透改）；initialize 协商协议版本 2025-06-18（SDK 1.30 默认，客户端发 2025-11-25 亦可协商，不锁死）；破坏性写 confirm:true 在 zod schema 层强制（z.literal(true)，spike §7 实测）。
 8. **配额契约**：读工具 limit≤200、写批量 op≤100、批文本≤100KB、文档/画布 10MB 上限（与 REST 同）；工具执行 30s 超时（AbortController）；超限一律协议层 -32602 或 isError 结构化码，不放行全表拉取。
-9. **版本兼容/回滚**：新依赖 SDK 进 external 白名单，fpk/Docker node_modules 安装须含该包（纯 JS 无原生风险，S9 发版冒烟加 `/mcp` initialize）；回滚 = 路由摘除 + 迁移保留（PAT 表无既有业务读取方，DROP 安全；发布前快照为主回滚路径）；GX_ENTERPRISE_ORG=off 时 /mcp 与 pats 不挂载（待 C-5 确认，建议与 v1 同门控）。
+9. **版本兼容/回滚**：新依赖 SDK 进 external 白名单，fpk/Docker node_modules 安装须含该包（纯 JS 无原生风险，S9 发版冒烟加 `/mcp` initialize）；回滚 = 路由摘除 + 迁移保留（PAT 表无既有业务读取方，DROP 安全；发布前快照为主回滚路径）；**C-5 终审定稿：/mcp 与 /api/v1/pats 同受 GX_ENTERPRISE_ORG 门控（off 即不挂载/404），stdio bin 进 fpk/Docker 产物（只是文件、不起第二服务）**。
 10. **M0-M5 回归不回退**：M1 flags 四组合、M2 组织 v1（含停用闭环，M6 追加 PAT 吊销后补一组回归）、M3/M4/M5 对抗在 M6 各开关下全绿；默认姿态下无 MCP 客户端连接时进程零额外定时器/零外网连接（stdio bin 不随 API 启动）。
 
 ---
@@ -176,10 +176,10 @@ model PersonalAccessToken {
   id         String    @id @default(cuid())
   userId     String
   name       String                                // "cursor-工作机"，≤60 字符
-  tokenPrefix String                                // gxpat_ + 随机段前 8 字符，列表展示用
+  tokenPrefix String                                // 明文前 14 字符（含 gxpat_ 前缀），列表辨识用；不可认证（C-3 定稿）
   tokenHash  String    @unique                      // sha256(plaintext) hex，等值索引
   scopes     String                                // JSON 数组字符串（SQLite 无原生数组）
-  expiresAt  DateTime?                             // null=不过期（是否允许待 C-3）
+  expiresAt  DateTime?                             // null=永不过期（C-3 定稿：默认 90 天，可选 30/90/365 与 null，UI 强警示）
   revokedAt  DateTime?                             // 用时间戳不用 boolean；revoked = revokedAt!=null
   lastUsedAt DateTime?
   createdAt  DateTime  @default(now())
@@ -190,7 +190,7 @@ model PersonalAccessToken {
 ```
 
 - 生成：`gxpat_` + crypto.randomBytes(24).toString("base64url")；hash = sha256 hex；tokenPrefix 存明文前 14 字符（含前缀）便于列表辨识，**不构成可认证凭据**（随机段 32 字符，暴露前 8 不足以猜中，C-3 复核）。
-- scope 五位常量（单一真源放 shared-types 或 mcp/permissions，M6 新增不与 M4 RESOURCE_ACTIONS 混用）：`record:read/record:write/doc:read/doc:write/canvas:read`。映射：`:read` → M4 资源动作 `r`；`:write` → `c,u,d`（引擎逐动作判定，write 不隐式含 read？**定稿映射：write 档工具在执行期按 c/u/d 判定，读返回仍需 r——建记录后回读该记录要求 r，无 r 时写成功但返回精简回执，S4 用例锁定**）。
+- scope **六位**常量（C-2 定稿追加 canvas:write；单一真源放 shared-types 或 mcp/permissions，M6 新增不与 M4 RESOURCE_ACTIONS 混用）：`record:read/record:write/doc:read/doc:write/canvas:read/canvas:write`。映射：`:read` → M4 资源动作 `r`；`:write` → `c,u,d`（引擎逐动作判定；**定稿：write 档工具在执行期按 c/u/d 判定，读返回仍需 r——建记录后回读该记录要求 r，无 r 时写成功但返回精简回执，S4 用例锁定**）。
 - 校验顺序（spike §3.2，边缘固定）：无 Bearer/前缀不符→401 Unauthorized；hash 查不到→401 同口径（防枚举）；revokedAt→401 Token revoked；expiresAt→401 Token expired；用户 status 非 ACTIVE→401 Account disabled（不区分"用户不存在"——cascade 删除后 PAT 行消失自然落到 hash 查不到）。
 - 比对：hash 等值查（@unique）即可；为防时序侧信道，查不到时对一个 dummy hash 做一次等长 timingSafeEqual（spike §3.5 建议，成本忽略）。
 - 迁移 down：DROP TABLE（表无其他读取方）；用户删除依赖 cascade——M2 既有 user 删除路径是否已对全关系 cascade 开工核对（schema 关系定义），缺失则在本迁移补关系声明（Prisma schema 改动 + 只增迁移一致）。
@@ -227,15 +227,19 @@ export interface McpPermissionPort {
 | record.query_records | {baseId, tableId, filter(白名单操作符), sort?, cursor?, limit≤200} | record:read | 表 r；filter 编译复用 queryPlan，禁公式/裸 SQL | — |
 | record.create_record | {baseId, tableId, fields{}, confirm:true} | record:write | c；字段逐列 fieldCapability 写权限 | requestId + confirm |
 | record.update_record | {baseId, tableId, recordId, fields{}, expectedVersion?} | record:write | u；行存在性（表 r 可见行，与 M5 B-3 同口径） | requestId |
-| record.delete_record（C-6 裁定后） | {baseId, tableId, recordId, confirm:true} | record:write | d（软删，与 REST 同语义） | requestId + confirm |
+| record.delete_record（C-6 定稿） | {baseId, tableId, recordId, confirm:true} | record:write | d（软删，与 REST 同语义） | requestId + confirm |
+| record.search（C-7 定稿） | {q, mode?:"auto"|"fts"|"like", cursor?, limit≤200} | record:read | 薄封装 M5 searchService；scope 由 M5 先收敛保证，MCP 不重复鉴权 | — |
 | doc.get_doc_blocks | {docId, format:"blocks"|"markdown", range?} | doc:read | doc 节点 r；blocks 经 shared mdToBlocks | — |
 | doc.append_blocks | {docId, afterBlockId?, ops[]≤100, baseVersion} | doc:write | u；单事务一次 version+1；文本≤100KB | requestId |
 | doc.update_block | {docId, blockId, patch{text?,checked?,align?}, baseVersion} | doc:write | u；align 仅注释通道 | requestId |
 | doc.delete_blocks | {docId, blockIds[]≤100, baseVersion, confirm:true} | doc:write | u；原子批 | requestId + confirm |
 | canvas.get_board | {docId} | canvas:read | canvas 节点 r；返 elements/contentVersion/viewport | — |
+| canvas.commit_elements（C-2 定稿，S6b） | {docId, baseVersion, ops:[{op:"element.create", element:{type:"geometry", shape:"rectangle", points/坐标/尺寸, gxNote?}}], confirm:true} | canvas:write（**S6b 新增第六 scope 位**，见下注） | canvas 节点 u；每元素经 shared 六不变量校验器；contentVersion 条件更新；写入路径 = children 数组尾插 | requestId + confirm；不支持的操作名 → UNSUPPORTED_OPERATION |
+
+> **canvas:write scope 注（C-2 定稿）**：scope 六位常量含 `canvas:write`；无该位的 PAT（仅 canvas:read）tools/list 无 commit_elements，直调 UNKNOWN_TOOL（AC-M6-1 口径自动覆盖）。S1 tokens.ts 直接按六位实现。
 
 - 乐观锁：doc 写复用 kb.ts:423-435 条件更新，冲突 `isError:true` + `{code:"VERSION_CONFLICT", currentVersion}`（MCP 错误码，HTTP 200——协议错误不走 HTTP 4xx）。
-- 幂等：24h 去重窗，键 = patId+tool+requestId；**幂等状态存哪**：主库轻表 `mcp_idempotency(key PK, patId, tool, responseJson, createdAt)` 只增迁移（与 PAT 同批迁移或 S7 单独迁移，建议同批第二迁移，过期行不清理也无害，runbook 给定期 DELETE）；内存 Map 不满足"进程重启仍幂等"且单实例下 SQLite 最省事。待裁决 C-8（如认为过度可降为进程内 Map，24h 重启失效）。
+- 幂等：24h 去重窗，键 = patId+tool+requestId；**C-8 终审定稿落库**：主库轻表 `mcp_idempotency(key PK, patId, tool, responseJson, createdAt)` 只增迁移（与 PAT 同批迁移或 S7 单独迁移，建议同批第二迁移，过期行不清理也无害，runbook 给定期 DELETE）；**不用进程内 Map**——单实例 SQLite 下重启不丢、24h 语义完整，表极小。
 - 块下沉：新建 `packages/blocks/`（或 shared-types 同仓新增包，开工按 pnpm-workspace 现有包形态定），从 apps/web 原样移动 blocks.ts/markdown.ts，web 改 import；**必须零行为改动**——S5 先补 web 侧 md↔blocks round-trip 快照测试（移动前在 web 锁住输出），移动后 api/web 双跑同一组 golden。
 
 ### 4.6 stdio 第二入口
@@ -243,7 +247,7 @@ export interface McpPermissionPort {
 - 文件 `src/mcp/stdio.ts`，package.json 加 bin：`gx-mcp-stdio` → dist/mcp/stdio.js；构建多入口（build.mjs entryPoints 增一项，复用同一 external）。
 - 启动：读 `GX_MCP_TOKEN`（值为完整 PAT 明文），调同一 authenticate 库函数的"非 HTTP"变体（直传 token 字符串）；失败打印一行 stderr `GX_MCP_TOKEN missing/invalid` + `process.exit(2)`（spike §1.5 实测形态）。
 - 同一 buildServer/registry；stdio 下限流/body 档/HTTP 审计 ip 字段不适用（ip="stdio"、path="stdio"）；审计照常落。
-- 交付：Docker/fpk 是否内置 bin 包装脚本待 C-5/C-9；Claude Desktop 配置示例写进《接入说明》（命令+env）。
+- 交付（**C-5 终审定稿**）：stdio bin **进 fpk/Docker 产物**（build 多入口产物随包投递，只是文件，不随 API 启动、不起第二服务、不占端口）；Claude Desktop 配置示例写进《接入说明》（命令+env，C-9：协议无关文字，无第三方 Logo/市场指引）。
 
 ### 4.7 目录组织（单文件 ≤300 行）
 
@@ -276,27 +280,27 @@ packages/blocks/              // S5：blocks.ts/markdown.ts 从 web 下沉（api
 
 ### 5.1 迁移拆分（只增；编号在 M5 迁移之后）
 
-- 迁移 F `<ts>_mcp_pat_ddl/migration.sql`：CREATE personal_access_tokens + mcp_idempotency（若 C-8 选落库）；Prisma schema 同步模型；User 关系补 PersonalAccessToken[]（cascade 声明）。
+- 迁移 F `<ts>_mcp_pat_ddl/migration.sql`：CREATE personal_access_tokens + mcp_idempotency（**C-8 定稿两表同批落库**）；Prisma schema 同步模型；User 关系补 PersonalAccessToken[]（cascade 声明）。
 - 无回填（新表）；幂等 = IF NOT EXISTS 风格随仓内手写迁移惯例。
 - down：`prisma/docs/rollback/<ts>_mcp_pat.down.sql` DROP 两表；发布前快照为主回滚。
-- M2 停用路径接线（同事务吊销，lifecycle.ts 增量）：disableUser 的 withWriteTx 内增 `tx.personalAccessToken.updateMany({ where:{userId: targetId, revokedAt:null}, data:{revokedAt: new Date()} })`；reactivate **不自动恢复**（吊销是终态，重新启用账号需重新发 PAT，安全姿态写进 runbook）。
+- M2 停用路径接线（同事务吊销，lifecycle.ts 增量；**C-4 终审定稿**）：disableUser 的 withWriteTx 内增 `tx.personalAccessToken.updateMany({ where:{userId: targetId, revokedAt:null}, data:{revokedAt: new Date()} })`——**停用用户同事务批量 revokedAt 吊销其全部 PAT**；reactivate **不自动恢复**（吊销是终态，重新激活账号需重新签发 PAT，安全优先，姿态写进 runbook）。
 
 ### 5.2 PAT REST（/api/v1/pats，挂 requireActiveUser，本人限定）
 
 ```
-POST   /api/v1/pats        body:{name(≤60), scopes[5 选], expiresInDays?|null}
+POST   /api/v1/pats        body:{name(≤60), scopes[6 选], expiresInDays?: 30|90|365|null}
   → 201 {id, name, scopes, token:"gxpat_…"（仅此一次）, tokenPrefix, expiresAt, createdAt}
 GET    /api/v1/pats        → 200 [{id,name,tokenPrefix,scopes,expiresAt,revokedAt,lastUsedAt,createdAt}]
-                         （绝无 token/tokenHash）
+                         （绝无 token/tokenHash；tokenPrefix 仅展前 14 字符供辨识，不可认证——C-3）
 DELETE /api/v1/pats/:id    仅本人行；→ 204；非本人/不存在统一 404（不泄漏存在性）
 ```
 
-- name 服务端 trim/长度校验；scopes 必须是五位子集且非空；expiresInDays 上限/默认待 C-3（建议默认 90 天、可选 30/90/365、允许 null 永不过期但 UI 二次警示）。
-- 限流：PAT 创建/删除走 ORG_ADMIN 同款思路新增敏感档或并入严格认证档（建议 30/60s/人，C-1 一并定）。
+- name 服务端 trim/长度校验；scopes 必须是六位子集且非空；**C-3 终审定稿**：有效期**默认 90 天**，可选 **30 / 90 / 365 天** 与 **null 永不过期**（UI 对 null 强警示）；非法 expiresInDays 值 400 PAT_SCOPE_INVALID 同级的新错误码 PAT_EXPIRY_INVALID（S9 进 openapi）。
+- 限流（**C-1 终审定稿**）：PAT 创建/删除独立敏感档 **30 次/60s/人**，超限 429 + Retry-After；环境变量名 S2 落 config 时归入 `GX_MCP_RATE_*` 前缀组（如 GX_MCP_RATE_PAT_WINDOW_SEC/GX_MCP_RATE_PAT_MAX）。
 
 ### 5.3 限流双键设计
 
-- 认证前（authenticate 之前）无法拿 patId：MCP_RULE 先按 sourceIp 计一道较宽松桶（防未认证打爆）；认证成功后同一请求按 `pat:<patId>` 计正式配额（建议 120 次/60s，spike §9.2 建议值）。实现：MCP 子应用内自治限流（复用 FixedWindowCounter 实例，不经全局 selectRule），在 mcpApp 内两段式中间件完成；全局 rateLimitMiddleware 对 /mcp 继续 selectRule=null（现状）以避免双重计数——**即 /mcp 限流整体内聚在 mcpApp，不污染全局规则表**，bodyLimit 是唯一需要在全局中间件增档的点（body 在进入子应用前已被读）。
+- 认证前（authenticate 之前）无法拿 patId：MCP_RULE 先按 sourceIp 计一道较宽松桶（防未认证打爆）；认证成功后同一请求按 `pat:<patId>` 计正式配额。**C-1 终审定稿默认值**：认证后 **patId 桶 120 次/60s**、认证前 **IP 预桶 300 次/60s**，均可配（`GX_MCP_RATE_WINDOW_SEC` 默认 60、`GX_MCP_RATE_PAT_MAX` 默认 120、`GX_MCP_RATE_IP_MAX` 默认 300；S2 落 config 并补配置闸门校验）。实现：MCP 子应用内自治限流（复用 FixedWindowCounter 实例，不经全局 selectRule），在 mcpApp 内两段式中间件完成；全局 rateLimitMiddleware 对 /mcp 继续 selectRule=null（现状）以避免双重计数——**即 /mcp 限流整体内聚在 mcpApp，不污染全局规则表**，bodyLimit 是唯一需要在全局中间件增档的点（body 在进入子应用前已被读）。NAS 上若证实 AI 调用更陡（单 token 连续 agent 循环调用）再调默认值，runbook 留调档章节，不阻塞 M6。
 - initialize/notifications 与 tools/call 同档（不做免认证探活宽免，防滥用）；超限 429 JSON-RPC 外信封（HTTP 层）+ Retry-After。
 
 ### 5.4 可观测与 runbook
@@ -308,9 +312,9 @@ DELETE /api/v1/pats/:id    仅本人行；→ 204；非本人/不存在统一 40
 
 ## 6. 契约纲要（S9 进 openapi；MCP 工具 schema 以 tools/schemas.ts 为唯一真源并导出 JSON 供对拍）
 
-- REST：§5.2 三端点 + 错误码只增 `PAT_SCOPE_INVALID(400)`、`PAT_NAME_INVALID(400)`、`PAT_NOT_FOUND(404)`、`MCP_RATE_LIMITED(429)`、`MCP_PAYLOAD_TOO_LARGE(413)`、`MCP_UNAUTHORIZED(401)`。
+- REST：§5.2 三端点 + 错误码只增 `PAT_SCOPE_INVALID(400)`、`PAT_NAME_INVALID(400)`、`PAT_EXPIRY_INVALID(400)`（C-3）、`PAT_NOT_FOUND(404)`、`MCP_RATE_LIMITED(429)`、`MCP_PAYLOAD_TOO_LARGE(413)`、`MCP_UNAUTHORIZED(401)`。
 - MCP 边缘 HTTP：200 承载全部 JSON-RPC（含 -32602/isError）；仅 401/413/429/406/415 是 HTTP 层。
-- MCP 工具错误码词汇（resultCode，审计同值）：`OK / UNKNOWN_TOOL / FORBIDDEN_RESOURCE / FORBIDDEN_FIELD / FORBIDDEN_GROUP / VERSION_CONFLICT / CONFIRM_REQUIRED / RATE_LIMITED / TIMEOUT / INVALID_PARAMS`。
+- MCP 工具错误码词汇（resultCode，审计同值）：`OK / UNKNOWN_TOOL / UNSUPPORTED_OPERATION / FORBIDDEN_RESOURCE / FORBIDDEN_FIELD / FORBIDDEN_GROUP / VERSION_CONFLICT / CONFIRM_REQUIRED / RATE_LIMITED / TIMEOUT / INVALID_PARAMS`。**UNSUPPORTED_OPERATION（C-2）**：客户端请求了 M6 未开放的画布操作（element.update/move/delete/connect 等）时返回的明确错误，isError:true，message 指明支持的最小集（element.create），**严禁静默成功**。
 - tools/list 结果 `nextCursor` 不分页（工具数 <50）；Resources list 三 URI：`manual://table-language.md`、`manual://doc-block-language.md`、`manual://canvas-element-language.md`（静态、无业务数据）。
 
 ---
@@ -323,26 +327,27 @@ DELETE /api/v1/pats/:id    仅本人行；→ 204；非本人/不存在统一 40
 | S1 | PAT 基座：迁移/tokens/patService/REST/停用联动 | 纯后端 | 迁移 F；mcp/pat/*；routes/v1/pats.ts；lifecycle.ts 一行；v1/index 挂载 | **仅 M2（可提前片）** |
 | S2 | 传输骨架：SDK 直桥/无状态/11MB/限流/401/ping | 纯后端 | mcp/transport/*；bodyLimit 第三档；app.ts 挂载；build.mjs external+bin | S1 |
 | S3 | 双闸门适配：M4 port/动态注册/UNKNOWN_TOOL 口径 | 纯后端 | permissions/*；server.ts | **M4-S1/S4 冻结**、M3 nav（间接） |
-| S4 | 表/记录语言 6-7 工具 | 纯后端 | tools/table.tools.ts；recordService 接线 | S3、M4 引擎 |
+| S4 | 表/记录语言 8 工具（含 delete_record、record.search） | 纯后端 | tools/table.tools.ts；recordService/searchService 接线 | S3、M4 引擎、**M5 searchService（C-7，M6 排在 M5 后天然满足）** |
 | S5 | blocks 下沉 + 文档块语言 4 工具 | 后端+shared | packages/blocks；web import 改道；tools/doc.tools.ts | S3 |
-| S6 | 画布只读 + stdio bin + Resources 说明书 | 后端+部署 | canvas.tools.ts；stdio.ts；manuals；build 多入口 | S3 |
-| S7 | mcp_* 审计 + requestId 幂等 + 30s 超时 | 纯后端 | audit.ts；idempotency；迁移（若选库） | S4/S5 |
-| S8 | 三客户端连通 + AC-M6 1/2/4 三对抗 + 401 四态回归 | 测试 | e2e（真库起服务）；Inspector CLI 脚本化基线 | 全部工具 |
+| S6 | 画布只读 + stdio bin + Resources 说明书 | 后端+部署 | canvas.tools.ts(get_board)；stdio.ts；manuals；build 多入口；fpk/Docker 产物含 bin（C-5） | S3 |
+| **S6b** | **画布六不变量 shared 校验器 + canvas.commit_elements（element.create 最小集）**（C-2 终审追加，保 AC-M6-3 P0） | 后端+shared | shared 画布不变量纯函数；web canvas-ops 改以 shared 为唯一规则源；tools/canvas.tools.ts 增 commit_elements | S6、S5（shared 下沉模式）；**不依赖 M3/M4，理论上可与 M3 并行准备，按单线纪律仍排序列，总监调度** |
+| S7 | mcp_* 审计 + requestId 幂等（落库 mcp_idempotency，C-8）+ 30s 超时 | 纯后端 | audit.ts；idempotency；mcp_idempotency 迁移 | S4/S5/S6b |
+| S8 | 三客户端连通 + AC-M6 1/2/3/4 四对抗 + 401 五态回归 | 测试 | e2e（真库起服务）；Inspector CLI 脚本化基线 | 全部工具（含 S6b） |
 | S9 | 出口：ADR/openapi/runbook/接入说明/40RC/M6-FE 清单 | 文档 | docs/adr；openapi；docs/runbooks；部署物核查 | S8 |
 
-关键路径：S0→S1（可提前）→S2→（S3 待 M4）→S4/S5/S6→S7→S8→S9。
+关键路径：S0→S1（可提前）→S2→（S3 待 M4）→S4/S5/S6→**S6b**→S7→S8→S9。
 排期硬约束：
 1. 后端单线 M2→M3→M4→M5→M6；**S3 是真正的门闩**——M4 scope/engine 契约未冻结不得开工，S1/S2 即便提前也不构成 M6 可交付（无鉴权工具面的 /mcp 不允许上线）。
 2. S5 块下沉触碰 apps/web，必须与 M3/M4/M5-FE 的 web 改动协调 rebase；下沉先于工具开发，移动提交独立成纯移动 commit（git 可追踪 rename），行为改动另计。
-3. 若 C-2 裁定画布写必须进 M6：在 S6 后插入 S6b"canvas-ops 六不变量抽 shared 服务端校验器 + canvas.commit_elements(element.create 最小集)"，工作量与 S5 同量级，AC-M6-3 画布写入在该片验收。
-4. 发版门：目标机（fpk/Docker）node_modules 含 SDK 包、`/mcp` initialize 冒烟、反代 body 上限 11m 核查（Caddy/飞牛网关两形态）。
+3. **S6b（C-2 终审）**：shared 不变量校验器是画布双向能力的关键件，frontend 后续任何画布相关改动都必须以 shared 为唯一规则源（canvas-ops 自身变为消费方）；S6b 不依赖 M3/M4（PAT/引擎之外），理论上可与 M3 实施并行准备，但按后端单线纪律排在序列里，具体排期由项目总监调度。**若 S6b 实施中证明六不变量服务端化远超一个切片，必须先报项目总监评估，不许自行再降级。**
+4. 发版门：目标机（fpk/Docker）node_modules 含 SDK 包、stdio bin 在产物内（C-5）、`/mcp` initialize 冒烟、反代 body 上限 11m 核查（Caddy/飞牛网关两形态）。
 5. M6-FE 在 S9 openapi 冻结后派工。
 
 ---
 
 ## 8. M6-FE 前端片输入清单（S9 冻结后派工，本文不拆前端切片）
 
-1. 设置 → MCP 接入页（SPEC §7 PatList）：PAT 列表（name/前缀/scopes 中文标签/创建时间/最后使用/过期状态/吊销按钮）；新建表单（名称、scope 勾选默认仅 read、有效期下拉）；**创建成功一次性明文弹窗**：大字等宽展示完整 token + 复制按钮 + "仅显示一次，关闭后不可找回"强提示 + 关闭即焚（组件 state 不落 localStorage）；吊销二次确认。
+1. 设置 → MCP 接入页（SPEC §7 PatList）：PAT 列表（name/前缀（前 14 字符，C-3）/scopes 中文标签/创建时间/最后使用/过期状态/吊销按钮）；新建表单（名称、**scope 六勾选默认仅 read 档（含 canvas:read，canvas:write 默认不勾，C-2**）、**有效期下拉 30/90/365 天/永不过期，默认 90 天，选"永不过期"弹强警示二次确认，C-3**）；**创建成功一次性明文弹窗**：大字等宽展示完整 token + 复制按钮 + "仅显示一次，关闭后不可找回"强提示 + 关闭即焚（组件 state 不落 localStorage）；吊销二次确认。
 2. 图标只追加 icons.tsx（团队 P0：单一自建 SVG 体系，禁 emoji/第二套图标库）；无紫粉渐变。
 3. 全部走 api/client.ts、gx token 中文文案过 PM/设计师；客户端配置指引区（endpoint URL 自动拼 basePath、curl/Inspector/Claude Desktop 三段示例数据来自 §接入说明，不硬编码第三方品牌绑定文案）。
 4. 不做 OAuth 入口（本期无后端）；不内置 token 测试调用（创建即成功，验活交给客户端文档）。
@@ -375,9 +380,9 @@ DELETE /api/v1/pats/:id    仅本人行；→ 204；非本人/不存在统一 40
 - 回滚：随 /mcp 挂载。
 
 ### S4 — 表/记录语言
-- registry/table.tools：list_bases（M3 base 节点集 + 现有 bases 投影）、get_schema（tables/fields 元数据 + 可读标记）、list/query（recordService.queryRecords，cursor 复用 M1 编解码、filter 白名单映射 queryPlan compile，禁公式）、create/update（写路径走现有 record 创建服务，enforce c/u + 字段级）；delete 视 C-6；出参投影（不可见字段物理缺席，AC-M6-2）；写无 r 时精简回执用例。
+- registry/table.tools：list_bases（M3 base 节点集 + 现有 bases 投影）、get_schema（tables/fields 元数据 + 可读标记）、list/query（recordService.queryRecords，cursor 复用 M1 编解码、filter 白名单映射 queryPlan compile，禁公式）、create/update（写路径走现有 record 创建服务，enforce c/u + 字段级）、**delete_record（C-6 定稿：confirm:true、软删与 REST DELETE 同语义、执行期 enforce d）**、**record.search（C-7 定稿：薄封装 M5 searchService 混合检索，scope 先收敛由 M5 保证，MCP 侧只做 PAT 粗档，不重复鉴权）**；出参投影（不可见字段物理缺席，AC-M6-2）；写无 r 时精简回执用例。
 - 陷阱：handler 禁裸 prisma（§3-3 grep）；queryRecords 旧 legacy 路径带旧 guards 假设——MCP 只走 queryPlan 新路径（GX_M1 flags 组合下行为固定，MCP 调用强制物理路径）；confirm zod4 literal；分页游标跨用户作用域（cursor 不编码权限，每次现判）。
-- 验收：Inspector 通读→查→建→改全链；limit 201/-32602；非法 filter 操作符 -32602；字段越权写 FORBIDDEN_FIELD；只读 PAT 无写工具且直调 UNKNOWN_TOOL（引 S3 golden）；M1 flags 四组合 MCP 读结果一致（对拍 REST）。
+- 验收：Inspector 通读→查→建→改→删→搜全链；limit 201/-32602；非法 filter 操作符 -32602；字段越权写 FORBIDDEN_FIELD；delete 无 confirm 被拒、confirm 后软删且 REST 侧同样不可见；只读 PAT 无写工具且直调 UNKNOWN_TOOL（引 S3 golden）；search 对无权内容零命中（与 M5 AC-M5-2 对抗夹具共用，MCP 不另造鉴权）；M1 flags 四组合 MCP 读结果一致（对拍 REST）。
 - 回滚：工具注销。
 
 ### S5 — blocks 下沉 + 文档块语言
@@ -387,17 +392,27 @@ DELETE /api/v1/pats/:id    仅本人行；→ 204；非本人/不存在统一 40
 - 回滚：shared 包保留无害；工具注销、web import 回改。
 
 ### S6 — 画布只读 + stdio + 说明书
-- canvas.get_board（解析 KbDoc kind=canvas content JSON，返 elements/contentVersion/viewport，未知键透传不剥离，对齐 ARCH §8.5）；stdio.ts + bin + 多入口构建； manuals.ts 三份静态 md（表语言：表/记录语义+filter 白名单+分页；块语言：块类型/op/乐观锁/align；图元语言：元素结构只读说明 + "写能力二期"声明；均不含真实业务数据）。
+- canvas.get_board（解析 KbDoc kind=canvas content JSON，返 elements/contentVersion/viewport，未知键透传不剥离，对齐 ARCH §8.5）；stdio.ts + bin + 多入口构建（**bin 进 fpk/Docker 产物，C-5**）；manuals.ts 三份静态 md（表语言：表/记录语义+filter 白名单+分页；块语言：块类型/op/乐观锁/align；图元语言：元素结构说明 + 当前支持的写入最小集 element.create 与"完整操作集二期"声明，与 S6b 交付保持一致；均不含真实业务数据）。
 - 验收：Inspector 读板元素数与 Web 打开一致；stdio 缺 GX_MCP_TOKEN exit 2；stdio client initialize/list/call 连通（spike §1.5 复现）；三 Resources 对只读 PAT 可读、tools/list 不泄漏业务库名；说明书 markdown 链接/编号与工具名一致性检查（脚本）。
 - 回滚：bin/工具注销。
 
+### S6b — 画布六不变量 shared 校验器 + canvas.commit_elements（C-2 终审追加，保 AC-M6-3 P0）
+- **目标**：AI 经 MCP 按图元语言写入后，Web 端打开结构完整、不破坏 Plait 六不变量（ARCH §1.4：自定义键不被 normalize 剥离/关联块透明 rectangle 承载 280×160 与 3×2 网格/插入尾位/z 序即数组序/选区 WeakMap 前端态不入库/WebKit 补偿是渲染层不进 JSON）。
+- **第一步（shared 下沉，独立纯移动/纯抽取 commit）**：把 canvas-ops.ts（747 行）中**数据层规则**与 **DOM/Board 依赖的交互规则**分离——服务端只需要数据层：矩形/几何图元 JSON 形状校验、id 生成（AI 不得自带 id）、尾插位置、z 序数组序约束、gxNote/gxDocRef/gxLinkRef 自定义键白名单、未知键透传不剥离、禁用 zIndex 字段、关联块 rectangle+geometry+gxLinkRef 完整结构、10MB 上限。落 packages（packages/blocks 同仓新增 canvas 模块或 packages/canvas，开工按 workspace 惯例定）；前端 canvas-ops 改 import shared 为**唯一规则源**（Web 端 DOM/手势/选区/渲染补偿逻辑留前端，但共享数据规则不得再有第二份实现）。移动/抽取前先在 web 补 golden：现有画布夹具（矩形/箭头/关联卡/脑图子节点/mind 样式）序列化 JSON 锁死，抽取后对拍 0 diff。
+- **第二步（服务端校验器 + commit_elements 最小集）**：`canvasValidator.validateCreateOps(docContent, ops)` 纯函数（逐 op 校验 + 整批不变量：尾插序、id 去重、无 zIndex、自定义键白名单、形状 schema、尺寸正数、整板 ≤10MB）；tool `canvas.commit_elements`：入参 `{docId, baseVersion, ops:[{op:"element.create", element:{type:"geometry", shape:"rectangle", …}}], confirm:true}`；执行期 canvas 节点 u 判定（canvas:write scope + 引擎 u）；服务端读 content → 校验 → 尾插 → 复用 kb 条件更新（contentVersion+1，冲突 409 VERSION_CONFLICT+currentVersion，同 doc 工具）；op≤100/批文本≤100KB。**未开放操作**（element.update/move/delete/connect、zorder、关联卡插入、脑图布局等）入参中出现即整批拒绝，返 isError + `{code:"UNSUPPORTED_OPERATION", supported:["element.create"]}`，**绝不静默成功/静默丢弃**。
+- **第三步（Web 端结构完整验收）**：MCP 写入（三矩形两箭头：矩形走 element.create；箭头若证明不属于 geometry/rectangle 最小集，则本批只验三矩形 + 经文档侧既有内容混排，两箭头在报告中如实标注——**开工第一件事是用 golden 判定箭头是否属于最小集，若属于则一并实现，若不属于不偷偷扩范围，报项目总监确认后按确认口径验收**）后 Web 真实打开：无白屏、元素坐标/绑定/层级完整、可继续编辑保存、再 GET 一次内容往返一致；跑 RC-13~RC-25 画布回归组。
+- 陷阱：PlaitBoard 强耦合的函数不能硬搬到服务端（只搬纯数据规则）；normalize 行为差异（服务端无 PlaitBoard，写入的 JSON 首次被前端加载时 normalize 不得报错/吞键——golden 必须含"服务端产出 JSON → 前端 board 加载"方向）；不碰 WebKit 补偿层与选区 WeakMap；乐观锁与 doc 写共用 contentVersion。
+- 验收：shared 抽取 web golden 0 diff；校验器对六类坏输入各有拒绝用例（自带 id/zIndex 键/非法 shape/自定义键越界/超 10MB/不支持操作名静默检查=必须 UNSUPPORTED_OPERATION）；commit_elements 全链（建→409 冲突→无 confirm 拒→只读/无 canvas:write PAT 看不到工具且直调 UNKNOWN_TOOL）；**Web 打开结构完整（AC-M6-3 画布部分）**；typecheck/lint/RC 画布组。
+- 红线：**若实施中证明六不变量服务端化远超一个切片（如发现 Plait normalize 依赖 Board 运行时无法静态满足），立即报项目总监评估，不得自行再降级、不得伪装达标。**
+- 回滚：工具注销；shared 模块保留无害；canvas-ops 可回改为本地规则（纯移动 commit 独立，revert 干净）。
+
 ### S7 — 审计 + 幂等 + 超时
-- AuditEventName 落四枚（含 S1 占位转正）；每次 call 收尾 writeAudit（成功/拒绝/UNKNOWN 都记；pattern：tool 未知时也能记 tool 名与 patId）；authenticate 失败 mcp_auth_failure（ip/patId 前缀级，无 token）；idempotency 库表或 Map（C-8）；30s AbortController（service 调用透传 signal——现有 service 无 signal 参数，M6 在 mcp 适配层包 Promise.race 超时，不改 service 签名，超时后不声称写失败/成功，返 TIMEOUT 引导客户端重读）。
-- 验收：审计行字段白名单（无 fields 业务值、token 被 redact）；同 requestId 重放返首次结果且只产生一次写；超时用慢夹具（临时挂起）返 TIMEOUT 不挂连接；审计目录不可写时 call 仍成功（告警不阻断，验现有纪律）。
+- AuditEventName 落四枚（含 S1 占位转正）；每次 call 收尾 writeAudit（成功/拒绝/UNKNOWN 都记；pattern：tool 未知时也能记 tool 名与 patId）；authenticate 失败 mcp_auth_failure（ip/patId 前缀级，无 token）；**幂等落 mcp_idempotency 轻表（C-8 定稿，不用进程内 Map）：key PK + 24h 窗，单实例 SQLite 重启不丢、语义完整**；30s AbortController（service 调用透传 signal——现有 service 无 signal 参数，M6 在 mcp 适配层包 Promise.race 超时，不改 service 签名，超时后不声称写失败/成功，返 TIMEOUT 引导客户端重读）。
+- 验收：审计行字段白名单（无 fields 业务值、token 被 redact）；同 requestId 重放返首次结果且只产生一次写；**进程重启后窗口期内重放仍返首次结果（C-8 落库语义实测）**；超时用慢夹具（临时挂起）返 TIMEOUT 不挂连接；审计目录不可写时 call 仍成功（告警不阻断，验现有纪律）。
 - 回滚：随工具。
 
-### S8 — 三客户端 + 三对抗（出口硬门）
-- 脚本化：vitest e2e 起真服务（TCP + unix socket 两矩阵至少一轮），curl 组、SDK StreamableHTTPClient 组、Inspector CLI 组（npx 固定版本，CI 视网络允许，否则基线手测留证入 baseline）；AC-M6-1（只读 list/直调）、AC-M6-2（字段受限 schema+返回+参数拦截）、AC-M6-3 文档部分（409/confirm/Web 打开）、AC-M6-4（吊销：建连后吊销，下一请求立即 401；每 call 有审计）；IDOR 三条（base/doc/canvas 各一）；三对抗在 HTTP 与 stdio 两入口各跑（stdio 吊销后下次启动进程拒——stdio 无连接概念，验启动即拒）。
+### S8 — 三客户端 + 四对抗（出口硬门）
+- 脚本化：vitest e2e 起真服务（TCP + unix socket 两矩阵至少一轮），curl 组、SDK StreamableHTTPClient 组、Inspector CLI 组（npx 固定版本，CI 视网络允许，否则基线手测留证入 baseline）；AC-M6-1（只读 list/直调）、AC-M6-2（字段受限 schema+返回+参数拦截）、**AC-M6-3（doc 块写入 409/confirm/Web 打开 + S6b 画布 element.create 写入 Web 打开结构完整 + UNSUPPORTED_OPERATION 不静默）**、AC-M6-4（吊销：建连后吊销，下一请求立即 401；每 call 有审计）；IDOR 四条（base/doc/canvas-read/canvas-write 各一）；四对抗在 HTTP 与 stdio 两入口各跑（stdio 吊销后下次启动进程拒——stdio 无连接概念，验启动即拒）。
 - 验收：产出 docs/baseline/m6-connectivity.md 贴真实命令与输出摘要（不贴 token）；任一对抗失败阻断 S9。
 - 回滚：测试。
 
@@ -412,24 +427,26 @@ DELETE /api/v1/pats/:id    仅本人行；→ 204；非本人/不存在统一 40
 - **ADR-0051 PAT 凭证模型与 M2 用户态联动**：gxpat_ 一次明文/hash 库存/scope 粗档/资源授权归 M4；停用同事务批量吊销 + 边缘 status 双保险；cascade 删除；lastUsedAt 节流；JWT OAuth 留扩展点。
 - **ADR-0052 双闸门与 UNKNOWN_TOOL 不泄漏口径**：动态注册 + service 首行 engine.decide；被裁工具与不存在同文案；FORBIDDEN_* 二分；MCP 只走新引擎不接旧 guards。
 - **ADR-0053 /mcp 11MB 豁免与 patId 独立限流内聚 mcpApp**：spike 实测 413；全局只增第三档 body；限流不进全局规则表，子应用两段式（IP/patId）。
-- **ADR-0054 画布 M6 只读、块模型下沉 shared（若 C-2 批准只读）**：Plait 六不变量服务端化独立成片；blocks.ts/markdown.ts 零行为移动，api/web 同源。
+- **ADR-0054 块模型下沉 shared 与画布最小写入（C-2 终审定稿）**：blocks.ts/markdown.ts 零行为移动，api/web 同源；画布写入保 AC-M6-3 P0——S6b 将 Plait 六不变量数据层规则抽 shared 服务端校验器，M6 仅开 canvas.commit_elements/element.create（geometry/rectangle + 乐观锁），完整操作集二期，未支持操作 UNSUPPORTED_OPERATION 显式拒绝；frontend 后续画布改动以 shared 为唯一规则源。
 - **ADR-0019 已存在**（协议无关标准 MCP server 总纲，ARCH:941）：本计划是其实施细化，不重复立项。
 
 ---
 
-## 11. 待项目总监裁决清单（终审前阻断）
+## 11. 项目总监终审裁决登记（2026-09-18，C-1~C-9 全部定稿）
 
-| # | 议题 | 架构师建议 | 影响 |
+> 九项裁决全部 **pass/批准**，按下列定稿实施；本表为唯一裁决索引，正文对应小节已同步替换"建议/待裁"措辞。
+
+| # | 议题 | 终审判定 | 落地位置 |
 |---|---|---|---|
-| C-1 | MCP 独立限流档默认值与超限口径（spike 开放问题 2） | patId 桶 120 次/60s + IP 预桶 300/60s；PAT 管理 REST 30/60s；GX_MCP_RATE_* 可配；超限 429 Retry-After。需运维确认 NAS 上单 token 典型 AI 调用模式是否更陡 | S2/runbook |
-| C-2 | 画布写是否必须 M6 交付（spike 开放问题 1；AC-M6-3 字面含"画布图元语言写入"） | 建议 M6 **只读**（get_board），写走二期独立切片（canvas-ops 747 行六不变量 shared 化+服务端校验器，约一个 S5 量级）；若终审裁定 AC-M6-3 画布部分 M6 必达，插入 S6b 仅交付 element.create 最小集（geometry/rectangle+乐观锁），其余操作二期 | S6/排期/AC-M6-3 验收口径 |
-| C-3 | PAT 有效期策略与永不过期 | 默认 90 天，可选 30/90/365 天与"永不过期"（UI 强警示）；tokenPrefix 展示前 14 字符 | S1/M6-FE |
-| C-4 | （已并入设计，确认即可）停用即批量吊销、重新激活不恢复 PAT | 按 §5.1；安全优先，重新发 token 成本低 | S1 |
-| C-5 | /mcp 与 /api/v1/pats 是否随 GX_ENTERPRISE_ORG 门控；stdio bin 是否进 fpk/Docker 产物 | 建议同门控（企业能力，off 不挂载/404）；stdio bin 进产物（零额外服务，只是文件） | S2/S6/部署 |
-| C-6 | record.delete_record / record.batch 是否进 M6 | delete 建议进（d 动作已有引擎判定，软删语义现成）；batch/jobId 二期（超 100 ops 场景少） | S4 |
-| C-7 | M6 是否暴露 record.search 工具（ARCH 全集含，依赖 M5） | 建议暴露：薄封装 M5 searchService，scope 由 M5 先收敛保证，MCP 不重复鉴权只做 PAT 粗档+service 内既有判定；M6 排在 M5 后故依赖天然满足 | S4 |
-| C-8 | requestId 幂等状态持久化（新轻表 mcp_idempotency）vs 进程内 Map | 建议落库（单实例 SQLite，重启不丢、24h 语义完整，表极小）；若总监认为过度可降 Map（重启后窗口期重放可能产生重复写） | S7/迁移数 |
-| C-9 | 《MCP 客户端接入说明》是否在 M6 提供具体第三方配置截图/品牌素材 | 只给协议无关文字+命令示例（endpoint/headers/env），不放第三方 Logo/市场上架指引（R-MCP-2） | S9 |
+| C-1 | MCP 独立限流档默认值与超限口径 | **批准**：认证后 patId 桶 **120/60s** + 认证前 IP 预桶 **300/60s**，PAT 管理 REST **30/60s/人**；`GX_MCP_RATE_*` 可配；超限 **429 + Retry-After**。NAS 上若证实 AI 调用更陡再调，不阻塞 | §0-2；S2；§5.3；runbook |
+| C-2 | 画布写是否必须 M6 交付 | **【与架构师建议不同】画布写入必须进 M6**：SPEC:127 AC-M6-3 是冻结 P0 明文，不得在实施切片里悄悄降为只读。S6 后插入 **S6b**：canvas-ops 六不变量数据层规则抽 packages/shared 服务端校验器，交付 canvas.commit_elements 的 **element.create 最小集（geometry/rectangle + 乐观锁 + 409）**；update/move/delete/connect 完整操作集列二期；**未支持操作返明确 "unsupported operation" 错误，不得静默成功**。若 S6b 证明六不变量服务端化远超一个切片，先报总监评估，不许自行再降级。S6b 不依赖 M3/M4，理论上可与 M3 并行准备，按单线纪律排序列，排期总监调度；frontend 后续画布改动以 shared 为唯一规则源 | §0-7/11；S6b；§7；ADR-0054 |
+| C-3 | PAT 有效期策略与永不过期 | **批准**：默认 **90 天**，可选 **30/90/365 天** 与 **null 永不过期**（UI 强警示）；tokenPrefix 仅存展前 **14 字符**供辨识，不可认证 | §4.3；§5.2；S1；M6-FE |
+| C-4 | 停用即批量吊销、重新激活不恢复 PAT | **确认**：停用用户同事务批量 revokedAt 吊销其全部 PAT；重新激活**不自动恢复**（安全优先，需重新签发） | §5.1；S1 |
+| C-5 | /mcp 与 /api/v1/pats 门控；stdio bin 产物 | **批准**：两者同受 **GX_ENTERPRISE_ORG 门控**（off 即不挂载/404）；stdio bin **进 fpk/Docker 产物**（只是文件、不起第二服务） | §3-9；S2/S6；部署物 |
+| C-6 | record.delete_record / record.batch | **批准 delete 进 M6**（confirm:true、软删同 REST 语义、走引擎 d 判定）；**record.batch/jobId 列二期** | §4.5；S4 |
+| C-7 | 暴露 record.search 工具 | **批准**：薄封装 M5 searchService；scope 先收敛由 M5 保证，MCP 不重复鉴权；M6 排在 M5 后依赖天然满足 | §4.5；S4 |
+| C-8 | requestId 幂等持久化 | **批准落库 mcp_idempotency**（key PK + 24h 窗；单实例 SQLite 重启不丢、语义完整）；**不用进程内 Map** | §4.5；S7；迁移 |
+| C-9 | 《MCP 客户端接入说明》品牌尺度 | **批准**：只给协议无关文字 + endpoint/headers/env/命令示例；不放第三方 Logo 或市场上架指引 | S9；接入说明 |
 
 ---
 
@@ -437,7 +454,7 @@ DELETE /api/v1/pats/:id    仅本人行；→ 204；非本人/不存在统一 40
 
 1. AC-M6-1：只读 PAT 的 tools/list 无任何写/删/admin 工具；绕过列表直调被裁工具返 UNKNOWN_TOOL 且与不存在工具同口径（golden 0 diff）。
 2. AC-M6-2：字段受限 PAT 的 schema 无不可见字段、返回无不可见字段；参数携带无权字段/资源被服务端二次拦截（FORBIDDEN_FIELD/RESOURCE）。
-3. AC-M6-3：AI 经 doc 工具写入后 Web 端打开结构完整（块 round-trip golden + 人工）；contentVersion 冲突 409+currentVersion；破坏性写无 confirm:true 一律拒绝。**画布部分按 C-2 裁定口径验收（只读则 AC 画布写入项明确标注二期，不伪装达标）**。
+3. AC-M6-3（C-2 终审口径）：AI 经 doc 工具写入后 Web 端打开结构完整（块 round-trip golden + 人工）；contentVersion 冲突 409+currentVersion；破坏性写无 confirm:true 一律拒绝。**画布写入 = S6b 最小集达标制：AI 经 canvas.commit_elements/element.create（geometry/rectangle + 乐观锁）写入的图元，在 Web 端打开结构完整、不破坏 Plait 六不变量（"AI 按图元语言写入结构完整"P0 即以此最小集满足）；update/move/delete/connect 等完整操作集为二期，被请求时返 UNSUPPORTED_OPERATION 显式错误、绝不静默成功——验收报告中最小集与二期边界如实写明，不伪装成全量画布写入达标。**
 4. AC-M6-4：吊销（含用户停用连带吊销）后下一次调用立即拒绝（HTTP 与 stdio 两入口）；每次 tools/call 与每次认证失败入审计，参数脱敏且无业务值。
 5. 三客户端（curl/SDK client/Inspector）+ stdio 客户端真实连通留证；根/子路径/unix socket 三形态至少各一轮；IDOR 三族对抗零泄漏。
 6. 11MB 豁免只对 /mcp 生效（既有 /api 1MB 行为零变化，S0 golden 证明）；独立限流生效可观测；30s 超时不挂连接。
@@ -454,11 +471,12 @@ DELETE /api/v1/pats/:id    仅本人行；→ 204；非本人/不存在统一 40
 | S1 | PAT 基座（可提前） | 迁移 F；mcp/pat/*；routes/v1/pats.ts；lifecycle 一行 | 明文一次、停用连带吊销、删除级联、本人限定、710 只增 | **仅 M2** |
 | S2 | 传输骨架 | transport/*；bodyLimit 三档；app.ts；build.mjs | initialize/call 通、401 五态、11MB 仅 /mcp、patId 限流 | S1 |
 | S3 | 双闸门 | permissions/*；server.ts | 四身份 list 快照、UNKNOWN_TOOL 同文案、IDOR 拒、引擎故障不 500 | **M4-S1/S4** |
-| S4 | 表/记录语言 | tools/table.tools.ts | Inspector 读写查通、字段越权拒、flags 四组合同 REST | S3 |
+| S4 | 表/记录语言（含 delete/search） | tools/table.tools.ts | Inspector 读写查删搜通、字段越权拒、search 零泄漏、flags 四组合同 REST | S3、M5 |
 | S5 | 块下沉+文档语言 | packages/blocks；tools/doc.tools.ts | 移动 0 diff、四工具+409+100KB+Web 结构完整 | S3 |
-| S6 | 画布只读+stdio+说明书 | canvas.tools.ts；stdio.ts；manuals.ts | 读板元素一致、stdio exit2/连通、三说明书可读 | S3 |
-| S7 | 审计/幂等/超时 | audit.ts；idempotency.ts | 每 call 审计脱敏、重放只写一次、TIMEOUT 不挂死 | S4/S5 |
-| S8 | 连通/对抗门 | e2e；m6-connectivity.md | 三客户端+stdio、AC-M6 全项、IDOR 三族零泄漏 | 全部 |
+| S6 | 画布只读+stdio+说明书 | canvas.tools.ts；stdio.ts；manuals.ts | 读板元素一致、stdio exit2/连通、三说明书可读、bin 在产物内 | S3 |
+| S6b | 六不变量 shared + 最小写入 | shared canvas 规则；canvas.tools.ts commit_elements | golden 0 diff、坏输入六拒、element.create 后 Web 打开完整、未支持操作明确报错不静默 | S6、S5；**不依赖 M3/M4** |
+| S7 | 审计/幂等落库/超时 | audit.ts；idempotency.ts；mcp_idempotency 迁移 | 每 call 审计脱敏、重启后重放仍幂等、TIMEOUT 不挂死 | S4/S5/S6b |
+| S8 | 连通/对抗门 | e2e；m6-connectivity.md | 三客户端+stdio、AC-M6 全项（含画布写入）、IDOR 四族零泄漏 | 全部 |
 | S9 | 收口 | ADR-0050~54；openapi；runbook；接入说明 | 全门绿、旧路由零 diff、可派 M6-FE | S8 |
 
 ---
@@ -467,4 +485,6 @@ DELETE /api/v1/pats/:id    仅本人行；→ 204；非本人/不存在统一 40
 
 - 本文档入库 commit：`679ba74`（2026-09-18，纯文档）。
 - 上一文档动作：M5 终审八裁决回填 `2c52196`（同日，B-1~B-8）。
-- 待裁决：§11 C-1~C-9（其中 C-4 为确认项）。
+- **终审九裁决回填 commit：（提交后回填短 hash）**——C-1 限流默认定稿、**C-2 画布写入保 P0（新增 S6b：shared 六不变量校验器 + canvas.commit_elements/element.create 最小集 + UNSUPPORTED_OPERATION 显式拒绝；scope 五→六位加 canvas:write；切片 11→12）**、C-3 有效期 90 天默认+30/365/null、C-4 停用同事务批量吊销不恢复、C-5 同门控+stdio bin 进产物、C-6 delete_record 进 M6/batch 二期、C-7 record.search 进 M6、C-8 幂等落 mcp_idempotency 不用 Map、C-9 接入说明协议无关。
+- 关联文档：同批产出 `docs/planning/phase2/M7-implementation-plan.md`（企业版总验收门，AC-M6-3 按本文件 S6b 最小集口径验收）。
+- 待裁决：无（C-1~C-9 全部关闭）。
