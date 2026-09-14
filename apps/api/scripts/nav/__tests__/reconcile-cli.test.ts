@@ -32,25 +32,39 @@ function runCli(dbFile: string, args: string[]): { status: number; stdout: strin
 }
 
 let tmpRoot: string;
+let templateDb: string;
+
+// 端到端用例（真 tsx 子进程 + 建库），显式 30s：默认 testTimeout=5000 在全套并行
+// CPU 争抢时余量不足（单跑约 4.8s 已贴线）必 flaky。
+const CLI_TEST_TIMEOUT = 30_000;
 
 beforeAll(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "gx-s4-cli-"));
-}, 180000);
-afterAll(() => {
-  fs.rmSync(tmpRoot, { recursive: true, force: true });
-});
-
-function deployDb(name: string): string {
-  const file = path.join(tmpRoot, `${name}.db`);
+  templateDb = path.join(tmpRoot, "template.db");
+  // 模板库只 deploy 一次（16 迁移建库是这组用例最重的固定成本）；
+  // 各用例改为文件级拷贝拿独立副本，毫秒级且仍完全隔离。
   execFileSync(
     "pnpm",
     ["exec", "prisma", "migrate", "deploy", "--schema=prisma/schema.prisma"],
     {
       cwd: process.cwd(),
-      env: { ...process.env, DATABASE_URL: `file:${file}` },
+      env: { ...process.env, DATABASE_URL: `file:${templateDb}` },
       stdio: "ignore",
     },
   );
+}, 180000);
+afterAll(() => {
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+});
+
+/** 从模板库拷一份独立库（含可能的 WAL/SHM 旁车，保证 SQLite 一致性）。 */
+function deployDb(name: string): string {
+  const file = path.join(tmpRoot, `${name}.db`);
+  fs.copyFileSync(templateDb, file);
+  for (const suffix of ["-wal", "-shm"]) {
+    const src = templateDb + suffix;
+    if (fs.existsSync(src)) fs.copyFileSync(src, file + suffix);
+  }
   return file;
 }
 
@@ -66,12 +80,12 @@ describe("reconcile-nav CLI", () => {
     await prisma.user.create({
       data: { id: "u1", email: "u1@x.com", displayName: "u1", passwordHash: "h", status: "ACTIVE", workspaceId: WS_ID },
     });
-    await prisma.$transaction([
-      prisma.base.create({ data: { id: "b1", name: "b1", createdBy: "u1" } }),
-      prisma.member.create({ data: { id: "m1", baseId: "b1", userId: "u1", role: "owner" } }),
-      prisma.table.create({ data: { id: "t1", baseId: "b1", name: "t1", primaryFieldId: "", createdBy: "u1" } }),
-      prisma.view.create({ data: { id: "v1", tableId: "t1", name: "g", type: "grid", order: 0, config: "{}" } }),
-    ]);
+    // 顺序写入（不用 $transaction(数组)——Prisma 数组事务并行发起，FK 依赖行会间歇
+    // 撞 P2003，全量高负载下必 flaky；独立临时库无需与他人并发，逐条 await 即可）。
+    await prisma.base.create({ data: { id: "b1", name: "b1", createdBy: "u1" } });
+    await prisma.member.create({ data: { id: "m1", baseId: "b1", userId: "u1", role: "owner" } });
+    await prisma.table.create({ data: { id: "t1", baseId: "b1", name: "t1", primaryFieldId: "", createdBy: "u1" } });
+    await prisma.view.create({ data: { id: "v1", tableId: "t1", name: "g", type: "grid", order: 0, config: "{}" } });
     await prisma.$transaction(async (tx) => {
       await reconcileNodesTx(tx, await buildExpectedNodes(tx));
       await rebuildPathsTx(tx);
@@ -89,7 +103,7 @@ describe("reconcile-nav CLI", () => {
     expect(again.status).toBe(0);
     expect(again.stdout).toContain("no changes");
     await prisma.$disconnect();
-  });
+  }, CLI_TEST_TIMEOUT);
 
   it("broken：只读 exit=1 且 --apply（无 purge）不清；--apply --purge-broken 清干净并写审计", async () => {
     const file = deployDb("brk");
@@ -97,12 +111,11 @@ describe("reconcile-nav CLI", () => {
     await p.user.create({
       data: { id: "u2", email: "u2@x.com", displayName: "u2", passwordHash: "h", status: "ACTIVE", workspaceId: WS_ID },
     });
-    await p.$transaction([
-      p.base.create({ data: { id: "b2", name: "b2", createdBy: "u2" } }),
-      p.member.create({ data: { id: "m2", baseId: "b2", userId: "u2", role: "owner" } }),
-      p.table.create({ data: { id: "t2", baseId: "b2", name: "t2", primaryFieldId: "", createdBy: "u2" } }),
-      p.view.create({ data: { id: "v2", tableId: "t2", name: "g", type: "grid", order: 0, config: "{}" } }),
-    ]);
+    // 顺序写入（同上前置用例）：避免数组事务并行发起时 FK 依赖间歇撞 P2003。
+    await p.base.create({ data: { id: "b2", name: "b2", createdBy: "u2" } });
+    await p.member.create({ data: { id: "m2", baseId: "b2", userId: "u2", role: "owner" } });
+    await p.table.create({ data: { id: "t2", baseId: "b2", name: "t2", primaryFieldId: "", createdBy: "u2" } });
+    await p.view.create({ data: { id: "v2", tableId: "t2", name: "g", type: "grid", order: 0, config: "{}" } });
     await p.$transaction(async (tx) => {
       await reconcileNodesTx(tx, await buildExpectedNodes(tx));
       await rebuildPathsTx(tx);
@@ -134,5 +147,5 @@ describe("reconcile-nav CLI", () => {
 
     raw.close();
     await p.$disconnect();
-  });
+  }, CLI_TEST_TIMEOUT);
 });
