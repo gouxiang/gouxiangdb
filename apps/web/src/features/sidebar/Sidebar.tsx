@@ -248,6 +248,14 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         </button>
         <button
           type="button"
+          onClick={() => navigate("/workspace/contacts")}
+          className="flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 text-gx-13 text-gx-text-primary hover:bg-gx-row-hover"
+        >
+          <Icon name="building" size={14} />
+          <span>通讯录</span>
+        </button>
+        <button
+          type="button"
           onClick={() => navigate(`/base/${baseId}/settings`)}
           className="flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 text-gx-13 text-gx-text-primary hover:bg-gx-row-hover"
         >

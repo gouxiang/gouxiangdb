@@ -17,6 +17,7 @@ export default function AppShell() {
 
   const isSettings = location.pathname.includes("/settings");
   const isTrash = location.pathname.includes("/trash");
+  const isContacts = location.pathname.startsWith("/workspace/contacts");
   const hasTable = !!tableId;
 
   // 全局快捷键：Cmd/Ctrl + K 打开搜索
@@ -40,17 +41,26 @@ export default function AppShell() {
           <TopBar />
         ) : (
           <div className="flex h-12 items-center gap-1.5 border-b border-gx-separator bg-gx-surface px-3">
-            <button
-              type="button"
-              onClick={() => navigate(`/base/${baseId}`)}
-              className="rounded-gx-sm p-1 text-gx-text-tertiary hover:bg-gx-bg"
-              title="返回"
-            >
-              <Icon name="chevronLeft" size={16} />
-            </button>
-            <span className="text-gx-13 font-medium text-gx-text-primary">
-              {isTrash ? "回收站" : "设置"}
-            </span>
+            {isContacts ? (
+              <>
+                <Icon name="building" size={16} className="text-gx-text-tertiary" />
+                <span className="text-gx-13 font-medium text-gx-text-primary">通讯录</span>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/base/${baseId}`)}
+                  className="rounded-gx-sm p-1 text-gx-text-tertiary hover:bg-gx-bg"
+                  title="返回"
+                >
+                  <Icon name="chevronLeft" size={16} />
+                </button>
+                <span className="text-gx-13 font-medium text-gx-text-primary">
+                  {isTrash ? "回收站" : "设置"}
+                </span>
+              </>
+            )}
           </div>
         )}
 

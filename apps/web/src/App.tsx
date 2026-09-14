@@ -32,6 +32,8 @@ import KbTrashPage from "./features/kb/KbTrashPage";
 import KbSettingsPage from "./features/kb/KbSettingsPage";
 import PublicSharePage from "./features/kb/PublicSharePage";
 import ErdPage from "./features/erd/ErdPage";
+import ContactsPage from "./features/contacts/ContactsPage";
+import InviteAcceptPage from "./features/contacts/InviteAcceptPage";
 
 function Loading() {
   return (
@@ -104,6 +106,9 @@ export default function App() {
       <Route path="/s/:token" element={<PublicSharePage />} />
       <Route path="/s/:token/doc/:docId" element={<PublicSharePage />} />
 
+      {/* 公开邀请接受页：登录前凭一次性激活码设置密码并激活账号（M2 组织通讯录） */}
+      <Route path="/invite/:token" element={<InviteAcceptPage />} />
+
       <Route
         element={
           <RequireAuth>
@@ -120,6 +125,7 @@ export default function App() {
         <Route path="/base/:baseId/erd" element={<ErdPage />} />
         <Route path="/base/:baseId/table/:tableId" element={<TableIndexRedirect />} />
         <Route path="/base/:baseId/table/:tableId/view/:viewId" element={<ViewRouter />} />
+        <Route path="/workspace/contacts" element={<ContactsPage />} />
       </Route>
 
       {/* 知识库：独立布局壳 KbShell，与数据表 AppShell 平行、零交叉 */}

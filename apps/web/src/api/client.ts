@@ -25,6 +25,18 @@ import type {
   CSVImportResult,
   TrashItemDTO,
 } from "@gx/shared-types";
+import type {
+  DeptDTO,
+  OrgRoleDTO,
+  RoleAssignmentDTO,
+  AssignmentSubjectInput,
+  OrgMemberDTO,
+  PaginatedMembers,
+  EffectiveRolesResponse,
+  OrgAction,
+  UserAccountStatus,
+  DeptMembershipDTO,
+} from "@gx/shared-types";
 import { resolveApiBase, withBase as joinBase } from "../lib/base";
 
 // API 同源前缀解析：
@@ -652,4 +664,151 @@ export const PublicApi = {
       body: JSON.stringify({ content }),
     }),
 };
+
+// ============ M2 组织通讯录 /api/v1/org/*（冻结契约，只消费后端） ============
+//
+// 路由全部挂在 v1 前缀（/api/v1/org/...），要求登录 + ACTIVE + tv 匹配；
+// 停用触发的 401 由 apiFetch 全局拦截自动登出，这里不做特殊处理。
+// 成功返资源本体 / 分页对象；错误 {error,code} 经 ApiError 抛出（409 文案在 error 里）。
+
+export type {
+  DeptDTO,
+  OrgRoleDTO,
+  RoleAssignmentDTO,
+  AssignmentSubjectInput,
+  OrgMemberDTO,
+  PaginatedMembers,
+  EffectiveRolesResponse,
+  OrgAction,
+  UserAccountStatus,
+  DeptMembershipDTO,
+};
+
+export interface MemberListParams {
+  page?: number;
+  limit?: number;
+  q?: string;
+  deptId?: string;
+  status?: UserAccountStatus;
+}
+
+export interface InvitedUserResult {
+  userId: string;
+  email: string;
+  status: string;
+  /** 明文一次性激活码（64 hex），仅本次返回；库存只留 sha256 摘要。 */
+  inviteToken: string;
+}
+
+export interface DeptAssignResult {
+  userId: string;
+  deptMemberships: DeptMembershipDTO[];
+}
+
+export interface LifecycleResult {
+  id: string;
+  status: string;
+  disabledAt: string | null;
+  tokenVersion: number;
+}
+
+/**
+ * 由一次性激活码拼出可线下转发的激活链接（M2 不投递邮件）。
+ * 走 withBase 以兼容子路径部署：根部署为 "/invite/<token>"，
+ * 网关子路径下为 "/app/gouxiangdb/invite/<token>"（与 API 同源前缀一致）。
+ */
+export function buildInviteLink(inviteToken: string): string {
+  return withBase(`/invite/${inviteToken}`);
+}
+
+export const OrgDepartments = {
+  list: () => apiFetch<DeptDTO[]>("/api/v1/org/departments"),
+  create: (data: { name: string; parentId?: string | null; ord?: number }) =>
+    apiFetch<DeptDTO>("/api/v1/org/departments", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: string, data: { name?: string; ord?: number; parentId?: string | null }) =>
+    apiFetch<DeptDTO>(`/api/v1/org/departments/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  remove: (id: string) =>
+    apiFetch<{ id: string; deleted: true }>(`/api/v1/org/departments/${id}`, { method: "DELETE" }),
+};
+
+export const OrgMembers = {
+  list: (params: MemberListParams) =>
+    apiFetch<PaginatedMembers>(`/api/v1/org/members${qs({ ...params })}`),
+  get: (id: string) => apiFetch<OrgMemberDTO>(`/api/v1/org/members/${id}`),
+  /** 当前登录者有效组织角色（直接授予 ∪ 活部门祖先闭包，附来源）。 */
+  myEffectiveRoles: () =>
+    apiFetch<EffectiveRolesResponse>("/api/v1/org/members/me/effective-roles"),
+  /** 指定成员有效组织角色（直接授予 ∪ 活部门祖先闭包，附来源）。 */
+  effectiveRoles: (id: string) =>
+    apiFetch<EffectiveRolesResponse>(`/api/v1/org/members/${id}/effective-roles`),
+  /** 邀请：建 INVITED 账号，一次性返回明文激活码。 */
+  invite: (data: { email: string; displayName: string }) =>
+    apiFetch<InvitedUserResult>("/api/v1/org/members/invite", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  /** 直接建 ACTIVE 账号（邮箱/姓名/初始密码）。 */
+  create: (data: { email: string; displayName: string; password: string }) =>
+    apiFetch<{ userId: string; email: string; status: string }>("/api/v1/org/members", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  /** 调岗/兼岗：add 加入兼岗、remove 移出、mainDeptId 设主部门。 */
+  assignDepartments: (
+    id: string,
+    data: { add?: string[]; remove?: string[]; mainDeptId?: string | null },
+  ) =>
+    apiFetch<DeptAssignResult>(`/api/v1/org/members/${id}/departments`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  disable: (id: string) =>
+    apiFetch<LifecycleResult>(`/api/v1/org/members/${id}/disable`, { method: "POST" }),
+  reactivate: (id: string) =>
+    apiFetch<LifecycleResult>(`/api/v1/org/members/${id}/reactivate`, { method: "POST" }),
+};
+
+export const OrgRoles = {
+  list: () => apiFetch<OrgRoleDTO[]>("/api/v1/org/roles"),
+  create: (data: { name: string; description?: string; actions?: OrgAction[] }) =>
+    apiFetch<OrgRoleDTO>("/api/v1/org/roles", { method: "POST", body: JSON.stringify(data) }),
+  update: (
+    id: string,
+    data: { name?: string; description?: string; actions?: OrgAction[] },
+  ) =>
+    apiFetch<OrgRoleDTO>(`/api/v1/org/roles/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  /** reassignTo：有悬挂授予时先迁移到目标角色再删。 */
+  remove: (id: string, reassignTo?: string) =>
+    apiFetch<{ id: string; deleted: true }>(
+      `/api/v1/org/roles/${id}${qs({ reassignTo })}`,
+      { method: "DELETE" },
+    ),
+  listAssignments: (id: string) =>
+    apiFetch<RoleAssignmentDTO[]>(`/api/v1/org/roles/${id}/assignments`),
+  /** 批量替换角色主体集（事务 diff）；主体可为 user 或 dept 节点。 */
+  replaceAssignments: (id: string, subjects: AssignmentSubjectInput[]) =>
+    apiFetch<{
+      assignments: RoleAssignmentDTO[];
+      added: Array<{ subjectType: string; subjectId: string }>;
+      removed: Array<{ subjectType: string; subjectId: string }>;
+    }>(`/api/v1/org/roles/${id}/assignments`, {
+      method: "PUT",
+      body: JSON.stringify({ subjects }),
+    }),
+};
+
+/**
+ * 接受邀请（公开，登录前调用）：一次性激活码兑换 ACTIVE 与 JWT。
+ * 刻意不走 apiFetch（不带 JWT、且 401 不应触发登出跳转；本端点失败为 400/404/409）。
+ */
+export function acceptOrgInvite(data: {
+  token: string;
+  password: string;
+  displayName?: string;
+}): Promise<{ token: string; user: { id: string; email: string; displayName: string; status: string } }> {
+  return publicFetch("/api/v1/auth/invite/accept", { method: "POST", body: JSON.stringify(data) });
+}
 

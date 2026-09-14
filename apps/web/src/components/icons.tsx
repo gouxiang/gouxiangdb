@@ -103,7 +103,13 @@ export type IconName =
   | "bringForward"
   | "sendBackward"
   | "bringToFront"
-  | "sendToBack";
+  | "sendToBack"
+  | "building"
+  | "userPlus"
+  | "userSlash"
+  | "crown"
+  | "keyRound"
+  | "sitemap";
 
 const PATHS: Record<IconName, string[]> = {
   chevronDown: ["M6 9l6 6 6-6"],
@@ -227,6 +233,45 @@ const PATHS: Record<IconName, string[]> = {
   bringToFront: ["M6 15l6-6 6 6", "M6 20l6-6 6 6"],
   // 置于底层：双下箭头
   sendToBack: ["M6 9l6 6 6-6", "M6 4l6 6 6-6"],
+  // M2 通讯录：组织（楼宇）
+  building: [
+    "M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16",
+    "M14 21V9a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v12",
+    "M3 21h18",
+    "M7 7h2",
+    "M7 11h2",
+    "M7 15h2",
+    "M17 11h.01",
+    "M17 15h.01",
+  ],
+  // 加成员：人 + 加号
+  userPlus: [
+    "M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2",
+    "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+    "M19 8v6",
+    "M16 11h6",
+  ],
+  // 停用成员：人 + 斜杠
+  userSlash: [
+    "M16.5 16.5a4 4 0 0 0-6 0",
+    "M9 11a4 4 0 0 1-2.8-6.8",
+    "M2.5 21v-1.2A4 4 0 0 1 5 16.2",
+    "M17 22l5-20",
+  ],
+  // 所有者/系统角色：皇冠
+  crown: ["M3 17l-1-9 5 4 5-7 5 7 5-4-1 9z", "M3 21h18"],
+  // 激活/密钥（邀请结果/激活）
+  keyRound: [
+    "M15.5 8.5a4.5 4.5 0 1 1-6.3 4.2L3 19v-2h2v-2h2l1.2-1.2a4.5 4.5 0 0 1 7.3-5.3z",
+  ],
+  // 组织层级/授予部门
+  sitemap: [
+    "M4 4h6v5H4z",
+    "M14 15h6v5h-6z",
+    "M7 9v3h10V9",
+    "M7 12h10",
+    "M17 12v3",
+  ],
 };
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {
