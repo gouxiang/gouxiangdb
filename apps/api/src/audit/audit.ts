@@ -23,7 +23,9 @@ export type AuditEventName =
   | "department_deleted"
   | "role_created"
   | "role_deleted"
-  | "role_assignment_changed";
+  | "role_assignment_changed"
+  // M3 导航对账脚本（--purge-broken 物理清理 broken 节点/shortcut，脚本侧主动留痕）
+  | "nav_broken_purged";
 
 export interface AuditInput {
   event: AuditEventName;

@@ -20,6 +20,8 @@ import fs from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { resolveDatabaseFile } from "../../src/db/databaseFile.js";
 import { computeDiffs, applyFixesTx, type ReconcileReport } from "../../src/domain/nav/reconcile.js";
+import { config } from "../../src/config.js";
+import { writeAudit } from "../../src/audit/audit.js";
 
 function hasFlag(flag: string): boolean {
   return process.argv.includes(flag);
@@ -68,6 +70,18 @@ async function main(): Promise<number> {
         result.nodes.pathsRebuilt +
         result.softDeleted.nodes + result.softDeleted.shortcuts +
         result.purged.shortcuts + result.purged.nodes;
+      // --purge-broken 物理清理 broken 节点/shortcut 是破坏性运维动作，写审计 JSONL 留痕
+      // （脚本无 Hono 上下文，直接 append 同格式行，actor 固定为 reconcile-script）。
+      if (purgeBroken && (result.purged.nodes > 0 || result.purged.shortcuts > 0)) {
+        writeAudit(config.auditDir, {
+          event: "nav_broken_purged",
+          actorId: "reconcile-script",
+          method: "CLI",
+          path: "scripts/nav/reconcile-nav.ts --apply --purge-broken",
+          status: 200,
+          detail: { purgedNodes: result.purged.nodes, purgedShortcuts: result.purged.shortcuts },
+        });
+      }
       console.log(changed === 0 ? "no changes" : `applied changes=${changed}`);
       if (after.summary.warnings > 0) {
         console.log(`warnings=${after.summary.warnings}（C4 未收纳/C5 ord 重复，不阻断；--apply 不自动收纳）`);

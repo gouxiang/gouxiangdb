@@ -72,9 +72,10 @@ export async function computeDiffs(tx: DbTx): Promise<ReconcileReport> {
 }
 
 /**
- * 修复阻断差异：A（缺建/异更/复活）+ path 重建 + B2/C1 soft 软删对齐；
- * B1/C1 broken 仅在 purgeBroken 时物理清理。C4 未收纳【不】自动补 shortcut
- * （2026-09-12 方案 A 裁决：运行期收纳只经 S6 菜单写 API；存量全收纳由迁移 B 保证）。
+ * 修复阻断差异：A（缺建/异更/复活）+ path 重建 + B2 节点软删对齐；
+ * B1/C1B broken 仅在 purgeBroken 时物理清理。C1S soft_dangling 与 C4 未收纳都【不】动
+ * shortcut（裁决 6：保留待实体恢复自动还原；2026-09-12 方案 A：运行期收纳只经 S6 菜单写
+ * API，存量全收纳由迁移 B 保证）。
  */
 export async function applyFixesTx(tx: DbTx, opts: ApplyOptions = {}): Promise<ApplyResult> {
   const expected = await buildExpectedNodes(tx);
@@ -95,25 +96,33 @@ export async function applyFixesTx(tx: DbTx, opts: ApplyOptions = {}): Promise<A
     }
   }
 
-  // 裁决 6：shortcut 指向软删节点（C1S soft_dangling）是正常悬挂态，shortcut 必须保留、
-  // 随实体恢复路径自动还原；--apply 不软删、不清理，仅在只读报告里给 warning。
+  // C1S soft_dangling shortcut（指向软删节点）是正常悬挂态，保留待恢复自动还原，不在此处理。
 
-  // B1/C1 broken（实体行物理消失）：仅 purgeBroken 时物理清理。
+  // B1/C1B broken（实体行物理消失或节点行缺失）：仅 purgeBroken 时物理清理。
   // 先物理删 shortcut 再删节点（FK RESTRICT 顺序）。
   if (opts.purgeBroken) {
     const brokenNodeIds = new Set<string>();
     for (const n of await tx.navNode.findMany({ where: { deletedAt: null, isSystem: 1 } })) {
       if (n.resourceType && !aliveId.has(n.id) && !softId.has(n.id)) brokenNodeIds.add(n.id);
     }
+    const allNodeIds = new Set((await tx.navNode.findMany({ select: { id: true } })).map((n) => n.id));
     const shortcuts = await tx.menuItem.findMany({ where: { type: "shortcut", deletedAt: null } });
     for (const s of shortcuts) {
-      if (s.nodeId && brokenNodeIds.has(s.nodeId)) {
+      // broken：指向待清的悬挂实体节点，或节点行已彻底不存在（含手工删行）。
+      if (s.nodeId && (brokenNodeIds.has(s.nodeId) || !allNodeIds.has(s.nodeId))) {
         await tx.menuItem.delete({ where: { id: s.id } });
         purged.shortcuts++;
       }
     }
-    for (const id of brokenNodeIds) {
-      await tx.navNode.delete({ where: { id } });
+    // nav_nodes 自引用 ON DELETE RESTRICT：先删子（depth 大）后删父，
+    // 否则待删父节点仍被同批待删子节点引用而 ABORT。
+    const ordered = await tx.navNode.findMany({
+      where: { id: { in: [...brokenNodeIds] } },
+      select: { id: true, depth: true },
+      orderBy: { depth: "desc" },
+    });
+    for (const n of ordered) {
+      await tx.navNode.delete({ where: { id: n.id } });
       purged.nodes++;
     }
   }
