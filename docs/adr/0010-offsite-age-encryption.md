@@ -1,6 +1,18 @@
 # ADR-0010：异地备份 age X25519 收件人加密（解密身份与备份机分离）
 
 **状态（Status）**：Accepted（M0 落地，2026-09-13，S6 实现）
+
+> **2026-09-12 NAS 重定向状态补充（项目总监 92d0a34 决策驱动，非作者自行翻状态）**：
+> 依据 `docs/planning/phase2/PLAN-ADJUST-nas-min-hardware.md` §3，本 ADR 的机制设计与代码**已就位且保留**，
+> 但**产品姿态＝接口预留、默认不激活**：
+>
+> - 本期**不作为已交付的容灾能力**，不在 M0/M1 出口验收中要求；
+> - 部署**不 enable** `gouxiangdb-backup.timer` 的异地投递（timer 本身也不随部署自动启用，见 ADR-0007 修订与 runbook）；
+> - env 模板中 `BACKUP_ENCRYPT_OFFSITE` / `AGE_RECIPIENT` / `AGE_BIN` / `GX_OFFSITE_TARGET` 标注为"可选扩展，默认不启用"；
+> - 未来需要异地容灾时，按已冻结的 **`BackupTransport` 契约**（PLAN-ADJUST §3.2）新增投递实现 + 填配置 + enable timer 即可启用，**无需重构快照核心**。现有 age-rsync 分支即该契约一个已写好但默认不注册的实现样例。
+>
+> 下方"决策/后果"正文（age X25519 收件人机制、密钥分离、rc=3 fail-loud 等）**保留不动**，仍是未来启用时的有效设计。
+
 **作者**：后端（mvp-dev-expert-team-backend）
 **编号说明**：ADR-0010 在生产化架构表中即预分配给「异地备份加密」；本号正文随 S6 补齐。
 0011–0020 由企业版架构（§10.4）占用，本批工程 ADR 顺沿 0021。

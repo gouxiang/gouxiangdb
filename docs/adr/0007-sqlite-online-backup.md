@@ -1,6 +1,24 @@
 # ADR-0007：SQLite 在线一致性备份 + 分层保留 + 季度恢复演练
 
 **状态（Status）**：Accepted（M0 落地，2026-09-13，S6 实现）
+
+> **2026-09-12 NAS 重定向补充（项目总监 92d0a34 决策驱动，非作者自行翻状态）**：
+> 依据 `docs/planning/phase2/PLAN-ADJUST-nas-min-hardware.md` §3，备份能力分两层重新定位：
+>
+> - **层① 本地在线一致性快照（本 ADR 主体）＝内置基础能力，保留**：零额外二进制、不联网、开销低，
+>   是防误删 / 防损坏 / 升级回滚的最低安全网，也是未来一切容灾的统一"快照原语"。产品默认提供
+>   **手动快照与发布前自动快照**（`deploy/bin/deploy.sh` 发布前只调本地快照，不依赖 age/异地）。
+>   每日 `gouxiangdb-backup.timer` **不随部署自动 enable**，由用户按需在 NAS 上手动开启本地定时
+>   （轻量本地操作，不含异地/加密）。
+> - **层② 完整异地容灾（age 加密 + 异地推送 + 定时启用 + 恢复演练）＝接口预留、默认关闭、本期不交付不验收**：
+>   见 [ADR-0010](0010-offsite-age-encryption.md) 状态补充与 PLAN-ADJUST §3。代码保留但默认不激活。
+> - **`BackupTransport` 是固定扩展点**：`backupDatabase` / `inspectSnapshot` / `buildManifest` /
+>   `selectRetention` 等快照核心与"副本去哪"解耦；未来新增异机 / 对象存储 / NAS 共享目录能力＝
+>   新增一个 `BackupTransport` 实现并登记配置（见 PLAN-ADJUST §3.2 契约），**快照/manifest/校验/保留核心一行不动**。
+>
+> 下方决策正文（在线备份 API、四重校验、daily7/weekly4、季度演练等）保留不动；其中第 6 条
+> "timer 每日 02:00 触发"的调度能力仍有效，仅默认激活姿态按上条调整。
+
 **作者**：后端（mvp-dev-expert-team-backend）
 
 ---

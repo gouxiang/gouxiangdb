@@ -90,16 +90,19 @@ sudo systemctl edit caddy --force      # 在 [Service] 加：Environment=GX_DOMA
 # 6.3 首次部署（无在运行版本，脚本按“首次”跳过发布前快照）
 sudo bash deploy/bin/deploy.sh --release /tmp/gouxiangdb-release-*.tar.gz
 
-# 6.4 起 API 与每日备份、重载 Caddy
+# 6.4 起 API、重载 Caddy（备份 timer 默认不启用，见下方说明）
 sudo systemctl enable --now gouxiangdb-api
-sudo systemctl enable --now gouxiangdb-backup.timer
 sudo systemctl reload caddy
+# 每日【本地】快照定时为可选项，需要时由用户手动开启（仅本地快照，不含异地/加密）：
+#   sudo systemctl enable --now gouxiangdb-backup.timer
+# 2026-09-12 NAS 重定向（PLAN-ADJUST §3，commit 92d0a34）：产品默认只提供手动/升级前本地快照，
+# 部署流程不再默认 enable 备份 timer；异地 age 加密容灾为预留接口、默认不激活（见 backup.md §3）。
 
 # 6.5 验收
 curl -fsS http://127.0.0.1:3001/healthz
 curl -fsS http://127.0.0.1:3001/readyz      # 五探针 true、migrations applied 与迁移目录数一致（M1 起为 12）
 curl -fsS https://gx.example.com/healthz
-systemctl list-timers gouxiangdb-backup.timer
+systemctl list-timers gouxiangdb-backup.timer   # 未 enable 时显示 n/a 或不列出，属预期
 ```
 
 ## 7. 证书两条路径
@@ -129,8 +132,14 @@ sudo bash deploy/bin/rollback.sh 20260920-1      # 指定 release
 
 ## 9. 备份与监控
 
-- 每日 02:00 由 `gouxiangdb-backup.timer` 调 S6 在线备份，落 `/var/backups/gouxiangdb`，
-  daily7/weekly4 保留；异地 age 加密在 env.conf 配置（见 [backup.md](backup.md)）。
+- **本地在线快照是内置基础能力**（防误删/损坏/升级回滚的最低安全网，零额外二进制）：
+  `deploy.sh` 每次发布前自动执行一次；也可随时手动跑 `online-backup.mjs`（见 [backup.md](backup.md)），
+  落 `/var/backups/gouxiangdb`，daily7/weekly4 本地保留。
+- **每日 timer 默认不启用**（2026-09-12 NAS 重定向，PLAN-ADJUST §3，commit 92d0a34）：需要本地每日定时时，
+  用户手动 `sudo systemctl enable --now gouxiangdb-backup.timer`（每日 02:00，仅本地快照）。
+- **异地 age 加密容灾＝可选扩展、接口预留、默认不激活**：相关变量
+  （`BACKUP_ENCRYPT_OFFSITE`/`AGE_RECIPIENT`/`AGE_BIN`/`GX_OFFSITE_TARGET`）在 env.conf 中默认全部关闭/注释，
+  详见 [backup.md](backup.md) §3。当前产品不宣称具备异地/异机容灾能力。
 - 日志：`journalctl -u gouxiangdb-api -f`、`-u gouxiangdb-backup`；
   审计 JSONL 在 `/var/log/gouxiangdb/audit.logl`，logrotate 配置见 `deploy/logrotate/gouxiangdb.conf`。
 - 健康：外部探针对 `/healthz`（存活）与 `/readyz`（就绪，含 db/disk/migrations/uploads）。
