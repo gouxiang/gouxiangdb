@@ -1,8 +1,9 @@
 # M5 向量库与统一检索 — 可执行实施切片（设计与现状核对，不改业务码）
 
-- 日期：2026-09-18
+- 日期：2026-09-18（终审回填同日）
 - 作者：架构师 高见远
-- 状态：**待项目总监终审**（§11 待裁决清单未关闭前不得派工实施）
+- 状态：**已通过项目总监终审**（§11 八项裁决 B-1~B-8 全部定稿，2026-09-18；可派工实施，排期仍受 §7 单线依赖约束）
+- 修订：2026-09-18 终审回填 B-1~B-8（§4.5 表节点定稿去二选一、§4.4/§6 凭据落库与轮换清除、§4.6-4 存在性口径、role_owner 不新增 manage_search、Tier-L 双真机门与 off+FTS 降级发布姿态、两步 reindex、内嵌 worker、M5-FE 同里程碑）；代码基线已前进至 5f05d19（M2-S6 收口），本文现状证据行号为 6f7dc29 工作区实读，M5 开工逐点复核。
 - 上游依据：SPEC-enterprise-v1.0 §5（`:75` `GET /api/v1/search`、`:76` `POST /api/v1/admin/reindex`）、§6（`:87` 主库仅 outbox/change_events、search.db 独立可 truncate 不进备份）、§7（embedding/检索设置页）、AC-M5-1（`:123` 崩溃自动降级 FTS-only/reindex 幂等）、AC-M5-2（`:124` 召回前剔除无权内容、不索引字段物理缺席）；PRD-enterprise V1-V6（`:169-177`：V2 异步向量化不阻主链路、V4 先收敛后召回 P95<500ms、V5 索引治理）、M5 出口验收（`:270-273`）；ARCH-enterprise §7.1-7.7（`:615-745` outbox/embedding/vec0/FTS5/RRF/即弃原则）；**硬约束来源：两份已入库 spike——`spike-sqlite-vec.md`（2026-09-14，实测）、`spike-mcp-transport.md`（M6 用，仅引用其审计/PAT 无关项，不引依赖）**
 - 适用代码基线：`main` @ `2aef401`（本文档入库提交；代码侧 M2-S5 已随 86a5b60 落地：roles.ts/usersWithRole/契约冻结，shared-types `org.ts` 为 OrgAction 单一真源；M4 切片文档 r2 为 1ad0836）；根 package.json v0.1.0
 - 测试基线（项目总监给定，本文不重跑）：api **56 文件 678 passed / 3 skipped**（M2-S3，6f7dc29）；迁移目录 **14 个**；M3 后预期 17（nav DDL/回填 + manage_menu 补位），M4 后预期 19（回填 + manage_share 补位，索引补强可能 20）。**M5 第一个数据迁移（change_events）编号排在 M4 全部迁移之后**
@@ -20,7 +21,7 @@
 4. **零泄漏的工程定义（AC-M5-2）= "先收敛、后召回"，禁止"先全量召回再应用层过滤"**：检索时先用 **M4 冻结的 scope 接口**（M4 §4.7 resolveVisibleNodeIds/buildVisibleScopeSql）实时算出当前主体可见 nodeId 集，物化为 search.db 会话临时表（`temp_scope`），FTS 路 JOIN 临时表、vec 路以 metadata 分区列 + 白名单收敛（spike 遗留首日验证项：vec0 KNN 对 `rowid IN (子查询)` 的确切行为，S5 第一件事）；融合出参前再逐实体过一次 `engine.decide(user,node,'r')` 纵深防御；**无权 id 不进入任何一路召回，不可能占满 top-k**。
 5. **权限变更无需索引失效机制**：索引内容只与实体文本有关、不含任何主体授权信息（不做 per-user 索引）；scope 每查询实时计算（M4 决策不做跨请求缓存），调岗/收权/继承变更（policyVersion/navVersion bump）后**下一次检索**即新可见集。版本号仅用于响应回传与前端缓存失效，不参与 worker 索引（§4.7）。
 6. **FTS5 trigram + 短词 LIKE 回退 + 应用层 RRF 融合**：≥3 码元（CJK 3 字/拉丁 3 字符）走 trigram MATCH（实测中文 2 字词命中 0，spike §3），<3 走参数化 LIKE；FTS 与 vec 各取 top-N（默认 100），RRF `score=Σ 1/(60+rank)`，标题精确命中加性 boost，同实体多 chunk 取最高分聚合后 top20；响应带 `mode:"hybrid"|"fts"|"like"` 让前端展示降级状态。
-7. **性能门分级，不拿开发机数字冒充 NAS 承诺**：spike 在 Apple M5/16GB 实测 100k×1536 维 KNN p95≈113ms、库文件 592MB（非 NAS，仅参考）；**10 万 chunk 混合检索 P95<500ms 只在 Tier-L 真机（2C4G ext4 本地盘，x86 与 arm 各一）验证后才允许写入对外承诺**；Tier-S 入门 NAS 的流畅基线定义为 **1 万-10 万 chunk 区间检索流畅（P95<500ms）+ 索引任务不饿死主写**，不达标先降维（512/768，MRL）/收紧 scope/控制 k，阈值沿用 ARCH §7.3：chunk>50 万或真机 P95 持续>500ms 立项评估 LanceDB（EmbeddingProvider/indexer 接口不变）。
+7. **性能门分级，不拿开发机数字冒充 NAS 承诺（B-5 终审定稿）**：spike 在 Apple M5/16GB 实测 100k×1536 维 KNN p95≈113ms、库文件 592MB（非 NAS，仅参考）；**10 万 chunk 混合检索 P95<500ms 必须在两台 Tier-L 目标机（飞牛 x86 + arm，均 2C4G 本地盘）真机验证后才允许写入对外承诺——真机设备与排期窗口是外部依赖（项目总监向主理人申请），S10 不以开发机数字替代真机门**；门不过时的发布姿态已定稿：**以 `GX_EMBEDDING_MODE=off` + FTS trigram 为默认发布姿态、cloud 语义检索作为高配能力**，不阻塞 M7 总验收。降杠杆顺序：降维（512/768，MRL）→收紧 scope→控制 k；阈值沿用 ARCH §7.3：chunk>50 万或真机 P95 持续>500ms 立项评估 LanceDB（EmbeddingProvider/indexer 接口不变）。Tier-S 入门 NAS 的流畅基线定义为 **1 万-10 万 chunk 区间检索流畅（P95<500ms）+ 索引任务不饿死主写**。
 8. **切片 S0-S11 共 12 片**：S0 旧检索 characterization → S1 主库 change_events 迁移 + 同事务 outbox 接线 → S2 SearchStore/search.db/vec0 加载降级 + 原生打包 → S3 EmbeddingProvider(off/cloud) + 配置契约 → S4 indexer worker（FTS/向量/退避/删除）→ S5 searchService 先收敛后召回 + RRF + `GET /api/v1/search` → S6 字段 mask 摘要剔除（接 M4 A-4 口径）→ S7 reindex + admin 状态端点 + openapi 冻结 → S8 权限/继承变更失效对抗 → S9 崩溃降级 AC-M5-1 全链路 → S10 规模与真机门 → S11 出口收口。**前端设置页（cloud/off 配置 UI）与搜索结果 UI 是独立 M5-FE 片，本文只给后端契约（输入清单 §8）。**
 9. **搜索端点版本化**：新检索走 **`GET /api/v1/search`**（SPEC :75，挂 M2 v1 鉴权链 requireActiveUser）；旧 `/api/search/`（search.ts 160 行，成员循环+有界预览）M5 不动、不重写，保留至旧 /api 统一下线切片；前端切新端点在 M5-FE。回滚 = v1 路由摘除/flag off，旧端点字节不变。
 10. **新增运行时依赖仅 `sqlite-vec@0.1.9`（可选平台子包，零 JS 传递依赖）**；不引入任何分词器/中文词库/Jieba/ORM；OpenAI 兼容 HTTP 调用用 Node 22 全局 `fetch` + AbortController，不引 SDK。
@@ -101,7 +102,7 @@
 4. **EmbeddingProvider 两态**：off（默认）/cloud（OpenAI 兼容契约，spike §6.1）；批量切片、信号量限流、AbortController 超时、仅网络/5xx 重试（4xx 不重试）、health 探活；维度不匹配拒绝向量路并标记需 reindex。
 5. **统一检索 v1**：`GET /api/v1/search?q=&type=&mode=auto&limit=`，先 M4 scope 收敛 → FTS/vec 各自白名单内召回 → RRF → 实体聚合 top20 → 出参前 engine.decide 二次校验；mode 回传 hybrid/fts/like + degraded 原因。
 6. **字段级零泄漏（AC-M5-2 后半句）**：记录 chunk 收录非计算字段文本（现状纪律）；命中文档的 snippet/title 生成按 **M4 fieldCapability/maskedTableFields（M4 §4.7）逐用户剔除不可见字段片段**——被 mask 字段的文本不进该用户的摘要（chunk 仍可被该字段命中召回，但高亮/摘要不含其原文，命中标记只说"记录匹配"不说是哪个字段；表级不可见整体不召回由 scope 保证）。
-7. **reindex 与可观测**：`POST /api/v1/admin/reindex`（role_owner，幂等，重建期间检索自动降 LIKE/FTS）、`GET /api/v1/admin/search/status`（vec 加载/embedding 模式/积压/失败/覆盖率/index_meta）、`GET/PATCH /api/v1/admin/embedding/config`（role_owner，后端契约供设置页）。
+7. **reindex 与可观测**：`POST /api/v1/admin/reindex`（role_owner，幂等，重建期间检索自动降 LIKE/FTS）、`GET /api/v1/admin/search/status`（vec 加载/embedding 模式/积压/失败/覆盖率/index_meta）、`GET/PATCH /api/v1/admin/embedding/config` + `POST .../api-key/rotate` + `DELETE .../api-key`（均 role_owner，后端契约供设置页；B-2/B-6）。
 8. **降级与损坏自愈（AC-M5-1）**：vec .so 缺失/cloud 连续失败/超时/401/dim 不符/vec 表损坏，全部回落 FTS+LIKE，主应用与编辑链路不受影响；search.db 损坏时隔离文件自动重建（reindex 播种）。
 9. **真机性能门**：Tier-L 两架构真机 10 万 chunk P95<500ms 验证（发版门，不达标走降杠杆）；Tier-S 1万-10万流畅基线；数据进 baseline。
 10. **openapi 增补 + 后端契约片**：search/admin 两组端点进 M4 冻结的 openapi.yaml；M5-FE 输入清单（搜索结果 UI、设置页 cloud/off 配置、reindex/覆盖率面板）。
@@ -122,7 +123,7 @@
 | 多工作区隔离 | Out（ws_default） | workspaceId 列照建（ARCH schema 含），值恒默认 |
 | 备份 search.db | 永不进主备份集（可重建） | runbook 声明；异地备份只含主库/uploads（现状已如此） |
 | 内置 AI 聊天/问答 | M6 后 | M5 只交付检索服务，M6 MCP 是消费方 |
-| 前端搜索结果页/设置页实现 | 独立 M5-FE 片（S7 openapi 冻结后派工） | 本文只给 §8 契约清单 |
+| 前端搜索结果页/设置页实现 | **B-8 终审定稿：M5-FE 同里程碑独立片**，S7 契约冻结后派前端 | 本文只给 §8 契约清单；走 `/api/v1/search`，旧 `/api/search/` 不动 |
 
 ---
 
@@ -133,7 +134,7 @@
 3. **主库 schema 方言纪律不变（SPEC :60 铁律）**：change_events 手写迁移、只增、幂等回填、发布前快照、30 分钟回滚；不写 SQLite 专有函数；search.db 的 FTS5/vec0 DDL 是派生库自举语句、**不进 Prisma migrations、不进 _prisma_migrations 对账**（否则 readiness migrations 探针 MISMATCH，readiness.ts:57-69）。
 4. **M4 契约只消费不改**：resolveVisibleNodeIds/buildVisibleScopeSql/engine.decide 的签名以 M4 §4.7 为准；M5 不 import guards.ts/kb.ts 旧守卫做检索鉴权（v1 从第一天只认 M4 引擎，与 M6 同纪律，M4 §4.8）。
 5. **降级不得改变可见性语义**：hybrid→fts→like 三态共用同一 scope 收敛结果；降级只损失召回能力，绝不放宽权限（AC-M5-2 在三种 mode 下分别对抗）。
-6. **Embedding 密钥不出服务端**：apiKey 只从 env/受控配置读，不入任何响应（配置 GET 返回 `hasKey:true` 级存在性）、不入审计、不入日志、不入 search.db、不随 openapi 示例泄漏；MCP/前端永不下发（spike §6.1）。
+6. **Embedding 密钥不出服务端（B-2 定稿细化）**：apiKey 只从 env/受控加密配置读，响应只回 `apiKey:{configured, source, maskedLast4}` 级存在性（明文与密文均不下发）、不入审计、不入日志、不入 search.db、不随 openapi 示例泄漏；JWT_SECRET 轮换导致库存密文不可解密时回落 configured:false 而非 500；MCP/前端永不下发明文（spike §6.1）。
 7. **search.db 单写者**：worker 是唯一写连接（同进程单例）；reindex 的 truncate 与 worker 认领用同一把进程内锁 + rebuilding 标记；检索连接只读打开（仿 rawRead readonly），避免读写互斥污染。
 8. **错误信封/限流/安全头/bodyLimit 不切**：v1 search 是 GET（无 body 问题）；admin/reindex POST 走现有 1MB 默认上限（任务参数极小，不需 M6 的 /mcp 豁免）。
 9. **可重建即弃**：search.db 与 index_meta 任何损坏都能通过删文件 + reindex 恢复；主库 change_events 保留期由 reindex 播种逻辑决定（reindex = 清派生库 + 主库事件重放/直接扫表，不依赖 change_events 历史不丢失——以扫主库活实体为准，§5.5）。
@@ -277,7 +278,7 @@ export interface EmbeddingProvider {
 }
 ```
 
-- 配置（env 启动基线 + admin PATCH 运行态覆盖，**运行态覆盖存主库新表 or index_meta？定稿：存主库 `app_settings` 小表（只增迁移，key/value），env 仅作首启种子；apiKey 存主库必须加密——M0 age 公钥是备份加密，应用内对称密钥用 JWT_SECRET 派生 AES-256-GCM（crypto 内置，零依赖）；不引加密库**。待裁决项 B-2：是否允许设置页落 apiKey，还是仅 env。本文建议：PATCH 可落（加密存），env 为只读基线，UI 明示"已配置"）：
+- 配置（**B-2 终审定稿：批准设置页写入 apiKey**。env 作只读首启种子，admin PATCH 运行态覆盖落主库 `app_settings` 小表（只增迁移，key/value）；apiKey 落库必须加密——M0 age 公钥是备份加密，应用内对称密钥用 **JWT_SECRET 派生 AES-256-GCM**（Node crypto 内置，零新依赖），密钥派生与存法：`key=SHA-256(JWT_SECRET || "embedding-v1")`、每条密文随机 IV、库存 iv/tag/ciphertext，见 S3）。GET/config 与 status **只回显存在性**（`configured:true` + `maskedLast4`），**永不回传明文或密文**；提供 apiKey **轮换与清除端点**（见 §6 增补）。**JWT_SECRET 变更后解密失败必须优雅回落"未配置"（configured:false），不得 500**——该行为写入 S3 验收。env 为只读基线，UI 明示"已配置/来自环境变量"）：
   `GX_EMBEDDING_MODE`（off|cloud，默认 **off**）、`GX_EMBEDDING_BASE_URL`、`GX_EMBEDDING_API_KEY`、`GX_EMBEDDING_MODEL`（默认 text-embedding-3-small）、`GX_EMBEDDING_DIM`（默认 1536，必须与 model 实际一致）、`GX_EMBEDDING_BATCH_SIZE`（64）、`GX_EMBEDDING_TIMEOUT_MS`（15000）。
 - cloud 可用性四与门（仿 flags.ts:28-30 组合判定）：mode=cloud **且** baseURL/key/model/dim 配置齐全 **且** health().ok（启动探活 + 周期 60s 探活，连续 3 次失败置 unhealthy）**且** index_meta.embedding_dim 与配置 dim 一致（不一致拒绝向量路、status 报 `dim_mismatch_reindex_required`）。
 - 请求：POST `${baseURL}/v1/embeddings`（baseURL 自带 /v1 与否做归一），Bearer key，`{model,input:[...],encoding_format:"float"}`；以 `data[].index` 对齐回序；4xx 不重试（配置/内容错误，直接 failed 让事件退避到 dead 暴露配置问题），网络错/5xx/超时指数退避（3 次，基数 1s）；整批 401/403 → provider 置 unhealthy，后续事件只写 FTS、向量部分 pending 不标 done？**定稿：FTS 成功即事件 done（检索可用性优先），向量缺失由"覆盖度对账"补发**（index_meta 维护 `vec_dirty` 清单或对 chunks LEFT JOIN vec_chunks 周期补向量，S4 实现对账）。
@@ -329,7 +330,7 @@ search(q, user, filters):
   9. 响应（§6 契约）+ mode（两路都有 hybrid；仅 FTS fts；短词 like）+ degraded[]。
 ```
 
-- **粒度对齐**：M4 scope 返回 nodeIds；record chunk 的 nodeId 挂**表节点**（记录在 M3 是 table 下内容，记录实体不建独立 nav 节点——M3 六类节点 base/table/view/doc/canvas/group，记录非节点；以 M3 落地为准，S5 开工核 nav sync 中记录变更如何反映，若 M3 不为记录建节点，则 record 可见性 = 其 table 节点 r，scope kinds 取 table，chunks.nodeId=tableNodeId）；doc/canvas chunk 挂各自 doc/canvas 节点。此映射在 S4 抽文本时固化，S5 用对拍测试锁"scope 集与 chunk 集的 join 语义 = 逐实体 decide"。
+- **粒度对齐（B-1 终审定稿）**：record chunk 的 nodeId 挂**表节点**，不留二选一分支。记录不建 nav 节点是 M3 六类定稿（base/table/view/doc/canvas/group；view 建节点、field 不建、**记录不建**），S4/S5 直接按 table 节点实现：record 可见性 = 其 table 节点 r，scope kinds 取 table，chunks.nodeId=tableNodeId；doc/canvas chunk 挂各自 doc/canvas 节点。此映射在 S4 抽文本时固化，S5 用对拍测试锁"scope 集与 chunk 集的 join 语义 = 逐实体 decide"。
 - **truncated 处理**：M4 budget 默认 5000、硬顶 20000；超限 M5 不允许全量召回——temp 表只装截断集时响应必须带 `scopeTruncated:true` + 提示缩小范围（管理类大规模检索不是 P0 场景），不得静默只搜部分却谎称全量。
 - **严禁时序**：禁止"vec/fts 全量 top100 → 应用层过滤掉无权的 → 数量不足"（spike §8.4 铁律）；所有召回 SQL 的 EXPLAIN 必须出现 temp_scope/chunks 的 JOIN/过滤在 SCAN vec 之前或之中（vec0 本就 SCAN，WHERE 下推即满足）。
 
@@ -340,7 +341,7 @@ search(q, user, filters):
   1. snippet 只由 `fieldCapability.visible` 字段文本生成，mask 字段命中不贡献高亮窗口；
   2. `matchedField` 不返回被 mask 字段名（旧 RecordHit.matchedField 字段语义降级：v1 对无字段可见性信息的命中返回 null 或"已隐藏字段"级中性值——**沿用 M4 A-4 最小泄漏原则：不出现"无权限"字样、不反证字段存在**；v1 新响应可重新定义 matchedField 为可选）；
   3. title 候选字段（primaryField/linkDisplayField）被 mask 时按 M4 A-4：回退 record id，不伪造；
-  4. 若该用户在该表所有可见字段均未参与命中（纯靠隐藏字段命中），记录仍可出现在结果中吗？定稿：**仍出现**（表级 r 即有权知道记录存在，与列表可见行一致——M4 列表对表级可见用户返回行，只是字段缺席），snippet 给中性"此记录包含匹配内容"占位而非原文。该项列入待裁决 B-3（产品确认是否接受此存在性口径；替代方案是隐藏字段命中整行不出现，但那要求建 per-user 字段倒排，与单一派生库冲突）。
+  4. **纯靠隐藏字段命中时记录仍出现（B-3 终审定稿）**：前提是用户持有该表 r——行存在性本就对其可见（与 M4 列表口径一致：M4 列表对表级可见用户返回行，仅字段缺席）。snippet 用**中性占位"此记录包含匹配内容"**，绝不回显命中字段原文，matchedField=null、不反证字段存在；**表级不可见者整体不出现**（由 §4.5 scope 先收敛保证，不依赖字段层 mask）。与 M4 A-4 边界的交叉引用：M4 A-4 管列表/详情出口的字段最小泄漏（mask-null、标题回退 record id），本条管检索出口的存在性口径与摘要中性化，两者共用 fieldCapability 判定、措辞纪律一致（不出现"无权限"字样）。
 - doc/canvas 无字段概念，mask 不适用；doc 级不可见由 scope 整体剔除。
 
 ### 4.7 权限/继承变更与版本号联动
@@ -382,7 +383,8 @@ apps/api/src/domain/search/
   __tests__/          // characterization/降级/零泄漏/融合/绑定类型
 apps/api/src/routes/v1/
   search.ts           // GET /search
-  adminSearch.ts      // POST /admin/reindex、GET /admin/search/status、GET/PATCH /admin/embedding/config
+  adminSearch.ts      // POST /admin/reindex、GET /admin/search/status、GET/PATCH /admin/embedding/config、
+                      // POST /admin/embedding/api-key/rotate、DELETE /admin/embedding/api-key（均 role_owner）
 apps/api/scripts/search/
   reindex.mjs         // pnpm gx:reindex [--type record|doc|canvas] [--id]（ARCH :743）
   check-coverage.mjs  // 主库实体 vs 派生覆盖度/悬空 nodeId 巡检（只读）
@@ -419,14 +421,14 @@ apps/api/scripts/search/
 - 认领单条 SQL（单写者 + 防多实例）：`UPDATE change_events SET status='processing', workerId=?, attempts=attempts+1 WHERE id=(SELECT id FROM change_events WHERE status='pending' AND nextRunAt<=? ORDER BY nextRunAt LIMIT 1) RETURNING *`（SQLite 3.53 支持 RETURNING，better-sqlite3 内建 3.53.4 已由 spike 确认）；失败置 failed + nextRunAt 指数退避（10s/1m/10m/1h/1h/1h/1h/1h），attempts≥8 转 dead；成功 done + processedAt。
 - 处理顺序：取实体（主库只读连接，活/deletedAt 判定）→ op=delete 清三表（chunks/fts/vec 按 entityId，rowid 联动）→ upsert：抽文本 → 删旧 chunk 行 → 取新 rowid → 写 chunks + fts → embed（cloud）→ 写 vec。
 - 单轮批量 50 事件、轮询间隔空闲 2s（有积压连续处理）；不引入外部队列/cron（systemd timer 只跑 reindex CLI，不跑 worker——worker 在 API 进程内）。
-- 启动：服务启动后延迟 3s 启动 worker（避开启动忙峰）；GX_SEARCH_WORKER=off 可关（排障/双开防护，默认 on）。
+- 启动：服务启动后延迟 3s 启动 worker（避开启动忙峰）；**B-7 终审定稿：不做独立 worker 进程/systemd 独立 unit，单实例内嵌为唯一交付形态**；仅保留 `GX_SEARCH_WORKER=on|off`（默认 on）供排障与双开防护，不演化成进程形态开关；多实例部署成为真实需求时另立 ADR（届时 change_events 认领 SQL 的行级锁需升级为租约机制，index_meta.worker_lock 已预留）。
 
 ### 5.4 reindex（幂等 job）
 
 - `POST /api/v1/admin/reindex {type?, entityId?}`：role_owner 限定；index_meta 置 rebuilding + 审计；在 `search.db.rebuild-<ts>` 自举空库 → 扫主库活实体直接灌（不经 change_events 重放，避免事件历史保留期问题，§3-9）→ 完成后原子 rename 替换 + worker 只读/写连接重开 + rebuilding=0；期间旧库继续服务、新库不可见，切换瞬态如 §4.8。
 - 并发保护：rebuilding=1 时再调返回 409 REINDEX_IN_PROGRESS（不排队第二个）。
 - CLI `pnpm gx:reindex`（ARCH :743）：停机维护场景直跑同一 service 函数。
-- model/dim 变更：PATCH embedding/config 改 dim 时后端不自动重建（可能耗时），返回 `reindexRequired:true`；管理员确认后调 reindex（或 PATCH 带 `reindex:true` 一步触发）；vec_chunks 在新库按新 D 建。
+- model/dim 变更（**B-6 终审定稿：两步，不支持一步触发**）：PATCH embedding/config 改 dim/model 时后端不自动重建（可能耗时），返回 `reindexRequired:true`；管理员**显式再调 `POST /api/v1/admin/reindex`** 完成重建，PATCH 不接受 `reindex:true` 参数（防误触长任务）；vec_chunks 在新库按新 D 建。**CLI 保留一步形态**：`pnpm gx:reindex --with-config`（停机维护场景，脚本内顺序执行配置应用与重建）。
 
 ### 5.5 覆盖度对账（check-coverage + status 数据源）
 
@@ -467,17 +469,26 @@ GET  /api/v1/admin/search/status → role_owner
                 backlog:{pending,failed,dead}, coverage:{a,b,c,d,e}, rebuilding} }
 
 GET  /api/v1/admin/embedding/config → role_owner   （绝不回传 apiKey 明文/密文）
-  200: {mode:"off"|"cloud", baseURL, model, dim, batchSize, timeoutMs, hasApiKey, source:"env"|"db"}
-PATCH /api/v1/admin/embedding/config → role_owner
+  200: {mode:"off"|"cloud", baseURL, model, dim, batchSize, timeoutMs,
+        apiKey:{configured:true|false, source:"env"|"db"|"none", maskedLast4:"ab12"|null}}
+PATCH /api/v1/admin/embedding/config → role_owner      （B-2 定稿：可写入 apiKey）
   body: {mode?, baseURL?, apiKey?, model?, dim?, batchSize?, timeoutMs?}
-  → 200 同 GET 形状；dim/model 变更 → 200 带 reindexRequired:true（不自动重建）；
+    · apiKey 字段：传入即覆盖（AES-256-GCM 加密落 app_settings）；不传保持不变；
+      传 null 显式清除库存 key（回落 env 种子或未配置）
+  → 200 同 GET 形状；dim/model 变更 → 200 带 reindexRequired:true（**B-6 定稿：不自动重建，
+    管理员须显式再调 POST /admin/reindex**；PATCH 不接受 reindex:true 参数）；
     cloud 模式保存后同步探活，失败 200 带 healthy:false（不阻断保存，允许先存后修网络）；
+    JWT_SECRET 变更致库存密文解密失败 → 视为未配置（configured:false, source:"none"），不 500；
     非法 URL/越界 dim/批量 → 400 EMBEDDING_CONFIG_INVALID；审计 embedding_config_changed（无 key 值）
+POST /api/v1/admin/embedding/api-key/rotate → role_owner   （B-2 轮换端点）
+  body: {apiKey:string}  → 200 同 GET 的 apiKey 存在性形状（configured:true, maskedLast4）
+DELETE /api/v1/admin/embedding/api-key → role_owner        （B-2 清除端点）
+  → 204；清除库存 key，回落 env 种子（env 存在则 source:"env"，否则 "none"）；审计记录清除动作
 ```
 
 - 错误码新增（只增不改旧码）：`SEARCH_UNAVAILABLE`、`REINDEX_IN_PROGRESS`(409)、`REINDEX_FAILED`、`EMBEDDING_CONFIG_INVALID`(400)。
 - 限流：沿用 /api 兜底；reindex 额外在应用层 409 防抖。
-- 管理端"admin"角色口径：M2 无独立 admin 动作位，**以有效角色含 systemKey=role_owner 判定**（复用 M4 hasOrgAction/effective 角色，具体 helper 在 S7 按 M4/M2 落地形态取，不新造角色）。
+- **管理端角色口径（B-4 终审定稿）**：reindex/embedding 配置限 **role_owner**（有效角色含 systemKey=role_owner，复用 M4 hasOrgAction/effective 角色求值）；**不新增第六枚组织动作 `manage_search`（YAGNI）**——M2 五枚动作 + M4 manage_menu/manage_share 清单不再扩，自定义角色暂不能被授予检索管理权，未来有真实客户诉求再按 §4.10 同款流程增补。
 
 ---
 
@@ -492,7 +503,7 @@ PATCH /api/v1/admin/embedding/config → role_owner
 | S4 | indexer worker（抽文本/FTS/vec/退避/删除/覆盖对账） | 纯后端 | chunks.ts/indexer.ts；scripts/search | S1-S3 |
 | S5 | searchService 先收敛后召回 + RRF + GET /v1/search | 纯后端 | query.ts/rrf.ts；routes/v1/search.ts | **M4-S4（scope 冻结）+ M4-S1（decide）**；spike §8.5-3 首日验证 |
 | S6 | mask 摘要剔除 + AC-M5-2 六对抗 | 纯后端 | snippets.ts；M4 fieldCapability 消费 | S5、M4-S6 |
-| S7 | reindex/status/config 端点 + openapi 增补冻结 | 后端+契约 | routes/v1/adminSearch.ts；docs/api/openapi.yaml | S4/S5 |
+| S7 | reindex/status/config + apiKey 轮换/清除（六端点）+ openapi 增补冻结 | 后端+契约 | routes/v1/adminSearch.ts；docs/api/openapi.yaml | S4/S5 |
 | S8 | 权限/调岗/继承变更即时失效对抗（联动 policyVersion/navVersion） | 测试 | __tests__ | S5、M4-S7 |
 | S9 | 崩溃/降级/损坏自愈全链路（AC-M5-1） | 测试+runbook | 断网/坏 endpoint/删库/杀 worker 演练 | 全部 |
 | S10 | 规模门：10 万 chunk 真机 P95（Tier-L x86+arm）+ Tier-S 1-10 万流畅基线 | 混合 | bench 夹具；docs/baseline/m5-gate.md | S5/S9 |
@@ -511,7 +522,7 @@ PATCH /api/v1/admin/embedding/config → role_owner
 ## 8. M5-FE 前端片输入清单（S7 冻结后派工，本文不拆前端切片）
 
 1. 全局搜索结果页改造：数据源由 `/api/search/` 切 `/api/v1/search`，items 统一实体形态 + matchedVia/score；mode/degraded 状态条（hybrid/fts/like 与降级原因的中性文案，不向用户暴露技术细节如 ".so"）；scopeTruncated 提示。
-2. 设置 → 语义检索页（SPEC §7 embedding/检索设置）：off/cloud 单选（默认 off，强调数据出域提示，文案过 PM/设计师）；cloud 下 baseURL/model/dim/batchSize/timeout 表单；apiKey 密码框（只写，GET 只回 hasApiKey）；"测试连接"（靠 PATCH 后 healthy 回显或 status）；reindexRequired 引导条 + 重建按钮（二次确认，显示 type 选择与进行中状态）；图标只追加 icons.tsx，禁止第二套 SVG 库与 emoji（团队 P0 规则）。
+2. 设置 → 语义检索页（SPEC §7 embedding/检索设置）：off/cloud 单选（默认 off，强调数据出域提示，文案过 PM/设计师）；cloud 下 baseURL/model/dim/batchSize/timeout 表单；apiKey 密码框（只写，GET 只回 configured/source/maskedLast4；提供"轮换"与"清除"两个按钮，分别调 rotate/DELETE，清除后提示回落 env 种子）；"测试连接"（靠 PATCH 后 healthy 回显或 status）；reindexRequired 引导条 + 重建按钮（二次确认，显示 type 选择与进行中状态）；图标只追加 icons.tsx，禁止第二套 SVG 库与 emoji（团队 P0 规则）。
 3. 索引覆盖度面板（V5 部分最小集）：status 的 backlog(dead/failed)/coverage/重建中进度（轮询 status，30s 节流）。
 4. 全部 gx token、只走 api/client.ts、无新依赖；M4 A-4 中性文案纪律延伸到搜索（不出现"无权限"反证措辞）。
 5. 嵌入状态徽标在主导航/搜索框的呈现形式由设计师定，数据只用 status 字段。
@@ -538,8 +549,8 @@ PATCH /api/v1/admin/embedding/config → role_owner
 - 回滚：依赖移除与接线摘除；search.db 文件可弃。
 
 ### S3 — EmbeddingProvider
-- offProvider（embed 抛 EmbeddingDisabled、health 恒 ok 不可向量化）；cloudProvider（§4.4）；embeddingConfig（env 种子 + app_settings AES-256-GCM：key=SHA-256(JWT_SECRET||"embedding-v1")，随机 IV，存 iv/tag/ciphertext）。
-- 验收：off 态零外网（nock/拦截断言无请求）；cloud 用 mock server：批量 index 对齐、超时、5xx 重试、4xx 不重试、401 置 unhealthy、dim 不符拒绝；key 加解密往返；GET 不泄漏 key；typecheck/lint。
+- offProvider（embed 抛 EmbeddingDisabled、health 恒 ok 不可向量化）；cloudProvider（§4.4）；embeddingConfig（env 只读种子 + app_settings AES-256-GCM：key=SHA-256(JWT_SECRET||"embedding-v1")，随机 IV，存 iv/tag/ciphertext；读取优先级 db 覆盖 > env 种子；B-2 轮换/清除服务原语在此片实现，HTTP 端点在 S7 挂）。
+- 验收：off 态零外网（nock/拦截断言无请求）；cloud 用 mock server：批量 index 对齐、超时、5xx 重试、4xx 不重试、401 置 unhealthy、dim 不符拒绝；key 加解密往返；GET 不泄漏 key（明文/密文均不出响应，只回 configured/source/maskedLast4，maskedLast4 取自解密后明文末 4 位）；**B-2 硬验收：轮换 JWT_SECRET 重启后，库存密文 GCM 校验失败必须被捕获并回落 configured:false/source:"none"，GET config 与 search status 返回 200 不得 500，启动 warn 日志不含密文**；清除后回落 env 种子；typecheck/lint。
 - 回滚：配置表保留无害；provider 摘除。
 
 ### S4 — worker
@@ -555,13 +566,13 @@ PATCH /api/v1/admin/embedding/config → role_owner
 - 回滚：v1 路由摘除，旧端点无损。
 
 ### S6 — mask 摘要 + AC-M5-2 对抗
-- snippets.ts 消费 M4 fieldCapability/maskedTableFields；matchedField 中性化；§4.6-4 存在性口径实现（待 B-3 确认）。
+- snippets.ts 消费 M4 fieldCapability/maskedTableFields；matchedField 中性化；§4.6-4 存在性口径按 **B-3 定稿**实现（隐藏字段纯命中仍出现，中性占位"此记录包含匹配内容"；表级不可见由 scope 保证整体缺席；与 M4 A-4 交叉引用措辞写进代码注释）。
 - 对抗：用无权内容**独特语句**搜索（PRD :273 原例），三种 mode 各断言零命中/零摘要泄漏；表级不可见整实体缺席；字段 mask 下 snippet 无原文、matchedField=null、title=record id；scope 与二次 decide 双层都在用（mock decide 拒绝时结果丢弃）。
 - 回滚：随 v1 路由。
 
 ### S7 — admin + openapi
-- adminSearch.ts 三端点（role_owner 口径）；reindex 双库切换；openapi 只增 search/admin/embedding schemas + 4 错误码；真实响应形状手写对拍（M3 S7 纪律，零新依赖）。
-- 验收：非 owner 403；409 防重；dim 改 reindexRequired；yaml 合法 + 形状绿。
+- adminSearch.ts 六端点（均 role_owner 口径，B-4 不新增 manage_search）：POST reindex、GET search/status、GET/PATCH embedding/config、POST embedding/api-key/rotate、DELETE embedding/api-key；reindex 双库切换；**B-6 两步：PATCH 改 dim/model 只回 reindexRequired，拒绝请求体中 reindex 字段（400 记入 EMBEDDING_CONFIG_INVALID），不自动重建；CLI 一步在 scripts/search 内自行编排**；openapi 只增 search/admin/embedding schemas + 4 错误码；真实响应形状手写对拍（M3 S7 纪律，零新依赖）。
+- 验收：非 owner 六端点全 403；409 防重；dim 改 reindexRequired 且不触发重建；rotate 后旧 key 失效、GET 回显新 maskedLast4；DELETE 后回落 env/none；轮换/清除有审计事件且不含密钥；yaml 合法 + 形状绿。
 - 回滚：端点/文档摘除。
 
 ### S8 — 权限变更即时性
@@ -592,22 +603,24 @@ PATCH /api/v1/admin/embedding/config → role_owner
 - **ADR-0046 FTS5 trigram + 短词 LIKE 的中文策略**：实测 3 码元门槛；无词库；BM25+标题 boost+RRF；不引分词器。
 - **ADR-0047 授权信息不入索引——权限变更零索引失效**：per-user 可见性完全由查询时 M4 scope 承担；版本号仅缓存失效；字段 mask 在摘要层最小泄漏（接 M4 A-4）。
 - **ADR-0048 reindex 双库原子切换与派生库损坏自愈**：临时库 rebuild + rename；损坏隔离 + 自动重建 + 主库 LIKE 应急。
-- **ADR-0049 embedding 凭据存储（env 基线 + AES-GCM 加密落库）**（待 B-2 裁决）：JWT_SECRET 派生密钥、零新加密依赖、只存在性回显。
+- **ADR-0049 embedding 凭据存储（env 只读种子 + AES-256-GCM 加密落库，B-2 定稿）**：JWT_SECRET 派生密钥（SHA-256 双域分隔）、随机 IV、零新加密依赖；只回显 configured/maskedLast4；轮换/清除端点；JWT_SECRET 变更解密失败优雅回落未配置；PATCH 两步 reindex（B-6）与 role_owner 限定（B-4）一并记录。
 
 ---
 
-## 11. 待项目总监裁决清单（终审前阻断）
+## 11. 项目总监终审批复（2026-09-18，B-1~B-8 全部定稿）
 
-| # | 议题 | 架构师建议 | 影响 |
+> 八项裁决全部 **pass/批准**，按下列定稿实施；原"二选一/建议"措辞已在正文对应小节替换，本表为唯一裁决索引。
+
+| # | 议题 | 终审判定 | 落地位置 |
 |---|---|---|---|
-| B-1 | record chunk 的 nodeId 挂 table 节点（M3 记录不建 nav 节点）是否与 M3 落地一致 | 挂 table 节点；S5 开工以 M3 nav sync 实现复核，若 M3 为记录建节点则改为记录节点（二选一在 S4 固化并对拍） | chunks schema/scope join |
-| B-2 | embedding apiKey 是否允许设置页写入（加密存 app_settings），还是仅 env 配置 | 允许：env 种子 + AES-256-GCM（JWT_SECRET 派生）落库，只存在性回显；若总监要求纯 env，PATCH 对 key 字段 400、设置页只留 env 指引 | S3/S7/前端片 |
-| B-3 | 记录仅"隐藏字段命中"（可见字段无命中）时该记录是否出现 | 建议出现（表级 r 即可见行存在，与 M4 列表一致），snippet 中性占位；若产品认为存在即泄漏，则需 per-user 字段倒排（推翻单派生库假设，工作量另计） | S6、AC-M5-2 口径 |
-| B-4 | role_owner 作为 reindex/embedding 配置的管理权限口径（M2 无独立 admin 动作位）是否认可，还是新增第六枚组织动作 `manage_search` | 建议**不新增动作**（YAGNI），直接 role_owner；若要把检索管理授予自定义角色则需 manage_search（走 §4.10 同款清单第三次改动） | S7、§4.10 |
-| B-5 | Tier-L 真机规格与提供方式（2C4G 是借用 M1 硬件门设备还是另备飞牛 x86+arm 两台）、验收轮次 | 需要总监/运维确认两台目标机与排期窗口；10 万 P95 门不过则默认 off+fts 发布、cloud 语义作高配能力（不阻塞 M7） | S10、发布承诺 |
-| B-6 | reindex 是否允许 PATCH embedding/config 带 reindex:true 一步触发（长任务占 worker） | 建议分两步（配置返回 reindexRequired，管理员显式再调 reindex），防误触长任务；CLI 保留一步 | S7 |
-| B-7 | worker 内嵌 API 进程（默认）外，是否要在 M5 提供独立 worker 进程开关形态（systemd 独立 unit） | 不做（单实例部署，ARCH-production 前提）；仅留 GX_SEARCH_WORKER 开关供排障；多实例时另立 | S4/部署 |
-| B-8 | 前端搜索结果页是否在 M5 同里程碑随 M5-FE 交付（对齐 M4-FE 裁决 A-8） | 建议同里程碑，S7 后派工独立 M5-FE；否则新检索无 UI 入口、M7 无法人工验收 | 排期/M7 |
+| B-1 | record chunk 的 nodeId 挂载 | **批准挂 table 节点**：记录不建 nav 节点是 M3 六类定稿（view 建/field 不建/记录不建），S4/S5 直接按 table 节点实现，**不留"若 M3 建记录节点则改"的二选一分支** | §4.5 粒度对齐；S4/S5 |
+| B-2 | 设置页写入 apiKey | **批准**：env 作只读首启种子，PATCH 落主库 app_settings；JWT_SECRET 派生 AES-256-GCM（crypto 内置零依赖）加密；只回显 `configured:true / maskedLast4`，**永不回传明文**；提供**轮换/清除端点**；**JWT_SECRET 变更后解密失败优雅回落"未配置"而非 500，写进 S3 验收** | §3-6、§4.4、§6；S3/S7 |
+| B-3 | 隐藏字段纯命中时记录是否出现 | **批准出现**：前提是用户持该表 r（行存在性本就可见，与 M4 列表一致）；snippet 中性占位"此记录包含匹配内容"，绝不回显命中字段原文；**表级不可见者整体不出现（scope 收敛保证）**；与 M4 A-4 边界交叉引用 | §4.6-4；S6 |
+| B-4 | 是否新增 manage_search 组织动作 | **批准不新增（YAGNI）**：reindex/embedding 配置限 role_owner，不做第六枚组织动作 | §6 角色口径；S7 |
+| B-5 | 10 万 chunk P95<500ms 性能门 | **批准分级真机门**：必须在两台 Tier-L 目标机（飞牛 x86 + arm，2C4G 本地盘）验证后才写进对外承诺；真机/排期是外部依赖（总监向主理人要）；**门不过则以 GX_EMBEDDING_MODE=off + FTS 为默认发布姿态、cloud 作高配能力，不阻塞 M7** | §0-7；S10 |
+| B-6 | 配置变更与 reindex 的触发方式 | **批准两步**：PATCH 配置返回 reindexRequired，管理员显式再调 reindex（PATCH 不收 reindex:true）；**CLI 保留一步** | §5.4、§6；S7 |
+| B-7 | 独立 worker 进程形态 | **批准不做独立 worker 进程**：单实例内嵌为唯一交付形态；仅留 GX_SEARCH_WORKER on/off 供排障 | §5.3；S4 |
+| B-8 | M5 前端片排期 | **批准 M5-FE 同里程碑独立片**：S7 契约冻结后派前端（设置页 cloud/off 配置 + 新检索结果 UI，走 /api/v1/search，旧 /api/search 不动） | §8；S11 |
 
 ---
 
@@ -619,7 +632,7 @@ PATCH /api/v1/admin/embedding/config → role_owner
 4. outbox 同事务共生死、主写 P95 无回退；首启自动播种建索引；覆盖度对账 A-E=0 可复跑。
 5. Tier-L 真机双架构 10 万 chunk P95<500ms（或如实记录不达标 + 降杠杆证据与降级发布结论）；Tier-S 1-10 万流畅；目标机 .so 冒烟过门；开发机数字只留档不作承诺。
 6. openapi 冻结并对拍；ADR-0041~0049 归档；40RC 全绿；678+N/3、lint/typecheck/ci-quality；旧 `/api/search/` 字节零 diff；M1 flags 四组合/M2/M3/M4 回归全绿。
-7. 密钥零泄漏审计（响应/日志/审计/库文件检查）；默认 off 下零外网连接抓包留证；runbook 五章齐备；M5-FE 输入清单可派工。
+7. 密钥零泄漏审计（响应/日志/审计/库文件检查：明文密文均不出响应，只回 configured/source/maskedLast4）；JWT_SECRET 轮换后解密失败回落未配置且不 500（B-2 对抗）；默认 off 下零外网连接抓包留证；runbook 五章齐备；M5-FE 输入清单可派工。
 
 ---
 
@@ -634,7 +647,7 @@ PATCH /api/v1/admin/embedding/config → role_owner
 | S4 | indexer worker | chunks.ts；indexer.ts；scripts/search | 播种消化零积压、退避 dead、BigInt 全绑定、删除联动 | S1-S3 |
 | S5 | 先收敛后召回+v1 搜索 | query.ts；rrf.ts；routes/v1/search.ts | scope 对拍零差、三 EXPLAIN 含白名单、RRF 正确（含 vec0 IN 首日验证） | **M4-S4/S1** |
 | S6 | mask 摘要+零泄漏对抗 | snippets.ts | 独特语句三 mode 零命中、摘要无 mask 原文 | S5、M4-S6 |
-| S7 | admin+openapi | adminSearch.ts；openapi.yaml | reindex/status/config 三端点 owner 限定、形状对拍 | S4/S5 |
+| S7 | admin+openapi | adminSearch.ts；openapi.yaml | reindex/status/config + apiKey 轮换/清除六端点 owner 限定、两步 reindex、形状对拍 | S4/S5 |
 | S8 | 权限即时失效 | __tests__ | 调岗/继承/move 下次搜索即变 | S5、M4-S7 |
 | S9 | 降级自愈 | 演练脚本；runbook | 五类故障 fts-only 且主应用可写 | 全部 |
 | S10 | 真机规模门 | bench；m5-gate.md | Tier-L 双架构 10 万 P95 留证（不达标给降级结论） | S5/S9 |
