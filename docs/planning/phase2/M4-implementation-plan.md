@@ -74,7 +74,7 @@
 
 - **已落地（2026-09-18 实查 6f7dc29 工作区）**：`domain/org/authorization.ts` 提供 `OrgActionString`（:14，当前三枚）、`ORG_ACTIONS`（:16-20）、`hasOrgAction(userId, action)`（:115-117）与 effective roles 定数两查询求值（q1 用户部门集、q2 user/dept 授予 OR，文件头 :1-11 注释即 M2 计划 :209-223 的实现）；`departments.ts`（229 行）、`deptTree.ts`（117 行）部门树服务已在；`routes/v1/org/`（departments/members 子路由）、`routes/v1/authInvite.ts` 已装配；`lifecycle.ts`（72 行）已存在（停用闭环 S6 仍在途，文件已建）。api 测试 **56 文件 678 passed**（M2-S3 提交口径）。
 - `effectiveOrgRoles(userId, workspaceId)`：落地形态即 authorization.ts 的 EffectiveRoleRow（:24-32，含 sources 溯源），M4 role 源展开直接复用其角色 id 集，**不重写部门祖先展开**。
-- `usersWithRole(roleId)`（M2 计划 :446，最后 owner 保护同款反向展开：user 直授 + dept 授角色的子部门全体成员，S5 将落地）；M4 的失访人数预览、策略 subject 解析复用。
+- `usersWithRole(roleId, client?)`：**M2-S5 已落地**（86a5b60，`domain/org/roles.ts:66`，最后 owner 保护同款反向展开：user 直授 + dept 授角色的子部门全体成员；lifecycle.ts:86 已消费）；M4 的失访人数预览、策略 subject 解析直接复用。
 - `hasOrgAction(userId, action)`：**已落地可直接 import**；M4 manage_share 守卫调它（第五枚经 §4.10 清单加入白名单）。
 - `lifecycle.ts` disableUserTx/reactivateUserTx（S6 在途）：M4 不接停用逻辑，但 shadow/enforce 必须有"DISABLED 用户进不了任何守卫"的对拍断言（resolveActiveAuth 已在 v1 层保证，旧 /api 经 getUserId 共享核心，authState.ts 头部注释已声明）。
 - 已落地可直接用：`resolveActiveAuth/ResolvedAuth`（authState.ts:23-28/:55-96）、`requireActiveUser/requireOrgAction`（authActive.ts，44 行；**当前动作联合仅三枚，M3 加 manage_menu 第四枚，M4 加 manage_share 第五枚，按 §4.10 清单同改**）、v1 挂载（routes/v1/index.ts:14-34，requireActiveUser 全链 :17）、config.enterpriseOrg（config.ts:229）。
@@ -409,8 +409,8 @@ apps/api/scripts/authz/
 |---|---|---|---|
 | 1 | 系统角色种子 SQL | M2 DDL 迁移 `:122` 固定 JSON 串（三动作）是历史锚点，**不改种子文件**；owner 补位由新只增迁移承担 | 不改 M3 补位迁移；M4 再出一条只增迁移 |
 | 2 | owner 幂等补位只增迁移 | `UPDATE roles SET permissions='[...四枚]' WHERE id='role_owner' AND permissions='[...三枚全串]'`（M3 计划 S6 已定稿） | `...='[...五枚]' WHERE ... AND permissions='[...四枚全串]'`；连跑两次恒等、自定义角色不触碰 |
-| 3 | 域白名单真源 | 在途真源 `domain/org/authorization.ts:14` `OrgActionString` 联合 + `:16-20` `ORG_ACTIONS`（2026-09-18 实查，三枚；M2-S5 若另建 roles.ts 以落地为准，开工先 `grep -rn "manage_roles"` 全仓列点） | 同文件/同真源追加第五枚；若 M3 已迁真源位置，随 M3 落地形态 |
-| 4 | shared-types 联合 | M2 计划 :441 规划 OrgAction 在 shared-types；实查 2026-09-18 `packages/shared-types/src/` 尚无该类型——**以 M2-S5 实际落地为准**：若落地在 shared-types 则两处改一处派生，若只在 api 域内则 api 单点 | 同口径追加；rebuild + api/web typecheck 双过 |
+| 3 | 域白名单真源 | **M2-S5 已落地（86a5b60，2026-09-18 复核）：单一真源 = `packages/shared-types/src/org.ts:10` `OrgAction` 联合 + `:12` `ORG_ACTIONS`**；api 侧 `domain/org/authorization.ts:12-18` 仅 import 并 re-export（`export type { OrgAction }; export { ORG_ACTIONS }`），`roles.ts:14-17` assertOrgActions 消费同一常量。M3 改 shared-types 单点即可，禁止在 api 侧另立枚举 | M4 同：只改 shared-types/org.ts 单点；重建后 authorization/roles/authActive 经 re-export/派生自动收窄 |
+| 4 | shared-types 联合 | 同上：M2-S5 已落 `org.ts`（M2 计划 :441 兑现）；M3 只增第四枚，rebuild shared-types，api/web typecheck 双过 | 同：只增第五枚；穷举测试在 api 侧写（消费 ORG_ACTIONS） |
 | 5 | 中间件 | `middleware/authActive.ts:11` 联合别名与 `:33` requireOrgAction（:40 调 hasOrgAction） | 同两处随真源自动收窄/同改 |
 | 6 | 角色管理端点校验 | M2-S5 `POST/PATCH /api/v1/org/roles` 的动作白名单必须引用第 3 点同源常量，不另写字面量数组 | 同 |
 | 7 | 穷举测试 | "N 动作 × requireOrgAction 不抛未知动作"白名单穷举（M3 计划 S6 已列） | 扩为五枚穷举；另测非 owner 系统角色持 manage_share 端点 403 |

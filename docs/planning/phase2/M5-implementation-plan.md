@@ -4,7 +4,7 @@
 - 作者：架构师 高见远
 - 状态：**待项目总监终审**（§11 待裁决清单未关闭前不得派工实施）
 - 上游依据：SPEC-enterprise-v1.0 §5（`:75` `GET /api/v1/search`、`:76` `POST /api/v1/admin/reindex`）、§6（`:87` 主库仅 outbox/change_events、search.db 独立可 truncate 不进备份）、§7（embedding/检索设置页）、AC-M5-1（`:123` 崩溃自动降级 FTS-only/reindex 幂等）、AC-M5-2（`:124` 召回前剔除无权内容、不索引字段物理缺席）；PRD-enterprise V1-V6（`:169-177`：V2 异步向量化不阻主链路、V4 先收敛后召回 P95<500ms、V5 索引治理）、M5 出口验收（`:270-273`）；ARCH-enterprise §7.1-7.7（`:615-745` outbox/embedding/vec0/FTS5/RRF/即弃原则）；**硬约束来源：两份已入库 spike——`spike-sqlite-vec.md`（2026-09-14，实测）、`spike-mcp-transport.md`（M6 用，仅引用其审计/PAT 无关项，不引依赖）**
-- 适用代码基线：`main` @ `1ad0836`（M4 切片文档 r2 已入库；代码 HEAD 为 6f7dc29 + 工作区在途 M2-S4 文件未提交）；根 package.json v0.1.0
+- 适用代码基线：`main` @ `2aef401`（本文档入库提交；代码侧 M2-S5 已随 86a5b60 落地：roles.ts/usersWithRole/契约冻结，shared-types `org.ts` 为 OrgAction 单一真源；M4 切片文档 r2 为 1ad0836）；根 package.json v0.1.0
 - 测试基线（项目总监给定，本文不重跑）：api **56 文件 678 passed / 3 skipped**（M2-S3，6f7dc29）；迁移目录 **14 个**；M3 后预期 17（nav DDL/回填 + manage_menu 补位），M4 后预期 19（回填 + manage_share 补位，索引补强可能 20）。**M5 第一个数据迁移（change_events）编号排在 M4 全部迁移之后**
 - 本机核对环境：Node v22.22.2、pnpm 9、Prisma 5.22、better-sqlite3 13.0.3（dependency，已在 `apps/api/package.json:28`）、Hono 4.13.5、React 18 / TanStack Query 5.62；**当前无 sqlite-vec 依赖（S2 新增 `sqlite-vec@0.1.9`，版本锁定理由见 §4.2）**
 
