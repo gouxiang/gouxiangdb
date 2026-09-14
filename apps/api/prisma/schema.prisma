@@ -191,11 +191,29 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime?  @updatedAt
 
+  // M2 组织通讯录（迁移 20260915090000_enterprise_org_ddl 只增加列）：
+  //  - status 账号生命周期 INVITED/ACTIVE/DISABLED，存量行默认 ACTIVE。
+  //  - tokenVersion 鉴权即时失效版本号，JWT 的 tv claim 与之比对，默认 0。
+  //  - workspaceId 归属工作区；SQLite ALTER ADD COLUMN 不能附带 REFERENCES，
+  //    故【只加列不建 Prisma 关系/FK】，引用完整性由应用层保证（计划 §11-11）。
+  //  - disabledAt/inviteTokenHash/invitedAt 停用与邀请一次性激活链接所用；
+  //    lastSeenAt 无消费方，不建（YAGNI）。
+  status          String    @default("ACTIVE")
+  workspaceId     String?
+  tokenVersion    Int       @default(0)
+  disabledAt      DateTime?
+  inviteTokenHash String?
+  invitedAt       DateTime?
+
   memberships  Member[]
   kbMemberships KbMember[]
   kbDocAcls    KbDocAcl[]
   comments     Comment[]
+  // M2：用户的多部门归属（dept_members.userId 对 users(id) ON DELETE CASCADE）。
+  deptMemberships DeptMember[]
 
+  @@index([workspaceId])
+  @@index([status])
   @@map("users")
 }
 
@@ -343,6 +361,101 @@ model KbDocAcl {
   @@unique([docId, userId])
   @@index([docId])
   @@map("kb_doc_acls")
+}
+
+// ============================================================================
+// M2 组织通讯录（工作区 / 部门树 / 成员多部门 / 组织角色 / 角色授予）
+// 单工作区交付：工作区与五枚系统角色用固定 id（ws_default / role_owner...），
+// 多工作区为 Out-of-Scope，users.workspaceId 只留列不建关系。
+// 两个索引无法在 Prisma schema 表达、由手写迁移承载（禁止 migrate dev 据其生成变更）：
+//   - dept_members 一人一主部门的【部分唯一索引】(userId) WHERE isMain=1；
+//   - role_assignments 业务唯一用 COALESCE(scopeNodeId,'') 的【表达式唯一索引】
+//     （SQLite 唯一索引把 NULL 视为互不相等，需 COALESCE 归一）。
+// ============================================================================
+
+model Workspace {
+  id            String       @id
+  name          String       @default("默认工作区")
+  policyVersion Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime?    @updatedAt
+
+  departments   Department[]
+  roles         Role[]
+
+  @@map("workspaces")
+}
+
+model Department {
+  id          String    @id @default(cuid())
+  workspaceId String
+  parentId    String?
+  path        String
+  name        String
+  ord         Int       @default(0)
+  status      String    @default("active")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime? @updatedAt
+  deletedAt   DateTime?
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent      Department? @relation("DeptParent", fields: [parentId], references: [id], onDelete: Restrict)
+  children    Department[] @relation("DeptParent")
+  members     DeptMember[]
+
+  @@index([workspaceId, parentId])
+  @@index([path])
+  @@map("departments")
+}
+
+model DeptMember {
+  id           String    @id @default(cuid())
+  departmentId String
+  userId       String
+  isMain       Int       @default(0) // 1=主部门（部分唯一索引保证一人一主），0=兼岗
+  joinedAt     DateTime  @default(now())
+
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([departmentId, userId])
+  @@index([userId])
+  @@map("dept_members")
+}
+
+model Role {
+  id          String    @id
+  workspaceId String
+  systemKey   String? // owner/creator/editor/commenter/viewer；自定义角色为 null
+  name        String
+  description String    @default("")
+  isSystem    Int       @default(0) // 1=系统角色不可删/不可改 key
+  permissions String    @default("[]") // JSON 字符串数组，仅组织管理动作三枚
+  createdAt   DateTime  @default(now())
+  deletedAt   DateTime?
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignments RoleAssignment[]
+
+  @@unique([workspaceId, name])
+  @@unique([workspaceId, systemKey])
+  @@map("roles")
+}
+
+model RoleAssignment {
+  id          String   @id @default(cuid())
+  roleId      String
+  subjectType String // "user" | "dept"（多态主体，不建 Prisma 关系/FK）
+  subjectId   String
+  scopeType   String   @default("workspace") // M2 恒 workspace；node 预留
+  scopeNodeId String?
+  createdAt   DateTime @default(now())
+  createdBy   String?
+
+  role        Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@index([subjectType, subjectId])
+  @@map("role_assignments")
 }
 
 // ============================================================================
