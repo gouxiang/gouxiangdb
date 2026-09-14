@@ -10,6 +10,12 @@ import App from "./App";
 import { ToastHost } from "./components/ui";
 import "./index.css";
 
+// 部署子路径（飞牛网关 /app/gouxiangdb/）下作为 BrowserRouter basename；
+// import.meta.env.BASE_URL 由 Vite 按构建 base 注入：根部署为 "/"（行为不变），
+// 子路径为 "/app/gouxiangdb/"（去尾斜杠）。react-router 的 navigate/Link/Navigate
+// 会自动补该 basename，故应用内路由调用仍写 "/login"、"/base/.." 即可。
+const routerBasename = import.meta.env.BASE_URL.replace(/\/+$/, "") || "/";
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -23,7 +29,7 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter basename={routerBasename}>
         <App />
         <ToastHost />
       </BrowserRouter>

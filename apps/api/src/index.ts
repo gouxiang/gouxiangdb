@@ -1,147 +1,81 @@
 // apps/api/src/index.ts
-// API 入口（Hono + Node）
+// API 入口（Hono + Node）：仅做装配 + 监听，业务装配见 app.ts。
 
 // 配置闸门必须是第一行 side-effect import：在任何会牵出 @prisma/client（自动 dotenv）
 // 的模块求值之前完成生产环境校验（D3）。
 import "./config.js";
 
-import { serve } from "@hono/node-server";
-import { Hono } from "hono";
-import { cors } from "hono/cors";
-import { logger } from "hono/logger";
+import { serve, getRequestListener } from "@hono/node-server";
+import { createServer, type Server } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 
-import { auth } from "./auth.js";
-import { bases } from "./routes/bases.js";
-import { tables } from "./routes/tables.js";
-import { fields } from "./routes/fields.js";
-import { records } from "./routes/records.js";
-import { views } from "./routes/views.js";
-import { kb } from "./routes/kb.js";
-import { pub } from "./routes/public.js";
-import { search } from "./routes/search.js";
-import { health } from "./routes/health.js";
-import { healthz } from "./routes/healthz.js";
-import { readyz } from "./routes/readyz.js";
-import { HttpError, errorResponse } from "./guards.js";
 import { config } from "./config.js";
-import { VERSION } from "./version.js";
-import { secureHeadersMiddleware } from "./middleware/secureHeaders.js";
-import { bodyLimitDispatch } from "./middleware/bodyLimit.js";
-import { rateLimitMiddleware } from "./middleware/rateLimit.js";
-import { benchMetricsMiddleware } from "./ops/benchMetrics.js";
+import { createApp } from "./app.js";
 
-const app = new Hono();
-
-app.use("*", logger());
-// S9 bench 观测（仅 GX_BENCH=on 生效）：挂 x-gx-serve-ms / x-gx-physical-sql / x-gx-prisma-calls / x-gx-rss-bytes，默认直通零开销。
-app.use("*", benchMetricsMiddleware);
-
-// 上传文件静态服务：GET /uploads/avatars/<filename>（头像等）
-// 上传根目录由 config 单一来源解析（GX_DATA_DIR / UPLOAD_ROOT）。
-const UPLOAD_ROOT = config.uploadRoot;
-const AVATAR_MIME: Record<string, string> = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-};
-app.get("/uploads/avatars/:filename", async (c) => {
-  const filename = c.req.param("filename");
-  // 防路径穿越
-  if (!filename || filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
-    return c.json({ error: "非法文件名" }, 400);
-  }
-  const filePath = path.join(UPLOAD_ROOT, "avatars", filename);
-  if (!fs.existsSync(filePath)) return c.json({ error: "文件不存在" }, 404);
-  const ext = path.extname(filename).toLowerCase();
-  const mime = AVATAR_MIME[ext] ?? "application/octet-stream";
-  const buf = await fs.promises.readFile(filePath);
-  return new Response(buf, {
-    headers: {
-      "Content-Type": mime,
-      "Cache-Control": "public, max-age=31536000, immutable",
-    },
-  });
-});
-
-// CORS：同源请求（无 Origin）放行；跨域仅允许白名单（开发环境 localhost 端口 + 生产 CORS_ORIGIN）。
-const ALLOWED_ORIGIN_PATTERNS: RegExp[] = config.corsOriginPatterns;
-
-app.use(
-  "*",
-  cors({
-    origin: (origin) => {
-      // 同源 / 非浏览器请求（无 Origin）放行
-      if (!origin) return "*";
-      return ALLOWED_ORIGIN_PATTERNS.some((re) => re.test(origin)) ? origin : null;
-    },
-    credentials: true,
-    allowHeaders: ["Content-Type", "Authorization"],
-    allowMethods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-  }),
-);
-
-// 安全响应头与请求体上限（必须在业务路由与 body 解析之前；健康端点已在上方挂载，天然豁免）。
-app.use("*", secureHeadersMiddleware);
-app.use("*", bodyLimitDispatch);
-// 限流：auth 端点严格 10/60s，其余 /api 兜底 600/60s；健康/上传在选择器内豁免。
-app.use("*", rateLimitMiddleware);
-
-// 运维健康端点（根级、不鉴权）。放在鉴权/限流（S5b 豁免）之外；
-// /api/health 保留为兼容别名（桌面壳与旧脚本在用）。
-app.route("/healthz", healthz);
-app.route("/readyz", readyz);
-
-app.get("/", (c) =>
-  c.json({
-    name: "GouXiangDB API",
-    version: VERSION,
-    endpoints: [
-      "/api/health",
-      "/api/auth/signup",
-      "/api/auth/login",
-      "/api/auth/me",
-      "/api/bases",
-      "/api/tables",
-      "/api/fields",
-      "/api/records",
-      "/api/views",
-    ],
-  }),
-);
-
-const api = new Hono();
-api.route("/health", health);
-api.route("/auth", auth);
-api.route("/bases", bases);
-api.route("/tables", tables);
-api.route("/fields", fields);
-api.route("/records", records);
-api.route("/views", views);
-api.route("/kb", kb);
-api.route("/public", pub);
-api.route("/search", search);
-app.route("/api", api);
-
-// 404（增补机器码 NOT_FOUND，保留原 error/path 契约）
-app.notFound((c) => c.json({ error: "接口不存在", code: "NOT_FOUND", path: c.req.path }, 404));
-
-// 统一错误处理
-app.onError((err, c) => {
-  if (err instanceof HttpError) return errorResponse(c, err);
-  return errorResponse(c, err);
-});
+const { app, webRoot } = createApp();
 
 const port = config.port;
 
-// 仅在直接运行时启动服务（测试里 import app 不应自动起服务）
-if (process.env.GX_NO_LISTEN !== "1") {
+function startTcp(): void {
   serve({ fetch: app.fetch, port }, () => {
     console.log(`[GouXiangDB API] http://localhost:${port}`);
   });
+}
+
+function startUnixSocket(socketPath: string): void {
+  // 父目录可能不存在（临时目录由编排方挂载）；递归创建，不强制绝对路径（本地可用相对临时路径）。
+  const parent = path.dirname(path.resolve(socketPath));
+  fs.mkdirSync(parent, { recursive: true });
+  // 上一进程异常退出会残留 socket 文件，不删则 EADDRINUSE。
+  fs.rmSync(socketPath, { force: true });
+
+  const server: Server = createServer(getRequestListener(app.fetch));
+  server.listen(socketPath, () => {
+    // 0660：同组（网关运行账户）可读写，其他账户不可达。
+    try {
+      fs.chmodSync(socketPath, 0o660);
+    } catch {
+      // 某些文件系统不支持 chmod，best-effort。
+    }
+    const prefixNote = config.basePath ? ` basePath=${config.basePath}` : "";
+    const webNote = webRoot ? ` web=${webRoot}` : "";
+    console.log(`[GouXiangDB API] unix:${socketPath}${prefixNote}${webNote}`);
+  });
+
+  // 优雅关闭：停止接收 → 排空在途请求 → 删除 socket 文件。10s 兜底强退防 keep-alive 悬挂。
+  let closing = false;
+  const shutdown = (signal: string) => {
+    if (closing) return;
+    closing = true;
+    console.log(`[GouXiangDB API] 收到 ${signal}，开始优雅关闭`);
+    const forceTimer = setTimeout(() => process.exit(0), 10_000);
+    forceTimer.unref();
+    server.close(() => {
+      try {
+        fs.rmSync(socketPath, { force: true });
+      } catch {
+        // best-effort
+      }
+      process.exit(0);
+    });
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  // 异常退出也尽力清理 socket 文件，避免下次启动残留。
+  process.on("exit", () => {
+    try {
+      fs.rmSync(socketPath, { force: true });
+    } catch {
+      // best-effort
+    }
+  });
+}
+
+// 仅在直接运行时启动服务（测试里 import app 不应自动起服务）。
+if (process.env.GX_NO_LISTEN !== "1") {
+  if (config.socketPath) startUnixSocket(config.socketPath);
+  else startTcp();
 }
 
 export default app;

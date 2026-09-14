@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Modal, Button, Switch, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { useShareState, useSetShare, useSetInternalShare } from "./kb-hooks";
+import { withBase } from "../../api/client";
 
 export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId: string; kbId: string; kind?: "doc" | "canvas"; open: boolean; onClose: () => void }) {
   const { data, isLoading } = useShareState(open ? docId : undefined);
@@ -30,7 +31,8 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
 
   const share = data?.share;
   const canManage = share?.canManage ?? true;
-  const fullUrl = share?.shareToken ? `${window.location.origin}/s/${share.shareToken}` : "";
+  // 子路径部署（/app/gouxiangdb）下公开分享链接必须带网关前缀。
+  const fullUrl = share?.shareToken ? `${window.location.origin}${withBase(`/s/${share.shareToken}`)}` : "";
 
   async function copyLink() {
     if (!fullUrl) return;

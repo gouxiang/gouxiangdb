@@ -10,6 +10,7 @@
 import type { MiddlewareHandler } from "hono";
 import { config } from "../config.js";
 import { sourceIp } from "../utils/client-ip.js";
+import { effectivePath } from "../utils/request-path.js";
 
 export interface RateRule {
   match: (path: string, method: string) => boolean;
@@ -130,7 +131,9 @@ export function createRateLimitMiddleware(deps: RateLimiterDeps): MiddlewareHand
   let lastPrune = deps.now();
   return async (c, next) => {
     if (!deps.enabled()) return next();
-    const rule = selectRule(c.req.path);
+    // 去掉网关前缀再做规则匹配：带 /app/gouxiangdb 前缀的部署与根路径部署共享同一限流口径
+    // （否则严格认证限流与 /api 兜底规则在网关后会静默失效）。
+    const rule = selectRule(effectivePath(c));
     if (!rule) return next();
 
     const now = deps.now();

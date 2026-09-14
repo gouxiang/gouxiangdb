@@ -10,6 +10,7 @@
 
 import { useCallback, useMemo } from "react";
 import { useAuthStore } from "../../../store/auth";
+import { withBase } from "../../../api/client";
 
 export type LinkResolveKind = "ok" | "deleted" | "forbidden" | "network" | "external" | "unknown";
 
@@ -69,7 +70,7 @@ export function useLinkResolve() {
       // 返回 200=可访问 / 404=已删除 / 403=无权限 / 401=未登录。
       // 不显式传 kbId：链接里的 kbId 可能因分享/复制产生漂移，以 docId 单维度探测更稳。
       void probe.kbId;
-      fetch(`/api/kb/docs/${probe.docId}/acl`, {
+      fetch(withBase(`/api/kb/docs/${probe.docId}/acl`), {
         method: "GET",
         headers: { Authorization: `Bearer ${tok}` },
       })

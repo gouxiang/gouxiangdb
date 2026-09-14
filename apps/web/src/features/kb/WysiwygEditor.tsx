@@ -17,6 +17,7 @@ import { MentionPicker } from "./MentionPicker";
 import { CanvasEmbed } from "./CanvasEmbed";
 import { useLinkResolve } from "./hooks/useLinkResolve";
 import { useAuthStore } from "../../store/auth";
+import { withBase } from "../../api/client";
 import {
   Block,
   BlockType,
@@ -2460,7 +2461,7 @@ export function WysiwygEditor({
                 if (bid) syncBlock(bid);
                 return;
               }
-              fetch(`/api/kb/docs/${docId}`, { headers })
+              fetch(withBase(`/api/kb/docs/${docId}`), { headers })
                 .then((r) => r.ok ? r.json() : null)
                 .then((doc) => {
                   // 修复 #3b (round 3)：后端响应是 { doc: { content, title, ... } }，旧代码误读为 doc.content

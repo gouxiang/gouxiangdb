@@ -25,11 +25,29 @@ import type {
   CSVImportResult,
   TrashItemDTO,
 } from "@gx/shared-types";
+import { resolveApiBase, withBase as joinBase } from "../lib/base";
 
-const BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "";
+// API 同源前缀解析：
+//  - 显式 VITE_API_URL（非空）→ 绝对来源，去尾斜杠（保留跨域/独立域名能力）
+//  - 否则取部署 base（import.meta.env.BASE_URL："/" 或 "/app/gouxiangdb/"），
+//    使请求与页面同源并在网关子路径下打到 /app/gouxiangdb/api/...
+const BASE_URL = resolveApiBase(
+  (import.meta.env.VITE_API_URL as string | undefined) ?? undefined,
+  import.meta.env.BASE_URL as string | undefined,
+);
 
 /** 供 sendBeacon / keepalive 等无法复用 apiFetch 的场景拼接绝对地址 */
 export const API_BASE_URL = BASE_URL;
+
+/**
+ * 把同源绝对路径（如 /uploads/... 静态资源、/login 硬导航）拼到当前部署 base 下。
+ * 根部署（BASE_URL=""）原样返回；子路径部署补 /app/gouxiangdb 前缀。
+ * 注意：仅适用于由同一后端/网关在 base 下提供的同源资源。
+ */
+export const withBase = (path: string): string => joinBase(BASE_URL, path);
+
+/** 登录页硬导航目标（401 拦截用），子路径下为 /app/gouxiangdb/login。 */
+const LOGIN_PATH = withBase("/login");
 
 export type {
   UserDTO,
@@ -88,8 +106,9 @@ function handleUnauthorized(): void {
   if (unauthorizedHandled) return;
   unauthorizedHandled = true;
   useAuthStore.getState().logout();
-  if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-    window.location.assign("/login");
+  // 子路径部署时 pathname 形如 /app/gouxiangdb/...，用带 base 的 LOGIN_PATH 比较与跳转。
+  if (typeof window !== "undefined" && !window.location.pathname.endsWith("/login")) {
+    window.location.assign(LOGIN_PATH);
   }
   // 若干秒内不再重复触发（回跳后重新登录会重置）
   setTimeout(() => {
@@ -258,7 +277,7 @@ export const Tables = {
   clear: (tableId: string) =>
     apiFetch<{ ok: true }>(`/api/tables/${tableId}/clear`, { method: "POST" }),
   exportUrl: (tableId: string, viewId?: string) =>
-    `/api/tables/${tableId}/export.csv${qs({ viewId })}`,
+    `${BASE_URL}/api/tables/${tableId}/export.csv${qs({ viewId })}`,
 };
 
 // ============ Fields ============

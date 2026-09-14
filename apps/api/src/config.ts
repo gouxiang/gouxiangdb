@@ -100,6 +100,24 @@ export function validateEnv(env: NodeJS.ProcessEnv): ConfigIssue[] {
   return issues;
 }
 
+/**
+ * 网关前缀归一（GX_BASE_PATH）：飞牛 fnOS 统一网关以 unix socket 转发时仍带
+ * "/app/gouxiangdb" 前缀。规则：
+ *   - 空/纯空白 → ""（仅根路径挂载，裸机/Docker 现状）
+ *   - 必须以 "/" 开头，否则视为非法 → ""（fail-safe 回落根路径）
+ *   - 去掉所有末尾斜杠（"/app/gx/" → "/app/gx"）
+ *   - 根 "/" 归一为 ""（根挂载已覆盖，无需重复挂）
+ *   - 拒绝路径穿越段 ".." 与 NUL，非法 → ""
+ * 纯字符串归一、不碰文件系统（socket/basePath 均可用于相对临时路径测试）。
+ */
+export function normalizeBasePath(raw: string | undefined): string {
+  const t = raw?.trim();
+  if (!t || t === "/") return "";
+  if (!t.startsWith("/")) return "";
+  if (t.includes("..") || t.includes("\0")) return "";
+  return t.replace(/\/+$/, "");
+}
+
 // 请求体上限环境变量按 MB（正整数）解释；非法值回退默认，生产侧另在 validateEnv 报错。
 function parseBodyLimit(raw: string | undefined, fallbackBytes: number): number {
   if (raw === undefined || raw.trim() === "") return fallbackBytes;
@@ -133,6 +151,16 @@ export interface AppConfig {
   auditDir: string;
   backupDir: string;
   rateLimitEnabled: boolean;
+  /**
+   * 以下三项为【可选部署适配】（默认全空 = 与历史行为逐字节一致）：
+   * - socketPath：非空时监听 unix socket（飞牛网关转发）而非 TCP。env GX_SOCKET_PATH。
+   * - basePath：网关前缀（如 "/app/gouxiangdb"），同一路由单元同时挂根与该前缀。env GX_BASE_PATH。
+   * - webDist：web vite 产物目录；仅当目录存在且含 index.html 才托管 SPA 静态。env GX_WEB_DIST。
+   * 三者均不进入生产 fail-closed 必填校验。
+   */
+  socketPath: string;
+  basePath: string;
+  webDist: string;
 }
 
 function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
@@ -170,6 +198,9 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     rateLimitEnabled: env.NODE_ENV === "test"
       ? env.GX_RATE_LIMIT === "on"
       : env.GX_RATE_LIMIT !== "off",
+    socketPath: env.GX_SOCKET_PATH?.trim() ?? "",
+    basePath: normalizeBasePath(env.GX_BASE_PATH),
+    webDist: env.GX_WEB_DIST?.trim() ?? "",
   };
 }
 

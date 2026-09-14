@@ -23,6 +23,7 @@ import {
   useRemoveAvatar,
 } from "../../api/hooks";
 import type { UserDTO } from "@gx/shared-types";
+import { withBase } from "../../api/client";
 import { AVATAR_PALETTE } from "@gx/design-tokens";
 import { ApiError } from "../../api/client";
 
@@ -441,7 +442,8 @@ function AvatarTab({ user }: { user: UserDTO }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const displayAvatar = preview ?? (user.avatarUrl ? user.avatarUrl : null);
+  // preview 为 blob:（withBase 原样返回）；后端 avatarUrl 为 /uploads/... 根路径，子路径下需加 base 前缀。
+  const displayAvatar = preview ?? (user.avatarUrl ? withBase(user.avatarUrl) : null);
   const initial = (user.displayName ?? user.email ?? "?").charAt(0).toUpperCase();
 
   const onSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -738,7 +740,7 @@ function uploadAvatarXHR(
   const ext = mimeType === "image/jpeg" ? "jpg" : mimeType.split("/")[1] ?? "jpg";
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/auth/me/avatar");
+    xhr.open("POST", withBase("/api/auth/me/avatar"));
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));

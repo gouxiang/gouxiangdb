@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bases } from "../../api/client";
+import { Bases, withBase } from "../../api/client";
 import { QK, useShareLinks, useGXMutations } from "../../api/hooks";
 import { Badge, Input, Select, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
@@ -27,7 +27,8 @@ export function SharePanel({ baseId, canManageBase }: { baseId: string; canManag
   const [expiresAt, setExpiresAt] = useState("");
 
   async function copyLink(token: string) {
-    const url = `${location.origin}/join/${token}`;
+    // 子路径部署（/app/gouxiangdb）下分享链接必须带网关前缀，否则命中后端根 404。
+    const url = `${location.origin}${withBase(`/join/${token}`)}`;
     try {
       await navigator.clipboard.writeText(url);
       toast("已复制", "success");
@@ -123,7 +124,7 @@ export function SharePanel({ baseId, canManageBase }: { baseId: string; canManag
               title="点击复制链接"
             >
               <Icon name="link" size={13} />
-              <span className="truncate">{location.origin}/join/{l.token}</span>
+              <span className="truncate">{location.origin}{withBase(`/join/${l.token}`)}</span>
             </button>
             <span className="w-36 text-gx-12 text-gx-text-tertiary">{fmtTime(l.createdAt)}</span>
             <span className="w-36 text-gx-12 text-gx-text-tertiary">{l.expiresAt ? fmtTime(l.expiresAt) : "永不"}</span>

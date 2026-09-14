@@ -7,6 +7,7 @@
 import { bodyLimit } from "hono/body-limit";
 import type { Context, MiddlewareHandler } from "hono";
 import { config } from "../config.js";
+import { effectivePath } from "../utils/request-path.js";
 
 function payloadTooLarge(c: Context) {
   return c.json(
@@ -29,7 +30,7 @@ function isAvatarUpload(c: Context): boolean {
   if (c.req.method === "GET" || c.req.method === "HEAD" || c.req.method === "OPTIONS") {
     return false;
   }
-  return c.req.path === "/api/auth/me/avatar";
+  return effectivePath(c) === "/api/auth/me/avatar";
 }
 
 // 按请求路径在两个固定阈值的 body-limit 之间分流（Hono bodyLimit 阈值在创建时固定）。
