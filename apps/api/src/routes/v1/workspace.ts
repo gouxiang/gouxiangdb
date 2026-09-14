@@ -5,11 +5,14 @@
 // 响应风格沿用现网：成功返资源本体，错误 {error,code}（错误码按 HTTP 状态映射）。
 
 import { Hono } from "hono";
-import { NAV_KINDS, type NavKind } from "@gx/shared-types";
+import { NAV_KINDS, type MenuOp, type NavKind } from "@gx/shared-types";
 import { readNavTree, TreeQueryError, type TreeParams } from "../../domain/nav/workspace-read.js";
 import { readMenuTree } from "../../domain/nav/menu-read.js";
+import { applyMenuChangesTx } from "../../domain/nav/menu.js";
 import { effectiveRoleRows } from "../../domain/org/authorization.js";
-import { prisma } from "../../db.js";
+import { withWriteTx, prisma } from "../../db.js";
+import { requireOrgAction } from "../../middleware/authActive.js";
+import { audit } from "../../audit/emit.js";
 
 export const workspaceRoutes = new Hono();
 
@@ -62,4 +65,19 @@ workspaceRoutes.get("/current/tree", async (c) => {
 workspaceRoutes.get("/current/menu", async (c) => {
   const data = await prisma.$transaction((tx) => readMenuTree(tx));
   return c.json(data);
+});
+
+// 菜单编排写：整单批量 diff 单事务（manage_menu），全成功或 4xx 全拒。
+workspaceRoutes.patch("/current/menu", requireOrgAction("manage_menu"), async (c) => {
+  const body = await c.req.json().catch(() => null) as { operations?: unknown } | null;
+  if (!body || !Array.isArray(body.operations) || body.operations.length === 0) {
+    return c.json({ error: "operations 必须是非空数组", code: "BAD_REQUEST" }, 400);
+  }
+  const ops = body.operations as MenuOp[];
+  const result = await withWriteTx("nav.menu.patch", (tx) => applyMenuChangesTx(tx, ops));
+  audit(c, {
+    event: "menu_changed", status: 200, actorId: c.get("auth").userId,
+    detail: { ops: ops.length, menuVersion: result.menuVersion },
+  });
+  return c.json({ menuVersion: result.menuVersion, applied: result.itemIds.length, itemIds: result.itemIds });
 });

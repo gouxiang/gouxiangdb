@@ -25,7 +25,12 @@ export type AuditEventName =
   | "role_deleted"
   | "role_assignment_changed"
   // M3 导航对账脚本（--purge-broken 物理清理 broken 节点/shortcut，脚本侧主动留痕）
-  | "nav_broken_purged";
+  | "nav_broken_purged"
+  // M3/S6 导航编排（菜单写/分组/权威移动，全部需 manage_menu）
+  | "menu_changed"
+  | "nav_group_created"
+  | "nav_group_deleted"
+  | "nav_node_moved";
 
 export interface AuditInput {
   event: AuditEventName;

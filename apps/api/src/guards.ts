@@ -7,8 +7,11 @@ import { getUserId, type Role } from "./auth.js";
 import { permissionsForRole, type PermissionSet } from "@gx/shared-types";
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  /** 可选机器可读错误码（不传时按状态码回落 BAD_REQUEST/CONFLICT 等）。 */
+  code?: string;
+  constructor(public status: number, message: string, code?: string) {
     super(message);
+    if (code) this.code = code;
   }
 }
 
@@ -112,7 +115,7 @@ function errorCodeForStatus(status: number): string {
 export function errorResponse(c: Context, e: unknown) {
   if (e instanceof HttpError) {
     return c.json(
-      { error: e.message, code: errorCodeForStatus(e.status) },
+      { error: e.message, code: e.code ?? errorCodeForStatus(e.status) },
       e.status as 400 | 401 | 403 | 404 | 409,
     );
   }

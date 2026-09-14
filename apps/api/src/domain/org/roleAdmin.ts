@@ -6,6 +6,7 @@
 
 import crypto from "node:crypto";
 import type { OrgAction, OrgRoleDTO, AssignmentSubjectInput, RoleAssignmentDTO } from "@gx/shared-types";
+import { ORG_ACTIONS } from "@gx/shared-types";
 import { HttpError } from "../../guards.js";
 import { withWriteTx, prisma, type DbTx } from "../../db.js";
 import { getDefaultWorkspaceId } from "./workspace.js";
@@ -17,7 +18,7 @@ function parseActionsStrict(raw: unknown): OrgAction[] {
   try {
     return assertOrgActions(raw);
   } catch {
-    throw new HttpError(400, "存在非法组织管理动作（仅允许 manage_departments/manage_members/manage_roles）");
+    throw new HttpError(400, "存在非法组织管理动作（仅允许 manage_departments/manage_members/manage_roles/manage_menu）");
   }
 }
 
@@ -30,7 +31,7 @@ function toRoleDTO(r: {
     const parsed: unknown = JSON.parse(r.permissions);
     if (Array.isArray(parsed)) {
       actions = parsed.filter((p): p is OrgAction => typeof p === "string"
-        && (["manage_departments", "manage_members", "manage_roles"] as string[]).includes(p));
+        && (ORG_ACTIONS as readonly string[]).includes(p));
     }
   } catch {
     actions = [];

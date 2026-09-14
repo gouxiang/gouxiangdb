@@ -87,7 +87,7 @@ describe("系统种子（幂等单播）", () => {
     expect(roles.map((r) => r.systemKey)).toEqual(["owner", "creator", "editor", "commenter", "viewer"]);
     expect(roles.every((r) => r.isSystem === 1)).toBe(true);
     const byKey = Object.fromEntries(roles.map((r) => [r.systemKey, JSON.parse(r.permissions) as string[]]));
-    expect(byKey.owner.sort()).toEqual(["manage_departments", "manage_members", "manage_roles"]);
+    expect(byKey.owner.sort()).toEqual(["manage_departments", "manage_members", "manage_menu", "manage_roles"]);
     for (const k of ["creator", "editor", "commenter", "viewer"]) expect(byKey[k]).toEqual([]);
   });
 

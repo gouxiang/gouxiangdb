@@ -28,14 +28,14 @@ async function dept(name: string, parentId?: string): Promise<string> {
 }
 
 describe("角色列表与系统角色锁定", () => {
-  it("列表系统角色固定序在前，仅 owner 持三动作", async () => {
+  it("列表系统角色固定序在前，仅 owner 持四动作", async () => {
     const res = await h.app.request("/api/v1/org/roles", { headers: await h.auth("admin") });
     const list = await json<Array<{ id: string; systemKey: string | null; isSystem: boolean; actions: string[]; name: string }>>(res);
     expect(list.slice(0, 5).map((r) => r.systemKey)).toEqual([
       "owner", "creator", "editor", "commenter", "viewer",
     ]);
     const owner = list.find((r) => r.systemKey === "owner")!;
-    expect(owner.actions.sort()).toEqual(["manage_departments", "manage_members", "manage_roles"]);
+    expect(owner.actions.sort()).toEqual(["manage_departments", "manage_members", "manage_menu", "manage_roles"]);
     for (const k of ["creator", "editor", "commenter", "viewer"]) {
       expect(list.find((r) => r.systemKey === k)!.actions).toEqual([]);
     }
@@ -73,13 +73,16 @@ describe("自定义角色与动作白名单", () => {
     });
   }
 
-  it("可建三动作任意子集；第四枚/非法动作 400；重名 409", async () => {
+  it("可建四动作任意子集（M3-S6 含 manage_menu）；非法动作 400；重名 409", async () => {
     const ok = await createRole("成员管理员", ["manage_members"]);
     expect(ok.status).toBe(201);
     expect((await json<{ actions: string[]; isSystem: boolean }>(ok)).actions).toEqual(["manage_members"]);
 
-    const bad = await createRole("非法动作", ["manage_menu"]);
-    expect(bad.status).toBe(400);
+    // M3-S6：manage_menu 是合法第四枚，自定义角色可勾选。
+    const menuRole = await createRole("导航编排员", ["manage_menu"]);
+    expect(menuRole.status).toBe(201);
+    expect((await json<{ actions: string[] }>(menuRole)).actions).toEqual(["manage_menu"]);
+
     const bad2 = await createRole("非法动作2", ["drop_table"]);
     expect(bad2.status).toBe(400);
 

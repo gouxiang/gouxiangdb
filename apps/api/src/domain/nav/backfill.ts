@@ -21,6 +21,20 @@ export function nodeId(kind: NavKind, resourceId: string): string {
   return `nav_${kind}_${resourceId}`;
 }
 
+/**
+ * 活 group 节点 id 集（S6 起的"编排覆盖"判定）：
+ * 实体节点被管理员经 move 挂到活 group 下后，这是持久编排态而非 A3/A5 差异——
+ * sync/reconcile 不得把它的 parentId/ord 拉回实体默认父（删组 retain 才回落，
+ * 见 groups.ts）。name/resourceType 等实体镜像字段仍照常对齐。
+ */
+export async function activeGroupIdSetTx(tx: DbTx): Promise<Set<string>> {
+  const groups = await tx.navNode.findMany({
+    where: { workspaceId: WS_ID, kind: "group", deletedAt: null },
+    select: { id: true },
+  });
+  return new Set(groups.map((g) => g.id));
+}
+
 /** 期望实体节点（父用确定性节点 id 表达；path 由 computePaths 统一重算）。 */
 export interface ExpectedNode {
   id: string;
@@ -99,8 +113,13 @@ export async function reconcileNodesTx(
   let revived = 0;
 
   // 已存在节点 id（含软删）：首轮一次全量取，供拓扑判定。
-  const existingRows = await tx.navNode.findMany({ select: { id: true } });
+  const existingRows = await tx.navNode.findMany({ select: { id: true, parentId: true } });
   const knownIds = new Set(existingRows.map((r) => r.id));
+  // 编排覆盖：当前父是活 group 的实体节点，parentId/ord 不由实体期望集改写（见 activeGroupIdSetTx）。
+  const groupIds = await activeGroupIdSetTx(tx);
+  const overriddenIds = new Set(
+    existingRows.filter((r) => r.parentId && groupIds.has(r.parentId)).map((r) => r.id),
+  );
   let pending = expected;
 
   while (pending.length > 0) {
@@ -123,16 +142,21 @@ export async function reconcileNodesTx(
         created++;
         continue;
       }
+      const override = overriddenIds.has(e.id);
       const changed =
         existing.name !== e.name ||
-        existing.parentId !== e.parentId ||
-        existing.ord !== e.ord ||
+        (!override && (existing.parentId !== e.parentId || existing.ord !== e.ord)) ||
+        existing.resourceType !== e.kind ||
         existing.resourceType !== e.kind ||
         existing.resourceId !== e.resourceId;
       if (changed || existing.deletedAt) {
         await tx.navNode.update({
           where: { id: e.id },
-          data: { name: e.name, parentId: e.parentId, ord: e.ord, resourceType: e.kind, resourceId: e.resourceId, deletedAt: null },
+          data: {
+            name: e.name,
+            ...(override ? {} : { parentId: e.parentId, ord: e.ord }),
+            resourceType: e.kind, resourceId: e.resourceId, deletedAt: null,
+          },
         });
         if (existing.deletedAt) revived++;
         else if (changed) updated++;

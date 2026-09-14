@@ -3,7 +3,7 @@
 // app.ts 在 config.enterpriseOrg || config.enterpriseNav 时 mount.route("/api/v1", v1)；
 // 子路由在本实例内按各自 flag 条件挂载，未启用时落入 v1 自身 404：
 //   - enterpriseOrg：/org/*、/meta、公开邀请（app.ts 侧）；
-//   - enterpriseNav：/workspaces/current/tree|menu。
+//   - enterpriseNav：/workspaces/current/tree|menu、/nav/groups、/nodes/:id/move。
 // 两个 flag 正交：仅一个 on 时只暴露对应子面。
 //
 // 响应风格沿用现网：成功返回资源本体，错误经全局 errorResponse 输出 {error,code}
@@ -14,6 +14,7 @@ import { requireActiveUser } from "../../middleware/authActive.js";
 import { config } from "../../config.js";
 import { org } from "./org/index.js";
 import { workspaceRoutes } from "./workspace.js";
+import { navRoutes, nodeRoutes } from "./nodes.js";
 
 export const v1 = new Hono();
 
@@ -38,6 +39,8 @@ if (config.enterpriseOrg) {
 }
 
 if (config.enterpriseNav) {
-  // M3 统一导航资源树读（tree 权威树 + menu 引用树）。
+  // M3 统一导航资源树：tree/menu 读 + menu 编排写 + group/move（均挂 v1 鉴权链）。
   v1.route("/workspaces", workspaceRoutes);
+  v1.route("/nav", navRoutes);
+  v1.route("/nodes", nodeRoutes);
 }

@@ -10,7 +10,7 @@ export { effectiveRoleRows };
 // 派工/计划接口名：effectiveOrgRoles 即去重合并来源后的有效角色集。
 export const effectiveOrgRoles = effectiveRoleRows;
 
-/** 白名单守卫：非三枚组织动作拒绝（自定义角色 actions 校验）。 */
+/** 白名单守卫：非四枚组织动作拒绝（自定义角色 actions 校验；manage_menu 为 M3-S6 只增）。 */
 export function assertOrgActions(actions: readonly unknown[]): OrgAction[] {
   const out = actions.filter((a): a is OrgAction => typeof a === "string"
     && (ORG_ACTIONS as readonly string[]).includes(a));
@@ -29,9 +29,10 @@ export interface SystemRoleSpec {
 }
 
 /**
- * 五枚系统角色单一真源（应用侧）。permissions/名称必须与手写迁移
- * 20260915090000_enterprise_org_ddl 的幂等种子逐字一致（systemRolesMatchSeed 对拍测试）。
- * 仅 owner 持三枚 manage_*，其余四枚为空（M4 资源角色命名锚点）。
+ * 五枚系统角色单一真源（应用侧）。permissions/名称与迁移链逐字一致：
+ * 20260915090000_enterprise_org_ddl 播三动作，20260916100000_owner_manage_menu
+ * 只增补到四动作（systemRolesMatchSeed 对拍测试跑在全量迁移后）。
+ * 仅 owner 持四枚 manage_*，其余四枚为空（M4 资源角色命名锚点）。
  */
 export const SYSTEM_ROLES: readonly SystemRoleSpec[] = [
   {
@@ -39,7 +40,7 @@ export const SYSTEM_ROLES: readonly SystemRoleSpec[] = [
     systemKey: "owner",
     name: "所有者",
     description: "工作区所有者，承担组织管理面全部动作",
-    actions: ["manage_departments", "manage_members", "manage_roles"],
+    actions: ["manage_departments", "manage_members", "manage_roles", "manage_menu"],
   },
   { id: "role_creator", systemKey: "creator", name: "创建者", description: "M4 资源角色命名锚点，M2 无组织管理动作", actions: [] },
   { id: "role_editor", systemKey: "editor", name: "编辑者", description: "M4 资源角色命名锚点，M2 无组织管理动作", actions: [] },

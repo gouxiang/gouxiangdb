@@ -2,13 +2,13 @@
 //
 // 构造一份"组织迁移之前的旧库"：用只含前 12 个迁移目录的临时 schema 跑
 // `prisma migrate deploy`（即 M2 之前的完整现网结构：users/members/kb 等，无任何组织表）；
-// 插入 3 个仅带原始列的存量用户与 base/kb 业务数据；随后用真实 16 迁移 schema 再 deploy，
+// 插入 3 个仅带原始列的存量用户与 base/kb 业务数据；随后用真实 17 迁移 schema 再 deploy，
 // 断言：
-//   - 组织两迁移落表 applied；存量 users 全 ACTIVE/ws_default/tv0；
+//   - 组织/nav/manage_menu 五迁移落表 applied；存量 users 全 ACTIVE/ws_default/tv0；
 //   - owner 自举恰好一行（createdAt 最早者，createdBy=system-bootstrap）；
 //   - ws_default/五系统角色就位；存量 members/kb 行无损；
-//   - 再跑一次 deploy 幂等：16 行 applied、无新增 owner。
-// 注：M3 起迁移总数 14 -> 16（nav DDL + nav 回填），本演练随直升到 16。
+//   - 再跑一次 deploy 幂等：17 行 applied、无新增 owner。
+// 注：迁移总数 12 -> 14（M2 组织）-> 16（M3 nav）-> 17（M3-S6 manage_menu），本演练直升到 17。
 // 用临时 migrations 目录而非手写 _prisma_migrations，保证校验和由 prisma 自己记录。
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -49,7 +49,7 @@ beforeAll(() => {
   fs.mkdirSync(path.join(tmpRoot, "migrations"));
   fs.copyFileSync(path.resolve("prisma/schema.prisma"), path.join(tmpRoot, "schema.prisma"));
   const dirs = migDirs();
-  expect(dirs.length).toBe(16); // M3 起 14 -> 16（nav DDL + nav 回填）
+  expect(dirs.length).toBe(17); // M3 起 14 -> 17（nav DDL + nav 回填 + owner manage_menu）
   for (const name of dirs.slice(0, PRE_ORG_COUNT)) {
     fs.cpSync(path.resolve("prisma/migrations", name), path.join(tmpRoot, "migrations", name), { recursive: true });
   }
@@ -86,18 +86,19 @@ afterAll(() => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-describe("旧库（前 12 迁移）升级到 16 迁移", () => {
-  it("两条组织迁移 applied，存量用户回填 ACTIVE/ws_default/tv0，owner 自举恰好一行", () => {
-    // 真实 schema（16 迁移）对旧库 deploy：补两条组织 + 两条 nav。
+describe("旧库（前 12 迁移）升级到 17 迁移", () => {
+  it("组织/nav/manage_menu 五条迁移 applied，存量用户回填 ACTIVE/ws_default/tv0，owner 自举恰好一行", () => {
+    // 真实 schema（17 迁移）对旧库 deploy：补两条组织 + 两条 nav + 一条 manage_menu。
     expect(() => deploy(path.resolve("prisma/schema.prisma"))).not.toThrow();
 
     db = new Database(dbFile);
     const applied = db.prepare(
       "SELECT migration_name FROM _prisma_migrations WHERE rolled_back_at IS NULL ORDER BY finished_at",
     ).all() as Array<{ migration_name: string }>;
-    expect(applied).toHaveLength(16);
+    expect(applied).toHaveLength(17);
     expect(applied.map((r) => r.migration_name)).toContain("20260915090000_enterprise_org_ddl");
     expect(applied.map((r) => r.migration_name)).toContain("20260915090100_enterprise_org_backfill");
+    expect(applied.map((r) => r.migration_name)).toContain("20260916100000_owner_manage_menu");
 
     const users = db.prepare("SELECT id,status,workspaceId,tokenVersion FROM users ORDER BY createdAt,id").all() as
       Array<{ id: string; status: string; workspaceId: string | null; tokenVersion: number }>;
@@ -126,10 +127,10 @@ describe("旧库（前 12 迁移）升级到 16 迁移", () => {
     expect((db.prepare("SELECT count(*) n FROM kb_members").get() as { n: number }).n).toBe(1);
   });
 
-  it("再 deploy 一次幂等：仍 16 applied，owner 仍只有一行，无额外迁移记录", async () => {
+  it("再 deploy 一次幂等：仍 17 applied，owner 仍只有一行，无额外迁移记录", async () => {
     expect(() => deploy(path.resolve("prisma/schema.prisma"))).not.toThrow();
     const n = (db.prepare("SELECT count(*) n FROM _prisma_migrations").get() as { n: number }).n;
-    expect(n).toBe(16);
+    expect(n).toBe(17);
     const owners = (db.prepare(
       "SELECT count(*) n FROM role_assignments WHERE roleId='role_owner' AND subjectType='user'",
     ).get() as { n: number }).n;

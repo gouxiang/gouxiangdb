@@ -2,17 +2,22 @@
 // M2 企业组织通讯录 /api/v1/org/* 前后端契约（唯一真源；只增不改既有导出）。
 //
 // 边界（M2 计划 §5-A / 派工）：
-//   - 组织管理动作本期锁定三枚；manage_menu 属 M3，本期【不加入】联合（留只增空间）。
+//   - M2 锁定三枚组织管理动作；M3-S6 只增第四枚 manage_menu（导航菜单编排）。
 //   - 资源动作 r/c/u/d/comment 一律不进 OrgAction（资源权限仍走 members.role + permissions.ts）。
 //   - 成功响应沿用现网：资源本体 / 分页对象 {items,total,page,limit,hasMore}；错误 {error,code}。
 
-/** 组织管理动作（M2 三枚；M3 会只增 manage_menu，勿提前加）。 */
-export type OrgAction = "manage_departments" | "manage_members" | "manage_roles";
+/** 组织管理动作（M3-S6 起四枚；只增不改既有成员顺序语义）。 */
+export type OrgAction =
+  | "manage_departments"
+  | "manage_members"
+  | "manage_roles"
+  | "manage_menu";
 
 export const ORG_ACTIONS: readonly OrgAction[] = [
   "manage_departments",
   "manage_members",
   "manage_roles",
+  "manage_menu",
 ];
 
 /** 五枚系统组织角色 key（自定义角色 systemKey=null）。 */

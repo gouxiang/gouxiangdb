@@ -121,3 +121,51 @@ export interface NavTreeQuery {
   /** 管理全量开关：仅组织管理员可用，绕过 10 万节点保护并返回含软删的全量节点。 */
   all?: boolean;
 }
+
+// ============ S6 菜单写（PATCH /workspaces/current/menu 批量 diff） ============
+
+/**
+ * 菜单编排操作（整单单事务，全成功或 4xx 全拒）：
+ *  - insert：新建 container 或 shortcut（shortcut 必须带活节点 nodeId）；
+ *  - update：改别名 label（null 清除）/图标 iconName（null 清除）；
+ *  - reorder：同父排序或跨容器拖拽（parentId 可选，换容器时与 ord 同改）；
+ *  - delete：软删菜单项（容器删除级联软删其全部后代）。
+ */
+export type MenuOp =
+  | { op: "insert"; id?: string; type: MenuItemType; parentId?: string | null; nodeId?: string; label?: string | null; iconName?: string | null; ord?: number }
+  | { op: "update"; id: string; label?: string | null; iconName?: string | null }
+  | { op: "reorder"; id: string; ord: number; parentId?: string | null }
+  | { op: "delete"; id: string };
+
+export interface MenuChangeResult {
+  menuVersion: number;
+  applied: number;
+  /** 各 insert 若由客户端带 id 回显，供前端对齐本地态。 */
+  itemIds: string[];
+}
+
+// ============ S6 分组与移动 ============
+
+export interface CreateGroupInput {
+  name: string;
+  /** 父只能是活 group 或 null（L0）；挂实体节点下一律 400。 */
+  parentId?: string | null;
+  ord?: number;
+  iconName?: string | null;
+}
+
+export type GroupDeleteStrategy = "move" | "retain";
+
+/** N6 移动影响预览（M3 旧成员口径；hint 恒 false，M4 才有继承语义）。 */
+export interface MoveImpactDTO {
+  nodeId: string;
+  newParentId: string;
+  /** 子树内 table/doc/canvas 内容数（不含 view/group）。 */
+  subtreeItemCount: number;
+  /** 按旧 members/kb_members 口径去重的受影响成员数。 */
+  affectedUserCount: number;
+  /** 指向子树节点的活 shortcut 数。 */
+  shortcutCount: number;
+  willBreakInheritanceHint: false;
+}
+

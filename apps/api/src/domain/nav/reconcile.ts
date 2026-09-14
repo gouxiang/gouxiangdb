@@ -7,6 +7,7 @@
 
 import type { DbTx } from "../../db.js";
 import {
+  activeGroupIdSetTx,
   buildExpectedNodes,
   reconcileNodesTx,
   rebuildPathsTx,
@@ -33,6 +34,11 @@ export async function computeDiffs(tx: DbTx): Promise<ReconcileReport> {
 
   // ---- A 类：实体 -> 节点 ----
   const liveById = new Map(aliveNodes.map((n) => [n.id, n]));
+  // 编排覆盖：当前父是活 group 的实体节点，父/序是管理员显式编排，不报 A3/A5（见 backfill.ts）。
+  const groupIds = await activeGroupIdSetTx(tx);
+  const overridden = new Set(
+    aliveNodes.filter((n) => n.parentId && groupIds.has(n.parentId)).map((n) => n.id),
+  );
   for (const e of expected) {
     const hits = aliveNodes.filter((n) => n.resourceType === e.kind && n.resourceId === e.resourceId);
     const n = liveById.get(e.id);
@@ -43,9 +49,13 @@ export async function computeDiffs(tx: DbTx): Promise<ReconcileReport> {
       continue;
     }
     if (hits.length > 1) report.A.push({ code: "A2", message: `同一实体多个活节点: ${e.kind}:${e.resourceId}`, ref: e.id });
-    if (n.parentId !== e.parentId) report.A.push({ code: "A3", message: `父节点错: ${e.kind}:${e.resourceId}`, ref: n.id });
+    if (!overridden.has(n.id) && n.parentId !== e.parentId) {
+      report.A.push({ code: "A3", message: `父节点错: ${e.kind}:${e.resourceId}`, ref: n.id });
+    }
+    if (!overridden.has(n.id) && n.ord !== e.ord) {
+      report.A.push({ code: "A5", message: `ord 不符: ${e.kind}:${e.resourceId}`, ref: n.id });
+    }
     if (n.name !== e.name) report.A.push({ code: "A4", message: `name 不一致: ${e.kind}:${e.resourceId}`, ref: n.id });
-    if (n.ord !== e.ord) report.A.push({ code: "A5", message: `ord 不符: ${e.kind}:${e.resourceId}`, ref: n.id });
   }
   const computedPaths = computePaths(aliveNodes.map((n) => ({ id: n.id, parentId: n.parentId })));
   for (const n of aliveNodes) {
