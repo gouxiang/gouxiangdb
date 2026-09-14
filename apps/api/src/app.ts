@@ -26,6 +26,7 @@ import { kb } from "./routes/kb.js";
 import { pub } from "./routes/public.js";
 import { search } from "./routes/search.js";
 import { v1 } from "./routes/v1/index.js";
+import { inviteRoutes } from "./routes/v1/authInvite.js";
 import { health } from "./routes/health.js";
 import { healthz } from "./routes/healthz.js";
 import { readyz } from "./routes/readyz.js";
@@ -142,6 +143,8 @@ function createMount(webRoot: string | null): Hono {
   // M2 企业组织管理面：/api/v1 与 /api 平级独立实例；GX_ENTERPRISE_ORG=off 时不挂载
   // （请求落入既有 notFound 404），旧 /api 与资源鉴权不受任何影响。
   if (config.enterpriseOrg) {
+    // 公开邀请接受（登录前，不要求 ACTIVE）挂在受保护 v1 之前；路径不重叠。
+    mount.route("/api/v1/auth/invite", inviteRoutes);
     mount.route("/api/v1", v1);
   }
 

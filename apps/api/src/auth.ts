@@ -8,6 +8,10 @@ import { prisma } from "./db.js";
 import { audit as recordAudit } from "./audit/emit.js";
 import { issueToken, resolveActiveAuth, USER_STATUS } from "./domain/org/authState.js";
 import { publicUser } from "./domain/userProjection.js";
+import { withWriteTx } from "./db.js";
+import { bootstrapFirstOwnerTx } from "./domain/org/members.js";
+import { DEFAULT_WORKSPACE_ID } from "./domain/org/workspace.js";
+import { config } from "./config.js";
 
 // token 有效期常量与 JWT/状态解析核心已下沉到 domain/org/authState.ts（旧 /api 与 v1 共享）。
 export type Role = "owner" | "creator" | "editor" | "commenter" | "viewer";
@@ -36,9 +40,21 @@ auth.post("/signup", async (c) => {
     return c.json({ error: "Email already registered" }, 409);
   }
   const passwordHash = await bcrypt.hash(password, 10);
-  const user = await prisma.user.create({
-    data: { email, displayName, passwordHash },
-  });
+  if (config.enterpriseOrg) {
+    // 组织面开启：新注册者归入默认工作区（ACTIVE/tv0）；若为工作区首位用户则同事务自举 owner
+    // （计划 §5-D.4 运行时兜底）。全部在一个写事务内，回调只用 tx。
+    const user = await withWriteTx("auth.signup.bootstrap", async (tx) => {
+      const created = await tx.user.create({
+        data: { email, displayName, passwordHash, workspaceId: DEFAULT_WORKSPACE_ID },
+      });
+      await bootstrapFirstOwnerTx(tx, created.id, DEFAULT_WORKSPACE_ID);
+      return created;
+    });
+    const token = await issueToken(user.id, user.tokenVersion);
+    recordAudit(c, { event: "signup", status: 200, actorId: user.id });
+    return c.json({ token, user: publicUser(user) });
+  }
+  const user = await prisma.user.create({ data: { email, displayName, passwordHash } });
   // 注册直接 ACTIVE（status 默认），tokenVersion=0。
   const token = await issueToken(user.id, user.tokenVersion);
   recordAudit(c, { event: "signup", status: 200, actorId: user.id });
@@ -61,12 +77,9 @@ auth.post("/login", async (c) => {
     recordAudit(c, { event: "login_failure", status: 401, detail: { reason: "unknown_email" } });
     return c.json({ error: "Invalid credentials" }, 401);
   }
-  const ok = await bcrypt.compare(parsed.data.password, user.passwordHash);
-  if (!ok) {
-    recordAudit(c, { event: "login_failure", status: 401, actorId: user.id, detail: { reason: "bad_password" } });
-    return c.json({ error: "Invalid credentials" }, 401);
-  }
-  // M2 账号生命周期：INVITED 尚未激活 -> 403（与密码错误 401 区分）；DISABLED -> 401。
+  // M2 账号生命周期：状态判定先于密码比对。
+  // INVITED 尚未激活 -> 403（邀请账号持随机占位密码，若先比密码会恒为 401，无法表达"未激活"，
+  // 见计划 §5-D.1：管理员域内系统取 403 + 审计）；DISABLED -> 401。
   if (user.status === USER_STATUS.INVITED) {
     recordAudit(c, { event: "login_failure", status: 403, actorId: user.id, detail: { reason: "invited" } });
     return c.json({ error: "账号尚未激活" }, 403);
@@ -74,6 +87,11 @@ auth.post("/login", async (c) => {
   if (user.status === USER_STATUS.DISABLED) {
     recordAudit(c, { event: "login_failure", status: 401, actorId: user.id, detail: { reason: "disabled" } });
     return c.json({ error: "账号已停用" }, 401);
+  }
+  const ok = await bcrypt.compare(parsed.data.password, user.passwordHash);
+  if (!ok) {
+    recordAudit(c, { event: "login_failure", status: 401, actorId: user.id, detail: { reason: "bad_password" } });
+    return c.json({ error: "Invalid credentials" }, 401);
   }
   const token = await issueToken(user.id, user.tokenVersion);
   recordAudit(c, { event: "login_success", status: 200, actorId: user.id });
