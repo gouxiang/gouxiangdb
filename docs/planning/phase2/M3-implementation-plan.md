@@ -1,8 +1,8 @@
 # M3 统一导航资源树 — 可执行实施切片（设计与现状核对，不改业务码）
 
-- 日期：2026-09-16
+- 日期：2026-09-16（2026-09-16 按项目总监 §10 十项裁决终审修订）
 - 作者：架构师 高见远
-- 状态：Proposed（交项目总监大湾区靓仔复核后派后端/前端工程师实施）
+- 状态：**终审通过（Accepted，总监十项裁决已回填，见 §10）**；实施排期由项目总监统一调度，S1-S4 虽可先行但未获派工不得开工（裁决 10：M2-S2 在途，后端实施保持单线 M2 收口 → M3）
 - 上游依据：SPEC-enterprise-v1.0 §2（M3 行，:23 P0）/§5（:62-69 `/api/v1/workspaces/current/tree|menu`、openapi 冻结点 :62）/§6（:85 nav_nodes/menu_items/auth_policies 表清单）/§7（:95-96 工作区外壳/一级三类列表）/§8（:109 单一 SVG 图标体系）/§9（AC-M3-1，:119）/§10（:134 资源 10 万节点首屏 <1s）/§11（:144 画布坑位）/§12；PRD-enterprise §支柱2（N1 :132 / N2 :133 / N3 :134 / N4 :135 / N5 :136 / N6 :137）/C-1（:308）/C-7（:314）/C-11（:318）/C-12（:319）/§六 M3（:253-258）；ARCH-enterprise §3.1（两层模型，:135-166）/§3.2（Prisma 草案，:168-278）/§3.3（迁移回填，:280-294）/§3.4（menu_items 行为级联，:296-313）/§9（:849 openapi M3 冻结）；UIUX-enterprise §1（:51-77）/§2（线框:84-179、设置收拢:203-234）/§5（路由建议:531-545）；M2 实施计划（`docs/planning/phase2/M2-implementation-plan.md`）§2.2（:105 明确划给 M3 的边界）、§4.1（GX_ENTERPRISE_ORG flag）、§5-A（manage_menu 留 M3，:193）
 - 适用代码基线：`main`（本文档随 commit 提交时业务码基线为 `f8ddde3`）；派工基线 `32f7bea` 之后 **M2-S0/S1 已落地**（`b19dfa1` 特征测试、`f8ddde3` 组织五表迁移与 users 扩列回填），M2-S2（/api/v1 骨架与 GX_ENTERPRISE_ORG flag）仍在实施中；根 `package.json` v0.1.0
 - 本机核对环境：Node v22.22.2、pnpm 9.0.0、Prisma 5.22、better-sqlite3 13.0.3（SQLite 3.53.4）、Hono 4.13.5、React 18 / react-router-dom 现状版本 / TanStack Query 5.62
@@ -14,14 +14,17 @@
 
 ## 0. 结论先行
 
-1. **M3 同样是"加一层 + 换外壳"，不是搬迁资产**：新增 `nav_nodes`（权威实体树，唯一父级）与 `menu_items`（引用编排层）两张旁路表，base/kb/table/view/doc/canvas 六类实体的物理归属、URL、旧 RBAC 守卫**一行不动**；`auth_policies` 按 SPEC §6 同期建表冻结，**不写策略、不接判定**（M4 启用）。权限纪律与 M2 完全一致：M3 不做任何 enforce，连菜单剪枝也不做（与主理人"权限先不 enforce"口径一致，PRD N2 的旧角色剪枝归 M4，见 §10 待裁决-1）。
-2. **两层模型按 SPEC §6 落地，但对 ARCH §3 做三处事实性裁剪（请总监复核，§12-7/8/10）**：①**建 view 节点、不建 field 节点**：①**建 view 节点、不建 field 节点**（SPEC/派工列了 view 未列 field；字段权限 M4 走 policy.fieldMask，建 field 节点只带来 ~10x 行数膨胀）；②**建 kb 节点**（ARCH 说 kb 退化为属性，派工明确 kb 是实体类型）；③doc 层级在 nav_nodes 用 parentId 镜像 `kb_docs.parentId`，**menu_items 回填不做"容器嵌套复刻文档树"**（二级文档树由 nav_nodes 子树呈现，避免每篇文档一个容器行）。
+1. **M3 同样是"加一层 + 换外壳"，不是搬迁资产**：新增 `nav_nodes`（权威实体树，唯一父级）与 `menu_items`（引用编排层）两张旁路表，base/kb/table/view/doc/canvas 六类实体的物理归属、URL、旧 RBAC 守卫**一行不动**；`auth_policies` 按 SPEC §6 同期建表冻结，**不写策略、不接判定**（M4 启用）。权限纪律与 M2 完全一致：M3 不做任何 enforce，**菜单零剪枝——tree/menu 对所有登录用户返回全量**，软删项由前端隐藏；M4 才做服务端剪枝（总监裁决 1，终审定案，不增加粗剪枝切片）。
+2. **两层模型按 SPEC §6 落地，对 ARCH §3 的三处事实性裁剪经总监裁决 3/4 全部批准定案**：①**建 view 节点、不建 field 节点**（字段可见性归 M4 fieldMask，建 field 节点只带来 ~10x 行数膨胀）；②**建 kb 节点**（kb 是六类实体之一）；③doc 层级在 nav_nodes 用 parentId 镜像 `kb_docs.parentId`，**默认菜单不嵌套复刻文档树**（裁决 4：文档层级走 nav_nodes 子树，默认菜单只挂 base/kb 容器 + 零入口丢失所需的一级项；容器嵌套 2 层上限保留）。六类 base/kb/table/view/doc/canvas + group 七节点种类定稿。
 3. **nav_nodes 树结构选用 M2 同款 `parentId 真相 + path 物化派生`，不引入闭包表/CTE**：M4 权限引擎要求沿权威树收集祖先链（ARCH §5），物化 path 前缀切分即可在无递归 SQL 下完成，且与 M2 部门树同一套纯函数/方言纪律；menu_items 是浅树（一级+二级，容器嵌套限 2 层），只保留 parentId + 应用层防环。
-4. **内容深链 URL 永不改名**：`/base/:id/table/:id/view/:id`、`/kb/:id/doc|canvas/:id` 是被 Markdown 正文（`lib/internal-links.ts`）、画布引用卡（`DocRefCard`/`GxLinkBlockView`）、匿名公开分享（`/s/:token`）持久化存储的资源身份，M3 只统一承载它们的**外壳**，不引入 `/w/node/:id` 内容路径（UIUX §5 建议路由只采纳工作区级：`/workspace/*`）。N5"旧链接可达"因此以"内容 URL 不变 + 外壳级旧入口配 SPA 别名路由"实现，而非服务端 301（SPA 静态兜底下发 index.html，服务端 301 无落点）。此为关键 ADR 候选（ADR-0027，§8），请总监裁决。
-5. **回填分两个只增迁移 + 一个可重跑对账脚本**：迁移 A 建三表 + workspaces 加 `navVersion/menuVersion`；迁移 B 用 `INSERT...SELECT` 幂等回填实体节点与默认菜单（零入口丢失：每个活表/活文档至少一条 shortcut）。对账脚本输出 A/B/C 三类差异，**0 差异定义见 §5**。实体写点接线覆盖五个路由文件（bases/tables/views/kb/records），§4.4 表逐条列出 18 个条目，全部在既有 `withWriteTx/withWriteBatch` 事务内接 `domain/nav/sync.ts` 原语，不新增写队列。
-6. **删除悬挂按三态处理（C-12）**：活（alive）/ 软删悬挂（资源 `deletedAt` 非空：节点与 shortcut 保留、读接口隐藏、随资源恢复自动还原）/ 失效悬挂（资源物理消失：shortcut 标记 `broken`，管理员显灰可清理，清理入审计）。现状删除语义不对称（base/kb 软删无恢复端点；view 是物理删；table 走回收站 order=-1 隐藏视图），§4.4 逐写点列清。
-7. M3 切成 **S0–S11 共 12 片**：S0 特征 → S1 DDL → S2 回填 → S3 写点接线 → S4 对账脚本 → S5 读 API → S6 写 API（含 manage_menu 第四动作位）→ S7 openapi.yaml 首版冻结 → S8 新外壳骨架（含 M2 通讯录入口收敛）→ S9 一级导航/编排器/二级三类列表 → S10 旧链兼容+AC-M3-1 对抗+10 万节点性能 → S11 出口收口。openapi 冻结片（S7）明确排在后端契约稳定（S6）之后、前端大改（S8/S9）之前。
+4. **内容深链 URL 永不改名（总监裁决 2 确认）**：`/base/:id/table/:id/view/:id`、`/kb/:id/doc|canvas/:id` 永久有效，是被 Markdown 正文（`lib/internal-links.ts`）、画布引用卡（`DocRefCard`/`GxLinkBlockView`）、匿名公开分享（`/s/:token`）持久化存储的资源身份；**不引入 `/w/node/:id` 内容路径**，N5 用 SPA 别名实现旧外壳入口可达，**不做服务端 301**。ADR-0027 照写（§8）。
+5. **回填分两个只增迁移 + 一个可重跑对账脚本**：迁移 A 建三表 + workspaces 加 `navVersion/menuVersion`；迁移 B 用 `INSERT...SELECT` 幂等回填实体节点与默认菜单（零入口丢失：每个活表/根级活文档/画布至少一条 shortcut）。对账脚本输出 A/B/C 三类差异，**0 差异定义见 §5**。实体写点接线覆盖五个路由文件（bases/tables/views/kb/records），§4.4 表逐条列出 18 个条目，全部在既有 `withWriteTx/withWriteBatch` 事务内接 `domain/nav/sync.ts` 原语，不新增写队列。
+6. **删除悬挂按三态处理（C-12）**：活（alive）/ 软删悬挂（资源 `deletedAt` 非空：节点与 shortcut 保留、读接口给 `state` 字段、前端对全员隐藏、随既有恢复路径自动还原）/ 失效悬挂（资源物理消失：shortcut 标 `broken`，**仅管理编排态显灰**可清理，清理入审计）。现状删除语义不对称（base/kb 软删无恢复端点；view 是物理删；table 走回收站 order=-1 隐藏视图），§4.4 逐写点列清。**裁决 6：M3 不补 base/kb 软删恢复端点**，全局回收站聚合列 P1 backlog；M3 只保证 soft_dangling 节点随 table/doc 既有恢复路径自动还原。
+7. M3 切成 **S0–S11 共 12 片**：S0 特征 → S1 DDL → S2 回填 → S3 写点接线 → S4 对账脚本 → S5 读 API → S6 写 API（含 manage_menu 第四动作位）→ S7 openapi.yaml 首版冻结 → S8 新外壳骨架（含 M2 通讯录入口收敛）→ S9 一级导航/编排器/二级三分区 → S10 旧链兼容+AC-M3-1 对抗+10 万节点性能 → S11 出口收口。openapi 冻结片（S7）明确排在后端契约稳定（S6）之后、前端大改（S8/S9）之前。
 8. flag：新增 `GX_ENTERPRISE_NAV`（默认 on，test 默认 on），与 M2 的 `GX_ENTERPRISE_ORG` 正交：off 时不挂 v1 nav 路由、前端探测 404 回退旧 AppShell/KbShell（双壳保留一个迭代，PRD :258 回滚承诺）。旧 `/api` 与旧页面零行为变化。
+9. **openapi 写实（裁决 5）**：按现网真实信封 `{error, code}` 与资源本体响应写实，全企业版 v1 在 M3 出口冻结成现网风格，**不切 `{code,data,message}`**；不引入 swagger/redoc CI 校验依赖，用手写请求/响应形状对拍测试。
+10. **nav 同步强一致（裁决 9 批准）**：`*Tx` 原语在既有 `withWriteTx/withWriteBatch` 内，任何 nav 写失败整体回滚实体写，实体回滚也不留半截节点；**禁止 try/catch 吞错降级 best-effort**；reconcile 脚本仅作上线后兜底。S3 每条写点必须有真库测试双向证明（nav 失败回滚实体、实体回滚无残留节点）。
+11. **排期纪律（裁决 10）**：S1-S4 虽不依赖 M2-S2 可先行，但**实施人力由项目总监统一调度，架构师线不开工代码**；后端单线 M2 全片收口 → M3，`app.ts` 的 v1 挂载合并点由总监串行化（M2-S2 在途改 app.ts/auth.ts/config.ts，与 M3-S3 的 18 写点接线同仓并行会撞文件）。本计划及后续修订保持纯文档。
 
 ---
 
@@ -108,9 +111,9 @@
 2. **menu_items 引用层**：type=container|shortcut；shortcut.nodeId 可重复（同一实体多处挂载）、label 可空（回落实体真名）、可起别名、可拖拽排序/换容器；删除 shortcut/container 不触 nav_nodes 父级与任何策略（AC-M3-1 前半句）。
 3. **存量自动回填 + 0 差异对账**：迁移回填全部活实体节点与默认菜单（每 base 一个同名容器挂全部 table；每 kb 一个同名容器挂全部根级 doc/canvas；doc 树层级由 nav_nodes parentId 镜像承载）；独立可重跑对账脚本（§5）。
 4. **实体写点同事务同步 nav_nodes**：§4.4 表 18 个条目，含软删/恢复/物理删/移动/改名/建复制；重复回填安全（upsert by 唯一键，软删行原地复活，不新增行）。
-5. **新工作区外壳（N1）**：顶部 Logo 区 + 全局搜索（⌘K 提权顶栏）+ 左下设置/通用功能区 + 左一级导航 + 可选二级内容栏 + 内容区；M2 的 `/workspace/contacts` 通讯录入口并入左下设置区（M2 S7 临时侧栏入口在 S8 摘除）；工作区设置中心首版只收"通讯录 + 库设置入口（base/kb 资产级设置原页保留可达）+ 导航编排"，安全/备份/embedding/MCP 各项随 M5/M6 填充，本里程碑只留导航占位或不留（待裁决 §10-7）。
+5. **新工作区外壳（N1）**：顶部 Logo 区 + 全局搜索（⌘K 提权顶栏）+ 左下设置/通用功能区 + 左一级导航 + 可选二级内容栏 + 内容区；M2 的 `/workspace/contacts` 通讯录入口并入左下设置区（M2 S7 临时侧栏入口在 S8 摘除）；**工作区设置中心首版定稿三个真实条目（裁决 7）：通讯录、导航编排、资产（base/kb）入口**——不放假入口、不放"即将上线"占位；安全/备份/embedding/MCP 各项随对应里程碑自然增列。
 6. **一级导航编排（N2）与三类统一分组（N4）**：管理员对 menu_items 增删改排、多处添加、别名；建 group 节点与"移动到其他分组"走 nav_nodes.parentId 变更 + N6 粗粒度影响预览（M3 用旧 members/kb_members 口径计算受影响人数，M4 自动升级三源并集）。
-7. **二级内容列表（N3 的 P0 部分）**：进入一级容器后，二级按 [数据表｜文档｜画布] 三分区列出被收纳内容（KbTree 分段页签同款样式），带列表内搜索；**收藏/最近访问为 N3 P1，本里程碑不做**（C-7/D-3 已定，§10-8 知会）。
+7. **二级内容列表（N3 的 P0 部分，裁决 8 定稿）**：进入一级容器后，二级按**收纳状态三视角**组织——全部 / 未收纳 / 已收纳（或等价的过滤结构：全部条目、尚未挂到任何菜单容器的条目、已被当前容器收纳的条目），条目内再按 [数据表｜文档｜画布] 内容类型分段（KbTree 分段页签同款样式），带列表内搜索；**无收藏星标、无最近访问列表**（N3 收藏/最近访问列 P1，本期不做）。
 8. **旧入口/旧链接（N5）**：全部旧 URL 在新外壳下可达且操作步数 ≤ 旧版 +1（PRD :257）；旧外壳经 flag 回退保留一个迭代；`/kb` 网格列表等"外壳级页面"给 SPA 别名路由。
 9. **API**：`GET /api/v1/workspaces/current/tree`、`GET/PATCH /api/v1/workspaces/current/menu`（SPEC §5 :68-69），另加节点管理端点（group 建改删、移动+影响预览、菜单批量 diff 写）；manage_menu 成为继 M2 三枚之后的第四枚组织管理动作位（owner 默认持有，自定义角色可勾）。
 10. **auth_policies 同期建表冻结**（SPEC §6 :85）：按 ARCH §3.2 结构建空表，M3 无任何写入/读取路径（一个测试断言"全代码无 authPolicy 写调用"）。
@@ -126,12 +129,12 @@
 | PAT、MCP 通道、AI | M6 | 无 |
 | 向量/语义检索/outbox/search.db | M5 | 全局搜索维持 search.ts 现状，新壳只提权入口 |
 | 收藏/最近访问（N3 P1）、个人导航、多主题、多工作区切换、多租户 | P1/Out-of-Scope | workspaceId 恒 ws_default |
-| base/kb 软删恢复端点 | 不新增（待裁决 §10-6） | nav 跟随软删；其恢复能力现状缺失是既存事实，不夹在 M3 补 |
+| base/kb 软删恢复端点 | **不新增（裁决 6 定案）**，全局回收站聚合列 P1 backlog | M3 只保证 soft_dangling 节点随 table/doc 既有恢复路径自动还原；base/kb 软删恢复能力现状缺失是既存事实，不夹在 M3 补 |
 | 全局回收站聚合页 | P1/设置中心后续 | 两个资产级回收站原样保留入口 |
 | 服务端 301 重定向表 | 不做 | 内容 URL 不变（§0-4）；外壳级迁移用 SPA 别名 |
 | 文档导航分组与 kb_docs.parentId 双向改写 | 不做（UIUX :179 注：两套层级并存不互改） | 二级文档区默认按权威树（=parentId 镜像）呈现 |
 | 内置 group 按字段桶预生成 | M4 | M3 group 只是空分组节点，config 留列不填桶 |
-| 旧 `/api` 下线/响应信封切换 | 下一迭代 | v1 与 /api 平级；openapi 按实现写实（§10-5） |
+| 旧 `/api` 下线/响应信封切换 | 下一迭代 | v1 与 /api 平级；openapi 按实现写实（裁决 5：冻结成现网 `{error,code}` 风格，不切信封） |
 
 ---
 
@@ -273,7 +276,7 @@ scripts/nav/
 ```
 
 - nav 路由全部经 M2 的 `requireActiveUser`；写操作经 `requireOrgAction('manage_menu')`（节点移动/菜单编排同一动作位；group 的 CRUD 也算 manage_menu）。
-- tree 读：登录即可；M3 不剪枝（§2.1-12），DTO 带 `deletedAt` 不下发（软删节点在 tree 管理视图里带 `state` 字段供管理员看，普通 menu 解析隐藏——普通 menu 读对软删 shortcut 返回 `state:"soft_deleted"` 但**不剪**？定口径：普通 menu 读也返回，由前端对全员隐藏软删项，M4 改为服务端剪枝。保持后端无权限逻辑，只做存在性解析）。
+- tree 读：登录即可；M3 不剪枝（§2.1-12），DTO 带 `deletedAt` 不下发。**shortcut 解析状态口径定稿（总监微调要求，不再留问号）**：后端对每条 shortcut 解析引用资源并返回 `state` 字段，取值 `alive | soft_dangling | broken`（alive=资源存在且未删；soft_dangling=节点/资源软删中；broken=资源行物理消失）；**后端不做任何权限判断**，三态对所有登录用户同值返回。前端规则写死：`soft_dangling` 对**全员隐藏**（普通浏览与编排态都不显示）；`broken` 普通浏览隐藏、**仅管理编排态显灰**并可清理。M4 服务端剪枝上线后此 state 契约保持不变（剪枝是另一维：可见性），open api 与 shared-types 按此定稿。
 
 ### 4.4 实体写点 → nav 同步接线表（18 个条目，全部入既有事务）
 
@@ -301,7 +304,7 @@ scripts/nav/
 接线纪律：
 
 - 原语一律 `*Tx(tx, …)` 签名，回调内只用传入 tx（M1 铁律）；route 文件不得直接 prisma.navNode.*。
-- **找不到节点不阻断实体写**（防御：nav 同步异常记审计 + console.error，但不回滚实体事务？——相反选择：M3 期同步必须强一致，接线期让 nav 写与实体写**同生共死**，任何 nav 写失败整体回滚，由测试保证不发生；对账脚本是上线后的兜底修复。若总监倾向"导航可重建、不该阻断主业务"，改为 best-effort+审计，请裁决 §10-9。本计划默认强一致）。
+- **强一致同事务共生死（裁决 9 定案）**：nav 写与实体写在同一事务内，**任何 nav 写失败 → 实体写整体回滚；实体写回滚 → 不留半截 nav 节点**。禁止 try/catch 吞错降级 best-effort、禁止"记审计但放行"。S3 对 18 个写点逐条提供真库测试双向证明（①注入 nav 写失败断言实体行不存在；②注入实体写失败断言 nav 行不存在）。reconcile 脚本仅作上线后兜底修复手段，不是运行期依赖。
 - 前端 query 失效：bases/tables/kb/docs 既有 mutation onSuccess 上追加 invalidate `["nav-tree"]`/`["nav-menu"]`（hooks.ts:326-411、kb-hooks.ts 对应位置）。
 
 ### 4.5 API 端点（v1，具体契约 S7 进 openapi 冻结）
@@ -378,13 +381,15 @@ scripts/nav/
 | S6 | v1 写 API：menu 批量 diff + group CRUD + move/impact + manage_menu 第四动作位 | 纯后端 | routes/v1/{workspace,nodes}.ts；domain/nav/menu.ts；系统 owner 动作种子补位迁移或启动幂等 | 无 | S5、M2-S5（角色求值） | 串行 |
 | S7 | **openapi.yaml 首版冻结**（M2 org + M3 nav/menu/node） | 文档+校验 | docs/api/openapi.yaml；契约对拍测试（响应形状快照） | 只增测试 | **S6 后**；前端 S8 前 | 汇合点 |
 | S8 | 前端新外壳骨架：WorkspaceShell/顶栏/左下设置区/flag 回退/通讯录入口收敛 | 前端 | features/workspace/*；App.tsx 路由分组；main 包壳；旧两壳保留 | web 只增；旧壳 flag off 路径回归 | S7 | S7 后与 S9 分段并行 |
-| S9 | 一级导航渲染+编排器（N2/N4）+ 二级三分区列表（N3-P0）+ N6 预览模态 | 前端 | features/workspace/{PrimaryNav,NavComposer,SecondaryNav,MoveImpactModal}；client/hooks；icons 追加 | web 只增 | S8、S6 | S8 后 |
+| S9 | 一级导航渲染+编排器（N2/N4）+ 二级三分区列表（N3 二级 P0：全部/未收纳/已收纳或等价结构，无收藏无最近）+ N6 预览模态 | 前端 | features/workspace/{PrimaryNav,NavComposer,SecondaryNav,MoveImpactModal}；client/hooks；icons 追加 | web 只增 | S8、S6 | S8 后 |
 | S10 | 旧链兼容/别名 + AC-M3-1 对抗 + C-12 三态 + 画布 R10 回归 + 10 万节点首屏性能 | 混合 | routes/v1/__tests__；web 测试；造数脚本；RC 增补 | 只增测试 | S3、S9 | 收尾 |
 | S11 | 出口收口：ADR/40RC/flag 生命周期/runbook/baseline 报告 | 文档+验证 | docs/adr、docs/baseline、docs/runbooks | 无 | 全部 | 收尾 |
 
 关键路径：S0/S1 → S2 → S3 → S5 → S6 → S7 → S8 → S9 → S10 → S11（S4 在 S3 后并行收；后端两人时 S3 与 S5 可并行，因为文件集不重叠：S3 动旧路由，S5 只加 v1 新文件）。
 
-**硬前置**：S5/S6 依赖 M2-S2（/api/v1 挂载与 requireActiveUser）落地；S6 依赖 M2-S5（角色/动作求值，manage_menu 判定）。派工时若 M2 延期，M3 后端片 S1-S4 可先行（不依赖 v1）。
+**硬前置**：S5/S6 依赖 M2-S2（/api/v1 挂载与 requireActiveUser）落地；S6 依赖 M2-S5（角色/动作求值，manage_menu 判定）。
+
+**排期纪律（裁决 10 定案）**：S1-S4 虽不依赖 M2-S2 技术上可先行，但**是否开工、何时开工由项目总监统一调度**，架构师与实施工程师均不得自行开工代码。原因：M2-S2 正在后端工作区在途（`app.ts`/`auth.ts`/`config.ts` 未提交），M3-S3 的 18 个写点接线与 M2 后续 S3-S6 同仓并行容易撞文件；后端实施保持单线（M2 全片收口 → M3），`app.ts` 的 v1 挂载合并点由总监串行化。本文档线继续纯文档产出。
 
 ---
 
@@ -451,10 +456,14 @@ node scripts/nav/reconcile-nav.mjs            # 第二次：A/B/C 全 0、no cha
 - view 物理删（#10）与 table purge（#15）：shortcut 存在性检查，有引用抛 NAV_NODE_IN_USE 409（C-12：先清引用）。
 - web：hooks.ts / kb-hooks.ts 资源 mutation onSuccess 追加 nav query 失效（仅在 flag on 时有消费者，失效空 query 无害）。
 **陷阱**：table 软删后视图 order=-1：节点树状态以 table 节点软删为准（视图子节点连带软删），恢复时 views order 重排后节点连带 restore；doc move 必须重算子树 path（复用 tree.ts）；复制表不自动加菜单。
-**独立验收**
+**独立验收（裁决 9 硬性配套：每条写点双向回滚证明）**
 ```bash
 pnpm -w test
-# 新增：建/改名/删/恢复/移动实体后 reconcile 立刻 0 差异（每个写点一条真库测试）
+# 正向：建/改名/删/恢复/移动实体后 reconcile 立刻 0 差异（每个写点一条真库测试）
+# 回滚证明（18 个写点逐条，可用夹具注入失败，不允许抽样）：
+#   ① 注入 nav 写失败 → 事务整体回滚，实体行不存在（建）/实体字段未变（改名/移动）；
+#   ② 注入实体写失败 → nav 行不存在/无半截子树节点；
+#   ③ 代码审查 grep 证明 domain/nav/sync.ts 与五路由接线处无 try/catch 吞错降级 best-effort。
 # 视图物理删遇 shortcut → 409 NAV_NODE_IN_USE；清 shortcut 后删除成功
 node scripts/nav/reconcile-nav.mjs   # 全套操作随机序列后 0 差异
 ```
@@ -478,7 +487,7 @@ node scripts/nav/reconcile-nav.mjs   # 全套操作随机序列后 0 差异
 - `config.ts`：`enterpriseNav: boolean`（GX_ENTERPRISE_NAV，on 默认，test on，可显式 off）。
 - `routes/v1/workspace.ts`（GET tree/menu，§4.5 参数与 DTO）；`routes/v1/index.ts`（M2 文件）追加装配；app.ts 挂载条件与 M2 v1 合并：`if (config.enterpriseOrg || config.enterpriseNav) mount.route("/api/v1", v1)`，子路由内部按 flag 各自 404（或 v1 实例内条件挂载子路由）。
 - shared-types 只增：NavNodeDTO/MenuItemDTO/MenuTreeDTO/NavKind/MenuOp 类型与图标白名单常量（icons.tsx 名称的后端镜像，单一真源放 shared-types）。
-- 真库测试：tree 平铺→组树、menu 解析真名/别名、软删节点 state、10 万行保护参数（maxDepth/parentId 必传限制，全量请求 400 或 admin 显式 all=1）。
+- 真库测试：tree 平铺→组树、menu 解析真名/别名、shortcut `state` 三态（alive/soft_dangling/broken）对所有登录用户同值（含无成员关系用户，断言后端不做权限判断）、10 万行保护参数（maxDepth/parentId 必传限制，全量请求 400 或 admin 显式 all=1）。
 **独立验收**
 ```bash
 pnpm --filter @gx/api test
@@ -490,22 +499,36 @@ GX_ENTERPRISE_ORG=off GX_ENTERPRISE_NAV=off pnpm --filter @gx/api test  # v1 全
 
 ### S6 — 菜单写 + group + 移动影响预览 + manage_menu
 
-- owner 系统角色补第四动作位：只增迁移 `UPDATE roles SET permissions='["manage_departments","manage_members","manage_roles","manage_menu"]' WHERE systemKey='owner' AND workspaceId='ws_default'`（固定 JSON 串，幂等）；自定义角色动作白名单（M2 S5 三处校验点）扩 manage_menu。
+- **owner 系统角色补第四动作位（只增迁移，作用于 M2 种子之后的数据，必须幂等）**：新增只增迁移
+  `20260916xxxxzz_owner_manage_menu/migration.sql`（与 S1/S2 同批 M3 迁移目录序列）：
+  ```sql
+  UPDATE roles
+  SET permissions = '["manage_departments","manage_members","manage_roles","manage_menu"]'
+  WHERE id = 'role_owner'
+    AND permissions = '["manage_departments","manage_members","manage_roles"]';
+  -- 幂等：已含 manage_menu 的行（重跑/人工提前补位）不被改写；固定 JSON 串与 M2 DDL :122 同序
+  ```
+  注意：M2 种子在迁移 `20260915090000_enterprise_org_ddl/migration.sql:122` 用**固定 id `role_owner` + 固定 JSON 串**播种三动作，本迁移只 UPDATE 不改系统角色行其余列；自定义角色行不触碰（manage_menu 是否授予由管理员在角色编辑器自行勾选）。
+- **跨里程碑文件改动点（M2 在途/规划文件，实施时不许漏，逐点列入切片验收）**：
+  1. `apps/api/src/middleware/authActive.ts:11`（M2-S2 在途文件，**当前工作区未提交**）：`OrgAction` 联合类型当前仅 `"manage_departments" | "manage_members" | "manage_roles"`，:34 的 `allowed` 数组同值——M3-S6 必须**两处同改**追加 `"manage_menu"`，漏改则 `requireOrgAction("manage_menu")` 直接抛"未知组织管理动作"。
+  2. `apps/api/src/domain/org/roles.ts`（M2-S5 将建，**当前尚不存在**）：M2-S5 规划的动作白名单（M2 计划 :448 `hasOrgAction`、:441 shared-types `OrgAction` 常量）——M3 派工前必须先核 M2 落地形态：若 M2 把动作白名单/`OrgAction` 落在 shared-types（`packages/shared-types/src/`，M2 计划 :441），则 shared-types 只增第四枚是**单一真源改动点**，api 侧联合类型从其派生；若 M2 在 api 内另立常量枚举（如 `domain/org/roles.ts` 导出 `ORG_ACTIONS`），则该白名单与 shared-types 两处都要追加。S6 开工第一件事 = grep `manage_roles` 全仓列出全部枚举点并逐个追加，验收含一条"白名单穷举测试"（四动作 × requireOrgAction 不抛未知动作）。
+  3. 角色管理端点 `POST/PATCH /api/v1/org/roles`（M2-S5）的动作白名单校验当前只认三动作，M3 后自定义角色可勾选 manage_menu，校验集合同源上一处，不另写列表。
+  4. shared-types 只增联合成员属兼容变更；`@gx/shared-types` 需 rebuild，api/web typecheck 双过。
 - `domain/nav/menu.ts`：operations diff 单事务应用（insert/update/delete/reorder）、容器环/2 层校验、iconName 白名单、shortcut nodeId 存在性；bump menuVersion。
 - `routes/v1/nodes.ts`：group 三端点 + move-impact + move（§4.5）。影响预览 M3 口径：沿移动子树收集受影响实体（table/doc/canvas），按现有 members/kb_members 求**去重成员数**（owner/creator 豁免口径与 M4 对齐预留），返回 `{affectedUserCount, subtreeItemCount, shortcutCount, willBreakInheritanceHint:false}`（hint 恒 false，M4 才有继承语义——但 UI 文案按 N6 展示人数）。
 - move 端点 confirmed 闸门 + 审计事件（nav_group_created/deleted、nav_node_moved、menu_changed）。
-- 测试：同节点三处快捷项、别名、拖拽换容器、环拒绝、超层拒绝、坏图标 400、move 未确认 409、确认后 path 子树重写、reconcile 仍 0 差异。
-**验收**：api 全绿；manage_menu 非授权写 403；owner 外系统角色 403。
-**回滚**：新模块摘除；owner 动作位多一枚无副作用（M2 不消费该位）。
+- 测试：同节点三处快捷项、别名、拖拽换容器、环拒绝、超层拒绝、坏图标 400、move 未确认 409、确认后 path 子树重写、reconcile 仍 0 差异；**manage_menu 白名单穷举测试 + 迁移幂等重跑测试**（连跑两次 UPDATE，role_owner permissions 恒为四动作且 updatedAt 语义不被无意义改写——SQLite 无 updatedAt 触发器时 UPDATE 同值幂等可接受，断言值而非时间戳）。
+**验收**：api 全绿；manage_menu 非授权写 403；owner 外系统角色 403；M2 三动作既有端点不受第四枚影响（M2 org 路由回归）。
+**回滚**：新模块摘除；owner 动作位多一枚无副作用（M2 不消费该位）；数据层回退用 down SQL 把 role_owner permissions 改回三动作（仅供回滚演练，主路径=发布前快照）。
 
 ---
 
 ### S7 — openapi.yaml 首版冻结（契约汇合点）
 
 - 产出 `docs/api/openapi.yaml`（OpenAPI 3.0.3，info.version=1.0.0）：覆盖 M2 全部 `/api/v1/org/*`（吸收 M2 draft 分册）+ M3 `/workspaces/current/tree|menu`、`/nav/groups`、`/nodes/:id/move(-impact)`、错误码全集、安全方案 bearerJwt。
-- **写实原则**：响应 schema 按**现网真实信封**描述（成功资源本体/`{items,total,…}`/错误 `{error,code}`），不把未实现的 `{code:0,data,message}` 写进冻结契约（§10-5 待总监确认；若裁决要借冻结切信封，另开切片，不在 M3 偷渡）。
-- 契约对拍：新增测试用真实路由响应做关键端点 schema 形状快照（非全量校验框架，零新依赖；用手写 JSON 形状断言），前后端以此为唯一联调依据；TS 类型由 shared-types 手工保持一致（openapi→TS 代码生成不引入，YAGNI，体量小）。
-**验收**：yaml 可被任意标准 Swagger/Redoc 打开（CI 加一步 `node -e "require('js-yaml')..."`？——不引依赖：用现有依赖若有 yaml 解析则用，否则只做结构 grep 校验，列入 §10-5b）；对拍测试绿。
+- **写实原则（裁决 5 定案）**：响应 schema 按**现网真实信封**描述——成功为资源本体或 `{items,total,page,limit,hasMore}` 分页体、错误为 `{error, code}`；全企业版 v1 在 M3 出口冻结成现网风格，**不切 `{code:0,data,message}`**（信封切换若做，另开切片，不在 M3 偷渡）。
+- 契约对拍：新增测试用真实路由响应做关键端点 schema 形状快照（**手写 JSON 形状断言，零新依赖**：不引 swagger/redoc/openapi-validator 等 CI 校验依赖，裁决 5b 一并定案），前后端以此为唯一联调依据；TS 类型由 shared-types 手工保持一致（openapi→TS 代码生成不引入，YAGNI，体量小）。
+**验收**：yaml 为结构合法的 OpenAPI 3.0.3 文档（用仓库已有依赖做最小解析检查；若无 yaml 解析依赖则只做结构 grep 关键段校验，不为此新增依赖）；手写形状对拍测试绿。
 **回滚**：纯文档/测试。
 
 ---
@@ -517,7 +540,7 @@ GX_ENTERPRISE_ORG=off GX_ENTERPRISE_NAV=off pnpm --filter @gx/api test  # v1 全
 **新增/改动**
 - `features/workspace/WorkspaceShell.tsx`：四区骨架——顶栏（左 Logo+工作区名（LibrarySwitcher 收入下拉，UIUX :160）；中全局搜索（提权现有 SearchDialog，⌘K 不变）；右帮助/头像）、左 w-60 PrimaryNav 槽位（S9 填充）、左下设置/通用区、内容 Outlet；窄宽 <1024 左栏可折叠抽屉（M3 只做桌面三版浏览器，SPEC :133）。
 - `App.tsx` 路由重组（路径不变，§3-1）：登录态统一包 WorkspaceShell 一组 `<Route>`，旧 `/base/*`、`/kb/*` 全部成为其子路由；**旧 AppShell/KbShell 文件保留**，由 `featureFlags.navV2`（启动时探活 GET menu：404→false）决定渲染新壳或旧壳；ErrorBoundary key 策略沿用现状（pathname）。
-- 左下设置区：工作区设置中心页 `features/workspace/WorkspaceSettingsPage.tsx`（仿 SettingsPage 左二级+右内容）：M3 条目=通讯录（→ M2 的 `/workspace/contacts`）、导航编排（S9 全屏编辑器入口）、数据库与知识库（资产入口列表 → 跳各资产原设置页 `/base/:id/settings`、`/kb/:id/settings`，UIUX :224-229 映射表逐入口可达）；其余项（安全/备份/embedding/MCP）**不放假入口**或仅置灰"随版本提供"（§10-7）。
+- 左下设置区：工作区设置中心页 `features/workspace/WorkspaceSettingsPage.tsx`（仿 SettingsPage 左二级+右内容）：**首版仅三个真实条目（裁决 7 定案）——通讯录（→ M2 的 `/workspace/contacts`）、导航编排（S9 全屏编辑器入口）、资产（base/kb 资产入口列表 → 跳各资产原设置页 `/base/:id/settings`、`/kb/:id/settings`，UIUX :224-229 映射表逐入口可达）**；安全/备份/embedding/MCP **不放假入口、不放"即将上线"占位**，随对应里程碑（M5/M6 等）自然增列。
 - **M2 收敛**：M2 S7 在侧栏底部加的通讯录临时按钮在新壳下移除，唯一入口为设置中心；M2 页面/路由/API 不动。flag off 旧壳仍显 M2 入口（M2 自己的回退姿态）。
 - 全局搜索挂顶栏后两处旧侧栏搜索按钮在新壳隐藏（组件不删）。
 - 纯函数：`features/workspace/lib/tree.ts`（平铺组树、激活态定位）、`featureFlags.ts`（探活缓存）。
@@ -530,11 +553,11 @@ pnpm --filter @gx/web typecheck && pnpm --filter @gx/web build && pnpm -w test
 
 ---
 
-### S9 — 一级导航 + 编排器 + 二级三分区（N2/N3-P0/N4/N6 UI）
+### S9 — 一级导航 + 编排器 + 二级三分区（N2/N4/N6 UI + N3 二级 P0）
 
 - PrimaryNav：渲染 menu 树（容器 chevron 展开、shortcut 类型图标 table/doc/canvas、别名 + tooltip 真名（UIUX C12）、激活 3px 指示条沿用现视觉）；点击 shortcut 解析实体类型**navigate 到既有内容 URL**（/base/.../view 首视图、/kb/.../doc|canvas）；一级快捷项点击后二级定位其权威父容器（UIUX :75）。
 - NavComposer（manage_menu 可见者）：容器/快捷项增删、添加实体选择器（复用 LibrarySwitcher 同款弹层 + 三类搜索）、内联重命名（别名）、grip 拖拽（HTML5 DnD，同 KbTree 防环前端拦一次）、"多处添加"、删容器二次确认（子项去向：移到其他容器/一并删引用，UIUX :311）；全屏编排复用为设置中心"导航编排"页（同组件两容器）。
-- SecondaryNav：进入容器时第二栏，segmented [数据表 n｜文档 n｜画布 n]（KbTree 分段样式）；表分区列表来自 tree 节点（未收纳表也列出，标"未分组"，行 more 可"收纳到导航"）；文档分区按 nav 节点树（=parentId 镜像）可展开；列表内搜索（前端过滤 + 大列表走 q 参数，S5 tree 读支持 q）；N3 收藏/最近不做。
+- SecondaryNav：进入容器时第二栏，**收纳状态三视角（裁决 8 定稿）：全部 / 未收纳 / 已收纳**（tab 或等价过滤；"未收纳"=活实体节点存在但无任何活 shortcut 引用；"已收纳"=当前菜单子树引用的条目）；条目内按 [数据表 n｜文档 n｜画布 n] 内容类型分段（KbTree 分段样式）；表行 more 可"收纳到导航"；文档分区按 nav 节点树（=parentId 镜像）可展开；列表内搜索（前端过滤 + 大列表走 q 参数，S5 tree 读支持 q）；**明确无收藏星标、无最近访问列表（N3 收藏/最近访问列 P1，本期不做）**。
 - 分组（N4）：建 group（容器内"新建分组"）、拖拽实体到组 = 调 move-impact → **BulkImpactConfirmModal 同款确认**（列去重人数/内容数，默认保留语义，PRD N6）→ move；菜单层拖拽不弹预览（AC-M3-1 后半句边界）。
 - 空态/加载/broken 标灰（仅管理者可见清理按钮）；软删项全员隐藏。
 - web 单测：组树、防环、快捷项映射、激活定位、排序纯函数（33+N）。
@@ -578,7 +601,7 @@ pnpm --filter @gx/web typecheck && pnpm --filter @gx/web build && pnpm -w test
 - **ADR-0026 nav_nodes 物化 path（与 M2 部门树同构）**：parentId 真相 + path 派生、32 护栏、否决闭包表/CTE、doc 子树移动重写、path 由对账脚本可全量重建（派生数据定位）。
 - **ADR-0027 内容 URL 不可变 + 外壳别名策略**：内部链接已落库（正文/画布/分享），资源身份即 URL；N5 以"不改名 + 外壳级 SPA 别名 + 双壳 flag 回退"实现，而非 UIUX §5 的 /w/node 新路径；列出被否决方案（全量新 URL + 301：服务端 SPA 无 301 落点、存量正文链接全部失效或需双解析）。
 - **ADR-0028 删除悬挂三态（C-12）**：alive/soft_dangling/broken；软删保留引用（恢复自动还原）、物理删 RESTRICT 先清引用、broken 管理员显灰可清理并入审计；现状删除语义不对称清单（view 物理删、base/kb 无恢复、table order=-1）作为附件。
-- **ADR-0029 M3 不做权限剪枝 + openapi 写实信封**：与 M2 同纪律（空跑一层）；菜单全员可见、数据守卫照旧；M4 翻转计划；冻结契约描述真实响应（待 §10-1/§10-5 裁决后定稿措辞）。
+- **ADR-0029 M3 不做权限剪枝 + openapi 写实信封**：与 M2 同纪律（空跑一层）；菜单全员可见、数据守卫照旧；M4 翻转计划（裁决 1/5 已定稿，本文措辞按裁决）；冻结契约描述真实 `{error,code}` 信封，不借冻结切信封。
 - **ADR-0030（候选）实体范围：六类节点，无 field 节点**：view 建节点、field 不建（fieldMask 承载字段权限）；kb 建节点（覆盖 ARCH "kb 退化属性"草案）；M4 若证伪的只增回填路径。
 
 ---
@@ -610,19 +633,32 @@ bash scripts/ci-quality.sh
 
 ---
 
-## 10. 外部输入清单（需总监裁决，不阻塞 S0-S4，阻塞对应合入）
+## 10. 项目总监十项裁决（2026-09-16 终审定案，原待裁决清单全部关闭）
 
-1. **M3 菜单是否按旧角色剪枝**：PRD N2/PRD M3 行写"过滤先按旧角色跑"，主理人口径"权限先不 enforce，可见性留 M4"。本计划按**不剪枝**（登录见全量菜单，数据 API 旧守卫不变），AC-M3-1 不涉剪枝。若裁决 M3 必须粗剪，S5 增加一层旧成员口径过滤（members/kb_members/kb_doc_acls 三源），工作量 +1 片且与 M4 有返工。
-2. **URL 方案**：建议内容深链 `/base/:id/...`、`/kb/:id/...` 永不改名、工作区级才用 `/workspace/*`（ADR-0027）；UIUX §5 建议过 `/w/node/:nodeId`。请确认不引入内容新路径。
-3. **view 建节点、field 不建节点、kb 建节点**（对 ARCH §3.1/§3.3 的三处覆盖，§0-2，ADR-0030）。
-4. **默认菜单不嵌套复刻文档树**（二级文档树走 nav_nodes 子树；ARCH §3.3-4 原文是容器嵌套），确认。
-5. **openapi 信封口径**：冻结 spec 按真实响应 `{error,code}`/资源本体写实（建议），还是借冻结把 v1 切到 `{code,data,message}`（需同步前端解析，建议另开切片，M3 不做）。
-5b. openapi 校验是否允许引入 swagger 解析依赖做 CI 校验（建议不引，手写形状对拍）。
-6. **base/kb 软删无恢复端点**：现状如此（bases.ts:212、kb.ts:199 均无 restore）。M3 不补恢复（导航跟随软删）；全局回收站聚合为 P1。确认。
-7. **工作区设置中心首版条目**：建议仅 通讯录 / 导航编排 / 资产设置入口；安全/备份/embedding/MCP 不放假入口。确认占位策略。
-8. **收藏/最近访问（N3 P1）确认不做**；二级只做三分区+搜索。
-9. **nav 同步与实体写的强度**：默认强一致（同事务共生死）；备选 best-effort+审计（不阻断主业务）。建议强一致（规模小、有对账兜底）。
-10. M3 排期与 M2 的咬合点确认：S5/S6 硬依赖 M2-S2/S5；若 M2 出口晚于 M3 启动，先做 S1-S4（纯旁路表，不需要 /api/v1）。
+> 下列裁决由项目总监大湾区靓仔在 M3 终审中逐条下达，本文档已全部回填至对应章节；本节保留裁决原文结论作为唯一溯源。原"需总监裁决"清单至此清零，新增分歧走变更流程。
+
+| # | 议题 | 裁决结论 | 回填位置 |
+|---|---|---|---|
+| 1 | 菜单是否按旧角色粗剪枝 | **批准零剪枝**：M3 tree/menu 对所有登录用户返回全量，软删项由前端按 state 隐藏；服务端剪枝在 M4 做。不增加粗剪枝切片 | §0-1、§2.1-12、ADR-0029 |
+| 2 | 内容深链是否改名/引 /w/node | **确认永不改名、不引入 /w/node**：`/base/:id/table/:id/view/:id`、`/kb/:id/doc|canvas/:id` 永久有效；N5 用 SPA 别名，不做服务端 301。ADR-0027 候选照写 | §0-4、§3-1、ADR-0027 |
+| 3 | 实体节点类型 | **批准**：view 建节点、field 不建（字段可见性归 M4 fieldMask）、kb 建节点。六类 base/kb/table/view/doc/canvas + group 定稿 | §0-2、§4.1、ADR-0030 |
+| 4 | 默认菜单是否嵌套复刻文档树 | **批准不复刻**：文档层级走 nav_nodes 子树，默认菜单只挂 base/kb 容器 + 零入口丢失所需一级项；容器嵌套 2 层上限保留 | §0-2、§5.3 |
+| 5 | openapi 信封与 CI 校验 | **按真实信封 `{error,code}` 写实**（与 M2 裁决 2 一致，全企业版 v1 在 M3 出口冻结成现网风格，不切 `{code,data,message}`）；**不引 swagger/redoc CI 校验依赖**，手写请求/响应形状对拍测试 | §0-9、S7 |
+| 6 | base/kb 软删恢复端点 | **M3 不补，批准**；全局回收站聚合列 P1 backlog。M3 只保证 soft_dangling 节点随既有恢复路径（table/doc 有）自动还原 | §0-6、§2.2 |
+| 7 | 工作区设置中心首版条目 | **仅三个真实条目**：通讯录、导航编排、资产（base/kb）入口；不放假入口和"即将上线"占位 | §2.1-5、S8 |
+| 8 | N3 收藏/最近访问 | **P1，本期不做**；S9 只做二级三分区（全部/未收纳/已收纳或等价结构），文档明确无收藏星标与最近列表 | §2.1-7、S9 |
+| 9 | nav 同步一致性强度 | **批准强一致**：`*Tx` 原语在既有 withWriteTx/withWriteBatch 内，任何 nav 写失败整体回滚，禁止 try/catch 吞错降级 best-effort；reconcile 仅上线后兜底。配套硬要求：**S3 每条写点必须有真库测试双向证明**（nav 失败回滚实体写；实体回滚不留半截节点） | §0-10、§4.4 接线纪律、S3 |
+| 10 | 排期与开工纪律 | **认可 S1-S4 可先行，但实施人力由总监统一调度，架构师/实施均不得自行开工代码**：M2-S2 后端在途（app.ts/auth.ts/config.ts 未提交），M3-S3 的 18 写点接线与 M2 S3-S6 同仓并行会撞文件；后端单线 M2 全片收口 → M3；app.ts 的 v1 挂载合并点由总监串行化。架构师线继续纯文档（本文档 + M4 切片设计） | §6 排期纪律、S3/S5 |
+
+**随裁决下达的两处文档微调（已落实）**：
+
+- §4.3 普通 menu 读对软删 shortcut 的口径已定稿（原文该处为自问自答）：**后端返回 `state` 字段（alive/soft_dangling/broken），不做权限判断；前端对全员隐藏 soft_dangling，broken 仅管理编排态显灰**。
+- S6 给 role_owner 补 manage_menu 是**只增迁移**，改的是 M2 种子之后的数据：迁移用 `UPDATE roles … WHERE id='role_owner'` 幂等补第四动作；跨里程碑文件改动点（M2-S2 在途 `middleware/authActive.ts:11/:34`、M2-S5 将建的 `domain/org/roles.ts` 动作白名单、shared-types OrgAction 常量、角色端点校验）已在 S6 逐条列出，实施时不得漏。
+
+**裁决衍生、移交 M4 的输入**（在 M4 实施切片中展开，本节仅登记）：
+- M4 翻转点：tree/menu 从全量返回改为服务端按引擎 can() 剪枝（无权 shortcut 剔除、空容器对普通成员隐藏、admin 标灰），state 字段契约不变。
+- M3 move-impact 的"旧 members/kb_members 口径"在 M4 自动升级为三源并集口径（hint willBreakInheritanceHint 届时启用真值）。
+- GX_ENTERPRISE_NAV flag 生命周期：稳定一个迭代后随 M4 或下一期删旧壳/off 分支（PRD :258）。
 
 ---
 
@@ -639,21 +675,21 @@ bash scripts/ci-quality.sh
 
 ## 12. 现状核对后与旧文档/所给锚点的不符与澄清
 
-1. **M2 落地进度（本文档期间发生基线移动）**：派工时点 32f7bea 无 `routes/v1`、无组织表；截至 f8ddde3，**M2-S0/S1 已落地**——workspaces/departments/dept_members/roles/role_assignments 五表与 users 六列（status/workspaceId/tokenVersion/disabledAt/inviteTokenHash/invitedAt）、固定 id `ws_default`/`role_owner` 已由迁移 20260915090000/20260915090100 播种（`schema.prisma:376` 起为组织 model；Workspace 当前仅 policyVersion，navVersion/menuVersion 仍缺，由 M3-S1 补）。**`routes/v1` 目录与 GX_ENTERPRISE_ORG flag 仍不存在**（M2-S2 进行中）。M3 的 S5/S6 以 M2-S2/S5 为硬前置；S1-S4 只依赖表与 ws_default，已可开工。
+1. **M2 落地进度（本文档期间发生基线移动）**：派工时点 32f7bea 无 `routes/v1`、无组织表；截至 f8ddde3，**M2-S0/S1 已落地**——workspaces/departments/dept_members/roles/role_assignments 五表与 users 六列（status/workspaceId/tokenVersion/disabledAt/inviteTokenHash/invitedAt）、固定 id `ws_default`/`role_owner` 已由迁移 20260915090000/20260915090100 播种（`schema.prisma:376` 起为组织 model；Workspace 当前仅 policyVersion，navVersion/menuVersion 仍缺，由 M3-S1 补）。**`routes/v1` 目录与 GX_ENTERPRISE_ORG flag 仍不存在**（M2-S2 进行中）。M3 的 S5/S6 以 M2-S2/S5 为硬前置；S1-S4 只依赖表与 ws_default，**技术上**可先行，但按裁决 10 未获总监派工不得开工（后端单线 M2 收口 → M3）。
 2. **workspaces 现状只有 policyVersion**（`schema.prisma:379` 实查）：M2 按其计划 S1 刻意只建此列（M2 文档 :335 YAGNI 注记），navVersion/menuVersion 由 M3-S1 以只增迁移补。
 3. **openapi 文件全仓不存在**（glob `**/openapi*.y(a)ml"` 无命中；M2 的 openapi 仅是计划中的 draft 分册，未落盘）。M3 S7 是首版。
 4. **v1 挂载点行号**：M2 计划说"app.ts:136 后条件挂载"——现 app.ts:136 正是 `mount.route("/api", api)`，:140-142 是 SPA 兜底；v1 必须在 :136 之后、SPA 之前插入，且 flag 合并挂载条件（S5 已写明），basePath 双副本（:162-164）自动覆盖。
 5. **views 无软删列**（schema.prisma:164-178）：删除是物理删（views.ts:186 `prisma.view.delete`），table 软删时视图不打 deletedAt 而置 `order=-1`（tables.ts:193），table 恢复时 order 重排（records.ts:1086-1090）。nav view 节点生命周期必须照此三态接线，ARCH §3.1-2"删表/删字段软删→节点 isSystem 隐藏"的笼统描述对 view 不成立。
-6. **base/kb 软删没有恢复端点**（bases.ts:212-218、kb.ts:199-211；grep 全路由无 base/kb restore）；table/field/record 的恢复在 records.ts:1027 回收站，doc 恢复在 kb.ts:607。nav"软删自动还原"只对 table/doc 成立，base/kb 只能靠快照。§10-6 请总监确认不补。
+6. **base/kb 软删没有恢复端点**（bases.ts:212-218、kb.ts:199-211；grep 全路由无 base/kb restore）；table/field/record 的恢复在 records.ts:1027 回收站，doc 恢复在 kb.ts:607。nav"软删自动还原"只对 table/doc 成立，base/kb 只能靠快照。**裁决 6 已定案：M3 不补，列 P1 backlog。**
 7. **ARCH §3.1 树层次含 field 节点、§3.3-3 回填 field**，SPEC §6 与派工的实体枚举是"base/table/view/kb/doc 等"且字段权限走 fieldMask——本计划裁掉 field 节点（ADR-0030），避免节点数 ~10x 膨胀且 M4 不消费。
 8. **ARCH §3.1-4/§3.3 把 kb 退化为"kbId 属性/系统分组"，不建独立节点**；派工明确 kb 是实体类型之一，且 UIUX 一级导航收纳知识库需要可点容器客体。本计划建 kb 节点（doc/canvas 的权威父），覆盖 ARCH 该点。
 9. **文档排序口径**：侧栏表列表按 `createdAt asc`（tables.ts:50），KbTree 视觉序实际是 `updatedAt desc`（kb.ts:305 + 前端按返回序组树，KbTree.tsx:20-33）。回填 ord 已分别对齐，ARCH/UIUX 未给此细节。
-10. **ARCH §3.3-4 要求菜单回填"复刻文档层级为容器嵌套"**：本计划改为菜单只挂根级、层级由 nav_nodes 子树在二级呈现（每文档一个容器行既无意义又放大 menu_items 行数，且容器不承载授权）。见 §10-4。
+10. **ARCH §3.3-4 要求菜单回填"复刻文档层级为容器嵌套"**：本计划改为菜单只挂根级、层级由 nav_nodes 子树在二级呈现（每文档一个容器行既无意义又放大 menu_items 行数，且容器不承载授权）。**裁决 4 已批准此裁剪。**
 11. **ARCH §3.4 的级联用 onDelete Cascade 清 shortcut**：本计划改 RESTRICT + 显式清理事务（§4.1-2），以强制 C-12 可解释性；软删不走数据库级联（要保留引用待恢复）。
-12. **菜单剪枝口径冲突**：ARCH §3.1-5/§3.4 读接口按引擎 can() 剪枝、空容器隐藏；M3 时引擎不存在（M4 才有），PRD M3 行说"先按旧角色跑"，主理人指示"先不 enforce"。本计划按主理人：不剪枝，行为翻转写进 M4 输入（§10-1）。
+12. **菜单剪枝口径冲突**：ARCH §3.1-5/§3.4 读接口按引擎 can() 剪枝、空容器隐藏；M3 时引擎不存在（M4 才有），PRD M3 行说"先按旧角色跑"。**裁决 1 已定案：M3 零剪枝，登录即全量，M4 做服务端剪枝**（翻转点已登记 §10 移交 M4 输入）。
 13. **UIUX §5 路由建议**（/w/node、/contacts、/settings/workspace）与 M2 已定的 `/workspace/contacts` 不一致；本计划统一为 `/workspace/*` 工作区级前缀，资产内容路由保持旧形（ADR-0027）。
 14. **现状无工作区级设置/回收站聚合**：左下设置是资产级（Sidebar.tsx:251、KbSidebar.tsx:106），两个 TrashPage 分属 base/kb。N1 设置收敛在 M3 只做"入口收敛 + 资产设置可达"，不搬迁资产设置页（UIUX :220-234 同口径）。
-15. **M2 owner 系统角色只播种三枚动作**（M2 计划 §5-A）：manage_menu 是 M3 新增的第四枚，S6 用只增迁移补到 owner；自定义角色动作编辑器白名单同步扩位。
+15. **M2 owner 系统角色只播种三枚动作**（M2 迁移 `20260915090000_enterprise_org_ddl/migration.sql:122` 固定 id `role_owner` + 固定 JSON 串；M2-S2 在途 `middleware/authActive.ts:11,:34` 的 `OrgAction` 联合与 `allowed` 白名单当前均为三枚，M2-S5 规划的 `domain/org/roles.ts` 与 shared-types OrgAction 常量尚不存在）：manage_menu 是 M3 新增的第四枚，S6 用只增 UPDATE 迁移幂等补到 owner，且**必须同改在途 M2 文件的动作枚举/白名单**（跨里程碑改动点清单见 S6，实施时逐点 grep 不漏）。
 16. **测试基线在编写期间移动一次，已复核**：32f7bea（2026-09-14）= 598/3（47 文件）、web 33、迁移 12；f8ddde3（M2-S0/S1 后，2026-09-16 复跑）= **641/3（51 文件）、web 33、shared-types 56（4 文件）、迁移 14**。本文计数以新基线为准，旧数字仅在 baseline 双记录中保留。
 17. **全局搜索是 membership 逐表有界预览**（search.ts:47 起，ADR-0005 口径），不读 nav；M3 只把入口提权到顶栏，搜索逻辑一行不动（M5 替换）。
 18. **图标现状**：icons.tsx 已有 table/database/book/doc/canvas/group/star/clock/external/users 等 100 枚；缺 grip 与专用 folder 语义（group 图标当前语义偏字段分组），S8/S9 在同文件追加，不引库。
@@ -673,6 +709,6 @@ bash scripts/ci-quality.sh
 | S6 | 菜单写/group/move+manage_menu | routes/v1/nodes.ts；domain/nav/menu.ts；动作位迁移 | 多处引用/别名/拖拽/防环/409 预览全正确，非授权 403 | 否 |
 | S7 | openapi 首版冻结 | docs/api/openapi.yaml；契约对拍测试 | M2+M3 端点全覆盖且与真实响应形状一致 | 否 |
 | S8 | 新外壳骨架+设置收敛+通讯录并入 | features/workspace/*；App.tsx；featureFlags | flag on 新壳达全部旧 URL；off 自动回退旧两壳 | **是** |
-| S9 | 一级导航/编排器/二级三分区/N6 模态 | PrimaryNav/NavComposer/SecondaryNav/MoveImpactModal | N2/N3-P0/N4/N6 端到端可用，AC 预演通过 | **是** |
+| S9 | 一级导航/编排器/二级三分区/N6 模态 | PrimaryNav/NavComposer/SecondaryNav/MoveImpactModal | N2/N4/N6 + N3 二级 P0（无收藏无最近）端到端可用，AC 预演通过 | **是** |
 | S10 | 兼容/对抗/画布/10 万性能 | v1 __tests__；web 测试；造数脚本；RC | AC-M3-1 八条全绿、旧链 0 损坏、menu 首屏 <1s、无 SCAN | 混合 |
 | S11 | 收口 | ADR-0025~0030；40RC；runbook；baseline | RC/characterization 逐值绿、升级演练 0 丢失、文档齐备 | 否 |
