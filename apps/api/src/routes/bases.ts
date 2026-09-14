@@ -10,7 +10,6 @@ import {
   requireUserId,
   requireCanView,
   requireCanManageBase,
-  requireCanEditData,
   permissionsOf,
   HttpError,
 } from "../guards.js";

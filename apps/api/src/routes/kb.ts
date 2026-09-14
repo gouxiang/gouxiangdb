@@ -98,29 +98,6 @@ async function isDescendant(ancestorId: string, maybeDescId: string): Promise<bo
   return false;
 }
 
-/** 收集某根节点下整棵子树的 doc id（含根），按 parentId 内存遍历 */
-async function collectSubtree(rootId: string): Promise<string[]> {
-  const all = await prisma.kbDoc.findMany({
-    where: { deletedAt: null },
-    select: { id: true, parentId: true },
-  });
-  const childrenOf = new Map<string | null, string[]>();
-  for (const d of all) {
-    const key = d.parentId;
-    const arr = childrenOf.get(key) ?? [];
-    arr.push(d.id);
-    childrenOf.set(key, arr);
-  }
-  const out: string[] = [];
-  const stack = [rootId];
-  while (stack.length) {
-    const id = stack.pop()!;
-    out.push(id);
-    for (const child of childrenOf.get(id) ?? []) stack.push(child);
-  }
-  return out;
-}
-
 // ============ 知识库容器 ============
 
 kb.get("/", async (c) => {

@@ -8,6 +8,7 @@ import {
   makeNavHarness,
   json,
   failNavWrites,
+  failEntityWrite,
   stopFailing,
   assertNoBlockingDiffs,
   type CharHarness,
@@ -61,6 +62,17 @@ describe("#14 回收站恢复 table（连带字段/记录/视图序）", () => {
     expect((await h.prisma.table.findUniqueOrThrow({ where: { id: table.id } })).deletedAt).not.toBeNull();
     expect((await h.prisma.view.findUniqueOrThrow({ where: { id: view.id } })).order).toBe(-1);
   });
+
+  it("方向②：tables UPDATE 失败 -> 500，table 仍软删、view 仍 order=-1、节点仍软删", async () => {
+    const { table, view } = await freshBaseTable("R14r2");
+    await del(`/api/tables/${table.id}`);
+    await failEntityWrite(h, "tables", "UPDATE");
+    const bad = await post(`/api/records/trash/${table.id}/restore`, { kind: "table" });
+    expect(bad.status).toBe(500);
+    expect((await h.prisma.table.findUniqueOrThrow({ where: { id: table.id } })).deletedAt).not.toBeNull();
+    expect((await h.prisma.view.findUniqueOrThrow({ where: { id: view.id } })).order).toBe(-1);
+    expect((await h.prisma.navNode.findUniqueOrThrow({ where: { id: nodeId("table", table.id) } })).deletedAt).not.toBeNull();
+  });
 });
 
 describe("#15 回收站物理删 table", () => {
@@ -93,5 +105,19 @@ describe("#15 回收站物理删 table", () => {
     expect(bad.status).toBe(500);
     expect(await h.prisma.table.count({ where: { id: table.id } })).toBe(1);
     expect(await h.prisma.navNode.count({ where: { id: nodeId("table", table.id) } })).toBe(1);
+  });
+
+  it("方向②（强证）：nav 已清后 tables DELETE 失败 -> table/view 节点随事务复活、table 仍在回收站", async () => {
+    const { table, view } = await freshBaseTable("R15r2");
+    await del(`/api/tables/${table.id}`);
+    await failEntityWrite(h, "tables", "DELETE");
+    const bad = await del(`/api/records/trash/${table.id}?kind=table`);
+    expect(bad.status).toBe(500);
+    // 实体删除失败 -> table 仍在；同事务里先前已删的 table/view 节点必须复活，不留缺节点/孤 view 节点。
+    expect(await h.prisma.table.count({ where: { id: table.id } })).toBe(1);
+    expect(await h.prisma.navNode.count({
+      where: { id: { in: [nodeId("table", table.id), nodeId("view", view.id)] } },
+    })).toBe(2);
+    await assertNoBlockingDiffs(h);
   });
 });

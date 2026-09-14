@@ -1,5 +1,5 @@
-// M3/S3 路由层写点同步测试（tables.ts：#4 建 / #5 改名 / #6 软删 / #7 复制；
-// views.ts：#8 建 / #9 改名 / #10 物理删 409 守卫 / 补点 视图复制）。
+// M3/S3 路由层写点同步测试（tables.ts：#4 建 / #5 改名 / #6 软删 / #7 复制）。
+// views.ts 的 #8-#10/视图复制见 nav-sync-views.test.ts。
 //
 // 每写点：正向（reconcile 0 阻断）+ 方向①（nav trigger 失败 -> 实体回滚）
 // + 方向②（实体 trigger 失败 -> nav 无残留）。trigger afterEach 清。
@@ -80,6 +80,15 @@ describe("#5 table 改名", () => {
     expect(res.status).toBe(500);
     expect((await h.prisma.table.findUniqueOrThrow({ where: { id: table.id } })).name).toBe("T");
   });
+
+  it("方向②：tables UPDATE 失败 -> 500，节点 name 未变", async () => {
+    const baseId = await makeBase("TB5c");
+    const { table } = await json<{ table: { id: string } }>(await h.app.request(`/api/tables?baseId=${baseId}`, { method: "POST", headers: await H(), body: JSON.stringify({ name: "T" }) }));
+    await failEntityWrite(h, "tables", "UPDATE");
+    const res = await h.app.request(`/api/tables/${table.id}`, { method: "PATCH", headers: await H(), body: JSON.stringify({ name: "T2-x" }) });
+    expect(res.status).toBe(500);
+    expect((await h.prisma.navNode.findUniqueOrThrow({ where: { id: nodeId("table", table.id) } })).name).toBe("T");
+  });
 });
 
 describe("#6 table 软删（views order=-1，子树节点软删）", () => {
@@ -100,6 +109,21 @@ describe("#6 table 软删（views order=-1，子树节点软删）", () => {
     const res = await h.app.request(`/api/tables/${table.id}`, { method: "DELETE", headers: await h.auth(OWNER) });
     expect(res.status).toBe(500);
     expect((await h.prisma.table.findUniqueOrThrow({ where: { id: table.id } })).deletedAt).toBeNull();
+  });
+
+  it("方向②：nav 之前的 views 更新失败 -> 500，实体回滚未软删、nav 子树仍活", async () => {
+    const baseId = await makeBase("TB6c");
+    const { table } = await json<{ table: { id: string } }>(await h.app.request(`/api/tables?baseId=${baseId}`, { method: "POST", headers: await H(), body: JSON.stringify({ name: "T" }) }));
+    const view = await h.prisma.view.findFirstOrThrow({ where: { tableId: table.id } });
+    // 事务顺序：table/record/field/view 更新后才 softDeleteSubtreeTx；让 view 更新炸，
+    // 先前更新整体回滚，nav 一步未触。
+    await failEntityWrite(h, "views", "UPDATE");
+    const res = await h.app.request(`/api/tables/${table.id}`, { method: "DELETE", headers: await h.auth(OWNER) });
+    expect(res.status).toBe(500);
+    expect((await h.prisma.table.findUniqueOrThrow({ where: { id: table.id } })).deletedAt).toBeNull();
+    expect((await h.prisma.view.findUniqueOrThrow({ where: { id: view.id } })).order).toBeGreaterThanOrEqual(0);
+    expect((await h.prisma.navNode.findUniqueOrThrow({ where: { id: nodeId("table", table.id) } })).deletedAt).toBeNull();
+    expect((await h.prisma.navNode.findUniqueOrThrow({ where: { id: nodeId("view", view.id) } })).deletedAt).toBeNull();
   });
 });
 
@@ -123,60 +147,15 @@ describe("#7 table 复制（收紧进事务，节点 upsert，不自动加菜单
     expect(res.status).toBe(500);
     expect(await h.prisma.table.count({ where: { baseId, name: { contains: "副本" } } })).toBe(0);
   });
-});
 
-describe("#8 建视图 / #9 视图改名 / 补点 视图复制", () => {
-  async function setupTable(baseName: string) {
-    const baseId = await makeBase(baseName);
-    const { table } = await json<{ table: { id: string } }>(await h.app.request(`/api/tables?baseId=${baseId}`, { method: "POST", headers: await H(), body: JSON.stringify({ name: "T" }) }));
-    return table.id;
-  }
-  it("#8 正向：新 view 节点存在，0 阻断；方向①回滚", async () => {
-    const tableId = await setupTable("VW8");
-    const res = await h.app.request(`/api/views?tableId=${tableId}`, { method: "POST", headers: await H(), body: JSON.stringify({ name: "V2", type: "grid" }) });
-    expect(res.status).toBe(201);
-    const { view } = await json<{ view: { id: string } }>(res);
-    expect(await h.prisma.navNode.count({ where: { resourceId: view.id } })).toBe(1);
-    await assertNoBlockingDiffs(h);
-  });
-  it("#9 改名/排序：节点 name/ord 同步；方向① nav 失败实体未变", async () => {
-    const tableId = await setupTable("VW9");
-    const created = await json<{ view: { id: string } }>(await h.app.request(`/api/views?tableId=${tableId}`, { method: "POST", headers: await H(), body: JSON.stringify({ name: "V2", type: "grid" }) }));
-    const res = await h.app.request(`/api/views/${created.view.id}`, { method: "PATCH", headers: await H(), body: JSON.stringify({ name: "V2x", order: 3 }) });
-    expect(res.status).toBe(200);
-    const node = await h.prisma.navNode.findUniqueOrThrow({ where: { id: nodeId("view", created.view.id) } });
-    expect(node.name).toBe("V2x");
-    expect(node.ord).toBe(3);
-  });
-  it("补点 视图复制：新活 view 有节点（否则 reconcile A1），0 阻断", async () => {
-    const tableId = await setupTable("VWdup");
-    const created = await json<{ view: { id: string } }>(await h.app.request(`/api/views?tableId=${tableId}`, { method: "POST", headers: await H(), body: JSON.stringify({ name: "V2", type: "grid" }) }));
-    const res = await h.app.request(`/api/views/${created.view.id}/duplicate`, { method: "POST", headers: await h.auth(OWNER) });
-    expect(res.status).toBe(201);
-    const { view } = await json<{ view: { id: string } }>(res);
-    expect(await h.prisma.navNode.count({ where: { resourceId: view.id } })).toBe(1);
-    await assertNoBlockingDiffs(h);
-  });
-});
-
-describe("#10 视图物理删：RESTRICT 守卫", () => {
-  it("无菜单引用时删除成功，节点随之物理删，0 阻断", async () => {
-    const baseId = await makeBase("VW10");
-    const { table } = await json<{ table: { id: string } }>(await h.app.request(`/api/tables?baseId=${baseId}`, { method: "POST", headers: await H(), body: JSON.stringify({ name: "T" }) }));
-    const created = await json<{ view: { id: string } }>(await h.app.request(`/api/views?tableId=${table.id}`, { method: "POST", headers: await H(), body: JSON.stringify({ name: "V2", type: "grid" }) }));
-    const res = await h.app.request(`/api/views/${created.view.id}`, { method: "DELETE", headers: await h.auth(OWNER) });
-    expect(res.status).toBe(200);
-    expect(await h.prisma.navNode.count({ where: { id: nodeId("view", created.view.id) } })).toBe(0);
-    await assertNoBlockingDiffs(h);
-  });
-  it("有菜单 shortcut 引用 -> 409 NAV_NODE_IN_USE，实体与节点都保留", async () => {
-    const baseId = await makeBase("VW10b");
-    const { table } = await json<{ table: { id: string } }>(await h.app.request(`/api/tables?baseId=${baseId}`, { method: "POST", headers: await H(), body: JSON.stringify({ name: "T" }) }));
-    const created = await json<{ view: { id: string } }>(await h.app.request(`/api/views?tableId=${table.id}`, { method: "POST", headers: await H(), body: JSON.stringify({ name: "V2", type: "grid" }) }));
-    await h.prisma.menuItem.create({ data: { workspaceId: "ws_default", type: "shortcut", nodeId: nodeId("view", created.view.id) } });
-    const res = await h.app.request(`/api/views/${created.view.id}`, { method: "DELETE", headers: await h.auth(OWNER) });
-    expect(res.status).toBe(409);
-    expect(await h.prisma.view.count({ where: { id: created.view.id } })).toBe(1);
-    expect(await h.prisma.navNode.count({ where: { id: nodeId("view", created.view.id) } })).toBe(1);
+  it("方向②：nav 之前的 views INSERT 失败 -> 500，复制表回滚、无副本节点", async () => {
+    const baseId = await makeBase("TB7c");
+    const { table } = await json<{ table: { id: string } }>(await h.app.request(`/api/tables?baseId=${baseId}`, { method: "POST", headers: await H(), body: JSON.stringify({ name: "Src" }) }));
+    const before = await h.prisma.navNode.count();
+    await failEntityWrite(h, "views", "INSERT");
+    const res = await h.app.request(`/api/tables/${table.id}/duplicate`, { method: "POST", headers: await H(), body: JSON.stringify({}) });
+    expect(res.status).toBe(500);
+    expect(await h.prisma.table.count({ where: { baseId, name: { contains: "副本" } } })).toBe(0);
+    expect(await h.prisma.navNode.count()).toBe(before);
   });
 });
