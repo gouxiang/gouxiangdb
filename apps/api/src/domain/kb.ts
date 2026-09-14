@@ -1,7 +1,7 @@
 // apps/api/src/domain/kb.ts
 // 知识库域逻辑：搜索文本提取、版本快照策略。与 Base/Table 域无任何引用耦合。
 
-import { prisma } from "../db.js";
+import { prisma, type DbTx } from "../db.js";
 
 /** 从 Markdown 提取纯文本（去标记，保留内容词） */
 export function markdownToSearchText(md: string): string {
@@ -71,10 +71,18 @@ const MAX_AUTO_VERSIONS = 50; // 自动版本上限（手动版本不参与淘�
  * 返回是否创建了快照。
  */
 export async function maybeAutoSnapshot(docId: string, userId: string): Promise<boolean> {
-  const doc = await prisma.kbDoc.findUnique({ where: { id: docId } });
+  return maybeAutoSnapshotTx(prisma, docId, userId);
+}
+
+/**
+ * 自动版本快照的事务版：调用方可传入交互事务 tx（M3/S3 内容保存需与 nav 同步同事务），
+ * 或直接传全局 prisma（单连接下其本身满足 DbTx 结构）。读/写全部走传入 client。
+ */
+export async function maybeAutoSnapshotTx(client: DbTx, docId: string, userId: string): Promise<boolean> {
+  const doc = await client.kbDoc.findUnique({ where: { id: docId } });
   if (!doc) return false;
 
-  const latest = await prisma.kbDocVersion.findFirst({
+  const latest = await client.kbDocVersion.findFirst({
     where: { docId },
     orderBy: { version: "desc" },
   });
@@ -85,7 +93,7 @@ export async function maybeAutoSnapshot(docId: string, userId: string): Promise<
   if (!needSnapshot) return false;
 
   const nextVersion = (latest?.version ?? 0) + 1;
-  await prisma.kbDocVersion.create({
+  await client.kbDocVersion.create({
     data: {
       docId,
       version: nextVersion,
@@ -98,13 +106,13 @@ export async function maybeAutoSnapshot(docId: string, userId: string): Promise<
   });
 
   // 淘汰最旧自动版本（保留手动版本）
-  const autos = await prisma.kbDocVersion.findMany({
+  const autos = await client.kbDocVersion.findMany({
     where: { docId, label: null },
     orderBy: { version: "desc" },
   });
   const stale = autos.slice(MAX_AUTO_VERSIONS);
   if (stale.length > 0) {
-    await prisma.kbDocVersion.deleteMany({
+    await client.kbDocVersion.deleteMany({
       where: { id: { in: stale.map((v) => v.id) } },
     });
   }

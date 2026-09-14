@@ -4,7 +4,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
-import { prisma, withWriteTx, withWriteBatch, runWrite } from "../db.js";
+import { prisma, withWriteTx, withWriteBatch } from "../db.js";
 import {
   requireCanView,
   requireCanManageSchema,
@@ -17,6 +17,11 @@ import { loadTableFields } from "../domain/recordService.js";
 import { exportTableCsv } from "../domain/csvExport.js";
 import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
 import { deleteTableStatement, rebuildTableTx } from "../domain/fieldIndex/sync.js";
+import {
+  syncNavFromEntitiesTx,
+  softDeleteSubtreeTx,
+} from "../domain/nav/sync.js";
+import { nodeId } from "../domain/nav/backfill.js";
 
 export const tables = new Hono();
 
@@ -124,6 +129,8 @@ tables.post("/", async (c) => {
     await tx.view.create({
       data: { tableId: t.id, name: "网格视图", type: "grid", order: 0, config: JSON.stringify(config) },
     });
+    // M3/S3 #4：同事务同步 table + view 节点（field 不建节点）。
+    await syncNavFromEntitiesTx(tx);
     return { table: t, primaryFieldId: nameField.id };
   });
 
@@ -174,9 +181,12 @@ tables.patch("/:tableId", async (c) => {
   const parsed = updateSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
 
-  const t = await runWrite("table.update", () =>
-    prisma.table.update({ where: { id: tableId }, data: parsed.data }),
-  );
+  // M3/S3 #5：改名收紧进事务（原 runWrite 非事务），同事务同步节点 name。
+  const t = await withWriteTx("table.update", async (tx) => {
+    const updated = await tx.table.update({ where: { id: tableId }, data: parsed.data });
+    if (parsed.data.name !== undefined) await syncNavFromEntitiesTx(tx);
+    return updated;
+  });
   return c.json({ table: { id: t.id, name: t.name, primaryFieldId: t.primaryFieldId } });
 });
 
@@ -186,12 +196,15 @@ tables.delete("/:tableId", async (c) => {
   await requireCanManageSchema(c, baseId);
 
   const now = new Date();
-  await withWriteBatch("table.softDelete", [
-    prisma.table.update({ where: { id: tableId }, data: { deletedAt: now } }),
-    prisma.record.updateMany({ where: { tableId }, data: { deletedAt: now } }),
-    prisma.field.updateMany({ where: { tableId }, data: { deletedAt: now } }),
-    prisma.view.updateMany({ where: { tableId }, data: { order: -1 } }),
-  ]);
+  // M3/S3 #6：原 withWriteBatch 数组事务无法承载 nav async 原语，收紧为 withWriteTx 回调；
+  // table 及视图节点整棵软删（视图实体置 order=-1 隐藏，views 表无 deletedAt 列）。
+  await withWriteTx("table.softDelete", async (tx) => {
+    await tx.table.update({ where: { id: tableId }, data: { deletedAt: now } });
+    await tx.record.updateMany({ where: { tableId }, data: { deletedAt: now } });
+    await tx.field.updateMany({ where: { tableId }, data: { deletedAt: now } });
+    await tx.view.updateMany({ where: { tableId }, data: { order: -1 } });
+    await softDeleteSubtreeTx(tx, nodeId("table", tableId));
+  });
   invalidateOrdinalCache(tableId);
   return c.json({ ok: true });
 });
@@ -211,8 +224,10 @@ tables.post("/:tableId/duplicate", async (c) => {
   const name = typeof body?.name === "string" && body.name ? body.name : `${src.name} 副本`;
   const withData = body?.withData === true;
 
-  const { copy, primary } = await runWrite("table.duplicate", async () => {
-  const copy = await prisma.table.create({
+  // M3/S3 #7：复制表原 runWrite（非事务）收紧进 withWriteTx；nav 同步 upsert 新表/视图节点。
+  // 计划 §4.4-7：复制产生的新表【不自动加菜单 shortcut】，以"未收纳"态等用户编排（菜单层不动）。
+  const { copy, primary } = await withWriteTx("table.duplicate", async (tx) => {
+  const copy = await tx.table.create({
     data: { baseId, name, primaryFieldId: "", createdBy: userId },
   });
 
@@ -223,7 +238,7 @@ tables.post("/:tableId/duplicate", async (c) => {
   const idMap = new Map<string, string>();
   for (const f of fields) {
     if (SKIP_COPY_TYPES.has(f.type)) continue;
-    const nf = await prisma.field.create({
+    const nf = await tx.field.create({
       data: {
         tableId: copy.id,
         name: f.name,
@@ -267,21 +282,21 @@ tables.post("/:tableId/duplicate", async (c) => {
           }))
         : undefined,
     }));
-    await prisma.field.update({
+    await tx.field.update({
       where: { id: newId },
       data: { tabsConfig: JSON.stringify(remappedTabs) },
     });
   }
 
   const primary = idMap.get(src.primaryFieldId) ?? fields[0]?.id ?? "";
-  await prisma.table.update({ where: { id: copy.id }, data: { primaryFieldId: primary } });
+  await tx.table.update({ where: { id: copy.id }, data: { primaryFieldId: primary } });
 
   // 数据复制
   if (withData) {
-    const recs = await prisma.record.findMany({ where: { tableId, deletedAt: null } });
+    const recs = await tx.record.findMany({ where: { tableId, deletedAt: null } });
     const recMap = new Map<string, string>();
     for (const r of recs) {
-      const nr = await prisma.record.create({
+      const nr = await tx.record.create({
         data: {
           tableId: copy.id,
           fields: r.fields,
@@ -301,7 +316,7 @@ tables.post("/:tableId/duplicate", async (c) => {
         for (const [k, v] of Object.entries(obj)) {
           remapped[idMap.get(k) ?? k] = v;
         }
-        await prisma.record.update({ where: { id: newRecId }, data: { fields: JSON.stringify(remapped) } });
+        await tx.record.update({ where: { id: newRecId }, data: { fields: JSON.stringify(remapped) } });
       } catch {
         /* 忽略解析失败 */
       }
@@ -329,15 +344,16 @@ tables.post("/:tableId/duplicate", async (c) => {
     detailFieldIds: [],
     detailLayout: null,
   };
-  await prisma.view.create({
+  await tx.view.create({
     data: { tableId: copy.id, name: "网格视图", type: "grid", order: 0, config: JSON.stringify(config) },
   });
 
   // M1/S4：复制表的数据已按新字段 id 重映射落库，全量重建新表 sidecar（派生冗余）。
   if (withData) {
-    await rebuildTableTx(prisma, copy.id);
+    await rebuildTableTx(tx, copy.id);
   }
 
+  await syncNavFromEntitiesTx(tx);
   return { copy, primary };
   });
 

@@ -4,7 +4,8 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { prisma } from "../db.js";
+import { prisma, withWriteTx } from "../db.js";
+import type { DbTx } from "../db.js";
 import {
   requireUserId,
   requireCanView,
@@ -15,6 +16,8 @@ import {
 } from "../guards.js";
 import { permissionsForRole, type Role, type ViewConfig } from "@gx/shared-types";
 import { makeOptions } from "../domain/fieldService.js";
+import { syncNavFromEntitiesTx, softDeleteSubtreeTx } from "../domain/nav/sync.js";
+import { nodeId } from "../domain/nav/backfill.js";
 
 export const bases = new Hono();
 
@@ -44,18 +47,18 @@ const shareSchema = z.object({
 
 // ============ 默认表结构 ============
 
-async function createStarterTable(baseId: string, userId: string, name = "数据表 1") {
-  const table = await prisma.table.create({
+async function createStarterTableTx(tx: DbTx, baseId: string, userId: string, name = "数据表 1") {
+  const table = await tx.table.create({
     data: { baseId, name, primaryFieldId: "", createdBy: userId },
   });
 
-  const nameField = await prisma.field.create({
+  const nameField = await tx.field.create({
     data: { tableId: table.id, name: "名称", type: "singleLineText", order: 0 },
   });
-  await prisma.field.create({
+  await tx.field.create({
     data: { tableId: table.id, name: "数量", type: "number", order: 1, precision: 0 },
   });
-  await prisma.field.create({
+  await tx.field.create({
     data: {
       tableId: table.id,
       name: "状态",
@@ -64,14 +67,14 @@ async function createStarterTable(baseId: string, userId: string, name = "数据
       options: JSON.stringify(makeOptions(["未开始", "进行中", "已完成"])),
     },
   });
-  await prisma.field.create({
+  await tx.field.create({
     data: { tableId: table.id, name: "日期", type: "date", order: 3 },
   });
-  await prisma.field.create({
+  await tx.field.create({
     data: { tableId: table.id, name: "备注", type: "longText", order: 4 },
   });
 
-  await prisma.table.update({
+  await tx.table.update({
     where: { id: table.id },
     data: { primaryFieldId: nameField.id },
   });
@@ -98,7 +101,7 @@ async function createStarterTable(baseId: string, userId: string, name = "数据
     detailLayout: null,
   };
 
-  await prisma.view.create({
+  await tx.view.create({
     data: { tableId: table.id, name: "网格视图", type: "grid", order: 0, config: JSON.stringify(defaultConfig) },
   });
 
@@ -143,15 +146,21 @@ bases.post("/", async (c) => {
   const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法", details: parsed.error.issues }, 400);
 
-  const base = await prisma.base.create({
-    data: {
-      name: parsed.data.name,
-      iconColor: parsed.data.iconColor ?? "#378ADD",
-      createdBy: userId,
-    },
+  // M3/S3 #1：建 base 多步写（base+owner 成员+starter 表/字段/视图）收紧进单事务，
+  // 同事务同步 nav_nodes（base + table + view 节点）。nav 写失败整体回滚（裁决 9）。
+  const base = await withWriteTx("base.create", async (tx) => {
+    const b = await tx.base.create({
+      data: {
+        name: parsed.data.name,
+        iconColor: parsed.data.iconColor ?? "#378ADD",
+        createdBy: userId,
+      },
+    });
+    await tx.member.create({ data: { baseId: b.id, userId, role: "owner" } });
+    await createStarterTableTx(tx, b.id, userId);
+    await syncNavFromEntitiesTx(tx);
+    return b;
   });
-  await prisma.member.create({ data: { baseId: base.id, userId, role: "owner" } });
-  await createStarterTable(base.id, userId);
 
   return c.json({
     base: {
@@ -205,7 +214,12 @@ bases.patch("/:baseId", async (c) => {
   await requireCanManageBase(c, baseId);
   const parsed = updateSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
-  const base = await prisma.base.update({ where: { id: baseId }, data: parsed.data });
+  // M3/S3 #2：改名同事务同步节点 name（iconColor 不影响节点）。
+  const base = await withWriteTx("base.rename", async (tx) => {
+    const b = await tx.base.update({ where: { id: baseId }, data: parsed.data });
+    await syncNavFromEntitiesTx(tx);
+    return b;
+  });
   return c.json({ base: { id: base.id, name: base.name, iconColor: base.iconColor } });
 });
 
@@ -213,8 +227,13 @@ bases.delete("/:baseId", async (c) => {
   const baseId = c.req.param("baseId");
   await requireCanManageBase(c, baseId);
   const now = new Date();
-  await prisma.base.update({ where: { id: baseId }, data: { deletedAt: now } });
-  await prisma.table.updateMany({ where: { baseId }, data: { deletedAt: now } });
+  // M3/S3 #3：软删 base + 其下 tables 收紧进单事务；nav 子树（base/table/view）整棵软删。
+  // view 实体行不碰 deletedAt（views 表无此列），其节点随 path 子树一并软删，恢复依赖对账。
+  await withWriteTx("base.softDelete", async (tx) => {
+    await tx.base.update({ where: { id: baseId }, data: { deletedAt: now } });
+    await tx.table.updateMany({ where: { baseId }, data: { deletedAt: now } });
+    await softDeleteSubtreeTx(tx, nodeId("base", baseId));
+  });
   return c.json({ ok: true });
 });
 
@@ -460,4 +479,3 @@ bases.post("/join/:token", async (c) => {
   return c.json({ baseId: link.baseId, role: link.role, alreadyMember: false }, 201);
 });
 
-export { createStarterTable };

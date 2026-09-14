@@ -3,10 +3,11 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { prisma } from "../db.js";
+import { prisma, withWriteTx } from "../db.js";
 import { requireCanView, requireCanManageSchema, HttpError } from "../guards.js";
 import { parseViewConfig } from "../domain/recordService.js";
 import { permissionsForRole } from "@gx/shared-types";
+import { syncNavFromEntitiesTx, purgeViewNodeTx } from "../domain/nav/sync.js";
 
 export const views = new Hono();
 
@@ -100,15 +101,20 @@ views.post("/", async (c) => {
     ...(parsed.data.config ?? {}),
   };
 
-  const v = await prisma.view.create({
-    data: {
-      tableId,
-      name: parsed.data.name,
-      type: parsed.data.type,
-      order,
-      config: JSON.stringify(merged),
-      lockMode: "collaborative",
-    },
+  // M3/S3 #8：原裸写收紧进事务，同事务 upsert view 节点。
+  const v = await withWriteTx("view.create", async (tx) => {
+    const created = await tx.view.create({
+      data: {
+        tableId,
+        name: parsed.data.name,
+        type: parsed.data.type,
+        order,
+        config: JSON.stringify(merged),
+        lockMode: "collaborative",
+      },
+    });
+    await syncNavFromEntitiesTx(tx);
+    return created;
   });
   return c.json({ view: serializeView(v) }, 201);
 });
@@ -166,7 +172,17 @@ views.patch("/:viewId", async (c) => {
     data["config"] = JSON.stringify({ ...current, ...parsed.data.config });
   }
 
-  const updated = await prisma.view.update({ where: { id: viewId }, data });
+  // M3/S3 #9：仅 name/order 影响 nav 节点（ord 镜像 view.order）；这两类变更收紧进事务
+  // 并同步节点。lockMode/config 不进树，保持原裸写以最小化触碰。
+  const affectsNav = Object.prototype.hasOwnProperty.call(data, "name") ||
+    Object.prototype.hasOwnProperty.call(data, "order");
+  const updated = affectsNav
+    ? await withWriteTx("view.update", async (tx) => {
+      const u = await tx.view.update({ where: { id: viewId }, data });
+      await syncNavFromEntitiesTx(tx);
+      return u;
+    })
+    : await prisma.view.update({ where: { id: viewId }, data });
   return c.json({ view: serializeView(updated) });
 });
 
@@ -183,7 +199,12 @@ views.delete("/:viewId", async (c) => {
   const count = await prisma.view.count({ where: { tableId: v.tableId } });
   if (count <= 1) throw new HttpError(400, "至少保留一个视图");
 
-  await prisma.view.delete({ where: { id: viewId } });
+  // M3/S3 #10：物理删收紧进事务；先 RESTRICT 守卫（节点被菜单引用则 409，不静默级联删菜单），
+  // 再删实体与节点（顺序无关紧要，同事务共生死）。
+  await withWriteTx("view.purge", async (tx) => {
+    await purgeViewNodeTx(tx, viewId);
+    await tx.view.delete({ where: { id: viewId } });
+  });
   return c.json({ ok: true });
 });
 
@@ -203,15 +224,21 @@ views.post("/:viewId/duplicate", async (c) => {
     select: { order: true },
   });
 
-  const copy = await prisma.view.create({
-    data: {
-      tableId: v.tableId,
-      name: `${v.name} 副本`,
-      type: v.type,
-      order: (maxOrder?.order ?? 0) + 1,
-      config: v.config,
-      lockMode: v.lockMode,
-    },
+  // M3/S3（baseline 偏差补接，§4.4 18 点之外的第 19 处实体写点）：视图复制产生新活 view，
+  // 同样必须 upsert 节点，否则 reconcile 报 A1。收紧进事务同生共死。
+  const copy = await withWriteTx("view.duplicate", async (tx) => {
+    const created = await tx.view.create({
+      data: {
+        tableId: v.tableId,
+        name: `${v.name} 副本`,
+        type: v.type,
+        order: (maxOrder?.order ?? 0) + 1,
+        config: v.config,
+        lockMode: v.lockMode,
+      },
+    });
+    await syncNavFromEntitiesTx(tx);
+    return created;
   });
   return c.json({ view: serializeView(copy) }, 201);
 });

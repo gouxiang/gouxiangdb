@@ -11,6 +11,8 @@
 //
 // 纪律：只读默认；--apply 与迁移回填/S3 sync 共用 domain/nav/backfill.ts 同一套期望规则；
 //      broken 清理必须显式 --purge-broken；重复执行第二次必须 no changes。
+//      C4 未收纳是 warning（2026-09-12 方案 A 裁决），--apply 不自动补 shortcut，
+//      exit code 只看阻断类 A/B/C1-C3；warnings 仅展示。
 // migrate deploy 后必须先跑一次 --apply 以全量重建非根节点 path/depth（迁移 B 只给根节点 path）。
 
 import path from "node:path";
@@ -63,10 +65,13 @@ async function main(): Promise<number> {
       }
       const changed =
         result.nodes.created + result.nodes.updated + result.nodes.revived +
-        result.nodes.pathsRebuilt + result.menus.shortcutAdded +
+        result.nodes.pathsRebuilt +
         result.softDeleted.nodes + result.softDeleted.shortcuts +
         result.purged.shortcuts + result.purged.nodes;
       console.log(changed === 0 ? "no changes" : `applied changes=${changed}`);
+      if (after.summary.warnings > 0) {
+        console.log(`warnings=${after.summary.warnings}（C4 未收纳/C5 ord 重复，不阻断；--apply 不自动收纳）`);
+      }
       return 0;
     }
 

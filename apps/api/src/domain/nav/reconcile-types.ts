@@ -1,7 +1,10 @@
-// M3 nav 对账：报告类型与公共常量（计划 §5.4）。
+// M3 nav 对账：报告类型与公共常量（计划 §5.4，2026-09-12 方案 A 裁决后分级）。
 //
-// 只读默认；--apply 修复节点/菜单；--purge-broken 才物理清理 broken shortcut/节点。
-// 0 差异：A/B/C 计数全 0（C5 同父 ord 重复为 warning，不阻断）。
+// 只读默认；--apply 修复节点；--purge-broken 才物理清理 broken shortcut/节点。
+// 阻断类（非零即 exit 1，--apply 须修复）：A1-A6、B1-B3、C1-C3。
+// warning 类（计数报告、不影响 exit code、--apply 不自动修）：
+//   C4 未收纳（活 table/根级活 doc/活 canvas 无活 shortcut，正常编排态，可经"全部"列表到达；
+//      零入口全收纳仅约束 S2 存量基线）；C5 同父菜单 ord 重复。
 
 // S5 会把图标白名单下沉 shared-types 单一真源；S2/S4 脚本先用与 icons.tsx 对齐的最小集合。
 export const MENU_ICONS = new Set(["database", "book", "table", "doc", "canvas", "folder", "folderOpen"]);
@@ -13,10 +16,10 @@ export interface DiffEntry {
 }
 
 export interface ReconcileReport {
-  A: DiffEntry[]; // 实体 -> 节点
-  B: DiffEntry[]; // 节点 -> 实体悬挂
-  C: DiffEntry[]; // 菜单引用
-  warnings: DiffEntry[]; // C5 等
+  A: DiffEntry[]; // 实体 -> 节点（A1-A6，阻断）
+  B: DiffEntry[]; // 节点 -> 实体悬挂（B1-B3，阻断）
+  C: DiffEntry[]; // 菜单引用阻断项（仅 C1-C3）
+  warnings: DiffEntry[]; // C4 未收纳 / C5 ord 重复（不阻断）
   summary: { A: number; B: number; C: number; warnings: number };
 }
 
@@ -35,7 +38,6 @@ export interface ApplyOptions {
 
 export interface ApplyResult {
   nodes: { created: number; updated: number; revived: number; pathsRebuilt: number };
-  menus: { shortcutAdded: number };
   purged: { shortcuts: number; nodes: number };
   softDeleted: { nodes: number; shortcuts: number };
 }

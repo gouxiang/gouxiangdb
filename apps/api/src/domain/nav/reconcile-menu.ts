@@ -1,13 +1,18 @@
-// M3 nav 对账：C 类菜单差异计算（C1-C5）与默认菜单幂等补齐。
+// M3 nav 对账：C 类菜单差异计算（C1-C5）。
 //
-// 规则（裁决 4，计划 §5.3）：
-//  - shortcut.nodeId 是真实 FK ON DELETE RESTRICT，资源物理删不联动删菜单，broken 只报告（purge 才清）；
-//  - 不生成 view shortcut；子文档不挂菜单（文档层级走 nav_nodes 子树）；
-//  - 每活 table / 根级活 doc / 活 canvas 至少一条活 shortcut（C4 零入口丢失）；
-//  - 容器嵌套应用层限 2 层，成环报 C2；同父 ord 重复为 warning（C5，不阻断）。
+// 分级（2026-09-12 方案 A 裁决，计划 §5.4/§7-S3）：
+//  - 阻断（push C）：C1 shortcut broken/soft_dangling；C2 菜单容器环或嵌套 >2；C3 坏图标；
+//  - warning（push warnings，--apply 不修、不影响 exit code）：
+//      C4 未收纳：活 table/根级活 doc/活 canvas 无任何活 shortcut——这是正常编排态，
+//         实体可达性由 nav_nodes 权威树 + 二级"全部"列表保证；零入口全收纳仅约束 S2
+//         存量迁移基线（见 M3 计划 §5.4），运行期写点禁止自动写 menu_items；
+//      C5 同父菜单 ord 重复（拖拽并发可产生）。
+// 其他规则（裁决 4，计划 §5.3）：shortcut.nodeId 真实 FK ON DELETE RESTRICT，资源物理删
+// 不联动删菜单；不生成 view shortcut；子文档不挂菜单（文档层级走 nav_nodes 子树）；
+// 容器嵌套应用层限 2 层。
 
 import type { DbTx } from "../../db.js";
-import { nodeId, WS_ID, type ExpectedNode } from "./backfill.js";
+import { nodeId, type ExpectedNode } from "./backfill.js";
 import { MENU_ICONS, type ReconcileReport } from "./reconcile-types.js";
 
 export interface SystemNodeRow {
@@ -40,14 +45,15 @@ export async function diffMenu(
       if (!m.nodeId) {
         report.C.push({ code: "C1", message: "shortcut 缺少 nodeId", ref: m.id });
       } else if (!nodeById.has(m.nodeId)) {
+        // 节点存在但软删 = soft_dangling：裁决 6 的正常悬挂态（随实体恢复自动还原），
+        // shortcut 必须保留、读接口给 state、前端隐藏；不阻断，仅 warning 留痕。
+        // 节点行彻底不存在才是 broken（C1 阻断，需 --purge-broken 显式清理）。
         const soft = await tx.navNode.findUnique({ where: { id: m.nodeId }, select: { deletedAt: true } });
-        report.C.push({
-          code: "C1",
-          message: soft?.deletedAt
-            ? "shortcut 指向软删节点(soft_dangling)"
-            : "shortcut 指向缺失节点(broken)",
-          ref: m.id,
-        });
+        if (soft?.deletedAt) {
+          report.warnings.push({ code: "C1S", message: "shortcut 指向软删节点(soft_dangling，正常悬挂态)", ref: m.id });
+        } else {
+          report.C.push({ code: "C1", message: "shortcut 指向缺失节点(broken)", ref: m.id });
+        }
       }
     }
     if (m.iconName && !MENU_ICONS.has(m.iconName)) {
@@ -70,12 +76,13 @@ export async function diffMenu(
     if (depth > 2) report.C.push({ code: "C2", message: `容器嵌套 ${depth} 层超过 2 层上限`, ref: m.id });
   }
 
-  // C4 零入口丢失：活 table / 根级活 doc / 活 canvas 至少一条活 shortcut。
+  // C4 未收纳（warning，不阻断、--apply 不修）：活 table / 根级活 doc / 活 canvas 无任何活
+  // shortcut 是正常编排态，实体经 nav_nodes 权威树与二级"全部"列表可达；运行期禁止自动收纳。
   const referenced = new Set(liveMenus.filter((m) => m.type === "shortcut").map((m) => m.nodeId));
   const required = await requiredDefaultShortcuts(tx, expected);
   for (const node of required) {
     if (!referenced.has(node)) {
-      report.C.push({ code: "C4", message: `活实体无任何菜单 shortcut（零入口丢失）: ${node}`, ref: node });
+      report.warnings.push({ code: "C4", message: `未收纳（可经全部列表到达）: ${node}`, ref: node });
     }
   }
 
@@ -95,7 +102,7 @@ export async function diffMenu(
   }
 }
 
-/** 默认菜单必须存在的 shortcut 节点集：活 table、根级活 doc、活 canvas。 */
+/** C4 检查集：活 table、根级活 doc、活 canvas 的节点 id。 */
 async function requiredDefaultShortcuts(tx: DbTx, expected: ExpectedNode[]): Promise<string[]> {
   const rootDocs = await tx.kbDoc.findMany({
     where: { deletedAt: null, kind: "doc", parentId: null }, select: { id: true },
@@ -104,57 +111,4 @@ async function requiredDefaultShortcuts(tx: DbTx, expected: ExpectedNode[]): Pro
   return expected
     .filter((e) => e.kind === "table" || e.kind === "canvas" || (e.kind === "doc" && rootDocNodes.has(e.id)))
     .map((e) => e.id);
-}
-
-/** 幂等补齐默认容器与零入口 shortcut；不删除、不动用户自定义项。 */
-export async function ensureDefaultMenuTx(
-  tx: DbTx,
-  expected: ExpectedNode[],
-): Promise<{ shortcutAdded: number }> {
-  let shortcutAdded = 0;
-  await tx.workspace.upsert({
-    where: { id: WS_ID }, update: {}, create: { id: WS_ID, name: "默认工作区" },
-  });
-
-  const bases = expected.filter((e) => e.kind === "base");
-  const kbs = expected.filter((e) => e.kind === "kb");
-  for (const b of bases) {
-    const containerId = `menu_base_${b.resourceId}`;
-    await tx.menuItem.upsert({
-      where: { id: containerId },
-      update: {},
-      create: { id: containerId, workspaceId: WS_ID, type: "container", nodeId: b.id, label: b.name, iconName: "database", ord: b.ord },
-    });
-  }
-  for (const k of kbs) {
-    const containerId = `menu_kb_${k.resourceId}`;
-    await tx.menuItem.upsert({
-      where: { id: containerId },
-      update: {},
-      create: { id: containerId, workspaceId: WS_ID, type: "container", nodeId: k.id, label: k.name, iconName: "book", ord: k.ord },
-    });
-  }
-
-  const has = async (nodeIdValue: string) =>
-    (await tx.menuItem.count({ where: { workspaceId: WS_ID, type: "shortcut", nodeId: nodeIdValue, deletedAt: null } })) > 0;
-
-  for (const t of expected.filter((e) => e.kind === "table")) {
-    if (await has(t.id)) continue;
-    await tx.menuItem.create({
-      data: { workspaceId: WS_ID, parentId: `menu_base_${(await tx.table.findUniqueOrThrow({ where: { id: t.resourceId }, select: { baseId: true } })).baseId}`,
-        type: "shortcut", nodeId: t.id, ord: t.ord },
-    });
-    shortcutAdded++;
-  }
-  for (const d of expected.filter((e) => e.kind === "doc" || e.kind === "canvas")) {
-    const doc = await tx.kbDoc.findUnique({ where: { id: d.resourceId }, select: { kbId: true, parentId: true, kind: true } });
-    if (!doc) continue;
-    if (d.kind === "doc" && doc.parentId) continue; // 仅根级 doc 入默认菜单
-    if (await has(d.id)) continue;
-    await tx.menuItem.create({
-      data: { workspaceId: WS_ID, parentId: `menu_kb_${doc.kbId}`, type: "shortcut", nodeId: d.id, ord: d.ord },
-    });
-    shortcutAdded++;
-  }
-  return { shortcutAdded };
 }

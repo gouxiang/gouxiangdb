@@ -33,6 +33,10 @@ import { sidecarUniqueMatch, findUniqueConflictTx } from "../domain/queryPlan/un
 import { resolveSidecarReadMode, resolveSidecarWriteEnabled, keysetPagingActive } from "../domain/queryPlan/flags.js";
 import { InvalidCursorError, OffsetWindowError } from "../domain/queryPlan/cursor.js";
 import { isNumberRuleEmpty } from "@gx/shared-types";
+import {
+  syncNavFromEntitiesTx,
+  purgeTableNodeTx,
+} from "../domain/nav/sync.js";
 
 export const records = new Hono();
 
@@ -1007,9 +1011,12 @@ const restoreSchema = z.object({ kind: z.enum(["record", "table", "field"]) });
  * 否则会出现「记录恢复了但关联全丢」的静默数据丢失。
  * 仅恢复两端记录都存活的关联：对端仍在回收站的，等它自己被恢复时再回填。
  */
-async function restoreLinkRows(recordIds: string[]): Promise<void> {
+async function restoreLinkRows(
+  client: Pick<DbTx, "linkRow" | "record">,
+  recordIds: string[],
+): Promise<void> {
   if (recordIds.length === 0) return;
-  const rows = await prisma.linkRow.findMany({
+  const rows = await client.linkRow.findMany({
     where: {
       OR: [{ parentRowId: { in: recordIds } }, { childRowId: { in: recordIds } }],
       deletedAt: { not: null },
@@ -1018,10 +1025,10 @@ async function restoreLinkRows(recordIds: string[]): Promise<void> {
   });
   if (rows.length === 0) return;
   const peerIds = Array.from(new Set(rows.flatMap((r) => [r.parentRowId, r.childRowId])));
-  const alive = await prisma.record.findMany({ where: { id: { in: peerIds }, deletedAt: null }, select: { id: true } });
+  const alive = await client.record.findMany({ where: { id: { in: peerIds }, deletedAt: null }, select: { id: true } });
   const aliveSet = new Set(alive.map((r) => r.id));
   const ids = rows.filter((r) => aliveSet.has(r.parentRowId) && aliveSet.has(r.childRowId)).map((r) => r.id);
-  if (ids.length > 0) await prisma.linkRow.updateMany({ where: { id: { in: ids } }, data: { deletedAt: null } });
+  if (ids.length > 0) await client.linkRow.updateMany({ where: { id: { in: ids } }, data: { deletedAt: null } });
 }
 
 records.post("/trash/:id/restore", async (c) => {
@@ -1034,7 +1041,7 @@ records.post("/trash/:id/restore", async (c) => {
     await requireCanEditData(c, baseId);
     const rec = await prisma.record.findUnique({ where: { id }, select: { tableId: true } });
     await prisma.record.update({ where: { id }, data: { deletedAt: null } });
-    await restoreLinkRows([id]);
+    await restoreLinkRows(prisma, [id]);
     // M1/S4：记录恢复后按最新 fields 重建 sidecar（只对仍活记录，prisma 自成语句）。
     if (rec) await restoreRecordsTx(prisma, rec.tableId, [id]);
   } else if (parsed.data.kind === "field") {
@@ -1068,25 +1075,30 @@ records.post("/trash/:id/restore", async (c) => {
     if (!t) throw new HttpError(404, "数据表不存在");
     // 恢复表属于表结构变更，与删除表一致需要 canManageSchema。
     await requireCanManageSchema(c, t.baseId);
-    // 恢复表时连带恢复其字段、记录（删表是级联软删的，单独恢复表会得到空壳）
-    await prisma.table.update({ where: { id }, data: { deletedAt: null } });
-    await prisma.field.updateMany({ where: { tableId: id, deletedAt: { not: null } }, data: { deletedAt: null } });
-    // 先取回待恢复记录 id，恢复后按「两端都存活」回填关联
-    const restoredRows = await prisma.record.findMany({
-      where: { tableId: id, deletedAt: { not: null } },
-      select: { id: true },
+    // M3/S3 #14：原裸多写收紧进单事务。恢复表连带恢复字段/记录（级联软删，单恢复会成空壳），
+    // 视图 order=-1 重排为可见；nav 子树节点（table/view）原地复活、重算 ord/path
+    // （仅当其 base 活；base 仍软删时期望集不含该表，节点保持软删与实体悬挂态一致）。
+    await withWriteTx("table.restore", async (tx) => {
+      await tx.table.update({ where: { id }, data: { deletedAt: null } });
+      await tx.field.updateMany({ where: { tableId: id, deletedAt: { not: null } }, data: { deletedAt: null } });
+      // 先取回待恢复记录 id，恢复后按「两端都存活」回填关联
+      const restoredRows = await tx.record.findMany({
+        where: { tableId: id, deletedAt: { not: null } },
+        select: { id: true },
+      });
+      await tx.record.updateMany({ where: { tableId: id, deletedAt: { not: null } }, data: { deletedAt: null } });
+      await restoreLinkRows(tx, restoredRows.map((r) => r.id));
+      // M1/S4：整表恢复后批量重建全部恢复记录的 sidecar（prisma 自成语句，内部按批删插）。
+      if (restoredRows.length > 0) {
+        await restoreRecordsTx(tx, id, restoredRows.map((r) => r.id));
+      }
+      // 删表时视图被置 order=-1 隐藏，恢复时按原序无关地重置为可见顺序
+      const hiddenViews = await tx.view.findMany({ where: { tableId: id, order: -1 }, select: { id: true } });
+      for (let i = 0; i < hiddenViews.length; i++) {
+        await tx.view.update({ where: { id: hiddenViews[i]!.id }, data: { order: i } });
+      }
+      await syncNavFromEntitiesTx(tx);
     });
-    await prisma.record.updateMany({ where: { tableId: id, deletedAt: { not: null } }, data: { deletedAt: null } });
-    await restoreLinkRows(restoredRows.map((r) => r.id));
-    // M1/S4：整表恢复后批量重建全部恢复记录的 sidecar（prisma 自成语句，内部按批删插）。
-    if (restoredRows.length > 0) {
-      await restoreRecordsTx(prisma, id, restoredRows.map((r) => r.id));
-    }
-    // 删表时视图被置 order=-1 隐藏，恢复时按原序无关地重置为可见顺序
-    const hiddenViews = await prisma.view.findMany({ where: { tableId: id, order: -1 }, select: { id: true } });
-    for (let i = 0; i < hiddenViews.length; i++) {
-      await prisma.view.update({ where: { id: hiddenViews[i]!.id }, data: { order: i } });
-    }
   }
   return c.json({ ok: true });
 });
@@ -1118,12 +1130,17 @@ records.delete("/trash/:id", async (c) => {
     const t = await prisma.table.findUnique({ where: { id }, select: { baseId: true } });
     if (!t) throw new HttpError(404, "数据表不存在");
     await requireCanManageBase(c, t.baseId);
-    // Comment 无外键级联，物理删表前先清该表所有记录的评论，避免孤儿
-    const recIds = await prisma.record.findMany({ where: { tableId: id }, select: { id: true } });
-    if (recIds.length > 0) {
-      await prisma.comment.deleteMany({ where: { recordId: { in: recIds.map((r) => r.id) } } });
-    }
-    await prisma.table.delete({ where: { id } });
+    // M3/S3 #15：物理删表收紧进事务。nav 守卫先于任何删除：table 节点仍被菜单引用则 409
+    // （C-12，不静默级联删菜单）；守卫通过后清 view/table 节点，再清评论、删实体（views 随表 cascade）。
+    await withWriteTx("table.purge", async (tx) => {
+      await purgeTableNodeTx(tx, id);
+      // Comment 无外键级联，物理删表前先清该表所有记录的评论，避免孤儿
+      const recIds = await tx.record.findMany({ where: { tableId: id }, select: { id: true } });
+      if (recIds.length > 0) {
+        await tx.comment.deleteMany({ where: { recordId: { in: recIds.map((r) => r.id) } } });
+      }
+      await tx.table.delete({ where: { id } });
+    });
   }
   return c.json({ ok: true });
 });

@@ -163,17 +163,24 @@ describe("reconcile 与 path 重建", () => {
 
     const after = await prisma.$transaction((tx) => computeDiffs(tx));
     expect(after.summary.A + after.summary.B + after.summary.C).toBe(0);
+    // 迁移 B 全收纳：2 table + 根 doc + canvas 均有 shortcut，C4/C5 warning 也为 0。
+    expect(after.summary.warnings).toBe(0);
   });
 
-  it("连跑第二次 --apply：no changes（created/updated/rebuilt/shortcutAdded 全 0）", async () => {
+  it("连跑第二次 --apply：no changes（created/updated/rebuilt/softDeleted/purged 全 0）", async () => {
     const again = await prisma.$transaction((tx) => applyFixesTx(tx));
     expect(again.nodes.created).toBe(0);
     expect(again.nodes.updated).toBe(0);
     expect(again.nodes.revived).toBe(0);
     expect(again.nodes.pathsRebuilt).toBe(0);
-    expect(again.menus.shortcutAdded).toBe(0);
+    expect(again.softDeleted.nodes).toBe(0);
+    expect(again.softDeleted.shortcuts).toBe(0);
+    expect(again.purged.nodes).toBe(0);
+    expect(again.purged.shortcuts).toBe(0);
     const report = await prisma.$transaction((tx) => computeDiffs(tx));
+    // 迁移 B 全收纳基线：阻断 0，C4 未收纳 warning 也为 0。
     expect(report.summary.A + report.summary.B + report.summary.C).toBe(0);
+    expect(report.summary.warnings).toBe(0);
   });
 
   it("期望集与迁移结果一致（buildExpectedNodes 同规则）", async () => {
