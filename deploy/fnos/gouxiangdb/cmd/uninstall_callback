@@ -1,0 +1,7 @@
+#!/bin/bash
+# GouXiangDB fnOS 卸载回调：默认【保留用户数据】。
+# 数据库/上传/备份位于 data-share（TRIM_DATA_SHARE_PATHS），卸载只清运行态；
+# 用户确认彻底删除时再手动删除数据共享目录 gouxiangdb/data。
+set -euo pipefail
+rm -f "${TRIM_APPDEST}/app.sock" "${TRIM_PKGVAR}/app.pid"
+exit 0

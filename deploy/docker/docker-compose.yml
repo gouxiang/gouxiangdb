@@ -1,0 +1,47 @@
+# GouXiangDB 单机自包含部署：单容器跑 API(TCP 3001) + Web 静态，数据持久化到 named volume。
+#
+# 首次使用（在 deploy/docker/ 目录下操作）：
+#   1) cp gouxiangdb.env.example gouxiangdb.env
+#      填入 JWT_SECRET（openssl rand -base64 32）与 CORS_ORIGIN（对外域名）。
+#   2) docker compose --env-file gouxiangdb.env -f docker-compose.yml up -d --build
+#      （--env-file 同时提供下方 ${JWT_SECRET:?}/${CORS_ORIGIN:?} 的插值来源；
+#       未设置时 compose 直接报错，杜绝用开发默认密钥裸跑。）
+#
+# 默认端口只绑回环 127.0.0.1：前面再挂 Caddy/Nginx 做 TLS 终结与域名转发。
+# 要直接暴露到局域网/公网，把 ports 改成 "0.0.0.0:3001:3001"（自行评估鉴权与 TLS）。
+
+services:
+  gouxiangdb:
+    build:
+      # 相对本文件：仓库根为构建上下文（.dockerignore 在仓库根）。
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: gouxiangdb:latest
+    container_name: gouxiangdb
+    restart: unless-stopped
+    ports:
+      # 仅回环；如需外部直连改为 "0.0.0.0:3001:3001"。
+      - "127.0.0.1:3001:3001"
+    env_file:
+      # 可选：直接注入容器（与 --env-file 插值同文件，重复但不冲突）。
+      - path: gouxiangdb.env
+        required: false
+    environment:
+      # 未设置直接让 compose 报错（强制显式注入，禁止默认值）。
+      JWT_SECRET: ${JWT_SECRET:?在 gouxiangdb.env 设置强随机 JWT_SECRET（openssl rand -base64 32）}
+      CORS_ORIGIN: ${CORS_ORIGIN:?在 gouxiangdb.env 设置 CORS_ORIGIN（对外站点域名）}
+    volumes:
+      - gouxiang-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  gouxiang-data:

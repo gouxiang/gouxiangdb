@@ -1,0 +1,37 @@
+# 构建上下文裁剪（仓库根为 Docker build context，见 deploy/docker/Dockerfile）。
+# 镜像内会重新 pnpm install 与 vite/esbuild 构建，因此宿主任意 node_modules/dist 一律排除。
+# 注意：绝不能排除 apps/api/prisma/migrations（镜像 entrypoint 必须执行其中迁移）。
+
+**/node_modules
+**/dist
+**/build
+**/release
+**/.turbo
+
+# 版本库与本地工作区元数据
+.git
+.gitignore
+.workbuddy
+.vscode
+.idea
+
+# 本地数据库/日志/环境机密（绝不进镜像）
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.db-journal
+**/*.log
+**/*.logl
+**/.env
+**/.env.*
+.env
+apps/*/.env
+
+# 桌面壳构建产物与目标平台二进制（镜像只构建 web+api，不碰 tauri）
+apps/desktop/src-tauri/target
+
+# 临时与系统文件
+**/.DS_Store
+**/coverage
+**/.cache
+/tmp

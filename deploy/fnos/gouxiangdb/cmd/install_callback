@@ -1,0 +1,40 @@
+#!/bin/bash
+# GouXiangDB fnOS 安装回调（应用文件落地后执行）：
+#   1) 幂等生成持久配置（TRIM_PKGETC/gouxiangdb.env），首装随机 JWT_SECRET；
+#   2) 执行 prisma migrate deploy（只增）。
+# 注意：TRIM_DATA_SHARE_PATHS / TRIM_PKGETC 仅在 callback 阶段保证就绪，
+#       故初始化不能放 install_init。
+set -euo pipefail
+export PATH=/var/apps/nodejs_v22/target/bin:$PATH
+
+APP_DIR="${TRIM_APPDEST}/server"
+DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
+ENV_FILE="${TRIM_PKGETC}/gouxiangdb.env"
+
+mkdir -p "$DATA_DIR/uploads" "$DATA_DIR/backups" "${TRIM_PKGVAR}/log"
+
+# 1) 持久配置（已存在则保留：升级重装不重生成密钥，避免登录态全失效）。
+if [ ! -f "$ENV_FILE" ]; then
+  JWT_SECRET="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")"
+  # 安装向导若收集 external_origin（无 TRIM_ 前缀）则用作 CORS 来源；
+  # 未配置向导时留占位，安装后由用户在 gouxiangdb.env 填实际来源并重启。
+  CORS_ORIGIN="${external_origin:-http://localhost}"
+  umask 077
+  cat > "$ENV_FILE" <<EOF
+NODE_ENV=production
+JWT_SECRET=${JWT_SECRET}
+DATABASE_URL=file:${DATA_DIR}/app.db
+CORS_ORIGIN=${CORS_ORIGIN}
+PORT=3001
+GX_MIN_DISK_MB=1024
+EOF
+fi
+
+# 2) 数据库迁移（只允许 migrate deploy）。
+cd "$APP_DIR"
+# shellcheck disable=SC1090
+set -a; source "$ENV_FILE"; set +a
+node node_modules/prisma/build/index.js migrate deploy --schema=prisma/schema.prisma \
+  || { echo "prisma migrate deploy failed on install" > "$TRIM_TEMP_LOGFILE"; exit 1; }
+
+exit 0

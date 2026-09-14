@@ -1,0 +1,69 @@
+#!/bin/bash
+# GouXiangDB fnOS 生命周期：start/stop/status
+#
+# 进程以 package 用户（gouxiangdb）运行；监听统一网关 socket
+# ${TRIM_APPDEST}/app.sock，经 /app/gouxiangdb 前缀对外。
+# 退出码：0 成功/status=运行中；1 失败；3 status=未运行。
+set -uo pipefail
+export PATH=/var/apps/nodejs_v22/target/bin:$PATH
+
+APP_DIR="${TRIM_APPDEST}/server"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+LOG_FILE="${TRIM_PKGVAR}/app.log"
+SOCKET_PATH="${TRIM_APPDEST}/app.sock"
+ENV_FILE="${TRIM_PKGETC}/gouxiangdb.env"
+DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
+
+alive() { kill -0 "$1" 2>/dev/null; }
+
+status_app() {
+  [ -f "$PID_FILE" ] || return 3
+  local pid
+  pid="$(head -n1 "$PID_FILE" | tr -d '[:space:]')"
+  if [ -n "$pid" ] && alive "$pid"; then return 0; fi
+  rm -f "$PID_FILE"
+  return 3
+}
+
+start_app() {
+  if status_app; then exit 0; fi
+  mkdir -p "$TRIM_PKGVAR" "$DATA_DIR/uploads" "$DATA_DIR/backups"
+  if [ ! -f "$ENV_FILE" ]; then
+    echo "Missing $ENV_FILE; reinstall the app to initialize config." > "$TRIM_TEMP_LOGFILE"
+    exit 1
+  fi
+  rm -f "$SOCKET_PATH"
+  cd "$APP_DIR" || { echo "server dir missing: $APP_DIR" > "$TRIM_TEMP_LOGFILE"; exit 1; }
+  # shellcheck disable=SC1090
+  set -a; source "$ENV_FILE"; set +a
+  export GX_SOCKET_PATH="$SOCKET_PATH"
+  export GX_BASE_PATH="/app/gouxiangdb"
+  export GX_WEB_DIST="$APP_DIR/public"
+  export GX_DATA_DIR="$DATA_DIR"
+  export UPLOAD_ROOT="$DATA_DIR/uploads"
+  export BACKUP_DIR="$DATA_DIR/backups"
+  export GX_AUDIT_DIR="${TRIM_PKGVAR}/log"
+  export GX_MIGRATIONS_DIR="$APP_DIR/prisma/migrations"
+  node dist/index.js >> "$LOG_FILE" 2>&1 &
+  echo "$!" > "$PID_FILE"
+}
+
+stop_app() {
+  if [ ! -f "$PID_FILE" ]; then rm -f "$SOCKET_PATH"; exit 0; fi
+  local pid
+  pid="$(head -n1 "$PID_FILE" | tr -d '[:space:]')"
+  if [ -n "$pid" ] && alive "$pid"; then
+    kill -TERM "$pid" 2>/dev/null || true
+    local i=0
+    while alive "$pid" && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+    if alive "$pid"; then kill -KILL "$pid" 2>/dev/null || true; fi
+  fi
+  rm -f "$PID_FILE" "$SOCKET_PATH"
+}
+
+case "$1" in
+  start)  start_app ;;
+  stop)   stop_app ;;
+  status) status_app ;;
+  *) echo "Unknown command: $1" > "$TRIM_TEMP_LOGFILE"; exit 1 ;;
+esac

@@ -1,0 +1,14 @@
+{
+  ".url": {
+    "gouxiangdb.main": {
+      "title": "勾享数据库",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "",
+      "gatewayPrefix": "/app/gouxiangdb",
+      "gatewaySocket": "app.sock",
+      "url": "/app/gouxiangdb/",
+      "allUsers": true
+    }
+  }
+}
