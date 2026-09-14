@@ -4,9 +4,9 @@
 - 作者：架构师 高见远
 - 状态：Proposed（交项目总监大湾区靓仔复核后派后端/前端工程师实施）
 - 上游依据：SPEC-enterprise-v1.0 §2（M3 行，:23 P0）/§5（:62-69 `/api/v1/workspaces/current/tree|menu`、openapi 冻结点 :62）/§6（:85 nav_nodes/menu_items/auth_policies 表清单）/§7（:95-96 工作区外壳/一级三类列表）/§8（:109 单一 SVG 图标体系）/§9（AC-M3-1，:119）/§10（:134 资源 10 万节点首屏 <1s）/§11（:144 画布坑位）/§12；PRD-enterprise §支柱2（N1 :132 / N2 :133 / N3 :134 / N4 :135 / N5 :136 / N6 :137）/C-1（:308）/C-7（:314）/C-11（:318）/C-12（:319）/§六 M3（:253-258）；ARCH-enterprise §3.1（两层模型，:135-166）/§3.2（Prisma 草案，:168-278）/§3.3（迁移回填，:280-294）/§3.4（menu_items 行为级联，:296-313）/§9（:849 openapi M3 冻结）；UIUX-enterprise §1（:51-77）/§2（线框:84-179、设置收拢:203-234）/§5（路由建议:531-545）；M2 实施计划（`docs/planning/phase2/M2-implementation-plan.md`）§2.2（:105 明确划给 M3 的边界）、§4.1（GX_ENTERPRISE_ORG flag）、§5-A（manage_menu 留 M3，:193）
-- 适用代码基线：`main` @ git `32f7bea`（M2/M5/M6 三份规划文档收口后；**M2 业务码尚在实施中**，S0-S2 in_progress）；根 `package.json` v0.1.0
+- 适用代码基线：`main`（本文档随 commit 提交时业务码基线为 `f8ddde3`）；派工基线 `32f7bea` 之后 **M2-S0/S1 已落地**（`b19dfa1` 特征测试、`f8ddde3` 组织五表迁移与 users 扩列回填），M2-S2（/api/v1 骨架与 GX_ENTERPRISE_ORG flag）仍在实施中；根 `package.json` v0.1.0
 - 本机核对环境：Node v22.22.2、pnpm 9.0.0、Prisma 5.22、better-sqlite3 13.0.3（SQLite 3.53.4）、Hono 4.13.5、React 18 / react-router-dom 现状版本 / TanStack Query 5.62
-- 测试基线实跑（2026-09-14 13:00/13:02）：**apps/api 47 文件 598 passed / 3 skipped；apps/web 2 文件 33 passed；迁移目录 12 个**（最新 `20260913062000_record_field_index_sidecar`）；全仓 glob 无任何 `openapi*.y(a)ml`
+- 测试基线两次实跑：2026-09-14 13:00（派工基线 32f7bea）= api 47 文件 598/3 skipped、web 33、迁移 12；**2026-09-16 M2-S1 后复跑 = apps/api 51 文件 641 passed / 3 skipped、shared-types 4 文件 56 passed、apps/web 2 文件 33 passed；迁移目录 14 个**（新增 `20260915090000_enterprise_org_ddl`、`20260915090100_enterprise_org_backfill`，已播种固定 id `ws_default`/`role_owner` 等）。本文行号证据在两次基线上均复核（§1.4 的 schema 行号以 f8ddde3 为准）；全仓 glob 无任何 `openapi*.y(a)ml`，`routes/v1` 目录尚不存在
 
 > 本文所有"现状证据"行号均在本机实际读码/跑命令核对。与旧 ARCH/SPEC/UIUX 或所给锚点不符之处集中列在 §12。本阶段只产出规划文档，不改任何源码、不提交业务代码。
 
@@ -76,19 +76,19 @@
 
 | 实体 | 模型/删除语义 | 写点文件:行 |
 |---|---|---|
-| Base | `schema.prisma:19-32`（name/iconColor/createdBy/deletedAt，**无 workspaceId**） | 建 `bases.ts:141-166`（同时建 owner member + createStarterTable :154）；改名 `:203-210`；**软删 :212-218（base+其下 tables 打 deletedAt，无字段/记录处理，无恢复端点）** |
+| Base | `schema.prisma:19-32`（两基线下行号未移动；name/iconColor/createdBy/deletedAt，**无 workspaceId**；M2-S1 只给 users 加列，资产表未动） | 建 `bases.ts:141-166`（同时建 owner member + createStarterTable :154）；改名 `:203-210`；**软删 :212-218（base+其下 tables 打 deletedAt，无字段/记录处理，无恢复端点）** |
 | Table | `:34-50`（baseId/primaryFieldId/deletedAt） | 建 `tables.ts:66-141`（withWriteTx：表+主字段+可选默认字段+网格视图）；改名 `:169-181`；**软删 :183-197（table/records/fields 打 deletedAt，views 置 `order=-1` 隐藏——不是 deletedAt）**；复制 `:201` |
 | Field | `:54-118`（order，无 ord） | 建经 `domain/fieldService.ts:122/167/181/305`（含配对反向字段）；**软删 :363-402（含对称反向字段、link_row 标记）**；路由 `fields.ts:100/170/233/245`。M3 **不为 field 建 nav 节点**（§0-2），故 field 写点**不接 nav 同步** |
 | View | `:164-178`（order/config，**无 deletedAt 列**） | 建 `views.ts:82-117`；改名 `:129-173`；**物理删 :175-190（至少保留一个视图，prisma.view.delete）**；复制 `:192`。table 软删时视图变 `order=-1`；table 恢复时视图 order 重排（`records.ts:1086-1090`） |
 | Record | `:122-139` | 回收站列表 `records.ts:468`；**恢复 :1027-1092（kind=record/field/table 三态；table 分支连带恢复 fields/records/linkRows/sidecar/视图序 :1064-1091）**；物理删 :1094-1128。record 不进 nav，无需同步；**table 恢复/物理删两条必须接 nav** |
-| KnowledgeBase | `:249-262`（createdBy/deletedAt） | 建 `kb.ts:143-165`（带 owner member）；改名 `:180-197`；**软删 :199-211（kb+其下 docs 打 deletedAt，无恢复端点）** |
-| KbDoc | `:279-313`（kind=doc/canvas、parentId :296 仅 doc 用、share* 外链字段、deletedAt/deletedBy） | 建 `:317-361`（仅 doc 可带 parentId，canvas 恒顶级；同时写首版本）；改名 `:383-401`；移动 parentId `:453-487`（防环 isDescendant :70-83）；**软删 :595-605；恢复 :607-622（deletedAt/deletedBy 清空）；物理删 :624-640（连删 versions/acls 后 prisma 删行，仅 kb owner）** |
+| KnowledgeBase | `:267-280`（M2-S1 后位移；32f7bea 时 249-262）（createdBy/deletedAt） | 建 `kb.ts:143-165`（带 owner member）；改名 `:180-197`；**软删 :199-211（kb+其下 docs 打 deletedAt，无恢复端点）** |
+| KbDoc | `:297-331`（M2-S1 后位移；32f7bea 时 279-313）（kind=doc/canvas、parentId :296 仅 doc 用、share* 外链字段、deletedAt/deletedBy） | 建 `:317-361`（仅 doc 可带 parentId，canvas 恒顶级；同时写首版本）；改名 `:383-401`；移动 parentId `:453-487`（防环 isDescendant :70-83）；**软删 :595-605；恢复 :607-622（deletedAt/deletedBy 清空）；物理删 :624-640（连删 versions/acls 后 prisma 删行，仅 kb owner）** |
 | 匿名公开 | `routes/public.ts:183/213/223`（/s/:token、/s/:token/doc/:docId、/ref/:docId，不解析用户） | M3 不动（与 M2 §5-D.5 同口径） |
 | 全局搜索 | `search.ts:47` 起，membership 内逐表有界预览 + kb 文档 | M3 不接 nav；M5 统一检索替换 |
 
 - 写串行门面复用 M1 设施：`db.ts` 的 `withWriteTx/runWrite/withWriteBatch`（M2 计划已核对 :111-138）。nav 同步原语只允许在这些回调内用传入 tx。
 - 审计事件名当前仅 6 枚（`audit/audit.ts:9-15`：login_success/login_failure/signup/change_password/account_delete/avatar_delete），M3 只增菜单/节点事件名。
-- 迁移目录 12 个；CI 在临时库 `prisma migrate deploy` 干跑并按目录数动态对账（M2 计划 §1.4 已述）。
+- 迁移目录 **14 个**（M2-S1 后；脚本 `ci-quality.sh:87-96` 按 `_prisma_migrations` 动态对账，不写死数字）；M3 后变 16。
 
 ### 1.5 前端工程设施（决定切片接法）
 
@@ -367,10 +367,10 @@ scripts/nav/
 
 ## 6. 切片总览与依赖
 
-| 切片 | 标题 | 类型 | 主要触碰 | 对 598/33 影响 | 依赖 | 可并行 |
+| 切片 | 标题 | 类型 | 主要触碰 | 对 641/33 基线影响 | 依赖 | 可并行 |
 |---|---|---|---|---|---|---|
 | S0 | M3 基线留证 + 导航/URL/删除语义 Characterization | 后端+文档 | docs/baseline；domain/nav/__tests__；web lib 测试 | 只增测试 | — | 与 S1 并行 |
-| S1 | 迁移 A：nav_nodes/menu_items/auth_policies DDL + ws 两列 | 纯后端 | 1 迁移；schema.prisma 三 model+workspace 改；rollback SQL | 无（CI 干跑 12→13） | S0 | 先行阻塞 |
+| S1 | 迁移 A：nav_nodes/menu_items/auth_policies DDL + ws 两列 | 纯后端 | 1 迁移；schema.prisma 三 model+workspace 改；rollback SQL | 无（CI 干跑 14→15） | S0 | 先行阻塞 |
 | S2 | 迁移 B：实体节点+默认菜单幂等回填 + path 重算脚本首跑 | 纯后端 | 1 迁移；domain/nav/{tree,backfill}.ts；scripts/nav/reconcile-nav.mjs（只读版先行） | 无 | S1 | S1 后立即 |
 | S3 | nav 同步原语 + §4.4 全部写点事务接线 | 纯后端 | domain/nav/sync.ts；bases/tables/views/kb/records 五路由；hooks 失效 | **中敏**（动 5 个业务路由的写事务形态），S0 对拍保护 | S2 | 与 S5 准备并行 |
 | S4 | 对账脚本 --apply/purge + 幂等/重复回填 + 异常库演练 | 纯后端 | scripts/nav；reconcile.ts；测试夹具 | 只增 | S2、S3 | S3 后 |
@@ -395,13 +395,13 @@ scripts/nav/
 ### S0 — 基线留证 + Characterization 锁行为
 
 **新增**
-- `docs/baseline/2026-09-16-m3-baseline.md`：git 32f7bea、598/3、web 33、迁移 12、Node/Hono/Prisma 版本、10 万节点目标（SPEC :134）。
+- `docs/baseline/2026-09-16-m3-baseline.md`：记录双基线（32f7bea=598/12 迁移；f8ddde3=641/14 迁移、shared 56、web 33）、Node/Hono/Prisma 版本、10 万节点目标（SPEC :134）。
 - 后端 characterization（真库真迁移，仿 records-keyset 模式）：
   - `domain/nav/__tests__/characterization/entity-lifecycle-current.test.ts`：锁六类实体的建/改名/软删/恢复/物理删现状行为（含 views 无 deletedAt 物理删、table 软删 views order=-1、base/kb 软删无恢复、doc restore 清双字段），S3/S10 后复跑逐值不变。
   - `.../membership-list-current.test.ts`：锁 `/api/bases`、`/api/tables?baseId`、`/api/kb`、`/api/kb/:id/docs` 的 membership 过滤与排序（tables created asc、docs updated desc）。
   - `.../rbac-current.test.ts`：仿 M2 S0 锁 requireCan*/requireKb 矩阵（M3 后逐值不变）。
 - web：`features/workspace/lib/__tests__/url-inventory.test.ts`（S8 才建目录，可放 `lib/__tests__/nav-urls.test.ts`）：把 §1.3 的 URL 形态清单固化为 internalHref/internal-links 的快照测试 + 一条"内部链接解析后仍以 /base//kb 为根"的断言（防 S8 误改协议）。
-**验收**：`pnpm -w test` 全绿（598+N / 33+M）。
+**验收**：`pnpm -w test` 全绿（api 641+N、web 33+M、shared-types 56 不变）。
 **回滚**：删测试与文档。
 
 ---
@@ -416,8 +416,8 @@ scripts/nav/
 **独立验收**
 ```bash
 T=$(mktemp -d); DATABASE_URL="file:$T/t.db" pnpm --filter @gx/api exec prisma migrate deploy
-# 断言：13 个迁移目录；三表/索引/FK 存在；workspaces 两列默认 0；auth_policies 为空表
-pnpm -w test   # 598 全绿
+# 断言：15 个迁移目录；三表/索引/FK 存在；workspaces 两列默认 0；auth_policies 为空表
+pnpm -w test   # 641+N 全绿（M2-S1 后基线）
 bash scripts/ci-quality.sh
 ```
 **回滚**：快照恢复 + down SQL；无任何代码读新表。
@@ -568,7 +568,7 @@ pnpm --filter @gx/web typecheck && pnpm --filter @gx/web build && pnpm -w test
 - openapi.yaml 与 shared-types/真实响应对拍无 diff；`docs/api/` 下补一份"枚举/错误码表"。
 - flag 生命周期文档：GX_ENTERPRISE_NAV 稳定一个迭代后随 M4 或下一期删旧壳与 off 分支（PRD :258 承诺保留一个迭代）；菜单不剪枝的 M4 翻转点写入 M4 输入清单。
 - runbook 增章："导航树差异排查与 reconcile 执行"、"菜单丢失/实体找不到（0 入口丢失校验）"、"新壳回退旧壳（flag）"、"move 误操作恢复（快照指引）"。
-- baseline 收口：测试计数、迁移数 12→14、10 万节点性能、升级演练（v0.1.0 风格库 → deploy → reconcile → 菜单零丢失抽样）。
+- baseline 收口：测试计数、迁移数 14→16、10 万节点性能、升级演练（v0.1.0 风格库 → deploy → reconcile → 菜单零丢失抽样）。
 
 ---
 
@@ -583,11 +583,11 @@ pnpm --filter @gx/web typecheck && pnpm --filter @gx/web build && pnpm -w test
 
 ---
 
-## 9. 对 598/33 基线的影响面与保护
+## 9. 对 641/33 基线的影响面与保护（shared-types 56 同护）
 
 | 触碰源 | 切片 | 保护 |
 |---|---|---|
-| 三新表 + ws 两列迁移 | S1/S2 | 只增；CI 临时库干跑 12→14；现有查询不读新表 |
+| 三新表 + ws 两列迁移 | S1/S2 | 只增；CI 临时库干跑 14→16；现有查询不读新表 |
 | 5 个业务路由写事务接线 | S3 | **中敏**：S0 characterization 对拍；每写点独立测试 reconcile=0；事务形态收紧（裸多写→withWrite*）本身修一致性隐患，行为等价 |
 | roles owner 动作 +manage_menu | S6 | 只增一枚动作位；M2 不消费即无效果；自定义角色白名单只增 |
 | /api/v1 新路由 + 新 flag | S5/S6 | flag off 不挂载；旧 /api 零 diff；限流选择器按 /api/ 前缀自动覆盖 |
@@ -601,12 +601,12 @@ pnpm --filter @gx/web typecheck && pnpm --filter @gx/web build && pnpm -w test
 pnpm -w install --frozen-lockfile
 pnpm --filter @gx/shared-types build
 pnpm --filter @gx/api typecheck && pnpm --filter @gx/web typecheck
-pnpm -w test            # api 598+N / 3 skipped、web 33+M，只许增不许转红
+pnpm -w test            # api 641+N / 3 skipped、web 33+M、shared-types 56 不变，只许增不许转红
 pnpm --filter @gx/api lint
 bash scripts/ci-quality.sh
 ```
 
-预计新增测试：S0 ~20、S1/S2 迁移回填 ~16、S3 写点同步 ~22、S4 对账 ~10、S5 读 API ~14、S6 写 API/预览 ~24、S7 契约对拍 ~8、S8/S9 web 纯函数/flag ~14、S10 对抗/性能 ~18（api 598 → 约 +130~160，以实现为准）。
+预计新增测试：S0 ~20、S1/S2 迁移回填 ~16、S3 写点同步 ~22、S4 对账 ~10、S5 读 API ~14、S6 写 API/预览 ~24、S7 契约对拍 ~8、S8/S9 web 纯函数/flag ~14、S10 对抗/性能 ~18（api 641 → 约 +130~160，以实现为准）。
 
 ---
 
@@ -631,7 +631,7 @@ bash scripts/ci-quality.sh
 1. AC-M3-1 自动化全绿：同一资源多处菜单引用下，快捷项拖拽/删除不改权威父级与权限结果；仅"移动到其他分组"改 nav_nodes.parentId 且必经影响预览+确认；移动后子树 path/权限边界（M3 口径=旧成员可见性）正确。
 2. 回填对账：v0.1.0 风格旧库升级后 A/B/C 三类差异 0；默认菜单零入口丢失（每个活表/根级文档/画布可达）；迁移与 reconcile 重跑幂等；10 万节点 menu 首屏 <1s 有留证、关键查询无全表 SCAN。
 3. N5：§1.3 全部旧链接在新壳可达，操作步数 ≤ 旧版 +1；正文内链/画布引用/匿名分享抽样 0 损坏；flag off 一键回退旧两壳；子路径部署验证通过；画布 R10 回归全过。
-4. 三新表只增迁移在干净库/旧库快照均可 deploy；auth_policies 全里程碑零写入（有断言）；旧 RBAC 矩阵与 40 RC 逐值不变；598+N/33+M/typecheck/lint/ci-quality 全绿。
+4. 三新表只增迁移在干净库/旧库快照均可 deploy；auth_policies 全里程碑零写入（有断言）；旧 RBAC 矩阵与 40 RC 逐值不变；641+N/33+M/typecheck/lint/ci-quality 全绿。
 5. openapi.yaml 冻结并与真实响应/TS 类型对拍无 diff；ADR-0025~0030 归档；runbook/baseline 齐备；manage_menu 第四动作位 owner 默认持有、非授权 403。
 6. 边界用例全自动：菜单环/超层 400、坏图标 400、shortcut 指向缺失 400/标 broken、视图物理删遇引用 409、移动未确认 409、删组未选 strategy 409、doc 移入自身子树 400。
 
@@ -639,8 +639,8 @@ bash scripts/ci-quality.sh
 
 ## 12. 现状核对后与旧文档/所给锚点的不符与澄清
 
-1. **/api/v1 与组织表在代码中尚不存在**：32f7bea 上无 `routes/v1` 目录、config 无 GX_ENTERPRISE_ORG（config.ts:198-203 只有 GX_RATE_LIMIT 等）、无 workspaces 表。M2 业务码在实施中（任务 #126 S0-S2 in_progress）。M3 的 S5/S6 以 M2-S2/S5 为硬前置；S1-S4 不依赖可先行。
-2. **workspaces 无 navVersion/menuVersion**：M2 计划 S1（M2 文档 :335）刻意只建 policyVersion（YAGNI），M3 自己以只增迁移补两列。
+1. **M2 落地进度（本文档期间发生基线移动）**：派工时点 32f7bea 无 `routes/v1`、无组织表；截至 f8ddde3，**M2-S0/S1 已落地**——workspaces/departments/dept_members/roles/role_assignments 五表与 users 六列（status/workspaceId/tokenVersion/disabledAt/inviteTokenHash/invitedAt）、固定 id `ws_default`/`role_owner` 已由迁移 20260915090000/20260915090100 播种（`schema.prisma:376` 起为组织 model；Workspace 当前仅 policyVersion，navVersion/menuVersion 仍缺，由 M3-S1 补）。**`routes/v1` 目录与 GX_ENTERPRISE_ORG flag 仍不存在**（M2-S2 进行中）。M3 的 S5/S6 以 M2-S2/S5 为硬前置；S1-S4 只依赖表与 ws_default，已可开工。
+2. **workspaces 现状只有 policyVersion**（`schema.prisma:379` 实查）：M2 按其计划 S1 刻意只建此列（M2 文档 :335 YAGNI 注记），navVersion/menuVersion 由 M3-S1 以只增迁移补。
 3. **openapi 文件全仓不存在**（glob `**/openapi*.y(a)ml"` 无命中；M2 的 openapi 仅是计划中的 draft 分册，未落盘）。M3 S7 是首版。
 4. **v1 挂载点行号**：M2 计划说"app.ts:136 后条件挂载"——现 app.ts:136 正是 `mount.route("/api", api)`，:140-142 是 SPA 兜底；v1 必须在 :136 之后、SPA 之前插入，且 flag 合并挂载条件（S5 已写明），basePath 双副本（:162-164）自动覆盖。
 5. **views 无软删列**（schema.prisma:164-178）：删除是物理删（views.ts:186 `prisma.view.delete`），table 软删时视图不打 deletedAt 而置 `order=-1`（tables.ts:193），table 恢复时 order 重排（records.ts:1086-1090）。nav view 节点生命周期必须照此三态接线，ARCH §3.1-2"删表/删字段软删→节点 isSystem 隐藏"的笼统描述对 view 不成立。
@@ -654,7 +654,7 @@ bash scripts/ci-quality.sh
 13. **UIUX §5 路由建议**（/w/node、/contacts、/settings/workspace）与 M2 已定的 `/workspace/contacts` 不一致；本计划统一为 `/workspace/*` 工作区级前缀，资产内容路由保持旧形（ADR-0027）。
 14. **现状无工作区级设置/回收站聚合**：左下设置是资产级（Sidebar.tsx:251、KbSidebar.tsx:106），两个 TrashPage 分属 base/kb。N1 设置收敛在 M3 只做"入口收敛 + 资产设置可达"，不搬迁资产设置页（UIUX :220-234 同口径）。
 15. **M2 owner 系统角色只播种三枚动作**（M2 计划 §5-A）：manage_menu 是 M3 新增的第四枚，S6 用只增迁移补到 owner；自定义角色动作编辑器白名单同步扩位。
-16. **测试基线复核一致**：598 passed/3 skipped（api 47 文件）、33 passed（web 2 文件）、迁移 12 个，2026-09-14 实跑，与 M2 计划记录相同（M2 尚未落业务码）。
+16. **测试基线在编写期间移动一次，已复核**：32f7bea（2026-09-14）= 598/3（47 文件）、web 33、迁移 12；f8ddde3（M2-S0/S1 后，2026-09-16 复跑）= **641/3（51 文件）、web 33、shared-types 56（4 文件）、迁移 14**。本文计数以新基线为准，旧数字仅在 baseline 双记录中保留。
 17. **全局搜索是 membership 逐表有界预览**（search.ts:47 起，ADR-0005 口径），不读 nav；M3 只把入口提权到顶栏，搜索逻辑一行不动（M5 替换）。
 18. **图标现状**：icons.tsx 已有 table/database/book/doc/canvas/group/star/clock/external/users 等 100 枚；缺 grip 与专用 folder 语义（group 图标当前语义偏字段分组），S8/S9 在同文件追加，不引库。
 
@@ -664,8 +664,8 @@ bash scripts/ci-quality.sh
 
 | ID | 标题 | 关键文件 | 独立验收（一句话） | 跨端 |
 |---|---|---|---|---|
-| S0 | 基线+特征测试 | docs/baseline/2026-09-16-m3-baseline.md；domain/nav/__tests__ | 598/33 全绿，锁实体生命周期/成员列表/RBAC/URL 清单 | 否 |
-| S1 | 三表 DDL+ws 两列 | 迁移 A；schema.prisma；down SQL | 干净库 deploy 13 迁移成功，598 全绿 | 否 |
+| S0 | 基线+特征测试 | docs/baseline/2026-09-16-m3-baseline.md；domain/nav/__tests__ | 641/33/56 全绿，锁实体生命周期/成员列表/RBAC/URL 清单 | 否 |
+| S1 | 三表 DDL+ws 两列 | 迁移 A；schema.prisma；down SQL | 干净库 deploy 15 迁移成功，641 基线全绿 | 否 |
 | S2 | 实体/菜单回填 | 迁移 B；domain/nav/{tree,backfill}.ts；scripts/nav/reconcile-nav.mjs | 旧库升级节点/菜单数与实体精确一致，重跑 0 变化 | 否 |
 | S3 | 写点同步接线 | domain/nav/sync.ts；bases/tables/views/kb/records 五路由 | §4.4 全部写点操作后 reconcile 0 差异，旧 characterization 逐值绿 | 否 |
 | S4 | 对账完工+异常库演练 | reconcile.ts；脚本 | broken/改名/多引用三夹具可报告可修复且幂等 | 否 |
