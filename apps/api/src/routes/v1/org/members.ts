@@ -6,6 +6,8 @@ import { Hono } from "hono";
 import { requireOrgAction } from "../../../middleware/authActive.js";
 import * as members from "../../../domain/org/members.js";
 import { effectiveRoleRows } from "../../../domain/org/authorization.js";
+import { disableUser, reactivateUser } from "../../../domain/org/lifecycle.js";
+import { audit } from "../../../audit/emit.js";
 
 export const memberRoutes = new Hono();
 
@@ -46,7 +48,9 @@ memberRoutes.post("/invite", requireOrgAction("manage_members"), async (c) => {
   if (!body || typeof body !== "object") {
     return c.json({ error: "请求体必须是 JSON 对象", code: "BAD_REQUEST" }, 400);
   }
+  const actorId = c.get("auth").userId;
   const result = await members.createInvitedUser(body);
+  audit(c, { event: "member_invited", status: 201, actorId, detail: { userId: result.userId } });
   return c.json(result, 201);
 });
 
@@ -70,6 +74,26 @@ memberRoutes.post("/:id/departments", requireOrgAction("manage_members"), async 
   }
   const actorId = c.get("auth").userId;
   const result = await members.assignDepartments(actorId, id, body);
+  return c.json(result);
+});
+
+// 停用：POST /org/members/:id/disable（自停用 400、最后 owner 409）
+memberRoutes.post("/:id/disable", requireOrgAction("manage_members"), async (c) => {
+  const id = c.req.param("id");
+  if (!id) return c.json({ error: "缺少成员 id", code: "BAD_REQUEST" }, 400);
+  const actorId = c.get("auth").userId;
+  const result = await disableUser(actorId, id);
+  audit(c, { event: "member_disabled", status: 200, actorId, detail: { targetId: id } });
+  return c.json(result);
+});
+
+// 重新激活：POST /org/members/:id/reactivate（旧 token 仍失效，强制重登）
+memberRoutes.post("/:id/reactivate", requireOrgAction("manage_members"), async (c) => {
+  const id = c.req.param("id");
+  if (!id) return c.json({ error: "缺少成员 id", code: "BAD_REQUEST" }, 400);
+  const actorId = c.get("auth").userId;
+  const result = await reactivateUser(actorId, id);
+  audit(c, { event: "member_reactivated", status: 200, actorId, detail: { targetId: id } });
   return c.json(result);
 });
 

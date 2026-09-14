@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import { requireOrgAction } from "../../../middleware/authActive.js";
 import * as deptService from "../../../domain/org/departments.js";
 import type { CreateDeptInput, UpdateDeptInput } from "../../../domain/org/departments.js";
+import { audit } from "../../../audit/emit.js";
 
 export const departments = new Hono();
 
@@ -24,6 +25,12 @@ departments.post("/", requireOrgAction("manage_departments"), async (c) => {
     return c.json({ error: "请求体必须是 JSON 对象", code: "BAD_REQUEST" }, 400);
   }
   const created = await deptService.createDepartment(body as CreateDeptInput);
+  audit(c, {
+    event: "department_created",
+    status: 201,
+    actorId: c.get("auth").userId,
+    detail: { departmentId: created.id, parentId: created.parentId },
+  });
   return c.json(created, 201);
 });
 
@@ -36,6 +43,14 @@ departments.patch("/:id", requireOrgAction("manage_departments"), async (c) => {
     return c.json({ error: "请求体必须是 JSON 对象", code: "BAD_REQUEST" }, 400);
   }
   const updated = await deptService.updateDepartment(id, body as UpdateDeptInput);
+  if (body.parentId !== undefined) {
+    audit(c, {
+      event: "department_moved",
+      status: 200,
+      actorId: c.get("auth").userId,
+      detail: { departmentId: id, newParentId: updated.parentId },
+    });
+  }
   return c.json(updated);
 });
 
@@ -44,5 +59,11 @@ departments.delete("/:id", requireOrgAction("manage_departments"), async (c) => 
   const id = c.req.param("id");
   if (!id) return c.json({ error: "缺少部门 id", code: "BAD_REQUEST" }, 400);
   const result = await deptService.deleteDepartment(id);
+  audit(c, {
+    event: "department_deleted",
+    status: 200,
+    actorId: c.get("auth").userId,
+    detail: { departmentId: id },
+  });
   return c.json(result);
 });

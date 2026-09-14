@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import {
   DEFAULT_RULE,
   FixedWindowCounter,
+  ORG_ADMIN_RULE,
   STRICT_RULE,
   clientKey,
   createRateLimitMiddleware,
@@ -18,6 +19,16 @@ describe("规则选择", () => {
     expect(selectRule("/api/auth/login")).toBe(STRICT_RULE);
     expect(selectRule("/api/auth/signup")).toBe(STRICT_RULE);
     expect(selectRule("/api/auth/me/change-password")).toBe(STRICT_RULE);
+  });
+  it("M2 组织敏感写（邀请/激活/停用/重新激活）命中 30/60s 组织档", () => {
+    expect(selectRule("/api/v1/org/members/invite")).toBe(ORG_ADMIN_RULE);
+    expect(selectRule("/api/v1/auth/invite/accept")).toBe(ORG_ADMIN_RULE);
+    expect(selectRule("/api/v1/org/members/u123/disable")).toBe(ORG_ADMIN_RULE);
+    expect(selectRule("/api/v1/org/members/u123/reactivate")).toBe(ORG_ADMIN_RULE);
+    expect(ORG_ADMIN_RULE.limit).toBe(30);
+    // 普通组织读/列角色仍走兜底档，不收严
+    expect(selectRule("/api/v1/org/members")).toBe(DEFAULT_RULE);
+    expect(selectRule("/api/v1/org/roles")).toBe(DEFAULT_RULE);
   });
   it("其余 /api 走兜底档", () => {
     expect(selectRule("/api/records")).toBe(DEFAULT_RULE);

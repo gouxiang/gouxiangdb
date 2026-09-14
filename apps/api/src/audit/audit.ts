@@ -12,7 +12,18 @@ export type AuditEventName =
   | "signup"
   | "change_password"
   | "account_delete"
-  | "avatar_delete";
+  | "avatar_delete"
+  // M2 组织通讯录（只增；S6 接线，复用既有脱敏，不落邮箱外敏感信息）
+  | "member_invited"
+  | "member_activated"
+  | "member_disabled"
+  | "member_reactivated"
+  | "department_created"
+  | "department_moved"
+  | "department_deleted"
+  | "role_created"
+  | "role_deleted"
+  | "role_assignment_changed";
 
 export interface AuditInput {
   event: AuditEventName;

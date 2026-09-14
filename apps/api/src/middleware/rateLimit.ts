@@ -26,6 +26,14 @@ const STRICT_AUTH_PATTERNS = [
   /\/api\/auth\/me\/change-password$/,
 ];
 
+// M2 组织管理敏感写：邀请/激活/停用/重新激活收严到 30 次/60 秒（只增命名档，不动旧档）。
+const ORG_ADMIN_PATTERNS = [
+  /\/api\/v1\/org\/members\/invite$/,
+  /\/api\/v1\/auth\/invite\/accept$/,
+  /\/api\/v1\/org\/members\/[^/]+\/disable$/,
+  /\/api\/v1\/org\/members\/[^/]+\/reactivate$/,
+];
+
 // 不计数的路径前缀/精确路径。
 const EXEMPT_PATTERNS = [
   /^\/healthz\/?$/,
@@ -41,6 +49,14 @@ export const STRICT_RULE: RateRule = {
   match: (path) => STRICT_AUTH_PATTERNS.some((re) => re.test(path)),
 };
 
+// M2 组织敏感动作档：30 次/60 秒（邀请/激活/停用/重新激活）。
+export const ORG_ADMIN_RULE: RateRule = {
+  name: "org-admin",
+  limit: 30,
+  windowMs: 60_000,
+  match: (path) => ORG_ADMIN_PATTERNS.some((re) => re.test(path)),
+};
+
 export const DEFAULT_RULE: RateRule = {
   name: "api",
   limit: 600,
@@ -54,7 +70,9 @@ export function isExempt(path: string): boolean {
 
 export function selectRule(path: string): RateRule | null {
   if (isExempt(path)) return null;
+  // 最具体的先匹配：严格认证档 -> M2 组织敏感档 -> /api 兜底档。
   if (STRICT_RULE.match(path, "")) return STRICT_RULE;
+  if (ORG_ADMIN_RULE.match(path, "")) return ORG_ADMIN_RULE;
   if (DEFAULT_RULE.match(path, "")) return DEFAULT_RULE;
   return null;
 }

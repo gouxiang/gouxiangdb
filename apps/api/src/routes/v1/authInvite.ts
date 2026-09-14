@@ -6,6 +6,7 @@
 
 import { Hono } from "hono";
 import { acceptInvite } from "../../domain/org/lifecycle.js";
+import { audit } from "../../audit/emit.js";
 
 export const inviteRoutes = new Hono();
 
@@ -15,5 +16,6 @@ inviteRoutes.post("/accept", async (c) => {
     return c.json({ error: "请求体必须是 JSON 对象", code: "BAD_REQUEST" }, 400);
   }
   const result = await acceptInvite(body as { token: unknown; password: unknown; displayName?: unknown });
+  audit(c, { event: "member_activated", status: 200, actorId: result.user.id, detail: { via: "invite" } });
   return c.json(result, 200);
 });

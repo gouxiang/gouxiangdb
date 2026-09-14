@@ -5,8 +5,9 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { HttpError } from "../../guards.js";
-import { withWriteTx } from "../../db.js";
-import { USER_STATUS, issueToken } from "./authState.js";
+import { withWriteTx, type DbTx } from "../../db.js";
+import { USER_STATUS, issueToken, invalidateAuthState } from "./authState.js";
+import { usersWithRole } from "./roles.js";
 
 /** 激活码明文 -> sha256 摘要（与建邀请时同一算法）。 */
 export function hashInviteToken(plain: string): string {
@@ -69,4 +70,98 @@ export async function acceptInvite(input: {
       },
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// S6：停用 / 重新激活 / 最后 owner 保护
+// ---------------------------------------------------------------------------
+
+/**
+ * 最后 owner 保护（必须把部门继承授予展开计入，计划 §5-D.4 / §11-15）。
+ * owners 经 usersWithRole 反查：user 直接持 role_owner ∪ 被授 role_owner 部门【子树】内的
+ * ACTIVE 成员。若目标当前是在岗 owner 且停用后 owner 集合为空 -> 409。
+ * 事务内执行，复用同一事务视图，避免"检查-写入"间隙被绕过。
+ */
+export async function assertNotLastOwnerTx(tx: DbTx, targetId: string): Promise<void> {
+  const owners = await usersWithRole("role_owner", tx);
+  if (owners.includes(targetId) && owners.length <= 1) {
+    throw new HttpError(409, "至少保留一位工作区所有者，请先移交所有者再停用");
+  }
+}
+
+export interface LifecycleResult {
+  id: string;
+  status: string;
+  disabledAt: string | null;
+  tokenVersion: number;
+}
+
+function toLifecycleResult(u: {
+  id: string; status: string; disabledAt: Date | null; tokenVersion: number;
+}): LifecycleResult {
+  return {
+    id: u.id,
+    status: u.status,
+    disabledAt: u.disabledAt ? u.disabledAt.toISOString() : null,
+    tokenVersion: u.tokenVersion,
+  };
+}
+
+/**
+ * 停用成员：自停用 400；最后 owner（含部门继承展开）409；
+ * 置 DISABLED+disabledAt+tokenVersion+1，保留全部 membership/授予行；事务提交后失效其缓存态。
+ * 已是 DISABLED 为幂等 no-op（不重复 bump、不触发 owner 检查）。
+ */
+export async function disableUser(actorId: string, targetId: string): Promise<LifecycleResult> {
+  if (actorId === targetId) {
+    throw new HttpError(400, "不能停用自己的账号");
+  }
+  const result = await withWriteTx("org.member.disable", async (tx) => {
+    const user = await tx.user.findUnique({ where: { id: targetId } });
+    if (!user) throw new HttpError(404, "成员不存在");
+    if (user.status === USER_STATUS.DISABLED) return toLifecycleResult(user);
+
+    await assertNotLastOwnerTx(tx, targetId);
+
+    const updated = await tx.user.update({
+      where: { id: targetId },
+      data: {
+        status: USER_STATUS.DISABLED,
+        disabledAt: new Date(),
+        tokenVersion: { increment: 1 },
+      },
+    });
+    return toLifecycleResult(updated);
+  });
+  // tokenVersion 已 +1：即使开了短缓存也主动失效，保证同进程下一次请求即 401。
+  invalidateAuthState(targetId);
+  return result;
+}
+
+/**
+ * 重新激活：DISABLED -> ACTIVE、disabledAt=null、tokenVersion 再 +1（强制重新登录：
+ * 停用前的旧 token 因 tv 已不匹配，激活后依旧不可用，必须重新登录）。
+ * 幂等：已 ACTIVE 直接返回；INVITED 不经此路径（应走邀请接受）-> 400。
+ */
+export async function reactivateUser(actorId: string, targetId: string): Promise<LifecycleResult> {
+  void actorId;
+  const result = await withWriteTx("org.member.reactivate", async (tx) => {
+    const user = await tx.user.findUnique({ where: { id: targetId } });
+    if (!user) throw new HttpError(404, "成员不存在");
+    if (user.status === USER_STATUS.ACTIVE) return toLifecycleResult(user);
+    if (user.status === USER_STATUS.INVITED) {
+      throw new HttpError(400, "待激活账号应通过邀请链接激活，不能直接重新启用");
+    }
+    const updated = await tx.user.update({
+      where: { id: targetId },
+      data: {
+        status: USER_STATUS.ACTIVE,
+        disabledAt: null,
+        tokenVersion: { increment: 1 },
+      },
+    });
+    return toLifecycleResult(updated);
+  });
+  invalidateAuthState(targetId);
+  return result;
 }

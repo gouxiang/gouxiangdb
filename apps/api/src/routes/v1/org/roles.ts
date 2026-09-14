@@ -4,6 +4,7 @@
 import { Hono } from "hono";
 import { requireOrgAction } from "../../../middleware/authActive.js";
 import * as roleAdmin from "../../../domain/org/roleAdmin.js";
+import { audit } from "../../../audit/emit.js";
 
 export const roles = new Hono();
 
@@ -16,7 +17,14 @@ roles.post("/", requireOrgAction("manage_roles"), async (c) => {
   if (!body || typeof body !== "object") {
     return c.json({ error: "请求体必须是 JSON 对象", code: "BAD_REQUEST" }, 400);
   }
-  return c.json(await roleAdmin.createCustomRole(body), 201);
+  const created = await roleAdmin.createCustomRole(body);
+  audit(c, {
+    event: "role_created",
+    status: 201,
+    actorId: c.get("auth").userId,
+    detail: { roleId: created.id, isSystem: false },
+  });
+  return c.json(created, 201);
 });
 
 // PATCH /org/roles/:id（系统角色仅 description）
@@ -35,7 +43,14 @@ roles.delete("/:id", requireOrgAction("manage_roles"), async (c) => {
   const id = c.req.param("id");
   if (!id) return c.json({ error: "缺少角色 id", code: "BAD_REQUEST" }, 400);
   const reassignTo = c.req.query("reassignTo");
-  return c.json(await roleAdmin.deleteRole(id, reassignTo));
+  const result = await roleAdmin.deleteRole(id, reassignTo);
+  audit(c, {
+    event: "role_deleted",
+    status: 200,
+    actorId: c.get("auth").userId,
+    detail: { roleId: id, reassignedTo: reassignTo ?? null },
+  });
+  return c.json(result);
 });
 
 // GET /org/roles/:id/assignments
@@ -54,5 +69,14 @@ roles.put("/:id/assignments", requireOrgAction("manage_roles"), async (c) => {
     return c.json({ error: "请求体必须是 JSON 对象", code: "BAD_REQUEST" }, 400);
   }
   const actorId = c.get("auth").userId;
-  return c.json(await roleAdmin.replaceAssignments(actorId, id, body));
+  const result = await roleAdmin.replaceAssignments(actorId, id, body);
+  if (result.added.length || result.removed.length) {
+    audit(c, {
+      event: "role_assignment_changed",
+      status: 200,
+      actorId,
+      detail: { roleId: id, added: result.added, removed: result.removed },
+    });
+  }
+  return c.json(result);
 });

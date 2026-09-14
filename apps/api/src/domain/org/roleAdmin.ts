@@ -244,12 +244,18 @@ export async function grantRole(
   });
 }
 
+export interface ReplaceAssignmentsResult {
+  assignments: RoleAssignmentDTO[];
+  added: Array<{ subjectType: string; subjectId: string }>;
+  removed: Array<{ subjectType: string; subjectId: string }>;
+}
+
 /** 批量替换角色主体集：与现授予做 diff，撤销缺失、新增多余（一个事务）。 */
 export async function replaceAssignments(
   actorId: string,
   roleId: string,
   body: Record<string, unknown>,
-): Promise<{ assignments: RoleAssignmentDTO[] }> {
+): Promise<ReplaceAssignmentsResult> {
   assertWorkspaceScope(body);
   const subjects = Array.isArray(body.subjects) ? (body.subjects as unknown[]) : [];
   const normalized: AssignmentSubjectInput[] = [];
@@ -271,9 +277,12 @@ export async function replaceAssignments(
 
     const current = await tx.roleAssignment.findMany({ where: { roleId, scopeType: "workspace" } });
     const want = new Set(normalized.map((s) => `${s.subjectType}:${s.subjectId}`));
+    const removed: ReplaceAssignmentsResult["removed"] = [];
+    const added: ReplaceAssignmentsResult["added"] = [];
     for (const a of current) {
       if (!want.has(`${a.subjectType}:${a.subjectId}`)) {
         await tx.roleAssignment.delete({ where: { id: a.id } });
+        removed.push({ subjectType: a.subjectType, subjectId: a.subjectId });
       }
     }
     const have = new Set(current.map((a) => `${a.subjectType}:${a.subjectId}`));
@@ -282,9 +291,10 @@ export async function replaceAssignments(
         await tx.roleAssignment.create({
           data: { roleId, subjectType: s.subjectType, subjectId: s.subjectId, scopeType: "workspace", createdBy: actorId },
         });
+        added.push({ subjectType: s.subjectType, subjectId: s.subjectId });
       }
     }
     const finalRows = await tx.roleAssignment.findMany({ where: { roleId }, orderBy: { createdAt: "asc" } });
-    return { assignments: finalRows.map(toAssignmentDTO) };
+    return { assignments: finalRows.map(toAssignmentDTO), added, removed };
   });
 }
