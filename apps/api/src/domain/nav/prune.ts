@@ -56,45 +56,94 @@ function resourceAncestorsPass(
   return true;
 }
 
-/** group 子树内是否存在对当前主体可见（含祖先门）的资源节点。 */
-function groupHasVisibleContent(
-  group: PruneNode,
-  byId: ReadonlyMap<string, PruneNode>,
-  visible: ReadonlySet<string>,
-): boolean {
-  const prefix = group.path;
-  for (const n of byId.values()) {
-    if (isGroup(n) || !n.path.startsWith(prefix) || n.id === group.id) continue;
-    if (visible.has(n.id) && resourceAncestorsPass(n, byId, visible)) return true;
+/** group 子树内是否含可见资源的 O(n) 索引见 buildGroupContentIndex（S10 前为 O(g*n) 嵌套扫描，已替换）。 */
+
+export interface GroupContentIndex {
+  /** 子树内含"门通过可见资源"的 group id（这些 group 对普通成员保留）。 */
+  contentGroups: ReadonlySet<string>;
+  /**
+   * 构造期访问的【唯一】节点数（线性证明）：记忆化后序遍历每节点恰好求值一次，
+   * 恒等于参与建索引的活节点数，与 group 数量无关（旧 O(g*n) 嵌套全组扫描的替代）。
+   */
+  scanned: number;
+}
+
+/**
+ * O(n) 一次遍历求全部 group 的"子树是否含可见内容"（S10 规模门前置，替代 O(g*n)）：
+ *   1. 按 parentId 建一次 children 邻接（O(n)）；
+ *   2. 自根记忆化后序遍历——资源节点值 = visible 且资源祖先门通过；
+ *      group 节点值 = 任一子树为真，为真即沿闭包记入 contentGroups（可见资源沿父链保 group）。
+ * 每个节点 memo 命中后不再访问，故总访问数恰为节点数；depth 有护栏（32），森林按根遍历。
+ */
+export function buildGroupContentIndex(idx: PruneIndex): GroupContentIndex {
+  const byId = new Map<string, PruneNode>(idx.allNodes.map((n) => [n.id, n]));
+  const children = new Map<string, PruneNode[]>();
+  const roots: PruneNode[] = [];
+  for (const n of idx.allNodes) {
+    if (n.parentId && byId.has(n.parentId)) {
+      const arr = children.get(n.parentId) ?? [];
+      arr.push(n);
+      children.set(n.parentId, arr);
+    } else {
+      roots.push(n); // parentId=null 或父不在活节点集（森林根/悬挂根）
+    }
   }
-  return false;
+
+  const contentGroups = new Set<string>();
+  const memo = new Map<string, boolean>();
+  let scanned = 0;
+  const subtreeHasVisible = (n: PruneNode): boolean => {
+    const cached = memo.get(n.id);
+    if (cached !== undefined) return cached;
+    scanned += 1; // 每个节点仅在 memo miss 时计一次
+    let has: boolean;
+    if (isGroup(n)) {
+      has = false;
+      for (const ch of children.get(n.id) ?? []) {
+        if (subtreeHasVisible(ch)) has = true;
+      }
+      if (has) contentGroups.add(n.id);
+    } else {
+      has = idx.visible.has(n.id) && resourceAncestorsPass(n, byId, idx.visible);
+    }
+    memo.set(n.id, has);
+    return has;
+  };
+
+  for (const r of roots) subtreeHasVisible(r);
+  // 防御补扫：父在 allNodes 外的悬挂分支理论上已作 root 入列；此处兜底保证全覆盖且不重复计数。
+  for (const n of idx.allNodes) {
+    if (!memo.has(n.id)) subtreeHasVisible(n);
+  }
+  return { contentGroups, scanned };
 }
 
 /**
  * 权威树后置剪枝。输入为某个读窗口取出的活节点行；输出保留行 + dimmed 标记（A-6）。
  * 资源行：自身可见且资源祖先门通过；group 行：管理能力者全保留（空者 dimmed），
  * 普通成员仅在子树含可见资源时保留（不 dimmed）。
+ * group 保活判定经 buildGroupContentIndex 一次遍历预算（O(n)），不再每 group 全组扫描。
  */
 export function pruneTreeRows<T extends PruneNode>(rows: readonly T[], idx: PruneIndex): PrunedNode<T>[] {
   const byId = new Map<string, PruneNode>(idx.allNodes.map((n) => [n.id, n]));
-  for (const r of rows) if (!byId.has(r.id)) byId.set(r.id, r);
-  const groupKept = new Map<string, boolean>();
-  const groupDimmed = new Map<string, boolean>();
-
-  const keepGroup = (g: PruneNode): boolean => {
-    const hit = groupKept.get(g.id);
-    if (hit !== undefined) return hit;
-    const hasContent = groupHasVisibleContent(g, byId, idx.visible);
-    const kept = hasContent || idx.manageAll;
-    groupKept.set(g.id, kept);
-    groupDimmed.set(g.id, !hasContent); // 普通成员能到这里必有 content；dimmed 只影响管理能力者
-    return kept;
-  };
+  // 与旧实现一致：把读窗口内可能多出的节点并入判定集（正常路径 prepared.nodes 已是全量活节点）。
+  const merged: PruneNode[] = [...idx.allNodes];
+  for (const r of rows) {
+    if (!byId.has(r.id)) {
+      byId.set(r.id, r);
+      merged.push(r);
+    }
+  }
+  // 用合并集做一次 O(n) 内容索引（窗口额外 group 也参与保活/dimmed 判定）。
+  const { contentGroups } = buildGroupContentIndex({ visible: idx.visible, allNodes: merged, manageAll: idx.manageAll });
 
   const out: PrunedNode<T>[] = [];
   for (const row of rows) {
     if (isGroup(row)) {
-      if (keepGroup(row)) out.push({ row, dimmed: groupDimmed.get(row.id) === true });
+      const hasContent = contentGroups.has(row.id);
+      if (hasContent || idx.manageAll) {
+        out.push({ row, dimmed: !hasContent }); // 普通成员能保留必有 content；dimmed 仅落管理能力者空容器
+      }
       continue;
     }
     if (resourceAncestorsPass(row, byId, idx.visible)) out.push({ row, dimmed: false });

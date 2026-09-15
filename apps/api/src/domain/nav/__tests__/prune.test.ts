@@ -3,7 +3,14 @@
 // 管理者 dimmed、菜单容器递归保留、shortcut 只看自身 r、面包屑根端孤立 group 截断。
 
 import { describe, expect, it } from "vitest";
-import { pruneTreeRows, pruneMenuRows, pruneBreadcrumb, type PruneNode, type PruneIndex } from "../prune.js";
+import {
+  pruneTreeRows,
+  pruneMenuRows,
+  pruneBreadcrumb,
+  buildGroupContentIndex,
+  type PruneNode,
+  type PruneIndex,
+} from "../prune.js";
 
 function node(id: string, kind: string, parentId: string | null, path: string, resourceType: string | null = null): PruneNode {
   return { id, parentId, kind, path, resourceType: resourceType ?? (kind === "group" ? null : kind) };
@@ -104,4 +111,76 @@ describe("pruneBreadcrumb 中性截断", () => {
     expect(r.truncatedAbove).toBe(true);
   });
 
+});
+
+describe("buildGroupContentIndex O(n) 一次遍历（S10 规模门前置，替代 O(g*n)）", () => {
+  /**
+   * 深层多组夹具：1 可见根 base；深度 D 的 group 链，每层 G_d 挂一个可见 doc V_d（祖先门通过）；
+   * 另有一条从不可见根 H 起的同深链挂 doc W（visible 但祖先门不通过）。
+   * 确定性构造，节点总数 = 1 + 3D + 1。
+   */
+  function build(depth: number): { nodes: PruneNode[]; visible: Set<string>; goodGroups: string[]; badGroups: string[] } {
+    const nodes: PruneNode[] = [node("B", "base", null, "/B/")];
+    const visible = new Set<string>(["B"]);
+    const goodGroups: string[] = [];
+    const badGroups: string[] = [];
+    let prev = "B";
+    let p = "/B/";
+    for (let d = 1; d <= depth; d++) {
+      const g = `G${d}`;
+      const gp = `${p}${g}/`;
+      nodes.push(node(g, "group", prev, gp));
+      goodGroups.push(g);
+      const v = `V${d}`;
+      nodes.push(node(v, "doc", g, `${gp}${v}/`));
+      visible.add(v); // doc 自身可见，且祖先 B 可见 -> 门通过
+      prev = g;
+      p = gp;
+    }
+    // 不可见资源根 H：其下 doc 虽在 visible 集，但资源祖先 H 不可见 -> 门不通过。
+    nodes.push(node("H", "base", null, "/H/"));
+    let hprev = "H";
+    let hp = "/H/";
+    for (let d = 1; d <= depth; d++) {
+      const g = `HG${d}`;
+      const gp = `${hp}${g}/`;
+      nodes.push(node(g, "group", hprev, gp));
+      badGroups.push(g);
+      const w = `W${d}`;
+      nodes.push(node(w, "doc", g, `${gp}${w}/`));
+      visible.add(w); // 自身 visible，但 H 不可见 -> 整枝不判为可见内容
+      hprev = g;
+      hp = gp;
+    }
+    return { nodes, visible, goodGroups, badGroups };
+  }
+
+  it("scanned 恒等于活节点数（记忆化每节点恰好求值一次），不随 group 数二次增长", () => {
+    const f10 = build(10);
+    const idx10: PruneIndex = { visible: f10.visible, allNodes: f10.nodes, manageAll: false };
+    const r10 = buildGroupContentIndex(idx10);
+    expect(r10.scanned).toBe(f10.nodes.length);
+
+    const f40 = build(40);
+    const idx40: PruneIndex = { visible: f40.visible, allNodes: f40.nodes, manageAll: false };
+    const r40 = buildGroupContentIndex(idx40);
+    expect(r40.scanned).toBe(f40.nodes.length);
+    // O(g*n) 旧法在 depth=40 会做约 g*n 次节点访问；线性断言远小于该量级。
+    expect(r40.scanned).toBeLessThan(f40.nodes.length * 2);
+  });
+
+  it("深层多组：可见链上每层 group 保活；不可见根 H 整枝 group 不保活（语义零变化）", () => {
+    const f = build(20);
+    const idx: PruneIndex = { visible: f.visible, allNodes: f.nodes, manageAll: false };
+    const { contentGroups } = buildGroupContentIndex(idx);
+    for (const g of f.goodGroups) expect(contentGroups.has(g), g).toBe(true);
+    for (const g of f.badGroups) expect(contentGroups.has(g), g).toBe(false);
+    // 经 pruneTreeRows：普通成员只见 B + 好链 group/doc，不见 H 整枝（含 visible 但门不过的 W）。
+    const kept = pruneTreeRows(f.nodes, idx).map((k) => k.row.id);
+    expect(kept).toContain("B");
+    expect(kept).not.toContain("H");
+    expect(kept).not.toContain("W1");
+    expect(kept).toContain("G20");
+    expect(kept).not.toContain("HG1");
+  });
 });
