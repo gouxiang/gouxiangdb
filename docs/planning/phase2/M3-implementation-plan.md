@@ -1,6 +1,6 @@
 # M3 统一导航资源树 — 可执行实施切片（设计与现状核对，不改业务码）
 
-- 日期：2026-09-16（2026-09-16 按项目总监 §10 十项裁决终审修订；**2026-09-14 按总监方案 A（裁决日 2026-09-12）修订 §5.3/§5.4/S2-S4/§10/DoD 的 C4 分级与运行期收纳口径，新增 ADR-0025，M3 候选 ADR 顺延为 0026-0031，M4-M7 计划候选编号连锁顺延一位**）
+- 日期：2026-09-16（2026-09-16 按项目总监 §10 十项裁决终审修订；**2026-09-18 按总监派工（task#175）在 §7-S11 新增 S11-A：生产可运行 nav path 重算入口（esbuild 双入口 → dist/cli/nav-reconcile.js）+ deploy.sh/docker-entrypoint migrate 后接线，失败 die 在切换前、快照回滚；M7 §3.1 登记为 AC-UPG-1 前置检查；runbook deploy/restore/README 同步（纯文档修订，不改业务码）**；**2026-09-14 按总监方案 A（裁决日 2026-09-12）修订 §5.3/§5.4/S2-S4/§10/DoD 的 C4 分级与运行期收纳口径，新增 ADR-0025，M3 候选 ADR 顺延为 0026-0031，M4-M7 计划候选编号连锁顺延一位**）
 - 作者：架构师 高见远
 - 状态：**终审通过（Accepted，总监十项裁决已回填，见 §10）**；实施排期由项目总监统一调度，S1-S4 虽可先行但未获派工不得开工（裁决 10：M2-S2 在途，后端实施保持单线 M2 收口 → M3）
 - 上游依据：SPEC-enterprise-v1.0 §2（M3 行，:23 P0）/§5（:62-69 `/api/v1/workspaces/current/tree|menu`、openapi 冻结点 :62）/§6（:85 nav_nodes/menu_items/auth_policies 表清单）/§7（:95-96 工作区外壳/一级三类列表）/§8（:109 单一 SVG 图标体系）/§9（AC-M3-1，:119）/§10（:134 资源 10 万节点首屏 <1s）/§11（:144 画布坑位）/§12；PRD-enterprise §支柱2（N1 :132 / N2 :133 / N3 :134 / N4 :135 / N5 :136 / N6 :137）/C-1（:308）/C-7（:314）/C-11（:318）/C-12（:319）/§六 M3（:253-258）；ARCH-enterprise §3.1（两层模型，:135-166）/§3.2（Prisma 草案，:168-278）/§3.3（迁移回填，:280-294）/§3.4（menu_items 行为级联，:296-313）/§9（:849 openapi M3 冻结）；UIUX-enterprise §1（:51-77）/§2（线框:84-179、设置收拢:203-234）/§5（路由建议:531-545）；M2 实施计划（`docs/planning/phase2/M2-implementation-plan.md`）§2.2（:105 明确划给 M3 的边界）、§4.1（GX_ENTERPRISE_ORG flag）、§5-A（manage_menu 留 M3，:193）
@@ -389,7 +389,7 @@ scripts/nav/
 | S8 | 前端新外壳骨架：WorkspaceShell/顶栏/左下设置区/flag 回退/通讯录入口收敛 | 前端 | features/workspace/*；App.tsx 路由分组；main 包壳；旧两壳保留 | web 只增；旧壳 flag off 路径回归 | S7 | S7 后与 S9 分段并行 |
 | S9 | 一级导航渲染+编排器（N2/N4）+ 二级三分区列表（N3 二级 P0：全部/未收纳/已收纳或等价结构，无收藏无最近）+ N6 预览模态 | 前端 | features/workspace/{PrimaryNav,NavComposer,SecondaryNav,MoveImpactModal}；client/hooks；icons 追加 | web 只增 | S8、S6 | S8 后 |
 | S10 | 旧链兼容/别名 + AC-M3-1 对抗 + C-12 三态 + 画布 R10 回归 + 10 万节点首屏性能 | 混合 | routes/v1/__tests__；web 测试；造数脚本；RC 增补 | 只增测试 | S3、S9 | 收尾 |
-| S11 | 出口收口：ADR/40RC/flag 生命周期/runbook/baseline 报告 | 文档+验证 | docs/adr、docs/baseline、docs/runbooks | 无 | 全部 | 收尾 |
+| S11 | 出口收口：**S11-A 生产 nav path 重算入口 + deploy/entrypoint 接线（必做，task#175）**、ADR/40RC/flag 生命周期/runbook/baseline 报告 | 后端+文档+验证 | scripts/build.mjs；scripts/nav/reconcile-nav.ts；deploy/bin/deploy.sh；deploy/docker/docker-entrypoint.sh；package-release.mjs 断言；ci-quality.sh；docs/adr、docs/baseline、docs/runbooks | 只增构建入口/部署步骤；migrate 后、切换前执行，幂等，失败不切换 | 全部 | 收尾 |
 
 关键路径：S0/S1 → S2 → S3 → S5 → S6 → S7 → S8 → S9 → S10 → S11（S4 在 S3 后并行收；后端两人时 S3 与 S5 可并行，因为文件集不重叠：S3 动旧路由，S5 只加 v1 新文件）。
 
@@ -599,11 +599,61 @@ pnpm --filter @gx/web typecheck && pnpm --filter @gx/web build && pnpm -w test
 
 ### S11 — 出口收口
 
+#### S11-A（M3-S8 真机验证抓出的交付缺口，必做，task#175）：生产可运行的 nav path 重算入口 + deploy 链路接线
+
+**缺口事实（2026-09-18 已逐处核实）**：
+
+- 迁移 `20260916093000_enterprise_nav_backfill` 只给根节点（base/kb）写 path，**非根节点 path 初始留空（depth=0）**（迁移 SQL 注释 :10、:60、:99 自述"path 待脚本重建"）；设计上由应用层 `scripts/nav/reconcile-nav.ts --apply` 首跑全量重算。**不跑的真实后果（前端 M3-S8 对本地 dev.db 实证）**：tree 深层索引缺节点（`@@index([path])` 前缀查询命不中空 path 后代）、menu shortcut 全部 disabled；手动执行后 `pathsRebuilt=11` 导航才正常。
+- `deploy/bin/deploy.sh:104-120` 只有 `prisma migrate deploy`，无 reconcile；`deploy/docker/docker-entrypoint.sh:14-16` 同。
+- 生产发布物**带不到** reconcile：`deploy/bin/package-release.mjs:83-94` 白名单只拷 `dist/`（构建单入口 `src/index.ts` → 仅 `dist/index.js`，见 `scripts/build.mjs:45-61`）、`prisma/`、`scripts/backup/`；`scripts/nav/` 不拷。Docker 镜像 `deploy/docker/Dockerfile:89-92` 同白名单。仓内唯一入口 `apps/api/scripts/nav/reconcile-nav.ts` 是 **tsx 源码脚本**（import `../../src/*.js`），生产包无 tsx、无 src，无法运行。
+- grep `docs/runbooks/` 五个文件无任何 `reconcile-nav` 步骤。
+
+**实现方案评估（两案，必须在本片定案）**：
+
+| 方案 | 做法 | 评价 |
+|---|---|---|
+| **A（推荐）** | esbuild 多入口：把 `scripts/nav/reconcile-nav.ts` 作为第二个 entry 打进 `dist/cli/nav-reconcile.js`（与 dist/index.js 同 external 策略：@prisma/client/better-sqlite3 外置），随现有 `dist/` 白名单自动进裸机发布物与 Docker 镜像；deploy.sh / entrypoint 在 migrate 后调 `node dist/cli/nav-reconcile.js --apply` | 与 ADR-0021 esbuild 扁平构建自洽；发布包继续零 TS 源码/零 tsx；reconcile 依赖 src 下 6 个 TS 模块（reconcile/backfill/tree/databaseFile/config/audit + @prisma/client），本就该 bundle 而非手工镜像（backup 脚本能走纯 .mjs 白名单是因为它只依赖 node 内置 + better-sqlite3）；`package-release.mjs:85` 与 Dockerfile:89 都是整目录拷 `dist/`，**分发侧零改动** |
+| B（否决） | deploy.sh 调"固定 node 入口"——把 tsx 与 src/ 打进发布包，或再手写一份纯 .mjs 镜像 reconcile 逻辑 | 生产包引入构建期工具链（tsx 是 devDep），与 ADR-0021/M0 打包纪律冲突；手写 .mjs 镜像 reconcile/backfill 规则会制造第二套真相，违反 §5.4"禁止另写一套规则"；databaseFile.ts 文件头已声明手工镜像的同步负担，不应再添一处 |
+
+**S11-A 触碰文件与改动点（推荐方案 A）**：
+
+1. `apps/api/scripts/build.mjs`：`entryPoints` 从单入口改为双入口（`src/index.ts`→`dist/index.js`、`scripts/nav/reconcile-nav.ts`→`dist/cli/nav-reconcile.js`，`outfile` 改 `outdir`，external/define/target 不变）。
+2. `apps/api/scripts/nav/reconcile-nav.ts`：**切断对 `src/config.ts` 的 import**（现 :23 `import { config }` 仅为拿 `config.auditDir`）。config.ts 顶层有生产启动闸门（缺 JWT_SECRET/CORS_ORIGIN 即 `process.exit(2)`），而运维通道（restore.md §7）只注入 DATABASE_URL——CLI bundle 一旦内化该闸门，恢复场景会被错误退出码 2 阻断。改法：把 auditDir 解析抽为无闸门纯模块（如 `src/audit/audit-dir.ts`，读 `GX_AUDIT_DIR`，缺省按 NODE_ENV 回落），config.ts 与 CLI 各自引用；CLI 不做任何服务进程配置校验。**不允许**用"deploy.sh 补注入 JWT_SECRET"绕过。
+3. `deploy/bin/deploy.sh`：在第 4) 步 migrate deploy 成功后、第 5) 步 `mv "$STAGE"`/`ln -sfn`/restart（即任何流量恢复动作）**之前**，在 `$STAGE/api` 用新版本 CLI 执行一次：
+   `DATABASE_URL="$DATABASE_URL" "$NODE_BIN" dist/cli/nav-reconcile.js --apply`（审计目录随 env.conf 的 GX_AUDIT_DIR，缺省 /var/log/gouxiangdb）。失败姿态与 migrate 失败同构：**die 在原子切换之前**——current 仍指旧版本、旧进程继续服务（迁移只增且向后兼容）；脚本输出明确指引"nav path 重算失败，未切换新版本；**回滚点 = 本次发布前在线快照（步骤 2 已强制完成），按 docs/runbooks/restore.md 从快照恢复，或排障后重跑 deploy.sh**"。不做脚本内自动恢复（与现有 migrate 失败 die 姿态一致；快照恢复是值守决策，自动恢复反而扩大动作面），但**快照回滚必须是失败信息中明示的第一处置路径**。
+4. `deploy/docker/docker-entrypoint.sh`：在 `prisma migrate deploy`（:14-16）成功后、`exec node dist/index.js`（:20）之前加同一命令（cwd 已是 API_DIR；`GX_AUDIT_DIR=/data/log` 已由 Dockerfile:110 注入）；失败即非零退出，容器不启动不接流量（沿用该文件头注释既有姿态，compose restart 策略接管）。
+5. `deploy/bin/package-release.mjs`：:84 附近增加一条构建产物断言 `api/dist/cli/nav-reconcile.js` 存在（与 dist/index.js 同级 fail-fast）；白名单本身无需改。`deploy/docker/Dockerfile` 无需改（:89 整目录 COPY dist）。
+6. CI 干跑链路（`scripts/ci-quality.sh` 迁移干跑段）：临时库 `migrate deploy` 后增加一次该 CLI `--apply`，断言 exit 0 且输出含 `pathsRebuilt`（首次）/二次 `no changes`，把"迁移后必须重算"固化成门而不只是文档约定。
+
+**接线语义（写进脚本注释与 runbook，不得被实现稀释）**：
+
+- **幂等**：每次部署/启动都执行；第二次起 `no changes`、exit 0，不产生副作用（§5.4 重复回填安全性）。
+- **只重算派生 path/depth 并修复 nav_nodes 阻断类差异（A/B/C1-C3）**；**不自动补任何 menu shortcut**——C4 未收纳始终是 warning（ADR-0025），运行期新建实体的菜单收纳唯一入口是 S6 写 API。warning 非零不影响 exit 0。
+- 首次升级（M3 前旧库）：迁移 B 已做存量初始全收纳，reconcile 后期望阻断 0、C4 warning 也为 0（S2 存量基线）。
+- 恢复场景（restore.md）同样必须执行：恢复点可能早于 nav 迁移或 path 不完整，migrate deploy 补迁移后该步把派生数据修到与新代码一致。
+
+**S11-A 验收**：
+```bash
+# 构建机：双入口产物齐备
+node apps/api/scripts/build.mjs && test -f apps/api/dist/cli/nav-reconcile.js
+node deploy/bin/package-release.mjs    # 包内 api/dist/cli/nav-reconcile.js 存在，无 tsx/src
+# 真库演练（v0.1.0 风格快照 → 新版发布物）：
+( cd <stage-api> && DATABASE_URL=file:/abs/app.db node dist/cli/nav-reconcile.js --apply )  # 首次 pathsRebuilt=N，exit 0
+( cd <stage-api> && DATABASE_URL=file:/abs/app.db node dist/cli/nav-reconcile.js --apply )  # no changes，exit 0
+# 仅注入 DATABASE_URL（restore 姿态）也必须 exit 0，不被配置闸门 exit 2 拦截
+# 故障注入：临时把某节点 name 改错后重跑部署 → deploy.sh die 在切换前，current 不动、旧版本仍服务
+bash -n deploy/bin/deploy.sh deploy/docker/docker-entrypoint.sh
+```
+
+**S11-A 与 M7 的衔接（AC-UPG-1 前置检查项）**：M7 总验收门②（M7 计划 §3.1）旧库直升路径中，`prisma migrate deploy` 跑完终态迁移后、候选构建接流量前，**必须经部署链路自动执行一次本入口并留证**（exit 0；二次 no changes；阻断差异 0）；人工绕开 deploy.sh/entrypoint 的直升演练同样要补跑该命令，否则 AC-UPG-1 判不通过（不跑 = tree 深层缺节点、shortcut 全 disabled，属升级损坏）。已同步登记到 M7 计划 §3.1。
+
+#### S11 其余收口项
+
 - ADR（docs/adr/）：ADR-0025 已归档（方案 A，2026-09-14），其余候选见 §8；40 RC + S0 characterization 复跑逐值绿。
 - openapi.yaml 与 shared-types/真实响应对拍无 diff；`docs/api/` 下补一份"枚举/错误码表"。
 - flag 生命周期文档：GX_ENTERPRISE_NAV 稳定一个迭代后随 M4 或下一期删旧壳与 off 分支（PRD :258 承诺保留一个迭代）；菜单不剪枝的 M4 翻转点写入 M4 输入清单。
 - runbook 增章："导航树差异排查与 reconcile 执行（阻断 A/B/C1-C3 vs warning C4 未收纳/C5/C1S 的处置口径）"、"实体在菜单里找不到（未收纳是正常编排态：经二级'全部'列表或 S6 编排收纳）"、"新壳回退旧壳（flag）"、"move 误操作恢复（快照指引）"。
-- baseline 收口：测试计数、迁移数 14→16、10 万节点性能、升级演练（v0.1.0 风格库 → deploy → reconcile → 存量基线零阻断且 C4=0 抽样：每个活 table/根级活 doc/活 canvas 恰好一条 shortcut）。
+- baseline 收口：测试计数、迁移数 14→16、10 万节点性能、升级演练（v0.1.0 风格库 → deploy.sh（或 Docker entrypoint）全链路：migrate deploy → **dist/cli/nav-reconcile.js --apply 自动执行（S11-A，非人工补跑）** → 切换接流量；存量基线零阻断且 C4=0 抽样：每个活 table/根级活 doc/活 canvas 恰好一条 shortcut）。
 
 ---
 
@@ -724,4 +774,4 @@ bash scripts/ci-quality.sh
 | S8 | 新外壳骨架+设置收敛+通讯录并入 | features/workspace/*；App.tsx；featureFlags | flag on 新壳达全部旧 URL；off 自动回退旧两壳 | **是** |
 | S9 | 一级导航/编排器/二级三分区/N6 模态 | PrimaryNav/NavComposer/SecondaryNav/MoveImpactModal | N2/N4/N6 + N3 二级 P0（无收藏无最近）端到端可用，AC 预演通过 | **是** |
 | S10 | 兼容/对抗/画布/10 万性能 | v1 __tests__；web 测试；造数脚本；RC | AC-M3-1 八条全绿、旧链 0 损坏、menu 首屏 <1s、无 SCAN | 混合 |
-| S11 | 收口 | ADR-0025~0031；40RC；runbook；baseline | RC/characterization 逐值绿、升级演练存量基线 C4=0、文档齐备 | 否 |
+| S11 | 收口（含 S11-A 部署接线） | build.mjs 双入口；reconcile-nav.ts 去 config 闸门；dist/cli/nav-reconcile.js；deploy.sh/entrypoint 迁移后接线；package-release 断言；runbook；ADR-0025~0031；40RC；baseline | 旧库经部署链路升级后 CLI --apply exit 0（首跑 pathsRebuilt、二跑 no changes）、失败 die 在切换前、RC/characterization 逐值绿、存量基线 C4=0、文档齐备 | 否 |

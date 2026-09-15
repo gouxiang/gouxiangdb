@@ -152,6 +152,7 @@
 
 - 起点 = tag `v0.1.0` 代码对一份**特征旧库**（不是当前 dev.db）：用 v0.1.0 代码/迁移建库并播种五类对象；起点版本记录在报告。
 - 路径 = 一条直线 `prisma migrate deploy` 跑完终态全部迁移（现 14，门时预计约 22~24），**中间不允许逐里程碑人工修补**；部署到候选发布构建后做抽样。
+- **【M3-S11-A 前置检查，task#175】迁移成功后、候选构建接流量前，部署链路必须自动执行一次 nav path 重算**（裸机 `deploy.sh` 与 Docker `docker-entrypoint.sh` 均在 migrate deploy 之后接线 `node dist/cli/nav-reconcile.js --apply`，入口由 M3-S11-A 经 esbuild 双入口构建产出并随发布物分发；最终入口/文件名以 M3-S11-A 实现为准）。判定：exit 0；首跑输出 `pathsRebuilt=N`（非根节点 path/depth 由迁移留空派生，见迁移 20260916093000 注释），二次执行 `no changes`（幂等）；阻断差异 A/B/C1-C3 = 0。该步只重算派生 path、修复 nav_nodes，**不自动补 menu shortcut**（C4 未收纳为 warning，ADR-0025）。绕开部署链路的人工直升演练必须在 migrate 后手动补跑同一入口，否则 AC-UPG-1 判不通过——不跑则 tree 深层索引缺节点、菜单 shortcut 全部 disabled（M3-S8 真机实证），属升级损坏。详见 M3 实施计划 §7-S11-A。
 - 既有自动化先例必须纳入并扩展：M2 s8-upgrade-drill.test.ts 已覆盖 12→14 组织迁移（owner 自举恰好一行、全 ACTIVE/ws_default、幂等）；M7 的演练是它的超集（起点更早、对象更全、含 search.db 重建与 PAT 新表），**不替代它**。
 - 每个里程碑出口已各自做过升级演练（M2 12→14、M3 v0.1.0 风格库、M4 20 主体对拍）；M7 只认真库全程一次的结果 + 各里程碑证据链接。
 

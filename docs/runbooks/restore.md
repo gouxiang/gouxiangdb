@@ -83,6 +83,21 @@ sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
   pnpm exec prisma migrate deploy
 ```
 
+## 7.5 nav path 重算（幂等，M3 起必须）
+
+恢复点可能早于 nav 迁移或其派生 path 不完整。迁移之后、启动服务之前，必须执行一次 nav path 重算；
+它幂等地只重算 `nav_nodes` 派生 `path/depth`、修复阻断类差异，**不补任何菜单快捷项**（未收纳 C4 只是
+warning，ADR-0025）。该入口由 M3-S11-A 构建进发布包（推荐形态 `dist/cli/nav-reconcile.js`，
+**最终入口路径/文件名以 M3-S11-A 实现为准**；落地前生产包内不存在该入口，不得照占位命令臆造）：
+
+```bash
+cd /srv/gouxiangdb/current/api
+sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
+  node dist/cli/nav-reconcile.js --apply        # 占位命令，最终入口以 M3-S11-A 实现为准
+# 期望：exit 0；再跑一次输出 no changes、exit 0（幂等）。
+# 非零：不得启动服务；恢复点库与当前版本不兼容，按 §9 回滚本次恢复后重新评估。
+```
+
 ## 8. 启动并验证
 
 ```bash
@@ -96,7 +111,7 @@ curl -fsS http://127.0.0.1:3001/readyz           # 五项 true，migration 与�
 ## 9. 回滚本次恢复
 
 恢复后如发现选错点：停 API，把 `_quarantine/app.db.$TS.bak*` 还原为 `app.db(+wal/+shm)`，
-重新 `migrate deploy`、启动、`/readyz`。
+重新 `migrate deploy`、按 §7.5 重跑 nav path 重算（幂等）、启动、`/readyz`。
 
 ## 10. 演练要求
 

@@ -6,9 +6,9 @@ M0 生产基座的可执行运维流程。所有手册与仓内脚本/配置一�
 
 | 手册 | 用途 | 关键入口 |
 |------|------|----------|
-| [deploy.md](deploy.md) | 干净 Linux 机从零装机、打包投递、首次部署、证书（公网自动 HTTPS / 内网 CA）、升级与回滚、卸载 | `deploy/bin/package-release.mjs`、`deploy/bin/deploy.sh`、`deploy/bin/rollback.sh`、`deploy/caddy/Caddyfile`、`deploy/systemd/*` |
+| [deploy.md](deploy.md) | 干净 Linux 机从零装机、打包投递、首次部署、证书（公网自动 HTTPS / 内网 CA）、升级与回滚、卸载；M3 起迁移后必须 nav path 重算（§6.6） | `deploy/bin/package-release.mjs`、`deploy/bin/deploy.sh`、`deploy/bin/rollback.sh`、`deploy/caddy/Caddyfile`、`deploy/systemd/*` |
 | [backup.md](backup.md) | 在线一致性备份、daily7/weekly4 保留、异地 age 加密、手动备份 | `apps/api/scripts/backup/online-backup.mjs`、`deploy/systemd/gouxiangdb-backup.{service,timer}` |
-| [restore.md](restore.md) | 从备份恢复：临时库校验、隔离现网、就位、migrate deploy、readyz 验收 | `apps/api/scripts/backup/verify-restore.mjs` |
+| [restore.md](restore.md) | 从备份恢复：临时库校验、隔离现网、就位、migrate deploy、nav path 重算（§7.5）、readyz 验收 | `apps/api/scripts/backup/verify-restore.mjs` |
 | [wal-crash-recovery.md](wal-crash-recovery.md) | SQLite WAL/-shm 崩溃恢复纪律（禁止凭感觉手删旁路文件） | 库文件三件套处理流程 |
 | [m1-sidecar.md](m1-sidecar.md) | M1 数据底座：sidecar 巡检/重建、功能 flag 回退、大表与搜索有界预览边界 | `scripts/bench/{check,backfill}-sidecar.ts`、`GX_M1_*` flag |
 | [org-contacts.md](org-contacts.md) | M2 组织通讯录：flag off 紧急收回、停用后仍可访问排查、默认工作区/owner 修复、邀请重发、只增不删回滚姿态 | `GX_ENTERPRISE_ORG`、`GX_AUTH_STATE_TTL_MS`、`/api/v1/org/*` |
@@ -26,6 +26,7 @@ M0 生产基座的可执行运维流程。所有手册与仓内脚本/配置一�
 - [ADR-0022](../adr/0022-org-token-version-revocation.md)：tokenVersion 账号级即时吊销（默认零缓存、单实例纪律）
 - [ADR-0023](../adr/0023-materialized-path-dept-tree.md)：部门树物化路径、移动子树重写、32 护栏
 - [ADR-0024](../adr/0024-org-role-vs-resource-role-layering.md)：组织角色与资源角色物理分层，M4 auth_policies 衔接点
+- [ADR-0025](../adr/0025-runtime-entities-uncollected-by-default.md)：运行期实体默认未收纳（nav 重算只修派生 path/节点，不自动补菜单快捷项）
 
 ## 速查
 
@@ -37,7 +38,7 @@ bash scripts/ci-quality.sh
 node deploy/bin/package-release.mjs
 cd release && shasum -a 256 -c checksums.txt
 
-# 目标机部署 / 回滚
+# 目标机部署 / 回滚（deploy.sh 迁移后自动幂等执行 nav path 重算，M3 起；详见 deploy.md §6.6）
 sudo bash deploy/bin/deploy.sh --release release/gouxiangdb-release-*.tar.gz
 sudo bash deploy/bin/rollback.sh
 

@@ -16,6 +16,7 @@
 - 单实例：不开 cluster、不部署副本；Caddy 与 Node 同机。
 - Node 仅监听回环，外部靠主机防火墙禁止直连 3001。
 - 迁移只由 `deploy.sh` 在“先快照后”显式 `prisma migrate deploy`，不挂开机/重启自动迁移。
+- **M3 起**：迁移成功后、版本切换/服务接流量前，部署链路必须幂等执行一次 **nav path 重算**（见 §6.6），否则旧库升级后导航树深层缺节点、菜单快捷项全部失效。
 
 ## 2. 前置条件
 
@@ -100,10 +101,40 @@ sudo systemctl reload caddy
 
 # 6.5 验收
 curl -fsS http://127.0.0.1:3001/healthz
-curl -fsS http://127.0.0.1:3001/readyz      # 五探针 true、migrations applied 与迁移目录数一致（M1 起为 12）
+curl -fsS http://127.0.0.1:3001/readyz      # 五探针 true、migrations applied 与迁移目录数一致
 curl -fsS https://gx.example.com/healthz
 systemctl list-timers gouxiangdb-backup.timer   # 未 enable 时显示 n/a 或不列出，属预期
 ```
+
+## 6.6 nav path 重算（幂等，M3 起必须）
+
+`deploy.sh` 的固定顺序是：在线快照 → 解包校验 → `prisma migrate deploy` → **nav path 重算** → 原子切换 + restart。
+nav 回填迁移（`20260916093000_enterprise_nav_backfill`）只给根节点写 path，非根节点的 `path/depth`
+留空（默认 `''/0`），设计上由应用层重算入口首跑补齐；**不跑则 tree 深层索引缺节点、菜单快捷项全部
+disabled**（M3-S8 真机实证）。重算失败时脚本 die 在原子切换之前，current 仍指旧版本、旧进程继续服务，
+按 [restore.md](restore.md) 评估从发布前快照恢复或排障后重跑部署，不允许带着空 path 切流量。
+
+- 入口由 **M3-S11-A** 提供：经 esbuild 构建进发布包的生产 CLI（推荐形态 `api/dist/cli/nav-reconcile.js`，
+  裸机发布物与 Docker 镜像随 `dist/` 白名单自带，无需 tsx/源码）。**最终入口路径/文件名以 M3-S11-A
+  实现为准**；该切片落地前仓内只有开发态源码脚本 `apps/api/scripts/nav/reconcile-nav.ts`（tsx），
+  生产包尚不可用，不要在目标机臆造命令。
+- 手工补跑/排障（在新版本发布目录内；命令以 S11-A 落地后的实际入口为准）：
+
+```bash
+cd /srv/gouxiangdb/current/api
+sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
+  node dist/cli/nav-reconcile.js --apply      # 占位命令，最终入口以 M3-S11-A 实现为准
+# 期望：首次 pathsRebuilt=N、exit 0；再跑一次输出 no changes、exit 0（幂等）
+```
+
+语义边界（与 ADR-0025 一致）：
+
+- **幂等**：每次部署都执行，二次起 `no changes`，无副作用；只重算派生 `path/depth`、修复 nav_nodes
+  阻断类差异（A/B/C1-C3）。
+- **不自动补菜单快捷项**：未收纳实体（C4）始终只是 warning，运行期收纳唯一入口是 M3 菜单写 API；
+  warning 非零不影响 exit 0。
+- Docker 部署同一顺序内置于 `deploy/docker/docker-entrypoint.sh`（migrate 后、`node dist/index.js` 前），
+  失败容器不启动、不接流量。
 
 ## 7. 证书两条路径
 
@@ -118,7 +149,7 @@ systemctl list-timers gouxiangdb-backup.timer   # 未 enable 时显示 n/a 或�
 ## 8. 日常升级与回滚
 
 ```bash
-# 升级：脚本自动先做在线快照、迁移、原子切换、30s readyz 轮询，失败自动回滚到上一版
+# 升级：脚本自动先做在线快照、迁移、nav path 重算（M3 起，§6.6）、原子切换、30s readyz 轮询，失败自动回滚到上一版
 sudo bash deploy/bin/deploy.sh --release /tmp/gouxiangdb-release-新.tar.gz
 
 # 手动回滚（只回应用、不回数据；30s 内 readyz 判定）
