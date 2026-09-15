@@ -115,9 +115,13 @@ components:
             - NAV_GROUP_NOT_EMPTY
             - NAV_RESOURCE_MISSING
             - MOVE_NEEDS_CONFIRM
+            - INHERITANCE_CONFIRM_REQUIRED
+            - NODE_NOT_INHERITABLE
+            - NODE_NOT_FOUND
           description: >-
             未显式指定机器码时按 HTTP 状态回落（400->BAD_REQUEST 等）；
-            NAV_* 与 MOVE_NEEDS_CONFIRM 为导航域专用码。
+            NAV_* 与 MOVE_NEEDS_CONFIRM 为导航域专用码；
+            INHERITANCE_CONFIRM_REQUIRED/NODE_NOT_INHERITABLE 为 M4/S7 继承域专用码。
         path: { type: string, description: 仅顶层 404 notFound 附带 }
     Meta:
       type: object
@@ -428,6 +432,11 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time, nullable: true }
         deletedAt: { type: string, format: date-time, nullable: true }
+        dimmed:
+          type: boolean
+          description: >-
+            M4/S7 仅 GX_AUTHZ_ENGINE=on 剪枝响应可能出现：空容器 group 对管理能力者保留时 true（前端标灰）；
+            off/shadow 响应不含本键。
     NavTree:
       type: object
       required: [workspaceId, navVersion, items, truncated]
@@ -525,15 +534,102 @@ components:
         nodeId: { type: string }
         newParentId: { type: string, description: 根层序列化为空串 }
         subtreeItemCount: { type: integer, description: 子树内 table/doc/canvas 数（不含 view/group） }
-        affectedUserCount: { type: integer, description: 旧 members/kb_members 口径去重 }
+        affectedUserCount:
+          type: integer
+          description: >-
+            M4/S7 三源口径：移动前后对子树资源节点 r 可见集（direct/dept/role 展开 + ACTIVE 收敛，
+            不含行级谓词 A-7）的对称差去重人数。
         shortcutCount: { type: integer }
-        willBreakInheritanceHint: { type: boolean, enum: [false], description: M3 恒 false，M4 才有继承语义 }
+        willBreakInheritanceHint:
+          type: boolean
+          description: M4/S7 真值——子树某资源节点最近 inheritAncestors=0 祖先移动前后是否不同
     MoveConfirmError:
       allOf:
         - $ref: '#/components/schemas/Error'
         - type: object
           properties:
             impact: { $ref: '#/components/schemas/MoveImpact' }
+
+    # ----- M4/S7 中断继承 -----
+    InheritanceImpactItem:
+      type: object
+      required: [userId, name, via, sources]
+      properties:
+        userId: { type: string }
+        name: { type: string, nullable: true }
+        via: { type: string, enum: [direct, dept, role] }
+        sources: { type: array, items: { type: string }, description: 命中来源标注（direct/dept/role + 节点） }
+    InheritanceExemptItem:
+      type: object
+      required: [userId, name, reason]
+      properties:
+        userId: { type: string }
+        name: { type: string, nullable: true }
+        reason: { type: string, enum: [creator, workspace_owner] }
+    InheritanceImpact:
+      type: object
+      required: [nodeId, from, to, delta, count, items, limit, offset, exempt]
+      properties:
+        nodeId: { type: string }
+        from: { type: boolean }
+        to: { type: boolean }
+        delta: { type: string, enum: [losing, gaining] }
+        count: { type: integer, description: 精确失访/恢复人数（COUNT DISTINCT，不受分页影响） }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/InheritanceImpactItem' }
+        limit: { type: integer }
+        offset: { type: integer }
+        exempt:
+          type: array
+          items: { $ref: '#/components/schemas/InheritanceExemptItem' }
+    InheritancePatchRequest:
+      type: object
+      required: [value]
+      properties:
+        value: { type: boolean, description: false=中断继承（置 0），true=恢复 }
+        confirmed: { type: boolean, description: 未带或 false -> 409 INHERITANCE_CONFIRM_REQUIRED 回带 impact }
+    InheritanceChangeResult:
+      allOf:
+        - type: object
+          required: [nodeId, inheritAncestors, navVersion, policyVersion]
+          properties:
+            nodeId: { type: string }
+            inheritAncestors: { type: boolean }
+            navVersion: { type: integer }
+            policyVersion: { type: integer }
+        - type: object
+          required: [impact]
+          properties:
+            impact: { $ref: '#/components/schemas/InheritanceImpact' }
+    InheritanceConfirmError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            impact: { $ref: '#/components/schemas/InheritanceImpact' }
+    BreadcrumbNode:
+      type: object
+      required: [id, parentId, kind, resourceType, resourceId, name, path, depth]
+      properties:
+        id: { type: string }
+        parentId: { type: string, nullable: true }
+        kind: { type: string, enum: [base, kb, table, view, doc, canvas, group] }
+        resourceType: { type: string, nullable: true }
+        resourceId: { type: string, nullable: true }
+        name: { type: string }
+        path: { type: string }
+        depth: { type: integer }
+    NodeBreadcrumb:
+      type: object
+      required: [nodeId, chain, truncatedAbove]
+      properties:
+        nodeId: { type: string }
+        chain:
+          type: array
+          description: 从该用户有权的最高祖先到自身的连续可见段（根->自身序）；不含无权祖先 id/name/path
+          items: { $ref: '#/components/schemas/BreadcrumbNode' }
+        truncatedAbove: { type: boolean, description: 链起点之上是否存在被中性截断的无权祖先段 }
 
 security:
   - bearerAuth: []
@@ -1305,6 +1401,88 @@ paths:
                               subjectId: { type: string }
                               subjectName: { type: string, nullable: true }
                               fallback: { type: string, nullable: true, enum: [workspace_owner, creator] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /nodes/{id}/inheritance/impact:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string }, description: doc/canvas 活 nav 节点 id }
+    get:
+      tags: [nodes]
+      summary: 中断/恢复继承影响预览（需组织或节点 manage_share）
+      description: |
+        三源（direct/dept/role）展开 cutoff 链上含 r 授予，关后可见集 = 节点自身授予 ∪ creator ∪
+        workspace owner；losing/gaining 对称，多部门只计 1，人数不含行级谓词（A-7）。
+        count 精确，items 按 userId 字典序分页；creator/workspace owner 列入 exempt 不计 count。
+      parameters:
+        - { name: value, in: query, required: false, schema: { type: string, enum: ['0', '1', 'true', 'false'] }, description: 目标值；缺省 = 切换到当前值反面 }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 100, maximum: 200 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InheritanceImpact' }
+        '400':
+          description: 非 doc/canvas 叶子（NODE_NOT_INHERITABLE）或参数非法
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /nodes/{id}/inheritance:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string }, description: doc/canvas 活 nav 节点 id }
+    patch:
+      tags: [nodes]
+      summary: 中断/恢复继承（需组织或节点 manage_share）；未 confirmed -> 409 带 impact
+      description: |
+        成功后同事务置 inheritAncestors 并 bump navVersion 与 policyVersion，审计 inheritance_changed。
+        目标值与现状一致时幂等返回（count=0，不 bump、不审计）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InheritancePatchRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InheritanceChangeResult' }
+        '400':
+          description: 非 doc/canvas 叶子（NODE_NOT_INHERITABLE）或请求体非法
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 未确认（INHERITANCE_CONFIRM_REQUIRED），回带 impact
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InheritanceConfirmError' }
+
+  /nodes/{id}/breadcrumb:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string }, description: 任意活 nav 节点 id }
+    get:
+      tags: [nodes]
+      summary: 节点面包屑（A-6 防泄漏）：只返回从该用户有权最高祖先起的连续可见段
+      description: |
+        无权祖先段整体中性截断（truncatedAbove=true），响应不含被截段的 id/name/path。
+        group 为透明容器；节点自身无 r -> 403；不存在/软删 -> 404。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NodeBreadcrumb' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }

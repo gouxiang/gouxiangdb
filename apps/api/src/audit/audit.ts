@@ -32,7 +32,9 @@ export type AuditEventName =
   | "nav_group_deleted"
   | "nav_node_moved"
   // M4/S5 节点授权策略整单写（需 manage_share；detail 带 upserts/deletes 与前后 diff）
-  | "policy_changed";
+  | "policy_changed"
+  // M4/S7 中断/恢复继承（需 manage_share；detail 带 from/to/失访或恢复人数）
+  | "inheritance_changed";
 
 export interface AuditInput {
   event: AuditEventName;

@@ -104,7 +104,7 @@ describe("POST /nav/groups", () => {
 });
 
 describe("move-impact + move", () => {
-  it("impact：把 table 节点移入 g1，人数/内容数/引用数正确，hint 恒 false", async () => {
+  it("impact：把 table 节点移入 g1，人数/内容数/引用数正确（M4/S7 三源：owner 两侧皆兜底 -> 0）", async () => {
     const tableNode = nodeId("table", ids.tableId);
     // 先给 table 加一条 shortcut，验 shortcutCount。
     await h.app.request("/api/v1/workspaces/current/menu", {
@@ -118,10 +118,12 @@ describe("move-impact + move", () => {
     );
     expect(res.status).toBe(200);
     const impact = await json<MoveImpactDTO>(res);
-    expect(impact.subtreeItemCount).toBe(1); // table 一个内容（view 不计）
-    expect(impact.affectedUserCount).toBe(1); // owner 是该 base 成员
+    expect(impact.subtreeItemCount).toBe(1); // table 一个内容（view 不计 subtreeItemCount）
+    // M4/S7 三源逐节点对称差：owner 是 table/view creator 且持 role_owner，移动前后两侧都在，
+    // 空 group 不构成 restricted 边界、无授予变化 -> 0（M3 旧 members 口径的 1 已废弃）。
+    expect(impact.affectedUserCount).toBe(0);
     expect(impact.shortcutCount).toBe(1);
-    expect(impact.willBreakInheritanceHint).toBe(false);
+    expect(impact.willBreakInheritanceHint).toBe(false); // 最近 inheritAncestors=0 祖先移动前后相同
   });
 
   it("未确认 -> 409 MOVE_NEEDS_CONFIRM 带 impact；节点未动", async () => {
@@ -134,7 +136,7 @@ describe("move-impact + move", () => {
     expect(res.status).toBe(409);
     const body = await json<{ code: string; impact: MoveImpactDTO }>(res);
     expect(body.code).toBe("MOVE_NEEDS_CONFIRM");
-    expect(body.impact.affectedUserCount).toBe(1);
+    expect(body.impact.affectedUserCount).toBe(0); // 三源口径：无失访/新增用户
     const row = await h.prisma.navNode.findUnique({ where: { id: tableNode } });
     expect(row?.parentId).toBe(nodeId("base", ids.baseId));
   });

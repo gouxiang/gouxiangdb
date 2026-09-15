@@ -51,7 +51,7 @@ export interface ResolveScopeOptions {
   workspaceId?: string;
 }
 
-interface PreparedScope {
+export interface PreparedScope {
   subject: ResolvedSubject;
   nodes: AuthzNode[];
   byId: Map<string, AuthzNode>;

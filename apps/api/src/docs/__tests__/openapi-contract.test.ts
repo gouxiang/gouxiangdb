@@ -42,6 +42,9 @@ const REQUIRED_PATHS = [
   "/nodes/{id}/move",
   "/nodes/{id}/policies",
   "/nodes/{id}/effective",
+  "/nodes/{id}/inheritance/impact",
+  "/nodes/{id}/inheritance",
+  "/nodes/{id}/breadcrumb",
 ];
 
 const REQUIRED_ERROR_CODES = [
@@ -60,6 +63,8 @@ const REQUIRED_ERROR_CODES = [
   "NAV_GROUP_NOT_EMPTY",
   "NAV_RESOURCE_MISSING",
   "MOVE_NEEDS_CONFIRM",
+  "INHERITANCE_CONFIRM_REQUIRED",
+  "NODE_NOT_INHERITABLE",
 ];
 
 describe("S7 openapi.yaml 结构冻结", () => {
@@ -191,7 +196,7 @@ describe("S7 真路由响应形状对拍", () => {
     expect(await json(res)).toEqual({ id: g2 });
   });
 
-  it("GET move-impact = MoveImpact 六键，hint 恒 false", async () => {
+  it("GET move-impact = MoveImpact 六键（M4/S7 三源口径；空 group 无内容 -> 人数 0、hint false）", async () => {
     const res = await h.app.request(`/api/v1/nodes/${g1}/move-impact?newParentId=${g2}`, {
       headers: await h.auth("owner"),
     });
@@ -202,7 +207,10 @@ describe("S7 真路由响应形状对拍", () => {
     );
     expect(body.nodeId).toBe(g1);
     expect(body.newParentId).toBe(g2);
-    expect(body.willBreakInheritanceHint).toBe(false);
+    expect(body.subtreeItemCount).toBe(0); // 空 group 无 table/doc/canvas 内容
+    expect(body.affectedUserCount).toBe(0); // 三源对称差：无内容节点即无人受影响
+    expect(body.shortcutCount).toBe(0);
+    expect(body.willBreakInheritanceHint).toBe(false); // 不跨越 inheritAncestors=0 边界
   });
 
   it("POST move 未 confirmed -> 409 {error,code:MOVE_NEEDS_CONFIRM,impact}，节点不动", async () => {
@@ -275,5 +283,39 @@ describe("S7 真路由响应形状对拍", () => {
     const body = await json<Record<string, unknown>>(res);
     expect(typeof body.error).toBe("string");
     expect(body.code).toBe("UNAUTHORIZED");
+  });
+
+  it("S7 inheritance impact/PATCH：group 非 doc/canvas -> 400 NODE_NOT_INHERITABLE（kind 白名单真路由）", async () => {
+    const impact = await h.app.request(`/api/v1/nodes/${g1}/inheritance/impact?value=0`, {
+      headers: await h.auth("owner"),
+    });
+    expect(impact.status).toBe(400);
+    expect((await json<{ code: string }>(impact)).code).toBe("NODE_NOT_INHERITABLE");
+    const patch = await h.app.request(`/api/v1/nodes/${g1}/inheritance`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...(await h.auth("owner")) },
+      body: JSON.stringify({ value: false, confirmed: true }),
+    });
+    expect(patch.status).toBe(400);
+    expect((await json<{ code: string }>(patch)).code).toBe("NODE_NOT_INHERITABLE");
+  });
+
+  it("S7 breadcrumb：group 200 = {nodeId,chain[],truncatedAbove}；未登录 401", async () => {
+    const res = await h.app.request(`/api/v1/nodes/${g1}/breadcrumb`, { headers: await h.auth("owner") });
+    expect(res.status).toBe(200);
+    const body = await json<Record<string, unknown>>(res);
+    expect(Object.keys(body).sort()).toEqual(["chain", "nodeId", "truncatedAbove"]);
+    expect(body.nodeId).toBe(g1);
+    expect(Array.isArray(body.chain)).toBe(true);
+    const chain = body.chain as Array<Record<string, unknown>>;
+    expect(chain[0]?.id).toBe(g1);
+    for (const n of chain) {
+      expect(Object.keys(n).sort()).toEqual(
+        ["depth", "id", "kind", "name", "parentId", "path", "resourceId", "resourceType"].sort(),
+      );
+    }
+    expect(body.truncatedAbove).toBe(false);
+    const anon = await h.app.request(`/api/v1/nodes/${g1}/breadcrumb`);
+    expect(anon.status).toBe(401);
   });
 });

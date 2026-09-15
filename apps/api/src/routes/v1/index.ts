@@ -16,6 +16,7 @@ import { org } from "./org/index.js";
 import { workspaceRoutes } from "./workspace.js";
 import { navRoutes, nodeRoutes } from "./nodes.js";
 import { policyRoutes } from "./policies.js";
+import { inheritanceRoutes } from "./inheritance.js";
 import { authzRoutes } from "./scope.js";
 
 export const v1 = new Hono();
@@ -51,4 +52,6 @@ if (config.enterpriseNav) {
   v1.route("/nodes", nodeRoutes);
   // M4/S5 节点策略管理/决策解释（/:id/policies、/:id/effective），与 move 同前缀分路由器挂载。
   v1.route("/nodes", policyRoutes);
+  // M4/S7 中断继承影响/PATCH 与面包屑（/:id/inheritance/*、/:id/breadcrumb），同前缀分路由器。
+  v1.route("/nodes", inheritanceRoutes);
 }

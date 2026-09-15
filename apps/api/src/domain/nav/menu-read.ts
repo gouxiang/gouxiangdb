@@ -4,13 +4,17 @@
 //   - alive：节点行存在且未软删；
 //   - soft_dangling：节点行存在但 deletedAt 非空（裁决 6 正常悬挂态，shortcut 保留）；
 //   - broken：节点行物理消失（FK RESTRICT 下只可能由关 FK 的异常操作产生）。
-// state 对所有登录用户同值——本服务不做任何资源权限判断（M3 零剪枝，裁决 1）。
+// M3 零剪枝：state 对所有登录用户同值。
+// M4/S7（裁决 A-6）：on 态路由注入 menuPrune 后，shortcut 按目标节点【自身】r 剔除
+//   （不做祖先门——父无权子 direct 有权时 shortcut 正常显示、直达可开），空菜单容器对
+//   普通成员隐藏、管理能力者保留；off/shadow 缺省不剪，响应与 M3 字节一致。
 
 import type {
   MenuItemDTO, MenuNodeSummaryDTO, MenuTreeDTO, NavKind, ShortcutState,
 } from "@gx/shared-types";
 import type { DbTx } from "../../db.js";
 import { WS_ID } from "./backfill.js";
+import { pruneMenuRows, type PruneIndex } from "./prune.js";
 
 interface MenuRow {
   id: string; workspaceId: string; parentId: string | null; type: string;
@@ -22,6 +26,9 @@ interface NodeRow {
   id: string; kind: string; name: string; iconName: string | null;
   resourceType: string | null; resourceId: string | null; deletedAt: Date | null;
 }
+
+/** on 态菜单剪枝入参（authz 层 buildNavVisibility 产物）。 */
+export type MenuPrune = Pick<PruneIndex, "visible" | "manageAll">;
 
 /** 节点行 -> shortcut 摘要（state 由 deletedAt 决定）。 */
 function summaryOf(node: NodeRow, state: ShortcutState): MenuNodeSummaryDTO {
@@ -78,14 +85,34 @@ export async function menuVersionOf(tx: DbTx): Promise<number> {
   return ws?.menuVersion ?? 0;
 }
 
-/** menu 读：全部活菜单项 + shortcut 解析摘要（零剪枝、零分页，容器量天然有界）。 */
-export async function readMenuTree(tx: DbTx): Promise<MenuTreeDTO> {
+/**
+ * menu 读：全部活菜单项 + shortcut 解析摘要（零剪枝、零分页，容器量天然有界）。
+ * 传入 prune 时（on 态）先按可见性收窄菜单项集合，再解析摘要（少做节点查询）。
+ */
+export async function readMenuTree(tx: DbTx, prune?: MenuPrune): Promise<MenuTreeDTO> {
   const menus = await tx.menuItem.findMany({
     where: { workspaceId: WS_ID, deletedAt: null },
     orderBy: [{ ord: "asc" }, { id: "asc" }],
-  });
-  const summaries = await resolveShortcuts(tx, menus);
-  const items = menus.map((m) =>
+  }) as MenuRow[];
+
+  let kept = menus;
+  if (prune) {
+    // shortcut 目标节点自身 r 成立才可见；soft_dangling/broken 一律剔除（无权访问已删内容）。
+    const liveVisible = (m: MenuRow): boolean =>
+      !!m.nodeId && prune.visible.has(m.nodeId);
+    const keepIds = pruneMenuRows(
+      menus,
+      liveVisible,
+      (m) => m.type === "container",
+      (m) => m.parentId,
+      (m) => m.id,
+      prune.manageAll,
+    );
+    kept = menus.filter((m) => keepIds.has(m.id));
+  }
+
+  const summaries = await resolveShortcuts(tx, kept);
+  const items = kept.map((m) =>
     toDto(m, m.type === "shortcut" && m.nodeId ? (summaries.get(m.id) ?? brokenSummary(m.nodeId)) : null));
   return { workspaceId: WS_ID, menuVersion: await menuVersionOf(tx), items };
 }

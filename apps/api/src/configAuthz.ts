@@ -67,3 +67,21 @@ export const FIELD_MASK_ENFORCE_READY = true;
 export function fieldMaskEnforceEffective(env: NodeJS.ProcessEnv = process.env): boolean {
   return FIELD_MASK_ENFORCE_READY && resolveAuthzEngineMode(env) === "on";
 }
+
+/**
+ * tree/menu 服务端剪枝 + 面包屑中性截断（M4-S7，裁决 A-6）独立就绪门。
+ *
+ * 与 FIELD_MASK 门同构、与 S10 才翻的节点守卫全局门（AUTHZ_ENFORCE_READY）刻意分离：
+ *   - 读【原始】GX_AUTHZ_ENGINE（不经 on->shadow 降级），on 时 readNavTree/readMenuTree/
+ *     breadcrumb 按引擎可见集剪枝，而七守 r/u 仍 shadow（旧决策为准放行），
+ *     使"父无权子 direct 有权三通道/无越权泄漏"在 S7 可独立验收；
+ *   - off/shadow 恒 false：树与菜单短路全量返回，零引擎 SQL，响应与 M3 金标准逐字节一致；
+ *   - 只减不增：剪枝只从全量集合删节点，从不放行任何被旧守卫拒绝的请求（shortcut/URL
+ *     能否打开仍由旧守卫/内容端点决定），故全局 enforce 未翻也安全。
+ */
+export const NAV_PRUNE_ENFORCE_READY = true;
+
+/** tree/menu 剪枝是否生效：仅 S7 就绪且原始模式为 on 时为真。 */
+export function navPruneEnforceEffective(env: NodeJS.ProcessEnv = process.env): boolean {
+  return NAV_PRUNE_ENFORCE_READY && resolveAuthzEngineMode(env) === "on";
+}

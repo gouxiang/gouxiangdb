@@ -62,6 +62,11 @@ export interface NavNodeDTO {
   createdAt: string;
   updatedAt: string | null;
   deletedAt: string | null;
+  /**
+   * M4/S7 仅 on 态剪枝响应可能出现：空容器（group）对管理能力者保留时置 true（前端标灰）。
+   * off/shadow 响应不含本键（与 M3 金标准逐字节一致）；资源节点恒不出现本键。
+   */
+  dimmed?: boolean;
 }
 
 export interface NavTreeDTO {
@@ -156,16 +161,94 @@ export interface CreateGroupInput {
 
 export type GroupDeleteStrategy = "move" | "retain";
 
-/** N6 移动影响预览（M3 旧成员口径；hint 恒 false，M4 才有继承语义）。 */
+/**
+ * N6 移动影响预览。
+ * M3 口径 = 旧 members/kb_members 去重成员数、hint 恒 false；
+ * M4/S7 升级 = 三源（direct/dept/role）引擎可见集对称差，hint 给 restricted 边界真值。
+ */
 export interface MoveImpactDTO {
   nodeId: string;
   newParentId: string;
   /** 子树内 table/doc/canvas 内容数（不含 view/group）。 */
   subtreeItemCount: number;
-  /** 按旧 members/kb_members 口径去重的受影响成员数。 */
+  /** 移动前后对子树内容的 r 可见集发生变化的去重 ACTIVE 用户数（三源展开，不含行级谓词 A-7）。 */
   affectedUserCount: number;
   /** 指向子树节点的活 shortcut 数。 */
   shortcutCount: number;
-  willBreakInheritanceHint: false;
+  /** 移动是否跨越 inheritAncestors=0 边界（子树某内容节点最近的 restricted 祖先移动前后不同）。 */
+  willBreakInheritanceHint: boolean;
+}
+
+// ============ S7 中断继承影响预览 / 面包屑（A-6 配套） ============
+
+/** 影响方向：关继承=losing（失访），重开=gaining（恢复）。 */
+export type InheritanceDeltaKind = "losing" | "gaining";
+
+/** 受影响单个用户（items 分页元素）。 */
+export interface InheritanceImpactItemDTO {
+  userId: string;
+  name: string | null;
+  /** 该用户在 cutoff 链上的主要来源类型。 */
+  via: "direct" | "dept" | "role";
+  /** 命中来源明细（如 direct:<nodeId>、dept:<deptId>、role:<roleId>）。 */
+  sources: string[];
+}
+
+/** 豁免项：开关前后都不失访的兜底主体（creator / workspace owner）。 */
+export interface InheritanceExemptItemDTO {
+  userId: string;
+  name: string | null;
+  reason: "creator" | "workspace_owner";
+}
+
+/** GET /nodes/:id/inheritance/impact 响应。 */
+export interface InheritanceImpactDTO {
+  nodeId: string;
+  /** 当前 inheritAncestors 是否开启。 */
+  from: boolean;
+  /** 预览目标值。 */
+  to: boolean;
+  delta: InheritanceDeltaKind;
+  /** 精确失访/恢复人数（COUNT DISTINCT，全量计算，不受分页影响）。 */
+  count: number;
+  /** 分页元素（按 userId 排序）。 */
+  items: InheritanceImpactItemDTO[];
+  limit: number;
+  offset: number;
+  /** creator/workspace owner：不计入 count，仅展示。 */
+  exempt: InheritanceExemptItemDTO[];
+}
+
+/** PATCH /nodes/:id/inheritance 结果。 */
+export interface InheritanceChangeResultDTO {
+  nodeId: string;
+  inheritAncestors: boolean;
+  navVersion: number;
+  policyVersion: number;
+  impact: InheritanceImpactDTO;
+}
+
+/** 面包屑链上的节点摘要（仅渲染所需字段，不含 ord/icon/时间戳）。 */
+export interface BreadcrumbNodeDTO {
+  id: string;
+  parentId: string | null;
+  kind: NavKind;
+  resourceType: string | null;
+  resourceId: string | null;
+  name: string;
+  path: string;
+  depth: number;
+}
+
+/**
+ * GET /nodes/:id/breadcrumb 响应（A-6 面包屑防泄漏）。
+ * chain 只含从该用户【有权的最高祖先】到自身的连续可见段（根->自身序）；
+ * 之上存在无权祖先段时 truncatedAbove=true，响应不含无权节点的 id/name/path。
+ */
+export interface NodeBreadcrumbDTO {
+  nodeId: string;
+  chain: BreadcrumbNodeDTO[];
+  /** 链起点之上是否被中性截断（存在不输出的无权/越界祖先段）。 */
+  truncatedAbove: boolean;
 }
 

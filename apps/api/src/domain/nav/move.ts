@@ -1,19 +1,30 @@
-// M3/S6 权威节点移动：move-impact 预览 + move 执行（计划 §4.5 N6）。
+// M3/S6 权威节点移动：move-impact 预览 + move 执行（计划 §4.5 N6，M4/S7 升三源口径）。
 //
 // 仅"移动到其他分组"改 nav_nodes.parentId：移动实体节点到活 group（编排覆盖），
 // 或移动 group 到 group/根。目标不能是实体节点；防环（新父不能是自身/子孙）；
 // 深度护栏 32；执行后整棵子树 path/depth 重写（复用 tree.ts planSubtreeRewrite），
-// bump navVersion。M3 口径 = 旧 members/kb_members 可见性（M4 升级三源并集，hint 恒 false）。
+// bump navVersion。
+//
+// M4/S7 影响口径升级（裁决 A-7：人数不含行级谓词）：
+//   affectedUserCount = 对子树内每个资源节点分别求移动前/后 r 可见用户集（三源 direct/dept/role
+//   展开 + ACTIVE 收敛 + creator/workspace owner 兜底），任一资源节点两侧对称差命中的用户并集
+//   去重计数（与逐节点 decide/scope 可对拍 0 差异）；
+//   willBreakInheritanceHint = 子树某资源节点最近 inheritAncestors=0 祖先移动前后不同。
 
 import type { MoveImpactDTO } from "@gx/shared-types";
 import type { DbTx } from "../../db.js";
 import { HttpError } from "../../guards.js";
 import { planSubtreeRewrite, applySubtreeRewriteTx, wouldCreateCycle } from "./tree.js";
 import { bumpNavVersionTx } from "./sync.js";
+import { GrantExpander, workspaceOwnerIds, type GrantRef } from "../authz/impactExpand.js";
+import { hypotheticalCollectIds } from "../authz/inheritance.js";
+import { makeCreatedByResolver } from "../authz/adapter.js";
+import type { AuthzClient, AuthzNode } from "../authz/types.js";
 
 interface NodeForMove {
   id: string; parentId: string | null; kind: string; path: string; depth: number;
   resourceType: string | null; resourceId: string | null; deletedAt: Date | null;
+  inheritAncestors: number; workspaceId: string;
 }
 
 /** 沿 parentId DFS 收集子树全部活节点（含自身）。 */
@@ -38,32 +49,6 @@ function collectSubtree(root: NodeForMove, rows: NodeForMove[]): NodeForMove[] {
 }
 
 const CONTENT_KINDS = new Set(["table", "doc", "canvas"]);
-
-/** 按旧 members/kb_members 口径求子树内容涉及的去重成员数。 */
-async function affectedUsersTx(tx: DbTx, subtree: NodeForMove[]): Promise<number> {
-  const userIds = new Set<string>();
-  const tableIds = subtree.filter((n) => n.kind === "table" && n.resourceId).map((n) => n.resourceId!);
-  const docIds = subtree.filter((n) => (n.kind === "doc" || n.kind === "canvas") && n.resourceId).map((n) => n.resourceId!);
-  // table -> baseId -> members（members 持 baseId，不是 tableId）。
-  if (tableIds.length) {
-    const tables = await tx.table.findMany({ where: { id: { in: tableIds } }, select: { baseId: true } });
-    const baseIds = [...new Set(tables.map((t) => t.baseId))];
-    if (baseIds.length) {
-      const rows = await tx.member.findMany({ where: { baseId: { in: baseIds } }, select: { userId: true } });
-      rows.forEach((r) => userIds.add(r.userId));
-    }
-  }
-  // doc/canvas -> kbId -> kb_members。
-  if (docIds.length) {
-    const docs = await tx.kbDoc.findMany({ where: { id: { in: docIds } }, select: { kbId: true } });
-    const kbIds = [...new Set(docs.map((d) => d.kbId))];
-    if (kbIds.length) {
-      const rows = await tx.kbMember.findMany({ where: { kbId: { in: kbIds } }, select: { userId: true } });
-      rows.forEach((r) => userIds.add(r.userId));
-    }
-  }
-  return userIds.size;
-}
 
 /** 移动前置校验，返回活节点行与新父行（newParentId=null 表示根层）。 */
 async function resolveMoveTargets(
@@ -93,26 +78,144 @@ async function resolveMoveTargets(
   return { node: node as unknown as NodeForMove, target: target as unknown as NodeForMove | null };
 }
 
-/** 预览影响：受影响成员数（旧口径去重）、子树内容数、菜单引用数。 */
+/** 叶->根序祖先链（由物化路径切段 + byId 还原）。 */
+function chainOfPath(path: string, byId: ReadonlyMap<string, NodeForMove>): NodeForMove[] {
+  const ids = path.split("/").filter(Boolean).reverse();
+  const out: NodeForMove[] = [];
+  for (const id of ids) {
+    const n = byId.get(id);
+    if (n) out.push(n);
+  }
+  return out;
+}
+
+/** 链（叶->根，含自身）上最近的 inheritAncestors=0 祖先（不含自身）；无则 null。 */
+function nearestRestrictedAncestor(chain: readonly NodeForMove[]): string | null {
+  for (let i = 1; i < chain.length; i++) {
+    if (chain[i]!.inheritAncestors === 0) return chain[i]!.id;
+  }
+  return null;
+}
+
+type GrantRow = { nodeId: string; subjectType: "user" | "dept" | "role"; subjectId: string };
+
+/** 读一批节点上的含 r 授予（三源行；动作内存判定）。 */
+async function readReadGrants(client: AuthzClient, nodeIds: ReadonlySet<string>): Promise<GrantRow[]> {
+  if (nodeIds.size === 0) return [];
+  const rows = await client.authPolicy.findMany({
+    where: { nodeId: { in: [...nodeIds] } },
+    select: { nodeId: true, subjectType: true, subjectId: true, actions: true },
+  });
+  const out: GrantRow[] = [];
+  for (const r of rows) {
+    if (!r.actions.split(",").map((s) => s.trim()).includes("r")) continue;
+    if (r.subjectType === "user" || r.subjectType === "dept" || r.subjectType === "role") {
+      out.push({ nodeId: r.nodeId, subjectType: r.subjectType, subjectId: r.subjectId });
+    }
+  }
+  return out;
+}
+
+/** 单资源节点一侧（before/after）的 ACTIVE 可见用户集（含 creator/workspace owner 兜底）。 */
+async function visibleUsersForSide(
+  client: AuthzClient,
+  expander: GrantExpander,
+  grantsByNode: ReadonlyMap<string, GrantRow[]>,
+  cutoffIds: readonly string[],
+  creatorId: string | null,
+  ownerIds: ReadonlySet<string>,
+): Promise<Set<string>> {
+  const grants: GrantRef[] = [];
+  for (const cid of cutoffIds) {
+    for (const g of grantsByNode.get(cid) ?? []) grants.push(g);
+  }
+  const sources = await expander.expand(grants);
+  if (creatorId) sources.set(creatorId, new Set([`creator:${cutoffIds[0]}`]));
+  for (const o of ownerIds) sources.set(o, new Set(["owner:workspace"]));
+  return expander.activeOnly(new Set(sources.keys()));
+}
+
+/** 三源可见集逐资源节点对称差人数 + restricted 边界变化 hint。 */
+async function computeAuthzImpact(
+  tx: DbTx,
+  rows: readonly NodeForMove[],
+  node: NodeForMove,
+  target: NodeForMove | null,
+): Promise<{ affectedUserCount: number; willBreakInheritanceHint: boolean }> {
+  const subtree = collectSubtree(node, rows as NodeForMove[]);
+  const newSelfPath = target === null ? `/${node.id}/` : `${target.path}${node.id}/`;
+  const updates = planSubtreeRewrite(
+    subtree.map((n) => ({ id: n.id, parentId: n.parentId, path: n.path })),
+    node.path,
+    newSelfPath,
+  );
+  const newPaths = new Map(updates.map((u) => [u.id, u.newPath]));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+
+  const contentNodes = subtree.filter((n) => n.resourceType !== null);
+  // 收集两侧所有 cutoff 节点，批量一次读授予。
+  const cutoffPool = new Set<string>();
+  const sides = contentNodes.map((n) => {
+    const beforeChain = chainOfPath(n.path, byId) as unknown as AuthzNode[];
+    const afterChain = chainOfPath(newPaths.get(n.id) ?? n.path, byId) as unknown as AuthzNode[];
+    const beforeIds = hypotheticalCollectIds(beforeChain, n.inheritAncestors === 1 ? 1 : 0);
+    const afterIds = hypotheticalCollectIds(afterChain, n.inheritAncestors === 1 ? 1 : 0);
+    for (const id of beforeIds) cutoffPool.add(id);
+    for (const id of afterIds) cutoffPool.add(id);
+    return { n, beforeIds, afterIds, beforeChain, afterChain };
+  });
+  const grantRows = await readReadGrants(tx, cutoffPool);
+  const grantsByNode = new Map<string, GrantRow[]>();
+  for (const g of grantRows) {
+    const list = grantsByNode.get(g.nodeId) ?? [];
+    list.push(g);
+    grantsByNode.set(g.nodeId, list);
+  }
+
+  const expander = new GrantExpander(tx);
+  const resolveCreatedBy = makeCreatedByResolver(tx);
+  const ownerIds = await workspaceOwnerIds(tx);
+  const affected = new Set<string>();
+  for (const side of sides) {
+    const creator = await resolveCreatedBy(side.n as unknown as AuthzNode);
+    const [before, after] = await Promise.all([
+      visibleUsersForSide(tx, expander, grantsByNode, side.beforeIds, creator, ownerIds),
+      visibleUsersForSide(tx, expander, grantsByNode, side.afterIds, creator, ownerIds),
+    ]);
+    for (const id of before) if (!after.has(id)) affected.add(id);
+    for (const id of after) if (!before.has(id)) affected.add(id);
+  }
+
+  let hint = false;
+  for (const side of sides) {
+    if (nearestRestrictedAncestor(side.beforeChain as unknown as NodeForMove[])
+      !== nearestRestrictedAncestor(side.afterChain as unknown as NodeForMove[])) {
+      hint = true;
+      break;
+    }
+  }
+  return { affectedUserCount: affected.size, willBreakInheritanceHint: hint };
+}
+
+/** 预览影响：受影响成员数（M4 三源逐节点对称差）、子树内容数、菜单引用数、继承边界 hint。 */
 export async function moveImpactTx(
   tx: DbTx, nodeIdValue: string, newParentId: string | null,
 ): Promise<MoveImpactDTO> {
   const { node, target } = await resolveMoveTargets(tx, nodeIdValue, newParentId);
-  void target;
   const rows = (await tx.navNode.findMany({ where: { deletedAt: null } })) as unknown as NodeForMove[];
   const subtree = collectSubtree(node, rows);
   const contentNodes = subtree.filter((n) => CONTENT_KINDS.has(n.kind));
   const subtreeIds = new Set(subtree.map((n) => n.id));
   const shortcuts = await tx.menuItem.findMany({ where: { deletedAt: null, type: "shortcut" }, select: { nodeId: true } });
   const shortcutCount = shortcuts.filter((s) => s.nodeId && subtreeIds.has(s.nodeId)).length;
-  const affectedUserCount = await affectedUsersTx(tx, subtree);
+  const { affectedUserCount, willBreakInheritanceHint } = await computeAuthzImpact(tx, rows, node, target);
   return {
     nodeId: nodeIdValue,
     newParentId: newParentId ?? "",
     subtreeItemCount: contentNodes.length,
     affectedUserCount,
     shortcutCount,
-    willBreakInheritanceHint: false,
+    willBreakInheritanceHint,
   };
 }
 
