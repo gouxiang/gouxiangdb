@@ -2,12 +2,15 @@
 // 单文档/画布独立权限弹窗：按邮箱授予 editor/commenter/viewer，列出并可撤销。
 // 权限与知识库成员角色叠加，取较高者（后端 RANK 逻辑）。
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Icon } from "../../components/icons";
 import { Input, Modal, Select, Spinner, toast } from "../../components/ui";
 import type { KbDocDTO } from "../../api/client";
 import { useDocAcl, useSetDocAcl } from "./kb-hooks";
 import { roleLabel } from "./kb-ui";
+import { useAuthzCapability } from "../authz/useAuthzCapability";
+import { useNavNodeIndex } from "../workspace/nav-hooks";
+import { DocPolicyView } from "../authz/DocPolicyView";
 
 const ROLE_OPTIONS = [
   { value: "editor", label: "可编辑" },
@@ -16,6 +19,35 @@ const ROLE_OPTIONS = [
 ];
 
 export function DocAclModal({ doc, onClose }: { doc: KbDocDTO; onClose: () => void }) {
+  const { canManage } = useAuthzCapability();
+  const { index } = useNavNodeIndex();
+  // doc 节点 resourceType=doc、resourceId=kb_docs.id；门控开且能在 M3 树解析到节点时切企业同表视图。
+  const navNode = useMemo(
+    () => index.byResource.get(`doc:${doc.id}`) ?? null,
+    [index.byResource, doc.id],
+  );
+  const useUnified = canManage && !!navNode;
+
+  return (
+    <Modal open title={`独立权限 · ${doc.title}`} onClose={onClose} width={520} footer={
+      <button
+        className="rounded-gx-md bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
+        onClick={onClose}
+      >
+        完成
+      </button>
+    }>
+      {useUnified && navNode ? (
+        <DocPolicyView node={navNode} />
+      ) : (
+        <LegacyDocAcl doc={doc} />
+      )}
+    </Modal>
+  );
+}
+
+/** 旧三档视图（门控关 / 未挂企业导航时保持原通道，生产默认形态）。 */
+function LegacyDocAcl({ doc }: { doc: KbDocDTO }) {
   const { data: acls, isLoading } = useDocAcl(doc.id);
   const setAcl = useSetDocAcl(doc.id);
   const [email, setEmail] = useState("");
@@ -44,20 +76,7 @@ export function DocAclModal({ doc, onClose }: { doc: KbDocDTO; onClose: () => vo
   }
 
   return (
-    <Modal
-      open
-      title={`独立权限 · ${doc.title}`}
-      onClose={onClose}
-      width={520}
-      footer={
-        <button
-          className="rounded-gx-md bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
-          onClick={onClose}
-        >
-          完成
-        </button>
-      }
-    >
+    <>
       <p className="mb-3 text-gx-12 text-gx-text-tertiary">
         为此{doc.kind === "canvas" ? "画布" : "文档"}单独指定成员权限，独立权限与知识库角色叠加、取较高者。
       </p>
@@ -115,6 +134,7 @@ export function DocAclModal({ doc, onClose }: { doc: KbDocDTO; onClose: () => vo
           ))
         )}
       </div>
-    </Modal>
+    </>
   );
 }
+
