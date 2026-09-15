@@ -37,6 +37,18 @@ import type {
   UserAccountStatus,
   DeptMembershipDTO,
 } from "@gx/shared-types";
+import type {
+  NavNodeDTO,
+  NavTreeDTO,
+  NavTreeQuery,
+  MenuItemDTO,
+  MenuTreeDTO,
+  MenuOp,
+  MenuChangeResult,
+  CreateGroupInput,
+  MoveImpactDTO,
+  GroupDeleteStrategy,
+} from "@gx/shared-types";
 import { resolveApiBase, withBase as joinBase } from "../lib/base";
 
 // API 同源前缀解析：
@@ -810,5 +822,95 @@ export function acceptOrgInvite(data: {
   displayName?: string;
 }): Promise<{ token: string; user: { id: string; email: string; displayName: string; status: string } }> {
   return publicFetch("/api/v1/auth/invite/accept", { method: "POST", body: JSON.stringify(data) });
+}
+
+// ============ M3 统一导航资源树 /api/v1/*（冻结契约，只消费后端） ============
+//
+// 这组端点仅在后端 GX_ENTERPRISE_NAV=on（默认）时挂载；off 时落入 v1 自身 404
+// （{error:"接口不存在",code:"NOT_FOUND"}），前端据此回退旧双壳。tree/menu M3 零剪枝，
+// 对所有登录用户返回同一份数据；悬挂三态 alive/soft_dangling/broken 见 openapi MenuNodeSummary。
+
+export type {
+  NavNodeDTO,
+  NavTreeDTO,
+  NavTreeQuery,
+  MenuItemDTO,
+  MenuTreeDTO,
+  MenuOp,
+  MenuChangeResult,
+  CreateGroupInput,
+  MoveImpactDTO,
+  GroupDeleteStrategy,
+};
+
+export const NavApi = {
+  /** 权威资源树（平铺 + parentId，前端组树）；登录可读。 */
+  tree: (params?: NavTreeQuery) => {
+    const q = qs({
+      parentId: params?.parentId ?? undefined,
+      maxDepth: params?.maxDepth,
+      kind: params?.kind,
+      all: params?.all ? "1" : undefined,
+    });
+    return apiFetch<NavTreeDTO>(`/api/v1/workspaces/current/tree${q}`);
+  },
+  /** 菜单引用树 + shortcut 节点摘要（state 三态）。 */
+  menu: () => apiFetch<MenuTreeDTO>("/api/v1/workspaces/current/menu"),
+  /** 菜单批量 diff 单事务（整单成功或全拒）；需 manage_menu。 */
+  patchMenu: (operations: MenuOp[]) =>
+    apiFetch<MenuChangeResult>("/api/v1/workspaces/current/menu", {
+      method: "PATCH",
+      body: JSON.stringify({ operations }),
+    }),
+  createGroup: (data: CreateGroupInput) =>
+    apiFetch<{ id: string }>("/api/v1/nav/groups", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateGroup: (id: string, data: { name?: string; ord?: number }) =>
+    apiFetch<{ id: string }>(`/api/v1/nav/groups/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  deleteGroup: (id: string, strategy: GroupDeleteStrategy, targetParentId?: string) =>
+    apiFetch<{ id: string; moved: number }>(
+      `/api/v1/nav/groups/${id}${qs({ strategy, targetParentId })}`,
+      { method: "DELETE" },
+    ),
+  moveImpact: (id: string, newParentId: string) =>
+    apiFetch<MoveImpactDTO>(
+      `/api/v1/nodes/${id}/move-impact${qs({ newParentId: newParentId || "root" })}`,
+    ),
+  move: (id: string, newParentId: string, confirmed: boolean) =>
+    apiFetch<{ id: string; newParentId: string | null }>(`/api/v1/nodes/${id}/move`, {
+      method: "POST",
+      body: JSON.stringify({ newParentId, confirmed }),
+    }),
+};
+
+/**
+ * GX_ENTERPRISE_NAV flag 探活：GET menu 仅在 nav flag on 时挂载。
+ *   200 → true；明确 NOT_FOUND（v1 off 或 /api/v1 未挂载）→ false；
+ *   401 交由 apiFetch 全局登出；其它网络/服务端错误按 on 处理并由调用方自然显示错误态
+ *   （后端默认 on，flag off 是唯一明确的旧壳回退信号，不应因 500 静默回退）。
+ * 结果模块级缓存：flag 在单次部署内不变，全会话只探一次。
+ */
+let navFlagCache: boolean | null = null;
+
+export async function probeNavV2(): Promise<boolean> {
+  if (navFlagCache !== null) return navFlagCache;
+  try {
+    await NavApi.menu();
+    navFlagCache = true;
+  } catch (e) {
+    // GET menu 成功路径恒返菜单树，不产生 404；404 唯一来源是子路由未挂载
+    // （nav flag off 时 v1 自身 404 或整个 /api/v1 未挂载时 app 兜底 404）。
+    if (e instanceof ApiError && e.status === 404) {
+      navFlagCache = false;
+    } else {
+      throw e;
+    }
+  }
+  return navFlagCache;
 }
 

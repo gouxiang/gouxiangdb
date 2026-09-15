@@ -19,11 +19,9 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 
 import LoginPage from "./features/auth/LoginPage";
 import ShareJoinPage from "./features/auth/ShareJoinPage";
-import AppShell from "./features/shell/AppShell";
 import ViewRouter from "./features/views/ViewRouter";
 import SettingsPage from "./features/settings/SettingsPage";
 import TrashPage from "./features/settings/TrashPage";
-import KbShell from "./features/kb/KbShell";
 import KbListPage from "./features/kb/KbListPage";
 import KbHomePage from "./features/kb/KbHomePage";
 import DocEditorPage from "./features/kb/DocEditorPage";
@@ -34,6 +32,8 @@ import PublicSharePage from "./features/kb/PublicSharePage";
 import ErdPage from "./features/erd/ErdPage";
 import ContactsPage from "./features/contacts/ContactsPage";
 import InviteAcceptPage from "./features/contacts/InviteAcceptPage";
+import { ShellGate } from "./features/workspace/ShellGate";
+import { WorkspaceSettingsPage } from "./features/workspace/WorkspaceSettingsPage";
 
 function Loading() {
   return (
@@ -109,41 +109,41 @@ export default function App() {
       {/* 公开邀请接受页：登录前凭一次性激活码设置密码并激活账号（M2 组织通讯录） */}
       <Route path="/invite/:token" element={<InviteAcceptPage />} />
 
+      {/*
+        登录态统一布局闸门（M3/S8）：GX_ENTERPRISE_NAV on → WorkspaceShell（base/kb
+        统一一壳）；off（menu 404）→ ShellGate 内部按路径回退旧 AppShell/KbShell。
+        内容路由只有一组、路径全部不变（N5/ADR-0028），旧两壳文件保留供回退。
+      */}
       <Route
         element={
           <RequireAuth>
-            <ErrorBoundary key={`base-${boundaryKey}`}>
-              <AppShell />
+            <ErrorBoundary key={`shell-${boundaryKey}`}>
+              <ShellGate />
             </ErrorBoundary>
           </RequireAuth>
         }
       >
         <Route path="/" element={<RootRedirect />} />
+
+        {/* 数据表资产（旧 AppShell 内容） */}
         <Route path="/base/:baseId" element={<BaseIndexRedirect />} />
         <Route path="/base/:baseId/settings" element={<SettingsPage />} />
         <Route path="/base/:baseId/trash" element={<TrashPage />} />
         <Route path="/base/:baseId/erd" element={<ErdPage />} />
         <Route path="/base/:baseId/table/:tableId" element={<TableIndexRedirect />} />
         <Route path="/base/:baseId/table/:tableId/view/:viewId" element={<ViewRouter />} />
-        <Route path="/workspace/contacts" element={<ContactsPage />} />
-      </Route>
 
-      {/* 知识库：独立布局壳 KbShell，与数据表 AppShell 平行、零交叉 */}
-      <Route
-        element={
-          <RequireAuth>
-            <ErrorBoundary key={`kb-${boundaryKey}`}>
-              <KbShell />
-            </ErrorBoundary>
-          </RequireAuth>
-        }
-      >
+        {/* 知识库资产（旧 KbShell 内容） */}
         <Route path="/kb" element={<KbListPage />} />
         <Route path="/kb/:kbId" element={<KbHomePage />} />
         <Route path="/kb/:kbId/doc/:docId" element={<DocEditorPage />} />
         <Route path="/kb/:kbId/canvas/:docId" element={<CanvasEditorPage />} />
         <Route path="/kb/:kbId/trash" element={<KbTrashPage />} />
         <Route path="/kb/:kbId/settings" element={<KbSettingsPage />} />
+
+        {/* 工作区级页面：M2 通讯录 + M3 设置中心（新壳左下设置区唯一入口） */}
+        <Route path="/workspace/contacts" element={<ContactsPage />} />
+        <Route path="/workspace/settings/*" element={<WorkspaceSettingsPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -109,7 +109,12 @@ export type IconName =
   | "userSlash"
   | "crown"
   | "keyRound"
-  | "sitemap";
+  | "sitemap"
+  | "grip"
+  | "folder"
+  | "folderOpen"
+  | "folderPlus"
+  | "linkExternal";
 
 const PATHS: Record<IconName, string[]> = {
   chevronDown: ["M6 9l6 6 6-6"],
@@ -271,6 +276,32 @@ const PATHS: Record<IconName, string[]> = {
     "M7 9v3h10V9",
     "M7 12h10",
     "M17 12v3",
+  ],
+  // 拖拽手柄（导航编排）
+  grip: [
+    "M9 5h.01",
+    "M9 12h.01",
+    "M9 19h.01",
+    "M15 5h.01",
+    "M15 12h.01",
+    "M15 19h.01",
+  ],
+  // 菜单容器文件夹（关闭/打开/新建）
+  folder: ["M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"],
+  folderOpen: [
+    "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H6l-3 8z",
+    "M3 18l3-8h15l-3 8z",
+  ],
+  folderPlus: [
+    "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
+    "M12 10v5",
+    "M9.5 12.5h5",
+  ],
+  // 外部/失效引用提示
+  linkExternal: [
+    "M14 4h6v6",
+    "M20 4l-9 9",
+    "M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4",
   ],
 };
 
