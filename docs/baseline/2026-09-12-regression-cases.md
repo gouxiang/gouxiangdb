@@ -254,9 +254,81 @@
 
 ---
 
+## H. M4 统一权限引擎（2026-09-16 追加）
+
+> 口径：M4 引入 auth_policies 权威表 + 引擎 decide/scope + 三态 flag（GX_AUTHZ_ENGINE
+> off/shadow/on），旧三表降级为同事务物化投影；代码默认 off，生产建议 shadow，切 on 须
+> 项目总监按五前置下令（ADR-0037）。自动化分布于 `apps/api/src/domain/authz/__tests__/`
+> 与 `routes/v1/__tests__/`，均真迁移临时库 + 真 JWT/真 HTTP，不 mock 鉴权。
+> 规模门默认跳过，须 `GX_M4_GATE=1` 显式真跑。
+
+### RC-47 旧三表决策 golden 不回退（S0）【自】
+- 步骤：跑 `characterization/legacy-decision-matrix.test.ts`（22）与 `legacy-response-shapes.test.ts`。
+- 预期：base 五角色 x 读/写/结构/成员/评论矩阵、kb 四档 + doc ACL 三档（含"取较高"两条）、
+  无成员/无 ACL/软删的 403/404 文案与机器 code 全冻结；off 态 records 列表/详情/CSV 形状逐字节不变。
+
+### RC-48 shadow 对拍双零、故障 fail-open、off 零接入（S3）【自】
+- 步骤：跑 `shadow.test.ts`、`shadow-integration.test.ts`（5）、`shadow-kb-escalation.test.ts`。
+- 预期：回填夹具三族 r/u 对拍 DRIFT_OVERDENY/OVERALLOW/errors/unresolved 全 0 且 compared>0；
+  人工删投影 -> OVERDENY=1 旧仍 200，插越权行 -> OVERALLOW=1 旧仍 403；引擎抛错旧响应照常 200、errors=1；
+  env=off 守卫健 auth_policies 零查询、compared=0；userId 仅 sha256 短哈希进日志。
+
+### RC-49 回填对账幂等 + 升级 20x20 零漂移（S2/S10）【自】
+- 步骤：跑 `backfill-reconcile.test.ts`（8）与 `s10-ac-upgrade-20x20.test.ts`（2，LCG seed42：
+  20 用户 x 7 base x 7 kb x docs/ACL，syncNav + reconcile 后 owner 调 effective 400 格）。
+- 预期：reconcile A/B/C=0、二次 --apply no changes；20 主体 x 20 节点新旧判定全等、0 漂移；
+  DISABLED 用户成员行保留投影（停用由鉴权层拦，不删授权行）。
+
+### RC-50 双写共生死：11 写点同事务原子性（S5，S10 复跑抽全）【自】
+- 步骤：跑 `s5-dual-write.test.ts`（11）、`s5-purge.test.ts`。
+- 预期：members/kb_members/kb_doc_acls 增改删与 legacy:* 投影行同事务同生同灭；降级精确收窄非并集；
+  双向故障注入（auth_policies 写失败 / 旧表写失败）整体回滚无半截、无悬空投影；触发器清除后恢复成功。
+  PUT policies 整单非法全拒：合法项不落、policyVersion 不增（policies-api）。
+
+### RC-51 fieldMask 六通道一致缺席 + 写键 403（AC-M4-3，S6）【自/API】
+- 步骤：跑 `s6-mask-exits.test.ts`（8）、`s6-a4-special.test.ts`（9）、`s6-mask-sanitize.test.ts`。
+- 预期：hidden 字段在列表/详情/CSV 导出/直调 GET/关联 LinkRef/公式引用六通道无列无原值；
+  写该字段键 403 FORBIDDEN_FIELD 且行不变；仅 env=on（字段独立门就绪）下推，off/shadow 五出口短路逐字节回到 S0 golden。
+
+### RC-52 中断继承 EARS 与 cutoff 孙节点边界（AC-M4-2，S7/S10）【自】
+- 步骤：跑 `s7-inheritance.test.ts`（14）、`s10-ac-cutoff-grandchild.test.ts`（3）、`s7-move-impact.test.ts`。
+- 预期：未确认 PATCH -> 409 INHERITANCE_CONFIRM_REQUIRED + impact 状态不变；确认后 restricted + 审计 diff；
+  失访人数多部门去重、createdBy/owner 豁免且自仍可访问；重开对称、幂等不 bump；
+  K(inheritAncestors=0) 自身策略及子孙、孙链在 K 截断不收 K 之上授予、K 子树外普通文档仍受上层约束。
+
+### RC-53 三源即时切换 + 越权直调矩阵 + 停用旧 JWT 401（AC-M4-1，S10）【自】
+- 步骤：跑 `s10-ac-sources.test.ts`（6）、`s10-ac-authz-matrix.test.ts`（18，it.each 展开：
+  无关系者读 5/写 3、viewer 4、停用旧 token 6）、`auth-state.test.ts`。
+- 预期：direct/role/dept 三源逐一切断后同一 JWT 下次请求动作集与来源链即时变化（调岗无 policyVersion/TTL 等待），
+  三源全断 403、owner_fallback 兜底 policyId=null；无关系用户 v1 读 403/404、写 403；viewer 写/查他人/切继承 403；
+  停用用户持旧 JWT 对 /api 与 v1 端点全 401 UNAUTHORIZED（鉴权先于授权）。
+
+### RC-54 规模门：SQL 定数 / EXPLAIN 无 SCAN / P95 / 零分叉（S4/S10）【自，门控】
+- 步骤：`GX_M4_GATE=1 pnpm --filter @gx/api exec vitest run \
+  src/domain/authz/__tests__/scope-scale.test.ts \
+  src/domain/authz/__tests__/s10-scale-gate.test.ts --fileParallelism=false`。
+- 预期（2026-09-16 本机证据，绝对值见 `docs/baseline/2026-09-16-m4-gate.md`）：
+  scope 非 owner 恰 4 条 SQL/owner 3 条；decide 冷 3 条（+creator 至多 1）/链缓存命中 1 条；
+  EXPLAIN 全 SEARCH INDEX（auth_policies_node_idx/workspace_subject_idx/nav 索引/createdBy 四索引）无裸 SCAN；
+  12 用户 x 500 节点 x r/u = 12000 次 scope/decide 布尔 0 差异；读链路不 bump policyVersion；
+  P95：decide 0.36-0.41ms、scope 41.8-44.0ms（同机两次门运行区间），均远低于 500ms 线。
+
+### RC-55 GX_AUTHZ_ENGINE 三态翻转与切 on 纪律（S10）【自/手册】
+- 步骤（自）：跑 `s5-toggle-roundtrip.test.ts`、`s10-flip-drill.test.ts`（5）、`s7-prune.test.ts`（11）；
+  M1 读路径四组合（sidecar read off/on x keyset off/on）下 fieldMask 投影不漂移跑
+  `s6-a4-special.test.ts`（9，专项 4）。
+- 预期：off -> shadow（旧测试全绿、双零）-> on 语义（引擎为权威时 AC 对抗集全绿）->
+  反向 shadow（旧结果仅对比、drift 分类计数正确）-> off（旧行为逐值恢复、A-5 权威行往返不丢）；
+  on 经总门降级 shadow 并 warn；fieldMask/navPrune 两独立门 env=on 真实生效、只减不增。
+- 步骤（手册）：切 on 严格按 `docs/runbooks/authz-engine-flip-on.md`（五条前置 + 双零一迭代 + 总监签收），
+  回滚 = env 回 off 重启一步；禁止改代码默认、禁止把 env=on 当灰度（总门未就绪会静默降级）。
+
+---
+
 ## 附：回归优先级建议
 - 每次提交：RC-38（自动）+ 当次改动域。
 - 阶段升级收尾：A/B 全部（RC-01~RC-12）+ E 公式（RC-31~RC-37）。
 - 动画布/Plait/编辑器：C 全部（RC-13~RC-25）。
 - 动分享/鉴权/附件/构建：D（RC-26~RC-30）+ F（RC-38~RC-40）。
 - 动工作区外壳/导航/菜单树：G 全部（RC-41~RC-46）；其中 RC-41 的手册点击项在任何路由/外壳改动后必跑。
+- 动权限/成员/ACL/auth_policies/三态 flag：H 全部（RC-47~RC-55）；切 on 前 RC-48/49/54/55 必须全绿并附双零证据。

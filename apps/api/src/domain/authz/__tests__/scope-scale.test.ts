@@ -7,8 +7,15 @@
 //   4) P95：21 次 scope 服务端计时，打印 P50/P95 留证并断言宽松上界（绝对值写 baseline 文档）。
 //
 // 不跑 1 万 x 500 全组合（500 万次 decide 无意义）；等距抽样覆盖 base/table/doc 三档深度与各源分支。
+//
+// 开关（S10 起）：万节点造数重，普通全量默认跳过；门证据显式真跑：
+//   GX_M4_GATE=1 pnpm --filter @gx/api exec vitest run \
+//     src/domain/authz/__tests__/scope-scale.test.ts \
+//     src/domain/authz/__tests__/s10-scale-gate.test.ts --fileParallelism=false
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe as vitestDescribe, expect, it } from "vitest";
+
+const describe = process.env.GX_M4_GATE === "1" ? vitestDescribe : vitestDescribe.skip;
 import type { PrismaClient } from "@prisma/client";
 import { setupEngineHarness, type EngineHarness } from "./engineHarness.js";
 import { resolveSubject } from "../subjects.js";
@@ -24,18 +31,20 @@ const SCOPE_BUDGET = 20_000; // 门内不截断（10000 < 20000 硬上限）
 const N_PARITY_USERS = 12;
 const N_PARITY_NODES = 500;
 
-let h: EngineHarness;
-let db: PrismaClient;
+let h!: EngineHarness;
+let db!: PrismaClient;
 let rawDbPath = "";
 
 beforeAll(async () => {
+  // 非门模式：describe 全 skip，用例体不执行，不建库不造数。
+  if (process.env.GX_M4_GATE !== "1") return;
   h = await setupEngineHarness("gx-m4-scale-");
   db = h.prisma;
   await seedScale(db);
 }, 600_000);
 
 afterAll(async () => {
-  await h.cleanup();
+  if (h) await h.cleanup();
 });
 
 describe("规模夹具结构（500 用户 / 6 层部门 / 万节点 / 3000 策略）", () => {

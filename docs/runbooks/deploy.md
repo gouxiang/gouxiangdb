@@ -196,6 +196,11 @@ GX_AUTHZ_ENGINE=shadow
 
 回滚：`GX_AUTHZ_ENGINE=off` 重启即恢复纯旧守卫，适配分支保留无副作用（无数据迁移、无双写）。
 
+切 on（enforce）操作面：七守真正以引擎为准需要独立的 enforce 接线构建 + 翻就绪门 + 项目总监
+按 §4.8 五前置下令，操作清单与签收/回滚纪律见
+[authz-engine-flip-on.md](authz-engine-flip-on.md)，规模门与翻转演练证据见
+`docs/baseline/2026-09-16-m4-gate.md`。M4 出口姿态为代码默认 off、生产建议 shadow。
+
 ## 7. 证书两条路径
 
 - **公网正式域名（推荐）**：DNS 已指向本机、80/443 可出网。保留 Caddyfile 站点块即可，

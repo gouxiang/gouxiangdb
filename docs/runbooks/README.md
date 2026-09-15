@@ -13,6 +13,7 @@ M0 生产基座的可执行运维流程。所有手册与仓内脚本/配置一�
 | [m1-sidecar.md](m1-sidecar.md) | M1 数据底座：sidecar 巡检/重建、功能 flag 回退、大表与搜索有界预览边界 | `scripts/bench/{check,backfill}-sidecar.ts`、`GX_M1_*` flag |
 | [org-contacts.md](org-contacts.md) | M2 组织通讯录：flag off 紧急收回、停用后仍可访问排查、默认工作区/owner 修复、邀请重发、只增不删回滚姿态 | `GX_ENTERPRISE_ORG`、`GX_AUTH_STATE_TTL_MS`、`/api/v1/org/*` |
 | [authz-policy-dual-write.md](authz-policy-dual-write.md) | M4 权限引擎：auth_policies 与旧三表同事务双写、GX_AUTHZ_ENGINE 开关往返、legacyUnmappable 恢复路径、purge 清孤儿策略 | `GX_AUTHZ_ENGINE`、`/api/v1/nodes/:id/{policies,effective}`、`scripts/authz/reconcile-policies.ts` |
+| [authz-engine-flip-on.md](authz-engine-flip-on.md) | M4 权限引擎切 on（enforce）操作清单：五条前置、双零证据、一步回滚、总监下令签收（含 S10 前 enforce 接线未就位的现状边界） | `GX_AUTHZ_ENGINE=on`、就绪门、drift 双零、回滚 = env 回 off |
 | [ci.md](ci.md) | 平台中立质量门、真 ESLint 基线、本地复现 CI、Gitee Go 开通与 runner | `scripts/ci-quality.sh`、`eslint.config.mjs`、`.workflow/ci.yml` |
 
 ## 相关架构决策（ADR）
