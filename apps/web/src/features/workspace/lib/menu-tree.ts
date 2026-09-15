@@ -57,10 +57,31 @@ export function isBrowsableShortcut(item: MenuItemDTO): boolean {
   return state === "alive";
 }
 
-/** 编排态可见：alive/soft_dangling/broken 全保留（soft_dangling/broken 由 UI 标灰）。 */
+/**
+ * 编排态可见（ADR-0029 / M3 §4.3 定稿）：
+ *  - container：恒可见（node 按契约恒 null）；
+ *  - shortcut：alive 正常；broken（含 node=null 物理消失）显灰保留以便管理者清理；
+ *  - soft_dangling：与浏览态一致全员隐藏（源软删，引用保留待恢复自动还原，编排态也不暴露）。
+ */
 export function isComposerVisible(item: MenuItemDTO): boolean {
   if (item.type === "container") return true;
-  return item.node !== null;
+  if (item.node === null) return true; // 物理消失的 broken 引用，需在编排态显灰可清理
+  return item.node.state !== "soft_dangling";
+}
+
+/** 仅保留编排态可见的菜单项（剔除 soft_dangling shortcut，容器恒保留）。 */
+export function filterComposerItems(items: readonly MenuItemDTO[]): MenuItemDTO[] {
+  return items.filter(isComposerVisible);
+}
+
+/**
+ * 编排态行状态（徽章/删除线单一判定口径）：
+ *  - 容器恒 alive——容器菜单项 node 按契约恒为 null，缺摘要不代表悬挂（S9 真机缺陷回归）；
+ *  - shortcut 以 node 摘要为准；node=null 视为 broken（物理消失或引用断裂，可清理）。
+ */
+export function composerItemState(item: MenuItemDTO): ShortcutState {
+  if (item.type === "container") return "alive";
+  return item.node?.state ?? "broken";
 }
 
 /** 仅保留浏览态可显示的菜单项（容器在过滤掉全部子项后是否保留由调用方决定）。 */

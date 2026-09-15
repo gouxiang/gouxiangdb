@@ -32,16 +32,20 @@ export function navKindIcon(kind: MenuNodeSummaryDTO["kind"]): IconName {
       return "canvas";
     case "view":
       return "grid";
+    case "group":
+      return "group";
     default:
       return "link";
   }
 }
 
-function ShortcutRow({ node, depth, active, onNavigate }: {
+function ShortcutRow({ node, depth, active, onNavigate, onLocate }: {
   node: MenuTreeNode;
   depth: number;
   active: boolean;
   onNavigate: (href: string) => void;
+  /** 点击后在二级栏定位其菜单父容器（UIUX :75）。 */
+  onLocate?: (parentMenuId: string) => void;
 }) {
   const { index } = useNavNodeIndex();
   const summary = node.item.node;
@@ -58,7 +62,11 @@ function ShortcutRow({ node, depth, active, onNavigate }: {
       type="button"
       disabled={!href}
       title={node.item.label ? summary.name : undefined}
-      onClick={() => href && onNavigate(href)}
+      onClick={() => {
+        if (!href) return;
+        onNavigate(href);
+        if (node.item.parentId) onLocate?.(node.item.parentId);
+      }}
       style={{ paddingLeft: 8 + depth * 14 }}
       className={[
         "relative flex w-full items-center gap-2 rounded-gx-sm py-1.5 pr-2 text-left text-gx-13 transition-colors",
@@ -73,17 +81,19 @@ function ShortcutRow({ node, depth, active, onNavigate }: {
   );
 }
 
-function ContainerNode({ node, depth, activeIds, onNavigate }: {
+function ContainerNode({ node, depth, activeIds, onNavigate, onLocate, onOpenSecondary }: {
   node: MenuTreeNode;
   depth: number;
   activeIds: Set<string>;
   onNavigate: (href: string) => void;
+  onLocate?: (parentMenuId: string) => void;
+  onOpenSecondary?: (container: MenuTreeNode) => void;
 }) {
-  // S8 只读：容器默认展开（后端菜单深度 ≤2 层容器）；chevron 仅视觉，S9 接编排。
+  // 容器默认展开（后端菜单深度 ≤2 层容器）；chevron 折叠，名称点击开二级栏。
   const [open, setOpen] = useState(true);
   const visibleChildren = node.children.filter((c) => isBrowsableShortcut(c.item) || c.item.type === "container");
   if (visibleChildren.length === 0) return null;
-  const icon: IconName = (node.item.iconName as IconName | null) ?? "group";
+  const icon: IconName = (node.item.iconName as IconName | null) ?? "folder";
 
   return (
     <div>
@@ -96,10 +106,17 @@ function ContainerNode({ node, depth, activeIds, onNavigate }: {
         >
           <Icon name={open ? "chevronDown" : "chevronRight"} size={12} />
         </button>
-        <Icon name={icon} size={14} className="shrink-0 text-gx-text-tertiary" />
-        <span className="flex-1 truncate text-gx-12 font-medium text-gx-text-secondary">
-          {node.item.label ?? "未命名分组"}
-        </span>
+        <button
+          type="button"
+          onClick={() => onOpenSecondary?.(node)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          title="打开二级导航"
+        >
+          <Icon name={icon} size={14} className="shrink-0 text-gx-text-tertiary" />
+          <span className="flex-1 truncate text-gx-12 font-medium text-gx-text-secondary group-hover:text-gx-text-primary">
+            {node.item.label ?? "未命名分组"}
+          </span>
+        </button>
       </div>
       {open &&
         visibleChildren.map((child) =>
@@ -110,6 +127,8 @@ function ContainerNode({ node, depth, activeIds, onNavigate }: {
               depth={depth + 1}
               activeIds={activeIds}
               onNavigate={onNavigate}
+              onLocate={onLocate}
+              onOpenSecondary={onOpenSecondary}
             />
           ) : (
             <ShortcutRow
@@ -118,6 +137,7 @@ function ContainerNode({ node, depth, activeIds, onNavigate }: {
               depth={depth + 1}
               active={activeIds.has(child.item.id)}
               onNavigate={onNavigate}
+              onLocate={onLocate}
             />
           ),
         )}
@@ -126,18 +146,14 @@ function ContainerNode({ node, depth, activeIds, onNavigate }: {
 }
 
 /**
- * 一级导航。composer=false（默认）浏览态：只显示活 shortcut。
- * S9 传 composer=true 时进入编排态（broken/soft_dangling 显灰 + 增删改排）。
+ * 一级导航。浏览态：只显示活 shortcut；点击容器名打开二级三分区。
  */
-export function PrimaryNav({ composer = false }: { composer?: boolean }) {
+export function PrimaryNav({ onOpenSecondary }: { onOpenSecondary?: (container: MenuTreeNode) => void }) {
   const { menu, isLoading, isError } = useNavMenu();
   const navigate = useNavigate();
   const { baseId, tableId, kbId, docId } = useParams();
 
-  const tree = useMemo(() => {
-    const items = composer ? menu?.items ?? [] : filterBrowsableItems(menu?.items ?? []);
-    return buildMenuTree(items);
-  }, [menu?.items, composer]);
+  const tree = useMemo(() => buildMenuTree(filterBrowsableItems(menu?.items ?? [])), [menu?.items]);
 
   // 当前内容资源：表页取 table 节点，文档/画布取 doc 节点，库首页取 base/kb 节点。
   const currentResource = tableId ?? docId ?? baseId ?? kbId ?? null;
@@ -176,6 +192,13 @@ export function PrimaryNav({ composer = false }: { composer?: boolean }) {
             depth={0}
             activeIds={activeItems}
             onNavigate={navigate}
+            onLocate={(pid) =>
+              onOpenSecondary?.(
+                // 用菜单项构造容器节点（二级栏只需 id/label）
+                { item: menu?.items.find((i) => i.id === pid) ?? node.item, children: [] } as MenuTreeNode,
+              )
+            }
+            onOpenSecondary={onOpenSecondary}
           />
         ) : (
           <ShortcutRow
@@ -184,6 +207,11 @@ export function PrimaryNav({ composer = false }: { composer?: boolean }) {
             depth={0}
             active={activeItems.has(node.item.id)}
             onNavigate={navigate}
+            onLocate={(pid) =>
+              onOpenSecondary?.(
+                { item: menu?.items.find((i) => i.id === pid) ?? node.item, children: [] } as MenuTreeNode,
+              )
+            }
           />
         ),
       )}

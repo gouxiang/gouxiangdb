@@ -11,6 +11,13 @@ import { Icon } from "../../components/icons";
 import { SearchDialog } from "../search/SearchDialog";
 import { WorkspaceTopBar } from "./WorkspaceTopBar";
 import { PrimaryNav } from "./PrimaryNav";
+import { SecondaryNav } from "./SecondaryNav";
+import type { MenuTreeNode } from "./lib/menu-tree";
+
+interface SecondaryState {
+  containerId: string;
+  name: string;
+}
 
 function FooterNav({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate();
@@ -48,11 +55,11 @@ function FooterNav({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-function SideRail() {
+function SideRail({ onOpenSecondary }: { onOpenSecondary: (c: MenuTreeNode) => void }) {
   return (
     <aside className="flex h-full w-60 shrink-0 flex-col border-r border-gx-separator bg-gx-bg">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <PrimaryNav />
+        <PrimaryNav onOpenSecondary={onOpenSecondary} />
       </div>
       <FooterNav />
     </aside>
@@ -62,8 +69,13 @@ function SideRail() {
 export function WorkspaceShell() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [secondary, setSecondary] = useState<SecondaryState | null>(null);
   const [wide, setWide] = useState(() => (typeof window === "undefined" ? true : window.innerWidth >= 1024));
   const location = useLocation();
+
+  const openSecondary = (c: MenuTreeNode) => {
+    setSecondary({ containerId: c.item.id, name: c.item.label ?? c.item.node?.name ?? "容器" });
+  };
 
   // ⌘K 与旧壳一致
   useEffect(() => {
@@ -107,7 +119,7 @@ export function WorkspaceShell() {
 
       <div className="relative flex min-h-0 flex-1">
         {wide ? (
-          <SideRail />
+          <SideRail onOpenSecondary={openSecondary} />
         ) : (
           drawerOpen && (
             <>
@@ -118,10 +130,20 @@ export function WorkspaceShell() {
                 onClick={() => setDrawerOpen(false)}
               />
               <div className="absolute left-0 top-0 bottom-0 z-30">
-                <SideRail />
+                <SideRail onOpenSecondary={openSecondary} />
               </div>
             </>
           )
+        )}
+
+        {wide && secondary && (
+          // key 随容器切换：tab/搜索词/展开态/移动弹层全部重挂重置，不把上个容器的视图状态带过来
+          <SecondaryNav
+            key={secondary.containerId}
+            containerMenuId={secondary.containerId}
+            containerName={secondary.name}
+            onClose={() => setSecondary(null)}
+          />
         )}
 
         <main className="min-w-0 flex-1 overflow-hidden">

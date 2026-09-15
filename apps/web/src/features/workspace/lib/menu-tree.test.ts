@@ -3,7 +3,9 @@ import { describe, it, expect } from "vitest";
 import type { MenuItemDTO, MenuTreeDTO, MenuNodeSummaryDTO } from "@gx/shared-types";
 import {
   buildMenuTree,
+  composerItemState,
   filterBrowsableItems,
+  filterComposerItems,
   findActiveShortcuts,
   isBrowsableShortcut,
   isComposerVisible,
@@ -97,10 +99,38 @@ describe("shortcut 悬挂三态浏览规则（openapi state，前端写死）", 
     expect(kept.map((i) => i.id)).toEqual(["c", "ok"]);
   });
 
-  it("编排态：broken/soft_dangling 保留（标灰可清理），node=null 的 shortcut 才剔除", () => {
+  it("编排态：broken 显灰保留可清理（含 node=null），soft_dangling 与浏览态一致全员隐藏", () => {
     expect(isComposerVisible(item({ id: "b", node: summary({ id: "b", state: "broken", resourceId: "b" }) }))).toBe(true);
-    expect(isComposerVisible(item({ id: "s", node: summary({ id: "s", state: "soft_dangling", resourceId: "s" }) }))).toBe(true);
-    expect(isComposerVisible(item({ id: "n", node: null }))).toBe(false);
+    expect(isComposerVisible(item({ id: "s", node: summary({ id: "s", state: "soft_dangling", resourceId: "s" }) }))).toBe(false);
+    expect(isComposerVisible(item({ id: "n", node: null }))).toBe(true);
+  });
+
+  it("filterComposerItems 剔除 soft_dangling shortcut，保留 alive/broken 与容器", () => {
+    const kept = filterComposerItems([
+      item({ id: "c", type: "container", nodeId: null, node: null }),
+      item({ id: "ok" }),
+      item({ id: "brk", node: summary({ id: "brk", state: "broken", resourceId: "brk" }) }),
+      item({ id: "soft", node: summary({ id: "soft", state: "soft_dangling", resourceId: "soft" }) }),
+    ]);
+    expect(kept.map((i) => i.id)).toEqual(["c", "ok", "brk"]);
+  });
+});
+
+describe("composerItemState 编排态行状态（容器缺摘要回归）", () => {
+  it("容器 node 恒 null 也必须判 alive，不显示已失效徽章/删除线（S9 真机回归）", () => {
+    const c1 = item({ id: "c1", type: "container", nodeId: "nav_base_1", node: null });
+    const c2 = item({ id: "c2", type: "container", nodeId: null, node: null });
+    expect(composerItemState(c1)).toBe("alive");
+    expect(composerItemState(c2)).toBe("alive");
+  });
+
+  it("shortcut 按摘要三态；node=null 视为 broken", () => {
+    expect(composerItemState(item({ id: "a" }))).toBe("alive");
+    expect(composerItemState(item({ id: "s", node: summary({ id: "s", state: "soft_dangling", resourceId: "s" }) }))).toBe(
+      "soft_dangling",
+    );
+    expect(composerItemState(item({ id: "b", node: summary({ id: "b", state: "broken", resourceId: "b" }) }))).toBe("broken");
+    expect(composerItemState(item({ id: "n", node: null }))).toBe("broken");
   });
 });
 

@@ -1,10 +1,33 @@
 // M3 统一导航 TanStack Query hooks：tree（权威实体树）/ menu（引用树）。
-// 所有请求经 client.ts NavApi 段，禁裸 fetch。写 mutation 在 S9 NavComposer 追加。
+// 所有请求经 client.ts NavApi 段，禁裸 fetch。
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { NavApi } from "../../api/client";
-import type { MenuTreeDTO, NavTreeDTO, NavTreeQuery } from "@gx/shared-types";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ApiError, NavApi } from "../../api/client";
+import type {
+  CreateGroupInput,
+  GroupDeleteStrategy,
+  MenuOp,
+  MenuTreeDTO,
+  MoveImpactDTO,
+  NavTreeDTO,
+  NavTreeQuery,
+} from "@gx/shared-types";
 import { indexNavNodes, type NodeIndex } from "./lib/nav-links";
+
+/** 409 MOVE_NEEDS_CONFIRM 错误体（body 在 ApiError 公共类型之外，窄化提取）。 */
+interface MoveConfirmBody {
+  error?: string;
+  code?: string;
+  impact?: MoveImpactDTO;
+}
+
+/** 从 move 409 错误中取影响面；非确认型错误返回 null。 */
+export function extractMoveImpact(e: unknown): MoveImpactDTO | null {
+  if (!(e instanceof ApiError) || e.status !== 409) return null;
+  const body = e.body as MoveConfirmBody;
+  if (body?.code !== "MOVE_NEEDS_CONFIRM" || !body.impact) return null;
+  return body.impact;
+}
 
 export const NAV_QK = {
   tree: ["nav-tree"] as const,
@@ -83,4 +106,61 @@ export function useNavNodeIndex(): { index: NodeIndex; isLoading: boolean } {
   const { tree, isLoading } = useNavTreeDeep();
   const index = useMemo(() => indexNavNodes(tree?.items ?? []), [tree?.items]);
   return { index, isLoading };
+}
+
+// ============ S9 写 mutations（菜单引用层 + group 实体 + 权威移动） ============
+//
+// 成功后统一失效 menu/tree 两类查询；菜单编排的乐观/本地态由 NavComposer 自行持有 draft，
+// 保存时一次性提交（整单事务），故这里不做逐操作乐观更新。
+
+/** 菜单批量 diff 整单提交（PATCH menu）。 */
+export function usePatchMenu() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (operations: MenuOp[]) => NavApi.patchMenu(operations),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: NAV_QK.menu });
+    },
+  });
+}
+
+export function useCreateGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateGroupInput) => NavApi.createGroup(input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: NAV_QK.menu });
+      void qc.invalidateQueries({ queryKey: NAV_QK.tree });
+    },
+  });
+}
+
+export function useDeleteGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; strategy: GroupDeleteStrategy; targetParentId?: string }) =>
+      NavApi.deleteGroup(args.id, args.strategy, args.targetParentId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: NAV_QK.menu });
+      void qc.invalidateQueries({ queryKey: NAV_QK.tree });
+    },
+  });
+}
+
+/**
+ * 权威节点移动（nav_nodes.parentId）。调用方流程：
+ *   mutate 不带 confirmed → 409 MOVE_NEEDS_CONFIRM，extractMoveImpact 取影响面弹模态；
+ *   用户确认后以 confirmed=true 重发同一请求 → 200。
+ * 菜单层拖拽不走本 hook（菜单零副作用，AC-M3-1 边界）。
+ */
+export function useMoveNode() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; newParentId: string; confirmed: boolean }) =>
+      NavApi.move(args.id, args.newParentId, args.confirmed),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: NAV_QK.tree });
+      void qc.invalidateQueries({ queryKey: NAV_QK.menu });
+    },
+  });
 }
