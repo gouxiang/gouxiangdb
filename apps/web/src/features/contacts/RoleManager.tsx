@@ -29,6 +29,7 @@ const ACTION_LABEL: Record<OrgAction, string> = {
   manage_members: "管理成员",
   manage_roles: "管理角色",
   manage_menu: "导航编排",
+  manage_share: "分享授权",
 };
 
 const NO_FILTER: MemberFilter = { q: "", deptId: null, status: null };

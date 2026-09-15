@@ -2,7 +2,7 @@
 //
 // 覆盖：
 //  - 迁移目录数 12 -> 14；两条新迁移都被记录为 applied；
-//  - ws_default 幂等单播；五枚系统角色（仅 owner 持三 manage_*，余 permissions=[]）；
+//  - ws_default 幂等单播；五枚系统角色（owner 随迁移链持五枚 manage_*，余 permissions=[]）；
 //  - 空库 backfill 不产生 owner 自举；新 users 列默认 status=ACTIVE/tv0/workspaceId=NULL；
 //  - 手动重放 backfill：全部用户置 ACTIVE/ws_default/0、最早用户恰好获一枚 owner 授予；
 //    再重放两次仍只一枚（幂等可重入）；
@@ -79,7 +79,7 @@ describe("系统种子（幂等单播）", () => {
     expect(ws).toEqual([{ id: "ws_default", name: "默认工作区", policyVersion: 0 }]);
   });
 
-  it("五枚系统角色，仅 owner 持三枚 manage_*，其余 permissions=[]", () => {
+  it("五枚系统角色，仅 owner 持五枚 manage_*，其余 permissions=[]", () => {
     const ORDER: Record<string, number> = { owner: 0, creator: 1, editor: 2, commenter: 3, viewer: 4 };
     const roles = (db.prepare("SELECT systemKey, isSystem, permissions FROM roles").all() as
       Array<{ systemKey: string; isSystem: number; permissions: string }>)
@@ -87,7 +87,7 @@ describe("系统种子（幂等单播）", () => {
     expect(roles.map((r) => r.systemKey)).toEqual(["owner", "creator", "editor", "commenter", "viewer"]);
     expect(roles.every((r) => r.isSystem === 1)).toBe(true);
     const byKey = Object.fromEntries(roles.map((r) => [r.systemKey, JSON.parse(r.permissions) as string[]]));
-    expect(byKey.owner.sort()).toEqual(["manage_departments", "manage_members", "manage_menu", "manage_roles"]);
+    expect(byKey.owner.sort()).toEqual(["manage_departments", "manage_members", "manage_menu", "manage_roles", "manage_share"]);
     for (const k of ["creator", "editor", "commenter", "viewer"]) expect(byKey[k]).toEqual([]);
   });
 

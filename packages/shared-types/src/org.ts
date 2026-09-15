@@ -2,22 +2,26 @@
 // M2 企业组织通讯录 /api/v1/org/* 前后端契约（唯一真源；只增不改既有导出）。
 //
 // 边界（M2 计划 §5-A / 派工）：
-//   - M2 锁定三枚组织管理动作；M3-S6 只增第四枚 manage_menu（导航菜单编排）。
-//   - 资源动作 r/c/u/d/comment 一律不进 OrgAction（资源权限仍走 members.role + permissions.ts）。
+//   - M2 锁定三枚组织管理动作；M3-S6 只增第四枚 manage_menu（导航菜单编排）；
+//     M4-S5 只增第五枚 manage_share（授权策略/分享管理）。
+//   - 资源动作 r/c/u/d/comment/manage_share（资源空间，见 authz.ts RESOURCE_ACTIONS）一律不与
+//     本 OrgAction 混用：组织空间的 manage_share 是独立第五枚，二者同名不同命名空间。
 //   - 成功响应沿用现网：资源本体 / 分页对象 {items,total,page,limit,hasMore}；错误 {error,code}。
 
-/** 组织管理动作（M3-S6 起四枚；只增不改既有成员顺序语义）。 */
+/** 组织管理动作（M3-S6 起四枚，M4-S5 起五枚；只增不改既有成员顺序语义）。 */
 export type OrgAction =
   | "manage_departments"
   | "manage_members"
   | "manage_roles"
-  | "manage_menu";
+  | "manage_menu"
+  | "manage_share";
 
 export const ORG_ACTIONS: readonly OrgAction[] = [
   "manage_departments",
   "manage_members",
   "manage_roles",
   "manage_menu",
+  "manage_share",
 ];
 
 /** 五枚系统组织角色 key（自定义角色 systemKey=null）。 */

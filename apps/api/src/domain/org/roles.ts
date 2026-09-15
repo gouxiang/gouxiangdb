@@ -10,7 +10,7 @@ export { effectiveRoleRows };
 // 派工/计划接口名：effectiveOrgRoles 即去重合并来源后的有效角色集。
 export const effectiveOrgRoles = effectiveRoleRows;
 
-/** 白名单守卫：非四枚组织动作拒绝（自定义角色 actions 校验；manage_menu 为 M3-S6 只增）。 */
+/** 白名单守卫：非 ORG_ACTIONS 内的组织动作拒绝（自定义角色 actions 校验；真源在 shared-types）。 */
 export function assertOrgActions(actions: readonly unknown[]): OrgAction[] {
   const out = actions.filter((a): a is OrgAction => typeof a === "string"
     && (ORG_ACTIONS as readonly string[]).includes(a));
@@ -31,8 +31,10 @@ export interface SystemRoleSpec {
 /**
  * 五枚系统角色单一真源（应用侧）。permissions/名称与迁移链逐字一致：
  * 20260915090000_enterprise_org_ddl 播三动作，20260916100000_owner_manage_menu
- * 只增补到四动作（systemRolesMatchSeed 对拍测试跑在全量迁移后）。
- * 仅 owner 持四枚 manage_*，其余四枚为空（M4 资源角色命名锚点）。
+ * 只增补到四动作，20260916130000_owner_manage_share 只增补到五动作
+ * （systemRolesMatchSeed 对拍测试跑在全量迁移后）。
+ * owner actions 直接展开 ORG_ACTIONS 真源（不手维护本地字面量，加动作位时自动收窄）。
+ * 仅 owner 持全部 manage_*，其余四枚为空（M4 资源角色命名锚点）。
  */
 export const SYSTEM_ROLES: readonly SystemRoleSpec[] = [
   {
@@ -40,7 +42,7 @@ export const SYSTEM_ROLES: readonly SystemRoleSpec[] = [
     systemKey: "owner",
     name: "所有者",
     description: "工作区所有者，承担组织管理面全部动作",
-    actions: ["manage_departments", "manage_members", "manage_roles", "manage_menu"],
+    actions: [...ORG_ACTIONS],
   },
   { id: "role_creator", systemKey: "creator", name: "创建者", description: "M4 资源角色命名锚点，M2 无组织管理动作", actions: [] },
   { id: "role_editor", systemKey: "editor", name: "编辑者", description: "M4 资源角色命名锚点，M2 无组织管理动作", actions: [] },
@@ -61,7 +63,7 @@ type Client = DbTx | typeof prisma;
  *   直接：role_assignments subjectType=user；
  *   部门：subjectType=dept 的授予部门 -> 其【子树】全体活部门 -> 成员（祖先授予荫及子树，
  *   与 effectiveRoleRows 的 path 祖先闭包方向互逆）。
- * 常量查询（3 次，与部门层数/兼岗数无关）：授予行 → 子树部门 → 成员。
+ * 常量查询（3 次，与部门层数/兼岗数无关）：授予行 -> 子树部门 -> 成员。
  * 只计 ACTIVE（INVITED 未入职、DISABLED 已停用，均不构成在岗 owner）。
  */
 export async function usersWithRole(roleId: string, client: Client = prisma): Promise<string[]> {

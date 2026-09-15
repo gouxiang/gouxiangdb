@@ -64,10 +64,11 @@ afterAll(() => {
 });
 
 describe("迁移清单", () => {
-  it("迁移目录数为 19（含 M4-S4 scope creator 索引），nav DDL 落 applied，重跑 deploy 幂等", () => {
+  it("迁移目录数为 20（含 M4-S5 owner manage_share 补位），nav DDL 落 applied，重跑 deploy 幂等", () => {
     const dirs = migDirs();
-    expect(dirs.length).toBe(19);
+    expect(dirs.length).toBe(20);
     expect(dirs).toContain("20260916090000_enterprise_nav_ddl");
+    expect(dirs).toContain("20260916130000_owner_manage_share");
     const applied = db.prepare("SELECT rolled_back_at FROM _prisma_migrations WHERE migration_name=?")
       .get("20260916090000_enterprise_nav_ddl") as { rolled_back_at: string | null } | undefined;
     expect(applied).toBeDefined();

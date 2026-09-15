@@ -89,8 +89,8 @@ describe("S7 openapi.yaml 结构冻结", () => {
     expect(yaml).not.toMatch(/^\s+data:\s*$/m);
   });
 
-  it("四枚组织动作与七类 nav kind 均在枚举内", () => {
-    for (const a of ["manage_departments", "manage_members", "manage_roles", "manage_menu"]) {
+  it("五枚组织动作与七类 nav kind 均在枚举内", () => {
+    for (const a of ["manage_departments", "manage_members", "manage_roles", "manage_menu", "manage_share"]) {
       expect(yaml).toContain(a);
     }
     for (const k of ["base", "kb", "table", "view", "doc", "canvas", "group"]) {

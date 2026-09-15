@@ -92,7 +92,7 @@ function counted(client: PrismaClient) {
 }
 
 describe("系统角色常量与迁移种子对拍", () => {
-  it("五枚 id/key/name/isSystem/permissions 逐字一致，仅 owner 持四动作", async () => {
+  it("五枚 id/key/name/isSystem/permissions 逐字一致，仅 owner 持五动作", async () => {
     const rows = await prisma.role.findMany({ where: { workspaceId: "ws_default" } });
     expect(rows).toHaveLength(5);
     const byId = new Map(rows.map((r) => [r.id, r]));
@@ -106,7 +106,7 @@ describe("系统角色常量与迁移种子对拍", () => {
     }
     const owner = byId.get("role_owner")!;
     expect(JSON.parse(owner.permissions).sort()).toEqual(
-      ["manage_departments", "manage_members", "manage_menu", "manage_roles"],
+      ["manage_departments", "manage_members", "manage_menu", "manage_roles", "manage_share"],
     );
   });
 });

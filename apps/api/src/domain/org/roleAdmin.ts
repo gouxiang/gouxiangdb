@@ -18,7 +18,7 @@ function parseActionsStrict(raw: unknown): OrgAction[] {
   try {
     return assertOrgActions(raw);
   } catch {
-    throw new HttpError(400, "存在非法组织管理动作（仅允许 manage_departments/manage_members/manage_roles/manage_menu）");
+    throw new HttpError(400, `存在非法组织管理动作（仅允许 ${ORG_ACTIONS.join("/")}）`);
   }
 }
 
