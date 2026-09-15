@@ -1,0 +1,167 @@
+// apps/api/src/routes/kb/index.ts
+// 知识库路由入口：容器（KnowledgeBase）CRUD + 挂载成员/内容/分享/回收站/版本/ACL 子路由。
+// 完全独立于 bases/tables/fields/records 路由，不改动数据表侧任何逻辑。
+//
+// M4/S5 commit ① 从单文件 routes/kb.ts（897 行）按资源分包（零行为变化）：
+//   index    容器 5 端点（list/create/get/rename/soft-delete）+ 子路由装配
+//   members  成员 3 端点；docs 内容 9 端点；sharing 分享 3 端点；
+//   versions 版本 4 端点；acl 文档权限 2 端点；recycle 回收站 + 永久删 2 端点；
+//   shared   守卫/角色/ACL/shadow 对拍缝（无路由）。
+// URL/请求/响应/状态码与拆分前逐字节一致；app.ts 改 import "./routes/kb/index.js"
+// （Bundler 解析下带 .js 后缀不会回退目录索引，显式指向本 index，同 v1 路由写法）。
+
+import { Hono } from "hono";
+import { z } from "zod";
+import { prisma, withWriteTx } from "../../db.js";
+import { requireUserId, errorResponse, HttpError } from "../../guards.js";
+import {
+  syncNavFromEntitiesTx,
+  softDeleteSubtreeTx,
+} from "../../domain/nav/sync.js";
+import { nodeId } from "../../domain/nav/backfill.js";
+import { requireKb, shadowKbAction } from "./shared.js";
+import { membersRoutes } from "./members.js";
+import { docsRoutes } from "./docs.js";
+import { sharingRoutes } from "./sharing.js";
+import { versionsRoutes } from "./versions.js";
+import { aclRoutes } from "./acl.js";
+import { recycleRoutes } from "./recycle.js";
+
+export const kb = new Hono();
+
+// ============ 知识库容器 ============
+
+kb.get("/", async (c) => {
+  try {
+    const userId = await requireUserId(c);
+    const memberships = await prisma.kbMember.findMany({
+      where: { userId, kb: { deletedAt: null } },
+      include: {
+        kb: {
+          include: {
+            _count: { select: { docs: { where: { deletedAt: null } } } },
+          },
+        },
+      },
+      orderBy: { joinedAt: "desc" },
+    });
+    const kbs = memberships
+      .filter((m) => m.kb)
+      .map((m) => ({
+        id: m.kb!.id,
+        name: m.kb!.name,
+        iconColor: m.kb!.iconColor,
+        role: m.role,
+        docCount: m.kb!._count.docs,
+        createdAt: m.kb!.createdAt,
+        updatedAt: m.kb!.updatedAt,
+      }));
+    return c.json({ knowledgeBases: kbs });
+  } catch (e) {
+    return errorResponse(c, e);
+  }
+});
+
+kb.post("/", async (c) => {
+  try {
+    const userId = await requireUserId(c);
+    const schema = z.object({
+      name: z.string().min(1).max(80),
+      iconColor: z.string().optional(),
+    });
+    const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "名称不合法" }, 400);
+
+    // M3/S3 #11：建 kb（含 owner 成员）收紧进事务，同事务 upsert kb 节点。
+    const created = await withWriteTx("kb.create", async (tx) => {
+      const k = await tx.knowledgeBase.create({
+        data: {
+          name: parsed.data.name,
+          iconColor: parsed.data.iconColor ?? "#0F6E56",
+          createdBy: userId,
+          members: { create: { userId, role: "owner" } },
+        },
+      });
+      await syncNavFromEntitiesTx(tx);
+      return k;
+    });
+    return c.json({ knowledgeBase: { id: created.id, name: created.name, iconColor: created.iconColor, role: "owner" } }, 201);
+  } catch (e) {
+    return errorResponse(c, e);
+  }
+});
+
+kb.get("/:kbId", async (c) => {
+  try {
+    const userId = await requireUserId(c);
+    const kbId = c.req.param("kbId");
+    const { role } = await requireKb(userId, kbId);
+    const full = await prisma.knowledgeBase.findUnique({ where: { id: kbId } });
+    if (!full) throw new HttpError(404, "知识库不存在");
+    return c.json({ knowledgeBase: { id: full.id, name: full.name, iconColor: full.iconColor, role, createdAt: full.createdAt } });
+  } catch (e) {
+    return errorResponse(c, e);
+  }
+});
+
+kb.patch("/:kbId", async (c) => {
+  try {
+    const userId = await requireUserId(c);
+    const kbId = c.req.param("kbId");
+    const { role } = await requireKb(userId, kbId);
+    const canManageShare = role === "owner";
+    if (!canManageShare) {
+      await shadowKbAction("kb.rename", userId, kbId, "manage_share", false);
+      throw new HttpError(403, "只有所有者可修改知识库");
+    }
+    await shadowKbAction("kb.rename", userId, kbId, "manage_share", true);
+    const schema = z.object({ name: z.string().min(1).max(80).optional(), iconColor: z.string().optional() });
+    const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
+    // M3/S3 #12a：改名收紧进事务同步 kb 节点 name（iconColor 不进树，也一并同事务）。
+    const updated = await withWriteTx("kb.rename", async (tx) => {
+      const u = await tx.knowledgeBase.update({
+        where: { id: kbId },
+        data: { name: parsed.data.name, iconColor: parsed.data.iconColor },
+      });
+      if (parsed.data.name !== undefined) await syncNavFromEntitiesTx(tx);
+      return u;
+    });
+    return c.json({ knowledgeBase: { id: updated.id, name: updated.name, iconColor: updated.iconColor } });
+  } catch (e) {
+    return errorResponse(c, e);
+  }
+});
+
+kb.delete("/:kbId", async (c) => {
+  try {
+    const userId = await requireUserId(c);
+    const kbId = c.req.param("kbId");
+    const { role } = await requireKb(userId, kbId);
+    if (role !== "owner") {
+      await shadowKbAction("kb.delete", userId, kbId, "manage_share", false);
+      throw new HttpError(403, "只有所有者可删除知识库");
+    }
+    await shadowKbAction("kb.delete", userId, kbId, "manage_share", true);
+    const now = new Date();
+    // M3/S3 #12b：kb 软删 + 级联 docs 收紧进单事务；nav 整棵子树（kb/doc/canvas）软删。
+    // kb 无恢复端点（裁决 6），子树节点随实体一并软删、保留行；如需找回由管理员 reconcile 兜底。
+    await withWriteTx("kb.softDelete", async (tx) => {
+      await tx.knowledgeBase.update({ where: { id: kbId }, data: { deletedAt: now } });
+      await tx.kbDoc.updateMany({ where: { kbId }, data: { deletedAt: now, deletedBy: userId } });
+      await softDeleteSubtreeTx(tx, nodeId("kb", kbId));
+    });
+    return c.json({ ok: true });
+  } catch (e) {
+    return errorResponse(c, e);
+  }
+});
+
+// ============ 子路由装配（同挂 kb 子 app，路径不变） ============
+// 注册覆盖 monolith 原全部端点；Hono 静态段优先于参数段（/docs/* 先于 /:kbId），与拆分前同解析。
+kb.route("/", membersRoutes);
+kb.route("/", docsRoutes);
+kb.route("/", sharingRoutes);
+kb.route("/", versionsRoutes);
+kb.route("/", recycleRoutes);
+kb.route("/", aclRoutes);

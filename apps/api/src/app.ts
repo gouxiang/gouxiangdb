@@ -22,7 +22,7 @@ import { tables } from "./routes/tables.js";
 import { fields } from "./routes/fields.js";
 import { records } from "./routes/records.js";
 import { views } from "./routes/views.js";
-import { kb } from "./routes/kb.js";
+import { kb } from "./routes/kb/index.js";
 import { pub } from "./routes/public.js";
 import { search } from "./routes/search.js";
 import { v1 } from "./routes/v1/index.js";
