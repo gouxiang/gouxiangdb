@@ -217,8 +217,46 @@
 
 ---
 
+## G. M3 统一导航资源树（新壳 / 菜单引用层，2026-09-15 追加）
+
+> 口径：M3 只换"工作区外壳 + 一级/二级导航"，内容 URL 与正文数据零变化（裁决 2/ADR-0028）。
+> 自动化用例分布：`ac-m3-1.test.ts`（17）、`nav-window.test.ts`（11）、`n5-new-shell-links.test.ts`（20）、
+> `menu-tree.test.ts`/`menu-ops/collection` 既有集；无 jsdom，组件点击项走【手册】。
+
+### RC-41 旧链接在新壳下逐条可达（N5）【自/UI】
+- 步骤（自）：跑 `n5-new-shell-links.test.ts`——navNodeHref 五 kind 输出 `/base/:id`、`/kb/:id/(doc|canvas)/:d` 旧形，view/group/祖先缺失返 null；App.tsx 7 条旧路由仍声明；SearchDialog 三类结果、DocRefCard/GxLinkBlockView/RefEmbedBody、ShareJoin、TopBar/ViewTabs、LibrarySwitcher 源码守卫仍 navigate 旧形；编辑器内不允许手拼 `/base//kb/`，一律经 `internalHref` 单一真源。
+- 步骤（手册）：真机逐点点击——全局搜索三类结果回车落地；画布关联卡跳转与 LinkBlock 双击；文档正文内链 SPA 跳转不整页刷新；分享接受后进 base；表页面包屑（库名/表名）与视图 Tab；库切换器 base/kb 四入口。
+- 预期：URL 与换壳前逐字符一致（含 `?record=`），无 `/w/node` 新形，无 404；`/s/:token` 公开页不被内部点击委托吞掉。
+
+### RC-42 菜单引用层写操作不改实体归属（多处挂载）【自/API】
+- 步骤（自）：跑 `ac-m3-1.test.ts` #1——同一 table shortcut 挂 3 个容器，diff 仅含 insert；每个菜单 op 断言无 `newParentId/confirmed/resourceId` 字段；跨容器菜单移动/删菜单引用后，权威树实体 parentId 不变。
+- 步骤（手册）：真机把一张表"添加到导航"到两个库容器，打开两处均可达；在编排里删掉其中一处引用，另一处与表本体仍在。
+- 预期：菜单增删改排只写 menu_items，nav_nodes 归属零变化（ADR-0026）。
+
+### RC-43 三态可见性：soft_dangling 双态隐藏 / broken 仅编排态显灰 / 源恢复自动还原【自/UI】
+- 步骤（自）：跑 `ac-m3-1.test.ts` #2/#3——soft_dangling 浏览态不可见且未收纳计数 +1；编排态视图层同样过滤、但 draft 全量镜像保留（保存不产生误 delete）；源恢复 alive 后 menu diff 为空（引用非重建）。broken 浏览隐藏、编排显灰可清理；shortcut `node=null`（物理消失）编排态保留显灰；容器恒判 alive；只有手动移除才产 delete op。
+- 预期：软删不误伤菜单、恢复不需重挂；broken 不污染浏览态但能在编排里被发现清理。
+
+### RC-44 二级三分区随菜单 patch 迁移（收纳/退收纳/子树收集）【自】
+- 步骤（自）：跑 `ac-m3-1.test.ts` #4——insert 后未收纳→已收纳计数迁移；delete 回退后"全部"视角实体仍在；多处挂载删一处仍收纳、全部删净才退；后代容器引用经 `collectedUnderSubtree` 被根容器收集。
+- 预期：三视角计数恒等式（全部 = 已收纳 + 未收纳，按 C4 口径）在任意菜单 patch 后成立。
+
+### RC-45 权威移动必经 move-impact + 409 确认【自/手册】
+- 步骤（自）：跑 `ac-m3-1.test.ts` #5——409 且 `code=MOVE_NEEDS_CONFIRM` 且带 impact 时 extractMoveImpact 返 impact 弹确认；409 他 code、缺 impact、403/500/网络错误均返 null 走 toast。
+- 步骤（手册）：真机"移动到分组"触发影响面弹窗（子树项/受影响用户/shortcut 数），取消不移动，确认后才落库；菜单编排里的拖动不触发该弹窗（那是引用层重排）。
+- 预期：未带 `confirmed=true` 的权威移动被后端 409 拒绝，前端不绕过。
+
+### RC-46 大菜单首屏 DOM 有界（窗口化）【自/手册】
+- 步骤（自）：跑 `nav-window.test.ts`——挂载行数 = `ceil(vh/rowH)+2*overscan`，1k/10k/100k 菜单同为 ≤49 行（一级 32px ≤48、二级 31px ≤49）；折叠容器只留自身行；首帧保守视口 `rowH*24` 即有界；滚到真实底部 end=total、padBottom=0。PrimaryNav/ComposerTree/SecondaryNav 源码守卫挂 `scrollerRef` + 渲染 `virt.windowed`，hook 复用 M2 `virtualWindow`、ResizeObserver + passive scroll 接线齐全。
+- 步骤（手册）：1000+ 菜单夹具下滚动一级/编排树/二级未收纳列表，DevTools Elements 检查行 DOM 数不随总量膨胀、滚动条高度正确、快速滚动无白屏久留、折叠容器后行数立即收敛。
+- 度量口径：Node `performance.now()` 仅夹纯算术（1k ≈0.3ms、10k ≈15ms，挂载恒 48 行），**不是浏览器 P95**；浏览器交互/渲染耗时以真机 Performance 面板为准。
+- 预期：DOM 节点数与菜单项总量解耦；窗口化重构后 RC-41 点击、RC-43/44 行为不回退。
+
+---
+
 ## 附：回归优先级建议
 - 每次提交：RC-38（自动）+ 当次改动域。
 - 阶段升级收尾：A/B 全部（RC-01~RC-12）+ E 公式（RC-31~RC-37）。
 - 动画布/Plait/编辑器：C 全部（RC-13~RC-25）。
 - 动分享/鉴权/附件/构建：D（RC-26~RC-30）+ F（RC-38~RC-40）。
+- 动工作区外壳/导航/菜单树：G 全部（RC-41~RC-46）；其中 RC-41 的手册点击项在任何路由/外壳改动后必跑。

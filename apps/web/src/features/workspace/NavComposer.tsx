@@ -189,7 +189,8 @@ export function NavComposer() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-gx-lg border border-gx-separator bg-gx-surface p-2">
+      {/* ComposerTree 自身窗口化滚动（S10），容器只给布局高度不再 overflow */}
+      <div className="min-h-0 flex-1 rounded-gx-lg border border-gx-separator bg-gx-surface p-2">
         {tree2.length === 0 ? (
           <div className="px-3 py-10 text-center text-gx-12 text-gx-text-hint">
             菜单为空。分组创建后会出现在根层；实体可通过二级导航「收纳到导航」加入容器。

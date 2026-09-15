@@ -21,7 +21,14 @@ import {
   type CollectionView,
 } from "./lib/collection";
 import { newDraftId } from "./lib/menu-ops";
-import { SectionList, groupByKind } from "./SecondaryNavSections";
+import { useMenuVirtualizer } from "./lib/useMenuVirtualizer";
+import {
+  buildSecondaryRows,
+  groupByKind,
+  SectionHeader,
+  SecondaryRow,
+  SECONDARY_ROW_H,
+} from "./SecondaryNavSections";
 import { MoveToGroupModal } from "./MoveToGroupModal";
 import { MoveImpactModal, type PendingMove } from "./MoveImpactModal";
 import type { NavNodeDTO } from "@gx/shared-types";
@@ -164,6 +171,13 @@ export function SecondaryNav({ containerMenuId, containerName, onClose }: {
 
   const empty = sections.table.length + sections.doc.length + sections.canvas.length === 0;
 
+  // S10：三段合并为一条定高行序列，单窗口切片，挂载 DOM 数不随未收纳/全部列表总量线性膨胀。
+  const flatRows = useMemo(
+    () => buildSecondaryRows(sections, expandedDocs, docChildren),
+    [sections, expandedDocs, docChildren],
+  );
+  const virt = useMenuVirtualizer(flatRows, SECONDARY_ROW_H);
+
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-r border-gx-separator bg-gx-bg">
       <div className="flex items-center gap-1 border-b border-gx-separator px-2 py-2">
@@ -212,27 +226,34 @@ export function SecondaryNav({ containerMenuId, containerName, onClose }: {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto py-1.5">
+      <div ref={virt.scrollerRef} className="min-h-0 flex-1 overflow-y-auto py-1.5">
         {isLoading ? (
           <div className="flex h-24 items-center justify-center"><Spinner size={16} /></div>
         ) : (
           <>
-            {(["table", "doc", "canvas"] as const).map((kind) => (
-              <SectionList
-                key={kind}
-                kind={kind}
-                entries={sections[kind]}
-                tab={tab}
-                currentResource={currentResource}
-                index={index}
-                expandedDocs={expandedDocs}
-                docChildren={docChildren}
-                onToggleDoc={toggleDoc}
-                onNavigate={(href) => navigate(href)}
-                onCollect={collect}
-                onMove={setMoveFor}
-              />
-            ))}
+            <div className="px-1.5" style={{ paddingTop: virt.padTop, paddingBottom: virt.padBottom }}>
+              {virt.windowed.map((row) =>
+                row.type === "header" ? (
+                  <SectionHeader key={`h-${row.kind}`} kind={row.kind} count={row.count} />
+                ) : (
+                  <SecondaryRow
+                    key={row.entry.node.id}
+                    kind={row.kind}
+                    entry={row.entry}
+                    depth={row.depth}
+                    hasDocKids={row.hasDocKids}
+                    expanded={row.expanded}
+                    currentResource={currentResource}
+                    index={index}
+                    tab={tab}
+                    onToggleDoc={toggleDoc}
+                    onNavigate={(href) => navigate(href)}
+                    onCollect={collect}
+                    onMove={setMoveFor}
+                  />
+                ),
+              )}
+            </div>
             {empty && (
               <div className="px-4 py-8 text-center text-gx-12 text-gx-text-hint">
                 {tab === "uncollected" ? "全部内容都已收纳" : "没有匹配的内容"}

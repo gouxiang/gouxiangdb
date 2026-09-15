@@ -115,3 +115,43 @@ export function visibleShortcutCount(nodes: readonly MenuTreeNode[]): number {
   }
   return n;
 }
+
+/** 扁平化后的可见行（窗口化渲染用）。 */
+export interface FlatMenuRow {
+  node: MenuTreeNode;
+  depth: number;
+  /** 该行是否为容器（容器有折叠态与子行）。 */
+  isContainer: boolean;
+  /** 容器直接/间接可见子行数（不含自身），供空容器与缩进判断。 */
+  childCount: number;
+}
+
+function countRows(nodes: readonly MenuTreeNode[]): number {
+  let n = 0;
+  for (const node of nodes) n += 1 + countRows(node.children);
+  return n;
+}
+
+/**
+ * 按容器展开集合把菜单树深度优先摊平为有序行（S10 DOM 有界窗口化的输入）。
+ * - 输入应已是浏览态/编排态过滤后的树；
+ * - isOpen 仅对容器有意义，返回 false 时其子行不摊平（折叠）；
+ * - 纯函数无 DOM，大菜单下「可见行数」可在此一次性确定，组件再用 virtualWindow 切片，
+ *   保证挂载 DOM 数只与视口相关、不随菜单项总数线性膨胀。
+ */
+export function flattenMenuRows(
+  nodes: readonly MenuTreeNode[],
+  isOpen: (id: string) => boolean,
+  depth = 0,
+): FlatMenuRow[] {
+  const rows: FlatMenuRow[] = [];
+  for (const node of nodes) {
+    const isContainer = node.item.type === "container";
+    const childCount = countRows(node.children);
+    rows.push({ node, depth, isContainer, childCount });
+    if (isContainer && isOpen(node.item.id)) {
+      rows.push(...flattenMenuRows(node.children, isOpen, depth + 1));
+    }
+  }
+  return rows;
+}

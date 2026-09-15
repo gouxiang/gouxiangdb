@@ -7,8 +7,18 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "../../../components/icons";
 import type { MenuDraft } from "../lib/menu-ops";
-import { buildMenuTree, composerItemState, filterComposerItems, type MenuTreeNode } from "../lib/menu-tree";
+import {
+  buildMenuTree,
+  composerItemState,
+  filterComposerItems,
+  flattenMenuRows,
+  type MenuTreeNode,
+} from "../lib/menu-tree";
+import { useMenuVirtualizer } from "../lib/useMenuVirtualizer";
 import { navKindIcon } from "../PrimaryNav";
+
+/** 编排树行固定行高（py-1.5 + 14px 内容 ≈ 31），窗口化按此映射。 */
+const COMPOSER_ROW_H = 31;
 
 export interface DropTarget {
   parentId: string | null;
@@ -185,6 +195,10 @@ export function ComposerTree(props: Omit<RowProps, "node" | "depth" | "siblingMa
   const visible = filterComposerItems(items) as MenuDraft[];
   const tree = buildMenuTree(visible);
 
+  // 编排容器恒展开，摊平为定高行做窗口化（S10：1000+ 项只挂载视口 DOM，不引新依赖）。
+  const rows = flattenMenuRows(tree, () => true);
+  const virt = useMenuVirtualizer(rows, COMPOSER_ROW_H);
+
   // parentId → 有序兄弟 id（拖拽期间排除被拖项，落点 index 以此为准）
   const siblingMap = new Map<string | null, string[]>();
   for (const i of visible) {
@@ -203,10 +217,12 @@ export function ComposerTree(props: Omit<RowProps, "node" | "depth" | "siblingMa
   }
 
   return (
-    <div>
-      {tree.map((n) => (
-        <Row key={n.item.id} {...props} node={n} depth={0} siblingMap={siblingMap} />
-      ))}
+    <div ref={virt.scrollerRef} className="h-full overflow-y-auto">
+      <div style={{ paddingTop: virt.padTop, paddingBottom: virt.padBottom }}>
+        {virt.windowed.map((r) => (
+          <Row key={r.node.item.id} {...props} node={r.node} depth={r.depth} siblingMap={siblingMap} />
+        ))}
+      </div>
       {/* 根层放置条带：拖到列表下方空白 = 根层末尾 */}
       <div
         onDragOver={(e) => {

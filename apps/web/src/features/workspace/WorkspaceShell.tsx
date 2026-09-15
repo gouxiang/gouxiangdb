@@ -58,7 +58,8 @@ function FooterNav({ onNavigate }: { onNavigate?: () => void }) {
 function SideRail({ onOpenSecondary }: { onOpenSecondary: (c: MenuTreeNode) => void }) {
   return (
     <aside className="flex h-full w-60 shrink-0 flex-col border-r border-gx-separator bg-gx-bg">
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* PrimaryNav 自身窗口化滚动（S10 大菜单 DOM 有界），不再外包滚动容器避免双滚动条 */}
+      <div className="min-h-0 flex-1">
         <PrimaryNav onOpenSecondary={onOpenSecondary} />
       </div>
       <FooterNav />

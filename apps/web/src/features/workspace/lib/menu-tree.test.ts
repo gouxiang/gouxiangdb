@@ -7,6 +7,7 @@ import {
   filterBrowsableItems,
   filterComposerItems,
   findActiveShortcuts,
+  flattenMenuRows,
   isBrowsableShortcut,
   isComposerVisible,
   visibleShortcutCount,
@@ -164,5 +165,41 @@ describe("激活定位与可见计数", () => {
       nodes.reduce((acc, n) => acc + (n.item.type === "shortcut" ? 1 : 0) + countAll(n.children), 0);
     expect(countAll(tree)).toBe(3);
     expect(visibleShortcutCount(tree)).toBe(2);
+  });
+});
+
+describe("flattenMenuRows 树扁平化（S10 窗口化输入）", () => {
+  it("深度优先摊平、depth 递增；容器恒展开时父子有序", () => {
+    const items: MenuItemDTO[] = [
+      item({ id: "c1", type: "container", nodeId: null, node: null, ord: 0 }),
+      item({ id: "s1", parentId: "c1", ord: 0 }),
+      item({ id: "s2", parentId: "c1", ord: 1 }),
+      item({ id: "s0", ord: 1 }),
+    ];
+    const tree = buildMenuTree(items);
+    const rows = flattenMenuRows(tree, () => true);
+    expect(rows.map((r) => r.node.item.id)).toEqual(["c1", "s1", "s2", "s0"]);
+    expect(rows.map((r) => r.depth)).toEqual([0, 1, 1, 0]);
+    expect(rows.map((r) => r.isContainer)).toEqual([true, false, false, false]);
+    expect(rows[0]!.childCount).toBe(2);
+  });
+
+  it("isOpen=false 的容器只留自身行、不摊子行（折叠态窗口有界）", () => {
+    const items: MenuItemDTO[] = [
+      item({ id: "c1", type: "container", nodeId: null, node: null }),
+      item({ id: "s1", parentId: "c1" }),
+      item({ id: "s2", parentId: "c1" }),
+    ];
+    const tree = buildMenuTree(items);
+    expect(flattenMenuRows(tree, () => false).map((r) => r.node.item.id)).toEqual(["c1"]);
+    expect(flattenMenuRows(tree, (id) => id !== "c1").map((r) => r.node.item.id)).toEqual(["c1"]);
+  });
+
+  it("大菜单摊平为全部行（窗口切片前的总量），行数 = 菜单项数", () => {
+    const items: MenuItemDTO[] = [item({ id: "root", type: "container", nodeId: null, node: null })];
+    for (let i = 0; i < 1000; i++) items.push(item({ id: `s${i}`, parentId: "root", ord: i }));
+    const tree = buildMenuTree(items);
+    const rows = flattenMenuRows(tree, () => true);
+    expect(rows).toHaveLength(1001);
   });
 });
