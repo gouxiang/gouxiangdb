@@ -56,11 +56,24 @@ class VersionConflictError extends HttpError {
 /**
  * M4/S3 shadow 对拍缝：仅 GX_AUTHZ_ENGINE 生效为 shadow 时跑引擎同上下文对拍；
  * off 时空操作零新增 SQL。旧决策永远为准，对拍只分类计数/脱敏日志、不改返回、不抛错。
- * 本函数只裁决 kb 成员资格（kb 节点 r）；处理器内 owner/editor 的更高限制不在此重复对拍。
+ * 按守卫名 + kb 节点动作对拍：requireKb 只裁决成员资格(r)；处理器内的 owner-only 提级
+ * （改名/删除/加成员/踢成员）对拍 manage_share，建内容对拍 c——引擎 kb owner 串恰比 editor
+ * 多 manage_share、editor 持 c，与旧提级判断同口径。业务保护（不能踢 owner/自己）不属授权动作，不对拍。
  */
-async function shadowKb(userId: string, kbId: string, oldAllowed: boolean): Promise<void> {
+async function shadowKbAction(
+  guard: string,
+  userId: string,
+  kbId: string,
+  action: "r" | "c" | "manage_share",
+  oldAllowed: boolean,
+): Promise<void> {
   if (!authzShadowActive()) return;
-  await runShadowCheck("requireKb", userId, { resourceType: "kb", resourceId: kbId }, "r", oldAllowed);
+  await runShadowCheck(guard, userId, { resourceType: "kb", resourceId: kbId }, action, oldAllowed);
+}
+
+/** requireKb 成员资格对拍（kb 节点 r）。 */
+async function shadowKb(userId: string, kbId: string, oldAllowed: boolean): Promise<void> {
+  await shadowKbAction("requireKb", userId, kbId, "r", oldAllowed);
 }
 
 async function requireKb(userId: string, kbId: string): Promise<{ role: Role }> {
@@ -211,7 +224,12 @@ kb.patch("/:kbId", async (c) => {
     const userId = await requireUserId(c);
     const kbId = c.req.param("kbId");
     const { role } = await requireKb(userId, kbId);
-    if (role !== "owner") throw new HttpError(403, "只有所有者可修改知识库");
+    const canManageShare = role === "owner";
+    if (!canManageShare) {
+      await shadowKbAction("kb.rename", userId, kbId, "manage_share", false);
+      throw new HttpError(403, "只有所有者可修改知识库");
+    }
+    await shadowKbAction("kb.rename", userId, kbId, "manage_share", true);
     const schema = z.object({ name: z.string().min(1).max(80).optional(), iconColor: z.string().optional() });
     const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
@@ -235,7 +253,11 @@ kb.delete("/:kbId", async (c) => {
     const userId = await requireUserId(c);
     const kbId = c.req.param("kbId");
     const { role } = await requireKb(userId, kbId);
-    if (role !== "owner") throw new HttpError(403, "只有所有者可删除知识库");
+    if (role !== "owner") {
+      await shadowKbAction("kb.delete", userId, kbId, "manage_share", false);
+      throw new HttpError(403, "只有所有者可删除知识库");
+    }
+    await shadowKbAction("kb.delete", userId, kbId, "manage_share", true);
     const now = new Date();
     // M3/S3 #12b：kb 软删 + 级联 docs 收紧进单事务；nav 整棵子树（kb/doc/canvas）软删。
     // kb 无恢复端点（裁决 6），子树节点随实体一并软删、保留行；如需找回由管理员 reconcile 兜底。
@@ -281,7 +303,11 @@ kb.post("/:kbId/members", async (c) => {
     const userId = await requireUserId(c);
     const kbId = c.req.param("kbId");
     const { role } = await requireKb(userId, kbId);
-    if (role !== "owner") throw new HttpError(403, "只有所有者可管理成员");
+    if (role !== "owner") {
+      await shadowKbAction("kb.member.add", userId, kbId, "manage_share", false);
+      throw new HttpError(403, "只有所有者可管理成员");
+    }
+    await shadowKbAction("kb.member.add", userId, kbId, "manage_share", true);
     const schema = z.object({ email: z.string().email(), role: z.enum(["editor", "commenter", "viewer"]) });
     const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) {
@@ -307,7 +333,11 @@ kb.delete("/:kbId/members/:memberUserId", async (c) => {
     const kbId = c.req.param("kbId");
     const target = c.req.param("memberUserId");
     const { role } = await requireKb(userId, kbId);
-    if (role !== "owner") throw new HttpError(403, "只有所有者可移除成员");
+    if (role !== "owner") {
+      await shadowKbAction("kb.member.remove", userId, kbId, "manage_share", false);
+      throw new HttpError(403, "只有所有者可移除成员");
+    }
+    await shadowKbAction("kb.member.remove", userId, kbId, "manage_share", true);
     // 保护：owner 成员不可被移除（防止被加为 owner 的成员反踢原所有者）；
     // 操作者也不可移除自己（防止误操作导致自己失去访问权）。
     if (target === userId) throw new HttpError(400, "不能移除自己；如需转让知识库请联系所有者");
@@ -358,7 +388,12 @@ kb.post("/:kbId/docs", async (c) => {
     const userId = await requireUserId(c);
     const kbId = c.req.param("kbId");
     const { role } = await requireKb(userId, kbId);
-    if (RANK[role]! < RANK["editor"]!) throw new HttpError(403, "当前角色无权创建内容");
+    const canCreate = RANK[role]! >= RANK["editor"]!;
+    if (!canCreate) {
+      await shadowKbAction("kb.doc.create", userId, kbId, "c", false);
+      throw new HttpError(403, "当前角色无权创建内容");
+    }
+    await shadowKbAction("kb.doc.create", userId, kbId, "c", true);
     const schema = z.object({
       kind: z.enum(["doc", "canvas"]),
       title: z.string().max(120).optional(),
