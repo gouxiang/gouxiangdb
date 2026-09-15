@@ -64,9 +64,9 @@ afterAll(() => {
 });
 
 describe("迁移清单", () => {
-  it("迁移目录数为 18（含 M4-S2 authz_policies_backfill），nav DDL 落 applied，重跑 deploy 幂等", () => {
+  it("迁移目录数为 19（含 M4-S4 scope creator 索引），nav DDL 落 applied，重跑 deploy 幂等", () => {
     const dirs = migDirs();
-    expect(dirs.length).toBe(18);
+    expect(dirs.length).toBe(19);
     expect(dirs).toContain("20260916090000_enterprise_nav_ddl");
     const applied = db.prepare("SELECT rolled_back_at FROM _prisma_migrations WHERE migration_name=?")
       .get("20260916090000_enterprise_nav_ddl") as { rolled_back_at: string | null } | undefined;

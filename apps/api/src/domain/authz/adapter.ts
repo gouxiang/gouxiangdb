@@ -66,8 +66,9 @@ export async function resolveNodeId(
 /**
  * 实体 createdBy 兜底解析（按 resourceType 点查对应实体表）。
  * view 无独立 createdBy 语义，旧成员权限 base 级，视图动作由守卫映射到 base，故此处不处理 view。
+ * 导出供 scope 批量对拍/对拍测试复用同一兜底口径（禁止第二套 creator 解析）。
  */
-function makeCreatedByResolver(client: AuthzClient): CreatedByResolver {
+export function makeCreatedByResolver(client: AuthzClient): CreatedByResolver {
   return async (node: AuthzNode): Promise<string | null> => {
     const rt = node.resourceType;
     const rid = node.resourceId;

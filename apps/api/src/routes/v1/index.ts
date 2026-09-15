@@ -15,11 +15,16 @@ import { config } from "../../config.js";
 import { org } from "./org/index.js";
 import { workspaceRoutes } from "./workspace.js";
 import { navRoutes, nodeRoutes } from "./nodes.js";
+import { authzRoutes } from "./scope.js";
 
 export const v1 = new Hono();
 
 // v1 全部端点要求登录且账号 ACTIVE/tv 匹配（条件挂载的子路由共享此链）。
 v1.use("*", requireActiveUser);
+
+// M4/S4：权限引擎只读探针（本人可查；查他人需工作区 owner）。随企业面 v1 挂载，
+// 不受 GX_AUTHZ_ENGINE off/shadow 影响——它直接计算 auth_policies/nav_nodes，不经七守卫。
+v1.route("/authz", authzRoutes);
 
 if (config.enterpriseOrg) {
   // 组织通讯录管理面（部门/成员/角色）+ 装配探针。

@@ -92,6 +92,50 @@ function deptPolicyMatches(grantedDeptId: string, subject: ResolvedSubject): boo
   );
 }
 
+/**
+ * S4 scope 批量：取工作区内对该主体三源可见的【全部】候选策略（不带 nodeId IN——scope 客体
+ * 可达万节点，IN 列表会超 SQLite 999 变量上限）。与 policiesOnNodesTx 同一三源 OR 与 dept
+ * 内存闭包判定，动作不在 SQL 过滤（内存判，与 decide 一致）。调用方按活节点/kind/动作在内存收敛。
+ */
+export async function policiesForSubjectTx(
+  client: AuthzClient,
+  subject: ResolvedSubject,
+  workspaceId = "ws_default",
+): Promise<ScopedPolicy[]> {
+  const rows = await client.authPolicy.findMany({
+    where: {
+      workspaceId,
+      OR: [
+        { subjectType: "user", subjectId: subject.userId },
+        ...(subject.roleIds.length
+          ? [{ subjectType: "role", subjectId: { in: subject.roleIds } }]
+          : []),
+        ...(subject.deptAncestorIds.length
+          ? [{ subjectType: "dept", subjectId: { in: subject.deptAncestorIds } }]
+          : []),
+      ],
+    },
+    select: POLICY_SELECT,
+  });
+
+  const out: ScopedPolicy[] = [];
+  for (const row of rows as PolicyRow[]) {
+    const st = row.subjectType;
+    if (st !== "user" && st !== "role" && st !== "dept") continue;
+    if (st === "dept" && !deptPolicyMatches(row.subjectId, subject)) continue;
+    out.push({
+      id: row.id,
+      nodeId: row.nodeId,
+      subjectType: st,
+      subjectId: row.subjectId,
+      actions: parseActionString(row.actions) as ResourceAction[],
+      fieldMask: parseFieldMask(row.fieldMask),
+      viaAncestor: false,
+    });
+  }
+  return out;
+}
+
 // ---- S5 CRUD 原语（S1 先落，无调用方；动作规范化在 service 层，这里只持久化） ----
 
 export interface PolicyUpsertInput {

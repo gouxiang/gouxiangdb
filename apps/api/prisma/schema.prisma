@@ -28,6 +28,8 @@ model Base {
   members     Member[]
   shareLinks  ShareLink[]
 
+  // M4/S4：scope creator 兜底 UNION 按 createdBy 点查（迁移 20260916120000 只增索引，EXPLAIN 无 SCAN）。
+  @@index([createdBy])
   @@map("bases")
 }
 
@@ -46,6 +48,8 @@ model Table {
   views          View[]
 
   @@index([baseId])
+  // M4/S4：scope creator 兜底 UNION（迁移 20260916120000）。
+  @@index([createdBy])
   @@map("tables")
 }
 
@@ -276,6 +280,8 @@ model KnowledgeBase {
   members   KbMember[]
   docs      KbDoc[]
 
+  // M4/S4：scope creator 兜底 UNION（迁移 20260916120000）。
+  @@index([createdBy])
   @@map("knowledge_bases")
 }
 
@@ -327,6 +333,8 @@ model KbDoc {
   @@index([kbId, kind])
   @@index([kbId, parentId])
   @@index([shareToken])
+  // M4/S4：scope creator 兜底 UNION（迁移 20260916120000）。
+  @@index([createdBy])
   @@map("kb_docs")
 }
 

@@ -20,6 +20,7 @@ const yaml = fs.readFileSync(OPENAPI_PATH, "utf8");
 const REQUIRED_PATHS = [
   "/meta",
   "/auth/invite/accept",
+  "/authz/visible-scope",
   "/org/departments",
   "/org/departments/{id}",
   "/org/members",

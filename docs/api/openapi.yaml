@@ -25,6 +25,7 @@ servers:
 
 tags:
   - name: meta
+  - name: authz
   - name: auth-invite
   - name: departments
   - name: members
@@ -129,6 +130,51 @@ components:
             userId: { type: string }
             status: { type: string }
             workspaceId: { type: string, nullable: true }
+
+    # ----- M4/S4 authz visible-scope -----
+    VisibleScope:
+      type: object
+      required:
+        [userId, actions, kinds, nodeIds, resourceIdsByType, maskedTableFields,
+         truncated, policyVersion, budget, evaluated, visibleTotal, materialize, count]
+      properties:
+        userId: { type: string, description: 实际求值的目标用户 id }
+        actions:
+          type: array
+          items: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema] }
+        kinds:
+          type: array
+          nullable: true
+          items: { type: string, enum: [base, kb, table, view, doc, canvas, group] }
+          description: 入参回显（缺省为 null = 全部资源类型；未知值已被忽略）
+        nodeIds:
+          type: array
+          description: 预算内有序可见 nav 节点 id（path,id 确定性排序）
+          items: { type: string }
+        resourceIdsByType:
+          type: object
+          description: 按资源类型归集的实体 id（nav.resourceId），供 M5 直接 IN 实体表
+          additionalProperties:
+            type: array
+            items: { type: string }
+        maskedTableFields:
+          type: object
+          description: 仅 r 动作；存在 fieldMask 收窄的 table 节点 -> allowFields 白名单
+          additionalProperties:
+            type: array
+            items: { type: string }
+        truncated: { type: boolean, description: 是否在预算处被截断 }
+        policyVersion: { type: integer, description: workspaces.policyVersion 快照 }
+        budget: { type: integer, example: 5000 }
+        evaluated: { type: integer, description: 扫描的活资源节点数（诊断用，不参与授权） }
+        visibleTotal: { type: integer, description: 截断前可见全集大小 }
+        materialize:
+          type: string
+          enum: [in_list, temp_table]
+          description: >-
+            in_list=nodeIds 可直接参数化 IN（<=499 且未截断）；
+            temp_table=M5 必须物化为 search.db 临时表后 JOIN，禁止超长 IN 直拼
+        count: { type: integer, description: nodeIds 长度（截断后实际返回数） }
 
     # ----- M2 departments -----
     Dept:
@@ -528,6 +574,50 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409': { $ref: '#/components/responses/Conflict' }
+
+  /authz/visible-scope:
+    get:
+      tags: [authz]
+      summary: |
+        M4/S4 权限引擎只读探针：返回目标用户在预算内可见的 nav 节点集（M5 先收敛后召回的契约面）。
+        不经 GX_AUTHZ_ENGINE off/shadow 门，直接由引擎在 auth_policies/nav_nodes 上批量计算，
+        与逐节点 decide 共用同一判定内核（零分叉）。
+      description: |
+        - 默认查本人（供前端"无权列表"诊断）；显式传 userId 查他人是工作区级排障，
+          要求调用方持工作区 role_owner（manage_share 的工作区兜底形态），否则 403（fail-closed）。
+        - 多动作取并：节点对任一动作可见即纳入；非法动作 token 返回 400（不静默忽略）。
+        - budget 默认 5000、硬上限 20000；截断或结果超 499 节点时 materialize=temp_table，
+          M5 必须物化为 search.db 临时表，禁止超长 IN 直拼。
+      parameters:
+        - name: userId
+          in: query
+          required: false
+          schema: { type: string }
+          description: 目标用户 id；缺省/空白为本人；查他人需工作区 owner
+        - name: actions
+          in: query
+          required: false
+          schema: { type: string, default: 'r' }
+          description: 逗号分隔资源动作（r/c/u/d/comment/manage_share/manage_schema），默认 r
+        - name: kinds
+          in: query
+          required: false
+          schema: { type: string }
+          description: 逗号分隔资源类型白名单（base/kb/table/view/doc/canvas/group）；未知值忽略，缺省全部
+        - name: budget
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 5000 }
+          description: 可见节点预算；非正整数 400；超 20000 收敛到 20000
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VisibleScope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /org/departments:
     get:

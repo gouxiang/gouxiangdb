@@ -9,9 +9,9 @@
 import type { ResourceAction } from "@gx/shared-types";
 import { collectibleChainIndexes, NavChainCache, navVersionOf } from "./nodes.js";
 import { policiesOnNodesTx } from "./repository.js";
-import { fieldCapability, fieldVisibleInMask, fieldWritableInMask, type FieldCapability } from "./fieldMask.js";
+import { fieldCapability, type FieldCapability } from "./fieldMask.js";
+import { collectChainPolicies, evaluateChainDecision } from "./evaluate.js";
 import type {
-  AllowSource,
   AuthzClient,
   AuthzNode,
   CreatedByResolver,
@@ -41,26 +41,6 @@ export interface DecisionResult {
   capability: FieldCapability;
 }
 
-function sourceOf(p: ScopedPolicy, chain: AuthzNode[]): AllowSource {
-  const node = chain.find((n) => n.id === p.nodeId);
-  return {
-    kind: p.subjectType === "user" ? "direct" : p.subjectType,
-    policyId: p.id,
-    nodeId: p.nodeId,
-    nodeName: node?.name,
-    viaAncestor: p.nodeId !== chain[0]?.id,
-    subjectId: p.subjectType === "user" ? undefined : p.subjectId,
-  };
-}
-
-function fieldPasses(p: ScopedPolicy, action: ResourceAction, ctx?: DecisionContext): boolean {
-  if (!ctx?.fieldId) return true;
-  const mask = p.fieldMask;
-  if (action === "r") return fieldVisibleInMask(mask, ctx.fieldId);
-  if (action === "c" || action === "u") return fieldWritableInMask(mask, ctx.fieldId);
-  return true; // d/comment/manage_* 不做字段裁剪
-}
-
 async function resolveVersion(deps: EngineDeps): Promise<number> {
   if (deps.navVersion !== undefined) return deps.navVersion;
   return navVersionOf(deps.client, deps.workspaceId ?? "ws_default");
@@ -69,6 +49,7 @@ async function resolveVersion(deps: EngineDeps): Promise<number> {
 /**
  * 收集单节点 cutoff 内全部命中策略（去重 by policyId，按 chain 序：自身 -> 祖先）。
  * 客体往返：节点点查 1 + 链批量 1（缓存命中链时为 0）+ 策略行 1。
+ * 内存去重/cutoff 段委托 evaluate.ts 共享纯函数，与 scope 批量形态同一口径。
  */
 export async function collectScopedNodes(
   deps: EngineDeps,
@@ -84,29 +65,19 @@ export async function collectScopedNodes(
   const indexes = collectibleChainIndexes(chain);
   const wantedIds = indexes.map((i) => chain[i]!.id);
   const rows = await policiesOnNodesTx(deps.client, wantedIds, subject);
-
-  const byId = new Map<string, ScopedPolicy>();
-  for (const nid of wantedIds) {
-    for (const row of rows) {
-      if (row.nodeId !== nid || byId.has(row.id)) continue;
-      byId.set(row.id, { ...row, viaAncestor: nid !== node.id });
-    }
+  const policiesByNode = new Map<string, ScopedPolicy[]>();
+  for (const r of rows) {
+    const list = policiesByNode.get(r.nodeId);
+    if (list) list.push(r);
+    else policiesByNode.set(r.nodeId, [r]);
   }
-  return { policies: [...byId.values()], chain, node };
-}
-
-function fallbackDecision(node: AuthzNode, fallback: "workspace_owner" | "creator"): Decision {
-  return {
-    allowed: true,
-    action: "r", // 由 decide 覆盖为实际动作
-    nodeId: node.id,
-    sources: [{ kind: "owner_fallback", nodeId: node.id, nodeName: node.name, viaAncestor: false, fallback }],
-  };
+  return { policies: collectChainPolicies(chain, policiesByNode), chain, node };
 }
 
 /**
  * 单节点决策。动作命中的来源全部列入 sources（O8 来源链，多源并集可解释）；
  * conditions M4 恒 null（非空写入已被 API 拦），此处留口不做行级求值。
+ * 判定内核委托 evaluate.evaluateChainDecision（与 scope 共用，禁止第二份判定）。
  */
 export async function decide(
   deps: EngineDeps,
@@ -118,26 +89,12 @@ export async function decide(
   const { policies, chain, node } = await collectScopedNodes(deps, subject, nodeId);
   const capability = fieldCapability(policies);
 
+  let isCreator = false;
   if (deps.resolveCreatedBy) {
     const creator = await deps.resolveCreatedBy(node);
-    if (creator && creator === subject.userId) {
-      const d = { ...fallbackDecision(node, "creator"), action };
-      return { decision: d, node, chain, policies, capability };
-    }
+    isCreator = !!creator && creator === subject.userId;
   }
-  if (subject.isWorkspaceOwner) {
-    const d = { ...fallbackDecision(node, "workspace_owner"), action };
-    return { decision: d, node, chain, policies, capability };
-  }
-
-  const sources = policies
-    .filter((p) => p.actions.includes(action))
-    .filter((p) => fieldPasses(p, action, ctx))
-    .map((p) => sourceOf(p, chain));
-
-  const decision: Decision = sources.length
-    ? { allowed: true, action, nodeId: node.id, sources }
-    : { allowed: false, action, nodeId: node.id, sources: [], reason: "no_matching_allow" };
+  const decision = evaluateChainDecision({ subject, node, chain, policies, action, ctx, isCreator });
   return { decision, node, chain, policies, capability };
 }
 
