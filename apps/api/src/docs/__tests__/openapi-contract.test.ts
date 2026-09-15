@@ -40,6 +40,8 @@ const REQUIRED_PATHS = [
   "/nav/groups/{id}",
   "/nodes/{id}/move-impact",
   "/nodes/{id}/move",
+  "/nodes/{id}/policies",
+  "/nodes/{id}/effective",
 ];
 
 const REQUIRED_ERROR_CODES = [
@@ -103,6 +105,25 @@ describe("S7 openapi.yaml 结构冻结", () => {
 
   it("文档无 emoji 与 Unicode 箭头（ASCII -> 也不使用）", () => {
     expect(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/u.test(yaml)).toBe(false);
+  });
+
+  it("S5 policies/effective 三端点形状在文档内且 legacyUnmappable 不在错误码表", () => {
+    for (const p of ["/nodes/{id}/policies", "/nodes/{id}/effective"]) {
+      expect(yaml).toContain(p);
+    }
+    // 七枚资源动作与三源 + owner_fallback 来源类型均在文档。
+    for (const a of ["r", "c", "u", "d", "comment", "manage_share", "manage_schema"]) {
+      expect(yaml).toContain(a);
+    }
+    for (const k of ["direct", "dept", "role", "owner_fallback", "policyVersion", "fieldMask"]) {
+      expect(yaml).toContain(k);
+    }
+    // legacyUnmappable 是 200 成功载荷，绝不能进入 Error.code 枚举（错误码表不含该项）。
+    const errorEnumMatch = yaml.match(/code:\s*\n\s*type: string\s*\n\s*enum:\s*\n((?:\s*- .*\n)+)/);
+    expect(errorEnumMatch).not.toBeNull();
+    expect(errorEnumMatch![1]).not.toContain("legacyUnmappable");
+    // 但作为成功响应字段必须被文档化。
+    expect(yaml).toMatch(/legacyUnmappable:\s*\n\s*type: array/);
   });
 });
 

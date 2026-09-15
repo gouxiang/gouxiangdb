@@ -17,6 +17,11 @@ import { permissionsForRole, type Role, type ViewConfig } from "@gx/shared-types
 import { makeOptions } from "../domain/fieldService.js";
 import { syncNavFromEntitiesTx, softDeleteSubtreeTx } from "../domain/nav/sync.js";
 import { nodeId } from "../domain/nav/backfill.js";
+import {
+  syncBaseMemberTx,
+  removeLegacyProjectionTx,
+  LEGACY_REASONS,
+} from "../domain/authz/projection.js";
 
 export const bases = new Hono();
 
@@ -155,7 +160,9 @@ bases.post("/", async (c) => {
         createdBy: userId,
       },
     });
-    await tx.member.create({ data: { baseId: b.id, userId, role: "owner" } });
+    const ownerMember = await tx.member.create({ data: { baseId: b.id, userId, role: "owner" } });
+    // M4/S5 同事务投影 owner 到 base 节点 user 策略行（auth_policies 无 FK，先于 sync 建节点亦安全）。
+    await syncBaseMemberTx(tx, { oldRowId: ownerMember.id, baseId: b.id, userId, role: "owner" });
     await createStarterTableTx(tx, b.id, userId);
     await syncNavFromEntitiesTx(tx);
     return b;
@@ -360,8 +367,15 @@ bases.post("/:baseId/members", async (c) => {
   const existing = await prisma.member.findUnique({ where: { baseId_userId: { baseId, userId: user.id } } });
   if (existing) return c.json({ error: "该用户已是成员" }, 409);
 
-  const member = await prisma.member.create({
-    data: { baseId, userId: user.id, role: parsed.data.role },
+  const member = await withWriteTx("base.member.add", async (tx) => {
+    const created = await tx.member.create({
+      data: { baseId, userId: user.id, role: parsed.data.role },
+    });
+    // M4/S5 同事务投影：加成员即写 base 节点 user 策略行（legacy:member）。
+    await syncBaseMemberTx(tx, {
+      oldRowId: created.id, baseId, userId: user.id, role: parsed.data.role,
+    });
+    return created;
   });
   return c.json({
     member: {
@@ -386,9 +400,16 @@ bases.patch("/:baseId/members/:memberId", async (c) => {
   if (!member || member.baseId !== baseId) throw new HttpError(404, "成员不存在");
   if (member.role === "owner") throw new HttpError(400, "不能修改所有者的角色");
 
-  const updated = await prisma.member.update({
-    where: { id: member.id },
-    data: { role: parsed.data.role },
+  const updated = await withWriteTx("base.member.role", async (tx) => {
+    const row = await tx.member.update({
+      where: { id: member.id },
+      data: { role: parsed.data.role },
+    });
+    // M4/S5 精确 SET 投影（降级 owner->viewer 必须收窄，不能用并集，见 setLegacyByRowTx）。
+    await syncBaseMemberTx(tx, {
+      oldRowId: row.id, baseId, userId: row.userId, role: row.role,
+    });
+    return row;
   });
   return c.json({ member: { id: updated.id, role: updated.role } });
 });
@@ -399,7 +420,11 @@ bases.delete("/:baseId/members/:memberId", async (c) => {
   const member = await prisma.member.findUnique({ where: { id: c.req.param("memberId") } });
   if (!member || member.baseId !== baseId) throw new HttpError(404, "成员不存在");
   if (member.role === "owner") throw new HttpError(400, "不能移除所有者");
-  await prisma.member.delete({ where: { id: member.id } });
+  await withWriteTx("base.member.remove", async (tx) => {
+    await tx.member.delete({ where: { id: member.id } });
+    // M4/S5 同事务删该成员的 legacy 投影（确定性策略 id 由旧行 id 派生，先删后删投影均可）。
+    await removeLegacyProjectionTx(tx, LEGACY_REASONS.member, member.id);
+  });
   return c.json({ ok: true });
 });
 
@@ -474,7 +499,14 @@ bases.post("/join/:token", async (c) => {
     return c.json({ baseId: link.baseId, role: existing.role, alreadyMember: true });
   }
 
-  await prisma.member.create({ data: { baseId: link.baseId, userId, role: link.role } });
-  return c.json({ baseId: link.baseId, role: link.role, alreadyMember: false }, 201);
+  const joined = await withWriteTx("base.member.join", async (tx) => {
+    const row = await tx.member.create({ data: { baseId: link.baseId, userId, role: link.role } });
+    // M4/S5 持票加入同事务投影到 base 节点 user 策略行。
+    await syncBaseMemberTx(tx, {
+      oldRowId: row.id, baseId: link.baseId, userId, role: row.role,
+    });
+    return row;
+  });
+  return c.json({ baseId: link.baseId, role: joined.role, alreadyMember: false }, 201);
 });
 

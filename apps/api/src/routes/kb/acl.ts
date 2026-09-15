@@ -4,8 +4,13 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { prisma } from "../../db.js";
+import { prisma, withWriteTx } from "../../db.js";
 import { requireUserId, errorResponse, HttpError } from "../../guards.js";
+import {
+  syncDocAclTx,
+  removeLegacyProjectionTx,
+  LEGACY_REASONS,
+} from "../../domain/authz/projection.js";
 import { RANK, kbRoleOf, requireDocAccess } from "./shared.js";
 
 export const aclRoutes = new Hono();
@@ -44,13 +49,28 @@ aclRoutes.put("/docs/:docId/acl", async (c) => {
     const target = await prisma.user.findUnique({ where: { email: parsed.data.email }, select: { id: true } });
     if (!target) return c.json({ error: "该用户尚未注册" }, 404);
     if (!parsed.data.role) {
-      await prisma.kbDocAcl.deleteMany({ where: { docId, userId: target.id } });
+      // docId_userId 唯一，至多一行；先取行 id 以便同事务删其确定性 legacy 投影。
+      await withWriteTx("doc.acl.revoke", async (tx) => {
+        const row = await tx.kbDocAcl.findUnique({
+          where: { docId_userId: { docId, userId: target.id } },
+          select: { id: true },
+        });
+        await tx.kbDocAcl.deleteMany({ where: { docId, userId: target.id } });
+        if (row) await removeLegacyProjectionTx(tx, LEGACY_REASONS.acl, row.id);
+      });
       return c.json({ ok: true, revoked: true });
     }
-    await prisma.kbDocAcl.upsert({
-      where: { docId_userId: { docId, userId: target.id } },
-      update: { role: parsed.data.role },
-      create: { docId, userId: target.id, role: parsed.data.role },
+    const grantRole = parsed.data.role; // 经上方 !role 分支，此处必为非空角色档
+    await withWriteTx("doc.acl.grant", async (tx) => {
+      const row = await tx.kbDocAcl.upsert({
+        where: { docId_userId: { docId, userId: target.id } },
+        update: { role: grantRole },
+        create: { docId, userId: target.id, role: grantRole },
+      });
+      // M4/S5 单文档 ACL 同事务投影到 doc/canvas 节点 user 策略行（resourceType 取 kb_docs.kind）。
+      await syncDocAclTx(tx, {
+        oldRowId: row.id, docId, userId: target.id, role: row.role,
+      });
     });
     return c.json({ ok: true });
   } catch (e) {

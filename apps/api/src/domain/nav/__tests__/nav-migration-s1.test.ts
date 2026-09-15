@@ -165,7 +165,18 @@ describe("auth_policies 冻结", () => {
     expect(db.prepare("SELECT count(*) n FROM auth_policies").get() as { n: number }).toMatchObject({ n: 0 });
   });
 
-  it("src 业务代码（排除 __tests__）无 authPolicy 读写委托（M3 零业务路径）", () => {
+  it("src 业务代码（排除 __tests__）authPolicy 直接委托仅限 S5 授权三落点（其余模块零直触）", () => {
+    // M3 冻结期：任何业务模块都不得直接 prisma/tx.authPolicy（S1/S2 经注入 client 的纯域
+    // repository/backfill 不匹配本正则）。M4/S5 打开写路径后，允许直接委托的模块精确收敛为：
+    //   - domain/authz/policyAdminTx.ts：PUT policies 整单写；
+    //   - domain/authz/projection.ts ：旧三表 -> auth_policies 投影双写；
+    //   - domain/nav/sync.ts          ：purge view/table/doc 同事务清孤儿策略。
+    // 任何其它模块新增 prisma/tx.authPolicy 都应在此显式登记，防止绕过纯域边界散落直写。
+    const S5_ALLOWED = new Set([
+      "domain/authz/policyAdminTx.ts",
+      "domain/authz/projection.ts",
+      "domain/nav/sync.ts",
+    ]);
     const srcRoot = path.resolve(process.cwd(), "src");
     const offenders: string[] = [];
     const walk = (dir: string) => {
@@ -175,8 +186,11 @@ describe("auth_policies 冻结", () => {
           if (ent.name === "__tests__") continue;
           walk(full);
         } else if (/\.(ts|tsx|mjs|js)$/.test(ent.name)) {
+          const rel = path.relative(srcRoot, full);
           const text = fs.readFileSync(full, "utf8");
-          if (/\b(?:prisma|tx)\.authPolicy\b/.test(text)) offenders.push(path.relative(srcRoot, full));
+          if (/\b(?:prisma|tx)\.authPolicy\b/.test(text) && !S5_ALLOWED.has(rel)) {
+            offenders.push(rel);
+          }
         }
       }
     };

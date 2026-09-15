@@ -4,8 +4,9 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { prisma, withWriteBatch } from "../../db.js";
+import { prisma, withWriteTx } from "../../db.js";
 import { requireUserId, errorResponse, HttpError } from "../../guards.js";
+import { syncKbMemberTx } from "../../domain/authz/projection.js";
 import { genShareToken, kbRoleOf, requireDocAccess } from "./shared.js";
 
 export const sharingRoutes = new Hono();
@@ -96,18 +97,22 @@ sharingRoutes.post("/docs/:docId/share/internal", async (c) => {
 
     const members = await prisma.kbMember.findMany({
       where: { kbId: doc.kbId, role: { not: "owner" } },
-      select: { userId: true, role: true },
+      select: { id: true, userId: true, role: true },
     });
     // "仅可见"=viewer，"可编辑"=editor；commenter 归并（viewer 侧）
     const desired = target === "editor" ? "editor" : "viewer";
-    await withWriteBatch(
-      "kb.internalShare",
-      members
-        .filter((m) => m.role !== desired)
-        .map((m) =>
-          prisma.kbMember.update({ where: { kbId_userId: { kbId: doc.kbId, userId: m.userId } }, data: { role: desired } }),
-        ),
-    );
+    // M4/S5：原 withWriteBatch 无 tx 句柄，无法挂投影。改为交互事务逐条 update + 同事务投影，
+    // 成员角色变更与 auth_policies 投影共生死（裁决 9）。
+    const changed = members.filter((m) => m.role !== desired);
+    await withWriteTx("kb.internalShare", async (tx) => {
+      for (const m of changed) {
+        await tx.kbMember.update({
+          where: { kbId_userId: { kbId: doc.kbId, userId: m.userId } },
+          data: { role: desired },
+        });
+        await syncKbMemberTx(tx, { oldRowId: m.id, kbId: doc.kbId, userId: m.userId, role: desired });
+      }
+    });
     return c.json({ ok: true, role: desired });
   } catch (e) {
     return errorResponse(c, e);

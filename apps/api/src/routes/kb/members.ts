@@ -4,8 +4,13 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { prisma } from "../../db.js";
+import { prisma, withWriteTx } from "../../db.js";
 import { requireUserId, errorResponse, HttpError } from "../../guards.js";
+import {
+  syncKbMemberTx,
+  removeLegacyProjectionTx,
+  LEGACY_REASONS,
+} from "../../domain/authz/projection.js";
 import { requireKb, shadowKbAction } from "./shared.js";
 
 export const membersRoutes = new Hono();
@@ -52,10 +57,17 @@ membersRoutes.post("/:kbId/members", async (c) => {
     }
     const target = await prisma.user.findUnique({ where: { email: parsed.data.email }, select: { id: true } });
     if (!target) return c.json({ error: "该用户尚未注册，无法添加" }, 404);
-    const m = await prisma.kbMember.upsert({
-      where: { kbId_userId: { kbId, userId: target.id } },
-      update: { role: parsed.data.role },
-      create: { kbId, userId: target.id, role: parsed.data.role },
+    const m = await withWriteTx("kb.member.upsert", async (tx) => {
+      const row = await tx.kbMember.upsert({
+        where: { kbId_userId: { kbId, userId: target.id } },
+        update: { role: parsed.data.role },
+        create: { kbId, userId: target.id, role: parsed.data.role },
+      });
+      // M4/S5 加/改成员同事务投影（精确 SET：降级也收窄）。
+      await syncKbMemberTx(tx, {
+        oldRowId: row.id, kbId, userId: target.id, role: row.role,
+      });
+      return row;
     });
     return c.json({ member: { userId: m.userId, role: m.role } }, 201);
   } catch (e) {
@@ -79,11 +91,15 @@ membersRoutes.delete("/:kbId/members/:memberUserId", async (c) => {
     if (target === userId) throw new HttpError(400, "不能移除自己；如需转让知识库请联系所有者");
     const targetMember = await prisma.kbMember.findUnique({
       where: { kbId_userId: { kbId, userId: target } },
-      select: { role: true },
+      select: { id: true, role: true },
     });
     if (!targetMember) throw new HttpError(404, "该成员不存在");
     if (targetMember.role === "owner") throw new HttpError(403, "不能移除知识库所有者");
-    await prisma.kbMember.deleteMany({ where: { kbId, userId: target } });
+    await withWriteTx("kb.member.remove", async (tx) => {
+      await tx.kbMember.deleteMany({ where: { kbId, userId: target } });
+      // M4/S5 同事务删该成员 legacy 投影（确定性 id 由 kb_members 旧行 id 派生）。
+      await removeLegacyProjectionTx(tx, LEGACY_REASONS.kbMember, targetMember.id);
+    });
     return c.json({ ok: true });
   } catch (e) {
     return errorResponse(c, e);

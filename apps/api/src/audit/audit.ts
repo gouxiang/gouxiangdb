@@ -30,7 +30,9 @@ export type AuditEventName =
   | "menu_changed"
   | "nav_group_created"
   | "nav_group_deleted"
-  | "nav_node_moved";
+  | "nav_node_moved"
+  // M4/S5 节点授权策略整单写（需 manage_share；detail 带 upserts/deletes 与前后 diff）
+  | "policy_changed";
 
 export interface AuditInput {
   event: AuditEventName;

@@ -1107,3 +1107,204 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/MoveConfirmError' }
+
+  /nodes/{id}/policies:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string }, description: nav 节点 id }
+    get:
+      tags: [nodes]
+      summary: 列节点直接授权策略 + cutoff 内祖先只读继承摘要（读需对节点有 r）
+      description: |
+        管理视角：返回节点全部直接策略行（不限主体，解析出 subjectName/subjectType），
+        以及按继承 cutoff 收集的、会向下作用到本节点的祖先策略只读摘要。
+        鉴权：调用方对该节点 decide(r) 通过（workspace owner / 实体 creator 兜底已含），否则 403。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [node, inheritAncestors, direct, ancestors]
+                properties:
+                  node:
+                    type: object
+                    required: [id, kind, resourceType, name, inheritAncestors]
+                    properties:
+                      id: { type: string }
+                      kind: { type: string }
+                      resourceType: { type: string, nullable: true }
+                      name: { type: string }
+                      inheritAncestors: { type: integer }
+                  inheritAncestors: { type: boolean }
+                  direct:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, subjectType, subjectId, subjectName, actions, fieldMask, reason, createdAt]
+                      properties:
+                        id: { type: string }
+                        subjectType: { type: string, enum: [user, dept, role] }
+                        subjectId: { type: string }
+                        subjectName: { type: string, nullable: true }
+                        actions: { type: array, items: { type: string } }
+                        fieldMask: { type: object, nullable: true, description: 解析后的字段掩码对象 }
+                        reason: { type: string, nullable: true }
+                        createdAt: { type: string, format: date-time }
+                  ancestors:
+                    type: array
+                    items:
+                      type: object
+                      required: [nodeId, nodeName, policies]
+                      properties:
+                        nodeId: { type: string }
+                        nodeName: { type: string }
+                        policies:
+                          type: array
+                          items:
+                            type: object
+                            required: [subjectType, subjectId, subjectName, actions]
+                            properties:
+                              subjectType: { type: string, enum: [user, dept, role] }
+                              subjectId: { type: string }
+                              subjectName: { type: string, nullable: true }
+                              actions: { type: array, items: { type: string } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [nodes]
+      summary: 单事务整单写节点策略（需组织 manage_share 或节点资源 manage_share）
+      description: |
+        整单 upserts/deletes，全合法才提交（任一不合法 4xx 全拒，policyVersion 不增）：
+        动作白名单（r/c/u/d/comment/manage_share/manage_schema）、节点存在非软删、
+        kind-动作合法（manage_schema 仅 table/base）、fieldMask 字段必须属于该 table、主体存在不悬挂。
+        成功 bump workspaces.policyVersion 并审计 policy_changed（detail 带 before/after diff）。
+        可映射到旧三表角色档的 per-user 授权同事务反写 members/kb_members/kb_doc_acls；
+        不可映射（角色/部门授予、fieldMask、非标动作组合、无旧表节点类型）不阻断、不扩旧表，
+        在 200 响应中以 legacyUnmappable 明细返回。legacyUnmappable 不是错误码。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                upserts:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [subjectType, subjectId, actions]
+                    properties:
+                      subjectType: { type: string, enum: [user, dept, role] }
+                      subjectId: { type: string }
+                      actions:
+                        type: array
+                        minItems: 1
+                        items: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema] }
+                      fieldMask:
+                        type: object
+                        nullable: true
+                        properties:
+                          allowFields: { type: array, items: { type: string } }
+                          readOnlyFields: { type: array, items: { type: string } }
+                deletes:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [subjectType, subjectId]
+                    properties:
+                      subjectType: { type: string, enum: [user, dept, role] }
+                      subjectId: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [node, policyVersion, upserted, deleted, legacyUnmappable]
+                properties:
+                  node:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      kind: { type: string }
+                      resourceType: { type: string, nullable: true }
+                      resourceId: { type: string, nullable: true }
+                      name: { type: string }
+                  policyVersion: { type: integer }
+                  upserted: { type: integer }
+                  deleted: { type: integer }
+                  legacyUnmappable:
+                    type: array
+                    description: 不可反写旧三表的授权明细（200 成功载荷，非错误码，不阻断提交）
+                    items:
+                      type: object
+                      required: [subjectType, subjectId, reasons]
+                      properties:
+                        subjectType: { type: string, enum: [user, dept, role] }
+                        subjectId: { type: string }
+                        reasons: { type: array, items: { type: string } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /nodes/{id}/effective:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string }, description: nav 节点 id }
+    get:
+      tags: [nodes]
+      summary: 决策解释器：某用户在节点的最终动作集 + 每动作完整来源链（读需 r；查他人需 manage_share）
+      parameters:
+        - { name: userId, in: query, required: false, schema: { type: string }, description: 目标用户；缺省为本人，查他人需写授权 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [node, userId, actions, policyVersion, perAction]
+                properties:
+                  node:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      kind: { type: string }
+                      resourceType: { type: string, nullable: true }
+                      name: { type: string }
+                  userId: { type: string }
+                  actions: { type: array, items: { type: string }, description: 允许的动作集（七枚之内） }
+                  policyVersion: { type: integer }
+                  perAction:
+                    type: array
+                    description: 七枚资源动作逐一的判定与来源链
+                    items:
+                      type: object
+                      required: [action, allowed, sources]
+                      properties:
+                        action: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema] }
+                        allowed: { type: boolean }
+                        sources:
+                          type: array
+                          items:
+                            type: object
+                            required: [kind, policyId, nodeId, nodeName, viaAncestor, subjectType, subjectId, subjectName, fallback]
+                            properties:
+                              kind: { type: string, enum: [direct, dept, role, owner_fallback] }
+                              policyId: { type: string, nullable: true }
+                              nodeId: { type: string }
+                              nodeName: { type: string, nullable: true }
+                              viaAncestor: { type: boolean }
+                              subjectType: { type: string, enum: [user, dept, role] }
+                              subjectId: { type: string }
+                              subjectName: { type: string, nullable: true }
+                              fallback: { type: string, nullable: true, enum: [workspace_owner, creator] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }

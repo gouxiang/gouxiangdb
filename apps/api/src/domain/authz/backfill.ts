@@ -99,6 +99,48 @@ export function unionActionStrings(a: string, b: string): string {
 }
 
 /**
+ * S5 双写专用：把一条旧权威行【精确覆盖】为其当前角色映射串（非并集）。
+ * 与 upsertByLegacyRow 的差别：成员改角色（owner->viewer）必须同步【收窄】投影，
+ * 若用并集会残留高档动作。一个 (node,user) 只可能由一张旧表的唯一行投影
+ * （members->base / kb_members->kb / kb_doc_acls->doc），无真多源碰撞，故精确 SET 正确。
+ * 已存在非同源 v1 手工策略占用同键时不覆盖（v1 权威更高），返回 skipped。
+ */
+export async function setLegacyByRowTx(
+  client: AuthzClient,
+  row: LegacyRow,
+): Promise<{ id: string; written: "created" | "updated" | "skipped" }> {
+  const id = policyId(row.reason, row.oldId);
+  const wanted = legacyActionString(row.family, row.role);
+
+  const existing = await client.authPolicy.findFirst({
+    where: { nodeId: row.nodeId, subjectType: "user", subjectId: row.userId },
+    select: { id: true, actions: true, reason: true },
+  });
+
+  if (!existing) {
+    await client.authPolicy.create({
+      data: {
+        id,
+        workspaceId: "ws_default",
+        nodeId: row.nodeId,
+        subjectType: "user",
+        subjectId: row.userId,
+        actions: wanted,
+        reason: row.reason,
+        createdBy: "legacy-backfill",
+      },
+    });
+    return { id, written: "created" };
+  }
+
+  const isLegacy = existing.reason === row.reason || existing.id === id;
+  if (!isLegacy) return { id: existing.id, written: "skipped" };
+  if (existing.actions === wanted) return { id: existing.id, written: "skipped" };
+  await client.authPolicy.update({ where: { id: existing.id }, data: { actions: wanted } });
+  return { id: existing.id, written: "updated" };
+}
+
+/**
  * 批量投影（单事务）：逐条 upsertByLegacyRow，返回 created/updated/skipped 计数。
  * 超大客户分批由调用方切片（M4 计划 §5.3：脚本层 5000/批，迁移 SQL 单条）。
  */
@@ -124,5 +166,18 @@ export async function deleteLegacyProjectionTx(
   key: { policyId: string },
 ): Promise<boolean> {
   const r = await client.authPolicy.deleteMany({ where: { id: key.policyId } });
+  return r.count > 0;
+}
+
+/**
+ * S5 双写：按 (reason, 旧表行 id) 确定性策略 id 删除投影（成员/ACL 移除同事务调用）。
+ * 仅删 legacy 命名空间的行，绝不触碰 id 形态不同的 v1 手工策略（pol_*_v1_*）。
+ */
+export async function deleteLegacyByIdTx(
+  client: AuthzClient,
+  reason: LegacyReason,
+  oldId: string,
+): Promise<boolean> {
+  const r = await client.authPolicy.deleteMany({ where: { id: policyId(reason, oldId) } });
   return r.count > 0;
 }

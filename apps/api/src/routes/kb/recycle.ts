@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { prisma, withWriteTx } from "../../db.js";
 import { requireUserId, errorResponse, HttpError } from "../../guards.js";
 import { syncNavFromEntitiesTx, purgeDocNodeTx } from "../../domain/nav/sync.js";
+import { removeDocAclProjectionsTx } from "../../domain/authz/projection.js";
 import { kbRoleOf, requireKb } from "./shared.js";
 
 export const recycleRoutes = new Hono();
@@ -25,6 +26,8 @@ recycleRoutes.delete("/docs/:docId/permanent", async (c) => {
     await withWriteTx("doc.purge", async (tx) => {
       await tx.kbDocVersion.deleteMany({ where: { docId } });
       await tx.kbDocAcl.deleteMany({ where: { docId } });
+      // M4/S5 同事务清该 doc/canvas 节点全部 legacy:acl 投影（多条 ACL 共指一节点）。
+      await removeDocAclProjectionsTx(tx, { docId, kind: doc.kind });
       await tx.kbDoc.delete({ where: { id: docId } });
       await syncNavFromEntitiesTx(tx);
       await purgeDocNodeTx(tx, docId);

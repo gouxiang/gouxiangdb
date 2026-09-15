@@ -36,6 +36,19 @@ export async function bumpNavVersionTx(tx: DbTx): Promise<void> {
 }
 
 /**
+ * M4/S5：物理删节点时同事务清掉挂在这些节点上的 auth_policies。
+ * auth_policies 对 nav_nodes【无外键】（DDL 刻意解耦，策略可先于/独立于节点写入），
+ * 故物理删节点不会级联清策略，必须在 purge 原语内显式删，否则留下指向不存在节点的孤儿授权。
+ * 直接经 tx 清（不经 authz/projection，避免 nav -> authz 反向依赖）；按节点 id 整行删，
+ * 涵盖 direct/role/dept、legacy:* 与 policy:v1 全部来源（节点都没了，其授权无意义）。
+ */
+async function purgePoliciesForNodesTx(tx: DbTx, nodeIds: readonly string[]): Promise<void> {
+  const ids = nodeIds.filter(Boolean);
+  if (ids.length === 0) return;
+  await tx.authPolicy.deleteMany({ where: { nodeId: { in: ids } } });
+}
+
+/**
  * 按当前实体状态全量对齐实体节点（缺建/异更/软删复活/parent-name-ord 修正）并重算 path，
  * 最后 bump navVersion。创建/改名/移动/恢复写点的统一入口——期望集只此一套（backfill）。
  * 不处理"实体已软删而节点活"（由 softDeleteSubtreeTx 显式软删）与物理删（purge 原语）。
@@ -134,6 +147,7 @@ async function assertNoMenuReferences(tx: DbTx, nodeIdValue: string): Promise<vo
 export async function purgeViewNodeTx(tx: DbTx, viewId: string): Promise<void> {
   const nid = nodeId("view", viewId);
   await assertNoMenuReferences(tx, nid);
+  await purgePoliciesForNodesTx(tx, [nid]); // M4/S5：view 无独立旧表，直接删挂在该 view 节点的策略
   await tx.navNode.deleteMany({ where: { id: nid } });
   await bumpNavVersionTx(tx);
 }
@@ -147,6 +161,12 @@ export async function purgeViewNodeTx(tx: DbTx, viewId: string): Promise<void> {
 export async function purgeTableNodeTx(tx: DbTx, tableId: string): Promise<void> {
   const tableNodeId = nodeId("table", tableId);
   await assertNoMenuReferences(tx, tableNodeId);
+  // M4/S5：table 下子 view 节点随之物理删，先取其 id 连同 table 节点一并清策略。
+  const childNodes = await tx.navNode.findMany({
+    where: { parentId: tableNodeId },
+    select: { id: true },
+  });
+  await purgePoliciesForNodesTx(tx, [tableNodeId, ...childNodes.map((n) => n.id)]);
   await tx.navNode.deleteMany({ where: { parentId: tableNodeId } });
   await tx.navNode.deleteMany({ where: { id: tableNodeId } });
   await bumpNavVersionTx(tx);
@@ -165,6 +185,8 @@ export async function purgeDocNodeTx(tx: DbTx, docId: string): Promise<void> {
   });
   if (node) {
     await tx.menuItem.deleteMany({ where: { nodeId: node.id } }); // 先清引用（绕开 menu RESTRICT）
+    // M4/S5：同事务清挂在该 doc/canvas 节点的全部 auth_policies（含 legacy:acl 与 v1/role/dept）。
+    await purgePoliciesForNodesTx(tx, [node.id]);
     // 防御：调用方已先 sync 对齐活子节点；此处把任何残留 parentId（含软删行）顶到祖父，
     // 否则 nav_nodes 自引用 RESTRICT 会让删除失败。
     await tx.navNode.updateMany({ where: { parentId: node.id }, data: { parentId: node.parentId } });
