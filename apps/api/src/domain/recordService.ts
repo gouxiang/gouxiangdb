@@ -7,7 +7,7 @@
 import { prisma } from "../db.js";
 import type { HydratedRecord, FieldMeta } from "./types.js";
 import { toFieldMeta, toRawRecord, prismaDeps } from "./prismaDeps.js";
-import { hydrateRecords } from "./hydrate.js";
+import { hydrateRecords, type HydrateDeps } from "./hydrate.js";
 import { evalFilter, matchesSearch } from "./filter.js";
 import { sortRows } from "./sort.js";
 import { assembleGroups, assembleAggregations } from "./queryPlan/assemble.js";
@@ -25,6 +25,15 @@ export interface QueryOptions {
   noPaging?: boolean;
   /** S7：不透明分页游标（base64url）；仅 GX_M1_KEYSET=on 且读=on 时被解析。 */
   cursor?: string | null;
+  /**
+   * M4/S6 中性依赖注入（不判 flag、不 import authz；缺省行为与 M3 一字不变）：
+   *  - hydrateDeps：携带跨表字段可见性钩子的 hydration 依赖（on 态由 maskSession 注入，
+   *    off/shadow 传缺省 prismaDeps，无钩子、零额外查询）；
+   *  - compileDeniedFieldIds：编译期禁止物理下推的字段集（掩码外字段，纵深防御；缺省空集）。
+   * 路由传入前已用【可见字段子集】与【脱敏 config】收窄，recordService 本身不含任何掩码判定。
+   */
+  hydrateDeps?: HydrateDeps;
+  compileDeniedFieldIds?: ReadonlySet<string> | null;
 }
 
 export interface QueryResult {
@@ -191,6 +200,8 @@ async function runPlannerOnce(opts: QueryOptions) {
     limit: opts.limit ?? 200,
     offset: opts.offset ?? 0,
     noPaging: opts.noPaging ?? false,
+    hydrateDeps: opts.hydrateDeps,
+    deniedFieldIds: opts.compileDeniedFieldIds ?? null,
   });
   return {
     records: r.records,
@@ -237,6 +248,7 @@ function logShadowDiff(opts: QueryOptions, legacy: QueryResult, planned: QueryRe
 export async function queryRecordsLegacy(opts: QueryOptions): Promise<QueryResult> {
   const { tableId, fields, config } = opts;
   const search = (opts.search ?? config.search ?? "").trim();
+  const hydrateDeps = opts.hydrateDeps ?? prismaDeps;
 
   // 1. 拉原始记录
   const rows = await prisma.record.findMany({
@@ -245,11 +257,11 @@ export async function queryRecordsLegacy(opts: QueryOptions): Promise<QueryResul
   });
   const total = rows.length;
 
-  // 2. hydrate（计算字段在此现算）
+  // 2. hydrate（计算字段在此现算；on 态注入的 deps 含跨表字段可见性钩子）
   let hydrated = await hydrateRecords(
     rows.map(toRawRecord),
     fields,
-    prismaDeps,
+    hydrateDeps,
   );
 
   // 3-5. 视图过滤 / 搜索 / 排序（纯内存，导出与列表共用同一后处理，口径零漂移）
@@ -285,15 +297,20 @@ export async function loadTableFields(tableId: string): Promise<FieldMeta[]> {
  * 替代 POST/PATCH/详情里「queryRecords(noPaging) 拉全表再 .find」的全表回查。
  * 取值算法与列表完全一致（同一个 hydrateRecords + prismaDeps），故返回的那一条与
  * 旧全表回查 .find 结果逐值 deep-equal（见 S5 对拍测试）。记录软删/不存在/表不符返回 null。
+ *
+ * M4/S6 可选投影（不判 flag，中性注入；缺省行为与 M3 一字不变）：
+ *   opts.fields 用可见字段子集（隐藏物理列在 merged 缺席，公式引用它天然 FNULL）；
+ *   opts.deps  注入含跨表可见性钩子的 hydration 依赖（LinkRef 两档/lookup 隐藏值 null）。
  */
 export async function hydrateRecordById(
   tableId: string,
   recordId: string,
+  opts?: { fields?: FieldMeta[]; deps?: HydrateDeps },
 ): Promise<HydratedRecord | null> {
   const row = await prisma.record.findUnique({ where: { id: recordId } });
   if (!row || row.deletedAt || row.tableId !== tableId) return null;
-  const fields = await loadTableFields(tableId);
-  const [hydrated] = await hydrateRecords([toRawRecord(row)], fields, prismaDeps);
+  const fields = opts?.fields ?? await loadTableFields(tableId);
+  const [hydrated] = await hydrateRecords([toRawRecord(row)], fields, opts?.deps ?? prismaDeps);
   return hydrated ?? null;
 }
 

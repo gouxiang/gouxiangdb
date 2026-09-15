@@ -159,8 +159,13 @@ function flattenAnd(node: FilterNode): FilterCondition[] | null {
  * @returns 可 rfi-JIN 驱动则返回 CountPlan；过滤为空返回 null（调用方走无过滤 count(*)），
  *          含任何不可安全改写结构也返回 null（回退相关 EXISTS，语义不变）。
  */
-export function compileCountPlan(b: Builder, filters: FilterNode | null | undefined): CountPlan | null {
+export function compileCountPlan(
+  b: Builder,
+  filters: FilterNode | null | undefined,
+  deniedFieldIds?: ReadonlySet<string> | null,
+): CountPlan | null {
   if (!filters) return null;
+  const denied = deniedFieldIds ?? null;
 
   // 顶层 OR：仅当所有叶子【同一字段】且都可改写时，并入该字段的一个 JOIN（inner 用 OR 连）。
   if (filters.kind === "or" && filters.children) {
@@ -169,6 +174,7 @@ export function compileCountPlan(b: Builder, filters: FilterNode | null | undefi
     const terms: Term[] = [];
     for (const ch of leaves) {
       if (ch.kind !== "condition") return null;
+      if (denied?.has(ch.fieldId)) return null; // M4/S6：掩码叶不入计数快速计划
       const tm = countTerm(b.byId, ch as FilterCondition);
       if (!tm) return null;
       terms.push(tm);
@@ -183,6 +189,7 @@ export function compileCountPlan(b: Builder, filters: FilterNode | null | undefi
   if (!leaves) return null;
   const groups = new Map<string, { comb: "AND" | "OR"; terms: Term[] }>();
   for (const leaf of leaves) {
+    if (denied?.has(leaf.fieldId)) return null; // M4/S6：掩码叶不入计数快速计划
     const tm = countTerm(b.byId, leaf);
     if (!tm) return null;
     let g = groups.get(tm.fieldId);

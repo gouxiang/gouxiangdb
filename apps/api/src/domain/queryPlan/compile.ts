@@ -71,12 +71,13 @@ interface NodeResult {
  * classifyNumLeaf 保证），合并成单 EXISTS；其余子节点逐个走 compileLeaf。
  * 返回物理 SQL 片段（未加外层括号）与残余节点。
  */
-function compileAndChildren(b: Builder, kids: FilterNode[]): { sqls: string[]; residuals: FilterNode[] } {
+function compileAndChildren(b: Builder, kids: FilterNode[], denied: ReadonlySet<string> | null): { sqls: string[]; residuals: FilterNode[] } {
   // 仅对【条件叶】按 fieldId 分组；嵌套 AND/OR/NOT 不拆进合并（保持子树语义边界）。
   // 只收能 classify 成正向 valueNum 谓词的叶；标量前提已由 classifyNumLeaf 保证（NUM/DATE）。
   const fieldGroups = new Map<string, number[]>(); // fieldId → 子节点下标（保持原序）
   kids.forEach((node, idx) => {
     if (node.kind !== "condition") return;
+    if (denied?.has(node.fieldId)) return; // M4/S6：掩码外字段不进物理下推
     if (!classifyNumLeaf(b, node as FilterCondition)) return;
     const list = fieldGroups.get(node.fieldId);
     if (list) list.push(idx);
@@ -88,6 +89,11 @@ function compileAndChildren(b: Builder, kids: FilterNode[]): { sqls: string[]; r
   const merged = new Set<number>(); // 已并入范围 EXISTS 的子节点下标
   kids.forEach((node, idx) => {
     if (node.kind === "condition") {
+      // M4/S6：掩码外条件叶留内存（上层对脱敏 config 求值时该叶已移除，物理侧只做兜底屏蔽）。
+      if (denied?.has(node.fieldId)) {
+        residuals.push(node);
+        return;
+      }
       const group = fieldGroups.get(node.fieldId);
       if (group && group[0] === idx && group.length >= 2) {
         // 组首：把该字段全部正向谓词按原序并入【单个】EXISTS。
@@ -98,24 +104,25 @@ function compileAndChildren(b: Builder, kids: FilterNode[]): { sqls: string[]; r
       }
       if (merged.has(idx)) return; // 已被合并的非首成员，不重复编译
     }
-    const r = compileNode(b, node);
+    const r = compileNode(b, node, denied);
     if (r.sql) sqls.push(r.sql);
     if (r.residual) residuals.push(r.residual);
   });
   return { sqls, residuals };
 }
 
-function compileNode(b: Builder, node: FilterNode | null | undefined): NodeResult {
+function compileNode(b: Builder, node: FilterNode | null | undefined, denied: ReadonlySet<string> | null = null): NodeResult {
   if (!node) return { sql: null, residual: null };
   switch (node.kind) {
     case "condition": {
+      if (denied?.has(node.fieldId)) return { sql: null, residual: node }; // M4/S6：掩码外不物理下推
       const sql = compileLeaf(b, node as FilterCondition);
       // 仅当该叶无法下推时才留内存；可下推叶 residual=null（不能重复进内存谓词）。
       return { sql, residual: sql ? null : node };
     }
     case "and": {
       const kids = node.children ?? [];
-      const { sqls, residuals } = compileAndChildren(b, kids);
+      const { sqls, residuals } = compileAndChildren(b, kids, denied);
       const sql = sqls.length ? sqls.map((s) => `(${s})`).join(" AND ") : null;
       const residual = combineResidual("and", residuals);
       return { sql, residual };
@@ -123,9 +130,13 @@ function compileNode(b: Builder, node: FilterNode | null | undefined): NodeResul
     case "or": {
       const children = node.children ?? [];
       // 全物理才下推；否则整棵 OR 回退（OR 片段自带括号）。
+      // M4/S6：OR 内含任一掩码字段 -> 整棵 OR 不物理下推（隐藏分支真值未知）。
+      if (denied && children.some((ch) => filterReferencesField(ch, denied))) {
+        return { sql: null, residual: node };
+      }
       const allSql: string[] = [];
       for (const ch of children) {
-        const r = compileNode(b, ch);
+        const r = compileNode(b, ch, denied);
         if (!r.sql || r.residual) return { sql: null, residual: node };
         allSql.push(r.sql);
       }
@@ -134,13 +145,22 @@ function compileNode(b: Builder, node: FilterNode | null | undefined): NodeResul
     }
     case "not": {
       if (!node.child) return { sql: null, residual: null };
-      const r = compileNode(b, node.child);
+      if (denied && filterReferencesField(node.child, denied)) return { sql: null, residual: node };
+      const r = compileNode(b, node.child, denied);
       if (!r.sql || r.residual) return { sql: null, residual: node };
       return { sql: `(NOT (${r.sql}))`, residual: null };
     }
     default:
       return { sql: null, residual: node };
   }
+}
+
+/** 过滤子树是否引用了掩码外字段（任一条件叶命中即真）。 */
+function filterReferencesField(node: FilterNode | null | undefined, denied: ReadonlySet<string>): boolean {
+  if (!node) return false;
+  if (node.kind === "condition") return denied.has(node.fieldId);
+  if (node.kind === "not") return filterReferencesField(node.child, denied);
+  return (node.children ?? []).some((ch) => filterReferencesField(ch, denied));
 }
 
 function combineResidual(kind: "and" | "or", nodes: FilterNode[]): FilterNode | null {
@@ -178,25 +198,35 @@ function sortableValueNum(f: PlanField | undefined): boolean {
 /**
  * 编译过滤 + 排序。fields 为该表全部活字段（含主字段标记）。
  * 排序仅当【过滤全物理】且【每个 sort 字段均可 valueNum 下推】时整体下推，否则内存排。
+ *
+ * M4/S6：deniedFieldIds 为当前主体被 fieldMask 收窄掉的字段集（on 态传入，off/shadow 传
+ * null/空集 -> 行为一字不变）。掩码外字段的条件叶【不进物理下推】、排序不下推，由上层对
+ * 同一份脱敏 config 跑内存精修（compile 不自行删除 residual，以免与内存口径分叉；调用方用
+ * sanitizeViewConfigForMask 得到两路径共用的脱敏 config，再把掩码集传此处做物理层兜底）。
  */
 export function compilePlan(
   tableId: string,
   fields: PlanField[],
   filters: FilterNode | null | undefined,
   sorts: SortSpec[] | null | undefined,
+  deniedFieldIds?: ReadonlySet<string> | null,
 ): CompiledPlan {
   const byId = new Map(fields.map((f) => [f.id, f]));
+  const denied = deniedFieldIds ?? null;
   const b: Builder = { tableId, params: [], byId, bind(v) { this.params.push(v); return "?"; } };
 
   // 计数快速计划独立累积绑定（不写 b.params），只在过滤树可安全改写为 rfi JOIN 时产出。
-  const countPlan = compileCountPlan(b, filters ?? null);
+  const countPlan = compileCountPlan(b, filters ?? null, denied);
 
-  const fr = compileNode(b, filters ?? null);
+  const fr = compileNode(b, filters ?? null, denied);
   const fullyPhysical = fr.residual === null;
 
   let sortJoins: SortJoin[] | null = null;
   const ss = sorts ?? [];
-  if (ss.length > 0 && fullyPhysical && ss.every((s) => sortableValueNum(byId.get(s.fieldId)))) {
+  if (
+    ss.length > 0 && fullyPhysical &&
+    ss.every((s) => !denied?.has(s.fieldId) && sortableValueNum(byId.get(s.fieldId)))
+  ) {
     sortJoins = ss.map((s, i) => ({
       fieldId: s.fieldId,
       alias: `s${i}`,

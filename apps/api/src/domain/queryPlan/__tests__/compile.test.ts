@@ -30,6 +30,12 @@ function compileOne(node: FilterNode, sorts: SortSpec[] = []) {
   return compilePlan("T1", fields, node, sorts);
 }
 
+// M4/S6：掩码外字段集（on 态由 maskSession 传入；off/shadow 传 null，行为一字不变）。
+const DENIED = new Set(["email", "stars", "body"]);
+function compileMasked(node: FilterNode | null, sorts: SortSpec[] = [], denied: Set<string> = DENIED) {
+  return compilePlan("T1", fields, node, sorts, denied);
+}
+
 describe("18 FilterOp 下推白名单分类", () => {
   it("数值族 eq/neq/gt/lt/gte/lte/isEmpty/isNotEmpty 下推 valueNum", () => {
     for (const [op, v] of [["eq", "10"], ["gt", "10"], ["lt", "10"], ["gte", "10"], ["lte", "10"]] as const) {
@@ -321,5 +327,58 @@ describe("physicalAggFuncs 聚合下推资格（防日期 min/max 静默偏差�
     for (const t of ["multiSelect", "longText", "autoNumber", "formula", "lookup", "rollup", "count", "links"]) {
       expect(physicalAggFuncs(t, ALL), t).toEqual([]);
     }
+  });
+});
+
+// ============ M4/S6 deniedFieldIds 编译期兜底 ============
+// 正常 on 路径 config 已脱敏（不含掩码叶），denied 集是纵深防御：即便上游漏脱敏，
+// 物理 WHERE/sort 也不得借隐藏列下推。掩码叶留 residual 交内存（脱敏 config 下该叶已不存在）。
+describe("deniedFieldIds：掩码字段禁止物理 filter/sort 下推", () => {
+  it("denied=null/undefined 与 S6 前一字不变（对照）", () => {
+    const p1 = compilePlan("T1", fields, cond("email", "contains", "a"), []);
+    const p2 = compilePlan("T1", fields, cond("email", "contains", "a"), [], null);
+    expect(p2).toEqual(p1);
+    expect(p1.filterSql).toContain("LIKE");
+  });
+
+  it("掩码叶不入物理 WHERE，转入 residual", () => {
+    const p = compileMasked(cond("email", "contains", "secret"));
+    expect(p.filterSql).toBeNull();
+    expect(p.residual).toEqual(cond("email", "contains", "secret"));
+    expect(p.filtersFullyPhysical).toBe(false);
+  });
+
+  it("AND 内掩码叶收窄：可见叶照常物理下推，掩码叶留 residual", () => {
+    const tree: FilterNode = { kind: "and", children: [cond("age", "gt", "1"), cond("stars", "lt", "5")] };
+    const p = compileMasked(tree);
+    expect(p.filterSql).toContain("valueNum");
+    expect(p.filterSql).not.toContain("stars");
+    expect(p.residual).toEqual(cond("stars", "lt", "5"));
+  });
+
+  it("OR 含掩码叶 -> 整棵回退 residual（隐藏分支真值未知，不可只下推可见半边）", () => {
+    const tree: FilterNode = { kind: "or", children: [cond("age", "gt", "1"), cond("email", "contains", "a")] };
+    const p = compileMasked(tree);
+    expect(p.filterSql).toBeNull();
+    expect(p.residual).toEqual(tree);
+  });
+
+  it("NOT 含掩码叶 -> 整棵回退 residual", () => {
+    const node = { kind: "not", child: cond("email", "contains", "a") } as FilterNode;
+    const p = compileMasked(node);
+    expect(p.filterSql).toBeNull();
+    expect(p.residual).toEqual(node);
+  });
+
+  it("排序字段被掩码 -> sortJoins=null（不得借隐藏列决定物理顺序）", () => {
+    // stars 在 DENIED：即便过滤全物理也不下推该排序
+    const p = compileMasked(cond("age", "gt", "0"), [{ fieldId: "stars", direction: "desc" }]);
+    expect(p.sortJoins).toBeNull();
+    // 可见数值列排序仍下推
+    const ok = compileMasked(cond("age", "gt", "0"), [{ fieldId: "age", direction: "asc" }]);
+    expect(ok.sortJoins).toEqual([{ fieldId: "age", alias: "s0", direction: "asc" }]);
+    // 空 denied 集（visibleAll 口径）行为与不传一致
+    const empty = compileMasked(cond("age", "gt", "0"), [{ fieldId: "stars", direction: "desc" }], new Set());
+    expect(empty.sortJoins).not.toBeNull();
   });
 });

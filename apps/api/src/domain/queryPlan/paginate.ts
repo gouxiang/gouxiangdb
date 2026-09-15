@@ -18,7 +18,7 @@
 import type { SortSpec, ViewConfig } from "@gx/shared-types";
 import type { HydratedRecord, FieldMeta } from "../types.js";
 import { prismaDeps } from "../prismaDeps.js";
-import { hydrateRecords } from "../hydrate.js";
+import { hydrateRecords, type HydrateDeps } from "../hydrate.js";
 import { applyViewQuery } from "../recordService.js";
 import { assembleGroups, assembleAggregations } from "./assemble.js";
 import type { SidecarQuerier } from "./sidecarQuery.js";
@@ -37,6 +37,10 @@ export interface KeysetInput {
   offset: number;
   /** 不透明游标原文（首页为 null/undefined/""）；非法抛 InvalidCursorError。 */
   cursor: string | null | undefined;
+  /** M4/S6：携带跨表可见性钩子的 hydration 依赖（缺省 prismaDeps，行为与 M3 一致）。 */
+  hydrateDeps?: HydrateDeps;
+  /** M4/S6：掩码外字段集（编译期物理下推兜底，缺省空集）。 */
+  deniedFieldIds?: ReadonlySet<string> | null;
 }
 
 export type KeysetPageMode = "keyset-created" | "keyset-sorted" | "keyset-wide";
@@ -76,7 +80,9 @@ export async function runKeysetPaging(
     throw new OffsetWindowError(limit, resolveOffsetWindowPages());
   }
 
-  const { plan } = await buildViewPlan(tableId, fields, config.filters ?? null, sorts);
+  const { plan } = await buildViewPlan(
+    tableId, fields, config.filters ?? null, sorts, input.deniedFieldIds ?? null,
+  );
   const total = q.countPhysical({ tableId, filterSql: null, filterParams: [] });
   const hasSearch = input.search.trim() !== "";
   const hasGroup = Boolean(config.groupByFieldId);
@@ -141,7 +147,7 @@ async function pageCreated(
   const page = q.physicalKeysetOnCreatedAt({ tableId, ...filter, cursor: startCursor, limit });
   const ids = page.rows.map((r) => r.id);
   const raw = await fetchRawByIds(tableId, ids);
-  const records = orderByIds(await hydrateRecords(raw, fields, prismaDeps), ids);
+  const records = orderByIds(await hydrateRecords(raw, fields, input.hydrateDeps ?? prismaDeps), ids);
   const last = page.rows[page.rows.length - 1];
   const nextCursor = page.hasMore && last ? encodeCursor({ c: last.createdAt, id: last.id }) : null;
   return {
@@ -165,7 +171,7 @@ async function pageSorted(
   if (rawCursor && start === 0) throw new InvalidCursorError(); // indexOf=-1 → 边界行已不在物理集合
   const pageIds = sequence.slice(start, start + limit);
   const raw = await fetchRawByIds(tableId, pageIds);
-  const records = orderByIds(await hydrateRecords(raw, fields, prismaDeps), pageIds);
+  const records = orderByIds(await hydrateRecords(raw, fields, input.hydrateDeps ?? prismaDeps), pageIds);
   const hasMore = start + limit < sequence.length;
   const last = records[records.length - 1];
   return {
@@ -188,7 +194,7 @@ async function pageWide(
 ): Promise<KeysetPageResult> {
   const { tableId, fields, config, search, limit, offset } = input;
   const rawAll = await fetchRawByIds(tableId, candidateIds);
-  let hydrated = await hydrateRecords(rawAll, fields, prismaDeps);
+  let hydrated = await hydrateRecords(rawAll, fields, input.hydrateDeps ?? prismaDeps);
   hydrated = applyViewQuery(hydrated, fields, config, search);
 
   const needsMemSort = sorts.length > 0 && plan.sortJoins === null;

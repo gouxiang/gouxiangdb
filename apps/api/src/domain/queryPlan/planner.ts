@@ -18,6 +18,7 @@
 
 import type { AggFunc, ViewConfig, SortSpec } from "@gx/shared-types";
 import type { HydratedRecord, FieldMeta } from "../types.js";
+import type { HydrateDeps } from "../hydrate.js";
 import { hydrateRecords } from "../hydrate.js";
 import { applyViewQuery } from "../recordService.js";
 import { assembleGroups, assembleAggregations } from "./assemble.js";
@@ -36,6 +37,10 @@ export interface PlannerInput {
   limit: number;
   offset: number;
   noPaging: boolean;
+  /** M4/S6：携带跨表可见性钩子的 hydration 依赖（缺省 prismaDeps，行为与 M3 一致）。 */
+  hydrateDeps?: HydrateDeps;
+  /** M4/S6：掩码外字段集（编译期物理下推兜底，缺省空集）。 */
+  deniedFieldIds?: ReadonlySet<string> | null;
 }
 
 export interface PlannerResult {
@@ -83,7 +88,9 @@ export async function runQueryPlan(
   const { tableId, fields, config } = input;
   const filters = (config.filters ?? null) as PlannerInput["config"]["filters"];
   const sorts = (config.sorts ?? []) as SortSpec[];
-  const { plan } = await buildViewPlan(tableId, fields, filters, sorts);
+  const hydrateDeps = input.hydrateDeps ?? prismaDeps;
+  const denied = input.deniedFieldIds ?? null;
+  const { plan } = await buildViewPlan(tableId, fields, filters, sorts, denied);
 
   const total = q.countPhysical({ tableId, filterSql: null, filterParams: [] });
   const hasSearch = input.search.trim() !== "";
@@ -123,7 +130,7 @@ export async function runQueryPlan(
         : null;
     if (pageIds !== null) {
       const raw = await fetchRawByIds(tableId, pageIds);
-      const hydrated = orderByIds(await hydrateRecords(raw, fields, prismaDeps), pageIds);
+      const hydrated = orderByIds(await hydrateRecords(raw, fields, hydrateDeps), pageIds);
       const aggregations = physicalAggregations(q, tableId, fields, config, plan);
       return { records: hydrated, total, filteredTotal, groups: null, aggregations, mode: "physical", degraded: false };
     }
@@ -133,7 +140,7 @@ export async function runQueryPlan(
       ? candidateIds
       : candidateIds.slice(input.offset, input.offset + input.limit);
     const raw = await fetchRawByIds(tableId, sliceIds);
-    const hydrated = orderByIds(await hydrateRecords(raw, fields, prismaDeps), sliceIds);
+    const hydrated = orderByIds(await hydrateRecords(raw, fields, hydrateDeps), sliceIds);
     const aggregations = physicalAggregations(q, tableId, fields, config, plan);
     return { records: hydrated, total, filteredTotal, groups: null, aggregations, mode: "physical", degraded: false };
   }
@@ -154,7 +161,7 @@ export async function runQueryPlan(
   }
 
   const raw = await fetchRawByIds(tableId, candidateIds);
-  let hydrated = await hydrateRecords(raw, fields, prismaDeps);
+  let hydrated = await hydrateRecords(raw, fields, hydrateDeps);
   // 与 S5 完全相同的后处理（完整 evalFilter/search/sort），物理候选是超集，精修后逐值一致。
   hydrated = applyViewQuery(hydrated, fields, config, input.search);
   const filteredTotal = hydrated.length;

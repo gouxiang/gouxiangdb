@@ -47,6 +47,13 @@ export interface HydrateDeps {
    * 未实现时回退逐条 resolveUserName（值一致）。返回 userId -> 显示名（缺失键由调用方回退 id）。
    */
   resolveUserNames?(userIds: string[]): Promise<Record<string, string>>;
+  /**
+   * M4/S6 可选字段掩码（fieldMask 五出口，仅 GX_AUTHZ_ENGINE=on 且字段门就绪时由
+   * authz/maskSession 注入；off/shadow 不提供 -> 所有跨表取值行为与 M3 一字不变）。
+   * 返回 null=该表不裁剪；否则给表级可见性与可见字段集（空集=表级完全不可见）。
+   * 结构类型（不 import authz 域，避免 hydrate -> authz 反向依赖）。
+   */
+  resolveFieldVisibility?(tableId: string): Promise<{ tableVisible: boolean; visibleIds: ReadonlySet<string> | null } | null>;
 }
 
 /** 批量 linkRows 查询的一组：dir="parent" 表示本组记录是 parent（正向，取 child）；"child" 反之。 */
@@ -364,6 +371,9 @@ export async function buildFormulaSource(
       const childFields = await loadFieldsCached(l.tableId, ctx);
       const subField = childFields.find((f) => f.name === subName);
       if (!subField) continue;
+      // M4/S6：对端字段对当前主体被 mask -> 该点引用以 null 参与（与真实空值不可区分，裁决 A-4）。
+      const peerVis = await visibilityOf(ctx, l.tableId);
+      if (!fieldVisible(peerVis, subField.id)) continue;
       const childMerged = await getMergedCached(l.tableId, l.recordId, ctx);
       if (!childMerged) continue;
       const v = cellToFormulaValue(childMerged[subField.id] ?? null);
@@ -424,7 +434,12 @@ async function getMergedCached(
   if (!raw || raw.tableId !== tableId) return null;
   ctx.merging.add(key);
   try {
-    const fields = await loadFieldsCached(tableId, ctx);
+    // M4/S6：跨表点引用取对端记录时按对端可见性收窄字段集——否则对端一个【可见公式字段】
+    // 内部引用对端被 mask 字段，会经公式计算结果泄漏（A-4 最小泄漏纵深收口）。
+    // 收窄后被 mask 字段在 merged 缺席，公式取值天然 FNULL，与对端真空值不可区分。
+    const allFields = await loadFieldsCached(tableId, ctx);
+    const peerVis = await visibilityOf(ctx, tableId);
+    const fields = peerVis ? allFields.filter((f) => fieldVisible(peerVis, f.id)) : allFields;
     const merged = await buildFirstPassMerged(raw, fields, ctx);
     await computeFormulas(raw, fields, merged, ctx);
     ctx.mergedCache.set(key, merged);
@@ -487,34 +502,45 @@ async function buildLinkRefs(
 ): Promise<LinkRef[]> {
   const records = await ctx.deps.getRecordsByIds(ids);
   const fields = await loadFieldsCached(tableId, ctx);
+  // M4/S6 裁决 A-4：对端表对当前主体完全不可见 -> 引用整体走不可见通道（无 id/title/tableId）。
+  const vis = await visibilityOf(ctx, tableId);
+  if (vis && !vis.tableVisible) return [];
   const byId = new Map(records.map((r) => [r.id, r]));
 
   const out: LinkRef[] = [];
   for (const id of ids) {
     const r = byId.get(id);
     if (!r) continue;
+    const title = await primaryTitle(r, fields, displayFieldId, ctx, vis);
+    // ①档：表可见但无任何可见展示值时以真实 recordId 为标题（非空、非伪造；
+    // 不显示空、不出现"无权限"措辞，§0-4/§4.4 末）。
     out.push({
       tableId: r.tableId,
       recordId: r.id,
-      title: await primaryTitle(r, fields, displayFieldId, ctx),
+      title: title ?? r.id,
     });
   }
   return out;
 }
 
-/** 记录主标题：优先 linkDisplayFieldId，其次表 primaryFieldId，最后第一个非计算字段 */
+/**
+ * 记录主标题：优先 linkDisplayFieldId，其次表 physical 候选，最后第一个非计算字段。
+ * M4/S6：传 vis 时只在【可见字段】中选标题；候选被 mask 或无可见非空值 -> 返回 null，
+ * 由 buildLinkRefs 回退真实 recordId（①档）。不传 vis（off/shadow）保持原 "(无标题)" 兜底。
+ */
 export async function primaryTitle(
   r: RawRecord,
   fields: FieldMeta[],
   displayFieldId: string | null,
   ctx?: HydrationContext,
-): Promise<string> {
+  vis?: TableVisibility | null,
+): Promise<string | null> {
   const stored = parseStored(r.fields);
 
   const candidates: string[] = [];
-  if (displayFieldId) candidates.push(displayFieldId);
+  if (displayFieldId && fieldVisible(vis, displayFieldId)) candidates.push(displayFieldId);
   const physical = fields.filter((f) => !isComputedFieldType(f.type) && !isSystemFieldType(f.type));
-  candidates.push(...physical.map((f) => f.id));
+  candidates.push(...physical.map((f) => f.id).filter((fid) => fieldVisible(vis, fid)));
 
   for (const fid of candidates) {
     const v = stored[fid];
@@ -525,7 +551,27 @@ export async function primaryTitle(
     }
     return String(v);
   }
+  // on 态掩码（vis 存在）无可见展示值 -> null（回退 recordId）；off/shadow 保持旧串。
+  if (vis !== undefined) return null;
   return "(无标题)";
+}
+
+/** M4/S6 对端表可见性（结构类型，与 authz/maskSession.TableVisibility 同形，hydrate 不 import authz）。 */
+interface TableVisibility {
+  tableVisible: boolean;
+  visibleIds: ReadonlySet<string> | null;
+}
+
+/** 取某表对当前主体可见性；无掩码钩子（off/shadow）返回 null=不裁剪。 */
+async function visibilityOf(ctx: HydrationContext, tableId: string): Promise<TableVisibility | null> {
+  if (!ctx.deps.resolveFieldVisibility) return null;
+  return await ctx.deps.resolveFieldVisibility(tableId);
+}
+
+/** 字段在该可见性下是否可见（null 或 visibleIds=null 表示全可见）。 */
+function fieldVisible(vis: TableVisibility | null | undefined, fieldId: string): boolean {
+  if (!vis || vis.visibleIds === null) return true;
+  return vis.visibleIds.has(fieldId);
 }
 
 function parseStored(f: unknown): Record<string, FieldValue> {
@@ -584,6 +630,14 @@ async function resolveLookup(
   const otherIds = await resolveLinkedPeerIds(raw, linkField, ctx);
   if (otherIds.length === 0) return [];
 
+  // M4/S6：对端表表级完全不可见 -> lookup/rollup 取空（与无关联同形，②档不泄漏对端记录数/值）。
+  const peerTableId = linkField.relatedTableId;
+  let peerVis: TableVisibility | null = null;
+  if (peerTableId) {
+    peerVis = await visibilityOf(ctx, peerTableId);
+    if (peerVis && !peerVis.tableVisible) return [];
+  }
+
   const otherRecords = await ctx.deps.getRecordsByIds(otherIds);
   const byId = new Map(otherRecords.map((r) => [r.id, r]));
 
@@ -603,6 +657,8 @@ async function resolveLookup(
       );
       if (!ok) continue;
     }
+    // M4/S6：lookup 目标字段对当前主体被 mask -> 该对端值缺席（①档，与对端本就为空不可区分）。
+    if (!fieldVisible(peerVis, f.lookupFieldId)) continue;
     const v = stored[f.lookupFieldId];
     if (v === undefined || v === null || v === "") continue;
     values.push(v);
@@ -646,6 +702,12 @@ async function resolveCount(
 
   const ids = await resolveLinkedPeerIds(raw, linkField, ctx);
   if (ids.length === 0) return 0;
+
+  // M4/S6：对端表表级完全不可见 -> count 归零（②档，不借关联计数泄漏对端记录存在性）。
+  if (linkField.relatedTableId) {
+    const peerVis = await visibilityOf(ctx, linkField.relatedTableId);
+    if (peerVis && !peerVis.tableVisible) return 0;
+  }
 
   const filterNode = f.recordFilter as Parameters<typeof evalFilter>[0] | null;
   if (!filterNode) {

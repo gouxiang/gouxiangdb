@@ -37,8 +37,21 @@ import {
   syncNavFromEntitiesTx,
   purgeTableNodeTx,
 } from "../domain/nav/sync.js";
+import { resolveTableMask } from "../domain/authz/maskGate.js";
+import { AuthzFieldError } from "../domain/authz/fieldMask.js";
 
 export const records = new Hono();
+
+/** M4/S6：字段掩码域错误 -> HTTP 403 FORBIDDEN_FIELD 统一信封（整单拒绝，事务不开）。 */
+function runMaskWriteGate(mask: Awaited<ReturnType<typeof resolveTableMask>>, keys: readonly string[]): void {
+  if (!mask) return; // off/shadow：不校验（响应与 S0 一致）
+  try {
+    mask.assertWritable(keys);
+  } catch (e) {
+    if (e instanceof AuthzFieldError) throw new HttpError(e.status, e.message, e.code);
+    throw e;
+  }
+}
 
 // ============ 工具 ============
 
@@ -329,7 +342,7 @@ records.get("/", async (c) => {
   const tableId = c.req.query("tableId");
   if (!tableId) return c.json({ error: "缺少 tableId" }, 400);
   const baseId = await baseIdOfTable(tableId);
-  await requireCanView(c, baseId);
+  const { userId } = await requireCanView(c, baseId);
 
   const viewId = c.req.query("viewId");
   const limit = Math.min(Number(c.req.query("limit") ?? 200) || 200, 1000);
@@ -348,9 +361,19 @@ records.get("/", async (c) => {
     if (v && v.tableId === tableId) config = parseViewConfig(v.config);
   }
 
+  // M4/S6 fieldMask 出口（on 态）：可见字段子集 + 脱敏 config + 注入跨表可见性 hydrate 依赖
+  // + compile 掩码外字段兜底。off/shadow mask=null，以下四项全部回落原值，响应与 S0 字节一致。
+  const mask = await resolveTableMask(userId, tableId, fields);
+  const queryFields = mask ? mask.visibleFields : fields;
+  const queryConfig = mask ? mask.sanitizeConfig(config) : config;
+
   let result;
   try {
-    result = await queryRecords({ tableId, fields, config, limit, offset, search, cursor });
+    result = await queryRecords({
+      tableId, fields: queryFields, config: queryConfig, limit, offset, search, cursor,
+      hydrateDeps: mask?.hydrateDeps,
+      compileDeniedFieldIds: mask?.deniedIds ?? null,
+    });
   } catch (e) {
     // keyset 客户端错误统一转 400（错误类定义不牵 db.js，这里桥接到 HttpError 信封）。
     if (e instanceof InvalidCursorError || e instanceof OffsetWindowError) {
@@ -360,12 +383,13 @@ records.get("/", async (c) => {
   }
 
   // additive：仅 keyset 生效路径带 nextCursor/hasMore/degraded；其余路径键集合与 S0 快照一致。
+  // fields/allFields 用同一可见子集（掩码后无权字段不出现，前端字段选择器自然不可选）。
   const body: Record<string, unknown> = {
     records: result.records,
     total: result.total,
     filteredTotal: result.filteredTotal,
-    fields: visibleFields(fields, config),
-    allFields: fields,
+    fields: visibleFields(queryFields, queryConfig),
+    allFields: queryFields,
     groups: result.groups,
     aggregations: result.aggregations,
   };
@@ -397,6 +421,11 @@ records.post("/", async (c) => {
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
 
   const fields = await loadTableFields(tableId);
+
+  // M4/S6 写键守卫（事务前）：客户端 payload 带掩码外/只读物理键 -> 403 FORBIDDEN_FIELD，整单不开事务。
+  // 只校验客户端原始键；defaultNow 等服务端注入值属系统行为（同 createdTime），不在用户写键集内。
+  const mask = await resolveTableMask(userId, tableId, fields);
+  runMaskWriteGate(mask, Object.keys(parsed.data.fields ?? {}));
 
   // 日期字段「新建默认当前时间」：字段配置了 defaultNow 且本次未显式传值时，自动填当前时间。
   // U-10：用【本地墙钟】而非 UTC——UTC+8 用户在 00:00-08:00 新建时，UTC 日期还是昨天，
@@ -461,7 +490,10 @@ records.post("/", async (c) => {
 
   // M1/S5：写后只 hydrate 本行返回（单行主键取数），替代旧 queryRecords(noPaging) 全表回查。
   // 取值与列表同一 hydrate 引擎，逐值等于旧全表结果里 .find(r=>r.id===rec.id) 的那一条。
-  const found = await hydrateRecordById(tableId, rec.id);
+  // M4/S6：on 态写后投影同读出口（可见子集 + 跨表可见性钩子），不回吐掩码字段值。
+  const found = await hydrateRecordById(tableId, rec.id, mask
+    ? { fields: mask.visibleFields, deps: mask.hydrateDeps }
+    : undefined);
   return c.json({ record: found, affectedParents }, 201);
 });
 
@@ -601,14 +633,20 @@ function recordTitle(raw: unknown): string {
 records.get("/:recordId", async (c) => {
   const recordId = c.req.param("recordId");
   const baseId = await baseIdOfRecord(recordId);
-  await requireCanView(c, baseId);
+  const { userId } = await requireCanView(c, baseId);
 
   const rec = await prisma.record.findUnique({ where: { id: recordId } });
   if (!rec || rec.deletedAt) throw new HttpError(404, "记录不存在");
 
-  const fields = await loadTableFields(rec.tableId);
+  const allFields = await loadTableFields(rec.tableId);
+  // M4/S6：on 态详情投影与列表同口径（可见子集 hydrate + 跨表可见性钩子 + fields 清单收窄）。
+  // 表级可达性仍由旧成员守卫负责（S6 不新增表级拒绝），本层只做字段维只减不增。
+  const mask = await resolveTableMask(userId, rec.tableId, allFields);
+  const fields = mask ? mask.visibleFields : allFields;
   // M1/S5：详情只 hydrate 本行（单行主键取数），替代旧 queryRecords(noPaging) 全表回查再 .find。
-  const found = await hydrateRecordById(rec.tableId, recordId);
+  const found = await hydrateRecordById(rec.tableId, recordId, mask
+    ? { fields: mask.visibleFields, deps: mask.hydrateDeps }
+    : undefined);
   if (!found) throw new HttpError(404, "记录不存在");
 
   return c.json({ record: found, fields });
@@ -630,6 +668,10 @@ records.patch("/:recordId", async (c) => {
   if (!rec || rec.deletedAt) throw new HttpError(404, "记录不存在");
 
   const fields = await loadTableFields(rec.tableId);
+
+  // M4/S6 写键守卫（事务前）：payload 带掩码外/只读物理键 -> 403 FORBIDDEN_FIELD，整行未改。
+  const mask = await resolveTableMask(userId, rec.tableId, fields);
+  runMaskWriteGate(mask, Object.keys(parsed.data.fields));
 
   // 事务：unique 校验 + 物理字段写入 + link_row 写入 + updatedBy 落库，
   // 任一步失败整体回滚，避免「链接写了一半、文本没写」的中间态。
@@ -671,7 +713,10 @@ records.patch("/:recordId", async (c) => {
   }
 
   // M1/S5：写后只 hydrate 本行返回（单行主键取数），替代旧 queryRecords(noPaging) 全表回查。
-  const found = await hydrateRecordById(rec.tableId, recordId);
+  // M4/S6：on 态写后投影同读出口（可见子集 + 跨表可见性钩子），不回吐掩码字段值。
+  const found = await hydrateRecordById(rec.tableId, recordId, mask
+    ? { fields: mask.visibleFields, deps: mask.hydrateDeps }
+    : undefined);
   return c.json({
     record: found,
     affectedParents,
@@ -781,6 +826,10 @@ records.post("/bulk-update", async (c) => {
   const { userId } = await requireCanEditData(c, baseId);
 
   const fields = await loadTableFields(first.tableId);
+
+  // M4/S6 写键守卫（事务前）：批量 payload 带掩码外/只读物理键 -> 403 FORBIDDEN_FIELD，整批不写。
+  const mask = await resolveTableMask(userId, first.tableId, fields);
+  runMaskWriteGate(mask, Object.keys(parsed.data.fields));
 
   // 先收敛出本表真实待更新的记录 id（防止跨表/跨 Base id 混入）。
   const scopedRows = await prisma.record.findMany({

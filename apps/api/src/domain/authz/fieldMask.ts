@@ -6,7 +6,7 @@
 //   - 可见 = 任一 r 来源可见之并；可写 = 任一 c/u 来源在【该来源】下可见且非其只读。
 //   - 并集只增不减：宽来源（不裁剪）与窄来源并存时全字段可见；管理员须收窄宽来源本身。
 
-import type { FieldMask, ResourceAction } from "@gx/shared-types";
+import type { FieldMask, ResourceAction, ViewConfig, FilterNode, SortSpec, AggFunc } from "@gx/shared-types";
 import type { ScopedPolicy } from "./types.js";
 
 /** 域内拒绝错误（纯类；S3 适配层映射为 HTTP 403 + 机器码，引擎不 import Hono）。 */
@@ -160,6 +160,7 @@ export function applyMaskToRecords<T extends RecordLike>(
 
 /**
  * 写入口守卫：payload 出现不可见或只读字段键 -> 整单拒绝（事务不开），不静默丢弃。
+ * 计算字段/系统字段键不在此判定（applyFieldWrites 本就跳过它们）；调用方只传物理写键。
  */
 export function assertFieldsWritable(keys: readonly string[], cap: FieldCapability): void {
   const hidden = keys.filter((k) => !canSeeField(cap, k));
@@ -170,4 +171,65 @@ export function assertFieldsWritable(keys: readonly string[], cap: FieldCapabili
   if (readOnly.length) {
     throw new AuthzFieldError("包含只读字段", "FORBIDDEN_FIELD", readOnly);
   }
+}
+
+/** 从字段定义列表挑出可见者（列表 fields/allFields、CSV 表头列、hydrate 入参同口径）。 */
+export function filterVisibleFieldDefs<T extends { id: string }>(
+  fieldDefs: readonly T[],
+  cap: FieldCapability,
+): T[] {
+  return fieldDefs.filter((f) => canSeeField(cap, f.id));
+}
+
+/**
+ * 视图配置脱敏（on 态）：从 ViewConfig 中抹掉一切以掩码外字段为目标的引用，产出一份
+ * 与"该用户视角下这些列不存在/恒为空"一致的配置。物理 compile 与内存 applyViewQuery
+ * 共用这同一份脱敏配置，保证两条 M1 读路径口径零分叉（不能用隐藏列偷偷过滤/排序/分组/聚合）。
+ *
+ *   - filters：删除引用隐藏字段的条件叶；AND 收窄为其余子树，OR 无法安全收窄->整体失效(null)；
+ *   - sorts/groupByFieldId：隐藏字段引用删除；
+ *   - aggregations：隐藏字段列删除；
+ *   - search 不处理：recordService 搜索本就以 visibleFields(fields,config) 为可搜域，
+ *     投影时 fields 已为可见子集，隐藏列自动不入搜索。
+ */
+export function sanitizeViewConfigForMask(config: ViewConfig, visible: ReadonlySet<string>): ViewConfig {
+  const filter = stripFilterByMask(config.filters ?? null, visible);
+  const sorts = (config.sorts ?? []).filter((s: SortSpec) => visible.has(s.fieldId));
+  const aggregations: Record<string, AggFunc | null> = {};
+  for (const [fid, fn] of Object.entries(config.aggregations ?? {})) {
+    if (visible.has(fid)) aggregations[fid] = fn;
+  }
+  return {
+    ...config,
+    filters: filter,
+    sorts,
+    aggregations,
+    groupByFieldId: config.groupByFieldId && visible.has(config.groupByFieldId) ? config.groupByFieldId : null,
+  };
+}
+
+/** 递归删除引用隐藏字段的条件叶（AND 收窄；OR/NOT 无法安全收窄时该子树整体失效）。 */
+function stripFilterByMask(node: FilterNode | null, visible: ReadonlySet<string>): FilterNode | null {
+  if (!node) return null;
+  if (node.kind === "condition") {
+    return visible.has(node.fieldId) ? node : null;
+  }
+  if (node.kind === "not") {
+    const child = node.child ? stripFilterByMask(node.child, visible) : null;
+    // NOT(隐藏条件) 无法安全求值为 true/false（隐藏值未知），整体失效。
+    return child ? { kind: "not", child } : null;
+  }
+  const originalKids = node.children ?? [];
+  const kids = originalKids
+    .map((ch) => stripFilterByMask(ch, visible))
+    .filter((ch): ch is FilterNode => ch !== null);
+  if (kids.length === 0) return null;
+  // OR 任一分支引用隐藏字段即无法安全收窄（隐藏分支真值未知，剩下单分支不等于原 OR）-> 整体失效；
+  // 必须在"单孩子拍平"之前判定，否则 OR(f1可见, f2隐藏) 会被错误拍平成 f1。
+  if (node.kind === "or") {
+    return kids.length === originalKids.length ? { kind: "or", children: kids } : null;
+  }
+  // AND 缺项只收窄；只剩一项时拍平为该叶。
+  if (kids.length === 1) return kids[0]!;
+  return { kind: node.kind, children: kids } as FilterNode;
 }

@@ -138,3 +138,28 @@ describe("compileCountPlan 安全放弃（回退相关 EXISTS，计数不变）"
     expect(countOf(node)).toBeNull();
   });
 });
+
+// M4/S6：掩码字段不得参与 rfi JOIN 计数快速计划（隐藏列值未知，JOIN 结果会泄漏命中数）。
+describe("M4/S6 compileCount deniedFieldIds 兜底", () => {
+  const denied = new Set(["stars", "email"]);
+  const countMasked = (node: FilterNode | null) =>
+    compilePlan("T1", fields, node, [] as SortSpec[], denied).countPlan;
+
+  it("纯掩码叶条件 -> 放弃快速计数计划", () => {
+    expect(countMasked(cond("stars", "gte", "3"))).toBeNull();
+  });
+
+  it("AND 中混入掩码叶 -> 整体放弃（不能只 JOIN 可见半边算出错误计数）", () => {
+    expect(countMasked(and([cond("age", "gte", "10"), cond("stars", "lte", "4")]))).toBeNull();
+  });
+
+  it("OR 任一分支为掩码叶 -> 放弃", () => {
+    expect(countMasked(or([cond("age", "gt", "90"), cond("email", "contains", "a")]))).toBeNull();
+  });
+
+  it("纯可见字段计划不受 denied 集影响（对照）", () => {
+    const cp = countMasked(and([cond("age", "gte", "10"), cond("age", "lte", "20")]));
+    expect(cp).not.toBeNull();
+    expect(cp!.joinParams).toEqual(["T1", "age", 10, 20]);
+  });
+});

@@ -48,3 +48,22 @@ export function effectiveAuthzMode(env: NodeJS.ProcessEnv = process.env): AuthzE
 export function authzShadowActive(env: NodeJS.ProcessEnv = process.env): boolean {
   return effectiveAuthzMode(env) === "shadow";
 }
+
+/**
+ * 字段掩码五出口（M4-S6）独立就绪门（计划 §7-S6 行622）。
+ *
+ * 与节点守卫全局 enforce（AUTHZ_ENFORCE_READY，S10 才翻）刻意分离：
+ *   - 本门读【原始】GX_AUTHZ_ENGINE（resolveAuthzEngineMode，不经 on->shadow 降级），
+ *     故 GX_AUTHZ_ENGINE=on 时，即便七守 r/u 仍按全局门降级 shadow，fieldMask 的
+ *     读投影/写键校验/物理下推屏蔽已按 on 生效，使 A-4/AC-M4-3 在 S6 可独立验收；
+ *   - off/shadow 恒 false：五出口全部短路，不实例化掩码解析、零新增 SQL，
+ *     响应与 M3/M4-S0 金标准逐字节一致。
+ * 边界安全（S7 tree/menu 剪枝缺失下不产生节点级越权/误拒）：S6 的 enforce 只在
+ * "表级 r 已由旧守卫成立"之后做字段维收窄（只减不增），表级可达性判定留 S7/S10。
+ */
+export const FIELD_MASK_ENFORCE_READY = true;
+
+/** 字段掩码五出口是否生效：仅 S6 就绪且原始模式为 on 时为真。 */
+export function fieldMaskEnforceEffective(env: NodeJS.ProcessEnv = process.env): boolean {
+  return FIELD_MASK_ENFORCE_READY && resolveAuthzEngineMode(env) === "on";
+}

@@ -11,15 +11,27 @@
 //   - RC-04 公式注入防护仍在 escapeCell（csv.ts）拼串层，本文件不触碰。
 
 import { getRawReader, type RawReader, type RawRecordRow } from "../db/rawRead.js";
-import { hydrateRecords } from "./hydrate.js";
+import { hydrateRecords, type HydrateDeps } from "./hydrate.js";
 import { prismaDeps } from "./prismaDeps.js";
 import { loadTableFields, parseViewConfig, applyViewQuery } from "./recordService.js";
 import { recordToRow, rowsToCSVBody, csvHeaderLine } from "./csv.js";
-import type { RawRecord } from "./types.js";
+import type { RawRecord, FieldMeta } from "./types.js";
 import type { ViewConfig } from "@gx/shared-types";
 
 /** 每批 keyset 拉取 + hydrate 的行数（500-1000 区间取 500，单批 hydrated 驻留受控）。 */
 const EXPORT_BATCH = 500;
+
+/**
+ * M4/S6 导出掩码上下文（中性结构，csvExport 不 import authz；off/shadow 调用方不传）：
+ *   visibleFields：仅这些列入 CSV 表头与数据列；
+ *   sanitizeConfig：抹掉隐藏字段的 filter/sort（导出条件不能借隐藏列偷偷过滤）；
+ *   hydrateDeps：携带跨表字段可见性钩子的 hydration 依赖（LinkRef 两档/公式 mask-null）。
+ */
+export interface CsvMaskContext {
+  visibleFields: FieldMeta[];
+  sanitizeConfig: (config: ViewConfig) => ViewConfig;
+  hydrateDeps: HydrateDeps;
+}
 
 /** raw 网关 epoch-ms 行 → domain RawRecord（ISO 时间串，与 toRawRecord 同形）。 */
 function rawRowToRecord(r: RawRecordRow): RawRecord {
@@ -61,9 +73,14 @@ export async function exportTableCsv(
   viewConfigRaw?: string | null,
   searchOverride?: string,
   reader?: RawReader,
+  mask?: CsvMaskContext | null,
 ): Promise<CsvExportResult> {
-  const fields = await loadTableFields(tableId);
-  const config = parseViewConfig(viewConfigRaw ?? null);
+  const allFields = await loadTableFields(tableId);
+  // M4/S6：on 态仅导出可见列（表头/数据/hydrate 入参同源）；off/shadow 全字段。
+  const fields = mask ? mask.visibleFields : allFields;
+  const parsedConfig = parseViewConfig(viewConfigRaw ?? null);
+  const config = mask ? mask.sanitizeConfig(parsedConfig) : parsedConfig;
+  const hydrateDeps = mask?.hydrateDeps ?? prismaDeps;
   const search = (searchOverride ?? config.search ?? "").trim();
   const post = needsPostProcessing(config, search);
 
@@ -82,9 +99,9 @@ export async function exportTableCsv(
       if (page.rows.length === 0) break;
       batches += 1;
       const rawRows = page.rows.map(rawRowToRecord);
-      const hydrated = await hydrateRecords(rawRows, fields, prismaDeps);
+      const hydrated = await hydrateRecords(rawRows, fields, hydrateDeps);
       rowCount += hydrated.length;
-      bodyChunks.push(rowsToCSVBody(hydrated.map((r) => recordToRow(r, fields))));
+      bodyChunks.push(rowsToCSVBody(hydrated.map((x) => recordToRow(x, fields))));
       cursor = page.nextCursor;
       if (!cursor) break;
     }
@@ -100,13 +117,13 @@ export async function exportTableCsv(
     if (page.rows.length === 0) break;
     batches += 1;
     const rawRows = page.rows.map(rawRowToRecord);
-    accumulated.push(...(await hydrateRecords(rawRows, fields, prismaDeps)));
+    accumulated.push(...(await hydrateRecords(rawRows, fields, hydrateDeps)));
     cursor = page.nextCursor;
     if (!cursor) break;
   }
   const finalRows = applyViewQuery(accumulated, fields, config, search);
   rowCount = finalRows.length;
-  const body = rowsToCSVBody(finalRows.map((r) => recordToRow(r, fields)));
+  const body = rowsToCSVBody(finalRows.map((x) => recordToRow(x, fields)));
   const csv = body === "" ? header : [header, body].join("\r\n");
   return { csv, rowCount, batches };
 }

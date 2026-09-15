@@ -15,6 +15,7 @@ import {
 import { makeOptions } from "../domain/fieldService.js";
 import { loadTableFields } from "../domain/recordService.js";
 import { exportTableCsv } from "../domain/csvExport.js";
+import { resolveTableMask } from "../domain/authz/maskGate.js";
 import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
 import { deleteTableStatement, rebuildTableTx } from "../domain/fieldIndex/sync.js";
 import {
@@ -365,7 +366,7 @@ tables.post("/:tableId/duplicate", async (c) => {
 tables.get("/:tableId/export.csv", async (c) => {
   const tableId = c.req.param("tableId");
   const baseId = await baseIdOf(tableId);
-  await requireCanView(c, baseId);
+  const { userId } = await requireCanView(c, baseId);
 
   const viewId = c.req.query("viewId");
   let viewConfigRaw: string | null = null;
@@ -374,9 +375,19 @@ tables.get("/:tableId/export.csv", async (c) => {
     if (v && v.tableId === tableId) viewConfigRaw = v.config;
   }
 
+  // M4/S6：on 态字段门就绪时按可见字段子集投影（表头列序/行值/视图 config 同口径收窄）；
+  // off/shadow 返回 null，exportTableCsv 收 undefined 走原路径，与 S0 字节一致。
+  const fields = await loadTableFields(tableId);
+  const mask = await resolveTableMask(userId, tableId, fields);
+
   // M1/S5：走只读网关 keyset 分批拉取 + 批量化 hydrate（每批 500），不全表入堆；
   // 视图 filters/sorts/search 的逐值口径由 csvExport 复用 applyViewQuery 保持。
-  const { csv } = await exportTableCsv(tableId, viewConfigRaw);
+  const { csv } = await exportTableCsv(tableId, viewConfigRaw, undefined, undefined,
+    mask && {
+      visibleFields: mask.visibleFields,
+      sanitizeConfig: mask.sanitizeConfig,
+      hydrateDeps: mask.hydrateDeps,
+    });
 
   c.header("Content-Type", "text/csv; charset=utf-8");
   c.header("Content-Disposition", `attachment; filename="table-${tableId}.csv"`);

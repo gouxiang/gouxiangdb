@@ -17,6 +17,8 @@ export async function runKeysetQuery(opts: QueryOptions): Promise<QueryResult> {
     limit: opts.limit ?? 200,
     offset: opts.offset ?? 0,
     cursor: opts.cursor ?? null,
+    hydrateDeps: opts.hydrateDeps,
+    deniedFieldIds: opts.compileDeniedFieldIds ?? null,
   });
   return {
     records: r.records,

@@ -17,12 +17,17 @@ export interface BuiltPlan {
 /**
  * 编译一个视图的物理计划。主字段即便物理类型是 longText 也按文本入索引
  *（compilePlan 需 isPrimary 标记，短文本 LIKE/等值白名单据此放行）。
+ *
+ * M4/S6：deniedFieldIds 为当前主体掩码外字段集（on 态传入；off/shadow 缺省空集，
+ * compile 行为一字不变）。调用方传入的 filters/sorts 已经过同一掩码脱敏，本参数是
+ * 物理层的编译期兜底（禁止掩码外字段做物理 filter/sort 下推）。
  */
 export async function buildViewPlan(
   tableId: string,
   fields: FieldMeta[],
   filters: ViewConfig["filters"],
   sorts: ViewConfig["sorts"],
+  deniedFieldIds?: ReadonlySet<string> | null,
 ): Promise<BuiltPlan> {
   const table = await prisma.table.findUnique({
     where: { id: tableId },
@@ -34,7 +39,7 @@ export async function buildViewPlan(
     type: f.type,
     isPrimary: f.id === primaryFieldId || undefined,
   }));
-  const plan = compilePlan(tableId, planFields, filters ?? null, sorts ?? []);
+  const plan = compilePlan(tableId, planFields, filters ?? null, sorts ?? [], deniedFieldIds ?? null);
   return { planFields, plan, primaryFieldId };
 }
 
