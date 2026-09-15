@@ -136,6 +136,35 @@ sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
 - Docker 部署同一顺序内置于 `deploy/docker/docker-entrypoint.sh`（migrate 后、`node dist/index.js` 前），
   失败容器不启动、不接流量。
 
+## 6.7 auth_policies 回填对账（幂等，M4 起升级后必跑）
+
+M4-S2 起，`prisma migrate deploy` 应用回填迁移 `20260916110000_authz_policies_backfill`，把旧三表
+（members / kb_members / kb_doc_acls）活行幂等投影到 `auth_policies`。**升级后、接流量前必须跑一次
+authz 对账**确认 0 漂移（A=旧表缺/不一致投影、B=悬挂/虚高投影、C=结构非法；D 类决策对拍在 S3 后补）：
+
+```bash
+cd /srv/gouxiangdb/current/api
+sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
+  pnpm tsx scripts/authz/reconcile-policies.ts            # 只读；期望 A=0 B=0 C=0、exit 0
+sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
+  pnpm tsx scripts/authz/reconcile-policies.ts --apply    # 有 A1/A2/B 漂移时幂等修复
+# 再跑一次 --apply 必须 no changes；行数 expected == legacy == 活 members+kb_members+kb_doc_acls
+```
+
+语义边界：
+
+- **幂等**：回填迁移是 `INSERT...SELECT WHERE NOT EXISTS`，重放零增长；对账脚本二次起 `no changes`。
+- **只投影活行**：软删 base/kb/doc 与未知角色档不投影；DISABLED 用户的成员行保留投影（停用由鉴权层
+  tokenVersion/status 拦截，不删授权行）。kb_members 只投影到 kb 容器节点一行，不逐 doc 膨胀；
+  kb_doc_acls 覆盖 doc/canvas 两种内容节点。
+- **owner 不抬权**：资源 owner 只持本资源 manage_share（base owner 另持 manage_schema），不写
+  role_assignments，不等于工作区管理员。
+- **A3/C 类不自动改**：非 legacy 行动作串恰等于旧角色档（疑似手工污染）与 C 类结构非法只报告，按人工
+  处理；`--apply` 只修 A1/A2/B1/B2/B3。
+- 当前仓内入口是开发态 tsx 源码脚本（不 import `src/config.ts`，只读 `DATABASE_URL`，无启动闸门）；
+  是否随 esbuild 进生产发布包属 M4-S11 出口收口范围，在那之前目标机按实际可用的 node/tsx 运行环境执行，
+  不要臆造 `dist/cli` 路径。
+
 ## 7. 证书两条路径
 
 - **公网正式域名（推荐）**：DNS 已指向本机、80/443 可出网。保留 Caddyfile 站点块即可，
