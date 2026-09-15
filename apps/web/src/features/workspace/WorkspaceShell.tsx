@@ -49,6 +49,7 @@ function FooterNav({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="border-t border-gx-separator p-1.5">
       {item("/workspace/contacts", "building", "通讯录")}
+      {item("/workspace/authz", "shield", "权限管理")}
       {item("/workspace/settings/nav", "sitemap", "导航编排")}
       {item("/workspace/settings/assets", "database", "工作区设置")}
     </div>

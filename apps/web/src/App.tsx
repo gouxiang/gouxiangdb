@@ -34,6 +34,7 @@ import ContactsPage from "./features/contacts/ContactsPage";
 import InviteAcceptPage from "./features/contacts/InviteAcceptPage";
 import { ShellGate } from "./features/workspace/ShellGate";
 import { WorkspaceSettingsPage } from "./features/workspace/WorkspaceSettingsPage";
+import PermPanel from "./features/authz/PermPanel";
 
 function Loading() {
   return (
@@ -141,8 +142,9 @@ export default function App() {
         <Route path="/kb/:kbId/trash" element={<KbTrashPage />} />
         <Route path="/kb/:kbId/settings" element={<KbSettingsPage />} />
 
-        {/* 工作区级页面：M2 通讯录 + M3 设置中心（新壳左下设置区唯一入口） */}
+        {/* 工作区级页面：M2 通讯录 + M4 权限管理 + M3 设置中心（新壳左下设置区入口） */}
         <Route path="/workspace/contacts" element={<ContactsPage />} />
+        <Route path="/workspace/authz" element={<PermPanel />} />
         <Route path="/workspace/settings/*" element={<WorkspaceSettingsPage />} />
       </Route>
 

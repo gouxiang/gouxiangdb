@@ -1,0 +1,54 @@
+// M4 统一授权管理面板：左资源树（M3 tree，后端剪枝）+ 右节点策略编辑。
+// 写入口经 useAuthzCapability 门控（默认 fail-closed）；只读解释（effective/面包屑）随面板可见。
+import { useState } from "react";
+import type { NavNodeDTO } from "@gx/shared-types";
+import { Icon } from "../../components/icons";
+import { Button } from "../../components/ui";
+import { PermNodeTree } from "./PermNodeTree";
+import { PermNodeEditor } from "./PermNodeEditor";
+import { EffectiveDrawer } from "./EffectiveDrawer";
+import { NodeBreadcrumb } from "./NodeBreadcrumb";
+
+export default function PermPanel() {
+  const [selected, setSelected] = useState<NavNodeDTO | null>(null);
+  const [showEffective, setShowEffective] = useState(false);
+
+  return (
+    <div className="flex h-full flex-col bg-gx-bg">
+      <header className="flex items-center gap-2 border-b border-gx-separator px-4 py-2.5">
+        <Icon name="shield" size={16} className="text-gx-text-secondary" />
+        <h1 className="text-gx-15 font-semibold text-gx-text-primary">权限管理</h1>
+        <div className="min-w-0 flex-1 px-2">
+          {selected && <NodeBreadcrumb nodeId={selected.id} />}
+        </div>
+        {selected && (
+          <Button variant="ghost" size="sm" icon="inherit" onClick={() => setShowEffective(true)}>
+            权限来源
+          </Button>
+        )}
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        <aside className="w-60 shrink-0 border-r border-gx-separator bg-gx-surface">
+          <PermNodeTree selectedId={selected?.id ?? null} onSelect={setSelected} />
+        </aside>
+        <main className="min-w-0 flex-1 bg-gx-bg">
+          {selected ? (
+            <div key={selected.id} className="flex h-full flex-col">
+              <PermNodeEditor node={selected} />
+            </div>
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-gx-text-hint">
+              <Icon name="shield" size={28} className="opacity-50" />
+              <p className="text-gx-13">从左侧选择一个资源，查看与管理其授权。</p>
+            </div>
+          )}
+        </main>
+      </div>
+
+      {showEffective && selected && (
+        <EffectiveDrawer nodeId={selected.id} nodeName={selected.name} onClose={() => setShowEffective(false)} />
+      )}
+    </div>
+  );
+}
