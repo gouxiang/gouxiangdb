@@ -65,6 +65,18 @@ const REQUIRED_ERROR_CODES = [
   "MOVE_NEEDS_CONFIRM",
   "INHERITANCE_CONFIRM_REQUIRED",
   "NODE_NOT_INHERITABLE",
+  // M4/S8 权限域定名冻结（6 枚去重全集；后两枚为预留码，本期不经 REST 产出）。
+  "FORBIDDEN_FIELD",
+  "FORBIDDEN_RESOURCE",
+  "POLICY_CONFLICT",
+  "POLICY_CONDITION_UNSUPPORTED",
+  // M4/S5 策略整单写校验细码（PolicyValidationError.code 原样透传）。
+  "POLICY_NODE_NOT_FOUND",
+  "POLICY_NODE_KIND_INVALID",
+  "POLICY_SUBJECT_INVALID",
+  "POLICY_ACTION_INVALID",
+  "POLICY_FIELD_INVALID",
+  "POLICY_BAD_INPUT",
 ];
 
 describe("S7 openapi.yaml 结构冻结", () => {
@@ -127,8 +139,8 @@ describe("S7 openapi.yaml 结构冻结", () => {
     const errorEnumMatch = yaml.match(/code:\s*\n\s*type: string\s*\n\s*enum:\s*\n((?:\s*- .*\n)+)/);
     expect(errorEnumMatch).not.toBeNull();
     expect(errorEnumMatch![1]).not.toContain("legacyUnmappable");
-    // 但作为成功响应字段必须被文档化。
-    expect(yaml).toMatch(/legacyUnmappable:\s*\n\s*type: array/);
+    // 但作为成功响应字段必须被文档化（S8 提取为 LegacyUnmappableItem 组件，类型为数组）。
+    expect(yaml).toMatch(/legacyUnmappable:\s*(?:\n\s*type: array|\{ type: array)/);
   });
 });
 

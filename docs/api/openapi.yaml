@@ -6,6 +6,11 @@ info:
     M3 出口冻结的企业版 /api/v1 契约首版：汇合 M2 组织通讯录（部门/成员/角色/邀请）
     与 M3 统一导航资源树（tree/menu/group/move）。旧 /api/* 非企业版端点不在本文档，契约零变化。
 
+    M4（S4-S8）增补统一权限引擎只读/管理面：/authz/visible-scope 可见集探针、
+    /nodes/{id}/policies（GET/PUT）节点授权策略、/nodes/{id}/effective 决策解释器、
+    /nodes/{id}/inheritance（impact/PATCH）中断继承、/nodes/{id}/breadcrumb 中性截断面包屑。
+    旧 /api records 写字段越权以 403 FORBIDDEN_FIELD 整单拒绝。
+
 
     响应风格（总监裁决 2/5 定案，M3 出口冻结为现网风格）：成功返回资源本体、数组，
     或分页对象 {items,total,page,limit,hasMore}；错误统一为 {error, code}。
@@ -118,10 +123,29 @@ components:
             - INHERITANCE_CONFIRM_REQUIRED
             - NODE_NOT_INHERITABLE
             - NODE_NOT_FOUND
+            # M4/S8 权限域定名冻结（去重后全集）：
+            - FORBIDDEN_FIELD
+            - FORBIDDEN_RESOURCE
+            - POLICY_CONFLICT
+            - POLICY_CONDITION_UNSUPPORTED
+            # M4/S5 策略整单写校验码（PolicyValidationError.code 原样透传，HTTP 状态见 policies PUT）：
+            - POLICY_NODE_NOT_FOUND
+            - POLICY_NODE_KIND_INVALID
+            - POLICY_SUBJECT_INVALID
+            - POLICY_ACTION_INVALID
+            - POLICY_FIELD_INVALID
+            - POLICY_BAD_INPUT
           description: >-
             未显式指定机器码时按 HTTP 状态回落（400->BAD_REQUEST 等）；
             NAV_* 与 MOVE_NEEDS_CONFIRM 为导航域专用码；
             INHERITANCE_CONFIRM_REQUIRED/NODE_NOT_INHERITABLE 为 M4/S7 继承域专用码。
+            M4/S8 权限域六枚定名：FORBIDDEN_FIELD=记录写 payload 含不可见/只读字段键（旧 /api records 三写端点，
+            403 整单拒绝）；FORBIDDEN_RESOURCE=主体已认证但本次资源/动作无权（M6 MCP 结构化拒绝词汇，
+            REST v1 当前 403 回落泛 FORBIDDEN，M6 工具面启用本码）；POLICY_CONFLICT=同节点同主体多策略行
+            违反唯一意图等冲突（M4 整单写为 upsert 覆盖语义，不经 HTTP 产出；巡检 C4_DUPLICATE_POLICY 为只读码）；
+            INHERITANCE_CONFIRM_REQUIRED/NODE_NOT_INHERITABLE 见继承端点；POLICY_CONDITION_UNSUPPORTED 为
+            A-7 行级条件预留（本期不实现：upsert 不接受/不持久化 conditions 键，P1 启用时非 null 一律 400 本码）。
+            POLICY_* 六枚为策略写校验细码，仅 /nodes/{id}/policies PUT 产出。
         path: { type: string, description: 仅顶层 404 notFound 附带 }
     Meta:
       type: object
@@ -176,9 +200,163 @@ components:
           type: string
           enum: [in_list, temp_table]
           description: >-
-            in_list=nodeIds 可直接参数化 IN（<=499 且未截断）；
-            temp_table=M5 必须物化为 search.db 临时表后 JOIN，禁止超长 IN 直拼
+            in_list=nodeIds 可直接参数化 IN（<=499 且未截断），域内 buildVisibleScopeSql
+            产出 sql="?,?.."/params=nodeIds/单批 batches；
+            temp_table=域内 sql 为空串（sql=""、params=[]、expectsTempTable=true、batches=[]），
+            M5 必须先物化为 search.db 临时表再 JOIN，禁止超长 IN 直拼。HTTP 层仅回传本枚举，
+            不直接暴露 sql/expectsTempTable（实现细节，空串即"必须物化"的契约信号）。
         count: { type: integer, description: nodeIds 长度（截断后实际返回数） }
+
+    # ----- M4/S5-S8 权限域命名组件（S8 冻结；与 routes/v1/policies.ts、policyQuery.ts 真实形状一致）-----
+    FieldMask:
+      type: object
+      description: >-
+        命中 allow 之上的字段能力裁剪（收窄清单，不是 deny/授权清单）；挂在 table 节点策略行。
+        缺省对象/缺省键 = 不裁剪。allowFields 收窄可见字段；readOnlyFields 声明该来源下只读字段。
+      properties:
+        allowFields: { type: array, items: { type: string }, description: 该 table 内可见字段 id 白名单 }
+        readOnlyFields: { type: array, items: { type: string }, description: 该来源下只读字段 id }
+    PolicySubject:
+      type: object
+      required: [subjectType, subjectId, subjectName]
+      properties:
+        subjectType: { type: string, enum: [user, dept, role] }
+        subjectId: { type: string }
+        subjectName: { type: string, nullable: true, description: user=displayName，role/dept=name；悬挂主体为 null }
+    PolicyRow:
+      type: object
+      description: GET policies 的 direct[] 行：节点自身的一条直接策略。
+      required: [id, subjectType, subjectId, subjectName, actions, fieldMask, reason, createdAt]
+      properties:
+        id: { type: string, description: auth_policies 行 id }
+        subjectType: { type: string, enum: [user, dept, role] }
+        subjectId: { type: string }
+        subjectName: { type: string, nullable: true }
+        actions: { type: array, items: { type: string } }
+        fieldMask: { oneOf: [{ $ref: '#/components/schemas/FieldMask' }, { type: 'null' }] }
+        reason: { type: string, nullable: true, description: 策略来源（policy:v1 / legacy:* 投影标记） }
+        createdAt: { type: string, format: date-time }
+    PolicyAncestorSummary:
+      type: object
+      description: cutoff 链上某祖先节点会向下继承到本节点的只读策略摘要。
+      required: [nodeId, nodeName, policies]
+      properties:
+        nodeId: { type: string }
+        nodeName: { type: string }
+        policies:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/PolicySubject'
+              - type: object
+                required: [actions]
+                properties:
+                  actions: { type: array, items: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema] } }
+    NodePoliciesView:
+      type: object
+      required: [node, inheritAncestors, direct, ancestors]
+      properties:
+        node:
+          type: object
+          required: [id, kind, resourceType, name, inheritAncestors]
+          properties:
+            id: { type: string }
+            kind: { type: string, enum: [base, kb, table, view, doc, canvas, group] }
+            resourceType: { type: string, nullable: true }
+            name: { type: string }
+            inheritAncestors: { type: integer, enum: [0, 1] }
+        inheritAncestors: { type: boolean, description: 节点是否继承祖先（inheritAncestors===1） }
+        direct: { type: array, items: { $ref: '#/components/schemas/PolicyRow' } }
+        ancestors: { type: array, items: { $ref: '#/components/schemas/PolicyAncestorSummary' } }
+    PolicyChange:
+      type: object
+      description: PUT policies upserts[] 单项（整单全合法才提交）。
+      required: [subjectType, subjectId, actions]
+      properties:
+        subjectType: { type: string, enum: [user, dept, role] }
+        subjectId: { type: string }
+        actions:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema] }
+        fieldMask: { oneOf: [{ $ref: '#/components/schemas/FieldMask' }, { type: 'null' }] }
+        # 注意：A-7 行级条件本期不实现，conditions 键不被读取也不持久化（非 null 条件 P1 启用时
+        # 返回 400 POLICY_CONDITION_UNSUPPORTED），故本请求 schema 不声明 conditions。
+    PolicyDelete:
+      type: object
+      required: [subjectType, subjectId]
+      properties:
+        subjectType: { type: string, enum: [user, dept, role] }
+        subjectId: { type: string }
+    PolicyWriteRequest:
+      type: object
+      description: upserts/deletes 至少一项；upserts<=200、deletes<=500。
+      properties:
+        upserts: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/PolicyChange' } }
+        deletes: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/PolicyDelete' } }
+    LegacyUnmappableItem:
+      type: object
+      required: [subjectType, subjectId, reasons]
+      properties:
+        subjectType: { type: string, enum: [user, dept, role] }
+        subjectId: { type: string }
+        reasons: { type: array, items: { type: string }, description: 不可反写旧三表的原因（非标动作组合/角色或部门授予/fieldMask/无旧表节点类型） }
+    PolicyWriteResult:
+      type: object
+      required: [node, policyVersion, upserted, deleted, legacyUnmappable]
+      description: 200 成功载荷。legacyUnmappable 是成功明细（裁决 A-5），不是错误码、不阻断提交。
+      properties:
+        node:
+          type: object
+          required: [id, kind, resourceType, resourceId, name]
+          properties:
+            id: { type: string }
+            kind: { type: string, enum: [base, kb, table, view, doc, canvas, group] }
+            resourceType: { type: string, nullable: true }
+            resourceId: { type: string, nullable: true }
+            name: { type: string }
+        policyVersion: { type: integer }
+        upserted: { type: integer }
+        deleted: { type: integer }
+        legacyUnmappable: { type: array, items: { $ref: '#/components/schemas/LegacyUnmappableItem' } }
+    DiagSource:
+      type: object
+      description: effective perAction.sources[] 单条授予来源（O8 可解释来源链）。
+      required: [kind, policyId, nodeId, nodeName, viaAncestor, subjectType, subjectId, subjectName, fallback]
+      properties:
+        kind: { type: string, enum: [direct, dept, role, owner_fallback] }
+        policyId: { type: string, nullable: true, description: 命中的 auth_policies 行 id；owner_fallback 为 null }
+        nodeId: { type: string, description: 授予实际挂载的节点（可能是祖先） }
+        nodeName: { type: string, nullable: true }
+        viaAncestor: { type: boolean, description: 授予是否经祖先节点继承而来（非节点自身直挂） }
+        subjectType: { type: string, enum: [user, dept, role] }
+        subjectId: { type: string }
+        subjectName: { type: string, nullable: true }
+        fallback: { type: string, nullable: true, enum: [workspace_owner, creator] }
+    EffectivePermission:
+      type: object
+      description: effective perAction[] 单项：一枚资源动作的最终判定与完整来源链。
+      required: [action, allowed, sources]
+      properties:
+        action: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema] }
+        allowed: { type: boolean }
+        sources: { type: array, items: { $ref: '#/components/schemas/DiagSource' } }
+    EffectiveView:
+      type: object
+      required: [node, userId, actions, policyVersion, perAction]
+      properties:
+        node:
+          type: object
+          required: [id, kind, resourceType, name]
+          properties:
+            id: { type: string }
+            kind: { type: string, enum: [base, kb, table, view, doc, canvas, group] }
+            resourceType: { type: string, nullable: true }
+            name: { type: string }
+        userId: { type: string }
+        actions: { type: array, items: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema] }, description: 最终允许的动作集（allowed=true 的动作） }
+        policyVersion: { type: integer }
+        perAction: { type: array, items: { $ref: '#/components/schemas/EffectivePermission' }, description: 七枚资源动作逐一判定 }
 
     # ----- M2 departments -----
     Dept:
@@ -569,6 +747,10 @@ components:
     InheritanceImpact:
       type: object
       required: [nodeId, from, to, delta, count, items, limit, offset, exempt]
+      description: >-
+        中断/恢复继承的失访（losing）或恢复（gaining）预览。本载荷不含 willBreakInheritanceHint——
+        "是否跨越 restricted 边界"的提示只属于 MoveImpact（移动语义）；继承切换的目标即显式 0/1，
+        边界状态由 from/to 表达。人数不含行级谓词（A-7 顺延 P1）。
       properties:
         nodeId: { type: string }
         from: { type: boolean }
@@ -1219,54 +1401,13 @@ paths:
           description: OK
           content:
             application/json:
-              schema:
-                type: object
-                required: [node, inheritAncestors, direct, ancestors]
-                properties:
-                  node:
-                    type: object
-                    required: [id, kind, resourceType, name, inheritAncestors]
-                    properties:
-                      id: { type: string }
-                      kind: { type: string }
-                      resourceType: { type: string, nullable: true }
-                      name: { type: string }
-                      inheritAncestors: { type: integer }
-                  inheritAncestors: { type: boolean }
-                  direct:
-                    type: array
-                    items:
-                      type: object
-                      required: [id, subjectType, subjectId, subjectName, actions, fieldMask, reason, createdAt]
-                      properties:
-                        id: { type: string }
-                        subjectType: { type: string, enum: [user, dept, role] }
-                        subjectId: { type: string }
-                        subjectName: { type: string, nullable: true }
-                        actions: { type: array, items: { type: string } }
-                        fieldMask: { type: object, nullable: true, description: 解析后的字段掩码对象 }
-                        reason: { type: string, nullable: true }
-                        createdAt: { type: string, format: date-time }
-                  ancestors:
-                    type: array
-                    items:
-                      type: object
-                      required: [nodeId, nodeName, policies]
-                      properties:
-                        nodeId: { type: string }
-                        nodeName: { type: string }
-                        policies:
-                          type: array
-                          items:
-                            type: object
-                            required: [subjectType, subjectId, subjectName, actions]
-                            properties:
-                              subjectType: { type: string, enum: [user, dept, role] }
-                              subjectId: { type: string }
-                              subjectName: { type: string, nullable: true }
-                              actions: { type: array, items: { type: string } }
+              schema: { $ref: '#/components/schemas/NodePoliciesView' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
+        '403':
+          description: 对节点无 r（已认证但无权本资源；REST 回落泛 FORBIDDEN，FORBIDDEN_RESOURCE 词汇留待 M6 MCP）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '404': { $ref: '#/components/responses/NotFound' }
     put:
       tags: [nodes]
@@ -1283,72 +1424,32 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              properties:
-                upserts:
-                  type: array
-                  maxItems: 200
-                  items:
-                    type: object
-                    required: [subjectType, subjectId, actions]
-                    properties:
-                      subjectType: { type: string, enum: [user, dept, role] }
-                      subjectId: { type: string }
-                      actions:
-                        type: array
-                        minItems: 1
-                        items: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema] }
-                      fieldMask:
-                        type: object
-                        nullable: true
-                        properties:
-                          allowFields: { type: array, items: { type: string } }
-                          readOnlyFields: { type: array, items: { type: string } }
-                deletes:
-                  type: array
-                  maxItems: 500
-                  items:
-                    type: object
-                    required: [subjectType, subjectId]
-                    properties:
-                      subjectType: { type: string, enum: [user, dept, role] }
-                      subjectId: { type: string }
+            schema: { $ref: '#/components/schemas/PolicyWriteRequest' }
       responses:
         '200':
           description: OK
           content:
             application/json:
-              schema:
-                type: object
-                required: [node, policyVersion, upserted, deleted, legacyUnmappable]
-                properties:
-                  node:
-                    type: object
-                    properties:
-                      id: { type: string }
-                      kind: { type: string }
-                      resourceType: { type: string, nullable: true }
-                      resourceId: { type: string, nullable: true }
-                      name: { type: string }
-                  policyVersion: { type: integer }
-                  upserted: { type: integer }
-                  deleted: { type: integer }
-                  legacyUnmappable:
-                    type: array
-                    description: 不可反写旧三表的授权明细（200 成功载荷，非错误码，不阻断提交）
-                    items:
-                      type: object
-                      required: [subjectType, subjectId, reasons]
-                      properties:
-                        subjectType: { type: string, enum: [user, dept, role] }
-                        subjectId: { type: string }
-                        reasons: { type: array, items: { type: string } }
-        '400': { $ref: '#/components/responses/BadRequest' }
+              schema: { $ref: '#/components/schemas/PolicyWriteResult' }
+        '400':
+          description: >-
+            整单校验失败（全拒、policyVersion 不增）：POLICY_BAD_INPUT / POLICY_SUBJECT_INVALID /
+            POLICY_ACTION_INVALID / POLICY_FIELD_INVALID；P1 行级条件非 null 时 POLICY_CONDITION_UNSUPPORTED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
+        '404':
+          description: 节点不存在（PolicyValidationError POLICY_NODE_NOT_FOUND 原样透传，HTTP 404）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: 编排节点（group）挂资源策略等 kind 冲突（POLICY_NODE_KIND_INVALID）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /nodes/{id}/effective:
     parameters:
@@ -1363,44 +1464,7 @@ paths:
           description: OK
           content:
             application/json:
-              schema:
-                type: object
-                required: [node, userId, actions, policyVersion, perAction]
-                properties:
-                  node:
-                    type: object
-                    properties:
-                      id: { type: string }
-                      kind: { type: string }
-                      resourceType: { type: string, nullable: true }
-                      name: { type: string }
-                  userId: { type: string }
-                  actions: { type: array, items: { type: string }, description: 允许的动作集（七枚之内） }
-                  policyVersion: { type: integer }
-                  perAction:
-                    type: array
-                    description: 七枚资源动作逐一的判定与来源链
-                    items:
-                      type: object
-                      required: [action, allowed, sources]
-                      properties:
-                        action: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema] }
-                        allowed: { type: boolean }
-                        sources:
-                          type: array
-                          items:
-                            type: object
-                            required: [kind, policyId, nodeId, nodeName, viaAncestor, subjectType, subjectId, subjectName, fallback]
-                            properties:
-                              kind: { type: string, enum: [direct, dept, role, owner_fallback] }
-                              policyId: { type: string, nullable: true }
-                              nodeId: { type: string }
-                              nodeName: { type: string, nullable: true }
-                              viaAncestor: { type: boolean }
-                              subjectType: { type: string, enum: [user, dept, role] }
-                              subjectId: { type: string }
-                              subjectName: { type: string, nullable: true }
-                              fallback: { type: string, nullable: true, enum: [workspace_owner, creator] }
+              schema: { $ref: '#/components/schemas/EffectiveView' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
