@@ -114,6 +114,9 @@ export type IconName =
   | "folder"
   | "folderOpen"
   | "folderPlus"
+  | "unlock"
+  | "inherit"
+  | "cutoff"
   | "linkExternal";
 
 const PATHS: Record<IconName, string[]> = {
@@ -303,6 +306,18 @@ const PATHS: Record<IconName, string[]> = {
     "M20 4l-9 9",
     "M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4",
   ],
+  // M4 权限：恢复继承（开锁钩）
+  unlock: ["M6 11h12v10H6z", "M9 11V8a3 3 0 0 1 5.5-1.8"],
+  // M4 权限：继承（来源向外分发，share-nodes 语义）
+  inherit: [
+    "M18 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
+    "M6 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
+    "M18 16a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
+    "M8.6 13.5l6.8 4",
+    "M15.4 6.5l-6.8 4",
+  ],
+  // M4 权限：继承边界/截断（链路中间断开打叉）
+  cutoff: ["M4 12h5.5", "M14.5 12H20", "M10.8 9.6l2.4 4.8", "M13.2 9.6l-2.4 4.8"],
 };
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {

@@ -49,6 +49,16 @@ import type {
   MoveImpactDTO,
   GroupDeleteStrategy,
 } from "@gx/shared-types";
+import type {
+  NodePoliciesViewDTO,
+  PolicyWriteRequestDTO,
+  PolicyWriteResultDTO,
+  EffectiveViewDTO,
+  VisibleScopeDTO,
+  InheritanceImpactDTO,
+  InheritanceChangeResultDTO,
+  NodeBreadcrumbDTO,
+} from "@gx/shared-types";
 import { resolveApiBase, withBase as joinBase } from "../lib/base";
 
 // API 同源前缀解析：
@@ -913,4 +923,84 @@ export async function probeNavV2(): Promise<boolean> {
   }
   return navFlagCache;
 }
+
+// ============ M4 统一权限引擎 /api/v1/*（S5-S9 冻结契约，只消费后端） ============
+//
+// 门控纪律（M4-FE handoff §1）：继承切换 + 策略编辑入口仅在 /meta 显式 authzManage===true
+// 时放行；后端 S10 翻 AUTHZ_ENFORCE_READY 总门前不下发此字段，故任何环境默认 fail-closed。
+// 只读解释类（effective 来源链 / visible-scope 诊断 / breadcrumb 截断标记）不受此门控。
+
+/** GET /api/v1/meta 响应。authzManage 由后端 S10 起在总门 on 时下发，缺省即关。 */
+export interface EnterpriseMeta {
+  apiVersion?: string;
+  enterpriseOrg?: boolean;
+  /** 权限写能力总门：仅严格等于 true 才放行策略编辑/继承切换；undefined/false 一律只读。 */
+  authzManage?: boolean;
+  auth?: { userId?: string; status?: string; workspaceId?: string };
+}
+
+/**
+ * 读企业能力位。/meta 仅在 enterpriseOrg on 时挂载；404（未挂载）与网络错误都收敛为
+ * 「无能力位」而非抛出——门控调用方按 fail-closed 处理，不能因探针失败暴露写入口。
+ */
+export async function fetchEnterpriseMeta(): Promise<EnterpriseMeta | null> {
+  try {
+    return await apiFetch<EnterpriseMeta>("/api/v1/meta");
+  } catch (e) {
+    if (e instanceof ApiError && (e.status === 404 || e.status === 401)) return null;
+    return null;
+  }
+}
+
+export interface VisibleScopeQuery {
+  userId?: string;
+  /** 逗号串，如 "r,u"。 */
+  actions?: string;
+  /** 逗号串，如 "table,doc"。 */
+  kinds?: string;
+  budget?: number;
+}
+
+export const AuthzApi = {
+  /** 节点策略管理视图（direct 可编辑 + ancestors cutoff 链只读摘要）。 */
+  getNodePolicies: (id: string) =>
+    apiFetch<NodePoliciesViewDTO>(`/api/v1/nodes/${id}/policies`),
+  /** 整单替换（upserts/deletes）；后端整单校验，任一 4xx 全拒、不局部生效。 */
+  putNodePolicies: (id: string, body: PolicyWriteRequestDTO) =>
+    apiFetch<PolicyWriteResultDTO>(`/api/v1/nodes/${id}/policies`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  /** 有效权限来源链（缺省查本人；查他人需节点 manage_share，403 时前端隐入口）。 */
+  getEffective: (id: string, userId?: string) =>
+    apiFetch<EffectiveViewDTO>(`/api/v1/nodes/${id}/effective${qs({ userId })}`),
+  /** 可见集诊断（查他人仅 workspace owner 放行；manage_share 直授也 403）。 */
+  getVisibleScope: (params: VisibleScopeQuery = {}) =>
+    apiFetch<VisibleScopeDTO>(
+      `/api/v1/authz/visible-scope${qs({
+        userId: params.userId,
+        actions: params.actions,
+        kinds: params.kinds,
+        budget: params.budget,
+      })}`,
+    ),
+  /** 继承切换影响面预览；value 为目标 inheritAncestors（0/1），items 按 userId 字典序分页。 */
+  getInheritanceImpact: (id: string, value: boolean, limit?: number, offset?: number) =>
+    apiFetch<InheritanceImpactDTO>(
+      `/api/v1/nodes/${id}/inheritance/impact${qs({
+        value: value ? 1 : 0,
+        limit,
+        offset,
+      })}`,
+    ),
+  /** 切换继承；confirmed=false 首次会 409 INHERITANCE_CONFIRM_REQUIRED 并附 impact。 */
+  patchInheritance: (id: string, value: boolean, confirmed: boolean) =>
+    apiFetch<InheritanceChangeResultDTO>(`/api/v1/nodes/${id}/inheritance`, {
+      method: "PATCH",
+      body: JSON.stringify({ value, confirmed }),
+    }),
+  /** 中性化面包屑（on 态已截无权祖先；truncatedAbove=true 时链首渲染截断标记）。 */
+  getBreadcrumb: (id: string) =>
+    apiFetch<NodeBreadcrumbDTO>(`/api/v1/nodes/${id}/breadcrumb`),
+};
 
