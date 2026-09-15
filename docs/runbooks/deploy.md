@@ -140,7 +140,8 @@ sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
 
 M4-S2 起，`prisma migrate deploy` 应用回填迁移 `20260916110000_authz_policies_backfill`，把旧三表
 （members / kb_members / kb_doc_acls）活行幂等投影到 `auth_policies`。**升级后、接流量前必须跑一次
-authz 对账**确认 0 漂移（A=旧表缺/不一致投影、B=悬挂/虚高投影、C=结构非法；D 类决策对拍在 S3 后补）：
+authz 对账**确认 0 漂移（A=旧表缺/不一致投影、B=悬挂/虚高投影、C=结构非法；D 类逐请求决策对拍见 §6.8
+`GX_AUTHZ_ENGINE=shadow`）：
 
 ```bash
 cd /srv/gouxiangdb/current/api
@@ -164,6 +165,36 @@ sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
 - 当前仓内入口是开发态 tsx 源码脚本（不 import `src/config.ts`，只读 `DATABASE_URL`，无启动闸门）；
   是否随 esbuild 进生产发布包属 M4-S11 出口收口范围，在那之前目标机按实际可用的 node/tsx 运行环境执行，
   不要臆造 `dist/cli` 路径。
+
+## 6.8 权限引擎 shadow 对拍（GX_AUTHZ_ENGINE，M4-S3 起）
+
+M4-S3 在七个旧守卫（`guards.ts` 的 requireCanView/EditData/ManageSchema/ManageBase/Comment，
+`routes/kb.ts` 的 requireKb/requireDocAccess）内挂了新旧决策对拍，默认完全关闭、旧行为零变化：
+
+| 取值 | 行为 |
+|---|---|
+| `off`（默认，含未设置/未知值） | 七守只走旧三表决策，不实例化引擎、零新增 SQL。回滚态。 |
+| `shadow` | 旧决策为准并照常返回；额外 `await` 新引擎同上下文（同主体/nav 节点/动作）对拍，差异只计数+脱敏日志，**绝不改响应、不抛错**。引擎自身抛错也只记 metric，旧响应照常（fail-open 仅限观测层）。 |
+| `on` | **S3-S5 阶段不可真正生效**：阶段门 `AUTHZ_ENFORCE_READY=false`，运行时一律降级为 `shadow` 并在启动行打一次 warn；S6 完成且 M4 计划 §4.8 翻门五条件全满足、仅由项目总监下令后才会以引擎为准。 |
+
+开启影子观测（升级并跑完 §6.7 对账、A/B/C=0 后）：
+
+```bash
+# systemd EnvironmentFile 或环境注入；重启后看启动行：
+#   [authz] GX_AUTHZ_ENGINE configured=shadow effective=shadow
+GX_AUTHZ_ENGINE=shadow
+```
+
+观测口径（不落盘、不含响应体；userId 只存 sha256 前 12 位短哈希）：
+
+- 结构化日志事件 `authz_drift`：字段 `kind/guard/action/nodeId/userHash/old/engine/ts`。
+  - `DRIFT_OVERDENY` = 旧允新拒（引擎更严，可能把用户锁外，可用性风险）；
+  - `DRIFT_OVERALLOW` = 旧拒新允（引擎更宽，越权风险，**零容忍**）。
+- `authz_shadow_error` = 引擎对拍自身异常（旧响应未受影响），错误明文仅进进程内环形缓冲供现场排查。
+- 进程内最近 200 条漂移/错误环形缓冲 + 分类计数，供运维接口/现场诊断（M4 不单独落盘）。
+- 翻门纪律（§4.8）：shadow 连续一个迭代 `DRIFT_OVERALLOW=0` 且 `DRIFT_OVERDENY=0` 双零，才允许评估切 on。
+
+回滚：`GX_AUTHZ_ENGINE=off` 重启即恢复纯旧守卫，适配分支保留无副作用（无数据迁移、无双写）。
 
 ## 7. 证书两条路径
 

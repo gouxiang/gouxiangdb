@@ -4,7 +4,9 @@
 import type { Context } from "hono";
 import { prisma } from "./db.js";
 import { getUserId, type Role } from "./auth.js";
-import { permissionsForRole, type PermissionSet } from "@gx/shared-types";
+import { permissionsForRole, type PermissionSet, type ResourceAction } from "@gx/shared-types";
+import { authzShadowActive } from "./configAuthz.js";
+import { runShadowCheck } from "./domain/authz/adapter.js";
 
 export class HttpError extends Error {
   /** 可选机器可读错误码（不传时按状态码回落 BAD_REQUEST/CONFLICT 等）。 */
@@ -59,6 +61,43 @@ export async function permissionsOf(userId: string, baseId: string): Promise<Per
   return permissionsForRole(role);
 }
 
+const DENY_PERM: PermissionSet = {
+  canManageBase: false,
+  canManageSchema: false,
+  canEditData: false,
+  canComment: false,
+  canView: false,
+};
+
+/**
+ * M4/S3 shadow 对拍缝：仅在 GX_AUTHZ_ENGINE 生效为 shadow 时跑引擎同上下文对拍。
+ * off 时 authzShadowActive()=false，本函数空操作，不实例化引擎、零新增 SQL。
+ * 旧守卫一律以自身旧逻辑结果为准；对拍只分类计数/脱敏日志，绝不改返回、不抛错。
+ * 动作映射：view=r / editData=u（旧 canEditData 同闸 c/u/d，投影 editor 同集，u 作编辑哨兵）/
+ * schema=manage_schema / manageBase=manage_share / comment=comment，均落 base 节点（成员权限本就 base 级）。
+ */
+async function shadowBase(
+  guard: string,
+  userId: string,
+  baseId: string,
+  action: ResourceAction,
+  oldAllowed: boolean,
+): Promise<void> {
+  if (!authzShadowActive()) return;
+  await runShadowCheck(guard, userId, { resourceType: "base", resourceId: baseId }, action, oldAllowed);
+}
+
+/** 加载 base 成员视图（不做 shadow 对拍，供公开守卫在落定旧决策后统一对拍一次）。401 未登录直接抛。 */
+async function loadBaseMember(
+  c: Context,
+  baseId: string,
+): Promise<{ userId: string; role: Role | null; perm: PermissionSet }> {
+  const userId = await requireUserId(c);
+  const role = await roleOf(userId, baseId);
+  if (!role) return { userId, role: null, perm: DENY_PERM };
+  return { userId, role, perm: permissionsForRole(role) };
+}
+
 export async function requireRole(c: Context, baseId: string): Promise<Role> {
   const userId = await requireUserId(c);
   const role = await roleOf(userId, baseId);
@@ -67,34 +106,69 @@ export async function requireRole(c: Context, baseId: string): Promise<Role> {
 }
 
 export async function requireCanView(c: Context, baseId: string): Promise<{ userId: string; role: Role; perm: PermissionSet }> {
-  const userId = await requireUserId(c);
-  const role = await roleOf(userId, baseId);
-  if (!role) throw new HttpError(403, "无权访问该 Base");
-  return { userId, role, perm: permissionsForRole(role) };
+  const m = await loadBaseMember(c, baseId);
+  if (!m.role) {
+    await shadowBase("requireCanView", m.userId, baseId, "r", false);
+    throw new HttpError(403, "无权访问该 Base");
+  }
+  await shadowBase("requireCanView", m.userId, baseId, "r", true);
+  return { userId: m.userId, role: m.role, perm: m.perm };
 }
 
 export async function requireCanEditData(c: Context, baseId: string): Promise<{ userId: string; role: Role }> {
-  const r = await requireCanView(c, baseId);
-  if (!r.perm.canEditData) throw new HttpError(403, "当前角色无权编辑数据");
-  return { userId: r.userId, role: r.role };
+  const m = await loadBaseMember(c, baseId);
+  if (!m.role) {
+    await shadowBase("requireCanEditData", m.userId, baseId, "u", false);
+    throw new HttpError(403, "无权访问该 Base");
+  }
+  if (!m.perm.canEditData) {
+    await shadowBase("requireCanEditData", m.userId, baseId, "u", false);
+    throw new HttpError(403, "当前角色无权编辑数据");
+  }
+  await shadowBase("requireCanEditData", m.userId, baseId, "u", true);
+  return { userId: m.userId, role: m.role };
 }
 
 export async function requireCanManageSchema(c: Context, baseId: string): Promise<{ userId: string; role: Role }> {
-  const r = await requireCanView(c, baseId);
-  if (!r.perm.canManageSchema) throw new HttpError(403, "当前角色无权修改表结构");
-  return { userId: r.userId, role: r.role };
+  const m = await loadBaseMember(c, baseId);
+  if (!m.role) {
+    await shadowBase("requireCanManageSchema", m.userId, baseId, "manage_schema", false);
+    throw new HttpError(403, "无权访问该 Base");
+  }
+  if (!m.perm.canManageSchema) {
+    await shadowBase("requireCanManageSchema", m.userId, baseId, "manage_schema", false);
+    throw new HttpError(403, "当前角色无权修改表结构");
+  }
+  await shadowBase("requireCanManageSchema", m.userId, baseId, "manage_schema", true);
+  return { userId: m.userId, role: m.role };
 }
 
 export async function requireCanManageBase(c: Context, baseId: string): Promise<{ userId: string; role: Role }> {
-  const r = await requireCanView(c, baseId);
-  if (!r.perm.canManageBase) throw new HttpError(403, "只有所有者可管理 Base");
-  return { userId: r.userId, role: r.role };
+  const m = await loadBaseMember(c, baseId);
+  if (!m.role) {
+    await shadowBase("requireCanManageBase", m.userId, baseId, "manage_share", false);
+    throw new HttpError(403, "无权访问该 Base");
+  }
+  if (!m.perm.canManageBase) {
+    await shadowBase("requireCanManageBase", m.userId, baseId, "manage_share", false);
+    throw new HttpError(403, "只有所有者可管理 Base");
+  }
+  await shadowBase("requireCanManageBase", m.userId, baseId, "manage_share", true);
+  return { userId: m.userId, role: m.role };
 }
 
 export async function requireCanComment(c: Context, baseId: string): Promise<{ userId: string; role: Role }> {
-  const r = await requireCanView(c, baseId);
-  if (!r.perm.canComment) throw new HttpError(403, "当前角色无权评论");
-  return { userId: r.userId, role: r.role };
+  const m = await loadBaseMember(c, baseId);
+  if (!m.role) {
+    await shadowBase("requireCanComment", m.userId, baseId, "comment", false);
+    throw new HttpError(403, "无权访问该 Base");
+  }
+  if (!m.perm.canComment) {
+    await shadowBase("requireCanComment", m.userId, baseId, "comment", false);
+    throw new HttpError(403, "当前角色无权评论");
+  }
+  await shadowBase("requireCanComment", m.userId, baseId, "comment", true);
+  return { userId: m.userId, role: m.role };
 }
 
 /** 状态码 → 机器可读错误码（仅增补字段，不改变 HTTP 状态码与中文 error 文案）。 */

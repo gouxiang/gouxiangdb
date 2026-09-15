@@ -18,6 +18,8 @@ import {
   purgeDocNodeTx,
 } from "../domain/nav/sync.js";
 import { nodeId } from "../domain/nav/backfill.js";
+import { authzShadowActive } from "../configAuthz.js";
+import { runShadowCheck } from "../domain/authz/adapter.js";
 
 export const kb = new Hono();
 
@@ -51,15 +53,33 @@ class VersionConflictError extends HttpError {
   }
 }
 
+/**
+ * M4/S3 shadow 对拍缝：仅 GX_AUTHZ_ENGINE 生效为 shadow 时跑引擎同上下文对拍；
+ * off 时空操作零新增 SQL。旧决策永远为准，对拍只分类计数/脱敏日志、不改返回、不抛错。
+ * 本函数只裁决 kb 成员资格（kb 节点 r）；处理器内 owner/editor 的更高限制不在此重复对拍。
+ */
+async function shadowKb(userId: string, kbId: string, oldAllowed: boolean): Promise<void> {
+  if (!authzShadowActive()) return;
+  await runShadowCheck("requireKb", userId, { resourceType: "kb", resourceId: kbId }, "r", oldAllowed);
+}
+
 async function requireKb(userId: string, kbId: string): Promise<{ role: Role }> {
   const kb = await prisma.knowledgeBase.findFirst({ where: { id: kbId, deletedAt: null } });
   if (!kb) throw new HttpError(404, "知识库不存在");
   const role = await kbRoleOf(userId, kbId);
-  if (!role) throw new HttpError(403, "无权访问该知识库");
+  if (!role) {
+    await shadowKb(userId, kbId, false);
+    throw new HttpError(403, "无权访问该知识库");
+  }
+  await shadowKb(userId, kbId, true);
   return { role };
 }
 
-/** 内容访问：知识库成员 或 单文档 ACL 授权 */
+/**
+ * 内容访问：知识库成员 或 单文档 ACL 授权。
+ * shadow：读映射内容节点（resourceType=doc.kind，覆盖 doc/canvas）r；写映射 u；
+ * 旧"取较高"结果为准，引擎对拍只观测。404（资源软删/缺失）不属授权漂移，不对拍。
+ */
 async function requireDocAccess(userId: string, docId: string, needEdit = false) {
   const doc = await prisma.kbDoc.findFirst({ where: { id: docId, deletedAt: null } });
   if (!doc) throw new HttpError(404, "文档不存在或已删除");
@@ -67,9 +87,22 @@ async function requireDocAccess(userId: string, docId: string, needEdit = false)
   const aclRole = await docAclRoleOf(userId, docId);
   const effective =
     kbRole && aclRole ? (RANK[kbRole]! >= RANK[aclRole]! ? kbRole : aclRole) : (kbRole ?? aclRole);
-  if (!effective) throw new HttpError(403, "无权访问该内容");
+  const action = needEdit ? ("u" as const) : ("r" as const);
+  const shadowContent = async (oldAllowed: boolean): Promise<void> => {
+    if (!authzShadowActive()) return;
+    const kind = doc.kind === "canvas" ? "canvas" : "doc";
+    await runShadowCheck("requireDocAccess", userId, { resourceType: kind, resourceId: docId }, action, oldAllowed);
+  };
+  if (!effective) {
+    await shadowContent(false);
+    throw new HttpError(403, "无权访问该内容");
+  }
   const canEdit = RANK[effective]! >= RANK["editor"]!;
-  if (needEdit && !canEdit) throw new HttpError(403, "当前角色无权编辑");
+  if (needEdit && !canEdit) {
+    await shadowContent(false);
+    throw new HttpError(403, "当前角色无权编辑");
+  }
+  await shadowContent(needEdit ? canEdit : true);
   return { doc, role: effective as Role, canEdit };
 }
 
