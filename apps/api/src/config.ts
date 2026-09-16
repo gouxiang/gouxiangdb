@@ -21,6 +21,12 @@ export {
 } from "./configAuthz.js";
 import { resolveAuthzEngineMode, type AuthzEngineMode } from "./configAuthz.js";
 
+// M5 统一检索总门（GX_M5_SEARCH 三态）真源在 configM5Search.ts；re-export 供
+// import { ... } from "./config.js" 调用方使用，与 configAuthz 同款无感接线。
+export type { M5SearchFlag } from "./configM5Search.js";
+export { parseM5SearchFlag } from "./configM5Search.js";
+import { parseM5SearchFlag, type M5SearchFlag } from "./configM5Search.js";
+
 // 历史上出现在源码/示例/.env 里的开发默认密钥，生产一律拒绝（即使 .env 被误打进发布包）。
 const BLOCKED_JWT_SECRETS = new Set([
   "dev-secret-change-me-in-production",
@@ -192,6 +198,12 @@ export interface AppConfig {
    */
   enterpriseNav: boolean;
   /**
+   * M5 统一检索总门（GX_M5_SEARCH），启动期解析的三态（parseM5SearchFlag，未知/大写回 off）：
+   * off（默认）= 不挂 /api/v1/search、不起 indexer worker、不建 search.db 连接，旧 /api/search 不变；
+   * shadow = 挂载路由，新链路对拍旧 /api/search（S7 起）；on = 新链路对外（S7 起）。
+   */
+  m5Search: M5SearchFlag;
+  /**
    * 鉴权状态缓存 TTL 毫秒（GX_AUTH_STATE_TTL_MS，默认 0=完全旁路零缓存，每请求一次 PK 点查，
    * 严格满足"停用后下一次请求即 401"）。>0 时启用进程内有界缓存，停用时同进程主动 invalidate。
    */
@@ -252,6 +264,8 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     enterpriseOrg: env.GX_ENTERPRISE_ORG !== "off",
     // M3：统一导航读默认 on（同纪律）；显式 off 摘除 tree/menu 子路由。
     enterpriseNav: env.GX_ENTERPRISE_NAV !== "off",
+    // M5：统一检索默认 off（仅精确小写 shadow/on 生效，见 parseM5SearchFlag）；off 不挂 v1 search。
+    m5Search: parseM5SearchFlag(env.GX_M5_SEARCH),
     authStateTtlMs: parseNonNegInt(env.GX_AUTH_STATE_TTL_MS, 0),
     socketPath: env.GX_SOCKET_PATH?.trim() ?? "",
     basePath: normalizeBasePath(env.GX_BASE_PATH),

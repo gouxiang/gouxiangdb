@@ -1,10 +1,12 @@
-// /api/v1 装配骨架（M2/S2 建，M3/S5 改双 flag 条件挂载）。
+// /api/v1 装配骨架（M2/S2 建，M3/S5 改双 flag 条件挂载，M5/S6 加 search 第三 flag）。
 //
 // app.ts 在 config.enterpriseOrg || config.enterpriseNav 时 mount.route("/api/v1", v1)；
 // 子路由在本实例内按各自 flag 条件挂载，未启用时落入 v1 自身 404：
 //   - enterpriseOrg：/org/*、/meta、公开邀请（app.ts 侧）；
-//   - enterpriseNav：/workspaces/current/tree|menu、/nav/groups、/nodes/:id/move。
-// 两个 flag 正交：仅一个 on 时只暴露对应子面。
+//   - enterpriseNav：/workspaces/current/tree|menu、/nav/groups、/nodes/:id/move；
+//   - m5Search(on/shadow)：/search（S6 为 501 骨架，S7 接真实 query；off 不挂，落 404）。
+// 前两个 flag 正交：仅一个 on 时只暴露对应子面。m5Search 只决定子路由是否注册；
+// 企业双 flag 全 off 时 app.ts 不挂载整个 /api/v1，此时 search 亦不可达（与未升级一致）。
 //
 // 响应风格沿用现网：成功返回资源本体，错误经全局 errorResponse 输出 {error,code}
 // （不引入 {code,data,message} 信封，见计划 §4.4/总监裁决 2/5）。
@@ -18,6 +20,7 @@ import { navRoutes, nodeRoutes } from "./nodes.js";
 import { policyRoutes } from "./policies.js";
 import { inheritanceRoutes } from "./inheritance.js";
 import { authzRoutes } from "./scope.js";
+import { searchRoutes } from "./search.js";
 
 export const v1 = new Hono();
 
@@ -54,4 +57,10 @@ if (config.enterpriseNav) {
   v1.route("/nodes", policyRoutes);
   // M4/S7 中断继承影响/PATCH 与面包屑（/:id/inheritance/*、/:id/breadcrumb），同前缀分路由器。
   v1.route("/nodes", inheritanceRoutes);
+}
+
+if (config.m5Search !== "off") {
+  // M5/S6 统一检索：仅 on/shadow 挂载；off 时 /api/v1/search 落 v1 自身 404。
+  // S6 骨架内一律 501（S7 接 domain/search/query.ts 与 shadow 对拍），不建库不出网。
+  v1.route("/search", searchRoutes);
 }
