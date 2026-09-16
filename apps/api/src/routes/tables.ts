@@ -3,8 +3,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import type { Prisma } from "@prisma/client";
-import { prisma, withWriteTx, withWriteBatch } from "../db.js";
+import { prisma, withWriteTx } from "../db.js";
 import {
   requireCanView,
   requireCanManageSchema,
@@ -17,7 +16,8 @@ import { loadTableFields } from "../domain/recordService.js";
 import { exportTableCsv } from "../domain/csvExport.js";
 import { resolveTableMask } from "../domain/authz/maskGate.js";
 import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
-import { deleteTableStatement, rebuildTableTx } from "../domain/fieldIndex/sync.js";
+import { deleteTableTx, rebuildTableTx } from "../domain/fieldIndex/sync.js";
+import { enqueueChangeEventsTx } from "../domain/search/outbox.js";
 import {
   syncNavFromEntitiesTx,
   softDeleteSubtreeTx,
@@ -201,10 +201,20 @@ tables.delete("/:tableId", async (c) => {
   // table 及视图节点整棵软删（视图实体置 order=-1 隐藏，views 表无 deletedAt 列）。
   await withWriteTx("table.softDelete", async (tx) => {
     await tx.table.update({ where: { id: tableId }, data: { deletedAt: now } });
+    // M5/S1：级联软删的活记录逐条登记 delete（先取 id，再更新）。
+    const liveRecords = await tx.record.findMany({
+      where: { tableId, deletedAt: null }, select: { id: true },
+    });
     await tx.record.updateMany({ where: { tableId }, data: { deletedAt: now } });
     await tx.field.updateMany({ where: { tableId }, data: { deletedAt: now } });
     await tx.view.updateMany({ where: { tableId }, data: { order: -1 } });
     await softDeleteSubtreeTx(tx, nodeId("table", tableId));
+    if (liveRecords.length > 0) {
+      const softVersion = BigInt(now.getTime());
+      await enqueueChangeEventsTx(tx, liveRecords.map((r) => ({
+        entityType: "record" as const, entityId: r.id, op: "delete" as const, version: softVersion,
+      })));
+    }
   });
   invalidateOrdinalCache(tableId);
   return c.json({ ok: true });
@@ -322,6 +332,11 @@ tables.post("/:tableId/duplicate", async (c) => {
         /* 忽略解析失败 */
       }
     }
+    // M5/S1：复制产生的新记录逐条登记 upsert（id 为新表记录 id）。
+    const dupVersion = BigInt(Date.now());
+    await enqueueChangeEventsTx(tx, Array.from(recMap.values()).map((newId) => ({
+      entityType: "record" as const, entityId: newId, op: "upsert" as const, version: dupVersion,
+    })));
   }
 
   const config = {
@@ -406,27 +421,31 @@ tables.post("/:tableId/clear", async (c) => {
     select: { id: true },
   });
   const ids = liveRecIds.map((r) => r.id);
-  const stmts: Prisma.PrismaPromise<unknown>[] = [];
-  if (ids.length > 0) {
-    // 软删记录，其关联数据同样只打软删标记（不清行），保证从回收站恢复后关联不丢
-    stmts.push(
-      prisma.linkRow.updateMany({
+  const clearNow = new Date();
+  // M5/S1：原 $transaction([...]) 数组批收紧为交互事务，承载 sidecar 清理与 outbox 批量登记。
+  await withWriteTx("table.clear", async (tx) => {
+    if (ids.length > 0) {
+      // 软删记录，其关联数据同样只打软删标记（不清行），保证从回收站恢复后关联不丢
+      await tx.linkRow.updateMany({
         where: { OR: [{ parentRowId: { in: ids } }, { childRowId: { in: ids } }], deletedAt: null },
-        data: { deletedAt: new Date() },
-      }),
-    );
-  }
-  stmts.push(
-    prisma.record.updateMany({
+        data: { deletedAt: clearNow },
+      });
+    }
+    await tx.record.updateMany({
       where: { tableId, deletedAt: null },
-      data: { deletedAt: new Date() },
-    }),
-  );
-  // M1/S4：表清空同批撤掉该表全部 sidecar 行（记录可从回收站恢复，恢复时不批量重建——
-  // 与「整表恢复」路径不同；单条记录恢复会各自重建）。
-  const clearSidecar = deleteTableStatement(tableId);
-  if (clearSidecar) stmts.push(clearSidecar);
-  await withWriteBatch("table.clear", stmts);
+      data: { deletedAt: clearNow },
+    });
+    // M1/S4：表清空同事务撤掉该表全部 sidecar 行（记录可从回收站恢复，恢复时不批量重建——
+    // 与「整表恢复」路径不同；单条记录恢复会各自重建）。
+    await deleteTableTx(tx, tableId);
+    // M5/S1：被清空记录逐条登记 delete。
+    if (ids.length > 0) {
+      const clearVersion = BigInt(clearNow.getTime());
+      await enqueueChangeEventsTx(tx, ids.map((rid) => ({
+        entityType: "record" as const, entityId: rid, op: "delete" as const, version: clearVersion,
+      })));
+    }
+  });
   invalidateOrdinalCache(tableId);
   return c.json({ ok: true });
 });

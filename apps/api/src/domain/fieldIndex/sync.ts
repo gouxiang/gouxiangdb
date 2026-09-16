@@ -110,6 +110,18 @@ export async function deleteRecordsTx(tx: unknown, recordIds: string[]): Promise
 }
 
 /**
+ * 交互事务形态：按 tableId 撤掉该表全部 sidecar 行（table.clear 用）。
+ * 与 deleteRecordsTx 同纪律——只在调用方事务内执行、不吞错。
+ */
+export async function deleteTableTx(tx: unknown, tableId: string): Promise<void> {
+  if (!resolveSidecarEnabled() || !supportsRaw(tx)) return;
+  await (tx as SidecarTx).$executeRawUnsafe(
+    `DELETE FROM record_field_index WHERE "tableId" = ?`,
+    tableId,
+  );
+}
+
+/**
  * 数组批量事务形态（prisma.$transaction([...])）的 sidecar 删除语句。
  * Prisma 的 $executeRawUnsafe 返回惰性 PrismaPromise，放入语句数组即随该批事务提交。
  * 与 records.ts 的 record.softDelete/bulkSoftDelete 批语句原子提交。

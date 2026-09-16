@@ -9,9 +9,10 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { prisma } from "../db.js";
+import { prisma, withWriteTx } from "../db.js";
 import { HttpError, errorResponse } from "../guards.js";
-import { buildSearchText, maybeAutoSnapshot } from "../domain/kb.js";
+import { buildSearchText, maybeAutoSnapshotTx } from "../domain/kb.js";
+import { enqueueChangeEventTx } from "../domain/search/outbox.js";
 
 export const pub = new Hono();
 
@@ -268,11 +269,19 @@ pub.put("/s/:token/doc/:docId/content", async (c) => {
     if (!parsed.success) return c.json({ error: "内容不合法" }, 400);
     const content = parsed.data.content;
     const searchText = buildSearchText(ctx.doc.kind, content);
-    await prisma.kbDoc.update({
-      where: { id: ctx.doc.id },
-      data: { content, searchText, updatedBy: ANON },
+    // M5/S1：ANON 公开编辑也发 outbox（实体存在即索引，匿名不影响归属）。原裸 update +
+    // 非事务快照收紧进单事务：正文、快照、outbox 共生死，enqueue 失败则编辑整体回滚。
+    await withWriteTx("public.doc.content.save", async (tx) => {
+      await tx.kbDoc.update({
+        where: { id: ctx.doc.id },
+        data: { content, searchText, updatedBy: ANON },
+      });
+      await maybeAutoSnapshotTx(tx, ctx.doc.id, ANON);
+      await enqueueChangeEventTx(tx, {
+        entityType: ctx.doc.kind === "canvas" ? "canvas" : "doc",
+        entityId: ctx.doc.id, op: "upsert", version: BigInt(Date.now()),
+      });
     });
-    await maybeAutoSnapshot(ctx.doc.id, ANON);
     return c.json({ ok: true, savedAt: new Date().toISOString() });
   } catch (e) {
     return errorResponse(c, e);

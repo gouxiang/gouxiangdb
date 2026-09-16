@@ -19,6 +19,7 @@ import {
   softDeleteSubtreeTx,
 } from "../../domain/nav/sync.js";
 import { nodeId } from "../../domain/nav/backfill.js";
+import { enqueueChangeEventsTx } from "../../domain/search/outbox.js";
 import { requireKb, shadowKbAction } from "./shared.js";
 import { membersRoutes } from "./members.js";
 import { docsRoutes } from "./docs.js";
@@ -148,8 +149,19 @@ kb.delete("/:kbId", async (c) => {
     // kb 无恢复端点（裁决 6），子树节点随实体一并软删、保留行；如需找回由管理员 reconcile 兜底。
     await withWriteTx("kb.softDelete", async (tx) => {
       await tx.knowledgeBase.update({ where: { id: kbId }, data: { deletedAt: now } });
+      // M5/S1：级联软删前收集活内容（doc/canvas），逐条按实体类型登记 delete。
+      const liveDocs = await tx.kbDoc.findMany({
+        where: { kbId, deletedAt: null }, select: { id: true, kind: true },
+      });
       await tx.kbDoc.updateMany({ where: { kbId }, data: { deletedAt: now, deletedBy: userId } });
       await softDeleteSubtreeTx(tx, nodeId("kb", kbId));
+      if (liveDocs.length > 0) {
+        const kbDeleteVersion = BigInt(now.getTime());
+        await enqueueChangeEventsTx(tx, liveDocs.map((d) => ({
+          entityType: d.kind === "canvas" ? "canvas" as const : "doc" as const,
+          entityId: d.id, op: "delete" as const, version: kbDeleteVersion,
+        })));
+      }
     });
     return c.json({ ok: true });
   } catch (e) {

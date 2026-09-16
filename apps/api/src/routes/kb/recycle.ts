@@ -7,6 +7,7 @@ import { prisma, withWriteTx } from "../../db.js";
 import { requireUserId, errorResponse, HttpError } from "../../guards.js";
 import { syncNavFromEntitiesTx, purgeDocNodeTx } from "../../domain/nav/sync.js";
 import { removeDocAclProjectionsTx } from "../../domain/authz/projection.js";
+import { enqueueChangeEventTx } from "../../domain/search/outbox.js";
 import { kbRoleOf, requireKb } from "./shared.js";
 
 export const recycleRoutes = new Hono();
@@ -29,6 +30,12 @@ recycleRoutes.delete("/docs/:docId/permanent", async (c) => {
       // M4/S5 同事务清该 doc/canvas 节点全部 legacy:acl 投影（多条 ACL 共指一节点）。
       await removeDocAclProjectionsTx(tx, { docId, kind: doc.kind });
       await tx.kbDoc.delete({ where: { id: docId } });
+      // M5/S1：物理删登记 delete 墓碑（事件无 FK，实体消失后仍可消费清派生检索行；
+      // 软删时若已有未消费 delete 则被同 op 吸收，已 done 则补一条）。
+      await enqueueChangeEventTx(tx, {
+        entityType: doc.kind === "canvas" ? "canvas" : "doc",
+        entityId: docId, op: "delete", version: BigInt(Date.now()),
+      });
       await syncNavFromEntitiesTx(tx);
       await purgeDocNodeTx(tx, docId);
     });

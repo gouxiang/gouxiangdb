@@ -3,9 +3,8 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import type { Prisma } from "@prisma/client";
 import { SEARCH_PREVIEW_LIMIT, boundedPreviewMarker } from "./searchBounds.js";
-import { prisma, withWriteTx, withWriteBatch, runWrite, type DbTx } from "../db.js";
+import { prisma, withWriteTx, runWrite, type DbTx } from "../db.js";
 import {
   requireCanView,
   requireCanEditData,
@@ -28,7 +27,8 @@ import { parseCSV, inferFieldType, coerceCellValue } from "../domain/csv.js";
 import { createField } from "../domain/fieldService.js";
 import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
 import { applyCreateDefaults, applyEditDefaults, applyReverseDefaultsForChild, applyLinkChangeDefaults } from "../domain/defaults.js";
-import { syncRecordsTx, deleteRecordsStatement, restoreRecordsTx } from "../domain/fieldIndex/sync.js";
+import { syncRecordsTx, deleteRecordsTx, restoreRecordsTx } from "../domain/fieldIndex/sync.js";
+import { enqueueChangeEventTx, enqueueChangeEventsTx } from "../domain/search/outbox.js";
 import { sidecarUniqueMatch, findUniqueConflictTx } from "../domain/queryPlan/uniqueSidecar.js";
 import { resolveSidecarReadMode, resolveSidecarWriteEnabled, keysetPagingActive } from "../domain/queryPlan/flags.js";
 import { InvalidCursorError, OffsetWindowError } from "../domain/queryPlan/cursor.js";
@@ -461,6 +461,10 @@ records.post("/", async (c) => {
     if (Object.keys(payloadFields).length > 0) {
       await applyFieldWrites(tableId, created.id, payloadFields, fields, tx);
     }
+    // M5/S1：同事务登记检索 outbox（实体建，upsert）。失败随本事务整体回滚。
+    await enqueueChangeEventTx(tx, {
+      entityType: "record", entityId: created.id, op: "upsert", version: BigInt(Date.now()),
+    });
     return created;
   });
 
@@ -679,6 +683,10 @@ records.patch("/:recordId", async (c) => {
     await assertUnique(rec.tableId, fields, parsed.data.fields, recordId, undefined, tx);
     await applyFieldWrites(rec.tableId, recordId, parsed.data.fields, fields, tx);
     await tx.record.update({ where: { id: recordId }, data: { updatedBy: userId } });
+    // M5/S1：记录改，同事务登记 upsert（与物理字段写共生死）。
+    await enqueueChangeEventTx(tx, {
+      entityType: "record", entityId: recordId, op: "upsert", version: BigInt(Date.now()),
+    });
   });
 
   // 编辑期默认值联动：被触发的 lookup/formula 默认字段（及子表格重播种）由后端权威重算
@@ -733,18 +741,21 @@ records.delete("/:recordId", async (c) => {
   const rec = await prisma.record.findUnique({ where: { id: recordId } });
   if (!rec || rec.deletedAt) throw new HttpError(404, "记录不存在");
 
-  // M1/S4：软删同批撤掉该记录 sidecar 行（派生索引不保留软删记录，恢复时重建）。
-  const softDeleteStmts: Prisma.PrismaPromise<unknown>[] = [
-    prisma.record.update({ where: { id: recordId }, data: { deletedAt: new Date() } }),
+  // M1/S4：软删同事务撤掉该记录 sidecar 行（派生索引不保留软删记录，恢复时重建）。
+  // M3/S1：原 $transaction([...]) 数组批收紧为交互事务，以承载 outbox 同事务登记。
+  await withWriteTx("record.softDelete", async (tx) => {
+    await tx.record.update({ where: { id: recordId }, data: { deletedAt: new Date() } });
     // 关联数据只打软删标记（不清行）：记录从回收站恢复时，关联关系随之恢复，不会丢数据
-    prisma.linkRow.updateMany({
+    await tx.linkRow.updateMany({
       where: { OR: [{ parentRowId: recordId }, { childRowId: recordId }], deletedAt: null },
       data: { deletedAt: new Date() },
-    }),
-  ];
-  const sidecarDel = deleteRecordsStatement([recordId]);
-  if (sidecarDel) softDeleteStmts.push(sidecarDel);
-  await withWriteBatch("record.softDelete", softDeleteStmts);
+    });
+    await deleteRecordsTx(tx, [recordId]);
+    // M5/S1：软删登记 delete（worker 清派生检索行）；与实体写共生死。
+    await enqueueChangeEventTx(tx, {
+      entityType: "record", entityId: recordId, op: "delete", version: BigInt(Date.now()),
+    });
+  });
   invalidateOrdinalCache(rec.tableId);
 
   // 反向联动：被删记录是某父记录的子表行 → 重算父表点引用 formula 默认值。
@@ -787,22 +798,25 @@ records.post("/bulk-delete", async (c) => {
   if (scopedIds.length === 0) return c.json({ ok: true, count: 0 });
 
   // 记录软删与关联软删必须原子：否则可能出现「记录已删但关联仍生效」的脏数据
-  // M1/S4：同批删除这些记录的 sidecar 行。
-  const bulkDeleteStmts: Prisma.PrismaPromise<unknown>[] = [
-    prisma.record.updateMany({
+  // M1/S4：同事务删除这些记录的 sidecar 行。
+  // M3/S1：原 $transaction([...]) 数组批收紧为交互事务，以承载 outbox 批量登记。
+  await withWriteTx("record.bulkSoftDelete", async (tx) => {
+    await tx.record.updateMany({
       where: { id: { in: scopedIds } },
       data: { deletedAt: now },
-    }),
+    });
     // linkRow 同样只打软删标记，严格限定在本表记录集合上：
     // 涉及这些记录的 linkRow 必属于本表关联字段，不会误删其它 Base 记录之间的关联关系。
-    prisma.linkRow.updateMany({
+    await tx.linkRow.updateMany({
       where: { OR: [{ parentRowId: { in: scopedIds } }, { childRowId: { in: scopedIds } }], deletedAt: null },
       data: { deletedAt: now },
-    }),
-  ];
-  const bulkSidecarDel = deleteRecordsStatement(scopedIds);
-  if (bulkSidecarDel) bulkDeleteStmts.push(bulkSidecarDel);
-  await withWriteBatch("record.bulkSoftDelete", bulkDeleteStmts);
+    });
+    await deleteRecordsTx(tx, scopedIds);
+    // M5/S1：批量软删逐条登记 delete（合并去重仍按实体各自生效）。
+    await enqueueChangeEventsTx(tx, scopedIds.map((id) => ({
+      entityType: "record" as const, entityId: id, op: "delete" as const, version: BigInt(now.getTime()),
+    })));
+  });
   invalidateOrdinalCache(first.tableId);
 
   // 反向联动：批量删除的子记录 → 父表点引用 formula 默认值重算（linkRow 已软删，includeDeleted）
@@ -858,6 +872,11 @@ records.post("/bulk-update", async (c) => {
     }
     // M1/S4：整批 fields 在同一事务内统一重建一次 sidecar（避免逐行重复删插）。
     await syncRecordsTx(tx, first.tableId, scopedIds);
+    // M5/S1：批量改，逐条登记 upsert（version 取提交时刻）。
+    const bulkEditVersion = BigInt(Date.now());
+    await enqueueChangeEventsTx(tx, scopedIds.map((id) => ({
+      entityType: "record" as const, entityId: id, op: "upsert" as const, version: bulkEditVersion,
+    })));
   });
 
   // 默认值联动属于增强行为，放在事务外逐个尽力执行，失败不影响批量写入结果
@@ -969,6 +988,10 @@ records.post("/csv-import", async (c) => {
           data: { tableId, fields: "{}", createdBy: userId, updatedBy: userId },
         });
         await applyFieldWrites(tableId, rec.id, payload, allFields, tx);
+        // M5/S1：导入新建记录同事务登记 upsert。
+        await enqueueChangeEventTx(tx, {
+          entityType: "record", entityId: rec.id, op: "upsert", version: BigInt(Date.now()),
+        });
       });
       createdRecords += 1;
     } catch (e) {
@@ -1089,10 +1112,17 @@ records.post("/trash/:id/restore", async (c) => {
     const baseId = await baseIdOfRecord(id);
     await requireCanEditData(c, baseId);
     const rec = await prisma.record.findUnique({ where: { id }, select: { tableId: true } });
-    await prisma.record.update({ where: { id }, data: { deletedAt: null } });
-    await restoreLinkRows(prisma, [id]);
-    // M1/S4：记录恢复后按最新 fields 重建 sidecar（只对仍活记录，prisma 自成语句）。
-    if (rec) await restoreRecordsTx(prisma, rec.tableId, [id]);
+    // M5/S1：原 record.update + linkRow + sidecar 三段裸写收紧进单事务，承载 outbox upsert。
+    await withWriteTx("record.restore", async (tx) => {
+      await tx.record.update({ where: { id }, data: { deletedAt: null } });
+      await restoreLinkRows(tx, [id]);
+      // M1/S4：记录恢复后按最新 fields 重建 sidecar（只对仍活记录）。
+      if (rec) await restoreRecordsTx(tx, rec.tableId, [id]);
+      // M5/S1：恢复登记 upsert（worker 重建派生检索行）。
+      await enqueueChangeEventTx(tx, {
+        entityType: "record", entityId: id, op: "upsert", version: BigInt(Date.now()),
+      });
+    });
   } else if (parsed.data.kind === "field") {
     const f = await prisma.field.findUnique({
       where: { id },
@@ -1137,9 +1167,15 @@ records.post("/trash/:id/restore", async (c) => {
       });
       await tx.record.updateMany({ where: { tableId: id, deletedAt: { not: null } }, data: { deletedAt: null } });
       await restoreLinkRows(tx, restoredRows.map((r) => r.id));
+      const restoredIds = restoredRows.map((r) => r.id);
       // M1/S4：整表恢复后批量重建全部恢复记录的 sidecar（prisma 自成语句，内部按批删插）。
       if (restoredRows.length > 0) {
-        await restoreRecordsTx(tx, id, restoredRows.map((r) => r.id));
+        await restoreRecordsTx(tx, id, restoredIds);
+        // M5/S1：整表恢复的记录逐条登记 upsert。
+        const restoreVersion = BigInt(Date.now());
+        await enqueueChangeEventsTx(tx, restoredIds.map((rid) => ({
+          entityType: "record" as const, entityId: rid, op: "upsert" as const, version: restoreVersion,
+        })));
       }
       // 删表时视图被置 order=-1 隐藏，恢复时按原序无关地重置为可见顺序
       const hiddenViews = await tx.view.findMany({ where: { tableId: id, order: -1 }, select: { id: true } });
@@ -1159,11 +1195,18 @@ records.delete("/trash/:id", async (c) => {
   if (kind === "record") {
     const baseId = await baseIdOfRecord(id);
     await requireCanManageBase(c, baseId);
-    await prisma.linkRow.deleteMany({
-      where: { OR: [{ parentRowId: id }, { childRowId: id }] },
+    // M5/S1：三段裸写收紧进单事务，并在实体物理删后登记 delete 墓碑（change_events 无 FK，
+    // 实体行消失后事件仍可被 worker 消费以清派生检索行）。
+    await withWriteTx("record.purge", async (tx) => {
+      await tx.linkRow.deleteMany({
+        where: { OR: [{ parentRowId: id }, { childRowId: id }] },
+      });
+      await tx.comment.deleteMany({ where: { recordId: id } });
+      await tx.record.delete({ where: { id } });
+      await enqueueChangeEventTx(tx, {
+        entityType: "record", entityId: id, op: "delete", version: BigInt(Date.now()),
+      });
     });
-    await prisma.comment.deleteMany({ where: { recordId: id } });
-    await prisma.record.delete({ where: { id } });
   } else if (kind === "field") {
     const f = await prisma.field.findUnique({
       where: { id },
@@ -1189,6 +1232,14 @@ records.delete("/trash/:id", async (c) => {
         await tx.comment.deleteMany({ where: { recordId: { in: recIds.map((r) => r.id) } } });
       }
       await tx.table.delete({ where: { id } });
+      // M5/S1：表物理删级联——按 tableId 收集的记录逐条登记 delete（实体随 cascade 消失，
+      // 事件无 FK 仍可消费清派生行）。在表删之后、同事务内登记。
+      if (recIds.length > 0) {
+        const purgeVersion = BigInt(Date.now());
+        await enqueueChangeEventsTx(tx, recIds.map((r) => ({
+          entityType: "record" as const, entityId: r.id, op: "delete" as const, version: purgeVersion,
+        })));
+      }
     });
   }
   return c.json({ ok: true });

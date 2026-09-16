@@ -21,6 +21,11 @@ import {
   kbRoleOf,
   shadowKbAction,
 } from "./shared.js";
+import { enqueueChangeEventTx } from "../../domain/search/outbox.js";
+import type { ChangeEntityType } from "../../domain/search/outbox.js";
+
+/** kb_docs.kind 到检索实体类型（doc/canvas 分别建索引）。 */
+const changeEntityOfKind = (kind: string): ChangeEntityType => (kind === "canvas" ? "canvas" : "doc");
 
 export const docsRoutes = new Hono();
 
@@ -100,6 +105,10 @@ docsRoutes.post("/:kbId/docs", async (c) => {
       await tx.kbDocVersion.create({
         data: { docId: d.id, version: 1, label: "创建", title: d.title, content: d.content, createdBy: userId },
       });
+      // M5/S1：文档/画布建，同事务登记 upsert（version 取新内容版本 0，worker 抽当前内容）。
+      await enqueueChangeEventTx(tx, {
+        entityType: changeEntityOfKind(d.kind), entityId: d.id, op: "upsert", version: BigInt(d.contentVersion),
+      });
       await syncNavFromEntitiesTx(tx);
       return d;
     });
@@ -143,6 +152,10 @@ docsRoutes.patch("/docs/:docId", async (c) => {
         await tx.kbDoc.update({
           where: { id: doc.id },
           data: { title: parsed.data.title!.trim(), updatedBy: userId },
+        });
+        // M5/S1：改名改标题文本（检索内容），发 upsert；version 用提交时刻（doc 无版本递增）。
+        await enqueueChangeEventTx(tx, {
+          entityType: changeEntityOfKind(doc.kind), entityId: doc.id, op: "upsert", version: BigInt(Date.now()),
         });
         await syncNavFromEntitiesTx(tx);
       });
@@ -196,7 +209,15 @@ docsRoutes.put("/docs/:docId/content", async (c) => {
         await tx.kbDoc.update({ where: { id: doc.id }, data });
       }
       const snapshotted = await maybeAutoSnapshotTx(tx, doc.id, userId);
-      const next = await tx.kbDoc.findUnique({ where: { id: doc.id }, select: { contentVersion: true } });
+      const next = await tx.kbDoc.findUnique({ where: { id: doc.id }, select: { contentVersion: true, kind: true } });
+      // M5/S1：正文（及附带 title）保存成功，两乐观锁分支汇流于此，发 upsert；
+      // version 用递增后的 contentVersion（worker 据此对齐内容版本）。
+      await enqueueChangeEventTx(tx, {
+        entityType: changeEntityOfKind(next?.kind ?? doc.kind),
+        entityId: doc.id,
+        op: "upsert",
+        version: BigInt(next?.contentVersion ?? doc.contentVersion + 1),
+      });
       await syncNavFromEntitiesTx(tx);
       return { snapshotted, contentVersion: next?.contentVersion ?? null };
     });
@@ -268,6 +289,10 @@ docsRoutes.delete("/docs/:docId", async (c) => {
     await withWriteTx("doc.softDelete", async (tx) => {
       await tx.kbDoc.update({ where: { id: docId }, data: { deletedAt: new Date(), deletedBy: userId } });
       await softDeleteSingleNodeTx(tx, kind, docId);
+      // M5/S1：软删登记 delete（worker 清派生检索行）。
+      await enqueueChangeEventTx(tx, {
+        entityType: changeEntityOfKind(doc.kind), entityId: docId, op: "delete", version: BigInt(Date.now()),
+      });
       await syncNavFromEntitiesTx(tx);
     });
     return c.json({ ok: true });
@@ -289,6 +314,10 @@ docsRoutes.post("/docs/:docId/restore", async (c) => {
     // M3/S3 #13d-恢复：复活实体 + 复活软删节点（期望集对齐含原地复活、重挂父、重算 ord/path）。
     await withWriteTx("doc.restore", async (tx) => {
       await tx.kbDoc.update({ where: { id: docId }, data: { deletedAt: null, deletedBy: null } });
+      // M5/S1：恢复登记 upsert（恢复不改 contentVersion，worker 按现存内容重建索引）。
+      await enqueueChangeEventTx(tx, {
+        entityType: changeEntityOfKind(doc.kind), entityId: docId, op: "upsert", version: BigInt(doc.contentVersion),
+      });
       await syncNavFromEntitiesTx(tx);
     });
     return c.json({ ok: true });
