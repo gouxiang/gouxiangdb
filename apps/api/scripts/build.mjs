@@ -29,6 +29,8 @@ const outFile = path.join(distDir, "index.js");
 
 // 外置：运行时从发布包 node_modules 解析。
 // better-sqlite3 含 .node 原生二进制，严禁打包；@prisma/client 自带 query engine。
+// sqlite-vec 的 vec0 是运行时 loadExtension 的独立动态库（不进 bundle），发布物按
+// scripts/native/copy-vec-native.mjs 显式拷到 native/<triplet>/，故一并外置（M5/S2 §12）。
 const external = [
   "@hono/node-server",
   "@prisma/client",
@@ -37,6 +39,7 @@ const external = [
   "zod",
   "bcryptjs",
   "better-sqlite3",
+  "sqlite-vec",
 ];
 
 fs.rmSync(distDir, { recursive: true, force: true });

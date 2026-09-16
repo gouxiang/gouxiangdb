@@ -114,6 +114,12 @@ copyDir(webDist, publicDir);
 const runtimeDeps = { ...(apiPkg.dependencies ?? {}) };
 for (const k of Object.keys(runtimeDeps)) if (k.startsWith("@gx/")) delete runtimeDeps[k];
 runtimeDeps.prisma = apiPkg.devDependencies?.prisma ?? "^5.22.0";
+// M5/S2：sqlite-vec 作为可选依赖带进 server/，安装时按目标 linux 架构拉 vec0 子包；
+// 不支持平台/子包缺失不阻断安装，运行时 SearchStore 降级 fts-only（H6/H8）。
+const runtimeOptional = {};
+if (apiPkg.optionalDependencies?.["sqlite-vec"]) {
+  runtimeOptional["sqlite-vec"] = apiPkg.optionalDependencies["sqlite-vec"];
+}
 fs.writeFileSync(
   path.join(serverDir, "package.json"),
   `${JSON.stringify(
@@ -124,6 +130,7 @@ fs.writeFileSync(
       type: "module",
       packageManager: rootPkg.packageManager ?? "pnpm@9.0.0",
       dependencies: runtimeDeps,
+      ...(Object.keys(runtimeOptional).length ? { optionalDependencies: runtimeOptional } : {}),
     },
     null,
     2,
@@ -139,6 +146,23 @@ run("node", ["node_modules/prisma/build/index.js", "generate", "--schema=prisma/
   env: { ...process.env, DATABASE_URL: "file:./_fpk_generate_placeholder.db" },
 });
 rimraf(path.join(serverDir, "_fpk_generate_placeholder.db"));
+
+// M5/S2：vec0 白名单拷贝到 server/native/<linux-triplet>/（§12，fpk 基准 server/native/...）。
+// 已在目标 linux 架构环境，脚本取 process 平台子包；平台无子包时仅 SKIP（纯 FTS），不 fail。
+run("node", [
+  path.join(srcApi, "scripts", "native", "copy-vec-native.mjs"),
+  "--dest", serverDir, "--app-dir", serverDir,
+], { cwd: repoRoot });
+// 提示性自检：native/<triplet>/vec0.so 存在即记录；缺失仅 warn（降级 fts-only 合法），不 fail 打包。
+{
+  const nativeBase = path.join(serverDir, "native");
+  const hasVec = fs.existsSync(nativeBase)
+    && fs.readdirSync(nativeBase, { withFileTypes: true }).some(
+      (d) => d.isDirectory() && fs.existsSync(path.join(nativeBase, d.name, "vec0.so")),
+    );
+  if (hasVec) log("找到 server/native/<triplet>/vec0.so");
+  else console.warn("[fnpack-build] 未生成 server/native/<triplet>/vec0.so，运行时降级 fts-only");
+}
 
 // 原生模块架构自检：至少应存在 better-sqlite3 的 .node 与 prisma libquery engine。
 function assertExists(globHint, predicate) {

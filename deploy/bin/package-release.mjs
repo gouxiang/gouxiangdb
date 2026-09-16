@@ -100,6 +100,12 @@ for (const key of Object.keys(runtimeDeps)) {
   if (key.startsWith("@gx/")) delete runtimeDeps[key];
 }
 runtimeDeps.prisma = apiPkg.devDependencies?.prisma ?? "^5.22.0";
+// M5/S2：sqlite-vec 必须作为【可选】依赖带进发布包，pnpm 才会按目标平台拉对应子包
+// （vec0）。平台不支持/子包缺失时不阻断安装（optional），运行时 SearchStore 降级 fts-only。
+const runtimeOptional = {};
+if (apiPkg.optionalDependencies?.["sqlite-vec"]) {
+  runtimeOptional["sqlite-vec"] = apiPkg.optionalDependencies["sqlite-vec"];
+}
 const runtimePkg = {
   name: "gouxiangdb-api-runtime",
   version,
@@ -107,6 +113,7 @@ const runtimePkg = {
   type: "module",
   packageManager: rootPkg.packageManager ?? "pnpm@9.0.0",
   dependencies: runtimeDeps,
+  ...(Object.keys(runtimeOptional).length ? { optionalDependencies: runtimeOptional } : {}),
 };
 fs.writeFileSync(path.join(relApi, "package.json"), `${JSON.stringify(runtimePkg, null, 2)}\n`);
 
@@ -122,6 +129,14 @@ run("node", ["node_modules/prisma/build/index.js", "generate", "--schema=prisma/
   env: { ...process.env, DATABASE_URL: "file:./_package_generate_placeholder.db" },
 });
 rimraf(path.join(relApi, "_package_generate_placeholder.db"));
+
+// M5/S2：把已安装的 vec0 显式拷到发布物白名单 api/native/<triplet>/（§12）。
+// 发布目录已 --prod 安装（含 sqlite-vec 可选依赖与当前平台子包），故 --app-dir 指向 relApi。
+// 不支持平台/子包缺失时脚本仅 SKIP 不 fail（该目标机纯 FTS 服役，H6/H8）。
+run("node", [
+  path.join(srcApi, "scripts", "native", "copy-vec-native.mjs"),
+  "--dest", relApi, "--app-dir", relApi,
+], { cwd: repoRoot });
 
 // ---------------------------------------------------------------------------
 // 4) 组装 web/：只拷 vite 产物

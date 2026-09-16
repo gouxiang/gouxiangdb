@@ -58,10 +58,12 @@ RUN node -e '\
   const deps={...(api.dependencies||{})};\
   for (const k of Object.keys(deps)) if (k.startsWith("@gx/")) delete deps[k];\
   deps.prisma=api.devDependencies?.prisma ?? "^5.22.0";\
+  const opt=api.optionalDependencies?.["sqlite-vec"] ? {sqlite-vec: api.optionalDependencies["sqlite-vec"]} : {};\
   fs.writeFileSync("runtime-package.json", JSON.stringify({\
     name:"gouxiangdb-api-runtime", version:root.version||"0.0.0",\
     private:true, type:"module", packageManager:root.packageManager??"pnpm@9.0.0",\
-    dependencies:deps\
+    dependencies:deps,\
+    ...(Object.keys(opt).length?{optionalDependencies:opt}:{})\
   },null,2)+"\n");'
 
 # ============================ runner ============================
@@ -89,6 +91,8 @@ RUN corepack enable && corepack prepare pnpm@9.0.0 --activate \
 COPY --from=builder --chown=node:node /app/apps/api/dist ./dist
 COPY --from=builder --chown=node:node /app/apps/api/prisma/schema.prisma ./prisma/schema.prisma
 COPY --from=builder --chown=node:node /app/apps/api/prisma/migrations ./prisma/migrations
+# M5/S2：vec0 白名单拷贝脚本（node:22-bookworm 为 glibc，vec0 有 linux-x64/arm64 子包，无 musl）。
+COPY --from=builder --chown=node:node /app/apps/api/scripts/native ./scripts/native
 COPY --from=builder --chown=node:node /app/apps/web/dist /app/web
 COPY --chown=node:node deploy/docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
@@ -97,6 +101,11 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 RUN DATABASE_URL=file:./_runner_generate_placeholder.db \
   node node_modules/prisma/build/index.js generate --schema=prisma/schema.prisma \
   && rm -f _runner_generate_placeholder.db*
+
+# M5/S2：把目标架构 vec0 显式拷到白名单 native/<triplet>/（node:22-bookworm glibc，无 musl）。
+# 平台子包缺失时脚本仅 SKIP 不 fail——该容器降级 fts-only（H6/H8）。buildx 每目标架构各自执行。
+RUN node scripts/native/copy-vec-native.mjs --dest . --app-dir . || \
+  echo "[docker] vec0 native copy skipped (fts-only fallback)"
 
 # 数据卷目录归属内置非 root 用户 node（uid 1000）。
 RUN mkdir -p /data/uploads /data/backups /data/log && chown -R node:node /data /app
