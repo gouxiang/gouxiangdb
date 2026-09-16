@@ -4,8 +4,9 @@
 //  1) parseM5SearchFlag 纯函数表驱动（仅精确小写 shadow/on，其余含大写一律 off）；
 //  2) off：/api/v1/search 不挂载，带合法 token 请回落 v1 自身 404（NOT_FOUND），
 //     且临时数据目录不产生 search.db（不建库/零连接的文件系统证据）；
-//  3) on/shadow：子路由挂载，带合法 token GET /api/v1/search 返回 501 +
-//     M5_SEARCH_NOT_IMPLEMENTED 信封（S7 才接真实 query）；
+//  3) on/shadow：子路由挂载，带合法 token GET /api/v1/search 走 S7 真实处理器（不再 501）：
+//     on 非空 q 返回新统一检索 §9 信封（items/mode）；空 q 在打开 search.db 前短路回空壳；
+//     shadow 空 q 回旧链空形 {records:[],docs:[]}（对拍 S7 细节另见 query-v1-route.test）；
 //  4) 旧 GET /api/search 不随 flag 摘除（空 q 200，旧链路字节不变姿态）；
 //  5) 企业双 flag 全 off 时 /api/v1 整体不挂载，m5Search=on 亦不可达（与所有 v1 子面同姿态，
 //     app.ts 挂载条件不含 m5Search，固定该边界防 S7 误判）。
@@ -154,15 +155,26 @@ describe("GX_M5_SEARCH=off（默认，含未设置）", () => {
 });
 
 describe("GX_M5_SEARCH=on", () => {
-  it("config.m5Search=on 且 /api/v1/search 挂载，GET 返回 501 骨架信封", async () => {
+  it("config.m5Search=on 且 /api/v1/search 挂载，空 q 返回 S7 新链 §9 空壳（不再是 501 占位）", async () => {
     const built = await buildApp("on");
     expect(built.flag).toBe("on");
-    const res = await built.app.request("/api/v1/search?q=hello", { headers: authHeaders() });
-    expect(res.status).toBe(501);
-    const body = (await res.json()) as { error: string; code: string; mode: string };
-    expect(body.code).toBe("M5_SEARCH_NOT_IMPLEMENTED");
-    expect(body.mode).toBe("on");
-    expect(body.error).toContain("M5");
+    const res = await built.app.request("/api/v1/search?q=", { headers: authHeaders() });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[]; total: number; mode: string };
+    expect(Array.isArray(body.items)).toBe(true);
+    expect(body.items).toEqual([]);
+    expect(body.total).toBe(0);
+    expect(body.mode).toBe("like");
+  });
+
+  it("非空 q 走真实新链（gate-user 无授权 -> scope 空 -> 200 §9 空壳，非 501/非旧形）", async () => {
+    const { app } = await buildApp("on");
+    const res = await app.request("/api/v1/search?q=hello", { headers: authHeaders() });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[]; mode: string; records?: unknown };
+    expect(Array.isArray(body.items)).toBe(true);
+    expect("records" in body).toBe(false);
+    expect(typeof body.mode).toBe("string");
   });
 
   it("未登录 -> 401（v1 requireActiveUser 先于处理器）", async () => {
@@ -179,14 +191,12 @@ describe("GX_M5_SEARCH=on", () => {
 });
 
 describe("GX_M5_SEARCH=shadow", () => {
-  it("config.m5Search=shadow 且 /api/v1/search 挂载，GET 同样返回 501（对拍 S7 才接）", async () => {
+  it("config.m5Search=shadow 且 /api/v1/search 挂载，空 q 回旧链空形（不再是 501；响应真源始终是旧链）", async () => {
     const built = await buildApp("shadow");
     expect(built.flag).toBe("shadow");
-    const res = await built.app.request("/api/v1/search?q=hello", { headers: authHeaders() });
-    expect(res.status).toBe(501);
-    const body = (await res.json()) as { code: string; mode: string };
-    expect(body.code).toBe("M5_SEARCH_NOT_IMPLEMENTED");
-    expect(body.mode).toBe("shadow");
+    const res = await built.app.request("/api/v1/search?q=", { headers: authHeaders() });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ records: [], docs: [] });
   });
 
   it("旧 GET /api/search 照常存在（空 q 200）", async () => {

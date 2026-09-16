@@ -21,3 +21,12 @@ export function parseM5SearchFlag(raw: string | undefined): M5SearchFlag {
   if (v === "shadow" || v === "on") return v;
   return "off";
 }
+
+/**
+ * GX_M5_SHADOW_STRICT（§6）：shadow 对拍严格门。仅精确小写 "on" 启用；
+ * 启用后新链路与旧 /api/search 在可比集上 drift 非 0 即让该请求失败。
+ * 与 parseM5SearchFlag 同款严格小写纪律（"ON"/"On" 一律 false）。
+ */
+export function parseM5ShadowStrict(raw: string | undefined): boolean {
+  return raw?.trim() === "on";
+}

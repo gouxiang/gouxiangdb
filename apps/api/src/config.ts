@@ -24,8 +24,8 @@ import { resolveAuthzEngineMode, type AuthzEngineMode } from "./configAuthz.js";
 // M5 统一检索总门（GX_M5_SEARCH 三态）真源在 configM5Search.ts；re-export 供
 // import { ... } from "./config.js" 调用方使用，与 configAuthz 同款无感接线。
 export type { M5SearchFlag } from "./configM5Search.js";
-export { parseM5SearchFlag } from "./configM5Search.js";
-import { parseM5SearchFlag, type M5SearchFlag } from "./configM5Search.js";
+export { parseM5SearchFlag, parseM5ShadowStrict } from "./configM5Search.js";
+import { parseM5SearchFlag, parseM5ShadowStrict, type M5SearchFlag } from "./configM5Search.js";
 
 // 历史上出现在源码/示例/.env 里的开发默认密钥，生产一律拒绝（即使 .env 被误打进发布包）。
 const BLOCKED_JWT_SECRETS = new Set([
@@ -176,6 +176,11 @@ export interface AppConfig {
   port: number;
   corsOriginPatterns: RegExp[];
   dataDir: string;
+  /**
+   * 应用根目录（dist 上一级；开发=apps/api）。供原生扩展（vec0 native/<triplet>）解析 appDir，
+   * 与 dataDir 分离：dataDir 是可写数据目录，appDir 是只读应用资源目录。
+   */
+  appDir: string;
   uploadRoot: string;
   migrationsDir: string;
   minDiskMb: number;
@@ -203,6 +208,12 @@ export interface AppConfig {
    * shadow = 挂载路由，新链路对拍旧 /api/search（S7 起）；on = 新链路对外（S7 起）。
    */
   m5Search: M5SearchFlag;
+  /**
+   * GX_M5_SHADOW_STRICT（M5/S7，仅在 m5Search=shadow 时有意义）：严格小写 on 时，
+   * 新链路与旧 /api/search 在可比集上对拍 drift 非 0 即让该请求失败（§6 对拍闸门）；
+   * 默认 off，shadow 只记脱敏日志/metric，不改变响应。
+   */
+  m5ShadowStrict: boolean;
   /**
    * 鉴权状态缓存 TTL 毫秒（GX_AUTH_STATE_TTL_MS，默认 0=完全旁路零缓存，每请求一次 PK 点查，
    * 严格满足"停用后下一次请求即 401"）。>0 时启用进程内有界缓存，停用时同进程主动 invalidate。
@@ -242,6 +253,7 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     port: Number(env.PORT ?? DEFAULT_PORT),
     corsOriginPatterns: buildCorsPatterns(env.CORS_ORIGIN ?? env.GX_PUBLIC_ORIGIN),
     dataDir,
+    appDir: apiRoot,
     uploadRoot,
     migrationsDir,
     minDiskMb: Number(env.GX_MIN_DISK_MB ?? DEFAULT_MIN_DISK_MB),
@@ -266,6 +278,8 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     enterpriseNav: env.GX_ENTERPRISE_NAV !== "off",
     // M5：统一检索默认 off（仅精确小写 shadow/on 生效，见 parseM5SearchFlag）；off 不挂 v1 search。
     m5Search: parseM5SearchFlag(env.GX_M5_SEARCH),
+    // M5/S7：shadow 对拍严格门（仅精确小写 on），默认 off 只记日志不改变响应。
+    m5ShadowStrict: parseM5ShadowStrict(env.GX_M5_SHADOW_STRICT),
     authStateTtlMs: parseNonNegInt(env.GX_AUTH_STATE_TTL_MS, 0),
     socketPath: env.GX_SOCKET_PATH?.trim() ?? "",
     basePath: normalizeBasePath(env.GX_BASE_PATH),
