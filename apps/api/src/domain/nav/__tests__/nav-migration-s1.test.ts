@@ -69,8 +69,8 @@ describe("迁移清单", () => {
     expect(dirs.length).toBe(22);
     expect(dirs).toContain("20260916090000_enterprise_nav_ddl");
     expect(dirs).toContain("20260916130000_owner_manage_share");
-    expect(dirs).toContain("20260917090000_m5_search_outbox_ddl");
-    expect(dirs).toContain("20260917090100_m5_search_outbox_seed");
+    expect(dirs).toContain("20260916140000_m5_search_outbox_ddl");
+    expect(dirs).toContain("20260916140100_m5_search_outbox_seed");
     const applied = db.prepare("SELECT rolled_back_at FROM _prisma_migrations WHERE migration_name=?")
       .get("20260916090000_enterprise_nav_ddl") as { rolled_back_at: string | null } | undefined;
     expect(applied).toBeDefined();

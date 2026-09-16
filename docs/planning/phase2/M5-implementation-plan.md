@@ -536,9 +536,9 @@ apps/api/scripts/search/
 
 ### 5.1 迁移拆分（只增；#21/#22 排在 M4 之后）
 
-- `20260917090000_m5_search_outbox_ddl`：CREATE change_events + 两索引 + app_settings(KV)。
-- `20260917090100_m5_search_outbox_seed`：活实体分批播种（records 活行 + kb_docs 活行，NOT EXISTS 幂等）。
-- down：`prisma/docs/rollback/20260917090000_m5_search.down.sql` DROP（主回滚靠快照）。
+- `20260916140000_m5_search_outbox_ddl`：CREATE change_events + 两索引 + app_settings(KV)。
+- `20260916140100_m5_search_outbox_seed`：活实体分批播种（records 活行 + kb_docs 活行，NOT EXISTS 幂等）。
+- down：`prisma/docs/rollback/20260916140000_m5_search.down.sql` DROP（主回滚靠快照）。
 - **search.db 零 Prisma 迁移**：schema.ts 自举，`index_meta.schema_version` 管内部版本；不兼容 DDL 变更 bump + 迁移函数或触发 rebuild。
 
 ### 5.2 outbox 接线点清单（S1 收口，每点同事务；S1 PR 单列触碰清单）

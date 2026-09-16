@@ -18,7 +18,7 @@ import { enqueueChangeEventTx } from "../outbox.js";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SEED_SQL = path.resolve(
   here,
-  "../../../../prisma/migrations/20260917090100_m5_search_outbox_seed/migration.sql",
+  "../../../../prisma/migrations/20260916140100_m5_search_outbox_seed/migration.sql",
 );
 
 let h: CharHarness;

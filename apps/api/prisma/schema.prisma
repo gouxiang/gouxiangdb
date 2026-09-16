@@ -557,7 +557,7 @@ model AuthPolicy {
   @@map("auth_policies")
 }
 
-// M5/S1：统一检索 outbox（主库 change_events，手写迁移 20260917090000）。
+// M5/S1：统一检索 outbox（主库 change_events，手写迁移 20260916140000）。
 // 业务写事务内 enqueueChangeEventTx 合并去重写入；由 S5 indexer worker 认领消费。
 // 本表与实体不建 FK（可重建事件流，删除不影响旧功能）；workspaceId 单工作区恒 ws_default。
 model ChangeEvent {
@@ -581,7 +581,7 @@ model ChangeEvent {
   @@map("change_events")
 }
 
-// M5/S1：手工 KV 配置表（手写迁移 20260917090000）。S1 只建表不读不写；
+// M5/S1：手工 KV 配置表（手写迁移 20260916140000）。S1 只建表不读不写；
 // S4 起存 cloud embedding 配置/加密凭据（AES-256-GCM），见 M5 计划 §4.4。
 model AppSetting {
   k         String   @id

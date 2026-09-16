@@ -105,8 +105,8 @@ describe("旧库（前 12 迁移）升级到 22 迁移", () => {
     expect(applied.map((r) => r.migration_name)).toContain("20260916110000_authz_policies_backfill");
     expect(applied.map((r) => r.migration_name)).toContain("20260916120000_authz_scope_creator_indexes");
     expect(applied.map((r) => r.migration_name)).toContain("20260916130000_owner_manage_share");
-    expect(applied.map((r) => r.migration_name)).toContain("20260917090000_m5_search_outbox_ddl");
-    expect(applied.map((r) => r.migration_name)).toContain("20260917090100_m5_search_outbox_seed");
+    expect(applied.map((r) => r.migration_name)).toContain("20260916140000_m5_search_outbox_ddl");
+    expect(applied.map((r) => r.migration_name)).toContain("20260916140100_m5_search_outbox_seed");
 
     // M4-S2 回填：旧 owner 成员（m1=legacy_1 / kb viewer km1=legacy_2）投影成 legacy 策略行，
     // 不写 role_assignments（资源 owner 不抬升为工作区管理员）；行数=活 members+kb_members（无 acl）。
