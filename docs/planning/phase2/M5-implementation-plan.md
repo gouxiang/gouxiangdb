@@ -402,14 +402,22 @@ search(q,user,filters):
        批量 INSERT（每批 499）。——M4 契约 expectsTempTable 与否，M5 一律走临时表（不分支 IN 直拼）
        CREATE TEMP TABLE temp_field_grant(tableNodeId TEXT, fieldId TEXT);
        INSERT maskedTableFields 展开（tableNodeId,fieldId）行；空表代表"无字段收窄"。
+       【勘误 2026-09-16 / S3 落地】temp_field_grant 只物化【有 mask 的表】白名单行；
+       故召回 allowed 必须是【三分支】而非早先稿的二分支——见下方 4a。纯函数真源：
+       queryPlan.buildAllowedPredicate / fieldGrant.buildFieldGrantRows，S7 照此接线勿回退。
   4a. FTS 路（码元≥3）：trigram MATCH（用户输入包双引号短语并转义，MATCH 左值用虚表名）
       WITH allowed AS (
         SELECT c.rowid,c.entityType,c.entityId,c.chunkKind,c.fieldId,c.title,c.nodeId
         FROM chunks c JOIN temp_scope s ON s.nodeId=c.nodeId
         WHERE c.chunkKind='identity'
+           OR NOT EXISTS(SELECT 1 FROM temp_field_grant g0 WHERE g0.tableNodeId=c.nodeId)
            OR EXISTS(SELECT 1 FROM temp_field_grant g
                      WHERE g.tableNodeId=c.nodeId AND g.fieldId=c.fieldId)
       )
+      -- 三分支语义：① identity 恒可见；② 该 scope 内表在 temp_field_grant 无任何行
+      -- （=无 mask）-> 其全部 field chunk 可见；③ 有 mask 表仅白名单字段可见。
+      -- 表级越权由 temp_scope INNER JOIN 先行剔除（规则 7）。二分支 identity OR EXISTS
+      -- 在"只物化 mask 表行"前提下会把无 mask 表的 field 全部误隐，已废弃。
       SELECT a.*, bm25(fts_chunks) rank FROM fts_chunks
       JOIN allowed a ON a.rowid=fts_chunks.rowid
       WHERE fts_chunks MATCH ? ORDER BY rank LIMIT 100
