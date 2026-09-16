@@ -1,0 +1,166 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`M5/S0 旧 /api/search golden > boundedPreview 截断：每表仅最旧 2000 条入窗，第 2001 条（最新）不召回；marker 恒定 > 有界预览截断与 marker 1`] = `
+{
+  "boundedPreview": true,
+  "docs": [],
+  "previewLimit": 2000,
+  "records": [
+    {
+      "baseId": "m5s_base_cap",
+      "baseName": "上限客户库",
+      "matchedField": "客户名",
+      "recordId": "m5s_cap_0",
+      "snippet": "旧窗内命中词zzz",
+      "tableId": "m5s_table_cap",
+      "tableName": "上限表",
+      "title": "旧窗内命中词zzz",
+      "type": "record",
+    },
+  ],
+}
+`;
+
+exports[`M5/S0 旧 /api/search golden > docs 命中：doc/canvas 全键、title 与 searchText snippet、updatedAt desc 序字节锁定 > doc 与 canvas 双命中 updatedAt desc 1`] = `
+{
+  "boundedPreview": true,
+  "docs": [
+    {
+      "docId": "m5s_d_title",
+      "kbId": "m5s_kb",
+      "kbName": "产品知识库",
+      "snippet": "",
+      "title": "德尔塔标题文档",
+      "type": "doc",
+    },
+    {
+      "docId": "m5s_cv",
+      "kbId": "m5s_kb",
+      "kbName": "产品知识库",
+      "snippet": "",
+      "title": "画布德尔塔导图",
+      "type": "canvas",
+    },
+  ],
+  "previewLimit": 2000,
+  "records": [],
+}
+`;
+
+exports[`M5/S0 旧 /api/search golden > docs 命中：doc/canvas 全键、title 与 searchText snippet、updatedAt desc 序字节锁定 > doc 正文 searchText snippet 1`] = `
+{
+  "boundedPreview": true,
+  "docs": [
+    {
+      "docId": "m5s_d_body",
+      "kbId": "m5s_kb",
+      "kbName": "产品知识库",
+      "snippet": "这是一段正文，伊普西龙关键字出现在中部位置用于截取片段窗口内容结尾。",
+      "title": "普通正文文档",
+      "type": "doc",
+    },
+  ],
+  "previewLimit": 2000,
+  "records": [],
+}
+`;
+
+exports[`M5/S0 旧 /api/search golden > records 命中：全键齐全、主标题/正文截断/空标题回退/LinkRef 标题派生字节锁定 > LinkRef 对象 title 命中 1`] = `
+{
+  "boundedPreview": true,
+  "docs": [],
+  "previewLimit": 2000,
+  "records": [
+    {
+      "baseId": "m5s_base",
+      "baseName": "古籍客户库",
+      "matchedField": "关联快照",
+      "recordId": "m5s_r_link",
+      "snippet": "关联对象贝塔标题",
+      "tableId": "m5s_table",
+      "tableName": "客户表",
+      "title": "链接所在客户",
+      "type": "record",
+    },
+  ],
+}
+`;
+
+exports[`M5/S0 旧 /api/search golden > records 命中：全键齐全、主标题/正文截断/空标题回退/LinkRef 标题派生字节锁定 > 主标题命中 1`] = `
+{
+  "boundedPreview": true,
+  "docs": [],
+  "previewLimit": 2000,
+  "records": [
+    {
+      "baseId": "m5s_base",
+      "baseName": "古籍客户库",
+      "matchedField": "客户名",
+      "recordId": "m5s_r_primary",
+      "snippet": "敦煌阿尔法客户",
+      "tableId": "m5s_table",
+      "tableName": "客户表",
+      "title": "敦煌阿尔法客户",
+      "type": "record",
+    },
+  ],
+}
+`;
+
+exports[`M5/S0 旧 /api/search golden > records 命中：全键齐全、主标题/正文截断/空标题回退/LinkRef 标题派生字节锁定 > 正文命中 60 字截断 1`] = `
+{
+  "boundedPreview": true,
+  "docs": [],
+  "previewLimit": 2000,
+  "records": [
+    {
+      "baseId": "m5s_base",
+      "baseName": "古籍客户库",
+      "matchedField": "备注",
+      "recordId": "m5s_r_body",
+      "snippet": "甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲…",
+      "tableId": "m5s_table",
+      "tableName": "客户表",
+      "title": "某客户",
+      "type": "record",
+    },
+  ],
+}
+`;
+
+exports[`M5/S0 旧 /api/search golden > records 命中：全键齐全、主标题/正文截断/空标题回退/LinkRef 标题派生字节锁定 > 空主标题回退 snippet 1`] = `
+{
+  "boundedPreview": true,
+  "docs": [],
+  "previewLimit": 2000,
+  "records": [
+    {
+      "baseId": "m5s_base",
+      "baseName": "古籍客户库",
+      "matchedField": "备注",
+      "recordId": "m5s_r_fallback",
+      "snippet": "回退专用词出现在正文备注字段里",
+      "tableId": "m5s_table",
+      "tableName": "客户表",
+      "title": "回退专用词出现在正文备注字段里",
+      "type": "record",
+    },
+  ],
+}
+`;
+
+exports[`M5/S0 旧 /api/search golden > 空 q（缺失或纯空白）：{records:[],docs:[]}，且不带 boundedPreview marker > 空 q 缺失 1`] = `
+{
+  "docs": [],
+  "records": [],
+}
+`;
+
+exports[`M5/S0 旧 /api/search golden > 计算字段不入选：命中词只在 formula 列时无任何记录召回 > 计算字段命中无召回 1`] = `
+{
+  "boundedPreview": true,
+  "docs": [],
+  "previewLimit": 2000,
+  "records": [],
+}
+`;
