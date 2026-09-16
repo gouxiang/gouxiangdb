@@ -21,6 +21,7 @@ import { policyRoutes } from "./policies.js";
 import { inheritanceRoutes } from "./inheritance.js";
 import { authzRoutes } from "./scope.js";
 import { searchRoutes } from "./search.js";
+import { adminSearchRoutes } from "./adminSearch.js";
 
 export const v1 = new Hono();
 
@@ -63,4 +64,7 @@ if (config.m5Search !== "off") {
   // M5/S6 统一检索：仅 on/shadow 挂载；off 时 /api/v1/search 落 v1 自身 404。
   // S6 骨架内一律 501（S7 接 domain/search/query.ts 与 shadow 对拍），不建库不出网。
   v1.route("/search", searchRoutes);
+  // M5/S9 检索管理面（reindex/status/embedding config+apiKey，全部 role_owner），与 /search 同门：
+  // 仅 on/shadow 可达；off 时 /api/v1/admin/* 落 v1 自身 404，且不产生 search.db（gate 断言）。
+  v1.route("/admin", adminSearchRoutes);
 }

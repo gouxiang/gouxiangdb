@@ -144,6 +144,23 @@ describe("GX_M5_SEARCH=off（默认，含未设置）", () => {
       await app.request("/api/v1/search", { headers: authHeaders() });
       expect(listSearchDbFiles()).toEqual([]);
     });
+
+    it(`flag=${flag === undefined ? "未设置" : "off"}：admin 六端点全 404 且零建库/零出网（管理面同 /search 门）`, async () => {
+      const { app } = await buildApp(flag);
+      const calls: Array<[string, RequestInit?]> = [
+        ["/api/v1/admin/search/status", { headers: authHeaders() }],
+        ["/api/v1/admin/embedding/config", { headers: authHeaders() }],
+        ["/api/v1/admin/reindex", { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: "{}" }],
+        ["/api/v1/admin/embedding/config", { method: "PATCH", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: "{}" }],
+        ["/api/v1/admin/embedding/api-key/rotate", { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ apiKey: "x" }) }],
+        ["/api/v1/admin/embedding/api-key", { method: "DELETE", headers: authHeaders() }],
+      ];
+      for (const [url, init] of calls) {
+        const res = await app.request(url, init);
+        expect(res.status, url).toBe(404);
+      }
+      expect(listSearchDbFiles()).toEqual([]);
+    });
   }
 
   it("旧 GET /api/search 不被摘除：空 q 返回 200（旧链路形状）", async () => {

@@ -38,6 +38,7 @@ tags:
   - name: workspaces
   - name: nav-groups
   - name: nodes
+  - name: search-admin
 
 components:
   securitySchemes:
@@ -135,6 +136,12 @@ components:
             - POLICY_ACTION_INVALID
             - POLICY_FIELD_INVALID
             - POLICY_BAD_INPUT
+            # M5/S9 统一检索管理面专用码（只增）：
+            - SEARCH_UNAVAILABLE
+            - REINDEX_IN_PROGRESS
+            - REINDEX_FAILED
+            - EMBEDDING_CONFIG_INVALID
+            - NEED_CLOUD_CONFIRM
           description: >-
             未显式指定机器码时按 HTTP 状态回落（400->BAD_REQUEST 等）；
             NAV_* 与 MOVE_NEEDS_CONFIRM 为导航域专用码；
@@ -812,6 +819,124 @@ components:
           description: 从该用户有权的最高祖先到自身的连续可见段（根->自身序）；不含无权祖先 id/name/path
           items: { $ref: '#/components/schemas/BreadcrumbNode' }
         truncatedAbove: { type: boolean, description: 链起点之上是否存在被中性截断的无权祖先段 }
+    # ---------------- M5/S9 统一检索管理面 ----------------
+    SearchApiKeyStatus:
+      type: object
+      required: [configured, source, maskedLast4]
+      properties:
+        configured: { type: boolean, description: 当前是否存在可用嵌入 API key（db 密文优先，否则 env） }
+        source: { type: string, enum: [env, db, none] }
+        maskedLast4: { type: string, nullable: true, description: 仅末 4 位；无 key 为 null，绝不回明文 }
+    EmbeddingConfig:
+      type: object
+      required: [mode, baseURL, model, dim, batchSize, timeoutMs, fieldChunkCap, apiKey]
+      properties:
+        mode: { type: string, enum: [off, cloud] }
+        baseURL: { type: string }
+        model: { type: string }
+        dim: { type: integer, description: 现役 search.db vec_chunks 建表维度；未建库/未向量化为 0 }
+        batchSize: { type: integer }
+        timeoutMs: { type: integer }
+        fieldChunkCap: { type: integer, minimum: 1, maximum: 1000 }
+        apiKey: { $ref: '#/components/schemas/SearchApiKeyStatus' }
+    EmbeddingConfigPatchResult:
+      allOf:
+        - $ref: '#/components/schemas/EmbeddingConfig'
+        - type: object
+          required: [reindexRequired]
+          properties:
+            reindexRequired: { type: boolean, description: mode/model/fieldChunkCap 变更后置 true；不自动重建，须显式 reindex }
+    SearchCoverage:
+      type: object
+      required: [a, b, c, d, e, f]
+      properties:
+        a: { type: integer, description: 活实体无 chunk（漏索引，阻断） }
+        b: { type: integer, description: chunk 实体不存在/已删（脏行，阻断） }
+        c: { type: integer, description: nodeId 悬空（警告，可自愈） }
+        d: { type: integer, description: cloud 下 chunk 缺 vec（向量欠账，警告；off 不适用） }
+        e: { type: integer, description: chunk 缺 fts 行（阻断） }
+        f: { type: integer, description: field chunk 缺 field_grant（授权漏登，阻断） }
+    SearchIndexStatus:
+      type: object
+      required: [schemaVersion, indexedAt, chunks, backlog, coverage, rebuilding]
+      properties:
+        schemaVersion: { type: integer }
+        indexedAt: { type: string, nullable: true, format: date-time }
+        chunks:
+          type: object
+          required: [records, docs, canvas, total, fieldChunks, fieldChunksCapped, fieldChunkCap]
+          properties:
+            records: { type: integer }
+            docs: { type: integer }
+            canvas: { type: integer }
+            total: { type: integer }
+            fieldChunks: { type: integer }
+            fieldChunksCapped: { type: integer, description: 超 N 截断记录数（index_meta.capped_records） }
+            fieldChunkCap: { type: integer }
+        backlog:
+          type: object
+          required: [pending, failed, dead]
+          properties:
+            pending: { type: integer, description: pending+processing }
+            failed: { type: integer }
+            dead: { type: integer }
+        coverage: { $ref: '#/components/schemas/SearchCoverage' }
+        rebuilding: { type: boolean }
+    SearchStatus:
+      type: object
+      required: [vec, embedding, index]
+      properties:
+        vec:
+          type: object
+          required: [loaded, version, extPathKind]
+          properties:
+            loaded: { type: boolean }
+            version: { type: string, nullable: true }
+            extPathKind: { type: string, enum: [builtin, env-override, platform] }
+        embedding:
+          type: object
+          required: [mode, model, dim, healthy, reindexRequired]
+          properties:
+            mode: { type: string, enum: [off, cloud] }
+            model: { type: string }
+            dim: { type: integer }
+            healthy: { type: boolean }
+            detail: { type: string, description: 健康/失败中性细节（技术态，不含凭据） }
+            reindexRequired: { type: boolean }
+        index: { allOf: [{ $ref: '#/components/schemas/SearchIndexStatus' }], nullable: true, description: search.db 尚未建库为 null }
+    ReindexStarted:
+      type: object
+      required: [job, status]
+      properties:
+        job: { type: string, enum: [reindex] }
+        status: { type: string, enum: [started] }
+    ReindexRequest:
+      type: object
+      properties:
+        type: { type: string, enum: [record, doc, canvas], description: 单实体重建的实体族；省略=全量 }
+        entityId: { type: string, description: 给定时对该实体原地幂等重建；省略=全量双库原子切换 }
+    EmbeddingConfigPatch:
+      type: object
+      properties:
+        mode: { type: string, enum: [off, cloud] }
+        baseURL: { type: string, description: 必须是 http(s) URL }
+        model: { type: string }
+        batchSize: { type: integer, minimum: 1 }
+        timeoutMs: { type: integer, minimum: 1 }
+        fieldChunkCap: { type: integer, minimum: 1, maximum: 1000 }
+        confirmCloud: { type: boolean, description: off->cloud 必须显式 true，否则 409 NEED_CLOUD_CONFIRM }
+        apiKey:
+          type: string
+          nullable: true
+          description: 字符串=AES-GCM 覆盖落库；字段缺省=保持；显式 null=清除 db key
+      description: >-
+        禁止出现 dim/dimensions（维度由 model 决定）与 reindex 字段，出现即 400 EMBEDDING_CONFIG_INVALID。
+        apiKey 不会在任何响应回明文。
+    ApiKeyRotateRequest:
+      type: object
+      required: [apiKey]
+      properties:
+        apiKey: { type: string, description: 非空字符串，AES-GCM 加密落库 }
 
 security:
   - bearerAuth: []
@@ -1550,3 +1675,117 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  # ================= M5/S9 统一检索管理面（仅 GX_M5_SEARCH on/shadow 挂载；off 全 404） =================
+  /admin/reindex:
+    post:
+      tags: [search-admin]
+      summary: 触发重建索引（role_owner；异步，立即 202）
+      description: |
+        省略 entityId=全量重建：写到独立 search.db.rebuild-&lt;ts&gt;，灌完 POSIX rename 原子替换，
+        旧库持续服务，切换瞬态只读连接重开。给 entityId=对该实体在现役库原地幂等 applyUpsert。
+        进行中再次调用 -> 409 REINDEX_IN_PROGRESS。不随配置变更自动触发。
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReindexRequest' }
+      responses:
+        '202':
+          description: 重建已开始
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReindexStarted' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: 已有重建在进行（code=REINDEX_IN_PROGRESS）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /admin/search/status:
+    get:
+      tags: [search-admin]
+      summary: 检索子系统状态（vec/embedding/index/coverage/backlog，role_owner）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchStatus' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /admin/embedding/config:
+    get:
+      tags: [search-admin]
+      summary: 读嵌入配置（apiKey 仅存在性 + 末 4，role_owner）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmbeddingConfig' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    patch:
+      tags: [search-admin]
+      summary: 改嵌入配置（两步：不自动重建，role_owner）
+      description: |
+        出现 dim/dimensions 或 reindex 字段 -> 400 EMBEDDING_CONFIG_INVALID；
+        off->cloud 须 confirmCloud:true，否则 409 NEED_CLOUD_CONFIRM（cloud->off 不需确认）；
+        apiKey 字符串=加密覆盖、缺省=保持、null=清 db key；fieldChunkCap 1..1000；baseURL 须 http(s)；
+        batchSize/timeoutMs 正整数。mode/model/fieldChunkCap 变更 -> reindexRequired:true，不自动重建。
+        JWT_SECRET 轮换致旧密文不可解 -> apiKey.configured:false/source:none，不 500。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmbeddingConfigPatch' }
+      responses:
+        '200':
+          description: OK（含 reindexRequired）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmbeddingConfigPatchResult' }
+        '400':
+          description: 配置非法（code=EMBEDDING_CONFIG_INVALID）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: 缺云端二次确认（code=NEED_CLOUD_CONFIRM）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /admin/embedding/api-key/rotate:
+    post:
+      tags: [search-admin]
+      summary: 轮换嵌入 API key（AES-GCM 落库，回存在性形状，role_owner）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiKeyRotateRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchApiKeyStatus' }
+        '400':
+          description: apiKey 缺失/非字符串/空（code=EMBEDDING_CONFIG_INVALID）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /admin/embedding/api-key:
+    delete:
+      tags: [search-admin]
+      summary: 清除 db 嵌入 API key（随后回落 env 种子或 none，role_owner）
+      responses:
+        '204':
+          description: 已清除
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }

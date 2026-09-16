@@ -26,7 +26,9 @@ import {
   loadVec0,
   readVecVersion,
   describeVecPlatform,
+  classifyVecExtKind,
   type VecPlatform,
+  type VecExtKind,
 } from "./vecLoader.js";
 
 /** search.db 文件名（可被 GX_SEARCH_DB_PATH 整路径覆盖）。 */
@@ -55,6 +57,8 @@ export interface SearchStore {
   /** vec0 是否可用；false 时不建/不查 vec_chunks（fts-only 降级，H8）。 */
   readonly vecAvailable: boolean;
   readonly vecPath: string | null;
+  /** vec0 扩展来源三分类（§9 status：env-override/builtin/platform）。 */
+  readonly vecExtKind: VecExtKind;
   readonly vecVersion: string | null;
   readonly vecError: string | null;
 
@@ -93,6 +97,9 @@ export function openSearchStore(opts: OpenSearchOptions): SearchStore {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = OFF"); // 派生库无外键，显式关闭避免误触发。
 
+  // 来源类别独立于是否尝试加载（off/tryLoadVec=false 也报候选来源面）。
+  const vecExtKind = classifyVecExtKind(opts.vecExtPath, opts.appDir, platformInfo);
+
   let vecAvailable = false;
   let vecPath: string | null = null;
   let vecVersion: string | null = null;
@@ -117,6 +124,7 @@ export function openSearchStore(opts: OpenSearchOptions): SearchStore {
     filePath: opts.filePath,
     vecAvailable,
     vecPath,
+    vecExtKind,
     vecVersion,
     vecError,
 

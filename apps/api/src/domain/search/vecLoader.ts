@@ -121,6 +121,35 @@ export function resolveVecPath(
   return null;
 }
 
+/**
+ * S9 status 端点的 vec0 扩展来源三分类（§9 vec.extPathKind）：
+ *   env-override = GX_VEC_EXT_PATH 显式覆盖且命中；
+ *   builtin      = 发布包白名单 native/&lt;triplet&gt;/vec0.&lt;ext&gt;；
+ *   platform     = node_modules 平台子包（开发态/未走白名单拷贝）。
+ */
+export type VecExtKind = "builtin" | "env-override" | "platform";
+
+/**
+ * 判定 vec0 扩展的来源类别。不依赖扩展是否加载成功（dlopen 失败也要能在 status 报来源）：
+ * env 显式路径存在 -> env-override；否则 native 白名单存在 -> builtin；否则 platform
+ * （node_modules 回退；平台不支持/包缺失时 loaded=false，类别仍是候选解析面）。
+ */
+export function classifyVecExtKind(
+  envPath: string | undefined,
+  appDir: string,
+  platformInfo: VecPlatform = describeVecPlatform(),
+  fileExists: (p: string) => boolean = (p) => fs.existsSync(p),
+): VecExtKind {
+  const fileName = `${VEC_ENTRY_BASENAME}.${platformInfo.ext}`;
+  const env = envPath?.trim();
+  if (env) {
+    const direct = path.isAbsolute(env) ? env : path.resolve(appDir, env);
+    if (fileExists(direct) || fileExists(path.join(direct, fileName))) return "env-override";
+  }
+  if (fileExists(bundledVecPath(appDir, platformInfo))) return "builtin";
+  return "platform";
+}
+
 export interface VecLoadResult {
   /** vec0 是否加载成功；false 时主流程必须降级 fts-only（H8）。 */
   vecAvailable: boolean;

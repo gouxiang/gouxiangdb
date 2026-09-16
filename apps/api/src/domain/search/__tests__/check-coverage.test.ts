@@ -1,38 +1,24 @@
 // M5/S5 check-coverage A-F 巡检测试：每个用例独立临时主库 + 独立 search.db，直读物理库，
 // 因此 A-F 计数可精确断言（无跨用例实体污染）。
+//
+// S9：A-F 判定单一真源已抽到 src/domain/search/searchCoverage.ts，本测试直接对拍该 domain
+// 函数（CLI scripts/search/check-coverage.ts 与 admin status 端点都只调它）；末尾另加一条
+// `pnpm tsx` CLI 端到端烟测，保证脚本入口/路径解析/exit code 不回归。
 
 import { describe, expect, it } from "vitest";
+import { execSync } from "node:child_process";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   makeIndexerHarness, seedTable, seedRecord, enqueue, type IndexerHarness,
 } from "./indexerHarness.js";
 import { SearchIndexer } from "../indexer.js";
-
-// 巡检脚本是 .mjs（不在 tsc include scripts/**/*.ts 内），用动态 import + 本地接口断言。
-interface CoverageReport {
-  mode: string; vecTableExists: boolean;
-  counts: Record<"A" | "B" | "C" | "D" | "E" | "F", number>;
-  cappedRecords: number; exitCode: number; blockingCodes: string[];
-  samples: Record<string, Array<Record<string, unknown>>>;
-}
-const covScript = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../../../scripts/search/check-coverage.mjs",
-);
-async function computeCoverage(args: {
-  mainDbPath: string; searchDbPath: string; mode?: "off" | "cloud";
-}): Promise<CoverageReport> {
-  const mod = (await import(covScript)) as {
-    computeCoverage: (a: typeof args) => CoverageReport;
-  };
-  return mod.computeCoverage(args);
-}
+import { computeCoverage, type CoverageReport } from "../searchCoverage.js";
 
 interface Ctx {
   h: IndexerHarness;
   storeKey: string;
-  cov: (mode?: "off" | "cloud") => Promise<CoverageReport>;
+  cov: (mode?: "off" | "cloud") => CoverageReport;
+  mainDbPath: string;
 }
 
 /** 每用例一套独立主库 + 一个 table（已同步 nav），跑完即清。 */
@@ -46,8 +32,8 @@ async function freshCtx(prefix: string, storeKey = "s"): Promise<Ctx> {
   await h.prisma.$transaction((tx) => syncNavFromEntitiesTx(tx));
   const mainDbPath = process.env.DATABASE_URL!.slice("file:".length).split("?")[0]!;
   return {
-    h, storeKey,
-    async cov(mode = "off") {
+    h, storeKey, mainDbPath,
+    cov(mode = "off") {
       return computeCoverage({ mainDbPath, searchDbPath: h.searchPathFor(storeKey), mode });
     },
   };
@@ -62,13 +48,13 @@ async function runIndexer(h: IndexerHarness, storeKey: string) {
   return store;
 }
 
-describe("check-coverage A-F（每用例独立库）", () => {
+describe("check-coverage A-F（domain 单一真源，每用例独立库）", () => {
   it("干净完整索引：A-F 全 0、exit 0；off 不输出 D 样本", async () => {
     const c = await freshCtx("clean");
     await seedRecord(c.h, "cov_t", "r_ok", { cov_f0: "好记录", cov_f1: "正文齐" });
     await enqueue(c.h, { entityType: "record", entityId: "r_ok", op: "upsert" });
     const store = await runIndexer(c.h, c.storeKey);
-    const rep = await c.cov("off");
+    const rep = c.cov("off");
     expect(rep.counts).toEqual({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
     expect(rep.exitCode).toBe(0);
     expect(rep.samples).not.toHaveProperty("D");
@@ -82,9 +68,9 @@ describe("check-coverage A-F（每用例独立库）", () => {
     const empty = c.h.openStore(c.storeKey, false); // 建一个自举后的空 search.db
     empty.db.pragma("wal_checkpoint(TRUNCATE)");
     empty.close();
-    const rep = await c.cov("off");
+    const rep = c.cov("off");
     expect(rep.counts.A).toBe(1);
-    expect(rep.samples.A[0]).toMatchObject({ entityType: "record", entityId: "r_a" });
+    expect(rep.samples.A?.[0]).toMatchObject({ entityType: "record", entityId: "r_a" });
     expect(rep.exitCode).toBe(1);
     expect(rep.blockingCodes).toEqual(["A"]);
     await c.h.cleanup();
@@ -96,7 +82,7 @@ describe("check-coverage A-F（每用例独立库）", () => {
     await enqueue(c.h, { entityType: "record", entityId: "r_b", op: "upsert" });
     const store = await runIndexer(c.h, c.storeKey);
     await c.h.prisma.record.update({ where: { id: "r_b" }, data: { deletedAt: new Date() } });
-    const rep = await c.cov("off");
+    const rep = c.cov("off");
     expect(rep.counts.B).toBeGreaterThanOrEqual(2);
     expect(rep.counts.A).toBe(0);
     expect(rep.exitCode).toBe(1);
@@ -116,7 +102,7 @@ describe("check-coverage A-F（每用例独立库）", () => {
       tx.prepare("DELETE FROM field_grant WHERE chunkRowid=?").run(fc.chunkRowid);
     });
     store.db.pragma("wal_checkpoint(TRUNCATE)"); // 确保独立只读连接看到最新帧
-    const rep = await c.cov("off");
+    const rep = c.cov("off");
     expect(rep.counts.E).toBe(1);
     expect(rep.counts.F).toBe(1);
     expect(rep.counts.A).toBe(0);
@@ -142,7 +128,7 @@ describe("check-coverage A-F（每用例独立库）", () => {
       tx.prepare("INSERT INTO fts_chunks(rowid,title,body,chunkId,nodeId,entityType) VALUES(?,?,?,?,?,?)")
         .run(rowid, "挂空", "悬空节点文本", "record:r_c:d", "nav_table_不存在", "record");
     });
-    const rep = await c.cov("off");
+    const rep = c.cov("off");
     expect(rep.counts.C).toBe(1);
     expect(rep.counts.E).toBe(0);
     expect(rep.counts.A).toBe(0);
@@ -157,13 +143,38 @@ describe("check-coverage A-F（每用例独立库）", () => {
     await seedRecord(c.h, "cov_t", "r_d", { cov_f0: "欠向量", cov_f1: "也欠" });
     await enqueue(c.h, { entityType: "record", entityId: "r_d", op: "upsert" });
     const store = await runIndexer(c.h, c.storeKey); // fts-only：无 vec 行
-    const off = await c.cov("off");
+    const off = c.cov("off");
     expect(off.samples).not.toHaveProperty("D");
     expect(off.exitCode).toBe(0);
-    const cloud = await c.cov("cloud");
+    const cloud = c.cov("cloud");
     expect(cloud.counts.D).toBeGreaterThanOrEqual(3); // identity+2 field 全欠
     expect(cloud.exitCode).toBe(0);
     store.close();
     await c.h.cleanup();
   });
+});
+
+describe("check-coverage CLI（pnpm tsx 端到端，脚本调 domain 真源）", () => {
+  it("--json 干净库 exit 0 且输出与 domain 一致", async () => {
+    const c = await freshCtx("cli");
+    await seedRecord(c.h, "cov_t", "r_cli", { cov_f0: "CLI记录" });
+    await enqueue(c.h, { entityType: "record", entityId: "r_cli", op: "upsert" });
+    const store = await runIndexer(c.h, c.storeKey);
+    store.db.pragma("wal_checkpoint(TRUNCATE)");
+    const searchDbPath = c.h.searchPathFor(c.storeKey);
+    const apiRoot = path.resolve(process.cwd());
+    const out = execSync(
+      "pnpm tsx scripts/search/check-coverage.ts --json",
+      {
+        cwd: apiRoot,
+        env: { ...process.env, DATABASE_URL: `file:${c.mainDbPath}`, GX_SEARCH_DB_PATH: searchDbPath },
+        encoding: "utf8",
+      },
+    );
+    const rep = JSON.parse(out) as CoverageReport;
+    expect(rep.counts).toEqual({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
+    expect(rep.exitCode).toBe(0);
+    store.close();
+    await c.h.cleanup();
+  }, 120000);
 });

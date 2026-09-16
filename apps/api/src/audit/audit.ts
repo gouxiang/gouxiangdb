@@ -34,7 +34,16 @@ export type AuditEventName =
   // M4/S5 节点授权策略整单写（需 manage_share；detail 带 upserts/deletes 与前后 diff）
   | "policy_changed"
   // M4/S7 中断/恢复继承（需 manage_share；detail 带 from/to/失访或恢复人数）
-  | "inheritance_changed";
+  | "inheritance_changed"
+  // M5/S9 统一检索管理面（仅 role_owner；detail 脱敏，绝不落 apiKey 明文/向量/查询词）
+  | "search_reindex_started"
+  | "search_reindex_done"
+  | "search_reindex_failed"
+  | "embedding_config_changed"
+  | "embedding_api_key_rotated"
+  | "embedding_api_key_cleared"
+  // S12 状态降级跳变采样（S9 仅预留常量，不打点）
+  | "search_degraded";
 
 export interface AuditInput {
   event: AuditEventName;
@@ -67,6 +76,9 @@ const SENSITIVE_PARTS = [
   "bearer",
   "jwt",
   "cookie",
+  // M5/S9 embedding 凭据（apiKey / api_key_cipher 等任何形态命中即脱敏）。
+  "apikey",
+  "api_key",
 ];
 
 const REDACTED = "[REDACTED]";

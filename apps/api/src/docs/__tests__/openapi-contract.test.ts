@@ -45,6 +45,12 @@ const REQUIRED_PATHS = [
   "/nodes/{id}/inheritance/impact",
   "/nodes/{id}/inheritance",
   "/nodes/{id}/breadcrumb",
+  // M5/S9 统一检索管理面（六端点；仅 GX_M5_SEARCH on/shadow 挂载）。
+  "/admin/reindex",
+  "/admin/search/status",
+  "/admin/embedding/config",
+  "/admin/embedding/api-key/rotate",
+  "/admin/embedding/api-key",
 ];
 
 const REQUIRED_ERROR_CODES = [
@@ -77,6 +83,12 @@ const REQUIRED_ERROR_CODES = [
   "POLICY_ACTION_INVALID",
   "POLICY_FIELD_INVALID",
   "POLICY_BAD_INPUT",
+  // M5/S9 统一检索管理面（只增）。
+  "SEARCH_UNAVAILABLE",
+  "REINDEX_IN_PROGRESS",
+  "REINDEX_FAILED",
+  "EMBEDDING_CONFIG_INVALID",
+  "NEED_CLOUD_CONFIRM",
 ];
 
 describe("S7 openapi.yaml 结构冻结", () => {

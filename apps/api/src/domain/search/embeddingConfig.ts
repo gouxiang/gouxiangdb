@@ -27,6 +27,8 @@ export const SETTING_KEYS = {
   batchSize: "embedding.batch_size",
   timeoutMs: "embedding.timeout_ms",
   fieldChunkCap: "search.field_chunk_cap",
+  /** model/mode/fieldChunkCap 变更后标记需要显式 reindex（两步纪律，§5.4）。 */
+  reindexRequired: "search.reindex_required",
 } as const;
 
 export const DEFAULT_FIELD_CHUNK_CAP = 50;
@@ -131,6 +133,31 @@ export function validateFieldChunkCap(n: number): number {
   return n;
 }
 
+/** 正整数门（batchSize/timeoutMs 等）；非法抛错由配置写入层转 400（S9）。 */
+export function validatePositiveInt(n: number, max: number, field: string): number {
+  if (!Number.isInteger(n) || n < 1 || n > max) {
+    throw new Error(`${field} must be a positive integer in [1, ${max}], got ${String(n)}`);
+  }
+  return n;
+}
+
+/**
+ * S9 PATCH 校验：http(s) URL 合法且非空白。只校验形态，不做可达性探测（健康由 health() 另算）。
+ */
+export function validateHttpUrl(raw: string): string {
+  const v = raw.trim();
+  let url: URL;
+  try {
+    url = new URL(v);
+  } catch {
+    throw new Error("baseURL must be a valid http(s) URL");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("baseURL must use http or https protocol");
+  }
+  return v;
+}
+
 // ===================== app_settings 持久化（主库 Prisma） =======================
 
 export interface EmbeddingConfigView {
@@ -168,8 +195,19 @@ export class EmbeddingConfigStore {
   async setBaseUrl(v: string): Promise<void> { await this.setRaw(SETTING_KEYS.baseUrl, v.trim()); }
   async setModel(v: string): Promise<void> { await this.setRaw(SETTING_KEYS.model, v.trim()); }
   async setBatchSize(n: number): Promise<void> { await this.setRaw(SETTING_KEYS.batchSize, String(n)); }
+  async setTimeoutMs(n: number): Promise<void> { await this.setRaw(SETTING_KEYS.timeoutMs, String(n)); }
   async setFieldChunkCap(n: number): Promise<void> {
     await this.setRaw(SETTING_KEYS.fieldChunkCap, String(validateFieldChunkCap(n)));
+  }
+
+  /** 标记/清除"配置已变、需显式重建"（§5.4 两步：PATCH 只标记，不自动重建）。 */
+  async setReindexRequired(required: boolean): Promise<void> {
+    await this.setRaw(SETTING_KEYS.reindexRequired, required ? "1" : "0");
+  }
+
+  /** 读重建标记；键不存在视为不需要（旧库升级首态）。 */
+  async isReindexRequired(): Promise<boolean> {
+    return (await this.getRaw(SETTING_KEYS.reindexRequired)) === "1";
   }
 
   /** API key 加密落库（绝不明文写 app_settings）。空串等价清除。 */
