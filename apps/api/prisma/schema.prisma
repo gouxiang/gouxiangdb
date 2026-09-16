@@ -557,6 +557,40 @@ model AuthPolicy {
   @@map("auth_policies")
 }
 
+// M5/S1：统一检索 outbox（主库 change_events，手写迁移 20260917090000）。
+// 业务写事务内 enqueueChangeEventTx 合并去重写入；由 S5 indexer worker 认领消费。
+// 本表与实体不建 FK（可重建事件流，删除不影响旧功能）；workspaceId 单工作区恒 ws_default。
+model ChangeEvent {
+  id          String    @id @default(cuid())
+  entityType  String // record | doc | canvas
+  entityId    String
+  workspaceId String    @default("ws_default")
+  // 用 BigInt（SQLite INTEGER 动态 64 位）：record 版本取 Date.now() 毫秒（13 位 > Int 上限）。
+  version     BigInt // doc=contentVersion；record=同事务 Date.now() ms 单调序号
+  op          String // upsert | delete
+  status      String    @default("pending") // pending|processing|done|failed|dead
+  attempts    Int       @default(0)
+  workerId    String?
+  lastError   String?
+  nextRunAt   DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  processedAt DateTime?
+
+  @@index([status, nextRunAt])
+  @@index([entityType, entityId])
+  @@map("change_events")
+}
+
+// M5/S1：手工 KV 配置表（手写迁移 20260917090000）。S1 只建表不读不写；
+// S4 起存 cloud embedding 配置/加密凭据（AES-256-GCM），见 M5 计划 §4.4。
+model AppSetting {
+  k         String   @id
+  v         String
+  updatedAt DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
 // ============================================================================
 // 手写维护表（不经 Prisma 管理，禁止在此添加 model）
 // ============================================================================

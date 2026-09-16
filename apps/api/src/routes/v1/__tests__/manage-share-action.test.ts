@@ -1,8 +1,8 @@
-// M4/S5 manage_share 第五动作位：白名单穷举 + roleAdmin 非法文案 + owner 迁移 20 幂等测试。
+// M4/S5 manage_share 第五动作位：白名单穷举 + roleAdmin 非法文案 + owner 第 20 迁移幂等测试。
 //
 // - ORG_ACTIONS 恰为五枚（真源 shared-types），逐枚经 requireOrgAction 构造不抛"未知动作"；
 //   非法动作必须同步抛（接线纪律）。
-// - 全量 deploy（20 迁移）后 role_owner permissions 恰为五动作固定 JSON 串。
+// - 全量 deploy（M5-S1 后 22 迁移）后 role_owner permissions 恰为五动作固定 JSON 串。
 // - 20260916130000_owner_manage_share 只把"恰为四动作"的 owner 行补到五动作：
 //   连跑恒等（FOUR -> FIVE，再跑不改写）；自定义角色不触碰；THREE 行不被越级补位（须先过迁移 19）。
 
