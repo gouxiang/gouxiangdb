@@ -60,7 +60,11 @@ export async function hydrateEntities(
   for (const rec of records) {
     const ref = refs.find((r) => r.type === "record" && r.entityId === rec.id)!;
     const t = rec.table;
-    const allow = masked[t.id]; // undefined=无 mask 全字段；数组=仅白名单
+    // 键域（§4.7 / A-4）：maskedTableFields 以【nav 节点 id】为键（scope.ts collectMasked...
+    // out[node.id]），即 `nav_table_<tableId>`，与召回侧 temp_field_grant 的 tableNodeId 同源；
+    // record 命中的 ref.nodeId（=chunk c.nodeId=tableNodeId）正是该键。绝不能用裸 Prisma 资源
+    // id t.id 去索引——那会恒查不到、allow 恒 undefined，导致被 mask 的 primaryField 从标题泄漏。
+    const allow = masked[ref.nodeId]; // undefined=该表无 mask 全字段可见；数组=仅白名单字段
     const values = parseFields(rec.fields);
 
     // title：primary 可见且有值用之，否则回退 record id（不泄漏被 mask 的主字段业务值）。
