@@ -130,6 +130,24 @@ export function useMyOrgActions(): { actions: Set<OrgAction>; isLoading: boolean
   return { actions, isLoading: query.isLoading };
 }
 
+/**
+ * 当前登录者是否为工作区所有者（任一有效系统角色 systemKey="owner"）。
+ * 复用 myEffectiveRoles 同一查询缓存，不新增请求。M5 检索管理面（role_owner）据此门控。
+ * 加载未完成时 isOwner=false，调用方应同时看 isLoading，避免在信号缺失时闪现面板。
+ */
+export function useIsWorkspaceOwner(): { isOwner: boolean; isLoading: boolean } {
+  const query = useQuery({
+    queryKey: ORG_QK.myEffectiveRoles,
+    queryFn: async () => (await OrgMembers.myEffectiveRoles()).roles,
+    staleTime: 60_000,
+  });
+  const isOwner = useMemo(
+    () => (query.data ?? []).some((r) => r.systemKey === "owner"),
+    [query.data],
+  );
+  return { isOwner, isLoading: query.isLoading };
+}
+
 // ============ 写操作 ============
 
 export function useOrgDeptMutations() {

@@ -7,15 +7,22 @@ import { useBases } from "../../api/hooks";
 import { useKbList } from "../kb/kb-hooks";
 import { Spinner } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
-import { useMyOrgActions } from "../contacts/contacts-hooks";
+import { useMyOrgActions, useIsWorkspaceOwner } from "../contacts/contacts-hooks";
 import { NavComposer } from "./NavComposer";
+import { EmbeddingSearchPanel } from "../search/EmbeddingSearchPanel";
+import { SearchCoveragePanel } from "../search/SearchCoveragePanel";
+import { ReindexModal } from "../search/ReindexModal";
+import { useReindex, isForbidden, errorCode } from "../search/search-admin-hooks";
+import { adminErrorMessage } from "../search/search-admin-copy";
+import { toast } from "../../components/ui";
 
-type Section = "general" | "contacts" | "nav" | "assets";
+type Section = "general" | "contacts" | "nav" | "search" | "assets";
 
-const SECTIONS: { key: Section; label: string; icon: IconName; desc: string }[] = [
+const SECTIONS: { key: Section; label: string; icon: IconName; desc: string; ownerOnly?: boolean }[] = [
   { key: "general", label: "通用", icon: "settings", desc: "工作区设置中心" },
   { key: "contacts", label: "通讯录", icon: "building", desc: "部门、成员与组织角色" },
   { key: "nav", label: "导航编排", icon: "sitemap", desc: "一级导航与分组管理" },
+  { key: "search", label: "语义检索", icon: "sparkles", desc: "云端语义检索与索引覆盖度", ownerOnly: true },
   { key: "assets", label: "资产", icon: "database", desc: "数据库与知识库入口" },
 ];
 
@@ -86,10 +93,40 @@ export function WorkspaceSettingsPage() {
   const { "*": splat } = useParams();
   const { actions } = useMyOrgActions();
   const canManageMenu = actions.has("manage_menu");
+  // M5 检索管理面仅工作区所有者可见；加载未完成先按非 owner 处理（不闪现面板）。
+  const { isOwner } = useIsWorkspaceOwner();
+  const [reindexOpen, setReindexOpen] = useState(false);
+  const reindex = useReindex();
 
   const initial: Section =
-    splat === "contacts" ? "contacts" : splat === "nav" ? "nav" : splat === "assets" ? "assets" : "general";
+    splat === "contacts"
+      ? "contacts"
+      : splat === "nav"
+        ? "nav"
+        : splat === "search"
+          ? "search"
+          : splat === "assets"
+            ? "assets"
+            : "general";
   const [section, setSection] = useState<Section>(initial);
+
+  const visibleSections = SECTIONS.filter((s) => !s.ownerOnly || isOwner);
+
+  // 非 owner 直戳 search 段时回落到通用，保证不渲染管理面板（403 也在 hooks 静默）。
+  const effectiveSection: Section = section === "search" && !isOwner ? "general" : section;
+
+  const openReindex = () => setReindexOpen(true);
+  const fireReindex = (body: Parameters<typeof reindex.mutate>[0]) =>
+    reindex.mutate(body, {
+      onSuccess: () => {
+        setReindexOpen(false);
+        toast("已开始在后台重建索引", "success");
+      },
+      onError: (e) => {
+        if (!isForbidden(e)) toast(adminErrorMessage(errorCode(e)), "error");
+        setReindexOpen(false);
+      },
+    });
 
   return (
     <div className="flex h-full">
@@ -103,19 +140,19 @@ export function WorkspaceSettingsPage() {
           <Icon name="chevronLeft" size={14} />
           返回
         </button>
-        {SECTIONS.map((s) => (
+        {visibleSections.map((s) => (
           <button
             key={s.key}
             type="button"
             onClick={() => setSection(s.key)}
             className={[
               "relative mx-2 flex items-center gap-2 rounded-gx-sm px-2 py-1.5 text-left text-gx-13 transition-colors",
-              section === s.key
+              effectiveSection === s.key
                 ? "bg-gx-accent-bg font-medium text-gx-accent"
                 : "text-gx-text-primary hover:bg-gx-row-hover",
             ].join(" ")}
           >
-            {section === s.key && <span className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r bg-gx-accent" />}
+            {effectiveSection === s.key && <span className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r bg-gx-accent" />}
             <Icon name={s.icon} size={14} className="shrink-0 opacity-80" />
             {s.label}
           </button>
@@ -183,6 +220,20 @@ export function WorkspaceSettingsPage() {
               </div>
             ))}
 
+          {effectiveSection === "search" && isOwner && (
+            <div className="flex flex-col gap-6">
+              <div>
+                <h2 className="text-gx-18 font-semibold text-gx-text-primary">语义检索</h2>
+                <p className="mt-1 text-gx-13 text-gx-text-tertiary">配置云端语义检索，并查看索引覆盖与健康状态。</p>
+              </div>
+              <EmbeddingSearchPanel onReindex={openReindex} />
+              <div>
+                <h3 className="mb-2 text-gx-14 font-semibold text-gx-text-primary">索引覆盖度</h3>
+                <SearchCoveragePanel onReindex={openReindex} />
+              </div>
+            </div>
+          )}
+
           {section === "assets" && (
             <div className="flex flex-col gap-3">
               <h2 className="mb-1 text-gx-18 font-semibold text-gx-text-primary">资产</h2>
@@ -191,6 +242,11 @@ export function WorkspaceSettingsPage() {
           )}
         </div>
       </div>
+
+      {/* 覆盖度面板/语义面板共用的重建确认弹窗（owner 才挂载到这里） */}
+      {isOwner && (
+        <ReindexModal open={reindexOpen} busy={reindex.isPending} onClose={() => setReindexOpen(false)} onConfirm={fireReindex} />
+      )}
     </div>
   );
 }
