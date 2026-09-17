@@ -9,9 +9,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapE2e, type E2eStack } from "./bootstrap.js";
 import { callTool, type ToolEnvelope } from "./serverHarness.js";
+import { openStdioClient, type SdkConnection } from "./clientHarness.js";
 import { dumpAttackMatrix, recordAttack } from "./attackLog.js";
 
 let stack: E2eStack;
+let stdio: SdkConnection;
 
 /** 单条 IDOR：隐藏 vs 不存在，逐字节对拍。 */
 async function idor(tool: string, args: Record<string, unknown>, idKey: string, hidden: string, ghost: string): Promise<{ text: string; code: string }> {
@@ -27,10 +29,12 @@ async function idor(tool: string, args: Record<string, unknown>, idKey: string, 
 
 beforeAll(async () => {
   stack = await bootstrapE2e("gx-m6-s8-idor-");
+  stdio = await openStdioClient(stack.fx.pat.full.token);
 }, 240_000);
 
 afterAll(async () => {
   dumpAttackMatrix();
+  await stdio?.close();
   await stack?.close();
 });
 
@@ -81,6 +85,34 @@ describe("S8-C5 IDOR 四条：隐藏 vs 不存在逐字节一致（零存在性�
     expect(hit.isError).toBe(true);
     expect(hit.text).toBe(miss.text);
     expect((JSON.parse(hit.text) as { code: string }).code).toBe("FORBIDDEN_RESOURCE");
+  });
+});
+
+describe("S8-C5 stdio 入口 IDOR 两族（doc 读 / canvas 写，第二入口不放宽）", () => {
+  it("stdio：不可见 doc 与不存在 doc 逐字节一致（FORBIDDEN_RESOURCE）", async () => {
+    const argsFor = (docId: string) => ({ docId, format: "markdown" });
+    const hit = await stdio.client.callTool({ name: "doc.get_doc_blocks", arguments: argsFor(stack.fx.ids.hiddenDocId) });
+    const miss = await stdio.client.callTool({ name: "doc.get_doc_blocks", arguments: argsFor(stack.fx.ghost.docId) });
+    const hitText = (hit.content as Array<{ text?: string }>)[0]?.text ?? "";
+    const missText = (miss.content as Array<{ text?: string }>)[0]?.text ?? "";
+    expect(hit.isError).toBe(true);
+    expect(miss.isError).toBe(true);
+    expect(hitText).toBe(missText);
+    expect((JSON.parse(hitText) as { code: string }).code).toBe("FORBIDDEN_RESOURCE");
+    recordAttack({ id: "IDOR-doc", entry: "stdio", input: "get_doc_blocks 不可见 docId vs 不存在 id", expected: "FORBIDDEN_RESOURCE 且两发逐字节一致", actual: "FORBIDDEN_RESOURCE，逐字节一致", verdict: "PASS" });
+  });
+
+  it("stdio：不可见 canvas 直调 commit_elements 与不存在 canvas 同口径", async () => {
+    const argsFor = (docId: string) => ({ docId, ops: [{ op: "element.create", element: { type: "geometry", shape: "rectangle", points: [[0, 0], [1, 1]] } }], confirm: true });
+    const hit = await stdio.client.callTool({ name: "canvas.commit_elements", arguments: argsFor(stack.fx.ids.hiddenCanvasId) });
+    const miss = await stdio.client.callTool({ name: "canvas.commit_elements", arguments: argsFor(stack.fx.ghost.canvasId) });
+    const hitText = (hit.content as Array<{ text?: string }>)[0]?.text ?? "";
+    const missText = (miss.content as Array<{ text?: string }>)[0]?.text ?? "";
+    expect(hit.isError).toBe(true);
+    expect(miss.isError).toBe(true);
+    expect(hitText).toBe(missText);
+    expect((JSON.parse(hitText) as { code: string }).code).toBe("FORBIDDEN_RESOURCE");
+    recordAttack({ id: "IDOR-canvas-write", entry: "stdio", input: "commit_elements 不可见 canvasId vs 不存在 id", expected: "FORBIDDEN_RESOURCE 且两发逐字节一致", actual: "FORBIDDEN_RESOURCE，逐字节一致", verdict: "PASS" });
   });
 });
 

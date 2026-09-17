@@ -138,6 +138,23 @@ describe("S8-C3 AC-M6-3b 画布二期操作：UNSUPPORTED_OPERATION 显式拒绝
     expect(payload.ok).toBe(true);
     recordAttack({ id: "AC-M6-3/doc-write", entry: "stdio", input: "append_blocks（LWW）", expected: "ok:true 成功写入", actual: "ok:true", verdict: "PASS" });
   });
+
+  it("stdio 陈旧 baseVersion -> VERSION_CONFLICT + currentVersion（乐观锁在第二入口同样生效）", async () => {
+    const read = await stdio.client.callTool({
+      name: "doc.get_doc_blocks",
+      arguments: { docId: stack.fx.ids.docId, format: "markdown" },
+    });
+    const cur = (JSON.parse((read.content as Array<{ text?: string }>)[0]?.text ?? "{}") as { contentVersion?: number }).contentVersion ?? 0;
+    const r = await stdio.client.callTool({
+      name: "doc.append_blocks",
+      arguments: { docId: stack.fx.ids.docId, ops: [{ type: "p", text: "stdio 冲突" }], baseVersion: cur - 1 },
+    });
+    expect(r.isError).toBe(true);
+    const body = JSON.parse((r.content as Array<{ text?: string }>)[0]?.text ?? "{}") as { code: string; currentVersion: number };
+    expect(body.code).toBe("VERSION_CONFLICT");
+    expect(body.currentVersion).toBe(cur);
+    recordAttack({ id: "AC-M6-3/409", entry: "stdio", input: `append_blocks baseVersion=${cur - 1}（陈旧）`, expected: "VERSION_CONFLICT + currentVersion", actual: `VERSION_CONFLICT currentVersion=${body.currentVersion}`, verdict: "PASS" });
+  });
 });
 
 describe("S8-C4 AC-M6-4 吊销语义与全量审计", () => {
