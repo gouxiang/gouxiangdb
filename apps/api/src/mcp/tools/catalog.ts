@@ -5,8 +5,8 @@
 
 import { config } from "../../config.js";
 import { tableGetSchema, tableListBases } from "./table.tools.js";
-import { recordListRecords, recordQueryRecords, recordSearch } from "./record.tools.js";
-import { getSchemaShape, listBasesShape, listRecordsShape, pingEchoShape, queryRecordsShape, recordSearchShape } from "./schemas.js";
+import { recordDeleteRecord, recordListRecords, recordQueryRecords, recordSearch } from "./record.tools.js";
+import { deleteRecordShape, getSchemaShape, listBasesShape, listRecordsShape, pingEchoShape, queryRecordsShape, recordSearchShape } from "./schemas.js";
 import { text, type ToolSpec } from "./types.js";
 
 export const TOOL_CATALOG: readonly ToolSpec[] = [
@@ -60,6 +60,15 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     },
     inputShape: queryRecordsShape,
     run: recordQueryRecords,
+  },
+  {
+    meta: {
+      name: "record.delete_record", title: "删除记录",
+      description: "软删一条记录（需 confirm=true；与 REST DELETE 同语义，可由回收站恢复）。",
+      scopes: ["record:write"], family: "table", readOnly: false,
+    },
+    inputShape: deleteRecordShape,
+    run: recordDeleteRecord,
   },
   {
     meta: {

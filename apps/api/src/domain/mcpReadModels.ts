@@ -46,3 +46,12 @@ export async function baseExists(baseId: string): Promise<boolean> {
   const b = await prisma.base.findUnique({ where: { id: baseId }, select: { id: true, deletedAt: true } });
   return !!b && !b.deletedAt;
 }
+
+/** 单记录最小投影（MCP 写前存在性/归属校验用；不做授权判定）。 */
+export async function recordBriefById(recordId: string): Promise<{ id: string; tableId: string; deletedAt: Date | null } | null> {
+  const r = await prisma.record.findUnique({
+    where: { id: recordId },
+    select: { id: true, tableId: true, deletedAt: true },
+  });
+  return r ?? null;
+}

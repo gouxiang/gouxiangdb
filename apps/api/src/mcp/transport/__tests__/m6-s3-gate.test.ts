@@ -100,8 +100,11 @@ describe("S3 四身份 tools/list 快照", () => {
     expect(await toolNames(tokens.readonly!)).toEqual(["ping_echo", "record.list_records", "record.query_records", "table.get_schema", "table.list_bases"]);
   });
 
-  it("③ 读写（scope 更宽）-> 与只读同集合（S4 只落读工具；写工具随 S4 写片）", async () => {
-    expect(await toolNames(tokens.readwrite!)).toEqual(["ping_echo", "record.list_records", "record.query_records", "table.get_schema", "table.list_bases"]);
+  it("③ 读写（scope 更宽）-> 多出写工具 record.delete_record（S4 写片）", async () => {
+    expect(await toolNames(tokens.readwrite!)).toEqual([
+      "ping_echo", "record.delete_record", "record.list_records", "record.query_records",
+      "table.get_schema", "table.list_bases",
+    ]);
   });
 
   it("④ 字段受限 -> 集合与只读同（字段级收窄体现在 schema/出参，见 m6-s4-read-tools）", async () => {

@@ -65,3 +65,10 @@ export const recordSearchShape = {
   mode: z.enum(["auto", "fts", "vector"]).optional(),
   limit: z.number().int().min(1).max(LIMIT_MAX).optional(),
 };
+
+/** record.delete_record：**confirm 必须是字面量 true**（缺省/false 由 SDK 入参校验拦为 -32602）。 */
+export const deleteRecordShape = {
+  tableId: z.string().min(1),
+  recordId: z.string().min(1),
+  confirm: z.literal(true).describe("删除确认；必须是字面量 true（破坏性操作强制显式确认）"),
+};

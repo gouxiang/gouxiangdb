@@ -9,6 +9,10 @@
 import { loadTableFields, parseViewConfig, queryRecords } from "../../domain/recordService.js";
 import { runMcpUnifiedSearch } from "../../domain/mcpSearchBridge.js";
 import { config } from "../../config.js";
+import { recordBriefById } from "../../domain/mcpReadModels.js";
+import { softDeleteRecordTx } from "../../domain/recordWrite.js";
+import { applyReverseDefaultsForChild } from "../../domain/defaults.js";
+import { runWrite, withWriteTx } from "../../db.js";
 import { buildFilterNode, buildSortSpec, InvalidParamsError, type FilterArg } from "./filterMap.js";
 import { deny, text, type ToolCtx, type ToolResult } from "./types.js";
 
@@ -100,4 +104,34 @@ export async function recordSearch(ctx: ToolCtx, args: Record<string, unknown>):
     // 检索不可用（search.db 缺失/损坏、provider 故障）：结构化错误，**不 500 不挂死**。
     return deny("INVALID_PARAMS", `统一检索暂不可用：${err instanceof Error ? err.message : String(err)}`);
   }
+}
+
+/**
+ * record.delete_record（C-6）：confirm 已由 zod4 literal 强制；执行期 enforce `d`（闸门二）；
+ * **软删与 REST DELETE 同语义**（复用 domain/recordWrite.softDeleteRecordTx：软删 + 关联软删 +
+ * sidecar 撤销 + outbox delete），事务边界与 REST 一致（withWriteTx("record.softDelete")）。
+ * 写后无 `r` 时返回精简回执（不回记录内容）。
+ */
+export async function recordDeleteRecord(ctx: ToolCtx, args: Record<string, unknown>): Promise<ToolResult> {
+  if (!ctx.port) return deny("FORBIDDEN_RESOURCE", "权限引擎未接入");
+  const tableId = String(args.tableId ?? "");
+  const recordId = String(args.recordId ?? "");
+  if (!(await ctx.port.can("d", { kind: "table", id: tableId }))) {
+    return deny("FORBIDDEN_RESOURCE", "无权删除该表的记录（或该表不存在）");
+  }
+  const brief = await recordBriefById(recordId);
+  if (!brief || brief.deletedAt !== null || brief.tableId !== tableId) {
+    return deny("FORBIDDEN_RESOURCE", "记录不存在或不属于该表");
+  }
+  await withWriteTx("record.softDelete", (tx) => softDeleteRecordTx(tx, recordId));
+  // 反向联动（与 REST 同口径；失败不阻断删除结果，已提交的软删不回滚）
+  try {
+    await runWrite("defaults.reverseOnDelete", async () => {
+      await applyReverseDefaultsForChild(tableId, [recordId], ctx.subject.userId, { includeDeleted: true });
+    });
+  } catch (err) {
+    console.error("[mcp] reverse recalc on delete failed:", err);
+  }
+  const canRead = await ctx.port.can("r", { kind: "table", id: tableId });
+  return text(JSON.stringify(canRead ? { ok: true, recordId, deleted: true } : { ok: true }));
 }
