@@ -337,6 +337,53 @@ describe("S5 只写身份：精简回执 + 不可见文档四工具全拒", () =
   });
 });
 
+describe("S5 fix：baseVersion 可选（只写身份 LWW 路径 = 缺陷真证明）", () => {
+  // 背景：baseVersion 曾为必填，但只写身份（doc:write 无 doc:read）拿不到 contentVersion，
+  // 等于逼用户为写入额外授予读权限（违反裁决 (b)）。以下两条**不经 prisma 直读版本**，
+  // 只走协议本身，才真正证明「只写身份可用」。
+  it("只写身份不传 baseVersion 调 append_blocks -> 成功、回执恰为 {ok:true}、DB 正文含写入内容", async () => {
+    const r = await callTool("doc.append_blocks", { docId: d1, ops: [{ type: "p", text: "无版本写入" }] }, woToken);
+    expect(r.status).toBe(200);
+    expect(r.result.isError ?? false, `append -> ${r.result.content[0]!.text}`).toBe(false);
+    const payload = JSON.parse(r.result.content[0]!.text) as Record<string, unknown>;
+    expect(payload).toEqual({ ok: true });
+    expect(Object.keys(payload)).toEqual(["ok"]);
+    expect((await docRow()).content).toContain("无版本写入");
+  });
+
+  it("LWW 分支（缺省 baseVersion）下 contentVersion 仍 +1", async () => {
+    const before = await docRow();
+    const r = await callTool("doc.append_blocks", { docId: d1, ops: [{ type: "p", text: "版本递增" }] }, woToken);
+    expect(r.result.isError ?? false).toBe(false);
+    const after = await docRow();
+    expect(after.contentVersion).toBe(before.contentVersion + 1);
+  });
+
+  it("只写身份携带陈旧 baseVersion -> 仍走条件更新：VERSION_CONFLICT + 正确 currentVersion（两分支并存，乐观锁未削弱）", async () => {
+    const cur = await docRow();
+    expect(cur.contentVersion).toBeGreaterThan(0);
+    const r = await callTool("doc.append_blocks", { docId: d1, ops: [{ type: "p", text: "陈旧版本写" }], baseVersion: cur.contentVersion - 1 }, woToken);
+    expect(r.status).toBe(200);
+    expect(r.result.isError).toBe(true);
+    const body = JSON.parse(r.result.content[0]!.text) as { code: string; currentVersion: number };
+    expect(body.code).toBe("VERSION_CONFLICT");
+    expect(body.currentVersion).toBe(cur.contentVersion);
+    expect((await docRow()).content).not.toContain("陈旧版本写");
+  });
+
+  it("update_block 空 patch -> INVALID_PARAMS，且 content/contentVersion 均未变（不空转版本）", async () => {
+    const before = await docRow();
+    const p = await getBlocks();
+    const target = String(p.blocks[0]!.id);
+    const r = await callTool("doc.update_block", { docId: d1, blockId: target, patch: {}, baseVersion: p.contentVersion }, rwToken);
+    expect(r.result.isError).toBe(true);
+    expect(JSON.parse(r.result.content[0]!.text).code).toBe("INVALID_PARAMS");
+    const after = await docRow();
+    expect(after.contentVersion).toBe(before.contentVersion);
+    expect(after.content).toBe(before.content);
+  });
+});
+
 describe("S5 结构完整性（Web 端可打开）", () => {
   it("MCP 写入后正文经 mdToBlocks/blocksToMd 往返稳定（序列化幂等，无 md 漂移）", async () => {
     const stored = (await docRow()).content;

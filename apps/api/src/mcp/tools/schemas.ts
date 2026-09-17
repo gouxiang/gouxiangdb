@@ -150,12 +150,21 @@ export const getDocBlocksShape = {
     .describe("按块序号切片（0-based 闭区间 [start,end]；越界安全截断，不报错）"),
 };
 
-/** doc.append_blocks：afterBlockId 缺省=末尾；ops ≤100；单事务一次 contentVersion+1；需 baseVersion 乐观锁。 */
+/**
+ * doc 族三个写 shape 的 `baseVersion` **为可选**（两个理由，缺一不可）：
+ *   1. 裁决 (b)「只写身份必须可用」：doc:write 而无 doc:read 的主体拿不到 get_doc_blocks，
+ *      也就无从得知 contentVersion；若强制必填，等于逼用户为写入额外授予读权限，工具集成死工具集。
+ *   2. 与 REST 契约一致：`saveDocContentTx` 的 `baseVersion?: number` 缺省即 last-write-wins
+ *      （REST `PUT /docs/:docId/content`：「旧客户端未携带版本 -> 保持 last-write-wins，版本号照常递增」）。
+ * 携带（陈旧）baseVersion 时仍走条件更新 -> 冲突回 VERSION_CONFLICT + currentVersion（乐观锁未被削弱）。
+ */
+
+/** doc.append_blocks：afterBlockId 缺省=末尾；ops ≤100；单事务一次 contentVersion+1；baseVersion 可选乐观锁。 */
 export const appendBlocksShape = {
   docId: z.string().min(1),
   afterBlockId: z.string().min(1).optional().describe("在该块 id 之后插入（缺省=追加到文档末尾）"),
   ops: z.array(blockOpShape).min(1).max(MCP_LIMITS.WRITE_OPS_MAX).describe(`要追加的块操作（≤${MCP_LIMITS.WRITE_OPS_MAX}）`),
-  baseVersion: z.number().int().min(0).describe("读取时的 contentVersion（乐观锁）"),
+  baseVersion: z.number().int().min(0).optional().describe("读取时的 contentVersion（乐观锁）；缺省=last-write-wins，与 REST PUT /docs/:docId/content 同口径"),
 };
 
 /** doc.update_block：patch 仅 text/checked/align；align 仅走注释通道（写 Block.align，不手写 md）。 */
@@ -169,13 +178,13 @@ export const updateBlockShape = {
       align: z.enum(["left", "center", "right"]).nullable().optional(),
     })
     .describe("要修改的块属性（至少一项）"),
-  baseVersion: z.number().int().min(0),
+  baseVersion: z.number().int().min(0).optional().describe("读取时的 contentVersion（乐观锁）；缺省=last-write-wins，与 REST PUT /docs/:docId/content 同口径"),
 };
 
 /** doc.delete_blocks：原子批删（任一 id 不存在整批失败）；confirm 必须字面量 true。 */
 export const deleteBlocksShape = {
   docId: z.string().min(1),
   blockIds: z.array(z.string().min(1)).min(1).max(MCP_LIMITS.WRITE_OPS_MAX).describe(`要删除的块 id（≤${MCP_LIMITS.WRITE_OPS_MAX}）`),
-  baseVersion: z.number().int().min(0),
+  baseVersion: z.number().int().min(0).optional().describe("读取时的 contentVersion（乐观锁）；缺省=last-write-wins，与 REST PUT /docs/:docId/content 同口径"),
   confirm: z.literal(true).describe("删除确认；必须是字面量 true（破坏性操作强制显式确认）"),
 };

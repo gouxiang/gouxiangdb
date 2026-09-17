@@ -8,7 +8,8 @@
 //   1. AI 不得自带块 id——append 的 op 仅透传属性，块由服务端 newBlock 构造；对外块标识按位置稳定派生
 //      （见 withStableIds），入参 shape 已无 id。
 //   2. align 只走注释通道——只写 Block.align，由 blocksToMd 序列化为 `<!-- align:x -->`，绝不手写 md。
-//   3. 乐观锁——写操作一律携带 baseVersion，冲突回 isError + `{code:"VERSION_CONFLICT", currentVersion}`（HTTP 200）。
+//   3. 乐观锁可选——写操作可携带 baseVersion，冲突回 isError + `{code:"VERSION_CONFLICT", currentVersion}`（HTTP 200）；
+//      缺省即 last-write-wins（与 REST PUT 同口径），使「只写身份」（无 doc:read）不被逼授予读权限（裁决 (b)）。
 //   4. 写而无 r 的主体 -> 精简回执 `{ok:true}`（不回 contentVersion，防派生值/时序泄漏）。
 
 import { blocksToMd, mdToBlocks, newBlock, type Block, type BlockType } from "@gx/blocks";
@@ -56,7 +57,7 @@ function collectBytes(v: unknown): number {
  * saveDocContentTx 条件更新（一次 contentVersion+1），事务名与 REST 一致（"doc.content.save"）。
  * 与 REST PUT 完全同一事务体、同一乐观锁语义、同一检索投影。
  */
-async function commitDoc(ctx: ToolCtx, doc: DocBrief, blocks: Block[], baseVersion: number): Promise<ToolResult> {
+async function commitDoc(ctx: ToolCtx, doc: DocBrief, blocks: Block[], baseVersion: number | undefined): Promise<ToolResult> {
   const nextMd = blocksToMd(blocks);
   // 文档级硬上限（与 REST 10MB 同口径；批级 100KB 已在上游按入参口径先行拦截）
   if (Buffer.byteLength(nextMd, "utf8") > MCP_LIMITS.DOC_CANVAS_MAX_BYTES) {
@@ -137,7 +138,9 @@ export async function docAppendBlocks(ctx: ToolCtx, args: Record<string, unknown
   if ("denied" in g) return g.denied;
   const doc = g.doc;
   const ops = (args.ops ?? []) as Array<Record<string, unknown>>;
-  const baseVersion = Number(args.baseVersion);
+  // 缺省（未携带）-> undefined（last-write-wins，与 REST 同口径）。**绝不可用 Number(undefined)**
+  // ——那得 NaN，而 saveDocContentTx 判 `baseVersion !== undefined`，NaN 会误入条件更新分支恒冲突。
+  const baseVersion = typeof args.baseVersion === "number" ? args.baseVersion : undefined;
   // 批文本上限（100KB，UTF-8 口径服务端实测——zod 的 max 只按字符数）
   if (collectBytes(ops) > MCP_LIMITS.WRITE_TEXT_MAX_BYTES) {
     return deny("INVALID_PARAMS", `批文本超过 ${MCP_LIMITS.WRITE_TEXT_MAX_BYTES} 字节上限`);
@@ -164,7 +167,11 @@ export async function docUpdateBlock(ctx: ToolCtx, args: Record<string, unknown>
   const doc = g.doc;
   const blockId = String(args.blockId ?? "");
   const patch = (args.patch ?? {}) as { text?: unknown; checked?: unknown; align?: unknown };
-  const baseVersion = Number(args.baseVersion);
+  // 空 patch 直接拒绝：否则会白白 contentVersion+1 并发一条 outbox upsert（触发无谓重索引）
+  if (Object.keys(patch).length === 0) return deny("INVALID_PARAMS", "patch 至少需包含一项（text/checked/align）");
+  // 缺省（未携带）-> undefined（last-write-wins，与 REST 同口径）。**绝不可用 Number(undefined)**
+  // ——那得 NaN，而 saveDocContentTx 判 `baseVersion !== undefined`，NaN 会误入条件更新分支恒冲突。
+  const baseVersion = typeof args.baseVersion === "number" ? args.baseVersion : undefined;
   if (collectBytes(patch) > MCP_LIMITS.WRITE_TEXT_MAX_BYTES) {
     return deny("INVALID_PARAMS", `批文本超过 ${MCP_LIMITS.WRITE_TEXT_MAX_BYTES} 字节上限`);
   }
@@ -188,7 +195,9 @@ export async function docDeleteBlocks(ctx: ToolCtx, args: Record<string, unknown
   if ("denied" in g) return g.denied;
   const doc = g.doc;
   const blockIds = (args.blockIds ?? []) as string[];
-  const baseVersion = Number(args.baseVersion);
+  // 缺省（未携带）-> undefined（last-write-wins，与 REST 同口径）。**绝不可用 Number(undefined)**
+  // ——那得 NaN，而 saveDocContentTx 判 `baseVersion !== undefined`，NaN 会误入条件更新分支恒冲突。
+  const baseVersion = typeof args.baseVersion === "number" ? args.baseVersion : undefined;
   const all = withStableIds(mdToBlocks(doc.content));
   const present = new Set(all.map((b) => b.id));
   const missing = blockIds.filter((id) => !present.has(id));
