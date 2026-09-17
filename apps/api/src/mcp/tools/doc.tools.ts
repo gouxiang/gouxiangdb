@@ -125,7 +125,16 @@ export async function docGetDocBlocks(ctx: ToolCtx, args: Record<string, unknown
   );
 }
 
-/** 剥掉 type（已作为 newBlock 首参），其余字段透传给 newBlock；id 不在入参 shape 内（服务端生成）。 */
+/**
+ * 剥掉 type（已作为 newBlock 首参），其余字段透传给 newBlock；id 不在入参 shape 内（服务端生成）。
+ *
+ * ⚠ 依赖耦合（勿破坏）：`newBlock` 的实现是 `{ id: uid(), type, ...partial }`，`...partial` 在尾位会**覆盖**
+ * 服务端生成的 id。本函数因此**只对已通过 `blockOpShape` 校验的 op 调用**：该 shape 无 `id` 键且 zod4 默认
+ * **丢弃**未知键，故 id 不可能进入 rest。**若将来把 `blockOpShape` 改成 looseObject/passthrough，此不变式即破**
+ * （详见 schemas.ts 中 blockOpShape 的守卫注释）。
+ * 影响面说明：`blocksToMd` 不序列化 id，故即便覆盖也不会污染落库正文——真正需要守住的是"AI 决定块 id"这一
+ * 语义口径（M6 计划 §402 明令禁止），故不为它加运行期防线，而是把约束钉在 shape 定义处。
+ */
 function blockPartialOf(op: Record<string, unknown>): Partial<Block> {
   const { type: _t, ...rest } = op;
   return rest as Partial<Block>;

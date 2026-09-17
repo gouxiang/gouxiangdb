@@ -122,6 +122,13 @@ void _assertBlockTypesComplete;
 /**
  * 单个「块操作」入参（append_blocks 之 ops 元素）。
  * **刻意不含 `id`**：块 id 由服务端 `newBlock` 生成，AI 不得自带插入 id（严禁凭空指定/覆盖块 id）。
+ *
+ * ⚠ 守卫（勿改成 looseObject / passthrough / strictObject 语义变更）：
+ *   `z.object` 默认**丢弃**未知键（已实测：`blockOpShape.parse({type:"p",id:"evil"})` 结果无 `id` 键），
+ *   这正是"AI 不得自带 id"的实现依据——下游 `doc.tools.ts:blockPartialOf` 把 op 余下字段直接透传给
+ *   `newBlock`（其实现为 `{ id: uid(), type, ...partial }`，`...partial` 在尾位**会覆盖**服务端 id）。
+ *   一旦本 shape 改为 looseObject/passthrough，未知键将透传，该不变式即破。
+ *   回归护栏：`__tests__/m6-s5-doc-tools.test.ts` 有一例直接断言 parse 后无 `id` 键。
  */
 export const blockOpShape = z.object({
   type: z.enum(BLOCK_TYPES).describe("块类型"),

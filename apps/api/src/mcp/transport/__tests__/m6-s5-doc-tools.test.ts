@@ -12,6 +12,7 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { blocksToMd, mdToBlocks } from "@gx/blocks";
+import { blockOpShape } from "../../tools/schemas.js";
 import { createNavNodes, createPolicies } from "../../../domain/authz/__tests__/engineHarness.js";
 import { nodeId } from "../../../domain/nav/backfill.js";
 
@@ -194,7 +195,16 @@ describe("S5 doc.append_blocks", () => {
     expect(JSON.parse(r.result.content[0]!.text).code).toBe("INVALID_PARAMS");
   });
 
-  it("AI 不得自带 id：op 内 id 被忽略，服务端生成新 id", async () => {
+  // 说明：原先此例只断言"写入后块 id 不是注入值"，但 getBlocks() 走 withStableIds 后 id 恒为 b<seq>，
+  // 无论 zod 是否丢弃 id 都成立 —— 属**同义反复**（证明不了它声称的东西）。改为直击 shape 层真断言。
+  it("AI 不得自带 id：blockOpShape parse 后无 id 键（zod 默认 strip，是权威实现依据）", () => {
+    const parsed = blockOpShape.parse({ type: "p", text: "带毒 id", id: "evil_block_id" }) as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(parsed, "id")).toBe(false);
+    // 顺带锁住"少一个必填/多一个已知键"都不至于被静默接受
+    expect(parsed.type).toBe("p");
+  });
+
+  it("AI 不得自带 id：走协议写入的块 id 由服务端按位置派生（端到端补充）", async () => {
     const p = await getBlocks();
     const r = await callTool("doc.append_blocks", { docId: d1, ops: [{ type: "p", text: "带毒 id", id: "evil_block_id" }], baseVersion: p.contentVersion }, rwToken);
     expect(r.result.isError ?? false).toBe(false);
