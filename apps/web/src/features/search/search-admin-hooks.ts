@@ -15,10 +15,12 @@ export const SEARCH_ADMIN_QK = {
   status: ["m5", "search-status"] as const,
 };
 
-/** 从 ApiError 信封取后端错误码（{error,code}）。 */
+/** 从 ApiError 信封取后端错误码（{error,code}；兼容个别经 details 透传的形态）。 */
 export function errorCode(e: unknown): M5AdminErrorCode | string | null {
-  if (e instanceof ApiError) return ((e.body as { code?: string }).code ?? null);
-  return null;
+  if (!(e instanceof ApiError)) return null;
+  const body = e.body as { code?: unknown; details?: { code?: unknown } };
+  const code = body?.code ?? body?.details?.code;
+  return typeof code === "string" ? code : null;
 }
 
 export function isForbidden(e: unknown): boolean {
