@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertNoFullRecall, decideMemory, estimateVectorBytes, kiloLabel, linearFit, parseBenchArgs,
-  parseNumberList, planFamilyMix, roundStats, scaleLabel, smoothChunkLimit,
+  parseNumberList, planFamilyMix, pointsAtCap, primaryCap, roundStats, scaleLabel, smoothChunkLimit,
 } from "../m5-bench-lib.js";
 
 describe("planFamilyMix：三族 chunk 目标", () => {
@@ -123,5 +123,33 @@ describe("CLI 解析与规模标签", () => {
     expect(r.maxMs).toBe(5);
     expect(r.minMs).toBe(1);
     expect(r.rounds).toBe(5);
+  });
+});
+
+describe("scope-caps 主口径与取样（S13 杠杆扫描）", () => {
+  const combos = [
+    {
+      chunks: 10_000, dim: 512,
+      scopes: [{ cap: 50, rounds: { p95Ms: 610 } }, { cap: 5_000, rounds: { p95Ms: 646 } }],
+    },
+    { chunks: 100_000, dim: 512, skipped: { reason: "insufficient_disk" } },
+    {
+      chunks: 10_000, dim: 1536,
+      scopes: [{ cap: 50, rounds: { p95Ms: 611 } }, { cap: 5_000, rounds: { p95Ms: 677 } }],
+    },
+  ];
+
+  it("primaryCap = 最大值", () => {
+    expect(primaryCap([50, 500, 5000])).toBe(5000);
+    expect(primaryCap([500])).toBe(500);
+    expect(primaryCap([])).toBe(0);
+  });
+
+  it("pointsAtCap：按 cap 取值、按 dim 过滤、跳过 skipped 档", () => {
+    expect(pointsAtCap(combos, 5000, 512)).toEqual([{ chunks: 10_000, p95Ms: 646 }]);
+    expect(pointsAtCap(combos, 5000)).toEqual([
+      { chunks: 10_000, p95Ms: 646 }, { chunks: 10_000, p95Ms: 677 },
+    ]);
+    expect(pointsAtCap(combos, 99999, 512)).toEqual([]);
   });
 });

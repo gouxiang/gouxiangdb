@@ -216,6 +216,31 @@ export function roundStats(ms: readonly number[]): RoundStats {
   return { p95Ms: p.p95, p50Ms: p.p50, minMs: p.min, maxMs: p.max, meanMs: p.mean, rounds: ms.length };
 }
 
+/** 主口径 cap = scope-caps 最大值（外推/Tier-S 用；空则 0）。 */
+export function primaryCap(scopeCaps: readonly number[]): number {
+  return scopeCaps.reduce((m, c) => Math.max(m, c), 0);
+}
+
+/** 某档组合的结构最小形（避免 m5-bench-lib 依赖 types 形成环）。 */
+export interface ComboLike {
+  chunks: number;
+  dim: number;
+  skipped?: unknown;
+  scopes?: ReadonlyArray<{ cap: number; rounds: { p95Ms: number } }>;
+}
+
+/** 取主口径 cap 下的 (chunks, p95) 点（用于线性外推；跳过被 skip 的档）。 */
+export function pointsAtCap(combos: readonly ComboLike[], cap: number, dim?: number): Array<{ chunks: number; p95Ms: number }> {
+  const pts: Array<{ chunks: number; p95Ms: number }> = [];
+  for (const c of combos) {
+    if (c.skipped || !c.scopes) continue;
+    if (dim !== undefined && c.dim !== dim) continue;
+    const s = c.scopes.find((x) => x.cap === cap);
+    if (s) pts.push({ chunks: c.chunks, p95Ms: s.rounds.p95Ms });
+  }
+  return pts;
+}
+
 /** 字节 -> MiB（报告/日志可读）。 */
 export function miB(bytes: number): number {
   return Math.round(bytes / 1024 / 1024);
