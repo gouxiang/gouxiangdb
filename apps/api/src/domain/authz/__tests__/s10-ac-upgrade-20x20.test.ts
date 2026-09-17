@@ -107,9 +107,15 @@ afterAll(async () => {
   await h.cleanup();
 });
 
+/** owner 调用头的记忆化缓存（见 engineAllowsR 内的说明）。 */
+let ownerHeaders: Record<string, string> | null = null;
+
 /** owner 调 effective 查 target 对节点的 r（owner 仅作调用方，不影响 target 判定）。 */
 async function engineAllowsR(user: string, node: string): Promise<boolean> {
-  const res = await h.app.request(`/api/v1/nodes/${node}/effective?userId=${user}`, { headers: await h.auth("owner") });
+  // owner 头记忆化：400 格会让原写法重签 400 次 JWT（与判定无关的纯开销）。
+  // token 只在单个 it 内存活、远长于测试时长，故按调用方固定签一次即安全。
+  ownerHeaders ??= await h.auth("owner");
+  const res = await h.app.request(`/api/v1/nodes/${node}/effective?userId=${user}`, { headers: ownerHeaders });
   if (res.status === 404 || res.status === 403) return false;
   expect(res.status, `${user}@${node}`).toBe(200);
   const body = await json<{ perAction: Array<{ action: string; allowed: boolean }> }>(res);
@@ -133,7 +139,10 @@ describe("20 主体 x 20 节点：引擎 r 判定 == 旧三表 oracle（升级 0
     expect(allowCells).toBeLessThan(N_USER * 20);
   });
 
-  it("400 格逐对全等（确定性选种，不抽样）", async () => {
+  // 显式放宽本单例预算：400 格逐对真 HTTP × 每次约 30-40 次串行 SQLite 往返，空闲态实测约 3.25s，
+  // 全量并行下 CPU/IO 争用可放大 2-3× 越过 5s 默认预算。断言路径确定性（固定 seed、无 Date.now/Math.random），
+  // 超时轮只是同一序列被截断的前缀，属**负载**而非正确性，故按需放宽单例预算（不动全局 testTimeout）。
+  it("400 格逐对全等（确定性选种，不抽样）", { timeout: 30000 }, async () => {
     const allNodes = buildNodes();
     const mismatches: string[] = [];
     for (const u of USERS) {
