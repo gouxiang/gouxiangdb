@@ -1,0 +1,5 @@
+# Playwright e2e（M6/S6b）本地产物，不入库（trace/screenshot/video 保留在失败时本地查看）
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

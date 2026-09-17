@@ -2,6 +2,11 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
+// vitest 配置（M6/S6b）：单测只认 *.test.*；Playwright e2e（*.spec.ts，import
+// @playwright/test）必须排除，否则被 vitest 当普通套件收集会报「Playwright Test did
+// not expect test()」并使 pnpm -r run test 失败。e2e 仅由 `test:e2e`(playwright) 运行。
+/// <reference types="vitest/config" />
+
 // 部署子路径（飞牛 fnOS 统一网关）：
 //   VITE_BASE_PATH=/app/gouxiangdb → base 归一为 "/app/gouxiangdb/"
 // 未设置、空白或为 "/" 时维持根路径部署现状（base="/"）。纯 node 归一，不引依赖。
@@ -46,5 +51,10 @@ export default defineConfig({
     // 拦截（≥50 文件/turn 触发 SAFE_DELETE_BULK_CONFIRM_REQUIRED）。
     sourcemap: false,
     emptyOutDir: true,
+  },
+  test: {
+    // 只收 *.test.*（src 下纯函数/SSR 单测）；显式排除 e2e（Playwright spec）与产物。
+    include: ["src/**/*.test.{ts,tsx}"],
+    exclude: ["**/node_modules/**", "**/dist/**", "e2e/**", "playwright-report/**"],
   },
 });
