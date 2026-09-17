@@ -39,6 +39,8 @@ tags:
   - name: nav-groups
   - name: nodes
   - name: search-admin
+  # M6/S9 增补：PAT 管理面（/api/v1/pats）。协议面 /mcp 非 REST，见文末 x-mcp 扩展节。
+  - name: pats
 
 components:
   securitySchemes:
@@ -96,6 +98,27 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    # M6/S9 增补：PAT 管理面专用响应。
+    PatNotFound:
+      description: 令牌不存在或非本人所有（统一 404，不泄漏存在性）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    McpRateLimited:
+      description: 触发 MCP 面独立敏感档限流（PAT 创建/删除与 /mcp 入口各自独立窗口）
+      headers:
+        Retry-After:
+          description: 建议重试等待秒数（当前固定窗剩余时间）
+          schema: { type: integer, example: 60 }
+        X-RateLimit-Limit:
+          description: 本窗口配额上限
+          schema: { type: integer, example: 30 }
+        X-RateLimit-Remaining:
+          description: 本窗口剩余可用次数
+          schema: { type: integer, example: 0 }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
   schemas:
     Error:
       type: object
@@ -142,6 +165,13 @@ components:
             - REINDEX_FAILED
             - EMBEDDING_CONFIG_INVALID
             - NEED_CLOUD_CONFIRM
+            # M6/S9 鉴权 MCP 面专用码（只增）：
+            - PAT_NOT_FOUND
+            - PAT_NAME_INVALID
+            - PAT_SCOPE_INVALID
+            - PAT_EXPIRY_INVALID
+            - MCP_RATE_LIMITED
+            - MCP_PAYLOAD_TOO_LARGE
           description: >-
             未显式指定机器码时按 HTTP 状态回落（400->BAD_REQUEST 等）；
             NAV_* 与 MOVE_NEEDS_CONFIRM 为导航域专用码；
@@ -153,6 +183,11 @@ components:
             INHERITANCE_CONFIRM_REQUIRED/NODE_NOT_INHERITABLE 见继承端点；POLICY_CONDITION_UNSUPPORTED 为
             A-7 行级条件预留（本期不实现：upsert 不接受/不持久化 conditions 键，P1 启用时非 null 一律 400 本码）。
             POLICY_* 六枚为策略写校验细码，仅 /nodes/{id}/policies PUT 产出。
+            M6/S9 鉴权 MCP 面五枚（只增）：PAT_NOT_FOUND=令牌不存在或非本人（404，不泄漏存在性）；
+            PAT_NAME_INVALID/PAT_SCOPE_INVALID/PAT_EXPIRY_INVALID=创建 PAT 入参校验（400，
+            PatValidationError 的 code 原样透传）；MCP_RATE_LIMITED=PAT 创建/删除敏感档限流
+            （429，附 Retry-After 与 X-RateLimit-*；/mcp 入口同码，见文末 x-mcp）。
+            /mcp 协议面不走本文档的 REST 语义，工具面结构化拒绝码见 x-mcp.tool-error-envelope。
         path: { type: string, description: 仅顶层 404 notFound 附带 }
     Meta:
       type: object
@@ -937,6 +972,73 @@ components:
       required: [apiKey]
       properties:
         apiKey: { type: string, description: 非空字符串，AES-GCM 加密落库 }
+
+    # ----- M6/S9 鉴权 MCP 面：PAT 管理（/api/v1/pats） -----
+    PatScope:
+      type: string
+      enum: [record:read, record:write, doc:read, doc:write, canvas:read, canvas:write]
+      description: >-
+        PAT 作用域六位（创建时的粗筛闸门一：无 record:write 则写工具不入册）。
+        作用域只做族级粗筛，资源级与字段级判定归 M4 权限引擎，令牌不携带任何资源授权。
+    PatCreateRequest:
+      type: object
+      required: [name, scopes]
+      properties:
+        name: { type: string, maxLength: 60, description: 令牌备注名（去首尾空白后非空，长度上限 60） }
+        scopes:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/PatScope' }
+          description: 六位子集，非空；重复项去重；空数组或含未知位即 400 PAT_SCOPE_INVALID
+        expiresInDays:
+          type: integer
+          nullable: true
+          enum: [30, 90, 365, null]
+          description: 30/90/365 天，或显式 null 表示永不过期；键缺省时取默认 90 天；其余取值 400 PAT_EXPIRY_INVALID
+    PatCreateResponse:
+      type: object
+      required: [id, name, scopes, token, tokenPrefix, expiresAt, createdAt]
+      properties:
+        id: { type: string, description: 令牌行 id（吊销时用它，不用明文） }
+        name: { type: string }
+        scopes:
+          type: array
+          items: { $ref: '#/components/schemas/PatScope' }
+        token:
+          type: string
+          description: >-
+            完整 PAT 明文（gxpat_ 起头 + 24 字节随机 base64url）。
+            仅创建响应返回这一次；之后任何端点、列表、审计、日志均不再出现，服务端只存 sha256 摘要。
+        tokenPrefix: { type: string, description: 明文前 14 字符（gxpat_ 加 8 随机字符），仅供列表辨识，不足以反推令牌 }
+        expiresAt: { type: string, format: date-time, nullable: true, description: null 表示永不过期 }
+        createdAt: { type: string, format: date-time }
+      description: 创建响应不含 revokedAt/lastUsedAt（新令牌尚无这两项状态），列表用 PatMetadata。
+    PatMetadata:
+      type: object
+      required: [id, name, tokenPrefix, scopes, expiresAt, revokedAt, lastUsedAt, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        tokenPrefix: { type: string, description: 前 14 字符；响应绝不含 token 或 tokenHash }
+        scopes:
+          type: array
+          items: { $ref: '#/components/schemas/PatScope' }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 非空即已吊销（软吊销，不物删行）；该令牌的下一次 /mcp 请求即 401
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 最近一次经 /mcp 成功认证的时间；进程内按 patId 节流 60 秒落库，可能滞后
+        createdAt: { type: string, format: date-time }
+    PatList:
+      type: array
+      description: 本人全部 PAT 元数据（按 createdAt 降序；仅本人行，不 join 任何关系）
+      items: { $ref: '#/components/schemas/PatMetadata' }
 
 security:
   - bearerAuth: []
@@ -1789,3 +1891,284 @@ paths:
           description: 已清除
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  # ================= M6/S9 鉴权 MCP 面 REST 段（随 GX_ENTERPRISE_ORG 挂载；off 全 404） =================
+  # 完整路径为 /api/v1/pats（servers[0].url 已含 /api/v1，故此处写相对路径，与上方各段一致）。
+  # 创建/删除走独立敏感档（默认 30 次/60 秒/人）；GET 只读列表不设该档，由全局 /api 兜底档覆盖。
+  /pats:
+    get:
+      tags: [pats]
+      summary: 列出本人全部 PAT 元数据（绝不返回 token / tokenHash）
+      description: |
+        仅返回调用者本人创建的令牌（userId 过滤，一次 findMany 按 createdAt 降序，不 join 关系以防 N+1）。
+        已吊销/已过期/未使用的令牌均在列表中，用 revokedAt / expiresAt / lastUsedAt 区分状态。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PatList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [pats]
+      summary: 创建 PAT，明文仅此一次返回（独立敏感档限流）
+      description: |
+        校验通过后落库并回明文一次。审计事件 mcp_pat_create，detail 只含 patId / name / prefix / scopes / expiresAt；
+        prefix 为 14 字符不可认证段，完整明文绝不落库、不落日志、不入审计。
+        超限时 429 code=MCP_RATE_LIMITED，附 Retry-After 与 X-RateLimit-*（窗口内每次调用都回 X-RateLimit-*，便于客户端自适应）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PatCreateRequest' }
+      responses:
+        '201':
+          description: 已创建（token 仅本响应可见）
+          headers:
+            X-RateLimit-Limit:
+              description: 本窗口配额上限（默认 30）
+              schema: { type: integer, example: 30 }
+            X-RateLimit-Remaining:
+              description: 本窗口剩余可用次数
+              schema: { type: integer, example: 29 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PatCreateResponse' }
+        '400':
+          description: 入参校验失败（code=PAT_NAME_INVALID / PAT_SCOPE_INVALID / PAT_EXPIRY_INVALID）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/McpRateLimited' }
+  /pats/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string }, description: PAT 行 id（不是明文令牌） }
+    delete:
+      tags: [pats]
+      summary: 吊销 PAT（本人限定；非本人/不存在/已吊销统一 404，不泄漏存在性）
+      description: |
+        置 revokedAt 软吊销，不物删行（保留审计可追溯）。生效即时：该令牌的下一次 /mcp 请求即 401
+        （每次请求重认证、无会话缓存，无需等待任何 TTL）。审计事件 mcp_pat_revoke。
+        创建与删除共用同一敏感档（30 次/60 秒/人）。
+      responses:
+        '204':
+          description: 已吊销（无响应体）
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/PatNotFound' }
+        '429': { $ref: '#/components/responses/McpRateLimited' }
+
+# ============================================================================================
+# x-mcp：M6 鉴权 MCP 服务（协议面非 REST，故不进 paths；两个入口共用同一套认证/闸门/工具/审计）
+# ============================================================================================
+x-mcp:
+  summary: M6 鉴权 MCP 服务：PAT 边缘认证 + M4 可见集闸门 + 工具语言层 + 审计四事件
+  why-not-in-paths: |
+    /mcp 是 JSON-RPC 2.0 over Streamable HTTP 的无状态直桥，不是 REST 资源端点：
+    没有路径变量、成功也是 HTTP 200 承载业务失败、错误信封是 JSON-RPC 而不是 {error, code}。
+    硬写成 paths 条目会伪造 REST 语义，故以扩展键表达；REST 部分（PAT 管理）仍在上方 /pats 正常表达。
+  spec-ref: >-
+    docs/planning/phase2/M6-implementation-plan.md（§4.1 中间件序、§4.3 认证口径、
+    §4.5 工具契约、§5.3 限流双键、§6 错误码只增）。
+    出口证据见 docs/baseline/m6-connectivity.md；运维处置见 docs/runbooks/mcp.md；
+    接入说明见 docs/guides/mcp-client-onboarding.md。
+  gate: >-
+    随 GX_ENTERPRISE_ORG 门控（与 /api/v1/pats 同门控，C-5 定稿）：off 时 /mcp 不挂载，
+    请求落到顶层 404 NOT_FOUND（不是 401，这一差异用于区分"未升级"与"未认证"）。
+  auth:
+    header: 'Authorization: Bearer <PAT 明文>'
+    scheme: >-
+      本期仅 Bearer PAT（个人访问令牌）。未来 OAuth 只在同一认证函数留"Bearer PAT 或 Bearer JWT"分支扩展点，
+      不预埋端点、不预埋表。
+    per-request: 每请求独立重认证，无会话信任、无会话缓存；故吊销/停用/改权限在下一次请求即生效。
+    failure-response: >-
+      HTTP 401，头 WWW-Authenticate: Bearer realm="gouxiangdb-mcp"，
+      体 {"jsonrpc":"2.0","error":{"code":-32001,"message":<文案>},"id":null}（id 恒为 null）。
+    states:
+      - id: missing_bearer
+        trigger: 无 Authorization 头，或值不是 Bearer 前缀
+        message: Unauthorized
+        distinguishable: false
+      - id: not_pat_prefix
+        trigger: Bearer 值缺少 gxpat_ 前缀（不查库，防令牌枚举）
+        message: Unauthorized
+        distinguishable: false
+      - id: unknown_token
+        trigger: sha256 摘要查不到该令牌（对 dummy 摘要做一次等长比较以抹平时序差异）
+        message: Unauthorized
+        distinguishable: false
+      - id: revoked
+        trigger: 令牌行 revokedAt 非空
+        message: Token revoked
+        distinguishable: true
+      - id: expired
+        trigger: 令牌行 expiresAt 已过
+        message: Token expired
+        distinguishable: true
+      - id: account_disabled
+        trigger: 令牌行有效但所属用户非 ACTIVE（C-4 纵深防御）
+        message: Account disabled
+        distinguishable: true
+    wording: >-
+      拿不出有效令牌的三种情况响应体逐字节一致；已过期 / 已吊销 / 账号停用各自可辨识。
+      依据 M6 实施计划 §4.3（校验顺序）与 §4.1（边缘口径）。逐字节一致性由 e2e 对拍，
+      证据见 docs/baseline/m6-connectivity.md §6。
+    audit: >-
+      认证失败必审计：ip + 14 字符明文前缀 + reason（前缀只用于"同一坏令牌反复尝试"的关联分析，
+      不足以认证）；非 gxpat_ 形态不落任何前缀；任何情况下不落完整令牌。
+  entries:
+    - id: http
+      transport: Streamable HTTP（stateless）
+      endpoint: /mcp
+      alt-endpoint: '{basePath}/mcp（子路径部署同源可达，basePath 不参与协议语义）'
+      server: 由 API 进程直接提供（裸机部署经 Caddy 反代；容器部署由同一进程托管前端静态）
+      notes: >-
+        每请求新建 server + transport（sessionIdGenerator: undefined、enableJsonResponse: true），
+        不维护会话状态；进程内单实例，与全局限流同纪律。
+      request-headers:
+        - 'Authorization: Bearer <PAT 明文>（必需）'
+        - 'Content-Type: application/json（必需）'
+        - 'Accept: application/json, text/event-stream（Streamable HTTP 客户端必需）'
+      examples:
+        init: |
+          curl -sS -X POST https://<host>/mcp \
+            -H 'Authorization: Bearer <PAT>' \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+        tools-list: |
+          curl -sS -X POST https://<host>/mcp \
+            -H 'Authorization: Bearer <PAT>' \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+        tool-call: |
+          curl -sS -X POST https://<host>/mcp \
+            -H 'Authorization: Bearer <PAT>' \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ping_echo","arguments":{"text":"hi"}}}'
+    - id: stdio
+      transport: stdio（本地子进程；随发布包投递的同一个产物，不常驻服务、不占端口、不碰 HTTP 监听）
+      command: 'GX_MCP_TOKEN=<PAT 明文> node dist/mcp-stdio.js'
+      bin-entry: >-
+        apps/api/package.json 的 bin.gx-mcp-stdio 指向 ./dist/mcp-stdio.js；
+        但 docker/fpk 产出的精简运行时 package.json 不含 bin（部署后无该命令名），
+        故统一用上面的 node <path>/dist/mcp-stdio.js 路径形式调用，不要依赖命令名。
+      notes: >-
+        与 HTTP 共用同一个 buildServer 与同一套 authenticatePat，无第二份工具注册实现。
+        启动即校验 GX_MCP_TOKEN：缺失/为空/非法/不可用一律退出码 2，stderr 文案区分具体原因；
+        通道纪律：stdout 只写 JSON-RPC 协议流，一切诊断走 stderr，绝不污染协议。
+      audit-source: stdio（固定值；HTTP 入口记 ip 与 path）
+  tools:
+    catalog-source: apps/api/src/mcp/tools/catalog.ts（唯一真源；工具入参 schema 真源为 tools/schemas.ts）
+    gating: >-
+      闸门一（令牌侧粗筛）：PAT scope 不含写位时写工具不入册；闸门二（资源侧）：
+      族可见集为空则该族工具不出现在 tools/list。故 tools/list 的实际返回是
+      "令牌作用域 与 该主体 M4 可见集"的交集，不是固定 14 项。
+    field-level-narrowing: >-
+      字段级可见性由 M4 节点策略行的 fieldMask.allowFields 决定，其语义是
+      **在 M4 可见集之上的显式收窄白名单（allow 之上再裁剪），不是 deny 清单，也不是独立授权来源**。
+      即：字段最终可见 = 资源可见（M4 决定整条记录看不看得到）∩ allowFields（决定看得到哪些列）；
+      缺省或空 fieldMask 等于不裁剪。PAT scope 只做族级粗筛，不参与字段判定。
+      对外不泄漏区别：请求了不在 allowFields 里的字段，与请求不可见资源，分别走
+      FORBIDDEN_FIELD 与 FORBIDDEN_RESOURCE；读路径则表现为该字段物理缺席（不起"这里有个字段你看不到"的提示）。
+    count-note: >-
+      目录共 15 项，其中 record.search 受 GX_M5_SEARCH 门控：off 时该项不出现在 tools/list，
+      准入目 14 项。工具名与 scope 如下（family=null 表示不绑资源族）。
+    list:
+      - { name: ping_echo, scopes: [], readOnly: true, family: null, note: 连通性自检，对任何已认证主体恒可见 }
+      - { name: table.list_bases, scopes: [record:read], readOnly: true, family: table, note: 列出经 M4 可见集与逐 base 复核后的 base id }
+      - { name: table.get_schema, scopes: [record:read], readOnly: true, family: table, note: 不可见字段不出现在 schema 中 }
+      - { name: record.list_records, scopes: [record:read], readOnly: true, family: table, note: keyset 游标分页，limit 上限 200 }
+      - { name: record.query_records, scopes: [record:read], readOnly: true, family: table, note: filter/sort 算子白名单，禁公式与裸 SQL }
+      - { name: record.create_record, scopes: [record:write], readOnly: false, family: table, note: 需 confirm=true；字段映射逐列受字段级写权约束 }
+      - { name: record.update_record, scopes: [record:write], readOnly: false, family: table, note: payload 含不可见字段键则整单拒绝 }
+      - { name: record.delete_record, scopes: [record:write], readOnly: false, family: table, note: 软删，与 REST DELETE 同语义，需 confirm=true }
+      - { name: record.search, scopes: [record:read], readOnly: true, family: null, conditional: GX_M5_SEARCH 不等于 off, note: M5 统一检索薄封装；off 时工具缺席 }
+      - { name: doc.get_doc_blocks, scopes: [doc:read], readOnly: true, family: doc, note: format=blocks 走共享块模型；range 按块序号 0-based 闭区间 }
+      - { name: doc.append_blocks, scopes: [doc:write], readOnly: false, family: doc, note: 单事务一次内容版本递增，需 baseVersion 乐观锁 }
+      - { name: doc.update_block, scopes: [doc:write], readOnly: false, family: doc, note: 块不存在整单拒绝，需 baseVersion }
+      - { name: doc.delete_blocks, scopes: [doc:write], readOnly: false, family: doc, note: 原子批删，任一 id 不存在则整批失败、无半应用，需 confirm 与 baseVersion }
+      - { name: canvas.get_board, scopes: [canvas:read], readOnly: true, family: canvas, note: 元素原样返回，未知键不剥离 }
+      - { name: canvas.commit_elements, scopes: [canvas:write], readOnly: false, family: canvas, note: 当前最小集仅 op element.create；其它操作名整批 UNSUPPORTED_OPERATION，需 confirm 与 baseVersion }
+  tool-error-envelope:
+    transport: >-
+      工具的业务失败不是 HTTP 错误：协议层仍回 200，result.isError 为 true，
+      content[0].text 为结构化 JSON 体（SDK 客户端把它包成 -32602 载荷，直读 HTTP 时就是同一段 JSON 文本）。
+      客户端必须按 JSON 体里的 code 判分支，不能只看 HTTP 状态。
+    codes:
+      - { code: OK, note: 成功 }
+      - { code: UNKNOWN_TOOL, note: 工具名不存在或未入册（未入册含"作用域不够"与"族不可见"两种情况，不外泄具体原因） }
+      - { code: UNSUPPORTED_OPERATION, note: 操作名不在本期最小集（如画布非 element.create 的 op） }
+      - { code: FORBIDDEN_RESOURCE, note: 主体已认证但本次资源/动作无权 }
+      - { code: FORBIDDEN_FIELD, note: payload 含不可见/只读字段键，整单拒绝 }
+      - { code: VERSION_CONFLICT, note: 乐观锁失配，响应带 currentVersion }
+      - { code: CONFIRM_REQUIRED, note: 破坏性操作缺 confirm=true }
+      - { code: RATE_LIMITED, note: 工具面限流（协议层 200 承载，与 HTTP 429 是两个不同层级） }
+      - { code: TIMEOUT, note: 单次工具调用超过 GX_MCP_TOOL_TIMEOUT_MS（默认 30000） }
+      - { code: INVALID_PARAMS, note: 入参不符工具 schema }
+    non-disclosure: >-
+      不可见资源与不存在资源返回同一码同一文案（逐字节一致），不泄漏存在性：
+      既不区分"你没有权限"与"它不存在"，也不在响应体/审计里回显被拒资源的内容。
+      IDOR 四条逐字节对拍证据见 docs/baseline/m6-connectivity.md §5。
+  payload-limit:
+    applies-to: /mcp 精确路径（去 basePath 前缀后比较，不做前缀放宽以免误伤 /api）
+    mcp-bytes: 11534336
+    mcp-human: 11MB（GX_MCP_BODY_LIMIT，默认值）
+    other-tiers: /api JSON 默认 1MB、头像上传 6MB，两档语义不变
+    over-limit: 413，机器码 MCP_PAYLOAD_TOO_LARGE（与 /api 的 PAYLOAD_TOO_LARGE 区分）
+    proxy-margin: >-
+      裸机部署 Caddy 侧 request_body max_size 为 12MB，与 /mcp 的 11MB 之间留 1MB 余量；
+      改小 /mcp 上限不必动 Caddy，改大则必须同步放大 Caddy 侧，否则请求在反代层先被拒。
+  http-layer-errors:
+    note: >-
+      /mcp 只有这五种情况是 HTTP 层错误（其余一切，含工具业务失败，都是 HTTP 200 承载 JSON-RPC）。
+      这五种里只有 413 与 429 带 {error, code} 信封，401 带 JSON-RPC 错误体，406/415 由传输层直接产生。
+    list:
+      - { status: 401, code: -32001, note: 边缘认证失败；附 WWW-Authenticate 与 JSON-RPC 错误体 }
+      - { status: 413, code: MCP_PAYLOAD_TOO_LARGE, note: 请求体超过 /mcp 档上限 }
+      - { status: 429, code: -32029, note: 两段式限流任一命中；附 Retry-After 与 X-RateLimit-* }
+      - { status: 406, note: Accept 头不含 application/json 或 text/event-stream（传输层判定） }
+      - { status: 415, note: Content-Type 不是 application/json（传输层判定） }
+  rate-limit:
+    algorithm: 固定窗口（进程内内存计数，单实例部署前提，与全局限流同纪律）
+    stages:
+      - stage: 1
+        position: 认证前
+        key: sourceIp
+        limit: 300
+        window-seconds: 60
+        env: GX_MCP_RATE_IP_MAX 与 GX_MCP_RATE_WINDOW_SEC
+        purpose: 防止未认证流量打爆认证与权限层
+      - stage: 2
+        position: 认证后
+        key: 'pat:<patId>'
+        limit: 120
+        window-seconds: 60
+        env: GX_MCP_RATE_PAT_MAX 与 GX_MCP_RATE_WINDOW_SEC
+        purpose: 按令牌隔离配额，单令牌失控不影响他人
+    response: >-
+      HTTP 429 + Retry-After + X-RateLimit-Limit + X-RateLimit-Remaining，
+      体 {"jsonrpc":"2.0","error":{"code":-32029,"message":"RATE_LIMITED"},"id":null}。
+    relation-to-global: >-
+      /mcp 的限流内聚在 /mcp 子应用内，全局规则表对 /mcp 仍返回 null（不改既有规则表）；
+      /api/v1/pats 的创建/删除另有独立敏感档：默认 30 次/60 秒/人（键=userId），
+      与 /mcp 两个桶分实例互不干扰，GET 列表不设该档。
+  timeout:
+    tool-timeout-ms: 30000
+    env: GX_MCP_TOOL_TIMEOUT_MS
+    behavior: >-
+      单次工具调用超过该值时返回结构化 TIMEOUT（协议层 200，result.isError 为 true），
+      并且不挂死连接：HTTP 连接随后仍可复用（同连接再发 ping_echo 正常）。
+      证据见 docs/baseline/m6-connectivity.md §7.3。
+  audit:
+    events:
+      - { event: mcp_pat_create, trigger: 'POST /api/v1/pats 成功', status: 201 }
+      - { event: mcp_pat_revoke, trigger: 'DELETE /api/v1/pats/{id} 成功', status: 204 }
+      - { event: mcp_tool_call, trigger: '每次 tools/call（成功与业务失败都记）', requestId: 随请求落库用于幂等 }
+      - { event: mcp_auth_failure, trigger: '边缘认证失败（HTTP 与 stdio 两入口都记）' }
+    never-log: >-
+      完整 PAT 明文、Authorization 头原值、hashToken 的输入与输出、被拒资源的内容与名称。
+      只允许记 14 字符前缀（不可认证）与 patId。该纪律由 e2e 的审计扫描用例守护
+      （含随机段零泄漏断言），见 docs/baseline/m6-connectivity.md §4.4。
+

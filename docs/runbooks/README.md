@@ -17,6 +17,7 @@ M0 生产基座的可执行运维流程。所有手册与仓内脚本/配置一�
 | [authz-drift-and-incidents.md](authz-drift-and-incidents.md) | M4 权限应急四章：D 类决策漂移排查（shadow drift 与 reconcile A/B/C 分工）、成员锁外/误授两条处置路线、inheritance 误关恢复、旧表投影不一致修复 | driftRegistry/authz_drift、reconcile-policies.ts、effective/impact 端点 |
 | [ci.md](ci.md) | 平台中立质量门、真 ESLint 基线、本地复现 CI、Gitee Go 开通与 runner | `scripts/ci-quality.sh`、`eslint.config.mjs`、`.workflow/ci.yml` |
 | [m5-search.md](m5-search.md) | M5 统一检索：off/cloud 零外网抓包验收（AC-M5-5）、search.db 损坏自愈与降级审计判读、vec0/musl/NFS/资产边界、reindex 与 model 切换、**S13 真机压测（一条命令 + 三杠杆参数 + 容量指引）** | `GX_M5_SEARCH`、`GX_EMBEDDING_MODE`、`GX_VEC_EXT_PATH`、`/api/v1/admin/{reindex,search/status,embedding/config}`、`scripts/bench/m5-gate.ts --mode|--k|--scope-caps` |
+| [mcp.md](mcp.md) | M6 鉴权 MCP 服务：PAT 签发/吊销与停用连带吊销、`GX_ENTERPRISE_ORG` 门控与紧急收回、HTTP `/mcp` 与 `dist/mcp-stdio.js` 两入口、11MB/限流/超时三旋钮调档（含 Caddy 12MB 余量）、401 六态判读、审计四事件字段与"永不记录"清单、常见故障（stdio 退出码 2 / 429 退避 / 超时不挂连接） | `GX_ENTERPRISE_ORG`、`GX_MCP_BODY_LIMIT`、`GX_MCP_RATE_{IP,PAT,PAT_REST}_MAX`、`GX_MCP_TOOL_TIMEOUT_MS`、`/mcp`、`/api/v1/pats`、`GX_MCP_TOKEN` + `dist/mcp-stdio.js` |
 
 ## 相关架构决策（ADR）
 
