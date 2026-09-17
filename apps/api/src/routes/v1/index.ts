@@ -22,6 +22,7 @@ import { inheritanceRoutes } from "./inheritance.js";
 import { authzRoutes } from "./scope.js";
 import { searchRoutes } from "./search.js";
 import { adminSearchRoutes } from "./adminSearch.js";
+import { patRoutes } from "./pats.js";
 
 export const v1 = new Hono();
 
@@ -35,6 +36,9 @@ v1.route("/authz", authzRoutes);
 if (config.enterpriseOrg) {
   // 组织通讯录管理面（部门/成员/角色）+ 装配探针。
   v1.route("/org", org);
+  // M6/S1 个人访问令牌（PAT）REST：本人限定（C-5 定稿：与 /mcp 同受 GX_ENTERPRISE_ORG 门控，
+  // off 即不挂载 -> v1 自身 404）。
+  v1.route("/pats", patRoutes);
   v1.get("/meta", (c) => {
     const auth = c.get("auth");
     return c.json({

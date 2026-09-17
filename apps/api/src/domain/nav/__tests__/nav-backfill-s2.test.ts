@@ -37,7 +37,7 @@ beforeAll(async () => {
   fs.mkdirSync(path.join(tmpRoot, "migrations"));
   fs.copyFileSync(path.resolve("prisma/schema.prisma"), path.join(tmpRoot, "schema-legacy.prisma"));
   const dirs = migDirs();
-  expect(dirs.length).toBe(22); // M5-S1 起 outbox DDL/活实体播种使总数 20 -> 22（M4-S5 时为 20）
+  expect(dirs.length).toBe(23); // M6-S1 起 PAT/mcp_idempotency 使 22 -> 23（M5-S1 时为 22、M4-S5 时为 20）
   for (const name of dirs.slice(0, PRE_ORG_COUNT)) {
     fs.cpSync(path.resolve("prisma/migrations", name), path.join(tmpRoot, "migrations", name), { recursive: true });
   }
@@ -84,10 +84,10 @@ afterAll(async () => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-describe("12 -> 22 直升回填（nav 迁移 B SQL 首跑；M5-S1 后总数 22）", () => {
-  it("迁移全 applied（22），活实体节点数精确，软删/无视图表不产生悬挂", async () => {
+describe("12 -> 23 直升回填（nav 迁移 B SQL 首跑；M6-S1 后总数 23）", () => {
+  it("迁移全 applied（23），活实体节点数精确，软删/无视图表不产生悬挂", async () => {
     const applied = await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) n FROM _prisma_migrations WHERE rolled_back_at IS NULL`;
-    expect(Number(applied[0].n)).toBe(22);
+    expect(Number(applied[0].n)).toBe(23);
 
     const nodes = await prisma.navNode.findMany({ where: { deletedAt: null } });
     // 活实体：b1 + t1 + t2 + v1 + k1 + d1 + d2 + c1 = 8（b2 软删不回填）。

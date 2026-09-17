@@ -215,6 +215,9 @@ model User {
   comments     Comment[]
   // M2：用户的多部门归属（dept_members.userId 对 users(id) ON DELETE CASCADE）。
   deptMemberships DeptMember[]
+  // M6/S1：个人访问令牌（personal_access_tokens.userId 对 users(id) ON DELETE CASCADE，
+  // 删除用户级联清 PAT；停用用户走 lifecycle.disableUser 同事务批量吊销，见 §5.1/C-4）。
+  personalAccessTokens PersonalAccessToken[]
 
   @@index([workspaceId])
   @@index([status])
@@ -589,6 +592,46 @@ model AppSetting {
   updatedAt DateTime @updatedAt
 
   @@map("app_settings")
+}
+
+// ---------------------------------------------------------------------------
+// M6/S1：鉴权 MCP 服务 — 个人访问令牌（PAT）
+// 迁移 20260918090000_mcp_pat_ddl（手写只增）。随机段不入库、只存 sha256（@unique 等值查）；
+// tokenPrefix 仅明文前 14 字符（含 gxpat_ 前缀）供列表辨识，【不可认证】（C-3 定稿）；
+// revokedAt 用时间戳（非 boolean，revoked = revokedAt != null）；expiresAt null=永不过期（C-3）。
+// ---------------------------------------------------------------------------
+model PersonalAccessToken {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  tokenPrefix String
+  tokenHash   String    @unique
+  scopes      String    // JSON 数组字符串（SQLite 无原生数组）
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("personal_access_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// M6/S7 用：MCP 写工具 requestId 幂等轻表（C-8 定稿落库，不用进程内 Map）。
+// 键 = key（patId + tool + requestId 的组合串）；24h 窗，过期行不清理也无害（runbook 定期 DELETE）。
+// S1 随 PAT 同批建表（§5.1）；表本身在本片无读写方。
+// ---------------------------------------------------------------------------
+model McpIdempotency {
+  key          String   @id
+  patId        String
+  tool         String
+  responseJson String
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("mcp_idempotency")
 }
 
 // ============================================================================

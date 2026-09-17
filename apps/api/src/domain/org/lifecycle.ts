@@ -131,6 +131,13 @@ export async function disableUser(actorId: string, targetId: string): Promise<Li
         tokenVersion: { increment: 1 },
       },
     });
+    // M6/S1（C-4 定稿）：停用同事务批量吊销该用户全部未吊销 PAT（revokedAt 置位=终态）。
+    // 认证侧另有 users.status=ACTIVE 检查兜底，故已 DISABLED 用户的 PAT 即便此处未置位也拒；
+    // 此处置位是为了「吊销状态可查询/可审计」与「重新激活后依旧不可用」（见 reactivateUser 注释）。
+    await tx.personalAccessToken.updateMany({
+      where: { userId: targetId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
     return toLifecycleResult(updated);
   });
   // tokenVersion 已 +1：即使开了短缓存也主动失效，保证同进程下一次请求即 401。
@@ -142,6 +149,10 @@ export async function disableUser(actorId: string, targetId: string): Promise<Li
  * 重新激活：DISABLED -> ACTIVE、disabledAt=null、tokenVersion 再 +1（强制重新登录：
  * 停用前的旧 token 因 tv 已不匹配，激活后依旧不可用，必须重新登录）。
  * 幂等：已 ACTIVE 直接返回；INVITED 不经此路径（应走邀请接受）-> 400。
+ *
+ * **M6/S1（C-4 定稿）：重新激活【不恢复】任何 PAT**——停用时置位的 revokedAt 是终态，
+ * 重新启用账号需重新签发 PAT（安全优先：账号停用期间的令牌不应自动复活）。
+ * 这是有意为之，不是遗漏。
  */
 export async function reactivateUser(actorId: string, targetId: string): Promise<LifecycleResult> {
   void actorId;

@@ -43,7 +43,10 @@ export type AuditEventName =
   | "embedding_api_key_rotated"
   | "embedding_api_key_cleared"
   // S12 状态降级跳变采样（S9 仅预留常量，不打点）
-  | "search_degraded";
+  | "search_degraded"
+  // M6/S1 鉴权 MCP 服务：PAT 生命周期（S1 起接线；S7 补 mcp_* 工具调用/认证失败四枚）
+  | "mcp_pat_create"
+  | "mcp_pat_revoke";
 
 export interface AuditInput {
   event: AuditEventName;
