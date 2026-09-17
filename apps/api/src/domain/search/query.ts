@@ -63,7 +63,8 @@ function resolveExecution(
 }
 
 function routeToHits(rows: RouteRow[]): RouteHit[] {
-  return rows.map((r) => ({ entityType: r.entityType, entityId: r.entityId, rank: r.rank }));
+  // 透传 chunk title：供 rrf 的标题精确/前缀加成（§4.5 步骤 5）；不加成时该字段无影响。
+  return rows.map((r) => ({ entityType: r.entityType, entityId: r.entityId, rank: r.rank, title: r.title }));
 }
 
 function effectiveMode(ran: RecallResult["ran"]): EffectiveMode {
@@ -162,12 +163,12 @@ export async function executeUnifiedSearch(
     { queryVector: exec.runVec ? queryVector : null, explain },
   );
 
-  // 步骤 5：RRF 融合（各路 1/(60+rank)，topN=limit）。
+  // 步骤 5：RRF 融合（各路 1/(60+rank)，topN=limit）；标题精确/前缀命中加固定 boost（§4.5 步骤 5）。
   const fusionInputs: Array<{ route: "fts" | "vec" | "like"; hits: RouteHit[] }> = [];
   if (recall.ran.fts) fusionInputs.push({ route: "fts", hits: routeToHits(recall.fts) });
   if (recall.ran.vec) fusionInputs.push({ route: "vec", hits: routeToHits(recall.vec) });
   if (recall.ran.like) fusionInputs.push({ route: "like", hits: routeToHits(recall.like) });
-  const fused = reciprocalRankFusion(fusionInputs, { topN: limit });
+  const fused = reciprocalRankFusion(fusionInputs, { topN: limit, titleQuery: plan.query });
 
   // 步骤 6：每实体最佳 chunk（用于 snippet/seq/fieldId）。
   const bestByEntity = bestChunks(recall);
