@@ -17,6 +17,7 @@ import {
   useRotateApiKey,
 } from "./search-admin-hooks";
 import { adminErrorMessage, CLOUD_CONSENT_TEXT } from "./search-admin-copy";
+import { buildConfigPatch } from "./search-config";
 import type { EmbeddingMode } from "@gx/shared-types";
 
 export function EmbeddingSearchPanel({ onReindex }: { onReindex?: () => void }) {
@@ -56,18 +57,12 @@ export function EmbeddingSearchPanel({ onReindex }: { onReindex?: () => void }) 
   }
   const cfg = configQ.data;
 
-  /** 收集表单为 patch（apiKey 仅在用户填了新值时随请求发送，缺省=保持）。 */
+  /** 收集表单为 patch（apiKey 仅在填了新值时随请求发送，缺省=保持）。 */
   function buildPatch(nextMode: EmbeddingMode, confirmCloud: boolean) {
-    return {
-      mode: nextMode,
-      baseURL: baseURL.trim(),
-      model: model.trim(),
-      batchSize: Number(batchSize) || undefined,
-      timeoutMs: Number(timeoutMs) || undefined,
-      fieldChunkCap: Number(fieldChunkCap) || undefined,
-      ...(apiKeyInput.trim() ? { apiKey: apiKeyInput.trim() } : {}),
-      ...(nextMode === "cloud" ? { confirmCloud } : {}),
-    };
+    return buildConfigPatch(
+      { mode: nextMode, baseURL, model, batchSize, timeoutMs, fieldChunkCap, apiKey: apiKeyInput },
+      confirmCloud,
+    );
   }
 
   function onError(e: unknown) {

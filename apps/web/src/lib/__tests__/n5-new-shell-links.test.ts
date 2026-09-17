@@ -104,10 +104,16 @@ describe("N5 §1.3 新壳路由声明：App.tsx 旧路径一条不删", () => {
 
 describe("N5 §1.3 旧链接生成点源码守卫（换壳/窗口化重构后仍 navigate 旧形）", () => {
   it("SearchDialog 三类结果仍跳 record/doc/canvas 旧形（record 走 query）", () => {
+    // M5 后跳转模板收敛到 search-adapter.hitHref 单一真源，SearchDialog 只 navigate(hitHref(hit))，
+    // 不再在组件内联三种路径。这里锁：组件确实经 hitHref 跳转；hitHref 产出的旧形由
+    // search-adapter.test.ts 逐值断言（record=/base/...?record=、doc|canvas=/kb/:id/:kind/:docId）。
     const s = read("../../features/search/SearchDialog.tsx");
-    expect(s).toContain("navigate(`/base/${hit.baseId}/table/${hit.tableId}?record=${hit.recordId}`)");
-    expect(s).toContain("navigate(`/kb/${hit.kbId}/doc/${hit.docId}`)");
-    expect(s).toContain("navigate(`/kb/${hit.kbId}/canvas/${hit.docId}`)");
+    expect(s).toContain("navigate(hitHref(hit))");
+    expect(s).toContain('from "./search-adapter"');
+    const adapter = read("../../features/search/search-adapter.ts");
+    expect(adapter).toContain("`/base/${hit.baseId}/table/${hit.tableId}?record=${hit.entityId}`");
+    // doc/canvas 共用同一模板（kind 段由 hit.type 决定）
+    expect(adapter).toContain("`/kb/${hit.kbId}/${hit.type}/${hit.docId}`");
   });
 
   it("画布 DocRefCard 双分支仍为 /kb/:id/(doc|canvas)/:docId", () => {
