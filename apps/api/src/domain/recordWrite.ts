@@ -16,7 +16,8 @@
 import { prisma, type DbTx } from "../db.js";
 import { HttpError } from "../guards.js";
 import { loadTableFields } from "./recordService.js";
-import { syncRecordsTx } from "./fieldIndex/sync.js";
+import { deleteRecordsTx, syncRecordsTx } from "./fieldIndex/sync.js";
+import { enqueueChangeEventTx } from "./search/outbox.js";
 import { applyCreateDefaults } from "./defaults.js";
 import { sidecarUniqueMatch, findUniqueConflictTx } from "./queryPlan/uniqueSidecar.js";
 import type { resolveTableMask } from "./authz/maskGate.js";
@@ -303,4 +304,23 @@ async function assertUniqueFullScan(
       }
     }
   }
+}
+
+/**
+ * 软删记录的事务体（**从 routes/records.ts 原样移动**：M1/S4 sidecar 撤销 + M3/S1 outbox 同事务登记）。
+ * 调用方职责：前置存在性/权限校验、事务包裹（withWriteTx("record.softDelete")）、
+ * 事务后的 invalidateOrdinalCache 与 defaults 反向重算（保持既有顺序不变）。
+ */
+export async function softDeleteRecordTx(tx: DbTx, recordId: string): Promise<void> {
+  await tx.record.update({ where: { id: recordId }, data: { deletedAt: new Date() } });
+  // 关联数据只打软删标记（不清行）：记录从回收站恢复时，关联关系随之恢复，不会丢数据
+  await tx.linkRow.updateMany({
+    where: { OR: [{ parentRowId: recordId }, { childRowId: recordId }], deletedAt: null },
+    data: { deletedAt: new Date() },
+  });
+  await deleteRecordsTx(tx, [recordId]);
+  // M5/S1：软删登记 delete（worker 清派生检索行）；与实体写共生死。
+  await enqueueChangeEventTx(tx, {
+    entityType: "record", entityId: recordId, op: "delete", version: BigInt(Date.now()),
+  });
 }

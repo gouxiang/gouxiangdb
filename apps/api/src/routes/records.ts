@@ -40,7 +40,7 @@ import { resolveTableMask } from "../domain/authz/maskGate.js";
 export const records = new Hono();
 
 // M6/S4：写原语已移入 domain/recordWrite.ts（纯移动）+ re-export 保持既有导入点不变。
-import { applyFieldWrites, assertRequiredOnCreate, assertUnique, parseStoredFields, runMaskWriteGate } from "../domain/recordWrite.js";
+import { applyFieldWrites, assertRequiredOnCreate, assertUnique, parseStoredFields, runMaskWriteGate, softDeleteRecordTx } from "../domain/recordWrite.js";
 export { assertRequiredOnCreate, assertUnique } from "../domain/recordWrite.js";
 
 // ============ 工具 ============
@@ -465,19 +465,8 @@ records.delete("/:recordId", async (c) => {
 
   // M1/S4：软删同事务撤掉该记录 sidecar 行（派生索引不保留软删记录，恢复时重建）。
   // M3/S1：原 $transaction([...]) 数组批收紧为交互事务，以承载 outbox 同事务登记。
-  await withWriteTx("record.softDelete", async (tx) => {
-    await tx.record.update({ where: { id: recordId }, data: { deletedAt: new Date() } });
-    // 关联数据只打软删标记（不清行）：记录从回收站恢复时，关联关系随之恢复，不会丢数据
-    await tx.linkRow.updateMany({
-      where: { OR: [{ parentRowId: recordId }, { childRowId: recordId }], deletedAt: null },
-      data: { deletedAt: new Date() },
-    });
-    await deleteRecordsTx(tx, [recordId]);
-    // M5/S1：软删登记 delete（worker 清派生检索行）；与实体写共生死。
-    await enqueueChangeEventTx(tx, {
-      entityType: "record", entityId: recordId, op: "delete", version: BigInt(Date.now()),
-    });
-  });
+  // M6/S4：事务体已移入 domain/recordWrite.ts（纯移动）。
+  await withWriteTx("record.softDelete", (tx) => softDeleteRecordTx(tx, recordId));
   invalidateOrdinalCache(rec.tableId);
 
   // 反向联动：被删记录是某父记录的子表行 → 重算父表点引用 formula 默认值。
