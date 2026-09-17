@@ -186,9 +186,9 @@ describe("S0-4 全局 1MB body 上限对 /api 仍 413（M6 不得放宽 /api）"
 });
 
 describe("S0-5 M6 新增面加挂前后对照", () => {
-  // 注：S0 落地时 /api/v1/pats 与 /mcp 均为 404（M6 加挂前对照）。S1 已挂载 /api/v1/pats，
-  // 故此处按"S1 之后"的既有行为更新（有 token -> 200；无 token -> 401；均不再 404）；
-  // /mcp 仍 404（待 S2 挂载）。这体现的是 M6 对既定契约的**有意增量**，非回归。
+  // S0 落地时 /api/v1/pats 与 /mcp 均为 404（M6 加挂前对照，见 m6-baseline §3）。
+  // S1 挂载 /api/v1/pats、S2 挂载 /mcp，故此处按"S2 之后"的既有行为更新：
+  // 两者都已存在（无 token -> 401；有 token -> 200）。属 M6 的**有意增量**，非回归。
   it("/api/v1/pats 已挂载（S1 起）：无 token -> 401、带 token -> 200（不再 404）", async () => {
     const noAuth = await app.request("/api/v1/pats");
     expect(noAuth.status).toBe(401);
@@ -197,13 +197,14 @@ describe("S0-5 M6 新增面加挂前后对照", () => {
     expect(Array.isArray(await withAuth.json())).toBe(true);
   });
 
-  it("/mcp -> 404 NOT_FOUND（S2 落地前；即使带协议头与 body 也 404）", async () => {
-    const res = await app.request("/mcp", {
+  it("/mcp 已挂载（S2 起）：无 token -> 401（WWW-Authenticate + -32001）、带协议头不再是 404", async () => {
+    const noAuth = await app.request("/mcp", {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
     });
-    expect(res.status).toBe(404);
-    expect((await res.json() as { code: string }).code).toBe("NOT_FOUND");
+    expect(noAuth.status).toBe(401);
+    expect(noAuth.headers.get("www-authenticate")).toContain("Bearer");
+    expect(await noAuth.json()).toEqual({ jsonrpc: "2.0", error: { code: -32001, message: "Unauthorized" }, id: null });
   });
 });

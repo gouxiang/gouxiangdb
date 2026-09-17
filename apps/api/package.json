@@ -24,6 +24,7 @@
     "@gx/design-tokens": "workspace:*",
     "@gx/shared-types": "workspace:*",
     "@hono/node-server": "^1.13.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^13.0.3",

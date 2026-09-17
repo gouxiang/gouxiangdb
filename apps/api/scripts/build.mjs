@@ -40,6 +40,8 @@ const external = [
   "bcryptjs",
   "better-sqlite3",
   "sqlite-vec",
+  // M6/S2：MCP SDK（纯 JS，含 zod/v4 子路径）；随发布包 node_modules 解析。
+  "@modelcontextprotocol/sdk",
 ];
 
 fs.rmSync(distDir, { recursive: true, force: true });

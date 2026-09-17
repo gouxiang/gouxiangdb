@@ -105,11 +105,28 @@ export function validateEnv(env: NodeJS.ProcessEnv): ConfigIssue[] {
   for (const [name, raw] of [
     ["GX_BODY_LIMIT_JSON", env.GX_BODY_LIMIT_JSON],
     ["GX_BODY_LIMIT_UPLOAD", env.GX_BODY_LIMIT_UPLOAD],
+    // M6/S2：/mcp 第三档（默认 11MB）；只增一档，/api 两档语义不变。
+    ["GX_MCP_BODY_LIMIT", env.GX_MCP_BODY_LIMIT],
   ] as const) {
     if (raw !== undefined && raw !== "") {
       const mb = Number(raw);
       if (!Number.isFinite(mb) || mb <= 0) {
         issues.push({ variable: name, reason: `必须为正数（MB），当前 "${raw}"` });
+      }
+    }
+  }
+
+  for (const [name, raw] of [
+    ["GX_MCP_RATE_WINDOW_SEC", env.GX_MCP_RATE_WINDOW_SEC],
+    ["GX_MCP_RATE_PAT_MAX", env.GX_MCP_RATE_PAT_MAX],
+    ["GX_MCP_RATE_IP_MAX", env.GX_MCP_RATE_IP_MAX],
+    ["GX_MCP_RATE_PAT_REST_WINDOW_SEC", env.GX_MCP_RATE_PAT_REST_WINDOW_SEC],
+    ["GX_MCP_RATE_PAT_REST_MAX", env.GX_MCP_RATE_PAT_REST_MAX],
+  ] as const) {
+    if (raw !== undefined && raw !== "") {
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n <= 0) {
+        issues.push({ variable: name, reason: `必须为正整数，当前 "${raw}"` });
       }
     }
   }
@@ -186,6 +203,15 @@ export interface AppConfig {
   minDiskMb: number;
   bodyLimitJsonBytes: number;
   bodyLimitUploadBytes: number;
+  /** M6/S2：/mcp 请求体上限（GX_MCP_BODY_LIMIT，默认 11MB）；/api 两档语义不变。 */
+  mcpBodyLimitBytes: number;
+  /** M6/S2 /mcp 限流：窗口秒 / patId 桶上限 / IP 预桶上限（C-1 默认 60/120/300）。 */
+  mcpRateWindowMs: number;
+  mcpRatePatMax: number;
+  mcpRateIpMax: number;
+  /** M6/S2 PAT REST 敏感档（§5.2：30 次/60s/人）；与 /mcp 桶分名避免歧义。 */
+  mcpPatRestWindowMs: number;
+  mcpPatRestMax: number;
   auditDir: string;
   backupDir: string;
   rateLimitEnabled: boolean;
@@ -261,6 +287,12 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
       env.GX_BODY_LIMIT_JSON,
       DEFAULT_BODY_LIMIT_JSON_MB * 1024 * 1024,
     ),
+    mcpBodyLimitBytes: parseBodyLimit(env.GX_MCP_BODY_LIMIT, 11 * 1024 * 1024),
+    mcpRateWindowMs: parseNonNegInt(env.GX_MCP_RATE_WINDOW_SEC, 60) * 1000,
+    mcpRatePatMax: parseNonNegInt(env.GX_MCP_RATE_PAT_MAX, 120),
+    mcpRateIpMax: parseNonNegInt(env.GX_MCP_RATE_IP_MAX, 300),
+    mcpPatRestWindowMs: parseNonNegInt(env.GX_MCP_RATE_PAT_REST_WINDOW_SEC, 60) * 1000,
+    mcpPatRestMax: parseNonNegInt(env.GX_MCP_RATE_PAT_REST_MAX, 30),
     bodyLimitUploadBytes: parseBodyLimit(
       env.GX_BODY_LIMIT_UPLOAD,
       DEFAULT_BODY_LIMIT_UPLOAD_MB * 1024 * 1024,

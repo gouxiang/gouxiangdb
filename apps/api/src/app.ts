@@ -27,6 +27,7 @@ import { pub } from "./routes/public.js";
 import { search } from "./routes/search.js";
 import { v1 } from "./routes/v1/index.js";
 import { inviteRoutes } from "./routes/v1/authInvite.js";
+import { mcpApp } from "./mcp/transport/mcpApp.js";
 import { health } from "./routes/health.js";
 import { healthz } from "./routes/healthz.js";
 import { readyz } from "./routes/readyz.js";
@@ -147,6 +148,10 @@ function createMount(webRoot: string | null): Hono {
     // 公开邀请接受（登录前，不要求 ACTIVE）仅组织面启用，挂在受保护 v1 之前；路径不重叠。
     if (config.enterpriseOrg) {
       mount.route("/api/v1/auth/invite", inviteRoutes);
+      // M6/S2 鉴权 MCP 服务：Streamable HTTP 无状态直桥（C-5 定稿：与 /api/v1/pats 同受
+      // GX_ENTERPRISE_ORG 门控；off 即不挂载 -> 顶层 404）。挂进 mount 即自动获得
+      // /mcp 与 {basePath}/mcp 双路径（spike §2.1 实测路径不参与协议）。
+      mount.route("/mcp", mcpApp);
     }
     mount.route("/api/v1", v1);
   }

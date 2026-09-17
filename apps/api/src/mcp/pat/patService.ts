@@ -147,4 +147,14 @@ export async function findByTokenHash(tokenHash: string): Promise<{
   });
 }
 
+/**
+ * 账号态复核（§4.3 校验顺序末步 + C-4 纵深防御）：PAT 行的 userId 对应用户必须 ACTIVE。
+ * DISABLED/INVITED/已删除（行随 cascade 消失，落到 hash 查不到）一律拒。
+ * 放在本模块以保持「mcp/** 内 prisma 访问只限 PAT 自身存储与审计」的评审纪律（§3-3）。
+ */
+export async function isUserActive(userId: string): Promise<boolean> {
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { status: true } });
+  return u?.status === "ACTIVE";
+}
+
 export { hashToken };

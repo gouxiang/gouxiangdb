@@ -16,6 +16,14 @@ function payloadTooLarge(c: Context) {
   );
 }
 
+/** /mcp 超限：同 HTTP 413，但机器码按 §6 用 MCP_PAYLOAD_TOO_LARGE（/api 两档仍 PAYLOAD_TOO_LARGE）。 */
+function payloadTooLargeMcp(c: Context) {
+  return c.json(
+    { error: "请求体超过大小限制", code: "MCP_PAYLOAD_TOO_LARGE" },
+    413,
+  );
+}
+
 const jsonLimit = bodyLimit({
   maxSize: config.bodyLimitJsonBytes,
   onError: payloadTooLarge,
@@ -26,6 +34,13 @@ const uploadLimit = bodyLimit({
   onError: payloadTooLarge,
 });
 
+// M6/S2：/mcp 第三档（默认 11MB，GX_MCP_BODY_LIMIT）。MCP 客户端（SDK/Inspector）单次
+// 工具调用可能携带整块文档/画布 JSON，故放宽；**/api 两档语义与 413 行为逐字节不变**（S0 护栏）。
+const mcpLimit = bodyLimit({
+  maxSize: config.mcpBodyLimitBytes,
+  onError: payloadTooLargeMcp,
+});
+
 function isAvatarUpload(c: Context): boolean {
   if (c.req.method === "GET" || c.req.method === "HEAD" || c.req.method === "OPTIONS") {
     return false;
@@ -33,6 +48,14 @@ function isAvatarUpload(c: Context): boolean {
   return effectivePath(c) === "/api/auth/me/avatar";
 }
 
-// 按请求路径在两个固定阈值的 body-limit 之间分流（Hono bodyLimit 阈值在创建时固定）。
-export const bodyLimitDispatch: MiddlewareHandler = (c, next) =>
-  isAvatarUpload(c) ? uploadLimit(c, next) : jsonLimit(c, next);
+/** /mcp 精确判定（去 basePath 前缀后比较；不做前缀放宽，避免误伤 /api）。 */
+function isMcpPath(c: Context): boolean {
+  return effectivePath(c) === "/mcp";
+}
+
+// 按请求路径在三档固定阈值间分流（Hono bodyLimit 阈值在创建时固定）。
+// 顺序：/mcp 档 -> 头像上传档 -> /api 默认档（互斥精确路径，既有两档行为不变）。
+export const bodyLimitDispatch: MiddlewareHandler = (c, next) => {
+  if (isMcpPath(c)) return mcpLimit(c, next);
+  return isAvatarUpload(c) ? uploadLimit(c, next) : jsonLimit(c, next);
+};
