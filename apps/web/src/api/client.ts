@@ -136,9 +136,18 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     public body: { error?: string; message?: string; details?: unknown },
+    /** 429 时后端给的 Retry-After 秒数（缺省 undefined）；M6 PAT 等敏感端点据此提示退避。 */
+    public retryAfter?: number,
   ) {
     super(`API ${status}: ${body?.error ?? "未知错误"}`);
   }
+}
+
+/** 解析 Retry-After 响应头（整数秒）；非数字/负数/缺失返回 undefined（调用方给保守兜底）。 */
+function parseRetryAfter(raw: string | null): number | undefined {
+  if (!raw) return undefined;
+  const n = Number(raw.trim());
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : undefined;
 }
 
 /**
@@ -178,7 +187,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     const body = await res.json().catch(() => ({}));
     // 登录态失效（token 过期 / 被移除 / 服务端重启换密钥）：清理本地凭据并回登录页
     if (res.status === 401 && !AUTH_SELF_401_PATHS.test(path)) handleUnauthorized();
-    throw new ApiError(res.status, body);
+    throw new ApiError(res.status, body, parseRetryAfter(res.headers.get("Retry-After")));
   }
   return (await res.json()) as T;
 }
@@ -1076,5 +1085,78 @@ export const EmbeddingAdminApi = {
     }),
   /** 检索子系统状态（覆盖度/积压/chunks/embedding 健康）。 */
   status: () => apiFetch<SearchStatusDTO>("/api/v1/admin/search/status"),
+};
+
+// ============ M6 PAT 访问令牌 /api/v1/pats（GX_ENTERPRISE_ORG 门控；本人限定） ============
+//
+// 形状对齐后端 routes/v1/pats.ts + mcp/pat/patService.ts（PatMetadata）；契约见 M6-implementation-plan §5.2/§6/C-3。
+//   POST   /api/v1/pats        -> 201 { id, name, scopes, token(仅此一次), tokenPrefix, expiresAt, createdAt }
+//   GET    /api/v1/pats        -> 200 PatMetadata[]（绝无 token/tokenHash；tokenPrefix 仅前 14 字符）
+//   DELETE /api/v1/pats/:id    -> 204（非本人/不存在统一 404 PAT_NOT_FOUND；超限 429 MCP_RATE_LIMITED + Retry-After）
+// 门控纪律：/api/v1/pats 与 /mcp 同受 GX_ENTERPRISE_ORG；off 即 404，调用方按 fail-closed 隐入口。
+// 类型位置：M6-FE 片只在 apps/web 工作，故 DTO 定义为前端本地契约；后端 openapi 冻结后如需可上提 @gx/shared-types。
+
+/** scope 六位（C-2 定稿）。 */
+export type PatScope =
+  | "record:read"
+  | "record:write"
+  | "doc:read"
+  | "doc:write"
+  | "canvas:read"
+  | "canvas:write";
+
+/** 列表/元数据（绝不含明文或 hash）。 */
+export interface PatMetadata {
+  id: string;
+  name: string;
+  /** 明文前 14 字符，仅辨识用（不可认证）。 */
+  tokenPrefix: string;
+  scopes: PatScope[];
+  expiresAt: string | null;
+  revokedAt: string | null;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+/** 创建响应：多一枚 `token`（**仅此一次**，前端只在一次性弹窗内呈现，绝不落 storage/URL）。 */
+export interface CreatedPat {
+  id: string;
+  name: string;
+  scopes: PatScope[];
+  token: string;
+  tokenPrefix: string;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+/** 创建入参：expiresInDays 为 30/90/365 或 null（永不过期）。 */
+export interface CreatePatInput {
+  name: string;
+  scopes: PatScope[];
+  expiresInDays: 30 | 90 | 365 | null;
+}
+
+export const PatsApi = {
+  /** 本人全部令牌（已吊销行也在列表内，前端按状态置灰）。 */
+  list: () => apiFetch<PatMetadata[]>("/api/v1/pats"),
+  /** 签发一枚令牌；响应的 token 仅此一次。 */
+  create: (input: CreatePatInput) =>
+    apiFetch<CreatedPat>("/api/v1/pats", { method: "POST", body: JSON.stringify(input) }),
+  /** 吊销（204 无体，容忍空响应；本人限定；429 请尊重 Retry-After，勿自动重试）。 */
+  revoke: async (id: string): Promise<void> => {
+    const token = useAuthStore.getState().token;
+    const res = await fetch(`${BASE_URL}/api/v1/pats/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 401) handleUnauthorized();
+      throw new ApiError(res.status, body, parseRetryAfter(res.headers.get("Retry-After")));
+    }
+  },
 };
 

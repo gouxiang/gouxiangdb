@@ -14,15 +14,26 @@ import { SearchCoveragePanel } from "../search/SearchCoveragePanel";
 import { ReindexModal } from "../search/ReindexModal";
 import { useReindex, isForbidden, errorCode } from "../search/search-admin-hooks";
 import { adminErrorMessage } from "../search/search-admin-copy";
+import { PatListPanel } from "../settings/PatListPanel";
+import { useEnterpriseOrgFlag } from "../settings/pat-hooks";
 import { toast } from "../../components/ui";
 
-type Section = "general" | "contacts" | "nav" | "search" | "assets";
+type Section = "general" | "contacts" | "nav" | "search" | "mcp" | "assets";
 
-const SECTIONS: { key: Section; label: string; icon: IconName; desc: string; ownerOnly?: boolean }[] = [
+const SECTIONS: {
+  key: Section;
+  label: string;
+  icon: IconName;
+  desc: string;
+  ownerOnly?: boolean;
+  /** M6 MCP 接入随 GX_ENTERPRISE_ORG 门控（off 即不挂载，fail-closed 隐入口）。 */
+  enterpriseOnly?: boolean;
+}[] = [
   { key: "general", label: "通用", icon: "settings", desc: "工作区设置中心" },
   { key: "contacts", label: "通讯录", icon: "building", desc: "部门、成员与组织角色" },
   { key: "nav", label: "导航编排", icon: "sitemap", desc: "一级导航与分组管理" },
   { key: "search", label: "语义检索", icon: "sparkles", desc: "云端语义检索与索引覆盖度", ownerOnly: true },
+  { key: "mcp", label: "MCP 接入", icon: "keyRound", desc: "为 AI 客户端签发访问令牌", enterpriseOnly: true },
   { key: "assets", label: "资产", icon: "database", desc: "数据库与知识库入口" },
 ];
 
@@ -95,6 +106,8 @@ export function WorkspaceSettingsPage() {
   const canManageMenu = actions.has("manage_menu");
   // M5 检索管理面仅工作区所有者可见；加载未完成先按非 owner 处理（不闪现面板）。
   const { isOwner } = useIsWorkspaceOwner();
+  // M6 MCP 接入随企业组织门控；loading/探测失败/非 true 一律 false（fail-closed）。
+  const enterpriseOn = useEnterpriseOrgFlag();
   const [reindexOpen, setReindexOpen] = useState(false);
   const reindex = useReindex();
 
@@ -105,15 +118,20 @@ export function WorkspaceSettingsPage() {
         ? "nav"
         : splat === "search"
           ? "search"
-          : splat === "assets"
-            ? "assets"
-            : "general";
+          : splat === "mcp"
+            ? "mcp"
+            : splat === "assets"
+              ? "assets"
+              : "general";
   const [section, setSection] = useState<Section>(initial);
 
-  const visibleSections = SECTIONS.filter((s) => !s.ownerOnly || isOwner);
+  const visibleSections = SECTIONS.filter(
+    (s) => (!s.ownerOnly || isOwner) && (!s.enterpriseOnly || enterpriseOn),
+  );
 
-  // 非 owner 直戳 search 段时回落到通用，保证不渲染管理面板（403 也在 hooks 静默）。
-  const effectiveSection: Section = section === "search" && !isOwner ? "general" : section;
+  // 非 owner 直戳 search / 非企业环境直戳 mcp 时回落通用，保证不渲染后台面板（403 在 hooks 静默）。
+  const effectiveSection: Section =
+    (section === "search" && !isOwner) || (section === "mcp" && !enterpriseOn) ? "general" : section;
 
   const openReindex = () => setReindexOpen(true);
   const fireReindex = (body: Parameters<typeof reindex.mutate>[0]) =>
@@ -231,6 +249,18 @@ export function WorkspaceSettingsPage() {
                 <h3 className="mb-2 text-gx-14 font-semibold text-gx-text-primary">索引覆盖度</h3>
                 <SearchCoveragePanel onReindex={openReindex} />
               </div>
+            </div>
+          )}
+
+          {effectiveSection === "mcp" && enterpriseOn && (
+            <div className="flex flex-col gap-6">
+              <div>
+                <h2 className="text-gx-18 font-semibold text-gx-text-primary">MCP 接入</h2>
+                <p className="mt-1 text-gx-13 text-gx-text-tertiary">
+                  为 AI 客户端签发访问令牌，按最小权限原则控制其可读写的范围。
+                </p>
+              </div>
+              <PatListPanel />
             </div>
           )}
 
