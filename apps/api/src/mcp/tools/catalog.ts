@@ -7,8 +7,9 @@ import { config } from "../../config.js";
 import { tableGetSchema, tableListBases } from "./table.tools.js";
 import { recordCreateRecord, recordDeleteRecord, recordUpdateRecord, recordListRecords, recordQueryRecords, recordSearch } from "./record.tools.js";
 import { canvasGetBoard } from "./canvas.tools.js";
+import { canvasCommitElements } from "./canvasWrite.tools.js";
 import { docAppendBlocks, docDeleteBlocks, docGetDocBlocks, docUpdateBlock } from "./doc.tools.js";
-import { appendBlocksShape, createRecordShape, deleteBlocksShape, deleteRecordShape, updateBlockShape, updateRecordShape, getBoardShape, getDocBlocksShape, getSchemaShape, listBasesShape, listRecordsShape, pingEchoShape, queryRecordsShape, recordSearchShape } from "./schemas.js";
+import { appendBlocksShape, commitElementsShape, createRecordShape, deleteBlocksShape, deleteRecordShape, updateBlockShape, updateRecordShape, getBoardShape, getDocBlocksShape, getSchemaShape, listBasesShape, listRecordsShape, pingEchoShape, queryRecordsShape, recordSearchShape } from "./schemas.js";
 import { text, type ToolSpec } from "./types.js";
 
 export const TOOL_CATALOG: readonly ToolSpec[] = [
@@ -139,10 +140,20 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
   {
     meta: {
       name: "canvas.get_board", title: "读取画布",
-      description: "只读读取画布元素与内容版本（元素原样返回，未知键不剥离；画布写入为二期能力）。",
+      description: "只读读取画布元素与内容版本（元素原样返回，未知键不剥离；画布写入见 canvas.commit_elements）。",
       scopes: ["canvas:read"], family: "canvas", actions: ["r"], readOnly: true,
     },
     inputShape: getBoardShape,
     run: canvasGetBoard,
+  },
+  {
+    meta: {
+      name: "canvas.commit_elements", title: "写入画布图元",
+      description: "在画布末尾追加图元（当前最小集仅 op element.create 创建 geometry/rectangle；服务端生成 id、尾插、单事务版本+1）。"
+        + "其它操作名/箭头/关联块整批拒绝 UNSUPPORTED_OPERATION；需 confirm=true 与 baseVersion 乐观锁（缺省=last-write-wins）。",
+      scopes: ["canvas:write"], family: "canvas", actions: ["u"], readOnly: false,
+    },
+    inputShape: commitElementsShape,
+    run: canvasCommitElements,
   },
 ];

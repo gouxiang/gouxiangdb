@@ -202,3 +202,25 @@ export const deleteBlocksShape = {
 export const getBoardShape = {
   docId: z.string().min(1).describe("画布文档 id（须在该令牌可见集内）"),
 };
+
+/* ------------------------- M6/S6b canvas 族（element.create 最小集写入） ------------------------- */
+
+/**
+ * canvas.commit_elements：op 数 ≤100；confirm 必须字面量 true。
+ *
+ * **刻意只在 zod 描述信封（docId/ops 条数/confirm），不描述 ops 元素内部结构**——
+ * 元素六不变量（geometry/rectangle 形状、points 有限正宽高、禁键、gx* 保留命名空间、字节上限）
+ * 权威判定在 @gx/canvas 的 validateCreateOps（纯函数，Node/浏览器同构，未来前端可同一真源）。
+ * 若在此再写一份元素 schema，两份规则必然漂移；故元素用 z.unknown() 透传。
+ * baseVersion 与 doc 写工具同口径**可选**（缺省 LWW，使只写身份可用；陈旧版本仍走条件更新冲突）。
+ */
+export const commitElementsShape = {
+  docId: z.string().min(1).describe("画布文档 id（须在该令牌有 canvas 节点 u 权限）"),
+  ops: z
+    .array(z.unknown())
+    .min(1)
+    .max(MCP_LIMITS.WRITE_OPS_MAX)
+    .describe(`图元操作批（≤${MCP_LIMITS.WRITE_OPS_MAX}）；当前仅支持 op:"element.create" 创建 geometry/rectangle，其它操作名整批拒绝`),
+  baseVersion: z.number().int().min(0).optional().describe("读取时的 contentVersion（乐观锁）；缺省=last-write-wins，与 REST PUT 同口径"),
+  confirm: z.literal(true).describe("写入确认；必须是字面量 true"),
+};

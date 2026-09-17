@@ -87,21 +87,25 @@ export const CANVAS_LANGUAGE_MD = `# 画布图元语言
 
 ## 工具
 - canvas.get_board：只读读取画布元素与内容版本。入参 docId。
-- **当前画布能力为只读**：尚无写入工具；任何写入调用都会收到"工具不存在"响应。
+- canvas.commit_elements：在画布末尾追加图元（写入）。入参 docId、ops、confirm=true、可选 baseVersion。
 
 ## 元素结构
 - 画布正文是一段 JSON，顶层为元素数组（不是包含 children 的对象）。
 - 每个元素至少含 type 与 points；几何图元另含 shape。
-- 元素可携带自定义键（注释、关联引用等）；读取时原样返回，不会被裁剪或剥离。
+- 元素可携带自定义键（注释等）；读取时原样返回，不会被裁剪或剥离。
 
-## 即将开放的写入最小集（随写入工具上线，**当前尚未注册**）
-- 操作 element.create：仅支持几何矩形，即 type 为 geometry 且 shape 为 rectangle。
-- 该最小集只允许在元素数组尾部追加自足图元，且元素 id 由服务端生成（调用方不得自带 id）。
-- 上线后会新增一个画布写入工具；在此之前本节描述的是**能力预告，不是当前可用操作**。
+## 当前支持的写入最小集（已上线）
+- canvas.commit_elements 的每个 op 形如 {op:"element.create", element:{...}}。
+- element.create 仅支持几何矩形，即 type 为 geometry 且 shape 为 rectangle；points 为左上角与右下角两个点，宽高必须为正。
+- 只允许在元素数组尾部追加自足图元，元素 id 由服务端生成（调用方不得自带 id、不得带 zIndex 或选区/DOM 态键）。
+- 自定义扩展键当前仅 gxNote（字符串）可用；关联文档 gxDocRef / 关联块 gxLinkRef 为二期能力，出现即报 UNSUPPORTED_OPERATION。
+  非 gx 前缀的普通自定义键（如 fill/strokeColor 等图元样式键）原样保留；未登记的 gx* 保留键会被拒绝。
+- 单批 op 上限 100，批文本上限 100KB，写入后整板上限 10MB（均按 UTF-8 字节计）。
 
-## 二期操作（写入工具上线时仍不支持，调用将明确报错，不会静默成功）
-- 更新、移动、缩放、删除、连线、层级调整、思维导图布局等操作。
-- 连线（箭头）图元依赖两端绑定到既有节点，属于绑定关系而非自足图元，故不纳入写入最小集。
+## 二期操作（当前仍不支持，调用将明确报 UNSUPPORTED_OPERATION，不会静默成功）
+- element.update / move / delete / connect、zorder、关联块（gxLinkRef）插入、思维导图布局等操作。
+- 连线（箭头 arrow-line/vector-line）图元依赖两端绑定到既有节点，属于绑定关系而非自足图元，故不纳入写入最小集。
+- 收到 UNSUPPORTED_OPERATION 时响应附 supported:["element.create"]，表示当前唯一支持的操作名。
 `;
 
 /** 说明书资源规格（不含 URI 之外的业务数据）；由 server.ts 注册为 MCP Resources。 */

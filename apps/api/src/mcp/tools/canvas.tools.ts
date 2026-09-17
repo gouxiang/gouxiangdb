@@ -11,23 +11,12 @@
 //      viewport 是 board 运行时视图态（DrawnixCanvas.tsx:52/165-194 的 BoardTransforms 缩放平移，不进数据）。
 //      故本工具如实返回 `viewport: null`，**不臆造字段**。
 
+import { parseBoardContent } from "@gx/canvas";
 import { docBriefById } from "../../domain/mcpDocModels.js";
 import { deny, text, type ToolCtx, type ToolResult } from "./types.js";
 
-/**
- * 解析画布 content。空/缺失 -> 空数组（非错误）；坏 JSON 或顶层非数组 -> 空数组 + parseError:true
- * （**不抛错、也不静默吞**：调用方据 parseError 判断内容是否可解析）。
- */
-function parseElements(content: string): { elements: unknown[]; parseError: boolean } {
-  if (!content || !content.trim()) return { elements: [], parseError: false };
-  let v: unknown;
-  try {
-    v = JSON.parse(content);
-  } catch {
-    return { elements: [], parseError: true };
-  }
-  return Array.isArray(v) ? { elements: v, parseError: false } : { elements: [], parseError: true };
-}
+// 解析口径（空/坏 JSON/非数组）与写侧 canvas.commit_elements 共用 @gx/canvas.parseBoardContent 单一真源：
+// 读侧宽容返回 parseError 标志（不抛、不吞），写侧据 parseError 拒绝写入。
 
 /**
  * canvas.get_board：画布只读。
@@ -45,7 +34,7 @@ export async function canvasGetBoard(ctx: ToolCtx, args: Record<string, unknown>
   if (!doc || doc.kind !== "canvas") {
     return deny("FORBIDDEN_RESOURCE", "画布不存在或类型不匹配");
   }
-  const { elements, parseError } = parseElements(doc.content);
+  const { elements, parseError } = parseBoardContent(doc.content);
   return text(JSON.stringify({
     docId: doc.id,
     kind: doc.kind,
