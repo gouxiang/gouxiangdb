@@ -45,6 +45,11 @@ const B2 = "v1_base_nomember";
 const T2 = "v1_table_nomember";
 const N2 = `nav_table_${T2}`;
 const NB2 = `nav_base_${B2}`;
+// B3：仅 member、无 nav policy r -> 新链漏召回（overDeny）用。
+const B3 = "v1_base_memberonly";
+const T3 = "v1_table_memberonly";
+const N3 = `nav_table_${T3}`;
+const NB3 = `nav_base_${B3}`;
 
 async function seedRecord(tableId: string, recordId: string, fieldId: string, word: string) {
   await h.prisma.record.create({
@@ -79,19 +84,29 @@ beforeAll(async () => {
   await h.prisma.table.create({ data: { id: T2, baseId: B2, name: "非成员表", primaryFieldId: "v1_g0", createdBy: "owner" } });
   await h.prisma.field.create({ data: { id: "v1_g0", tableId: T2, name: "客户名", type: "singleLineText", order: 0 } });
 
+  // B3：U 只是 member（legacy 命中），但无 nav policy r（新链 scope 不含该表）-> 制造 overDeny。
+  await h.prisma.base.create({ data: { id: B3, name: "仅成员库", createdBy: "owner" } });
+  await h.prisma.member.create({ data: { id: "v1_m_b3", baseId: B3, userId: U, role: "viewer" } });
+  await h.prisma.table.create({ data: { id: T3, baseId: B3, name: "仅成员表", primaryFieldId: "v1_h0", createdBy: "owner" } });
+  await h.prisma.field.create({ data: { id: "v1_h0", tableId: T3, name: "客户名", type: "singleLineText", order: 0 } });
+
   await querySeed.createNavNodes(h.prisma, [
     { id: NB1, kind: "base", resourceType: "base", resourceId: B1, parentId: null },
     { id: N1, kind: "table", resourceType: "table", resourceId: T1, parentId: NB1 },
     { id: NB2, kind: "base", resourceType: "base", resourceId: B2, parentId: null },
     { id: N2, kind: "table", resourceType: "table", resourceId: T2, parentId: NB2 },
+    { id: NB3, kind: "base", resourceType: "base", resourceId: B3, parentId: null },
+    { id: N3, kind: "table", resourceType: "table", resourceId: T3, parentId: NB3 },
   ]);
   await querySeed.createPolicies(h.prisma, [
     { id: "v1_p_t1", nodeId: N1, subjectType: "user", subjectId: U, actions: "r" },
     { id: "v1_p_t2", nodeId: N2, subjectType: "user", subjectId: U, actions: "r" },
+    // 注意：T3 刻意不建 r 策略 -> 新链 scope 不含 T3（B3 记录对 U 不可见）。
   ]);
 
   await seedRecord(T1, "v1_r_shared", "v1_f0", "暗影共享词SH_0");
   await seedRecord(T2, "v1_r_newonly", "v1_g0", "暗影独有词NW_0");
+  await seedRecord(T3, "v1_r_memberonly", "v1_h0", "暗影仅成员词MO_0");
 
   // db.js 顶层读 globalThis.__gx_prisma：在动态 import 路由前注入真 harness 客户端。
   globalThis.__gx_prisma = h.prisma as unknown as PrismaClient;
@@ -171,13 +186,31 @@ describe("GX_M5_SEARCH=shadow：响应永远走旧链，对拍只观测", () => 
     expect(warn.mock.calls.map((c) => c.join(" ")).join("\n")).toContain("[m5-search-shadow]");
   });
 
-  it("GX_M5_SHADOW_STRICT=on：可比集 drift 非 0 -> 500 M5_SHADOW_DRIFT", async () => {
+  it("GX_M5_SHADOW_STRICT=on：集合漂移（overAllow）-> 500 M5_SHADOW_DRIFT（闸门未弱化）", async () => {
     configState.m5Search = "shadow";
     configState.m5ShadowStrict = true;
     const res = await get("暗影独有词NW_0");
     expect(res.status).toBe(500);
     const body = await res.json() as { code: string };
     expect(body.code).toBe("M5_SHADOW_DRIFT");
+  });
+
+  it("反证·overDeny（新链漏召回）：非 strict 观测 overDeny=1；strict=on 仍 500（集合保护未弱化）", async () => {
+    configState.m5Search = "shadow";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    // U 是 B3 成员（旧链命中 v1_r_memberonly），但 T3 无 r 策略（新链 scope 不含）-> 新链漏召回。
+    const res = await get("暗影仅成员词MO_0");
+    expect(res.status).toBe(200); // 非 strict：只观测
+    const snap = searchShadowRegistry.snapshot();
+    expect(snap.overDeny).toBe(1);
+    expect(snap.overAllow).toBe(0);
+    expect(snap.drift).toBe(1);
+    expect(warn.mock.calls.map((c) => c.join(" ")).join("\n")).toContain("SHADOW_OVERDENY");
+
+    configState.m5ShadowStrict = true;
+    const strictRes = await get("暗影仅成员词MO_0");
+    expect(strictRes.status).toBe(500); // 集合漂移在 strict 下仍失败
+    expect((await strictRes.json() as { code: string }).code).toBe("M5_SHADOW_DRIFT");
   });
 
   it("空 q：回 {records:[],docs:[]} 旧空壳，短路不进新链/不开新库", async () => {

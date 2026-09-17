@@ -11,8 +11,10 @@
 //   C. 前置条件为何现实可达：旧链 record 序 = createdAt asc、LIKE 路无 ORDER BY 返回按 rowid
 //      （=插入序=createdAt asc）——二者在"单表/单批"下天然一致，boost 一旦重排即翻转。
 //
-// 结论见 docs/baseline/2026-09-17-m5-gate.md §3.5：**会翻转**，已按约定停下报 team-lead，
-// 未改 shadow 闸门、未调 boost 常量。
+// 结论见 docs/baseline/2026-09-17-m5-gate.md §3.5：**会翻转**（orderDiffer=false -> true）。
+// 2026-09-17 总监裁决：strict 判据 = `setDriftCount`（集合漂移 overDeny+overAllow）；ORDER 降为观测。
+// 故本文件在断言"ORDER 翻转"的同时，锁死 `setDriftCount===0`（strict 不再失败）——集合保护未被弱化
+// 的反证见 __tests__/queryShadow.test.ts 的 overDeny/overAllow 例与 query-v1-route.test.ts 的 HTTP 500。
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeQueryHarness, type QueryHarness } from "./queryHarness.js";
@@ -80,29 +82,35 @@ describe("A. 合成输入：标题 boost 会把 orderDiffer 由 false 翻 true�
   const noBoost = reciprocalRankFusion([input]);
   const boosted = reciprocalRankFusion([input], { titleQuery: Q });
 
-  it("前置条件成立：boost 前新链序 == 旧链序（orderDiffer=false, driftCount=0）", () => {
+  it("前置条件成立：boost 前新链序 == 旧链序（orderDiffer=false, setDriftCount=0, driftCount=0）", () => {
     expect(order(noBoost)).toEqual(["a", "b", "c"]);
     const rep = compareSearchShadow("fts", noBoost.map((c) => item("record", c.entityId)), legacy, true);
     expect(rep.comparable).toBe(true);
     expect(rep.orderDiffer).toBe(false);
+    expect(rep.setDriftCount).toBe(0);
     expect(rep.driftCount).toBe(0);
   });
 
-  it("施加标题精确加成后：新链被重排为 b,a,c，orderDiffer=true、driftCount=1（strict=on 即 500）", () => {
+  it("施加标题精确加成后：新链被重排为 b,a,c；orderDiffer=true 但 setDriftCount=0 -> strict 判据下不失败", () => {
     expect(order(boosted)).toEqual(["b", "a", "c"]); // b 由 rank2 被加成顶到首位
     const rep = compareSearchShadow("fts", boosted.map((c) => item("record", c.entityId)), legacy, true);
     expect(rep.comparable).toBe(true);
     expect(rep.orderDiffer).toBe(true);
     expect(rep.overDeny).toHaveLength(0); // 集合未变（boost 不加/删候选）
     expect(rep.overAllow).toHaveLength(0);
-    expect(rep.driftCount).toBe(1); // 纯 ORDER 漂移
+    expect(rep.setDriftCount).toBe(0); // 集合零漂移 -> strict 唯一判据为 0（不失败）
+    expect(rep.driftCount).toBe(1); // 观测总量仍含 ORDER
+    // 复刻闸门判据（queryShadow strict 分支）：setDriftCount>0 才失败。
+    expect(rep.setDriftCount > 0).toBe(false);
   });
 
-  it("同实体集合、仅加成不同：driftCount 由 0 变 1 —— 翻转由 boost 单独引起", () => {
+  it("仅加成不同：ORDER 翻转不改变集合判据（setDriftCount 恒 0，driftCount 随 ORDER 变）", () => {
     const before = compareSearchShadow("fts", noBoost.map((c) => item("record", c.entityId)), legacy, true);
     const after = compareSearchShadow("fts", boosted.map((c) => item("record", c.entityId)), legacy, true);
     expect(before.driftCount).toBe(0);
     expect(after.driftCount).toBe(1);
+    expect(before.setDriftCount).toBe(0); // strict 判据前后恒 0
+    expect(after.setDriftCount).toBe(0);
     // 与加成大小无关：只把 titleQuery 换成不命中的词，顺序即复原 -> 证明是加成（非其它因素）导致。
     const untouched = reciprocalRankFusion([input], { titleQuery: "毫不相关词" });
     expect(order(untouched)).toEqual(["a", "b", "c"]);
@@ -158,7 +166,7 @@ describe("B. 真 recall 数据：同一翻转在真实 LIKE 召回上成立（re
     return { hits, baseOrder: order(base), boostedOrder: order(boosted) };
   }
 
-  it("真 LIKE 召回序 [A,B,C]；无加成时与旧链序一致（drift 0），加成后重排为 [B,A,C]（drift 1）", () => {
+  it("真 LIKE 召回序 [A,B,C]；无加成时与旧链序一致（drift 0），加成后重排为 [B,A,C]（ORDER 漂移但集合判据 0）", () => {
     const { hits, baseOrder, boostedOrder } = recallHits();
     expect(hits.map((x) => x.entityId)).toEqual([D_A, D_B, D_C]); // LIKE 无 ORDER BY -> rowid/插入序
     expect(baseOrder).toEqual([D_A, D_B, D_C]);
@@ -170,8 +178,10 @@ describe("B. 真 recall 数据：同一翻转在真实 LIKE 召回上成立（re
     const after = compareSearchShadow("like", boostedOrder.map((id) => item("doc", id)), legacy, true);
     expect(before.comparable).toBe(true);
     expect(before.orderDiffer).toBe(false);
+    expect(before.setDriftCount).toBe(0);
     expect(before.driftCount).toBe(0);
     expect(after.orderDiffer).toBe(true);
+    expect(after.setDriftCount).toBe(0); // 集合零漂移 -> strict 不失败（ORDER 降观测）
     expect(after.driftCount).toBe(1);
   });
 });

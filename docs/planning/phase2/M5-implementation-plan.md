@@ -595,6 +595,7 @@ A 主库活实体无派生 chunk（漏索引）；B 派生 chunk 对应实体不
 
 - **两层门**：实施期 `GX_M5_SEARCH=off` 保证代码合入不建库、不出网；纯函数（rrf/queryPlan/chunks/fieldGrant）先落地不接线，随后 SearchStore/provider/worker，再 shadow 对拍，连续一迭代 drift=0 才允许 on（与 M1/M4 同款）。on 之后 `GX_EMBEDDING_MODE=off`，存量用户升级后仍是纯 FTS/LIKE；只有管理员显式配置 cloud 并通过二次确认后才建向量、才出网。
 - shadow 对拍口径：仅在「旧搜索有界预览可达 + 两模式都用 FTS/LIKE（不引入向量差异）」的交集上比对命中实体集合/顺序；向量召回属于新增能力，用 S11 独立小样召回评测而非与旧 includes 对拍。
+  - 【2026-09-17 项目总监裁决：strict 判据为**集合漂移**（overDeny+overAllow），**ORDER 降为可观测项**（仍计入 registry/日志，不再导致 strict 失败）。依据：RRF/标题 boost 是设计内排序改进，把 ORDER 算失败会误报致报警疲劳并最终丢弃整个闸门；硬门只对真正的错误（漏召回/多召回）失败。实现：`queryShadow.setDriftCount`（strict 唯一判据）与 `routes/v1/search.ts` 判据切换；集合保护逐位不变。证据：`docs/baseline/2026-09-17-m5-gate.md` §3.5、`__tests__/query-shadow-boost-drift.test.ts`、`queryShadow.test.ts`、`query-v1-route.test.ts`。】
 - 回滚：GX_M5_SEARCH=off 即回现状；v1 路由摘除为代码级最终回退，旧端点无损。
 
 ---

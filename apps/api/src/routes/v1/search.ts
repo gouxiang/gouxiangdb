@@ -121,9 +121,10 @@ searchRoutes.get("/", async (c) => {
     }
     const report = compareSearchShadow(unified!.mode, unified!.items, legacy, hadQuery);
     searchShadowRegistry.record(report, userId);
-    if (config.m5ShadowStrict && report.comparable && report.driftCount > 0) {
-      // §6 对拍闸门：strict 下 drift 非 0 让请求失败（不含实体业务值）。
-      throw new HttpError(500, "统一检索 shadow 对拍漂移（strict 闸门）", "M5_SHADOW_DRIFT");
+    if (config.m5ShadowStrict && report.comparable && report.setDriftCount > 0) {
+      // §6 对拍闸门（2026-09-17 总监裁决）：strict 只对【集合漂移】（漏召回/多召回）失败；
+      // ORDER 是 RRF/boost 的设计内排序改进，降为观测（registry 计数 + warn），不再让请求失败。
+      throw new HttpError(500, "统一检索 shadow 集合漂移（strict 闸门）", "M5_SHADOW_DRIFT");
     }
     return c.json(legacy); // 响应永远是旧结果
   }

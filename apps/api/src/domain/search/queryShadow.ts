@@ -34,6 +34,14 @@ export interface ShadowReport {
   overAllow: EntityKey[];
   /** 共有实体在两序列中的相对顺序不一致。 */
   orderDiffer: boolean;
+  /**
+   * 集合漂移总数（= overDeny + overAllow）——**strict 闸门的唯一判据**。
+   * 硬门只对"漏召回/多召回"这类真正的错误失败；ORDER 是 RRF/boost 的设计内排序改进，不计入失败。
+   */
+  get setDriftCount(): number;
+  /**
+   * 可观测总漂移（= setDriftCount + (orderDiffer ? 1 : 0)）——仅用于日志/registry 观测，别当失败判据。
+   */
   get driftCount(): number;
 }
 
@@ -73,10 +81,10 @@ export function compareSearchShadow(
     orderDiffer: false,
   };
   if (!hadQuery) {
-    return { ...base, reason: "empty_query", get driftCount() { return 0; } };
+    return { ...base, reason: "empty_query", get setDriftCount() { return 0; }, get driftCount() { return 0; } };
   }
   if (newMode === "hybrid" || newMode === "vector") {
-    return { ...base, reason: "vector_route", get driftCount() { return 0; } };
+    return { ...base, reason: "vector_route", get setDriftCount() { return 0; }, get driftCount() { return 0; } };
   }
 
   const oldKeys = legacyKeys(legacy);
@@ -99,8 +107,13 @@ export function compareSearchShadow(
     overDeny,
     overAllow,
     orderDiffer,
+    // strict 唯一判据：集合漂移（漏召回/多召回）。
+    get setDriftCount() {
+      return this.overDeny.length + this.overAllow.length;
+    },
+    // 可观测总量（日志/registry）：集合漂移 + ORDER 设计内重排。
     get driftCount() {
-      return this.overDeny.length + this.overAllow.length + (this.orderDiffer ? 1 : 0);
+      return this.setDriftCount + (this.orderDiffer ? 1 : 0);
     },
   };
   return report;
@@ -132,6 +145,7 @@ class SearchShadowRegistry {
       return;
     }
     this.counts.compared += 1;
+    // 观测口径用【总漂移】（含 ORDER）：ORDER-only 漂移也照常计数并 warn，只是不再让 strict 失败。
     if (report.driftCount === 0) return;
     const kinds: ShadowDriftKind[] = [];
     if (report.overDeny.length) { kinds.push("SHADOW_OVERDENY"); this.counts.overDeny += report.overDeny.length; }
