@@ -324,3 +324,38 @@ export async function softDeleteRecordTx(tx: DbTx, recordId: string): Promise<vo
     entityType: "record", entityId: recordId, op: "delete", version: BigInt(Date.now()),
   });
 }
+
+/** createRecordTx 入参（MCP 与 REST 同口径；显式传参、无 Hono Context）。 */
+export interface CreateRecordParams {
+  tableId: string;
+  payloadFields: Record<string, unknown>;
+  fields: Awaited<ReturnType<typeof loadTableFields>>;
+  userId: string;
+  /** draft=true 跳过创建期必填兜底（就地新建空行草稿，与编辑期允许临时为空一致）。 */
+  isDraft: boolean;
+}
+
+/**
+ * 创建记录的事务体（**从 routes/records.ts:172-191 原样移动** + 显式传参）。
+ * 顺序未改：draft 跳过必填兜底 -> assertRequiredOnCreate -> assertUnique（事务内防 TOCTOU）-> record.create
+ * -> applyFieldWrites（含 links/sidecar）-> outbox upsert。调用方负责 defaults 补偿写与写后 hydrate。
+ */
+export async function createRecordTx(tx: DbTx, params: CreateRecordParams): Promise<{ id: string; tableId: string }> {
+    // draft 模式（就地新建空行草稿）跳过，与编辑期允许临时为空保持一致。
+    if (!params.isDraft) {
+      await assertRequiredOnCreate(params.fields, params.payloadFields);
+    }
+    // unique 校验放进事务内，避免并发下检查与写入之间被插队（TOCTOU）
+    await assertUnique(params.tableId, params.fields, params.payloadFields, undefined, undefined, tx);
+    const created = await tx.record.create({
+      data: { tableId: params.tableId, fields: "{}", createdBy: params.userId, updatedBy: params.userId },
+    });
+    if (Object.keys(params.payloadFields).length > 0) {
+      await applyFieldWrites(params.tableId, created.id, params.payloadFields, params.fields, tx);
+    }
+    // M5/S1：同事务登记检索 outbox（实体建，upsert）。失败随本事务整体回滚。
+    await enqueueChangeEventTx(tx, {
+      entityType: "record", entityId: created.id, op: "upsert", version: BigInt(Date.now()),
+    });
+    return created;
+}

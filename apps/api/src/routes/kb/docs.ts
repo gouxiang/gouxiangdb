@@ -8,7 +8,7 @@ import { z } from "zod";
 import { prisma, withWriteTx } from "../../db.js";
 import { VersionConflictError, changeEntityOfKind, saveDocContentTx } from "../../domain/kbDocWrite.js";
 import { requireUserId, errorResponse, HttpError } from "../../guards.js";
-import { buildSearchText, maybeAutoSnapshotTx } from "../../domain/kb.js";
+import { buildSearchText } from "../../domain/kb.js";
 import {
   syncNavFromEntitiesTx,
   softDeleteSingleNodeTx,

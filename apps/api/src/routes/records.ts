@@ -40,7 +40,7 @@ import { resolveTableMask } from "../domain/authz/maskGate.js";
 export const records = new Hono();
 
 // M6/S4：写原语已移入 domain/recordWrite.ts（纯移动）+ re-export 保持既有导入点不变。
-import { applyFieldWrites, assertRequiredOnCreate, assertUnique, parseStoredFields, runMaskWriteGate, softDeleteRecordTx } from "../domain/recordWrite.js";
+import { applyFieldWrites, assertUnique, createRecordTx, parseStoredFields, runMaskWriteGate, softDeleteRecordTx } from "../domain/recordWrite.js";
 export { assertRequiredOnCreate, assertUnique } from "../domain/recordWrite.js";
 
 // ============ 工具 ============
@@ -169,26 +169,10 @@ records.post("/", async (c) => {
   // 事务：创建记录 + 写入字段（含 link_row）要么一起成功，要么整体回滚，
   // 否则「字段校验失败但空记录已落库」会留下孤儿记录。
   const isDraft = parsed.data.draft === true;
-  const rec = await withWriteTx("record.create", async (tx) => {
-    // 创建期必填兜底：对全表 required 字段统一校验（含 payload 完全省略的字段）。
-    // draft 模式（就地新建空行草稿）跳过，与编辑期允许临时为空保持一致。
-    if (!isDraft) {
-      await assertRequiredOnCreate(fields, payloadFields);
-    }
-    // unique 校验放进事务内，避免并发下检查与写入之间被插队（TOCTOU）
-    await assertUnique(tableId, fields, payloadFields, undefined, undefined, tx);
-    const created = await tx.record.create({
-      data: { tableId, fields: "{}", createdBy: userId, updatedBy: userId },
-    });
-    if (Object.keys(payloadFields).length > 0) {
-      await applyFieldWrites(tableId, created.id, payloadFields, fields, tx);
-    }
-    // M5/S1：同事务登记检索 outbox（实体建，upsert）。失败随本事务整体回滚。
-    await enqueueChangeEventTx(tx, {
-      entityType: "record", entityId: created.id, op: "upsert", version: BigInt(Date.now()),
-    });
-    return created;
-  });
+  // M6/S4：事务体已移入 domain/recordWrite.ts（纯移动 + 显式传参）。
+  const rec = await withWriteTx("record.create", (tx) => createRecordTx(tx, {
+    tableId, payloadFields, fields, userId, isDraft,
+  }));
 
   // 创建期默认逻辑：static 填入、autoNumber 编号、lookup/formula 初值、subtable 整表抓取播种
   // 属于增强行为，失败不应回滚已创建的记录（与编辑期一致）。
