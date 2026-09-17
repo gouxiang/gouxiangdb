@@ -52,6 +52,9 @@ export const SYSTEM_ROLES: readonly SystemRoleSpec[] = [
 
 export const SYSTEM_ROLE_BY_ID = new Map(SYSTEM_ROLES.map((r) => [r.id, r]));
 
+/** owner 系统角色 id 锚点（写后守卫等处复用，避免散落裸字符串 "role_owner"）。 */
+export const OWNER_ROLE_ID = SYSTEM_ROLES[0].id;
+
 export function isSystemRoleId(id: string): boolean {
   return SYSTEM_ROLE_BY_ID.has(id);
 }

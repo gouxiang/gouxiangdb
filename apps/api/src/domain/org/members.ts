@@ -12,6 +12,7 @@ import { HttpError } from "../../guards.js";
 import { withWriteTx, type DbTx } from "../../db.js";
 import { getDefaultWorkspaceId } from "./workspace.js";
 import { USER_STATUS } from "./authState.js";
+import { assertWorkspaceHasOwnerTx } from "./lifecycle.js";
 
 // 只读 DTO/查询从 memberDirectory 再导出，调用方可只从 members 一处导入。
 export type {
@@ -95,6 +96,13 @@ export async function assignDepartments(
         where: { departmentId_userId: { departmentId: mainDeptId, userId } },
         data: { isMain: 1 },
       });
+    }
+
+    // 写后兜底：仅 remove 可能减少 owner 来源——若该成员的 role_owner 身份只来自被授
+    // role_owner 部门（及其子树）的成员关系，移出后可致工作区零在岗 owner。纯 add / 设主
+    // 部门不可能摘掉 owner 来源，无需复算。抛错即在事务回调内，整体回滚。
+    if (remove.size > 0) {
+      await assertWorkspaceHasOwnerTx(tx);
     }
 
     const rows = await tx.deptMember.findMany({

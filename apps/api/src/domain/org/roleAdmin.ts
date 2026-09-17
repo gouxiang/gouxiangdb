@@ -10,7 +10,8 @@ import { ORG_ACTIONS } from "@gx/shared-types";
 import { HttpError } from "../../guards.js";
 import { withWriteTx, prisma, type DbTx } from "../../db.js";
 import { getDefaultWorkspaceId } from "./workspace.js";
-import { SYSTEM_ROLE_BY_ID, assertOrgActions } from "./roles.js";
+import { SYSTEM_ROLE_BY_ID, OWNER_ROLE_ID, assertOrgActions } from "./roles.js";
+import { assertWorkspaceHasOwnerTx } from "./lifecycle.js";
 
 /** 动作白名单非法统一为 400（assertOrgActions 抛普通 Error，边界翻译避免冒泡 500）。 */
 function parseActionsStrict(raw: unknown): OrgAction[] {
@@ -294,6 +295,12 @@ export async function replaceAssignments(
         });
         added.push({ subjectType: s.subjectType, subjectId: s.subjectId });
       }
+    }
+    // 写后兜底：替换 role_owner 主体集可能删掉全部有效 owner 来源（空 subjects、换成
+    // DISABLED 用户、换成无 ACTIVE 成员的部门），复算在岗 owner 为空则 409 回滚。
+    // 自定义角色不持 owner 语义，不触发。
+    if (roleId === OWNER_ROLE_ID) {
+      await assertWorkspaceHasOwnerTx(tx);
     }
     const finalRows = await tx.roleAssignment.findMany({ where: { roleId }, orderBy: { createdAt: "asc" } });
     return { assignments: finalRows.map(toAssignmentDTO), added, removed };

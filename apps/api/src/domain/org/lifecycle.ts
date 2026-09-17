@@ -7,7 +7,7 @@ import bcrypt from "bcryptjs";
 import { HttpError } from "../../guards.js";
 import { withWriteTx, type DbTx } from "../../db.js";
 import { USER_STATUS, issueToken, invalidateAuthState } from "./authState.js";
-import { usersWithRole } from "./roles.js";
+import { usersWithRole, OWNER_ROLE_ID } from "./roles.js";
 
 /** 激活码明文 -> sha256 摘要（与建邀请时同一算法）。 */
 export function hashInviteToken(plain: string): string {
@@ -83,9 +83,23 @@ export async function acceptInvite(input: {
  * 事务内执行，复用同一事务视图，避免"检查-写入"间隙被绕过。
  */
 export async function assertNotLastOwnerTx(tx: DbTx, targetId: string): Promise<void> {
-  const owners = await usersWithRole("role_owner", tx);
+  const owners = await usersWithRole(OWNER_ROLE_ID, tx);
   if (owners.includes(targetId) && owners.length <= 1) {
     throw new HttpError(409, "至少保留一位工作区所有者，请先移交所有者再停用");
+  }
+}
+
+/**
+ * 写操作后兜底守卫：确保工作区仍至少有一位【在岗】(ACTIVE) owner，否则 409 回滚。
+ * 与针对单个 targetId 的写前检查 assertNotLastOwnerTx 分开——replaceAssignments（主体集
+ * 批量替换）与 assignDepartments（移除部门归属）都可能不经停用路径就摘掉全部有效 owner
+ * 来源，故在事务内写操作完成后统一复算 usersWithRole。必须在 withWriteTx 回调内调用，
+ * 抛错即触发事务回滚，delete/create 全部不落库。
+ */
+export async function assertWorkspaceHasOwnerTx(tx: DbTx): Promise<void> {
+  const owners = await usersWithRole(OWNER_ROLE_ID, tx);
+  if (owners.length === 0) {
+    throw new HttpError(409, "至少保留一位工作区所有者");
   }
 }
 
