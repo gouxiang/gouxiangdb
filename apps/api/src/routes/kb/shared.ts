@@ -30,12 +30,6 @@ export async function docAclRoleOf(userId: string, docId: string): Promise<Role 
   return (a?.role as Role) ?? null;
 }
 
-/** 乐观锁冲突：沿用现网特殊信封 {error, code:"VERSION_CONFLICT", currentVersion} + 409。 */
-export class VersionConflictError extends HttpError {
-  constructor(public currentVersion: number | null) {
-    super(409, "文档已被他人修改，请刷新后重试");
-  }
-}
 
 /**
  * M4/S3 shadow 对拍缝：仅 GX_AUTHZ_ENGINE 生效为 shadow 时跑引擎同上下文对拍；

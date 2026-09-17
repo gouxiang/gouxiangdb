@@ -6,6 +6,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { prisma, withWriteTx } from "../../db.js";
+import { VersionConflictError, changeEntityOfKind, saveDocContentTx } from "../../domain/kbDocWrite.js";
 import { requireUserId, errorResponse, HttpError } from "../../guards.js";
 import { buildSearchText, maybeAutoSnapshotTx } from "../../domain/kb.js";
 import {
@@ -14,7 +15,6 @@ import {
 } from "../../domain/nav/sync.js";
 import {
   RANK,
-  VersionConflictError,
   isDescendant,
   requireDocAccess,
   requireKb,
@@ -25,7 +25,6 @@ import { enqueueChangeEventTx } from "../../domain/search/outbox.js";
 import type { ChangeEntityType } from "../../domain/search/outbox.js";
 
 /** kb_docs.kind 到检索实体类型（doc/canvas 分别建索引）。 */
-const changeEntityOfKind = (kind: string): ChangeEntityType => (kind === "canvas" ? "canvas" : "doc");
 
 export const docsRoutes = new Hono();
 
@@ -186,41 +185,11 @@ docsRoutes.put("/docs/:docId/content", async (c) => {
     // M3/S3（baseline 偏差补接）：内容保存会更新 updatedAt（节点 ord 依赖 updatedAt desc），
     // 附带 title 时还要改节点 name；故内容更新+版本快照+nav 同步整体进单事务。
     // 乐观锁不匹配抛 VersionConflictError -> 事务回滚 + catch 内回现网特殊 409 信封。
-    const result = await withWriteTx("doc.content.save", async (tx) => {
-      const data = {
-        content,
-        searchText,
-        updatedBy: userId,
-        contentVersion: { increment: 1 as const },
-        ...(title ? { title } : {}),
-      };
-      if (parsed.data.baseVersion !== undefined) {
-        // 条件更新：版本不匹配说明他人已保存，抛错回滚，由外层回 409 冲突信封
-        const res = await tx.kbDoc.updateMany({
-          where: { id: doc.id, contentVersion: parsed.data.baseVersion },
-          data,
-        });
-        if (res.count === 0) {
-          const cur = await tx.kbDoc.findUnique({ where: { id: doc.id }, select: { contentVersion: true } });
-          throw new VersionConflictError(cur?.contentVersion ?? null);
-        }
-      } else {
-        // 旧客户端（未携带版本）：保持 last-write-wins，但版本号照常递增
-        await tx.kbDoc.update({ where: { id: doc.id }, data });
-      }
-      const snapshotted = await maybeAutoSnapshotTx(tx, doc.id, userId);
-      const next = await tx.kbDoc.findUnique({ where: { id: doc.id }, select: { contentVersion: true, kind: true } });
-      // M5/S1：正文（及附带 title）保存成功，两乐观锁分支汇流于此，发 upsert；
-      // version 用递增后的 contentVersion（worker 据此对齐内容版本）。
-      await enqueueChangeEventTx(tx, {
-        entityType: changeEntityOfKind(next?.kind ?? doc.kind),
-        entityId: doc.id,
-        op: "upsert",
-        version: BigInt(next?.contentVersion ?? doc.contentVersion + 1),
-      });
-      await syncNavFromEntitiesTx(tx);
-      return { snapshotted, contentVersion: next?.contentVersion ?? null };
-    });
+    // M6/S4：事务体已移入 domain/kbDocWrite.ts（纯移动 + 显式传参）。
+    const result = await withWriteTx("doc.content.save", (tx) => saveDocContentTx(tx, {
+      docId: doc.id, kind: doc.kind, currentVersion: doc.contentVersion,
+      content, searchText, userId, title, baseVersion: parsed.data.baseVersion,
+    }));
     return c.json({ ok: true, snapshotted: result.snapshotted, savedAt: new Date().toISOString(), contentVersion: result.contentVersion });
   } catch (e) {
     if (e instanceof VersionConflictError) {
