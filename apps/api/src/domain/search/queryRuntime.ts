@@ -39,6 +39,13 @@ export interface BuildRuntimeOptions {
   /** 覆写 provider（测试 mock，避免触外网）。 */
   provider?: EmbeddingProvider | null;
   workspaceId?: string;
+  /**
+   * 显式指定 scope 收敛的资源 kind（MCP record.search 按 PAT scope 收窄实体族用）。
+   * **不传（非 MCP 调用）= 沿用由 `type` 推导的 kinds，行为逐字节不变**。
+   * 注意：这是安全闸——多实体族（type:"all"）时仍可只让 scope 命中其中部分族；
+   * 召回三路都 JOIN temp_scope，不在 scopeKinds 内的族在 SQL 层即被排除。
+   */
+  scopeKinds?: readonly string[];
 }
 
 /** 惰性进程级 provider（配置视图每次现算，但 provider 复用——cloud 内部带 health/dim 状态）。 */
@@ -123,7 +130,8 @@ export async function buildQueryRuntime(
     mode = provider?.mode === "cloud" ? "cloud" : "off";
   }
 
-  const kinds = typeKinds(type);
+  // scope kinds：显式 scopeKinds（MCP 按 PAT scope 收窄）优先；否则沿用 type 推导（非 MCP 默认，零变化）。
+  const kinds = opts.scopeKinds ? [...new Set(opts.scopeKinds)] : typeKinds(type);
   const deps: QueryRuntimeDeps = {
     store: { db: store.db, vecAvailable: store.vecAvailable, filePath: store.filePath },
     vector: mode === "cloud" ? makeVectorGate(store, mode, provider) : null,

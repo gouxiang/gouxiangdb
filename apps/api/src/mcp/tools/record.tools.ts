@@ -8,6 +8,7 @@
 
 import { loadTableFields, parseViewConfig, queryRecords } from "../../domain/recordService.js";
 import { runMcpUnifiedSearch } from "../../domain/mcpSearchBridge.js";
+import type { SearchEntityType } from "../../domain/search/queryPlan.js";
 import { config } from "../../config.js";
 import { recordBriefById } from "../../domain/mcpReadModels.js";
 import { createRecordTx, softDeleteRecordTx, updateRecordTx } from "../../domain/recordWrite.js";
@@ -91,14 +92,34 @@ export async function recordQueryRecords(ctx: ToolCtx, args: Record<string, unkn
   return readPage(ctx, args as unknown as ReadArgs, true);
 }
 
-/** record.search：薄封装 M5 统一检索（scope 先收敛由 M5 保证，MCP 侧只做 PAT 粗档，不重复鉴权）。 */
+/**
+ * 按 PAT 六位 scope 推导 record.search 允许检索的实体族（P0-A）：
+ * record:read→record(nav kind=table)、doc:read→doc、canvas:read→canvas。
+ * M5 的 scope 收敛只认登录用户 r 授权、不知道 PAT scope，故必须由 MCP 层按 scope 收窄实体族。
+ * 返回空数组 = 该 PAT 无任何读族（注册层本已不发此工具，这里 fail-closed 兜底）。
+ */
+export function searchEntityTypesForScopes(scopes: readonly string[]): SearchEntityType[] {
+  const set = new Set(scopes);
+  const types: SearchEntityType[] = [];
+  if (set.has("record:read")) types.push("record");
+  if (set.has("doc:read")) types.push("doc");
+  if (set.has("canvas:read")) types.push("canvas");
+  return types;
+}
+
+/** record.search：薄封装 M5 统一检索；按 PAT scope 收窄实体族（P0-A），M5 scope 只认用户 r。 */
 export async function recordSearch(ctx: ToolCtx, args: Record<string, unknown>): Promise<ToolResult> {
   if (config.m5Search === "off") return deny("INVALID_PARAMS", "统一检索未启用（GX_M5_SEARCH=off）");
+  const allowedTypes = searchEntityTypesForScopes(ctx.subject.scopes);
+  if (allowedTypes.length === 0) {
+    // fail-closed：注册层（catalog 要求 record:read）理论上已挡住，这里纵深兜底，绝不回落全族。
+    return deny("FORBIDDEN_RESOURCE", "该令牌无权检索任何实体");
+  }
   const q = String(args.q ?? "");
   const limit = typeof args.limit === "number" ? args.limit : 20;
   const mode = (args.mode as "auto" | "fts" | "vector" | undefined) ?? "auto";
   try {
-    const res = await runMcpUnifiedSearch(ctx.subject.userId, q, mode, limit);
+    const res = await runMcpUnifiedSearch(ctx.subject.userId, q, mode, limit, allowedTypes);
     return text(JSON.stringify(res));
   } catch (err) {
     // 检索不可用（search.db 缺失/损坏、provider 故障）：结构化错误，**不 500 不挂死**。
