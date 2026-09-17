@@ -7,6 +7,7 @@
 // 上限常量（§3-8 配额契约）亦单点定义，供工具与 openapi 对拍复用。
 
 import { z } from "zod/v4";
+import type { BlockType } from "@gx/blocks";
 
 /** 配额常量（§3-8）：读 limit ≤200、写批量 op ≤100、批文本 ≤100KB、文档/画布 10MB。 */
 export const MCP_LIMITS = {
@@ -85,4 +86,96 @@ export const updateRecordShape = {
   tableId: z.string().min(1),
   recordId: z.string().min(1),
   fields: z.record(z.string(), z.unknown()).describe("要更新的字段映射 {fieldId: value}"),
+};
+
+/* ------------------------- M6/S5 doc 族（文档块语言） ------------------------- */
+
+/**
+ * 可写入的块类型白名单（与 @gx/blocks 的 `BlockType` 同域）。
+ * 完备性由下方编译期守卫保证：@gx/blocks 新增块类型而此处未同步时 tsc 直接报错。
+ */
+export const BLOCK_TYPES = [
+  "p",
+  "h1", "h2", "h3", "h4", "h5", "h6",
+  "ul", "ol", "task",
+  "quote",
+  "callout",
+  "toggle",
+  "code",
+  "hr",
+  "pagebreak",
+  "table",
+  "image",
+  "video",
+  "audio",
+  "pdf",
+  "attachment",
+  "math",
+  "raw",
+] as const;
+
+// 编译期完备性守卫：_MissingBlockType 非 never 时本行赋值类型不匹配 -> tsc 报错。
+type _MissingBlockType = Exclude<BlockType, (typeof BLOCK_TYPES)[number]>;
+const _assertBlockTypesComplete: [_MissingBlockType] extends [never] ? true : false = true;
+void _assertBlockTypesComplete;
+
+/**
+ * 单个「块操作」入参（append_blocks 之 ops 元素）。
+ * **刻意不含 `id`**：块 id 由服务端 `newBlock` 生成，AI 不得自带插入 id（严禁凭空指定/覆盖块 id）。
+ */
+export const blockOpShape = z.object({
+  type: z.enum(BLOCK_TYPES).describe("块类型"),
+  text: z.string().optional().describe("文本类块的行内 Markdown 源码"),
+  checked: z.boolean().optional().describe("task 勾选态"),
+  lang: z.string().optional().describe("code 语言"),
+  code: z.string().optional().describe("code 代码内容"),
+  rows: z.array(z.array(z.string())).optional().describe("table 二维数组（第 0 行为表头）"),
+  src: z.string().optional().describe("媒体类资源地址"),
+  alt: z.string().optional().describe("image alt / pdf 标题 / 媒体说明"),
+  name: z.string().optional().describe("attachment 文件名"),
+  variant: z.enum(["note", "tip", "warning", "important", "caution"]).optional().describe("callout 类型"),
+  summary: z.string().optional().describe("toggle 折叠块标题"),
+  formula: z.string().optional().describe("math 公式源码"),
+  raw: z.string().optional().describe("raw 透传的原始 Markdown"),
+  align: z.enum(["left", "center", "right"]).nullable().optional().describe("块级对齐（仅注释通道生效）"),
+});
+
+/** doc.get_doc_blocks：format=blocks 走 mdToBlocks；format=markdown 直出正文；range 按块 seq 0-based 闭区间切片。 */
+export const getDocBlocksShape = {
+  docId: z.string().min(1).describe("文档 id（须在该令牌可见集内）"),
+  format: z.enum(["blocks", "markdown"]).describe("blocks=结构化块数组；markdown=原始 Markdown 正文"),
+  range: z
+    .object({ start: z.number().int().min(0), end: z.number().int().min(0) })
+    .optional()
+    .describe("按块序号切片（0-based 闭区间 [start,end]；越界安全截断，不报错）"),
+};
+
+/** doc.append_blocks：afterBlockId 缺省=末尾；ops ≤100；单事务一次 contentVersion+1；需 baseVersion 乐观锁。 */
+export const appendBlocksShape = {
+  docId: z.string().min(1),
+  afterBlockId: z.string().min(1).optional().describe("在该块 id 之后插入（缺省=追加到文档末尾）"),
+  ops: z.array(blockOpShape).min(1).max(MCP_LIMITS.WRITE_OPS_MAX).describe(`要追加的块操作（≤${MCP_LIMITS.WRITE_OPS_MAX}）`),
+  baseVersion: z.number().int().min(0).describe("读取时的 contentVersion（乐观锁）"),
+};
+
+/** doc.update_block：patch 仅 text/checked/align；align 仅走注释通道（写 Block.align，不手写 md）。 */
+export const updateBlockShape = {
+  docId: z.string().min(1),
+  blockId: z.string().min(1).describe("目标块 id（须为当前文档内的块）"),
+  patch: z
+    .object({
+      text: z.string().optional(),
+      checked: z.boolean().optional(),
+      align: z.enum(["left", "center", "right"]).nullable().optional(),
+    })
+    .describe("要修改的块属性（至少一项）"),
+  baseVersion: z.number().int().min(0),
+};
+
+/** doc.delete_blocks：原子批删（任一 id 不存在整批失败）；confirm 必须字面量 true。 */
+export const deleteBlocksShape = {
+  docId: z.string().min(1),
+  blockIds: z.array(z.string().min(1)).min(1).max(MCP_LIMITS.WRITE_OPS_MAX).describe(`要删除的块 id（≤${MCP_LIMITS.WRITE_OPS_MAX}）`),
+  baseVersion: z.number().int().min(0),
+  confirm: z.literal(true).describe("删除确认；必须是字面量 true（破坏性操作强制显式确认）"),
 };

@@ -6,7 +6,8 @@
 import { config } from "../../config.js";
 import { tableGetSchema, tableListBases } from "./table.tools.js";
 import { recordCreateRecord, recordDeleteRecord, recordUpdateRecord, recordListRecords, recordQueryRecords, recordSearch } from "./record.tools.js";
-import { createRecordShape, deleteRecordShape, updateRecordShape, getSchemaShape, listBasesShape, listRecordsShape, pingEchoShape, queryRecordsShape, recordSearchShape } from "./schemas.js";
+import { docAppendBlocks, docDeleteBlocks, docGetDocBlocks, docUpdateBlock } from "./doc.tools.js";
+import { appendBlocksShape, createRecordShape, deleteBlocksShape, deleteRecordShape, updateBlockShape, updateRecordShape, getDocBlocksShape, getSchemaShape, listBasesShape, listRecordsShape, pingEchoShape, queryRecordsShape, recordSearchShape } from "./schemas.js";
 import { text, type ToolSpec } from "./types.js";
 
 export const TOOL_CATALOG: readonly ToolSpec[] = [
@@ -97,5 +98,41 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     },
     inputShape: recordSearchShape,
     run: recordSearch,
+  },
+  {
+    meta: {
+      name: "doc.get_doc_blocks", title: "读取文档块",
+      description: "读取文档的结构化块（format=blocks 经共享块模型解析）或原始 Markdown；range 按块序号 0-based 闭区间切片。",
+      scopes: ["doc:read"], family: "doc", readOnly: true,
+    },
+    inputShape: getDocBlocksShape,
+    run: docGetDocBlocks,
+  },
+  {
+    meta: {
+      name: "doc.append_blocks", title: "追加文档块",
+      description: "在指定块之后（缺省末尾）追加块；块 id 由服务端生成，单事务一次内容版本递增（需 baseVersion 乐观锁）。",
+      scopes: ["doc:write"], family: "doc", actions: ["u"], readOnly: false,
+    },
+    inputShape: appendBlocksShape,
+    run: docAppendBlocks,
+  },
+  {
+    meta: {
+      name: "doc.update_block", title: "更新文档块",
+      description: "更新单个块的 text/checked/align（对齐经注释通道持久化；块不存在则整单拒绝，需 baseVersion）。",
+      scopes: ["doc:write"], family: "doc", actions: ["u"], readOnly: false,
+    },
+    inputShape: updateBlockShape,
+    run: docUpdateBlock,
+  },
+  {
+    meta: {
+      name: "doc.delete_blocks", title: "删除文档块",
+      description: "原子批删若干块（任一 id 不存在则整批失败，无半应用；需 confirm=true 与 baseVersion）。",
+      scopes: ["doc:write"], family: "doc", actions: ["u"], readOnly: false,
+    },
+    inputShape: deleteBlocksShape,
+    run: docDeleteBlocks,
   },
 ];
