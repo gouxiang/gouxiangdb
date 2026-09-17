@@ -12,15 +12,18 @@
 import type { Context } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { buildServer } from "../server.js";
+import { mcpPermissionPortFactory } from "../permissions/m4Adapter.js";
 import type { ToolDeps } from "../tools/registry.js";
 import type { McpSubject } from "./authenticate.js";
 
-export async function handleMcpRequest(c: Context, subject: McpSubject, deps: ToolDeps = {}): Promise<Response> {
+export async function handleMcpRequest(c: Context, subject: McpSubject): Promise<Response> {
+  // 每请求新建权限端口（内部惰性预取一次 scope 并复用）；接真 M4，无测试替身。
+  const deps: ToolDeps = { port: mcpPermissionPortFactory(subject) };
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // 无状态：无 Session-Id
     enableJsonResponse: true, // 协议请求 -> 完整 JSON 响应（SSE 不开）
   });
-  const server = buildServer(subject, deps);
+  const server = await buildServer(subject, deps);
   await server.connect(transport); // 铁律：不 connect 必挂死
 
   const response = await transport.handleRequest(c.req.raw);

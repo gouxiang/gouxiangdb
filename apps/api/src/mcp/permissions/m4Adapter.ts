@@ -1,0 +1,80 @@
+// M6/S3 M4 适配层（薄封装，不复制引擎、不改 M4 文件）。
+//
+// 映射（M6-implementation-plan §3-2 / §4.4）：
+//   listAccessibleResources(family) -> prepareScope + nodeVisibleInPrepared(act="r")，按 kind 归集 resourceId
+//   can(action, resource)          -> 同一 PreparedScope 内定位 (resourceType,resourceId) 节点后 nodeVisibleInPrepared
+//   fieldCapability(tableNodeId)   -> M4 decide(...,"r").capability（fieldCapability 纯函数的下游产物）
+//
+// 性能：PreparedScope **每请求只预取一次**（本端口实例按请求创建），后续判定零额外往返；
+//   这是 §4.7「decide 客体 SQL 定数」在 MCP 侧的沿用（避免每次 can() 重算 scope）。
+//
+// 评审纪律（§3-3）：本文件是 mcp/** 内唯一的 M4 边界；只把 prisma 客户端**作为参数**传给 M4 函数，
+// 自身不做资源裸查（无 `prisma.<model>` 调用）；资源判定全部经 M4。
+
+import { prisma } from "../../db.js";
+import type { AuthzClient } from "../../domain/authz/types.js";
+import { nodeVisibleInPrepared, prepareScope, type PreparedScope } from "../../domain/authz/scope.js";
+import { decide } from "../../domain/authz/engine.js";
+import {
+  FAMILY_KINDS, type AccessibleResources, type McpAction, type McpFieldCapability,
+  type McpPermissionPort, type McpResource, type McpSubject, type ResourceFamily,
+} from "./types.js";
+
+const WORKSPACE_ID = "ws_default";
+
+/** 按请求构建的端口（内部惰性预取 scope，多次判定复用）。 */
+export function createMcpPermissionPort(
+  subject: McpSubject,
+  client: AuthzClient = prisma,
+): McpPermissionPort & { preload(): Promise<void> } {
+  let preparedPromise: Promise<PreparedScope> | null = null;
+  const prepared = (): Promise<PreparedScope> => {
+    preparedPromise ??= prepareScope(client, subject.userId, { workspaceId: WORKSPACE_ID });
+    return preparedPromise;
+  };
+
+  return {
+    preload: async () => { await prepared(); },
+    async listAccessibleResources(family: ResourceFamily): Promise<AccessibleResources> {
+      const p = await prepared();
+      const kinds = new Set<string>(FAMILY_KINDS[family]);
+      const byKind: Partial<Record<string, string[]>> = {};
+      for (const node of p.nodes) {
+        const kind = node.resourceType;
+        if (!kind || !node.resourceId || !kinds.has(kind)) continue;
+        if (!nodeVisibleInPrepared(p, node, "r")) continue;
+        (byKind[kind] ??= []).push(node.resourceId);
+      }
+      for (const k of Object.keys(byKind)) byKind[k]!.sort();
+      // budget 截断：scope 侧超预算时 resourceIdsByType 已按预算切齐，此处以「族内任一类被截」
+      // 的保守口径表达（调用方据此退化 enum）。
+      const truncated = p.nodes.length > 20_000;
+      return { byKind: byKind as AccessibleResources["byKind"], truncated };
+    },
+
+    async can(action: McpAction, resource: McpResource): Promise<boolean> {
+      const p = await prepared();
+      const node = p.nodes.find((n) => n.resourceType === resource.kind && n.resourceId === resource.id);
+      if (!node) return false; // 不存在 / 不可见：同口径 false（不泄漏存在性）
+      return nodeVisibleInPrepared(p, node, action);
+    },
+
+    async fieldCapability(tableNodeId: string): Promise<McpFieldCapability> {
+      const p = await prepared();
+      const node = p.byId.get(tableNodeId);
+      if (!node) return { visible: false, visibleAll: false, visibleFields: null, writableAll: false };
+      const { capability } = await decide({ client }, p.subject, tableNodeId, "r");
+      return {
+        visible: capability.visible,
+        visibleAll: capability.visibleAll,
+        visibleFields: capability.visibleFields ? [...capability.visibleFields].sort() : null,
+        writableAll: capability.writableAll,
+      };
+    },
+  };
+}
+
+/** 端口工厂（mcpApp 每请求调用一次；subject 绑定后端口自持 scope 缓存）。 */
+export function mcpPermissionPortFactory(subject: McpSubject): McpPermissionPort {
+  return createMcpPermissionPort(subject);
+}

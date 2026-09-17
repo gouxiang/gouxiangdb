@@ -16,7 +16,10 @@ export const MCP_LIMITS = {
   DOC_CANVAS_MAX_BYTES: 10 * 1024 * 1024,
 } as const;
 
-/** S2 冒烟工具 ping_echo 入参（S3 起换为按权限动态注册的真实工具族）。 */
+/** 连接性自检工具 ping_echo 入参。 */
 export const pingEchoShape = {
   text: z.string().max(200).describe("回显文本（≤200 字符）"),
 };
+
+/** table.list_bases：无入参（S4 增 baseId 等）。 */
+export const listBasesShape = {};
