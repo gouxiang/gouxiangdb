@@ -103,7 +103,7 @@ export type IdGenerator = () => string;
 
 // 与 plait idCreator 同一字母表（无格式约束；同族风格，避免引入其刻意剔除的数字/易混字符）。
 const ID_ALPHABET = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz";
-const ID_LEN = 12; // 48^12 ≈ 1.4e20，碰撞可忽略
+const ID_LEN = 12; // 字母表去重后 41 字符（node 实测 new Set(ID_ALPHABET).size === 41）；41^12 ≈ 2.3e19，碰撞可忽略
 
 function randomId(): string {
   let s = "";
