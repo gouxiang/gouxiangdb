@@ -2,11 +2,8 @@
 // M5/S13 报告渲染（纯格式化）：GateReport -> Markdown 片段（可直接并入 docs/baseline）。
 
 import { formatSpecSummary } from "./m5-spec.js";
+import { miB } from "./m5-bench-lib.js";
 import type { GateReport } from "./m5-gate.js";
-
-export function miB(bytes: number): number {
-  return Math.round(bytes / 1024 / 1024);
-}
 
 export function renderMarkdown(r: GateReport): string {
   const rows = r.combos.map((c) => {

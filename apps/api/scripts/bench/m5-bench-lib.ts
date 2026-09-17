@@ -216,7 +216,17 @@ export function roundStats(ms: readonly number[]): RoundStats {
   return { p95Ms: p.p95, p50Ms: p.p50, minMs: p.min, maxMs: p.max, meanMs: p.mean, rounds: ms.length };
 }
 
-/** 取样本 95 分位（供报告里对"每轮命中数/慢轮"做二次汇总）。 */
+/** 字节 -> MiB（报告/日志可读）。 */
+export function miB(bytes: number): number {
+  return Math.round(bytes / 1024 / 1024);
+}
+
+/** 磁盘账：向量 + 文本 + 行开销，再留 20% 安全余量。 */
+export function estimateDiskBytes(chunks: number, dim: number): number {
+  return Math.round(chunks * (dim * 4 + 512) * 1.2);
+}
+
+/** 样本 95 分位（供报告里对"每轮命中数/慢轮"做二次汇总）。 */
 export function p95(ms: readonly number[]): number {
   return percentile([...ms].sort((a, b) => a - b), 0.95);
 }

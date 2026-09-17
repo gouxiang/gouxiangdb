@@ -18,17 +18,17 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { performance } from "node:perf_hooks";
 import { openSearchStore } from "../../src/domain/search/searchStore.js";
 import { runRecall, toQueryBlob } from "../../src/domain/search/queryRecall.js";
 import { buildSearchQueryPlan } from "../../src/domain/search/queryPlan.js";
-import { reciprocalRankFusion, type RouteHit } from "../../src/domain/search/rrf.js";
 import { collectMachineSpec, type MachineSpec } from "./m5-spec.js";
 import { renderMarkdown } from "./m5-report.js";
 import { generateSearchDb, defaultDbPath, queryVector } from "./m5-gen.js";
+import { measureStages, oneHybridRound, type StageTimings } from "./m5-measure.js";
 import {
-  assertNoFullRecall, decideMemory, estimateVectorBytes, kiloLabel, parseBenchArgs, parseNumberList,
-  roundStats, smoothChunkLimit, type ExplainVerdict, type RoundStats, type SmoothLimit,
+  assertNoFullRecall, decideMemory, estimateDiskBytes, estimateVectorBytes, kiloLabel,
+  miB, parseBenchArgs, parseNumberList, roundStats, smoothChunkLimit,
+  type ExplainVerdict, type RoundStats, type SmoothLimit,
 } from "./m5-bench-lib.js";
 
 const QUERY_TERM = "季度报告";
@@ -53,8 +53,8 @@ export interface ComboResult {
   rounds?: RoundStats;
   hits?: { fts: number; vec: number; fused: number };
   rss?: { beforeBytes: number; peakBytes: number; afterBytes: number };
-  /** 单次分阶段耗时（诊断：定位 O(N²) 在哪一段；非 10 轮均值，仅作归因）。 */
-  stages?: { scopeMs: number; ftsMs: number; vecMs: number; fusionMs: number };
+  /** 单次分阶段耗时（诊断：定位超线性在哪一段；非 10 轮均值，仅作归因）。 */
+  stages?: StageTimings;
   explain?: ExplainVerdict;
 }
 
@@ -97,56 +97,6 @@ function diskAvailBytes(dir: string): number | null {
   }
 }
 
-/** 磁盘账：向量 + 文本 + 行开销，再留 20% 安全余量。 */
-function estimateDiskBytes(chunks: number, dim: number): number {
-  return Math.round(chunks * (dim * 4 + 512) * 1.2);
-}
-
-function miB(bytes: number): number {
-  return Math.round(bytes / 1024 / 1024);
-}
-
-/** 分阶段单次耗时（诊断）：scope 物化 / FTS / vec / 融合，定位超线性成本所在。 */
-function measureStages(
-  db: Parameters<typeof runRecall>[0],
-  plan: ReturnType<typeof buildSearchQueryPlan>,
-  scope: string[],
-  grants: Array<{ tableNodeId: string; fieldId: string }>,
-  qvec: Buffer,
-): ComboResult["stages"] {
-  const t = (fn: () => void): number => { const s = performance.now(); fn(); return performance.now() - s; };
-  const emptyPlan = { ...plan, fts: null, like: null, vector: { ...plan.vector, enabled: false } };
-  const scopeMs = t(() => { runRecall(db, emptyPlan, scope, grants, {}); });
-  const ftsPlan = { ...plan, vector: { ...plan.vector, enabled: false } };
-  const ftsMs = t(() => { runRecall(db, ftsPlan, scope, grants, {}); });
-  const vecPlan = { ...plan, fts: null, like: null };
-  const vecMs = t(() => { runRecall(db, vecPlan, scope, grants, { queryVector: qvec }); });
-  const fusionMs = t(() => {
-    reciprocalRankFusion([
-      { route: "fts", hits: Array.from({ length: 100 }, (_, i) => ({ entityType: "doc", entityId: `d${i}`, rank: i + 1 })) },
-      { route: "vec", hits: Array.from({ length: 100 }, (_, i) => ({ entityType: "doc", entityId: `v${i}`, rank: i + 1 })) },
-    ], { topN: plan.limits.finalTopN, titleQuery: plan.query });
-  });
-  return { scopeMs, ftsMs, vecMs, fusionMs };
-}
-
-/** 单轮混合检索：runRecall（FTS+vec）→ RRF 融合（含标题 boost），全程无 await（同步段）。 */
-function oneHybridRound(
-  db: Parameters<typeof runRecall>[0],
-  plan: ReturnType<typeof buildSearchQueryPlan>,
-  scope: string[],
-  grants: Array<{ tableNodeId: string; fieldId: string }>,
-  qvec: Buffer,
-): { ms: number; fts: number; vec: number; fused: number } {
-  const t = performance.now();
-  const recall = runRecall(db, plan, scope, grants, { queryVector: qvec });
-  const inputs: Array<{ route: "fts" | "vec"; hits: RouteHit[] }> = [];
-  if (recall.ran.fts) inputs.push({ route: "fts", hits: recall.fts.map((r) => ({ entityType: r.entityType, entityId: r.entityId, rank: r.rank, title: r.title })) });
-  if (recall.ran.vec) inputs.push({ route: "vec", hits: recall.vec.map((r) => ({ entityType: r.entityType, entityId: r.entityId, rank: r.rank, title: r.title })) });
-  const fused = reciprocalRankFusion(inputs, { topN: plan.limits.finalTopN, titleQuery: plan.query });
-  return { ms: performance.now() - t, fts: recall.fts.length, vec: recall.vec.length, fused: fused.length };
-}
-
 /** 跑一个 (chunks, dim) 组合：守卫 → 造库 → 预热 → R 轮 → EXPLAIN → 汇总。 */
 export async function runCombo(size: number, dim: number, o: GateOptions): Promise<ComboResult> {
   const log = o.log ?? (() => { /* silent */ });
@@ -158,7 +108,9 @@ export async function runCombo(size: number, dim: number, o: GateOptions): Promi
   if (!ram.ok && !o.allowLowMemory) {
     out.skipped = {
       reason: "insufficient_memory",
-      detail: `free=${miB(ram.availBytes)}MiB < need=${miB(ram.requiredBytes)}MiB+margin=${miB(ram.marginBytes)}MiB；该档位需降维/降规模（如 dim 512 或 1 万 chunk），或确认机器空闲后用 --force 覆盖`,
+      detail: `free=${miB(ram.availBytes)}MiB < need=${miB(ram.requiredBytes)}MiB+margin=${miB(ram.marginBytes)}MiB`
+        + `（本器流式写入，RSS 有界；若一次性载入全量向量需 ≈${miB(estimateVectorBytes(size, dim))}MiB）`
+        + `；该档位需降维/降规模（如 dim 512 或 1 万 chunk），或确认机器空闲后用 --force 覆盖`,
     };
     log(`[m5-gate] SKIP ${label}: ${out.skipped.detail}`);
     return out;
