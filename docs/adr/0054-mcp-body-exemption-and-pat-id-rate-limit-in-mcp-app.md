@@ -74,7 +74,7 @@ spike 实测复现两处部署坑，M6 必须处理，但不得扰动既有路�
 - **401 语义裁决的后果**：持令人可据 `Token expired/revoked/Account disabled` 直接排障；伪造者无法借此
   枚举令牌——"查不到"三态已一致，且到达状态分支需先猜中 32 字符随机段。**该裁决保持现状、未改生产码**，
   后续如需收紧为"状态也不可辨识"，须另立裁决并同步改 S2 冻结的文案快照。
-- 反代需同步 11m 上限（Caddy `client_max_body` / 飞牛网关上载上限），列为部署物核查项与 runbook 章节。
+- 反代需同步 11MB 上限（本仓 Caddy 写法为 `request_body { max_size 12MB }`，见 `deploy/caddy/Caddyfile`；12MB 是给 11MB 业务上限留的余量。另需核查飞牛网关上载上限），列为部署物核查项与 runbook 章节。
 - 运维可经 `GX_MCP_RATE_*` 调档：NAS 上若实测 AI 调用更陡（单 token 连续 agent 循环）再调，不阻塞 M6。
 
 ## 5. 验证证据
