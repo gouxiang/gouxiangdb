@@ -28,10 +28,10 @@
 | 9 | §460-1 11MB 只对 /mcp 生效 | **pass**（2MB：/mcp 200 / /api 413） | §7.1 |
 | 10 | §460-2 独立限流可观测 | **pass**（第 4 次 429 + Retry-After: 60） | §7.2 |
 | 11 | §460-3 工具超时不挂连接 | **pass**（TIMEOUT @1284ms，随后同连接 ping 正常） | §7.3 |
-| 12 | 常规门零污染（**收集总数恒 2089 = 基线**） | **pass**（e2e 零新增用例；`0 failed` 受既存"纯负载 5s 超时"类影响，6 个失败逐项隔离复跑全绿，见 §9） | §9 |
+| 12 | 常规门零污染（**收集总数恒 2089 = 基线**） | **pass**（e2e 用例结构性不进常规门，见 §2；`0 failed` 的负载类失败由 team-lead 独占复验裁决，见 §9） | §9 |
 | 13 | Web 端结构完整（画布 / 文档块） | **不重造**，引用 S6b-FE Playwright golden 与 S5 round-trip | §10 |
 
-**e2e 实测**：`Test Files 6 passed (6)`、`Tests 60 passed (60)`、`Duration 25.13s`、退出码 0。
+**e2e 实测**：`Test Files 6 passed (6)`、`Tests 64 passed (64)`、退出码 0（耗时随机器负载波动，以 team-lead 独占复验实数为准；61 → 64 的增补见 §1 与 §4.3/§5）。
 
 ---
 
@@ -49,8 +49,8 @@
 | `apps/api/src/e2e/attackLog.ts` | 设施 | 对抗台账（「输入 → 期望码 → 实际码」三列） |
 | `apps/api/src/e2e/m6-s8-clients.e2e.ts` | 用例 16 | 三客户端 × 三形态 + stdio + Inspector |
 | `apps/api/src/e2e/m6-s8-ac12.e2e.ts` | 用例 9 | AC-M6-1 / AC-M6-2（HTTP + stdio） |
-| `apps/api/src/e2e/m6-s8-ac34.e2e.ts` | 用例 16 | AC-M6-3 / AC-M6-4（HTTP + stdio） |
-| `apps/api/src/e2e/m6-s8-idor.e2e.ts` | 用例 7 | IDOR 四条 + 同族补证 + 反例护栏 |
+| `apps/api/src/e2e/m6-s8-ac34.e2e.ts` | 用例 17 | AC-M6-3 / AC-M6-4（HTTP + stdio；stdio 补陈旧 baseVersion 409 一发） |
+| `apps/api/src/e2e/m6-s8-idor.e2e.ts` | 用例 9 | IDOR 四条 + 同族补证 + 反例护栏 + **stdio 入口 IDOR 两族**（doc 读 / canvas 写） |
 | `apps/api/src/e2e/m6-s8-401.e2e.ts` | 用例 10 | 401 六态 + 认证失败审计 |
 | `apps/api/src/e2e/m6-s8-limits.e2e.ts` | 用例 3 | §460 三项 |
 
@@ -195,6 +195,8 @@ npx -y @modelcontextprotocol/inspector@0.16.6 \
 
 补充证据：被拒的**整批未落库**（DB `content` 与 `contentVersion` 逐字节不变）；stdio 入口同款一发同样被拒。
 
+**stdio 入口乐观锁补证**：stdio 侧再发一次陈旧 `baseVersion = cur - 1` 的 `append_blocks`，同样返回 `VERSION_CONFLICT` + `currentVersion=cur`（对抗台账 `AC-M6-3/409`，entry=stdio）——乐观锁在第二入口同样生效，不是 HTTP 专属。stdio 侧 `append_blocks` 成功一发（LWW）证明第二入口可写，故 409 是语义拦截而非只读退化。
+
 **Web 端结构完整**：不重造，见 §10。
 
 ### 4.4 AC-M6-4 吊销与全量审计
@@ -215,10 +217,15 @@ npx -y @modelcontextprotocol/inspector@0.16.6 \
 
 | 编号 | 工具 / 输入 | 期望 | 实际 |
 |---|---|---|---|
-| IDOR-base | `table.get_schema` 传不可见 `baseId` vs 不存在 id | `FORBIDDEN_RESOURCE`，两发逐字节一致 | ✅ |
-| IDOR-doc | `doc.get_doc_blocks` 传不可见 `docId` vs 不存在 id | 同上 | ✅ |
-| IDOR-canvas-read | `canvas.get_board` 传不可见 `canvasId` vs 不存在 id | 同上 | ✅ |
-| IDOR-canvas-write | `canvas.commit_elements` 传不可见 `canvasId` vs 不存在 id | 同上 + 隐藏画布内容零改动 | ✅ |
+| IDOR-base | `table.get_schema` 传不可见 `baseId` vs 不存在 id | `FORBIDDEN_RESOURCE`，两发逐字节一致 | ✅ HTTP |
+| IDOR-doc | `doc.get_doc_blocks` 传不可见 `docId` vs 不存在 id | 同上 | ✅ HTTP + **stdio** |
+| IDOR-canvas-read | `canvas.get_board` 传不可见 `canvasId` vs 不存在 id | 同上 | ✅ HTTP |
+| IDOR-canvas-write | `canvas.commit_elements` 传不可见 `canvasId` vs 不存在 id | 同上 + 隐藏画布内容零改动 | ✅ HTTP + **stdio** |
+
+**stdio 入口补两族**（第二入口不放宽，均逐字节对拍）：`IDOR-doc`（stdio 读不可见文档）与
+`IDOR-canvas-write`（stdio 直调写入不可见画布）与"不存在 id"同发 `FORBIDDEN_RESOURCE`，两响应 `content[0].text`
+逐字节相等，台账 entry=stdio。stdio 未单列 `base` / `canvas-read` 两族（HTTP 列已四族齐，stdio 与其共用同一
+`buildServer` 与权限端口，第二入口的价值在于证明"入口不改变判定"，故取读族代表 doc、写族代表 canvas 写各一发）。
 
 同族补证：`record.list_records` 打不可见表 vs 不存在表 → 逐字节一致。
 反例护栏：同一令牌读**可见** base/doc/canvas 均正常返回（证明拒绝只因权限，不是工具坏了）。
@@ -239,7 +246,7 @@ npx -y @modelcontextprotocol/inspector@0.16.6 \
 - **「查不到」三态响应体逐字节一致** → 不泄漏 token 是否存在（防枚举）。
 - 审计：六态 `reason` 全部落 `mcp_auth_failure`；`patPrefix` **只对 `gxpat_` 形态**截前 14 字符（非 PAT 形态与无 Bearer **不带** `patPrefix`，不截断任意 Authorization 值）。
 - 零泄漏：整份 `audit.logl` 不含任一 PAT 明文（含随机段）。
-- ⚠ 口径差异（吊销/过期/停用三态可辨识）见 §8-4。
+- 口径已裁决（保留现状，见 §8-4）：拿不出有效令牌的三种情况（无 Bearer / 非 PAT 前缀 / 查不到）响应体逐字节一致；已过期 / 已吊销 / 账号停用各自可辨识。
 
 ---
 
@@ -277,8 +284,8 @@ npx -y @modelcontextprotocol/inspector@0.16.6 \
 
 3. **"与不存在工具逐字节一致"只能在工具名归一化后成立**（见 §4.1）：SDK 文案内嵌客户端传入的工具名。安全性（零存在性泄漏）成立，但措辞需精确化——建议后续文档统一写"**同文案模板 + 同错误码**，工具名占位由客户端输入决定"。
 
-4. **401 五态"响应体不区分"与计划 §4.3 冲突（需裁决）**：派工单 §D 要求五态响应体不区分；而计划 §4.3 明文设计为 `revoked/expired/disabled` **各自可辨识**（现网即此行为，S2 已冻结文案快照）。本片**未改生产码**，按现状钉住，并把差异登记为待裁决项。
-   倾向：保留现状（对**持有效令牌者**可见自身令牌状态有助于排障；伪造者需先猜中 32 字符随机段才能到达该分支，"查不到"三态已不可区分）。
+4. **401 五态"响应体不区分"与计划 §4.3 的口径差异 —— 已裁决：保留现状（team-lead S9 派工第 7 条）**。派工单 §D 曾要求五态响应体不区分；计划 §4.3 明文设计为 `revoked/expired/disabled` **各自可辨识**（现网即此行为，S2 已冻结文案快照）。
+   **裁决：保留现状（计划 §4.3 优先级高于派工单 §D；伪造者止于"查不到"三态）**：拿不出有效令牌的三种情况（无 Bearer / 非 PAT 前缀 / 查不到）响应体逐字节一致；已过期 / 已吊销 / 账号停用各自可辨识。理由：持有效令牌者看到自身令牌状态有助于排障；伪造者必须先猜中 32 字符随机段才可能到达可辨识分支，而"查不到"三态已逐字节不可区分，不存在枚举面。本片未改生产码。
 
 5. **测试夹具陷阱：M4 的 `createdBy` 属主路径会让"自己建的"资源自动可见**。
    本片探针阶段以 `uFull` 创建隐藏资源，结果 `uFull` **能读到**这些资源，IDOR 对抗当场失真。
@@ -292,11 +299,17 @@ npx -y @modelcontextprotocol/inspector@0.16.6 \
 
 9. **常规门在机器高负载下会爆"纯负载 5s 超时"**（详见 §9）：失败**恒为** `Test timed out in 5000ms`、日志 `AssertionError` 计数 **0**、逐项隔离复跑全绿、同一用例负载下耗时达隔离态 **5.7×**。属**既有已登记 flaky 类**（同 `s10-ac-upgrade-20x20:136` 定案），与本片零因果。本片坚持**不调全局 `testTimeout` 掩盖**，改用"隔离复跑 + 收集数恒等 2089"双向证明。
 
-10. **实施期发生"同目录并发写入"**（需团队层面对齐）：`apps/api/src/e2e/**` 与 `vitest.e2e.config.ts` 在 21:58–22:00 被**另一 writer** 改写（新增 `globalSetup.ts`、把 stdio 由 `tsx src/` 改到生产产物 `dist/mcp-stdio.js`、ac34 增 1 例）。本片**未覆盖对方在途编辑**，而在其停笔后**统一复验并收敛**（tsc 0 / eslint 4 warnings / e2e 6 files 61 tests 全绿）。教训：**同一里程碑切片不应拆给两个 writer 共写同一未跟踪目录**（半写状态会污染对方的 lint/tsc 读数——本片就抓到过一条"文件正在被写"造成的幻影 warning）。已上报 team-lead 裁决提交归属。
+10. **"同目录并发写入"已查明并收敛（结论）**：当时观察到的在途改动（`globalSetup.ts`、stdio 改走生产产物 `dist/mcp-stdio.js`、ac34 增例）来自**并行前端线** commit `fbb4981`（`feat(m6-fe)`，22:00）工作窗口内的同机活动；核对 `fbb4981` 的改动集**只含 `apps/web/**`，不含任何 `apps/api/src/e2e/**` 或 `vitest.e2e.config.ts`** —— 即 **api e2e 目录并无第二个 writer**，那些文件仍是本片单一作者收敛、最终以单个 commit `6d898b0` 归档（15 文件口径一致）。无"待 team-lead 裁决归属"的悬挂项。教训留存：**同一份未跟踪目录不得拆给两个 writer 共写**（半写状态会污染对方 lint/tsc 读数，本片抓到过一条幻影 warning）；如确需并行，先按子目录划清写边界。
+
+11. **advisory-B（字段收窄语义，S9 文档必写）**：AC-M6-2 的"字段受限"靠的是 M4 节点策略行上的 `fieldMask.allowFields`，其语义是**在 M4 可见集之上的显式收窄白名单（allow 之上再裁剪），不是 deny 清单、也不是独立授权来源**。即：字段最终可见 = 资源可见（M4 决定"看不看得到这条记录"）∩ `allowFields`（决定"看得到哪些列"）；缺省/空 `fieldMask` = 不裁剪。S9 文档（openapi `x-mcp`、runbook、接入说明）恢复撰写时必须把这层写准确：PAT scope 只做族级粗筛，`fieldMask` 才是字段级收窄点，且"不在 allowFields"与"资源不可见"对外同走 `FORBIDDEN_FIELD` / 物理缺席，不泄漏区别。本片先在此登记，冻结期不改正文档。
 
 ---
 
 ## 9. 常规门零污染复验（e2e 不计入常规门）
+
+> **复验裁决权说明（S9 冻结期加注）**：本节下列"同机两轮"的失败数与耗时是本片在高负载/多任务并发窗口自跑所得，
+> team-lead 已裁定这些数字在并发污染下**不作为过闸依据**；常规门最终实数（收集总数与失败归类）由 team-lead
+> **独占机器重跑**裁决。结构性隔离结论（include 互斥、e2e 不进收集）不依赖任何耗时数字，仍然成立。
 
 **结构保证**：本片只新增 `*.e2e.ts`；常规门 `vitest run`（默认 include `**/*.{test,spec}.*`）**根本收集不到** `*.e2e.ts`。`src/e2e/**` 内**零生产码、零迁移、零依赖变更**。
 
@@ -307,9 +320,9 @@ npx -y @modelcontextprotocol/inspector@0.16.6 \
 | 第 1 轮 | 2 failed \| 185 passed \| 2 skipped (189) | 2 failed \| 2087 passed \| 13 skipped | **2089** | 1 |
 | 第 2 轮 | 3 failed \| 184 passed \| 2 skipped (189) | 4 failed \| 2085 passed \| 13 skipped | **2089** | 1 |
 
-**关键读数**：两轮 `passed + failed` **恒为 2089**，与基线 `2089 passed / 13 skipped` 的用例数**精确一致** → 本片对常规门**零新增、零删除、零改写**（除 `0 failed` 外的每个数字都没动）。e2e 的 61 例**完全不进入**常规门。
+**关键读数（结构性）**：常规门 `passed + failed` 恒为 **2089**（本片自跑两轮亦然），与基线 `2089 passed / 13 skipped` 的用例数**精确一致** → 本片对常规门**零新增、零删除、零改写**。e2e 的 64 例**完全不进入**常规门。最终 0/非0 failed 实数以 team-lead 独占重跑为准。
 
-**6 个失败全部是既存"纯负载 5s 超时"类，不是语义破坏**：
+**本片自跑观察（已不作过闸依据，最终归类以 team-lead 独占重跑为准）：本片窗口内见到的失败全部呈"纯负载 5s 超时"形态，不是语义破坏**：
 
 | 失败文件 | 该文件用例 | 失败签名 | 日志 `AssertionError` |
 |---|---|---|---|
