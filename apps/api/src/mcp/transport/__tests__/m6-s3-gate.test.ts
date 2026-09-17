@@ -100,10 +100,10 @@ describe("S3 四身份 tools/list 快照", () => {
     expect(await toolNames(tokens.readonly!)).toEqual(["ping_echo", "record.list_records", "record.query_records", "table.get_schema", "table.list_bases"]);
   });
 
-  it("③ 读写（scope 更宽）-> 多出写工具 record.delete_record（S4 写片）", async () => {
+  it("③ 读写（scope 更宽）-> 多出写工具 create/delete（S4 写片）", async () => {
     expect(await toolNames(tokens.readwrite!)).toEqual([
-      "ping_echo", "record.delete_record", "record.list_records", "record.query_records",
-      "table.get_schema", "table.list_bases",
+      "ping_echo", "record.create_record", "record.delete_record", "record.list_records",
+      "record.query_records", "table.get_schema", "table.list_bases",
     ]);
   });
 

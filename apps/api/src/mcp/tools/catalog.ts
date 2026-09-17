@@ -5,8 +5,8 @@
 
 import { config } from "../../config.js";
 import { tableGetSchema, tableListBases } from "./table.tools.js";
-import { recordDeleteRecord, recordListRecords, recordQueryRecords, recordSearch } from "./record.tools.js";
-import { deleteRecordShape, getSchemaShape, listBasesShape, listRecordsShape, pingEchoShape, queryRecordsShape, recordSearchShape } from "./schemas.js";
+import { recordCreateRecord, recordDeleteRecord, recordListRecords, recordQueryRecords, recordSearch } from "./record.tools.js";
+import { createRecordShape, deleteRecordShape, getSchemaShape, listBasesShape, listRecordsShape, pingEchoShape, queryRecordsShape, recordSearchShape } from "./schemas.js";
 import { text, type ToolSpec } from "./types.js";
 
 export const TOOL_CATALOG: readonly ToolSpec[] = [
@@ -60,6 +60,15 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     },
     inputShape: queryRecordsShape,
     run: recordQueryRecords,
+  },
+  {
+    meta: {
+      name: "record.create_record", title: "创建记录",
+      description: "在指定表创建一条记录（需 confirm=true；字段映射逐列受字段级写权约束）。",
+      scopes: ["record:write"], family: "table", actions: ["c"], readOnly: false,
+    },
+    inputShape: createRecordShape,
+    run: recordCreateRecord,
   },
   {
     meta: {

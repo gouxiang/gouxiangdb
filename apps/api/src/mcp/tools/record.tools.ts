@@ -10,8 +10,8 @@ import { loadTableFields, parseViewConfig, queryRecords } from "../../domain/rec
 import { runMcpUnifiedSearch } from "../../domain/mcpSearchBridge.js";
 import { config } from "../../config.js";
 import { recordBriefById } from "../../domain/mcpReadModels.js";
-import { softDeleteRecordTx } from "../../domain/recordWrite.js";
-import { applyReverseDefaultsForChild } from "../../domain/defaults.js";
+import { createRecordTx, softDeleteRecordTx } from "../../domain/recordWrite.js";
+import { applyCreateDefaults, applyReverseDefaultsForChild } from "../../domain/defaults.js";
 import { runWrite, withWriteTx } from "../../db.js";
 import { buildFilterNode, buildSortSpec, InvalidParamsError, type FilterArg } from "./filterMap.js";
 import { deny, text, type ToolCtx, type ToolResult } from "./types.js";
@@ -134,4 +134,36 @@ export async function recordDeleteRecord(ctx: ToolCtx, args: Record<string, unkn
   }
   const canRead = await ctx.port.can("r", { kind: "table", id: tableId });
   return text(JSON.stringify(canRead ? { ok: true, recordId, deleted: true } : { ok: true }));
+}
+
+/**
+ * record.create_record：闸门二 enforce `c`（+ 字段级写权，非全写来源时按可见字段集保守收窄）；
+ * 复用 domain/recordWrite.createRecordTx（与 REST 同一事务体）；事务后 defaults 补偿写（失败不阻断）；
+ * 写而无 `r` -> 精简回执 `{ok:true}`（不回字段映射，防派生值泄漏）。
+ */
+export async function recordCreateRecord(ctx: ToolCtx, args: Record<string, unknown>): Promise<ToolResult> {
+  if (!ctx.port) return deny("FORBIDDEN_RESOURCE", "权限引擎未接入");
+  const tableId = String(args.tableId ?? "");
+  const payloadFields = (args.fields ?? {}) as Record<string, unknown>;
+  if (!(await ctx.port.can("c", { kind: "table", id: tableId }))) {
+    return deny("FORBIDDEN_RESOURCE", "无权在该表创建记录（或该表不存在）");
+  }
+  // 字段级：非「全字段可写」来源时，payload 键必须落在可见字段集内，否则整单拒绝（不静默丢弃）
+  const cap = await ctx.port.fieldCapabilityOf({ kind: "table", id: tableId });
+  if (!cap.writableAll) {
+    const allowed = new Set(cap.visibleFields ?? []);
+    const bad = Object.keys(payloadFields).filter((k) => !allowed.has(k));
+    if (bad.length > 0) return deny("FORBIDDEN_FIELD", `不可写字段：${bad.join(", ")}`);
+  }
+  const fields = await loadTableFields(tableId);
+  const created = await withWriteTx("record.create", (tx) =>
+    createRecordTx(tx, { tableId, payloadFields, fields, userId: ctx.subject.userId, isDraft: false }),
+  );
+  try {
+    await runWrite("defaults.create", () => applyCreateDefaults(tableId, created.id, ctx.subject.userId));
+  } catch (err) {
+    console.error("[mcp] defaults.create failed (不阻断):", err);
+  }
+  const canRead = await ctx.port.can("r", { kind: "table", id: tableId });
+  return text(JSON.stringify(canRead ? { ok: true, recordId: created.id } : { ok: true }));
 }

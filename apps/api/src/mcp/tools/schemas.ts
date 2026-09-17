@@ -72,3 +72,10 @@ export const deleteRecordShape = {
   recordId: z.string().min(1),
   confirm: z.literal(true).describe("删除确认；必须是字面量 true（破坏性操作强制显式确认）"),
 };
+
+/** record.create_record：fields 为 {fieldId: value}；confirm 必须字面量 true。 */
+export const createRecordShape = {
+  tableId: z.string().min(1),
+  fields: z.record(z.string(), z.unknown()).describe("字段映射 {fieldId: value}"),
+  confirm: z.literal(true).describe("写入确认；必须是字面量 true"),
+};
