@@ -13,6 +13,7 @@ function fakePort(byFamily: Partial<Record<ResourceFamily, AccessibleResources>>
       can: async () => false,
       fieldCapability: async () => ({ visible: false, visibleAll: false, visibleFields: null, writableAll: false }),
       fieldCapabilityOf: async () => ({ visible: false, visibleAll: false, visibleFields: null, writableAll: false }),
+      writeFieldCapabilityOf: async () => ({ matched: false, writableAll: false, writableFields: [] }),
     };
   }
   return {
@@ -20,6 +21,7 @@ function fakePort(byFamily: Partial<Record<ResourceFamily, AccessibleResources>>
     can: async () => true,
     fieldCapability: async () => ({ visible: true, visibleAll: true, visibleFields: null, writableAll: false }),
     fieldCapabilityOf: async () => ({ visible: true, visibleAll: true, visibleFields: null, writableAll: false }),
+    writeFieldCapabilityOf: async () => ({ matched: false, writableAll: false, writableFields: [] }),
   };
 }
 

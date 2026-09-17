@@ -29,6 +29,8 @@ import {
   assertFieldsWritable,
   filterVisibleFieldDefs,
   sanitizeViewConfigForMask,
+  syntheticWidePolicy,
+  NON_WRITABLE_FIELD_TYPES,
   type FieldCapability,
 } from "./fieldMask.js";
 
@@ -49,20 +51,7 @@ export interface TableVisibility {
   visibleIds: ReadonlySet<string> | null;
 }
 
-/** 服务端计算/系统/autoNumber/tabs 字段不接受物理直写（applyFieldWrites 本就跳过，写键守卫不校验）。 */
-const NON_WRITABLE_TYPES = new Set([
-  "lookup", "rollup", "count", "formula", "tabs",
-  "createdTime", "lastModifiedTime", "createdBy", "lastModifiedBy", "autoNumber",
-]);
-
-/** creator/owner 兜底合成的宽来源（不裁剪，动作覆盖 r/c/u）。 */
-function fallbackPolicy(userId: string, tableNodeId: string): ScopedPolicy {
-  return {
-    id: "__owner_fallback__", nodeId: tableNodeId, subjectType: "user",
-    subjectId: userId, actions: ["r", "c", "u"] as ResourceAction[],
-    fieldMask: null, viaAncestor: false,
-  };
-}
+/** 服务端计算/系统/autoNumber/tabs 字段不接受物理直写（单源 NON_WRITABLE_FIELD_TYPES，见 fieldMask.ts）。 */
 
 export class FieldMaskSession {
   private subjectP: ReturnType<typeof resolveSubject> | null = null;
@@ -98,7 +87,7 @@ export class FieldMaskSession {
       ? (await this.deps.resolveCreatedBy(node)) === this.userId
       : false;
     const effective: ScopedPolicy[] = isCreator || subject.isWorkspaceOwner
-      ? [...policies, fallbackPolicy(this.userId, node.id)]
+      ? [...policies, syntheticWidePolicy(this.userId, node.id)]
       : policies;
 
     const cap = fieldCapability(effective);
@@ -141,7 +130,7 @@ export class FieldMaskSession {
   assertWritable(keys: readonly string[], fields: readonly FieldMeta[], mask: TableMask): void {
     const candidates = keys.filter((k) => {
       const f = fields.find((x) => x.id === k);
-      return !!f && !NON_WRITABLE_TYPES.has(f.type);
+      return !!f && !NON_WRITABLE_FIELD_TYPES.has(f.type);
     });
     assertFieldsWritable(candidates, mask.cap);
   }

@@ -14,10 +14,13 @@
 import { prisma } from "../../db.js";
 import type { AuthzClient } from "../../domain/authz/types.js";
 import { nodeVisibleInPrepared, prepareScope, type PreparedScope } from "../../domain/authz/scope.js";
-import { decide } from "../../domain/authz/engine.js";
+import { decide, collectScopedNodes } from "../../domain/authz/engine.js";
+import { makeCreatedByResolver } from "../../domain/authz/adapter.js";
+import { writeOnlyFieldCapability, syntheticWidePolicy } from "../../domain/authz/fieldMask.js";
 import {
   FAMILY_KINDS, type AccessibleResources, type McpAction, type McpFieldCapability,
-  type McpPermissionPort, type McpResource, type McpSubject, type ResourceFamily,
+  type McpPermissionPort, type McpResource, type McpSubject, type McpWriteFieldCapability,
+  type ResourceFamily,
 } from "./types.js";
 
 const WORKSPACE_ID = "ws_default";
@@ -78,6 +81,28 @@ export function createMcpPermissionPort(
         visibleAll: capability.visibleAll,
         visibleFields: capability.visibleFields ? [...capability.visibleFields].sort() : null,
         writableAll: capability.writableAll,
+      };
+    },
+
+    async writeFieldCapabilityOf(resource: McpResource, action: "c" | "u"): Promise<McpWriteFieldCapability> {
+      const p = await prepared();
+      const node = p.nodes.find((n) => n.resourceType === resource.kind && n.resourceId === resource.id);
+      if (!node) return { matched: false, writableAll: false, writableFields: [] };
+      // 与 REST FieldMaskSession.forTable 同口径：collectScopedNodes + creator/owner 兜底宽来源。
+      const deps = {
+        client, workspaceId: WORKSPACE_ID,
+        resolveCreatedBy: makeCreatedByResolver(client),
+      };
+      const { policies, node: hit } = await collectScopedNodes(deps, p.subject, node.id);
+      const isCreator = (await deps.resolveCreatedBy?.(hit)) === subject.userId;
+      const effective = isCreator || p.subject.isWorkspaceOwner
+        ? [...policies, syntheticWidePolicy(subject.userId, hit.id)]
+        : policies;
+      const cap = writeOnlyFieldCapability(effective, action);
+      return {
+        matched: cap.writeMatched,
+        writableAll: cap.writableAll,
+        writableFields: [...cap.writableFields].sort(),
       };
     },
   };

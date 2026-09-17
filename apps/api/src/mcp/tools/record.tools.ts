@@ -9,6 +9,12 @@
 import { loadTableFields, parseViewConfig, queryRecords } from "../../domain/recordService.js";
 import { runMcpUnifiedSearch } from "../../domain/mcpSearchBridge.js";
 import type { SearchEntityType } from "../../domain/search/queryPlan.js";
+import {
+  assertWriteOnlyFields,
+  AuthzFieldError,
+  NON_WRITABLE_FIELD_TYPES,
+} from "../../domain/authz/fieldMask.js";
+import type { FieldMeta } from "../../domain/types.js";
 import { config } from "../../config.js";
 import { recordBriefById } from "../../domain/mcpReadModels.js";
 import { createRecordTx, softDeleteRecordTx, updateRecordTx } from "../../domain/recordWrite.js";
@@ -80,6 +86,40 @@ async function readPage(ctx: ToolCtx, args: ReadArgs, withFilter: boolean): Prom
     truncatedScope: false,
   };
   return text(JSON.stringify(payload));
+}
+
+/**
+ * P1-B 写字段守卫（fail-closed，事务前）：按写动作 c/u 取【纯写字段能力】（writeSources 语义，
+ * 不要求 r 来源，只写身份也能得到正确白名单），校验 payload 的物理可写键：
+ *   - 只校验存在字段定义且非服务端计算/系统类型的物理键（与 REST maskSession.assertWritable 同口径）；
+ *   - writableAll=true（任一 c/u 来源 mask=null，含 creator/owner 宽来源）-> 全放行（宽授权不回归）；
+ *   - 否则键必须落在可写并集内（已排除各来源 readOnlyFields）；越界/只读 -> FORBIDDEN_FIELD，整单不开事务。
+ * 返回非 null 表示已构造拒绝结果。
+ */
+async function guardWriteFields(
+  ctx: ToolCtx,
+  tableId: string,
+  action: "c" | "u",
+  fields: FieldMeta[],
+  payload: Record<string, unknown>,
+): Promise<ToolResult | null> {
+  if (!ctx.port) return deny("FORBIDDEN_RESOURCE", "权限引擎未接入");
+  const cap = await ctx.port.writeFieldCapabilityOf({ kind: "table", id: tableId }, action);
+  const physicalKeys = Object.keys(payload).filter((k) => {
+    const f = fields.find((x) => x.id === k);
+    return !!f && !NON_WRITABLE_FIELD_TYPES.has(f.type);
+  });
+  try {
+    assertWriteOnlyFields(physicalKeys, {
+      writeMatched: cap.matched,
+      writableAll: cap.writableAll,
+      writableFields: new Set(cap.writableFields),
+    });
+  } catch (e) {
+    if (e instanceof AuthzFieldError) return deny("FORBIDDEN_FIELD", e.message);
+    throw e;
+  }
+  return null;
 }
 
 /** record.list_records：无过滤的 keyset 分页读。 */
@@ -169,16 +209,11 @@ export async function recordCreateRecord(ctx: ToolCtx, args: Record<string, unkn
   if (!(await ctx.port.can("c", { kind: "table", id: tableId }))) {
     return deny("FORBIDDEN_RESOURCE", "无权在该表创建记录（或该表不存在）");
   }
-  // 字段级：非「全字段可写」来源时，payload 键必须落在可见字段集内，否则整单拒绝（不静默丢弃）
-  const cap = await ctx.port.fieldCapabilityOf({ kind: "table", id: tableId });
-  // 仅当能力真的携带字段收窄（visibleFields !== null）时才做白名单拒绝；无读掩码（null）不代表"全字段不可写"，
-  // 写权已由闸门二 can("c") 判定 —— 否则"只写身份"会被误判为 0 可写字段（实测回归）。
-  if (!cap.writableAll && cap.visibleFields !== null) {
-    const allowed = new Set(cap.visibleFields);
-    const bad = Object.keys(payloadFields).filter((k) => !allowed.has(k));
-    if (bad.length > 0) return deny("FORBIDDEN_FIELD", `不可写字段：${bad.join(", ")}`);
-  }
   const fields = await loadTableFields(tableId);
+  // P1-B 字段级写权（fail-closed）：按 c 动作的纯写能力判定，只写身份（无 r 来源）也必须收窄；
+  // 同时校验 allowFields 与 readOnlyFields。宽 c 来源（mask=null，含 creator/owner）全放行。
+  const fieldDenied = await guardWriteFields(ctx, tableId, "c", fields, payloadFields);
+  if (fieldDenied) return fieldDenied;
   const created = await withWriteTx("record.create", (tx) =>
     createRecordTx(tx, { tableId, payloadFields, fields, userId: ctx.subject.userId, isDraft: false }),
   );
@@ -203,18 +238,14 @@ export async function recordUpdateRecord(ctx: ToolCtx, args: Record<string, unkn
   if (!(await ctx.port.can("u", { kind: "table", id: tableId }))) {
     return deny("FORBIDDEN_RESOURCE", "无权更新该表的记录（或该表不存在）");
   }
-  const cap = await ctx.port.fieldCapabilityOf({ kind: "table", id: tableId });
-  // 同 create：仅当确有字段收窄时才做白名单拒绝（visibleFields === null = 无收窄信息，写权由 can("u") 判定）
-  if (!cap.writableAll && cap.visibleFields !== null) {
-    const allowed = new Set(cap.visibleFields);
-    const bad = Object.keys(patch).filter((k) => !allowed.has(k));
-    if (bad.length > 0) return deny("FORBIDDEN_FIELD", `不可写字段：${bad.join(", ")}`);
-  }
+  const fields = await loadTableFields(tableId);
+  // P1-B 字段级写权（fail-closed）：按 u 动作纯写能力判定，只写身份也收窄；allow + readOnly 双校验。
+  const fieldDenied = await guardWriteFields(ctx, tableId, "u", fields, patch);
+  if (fieldDenied) return fieldDenied;
   const brief = await recordBriefById(recordId);
   if (!brief || brief.deletedAt !== null || brief.tableId !== tableId) {
     return deny("FORBIDDEN_RESOURCE", "记录不存在或不属于该表");
   }
-  const fields = await loadTableFields(tableId);
   await withWriteTx("record.update", (tx) =>
     updateRecordTx(tx, { tableId, recordId, patch, fields, userId: ctx.subject.userId }),
   );

@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertFieldsWritable,
+  assertWriteOnlyFields,
   AuthzFieldError,
   applyMaskToRecords,
   canSeeField,
@@ -11,6 +12,7 @@ import {
   fieldVisibleInMask,
   fieldWritableInMask,
   mergeFieldMasks,
+  writeOnlyFieldCapability,
 } from "../fieldMask.js";
 import type { ScopedPolicy } from "../types.js";
 
@@ -162,5 +164,74 @@ describe("applyMaskToRecords / assertFieldsWritable", () => {
     }
     expect(() => assertFieldsWritable(["f2"], cap)).toThrow(/只读/);
     expect(() => assertFieldsWritable(["f1"], cap)).not.toThrow();
+  });
+});
+
+// P1-B：只写身份（有 c/u 窄掩码、无任何 r 来源）必须仍按 writeSources 收窄，不能因 read-capability
+// visibleFields=null 而 fail-open。旧 MCP 守卫 `!writableAll && visibleFields!==null` 在此整段跳过。
+describe("P1-B writeOnlyFieldCapability / assertWriteOnlyFields（只写身份 fail-closed）", () => {
+  it("窄 c + allowFields:[fA]、无 r：read-capability visible=false，但纯写能力只放 fA", () => {
+    const policies = [pol({ actions: ["c"], fieldMask: { allowFields: ["fA"] } })];
+    // 旧的读能力：无 r -> visible=false / visibleFields=null（旧 MCP 守卫因此跳过白名单 = fail-open）
+    const readCap = fieldCapability(policies);
+    expect(readCap.visible).toBe(false);
+    expect(readCap.visibleFields).toBeNull();
+    // 新纯写能力：命中 c、非全写、可写集仅 fA
+    const wcap = writeOnlyFieldCapability(policies, "c");
+    expect(wcap.writeMatched).toBe(true);
+    expect(wcap.writableAll).toBe(false);
+    expect([...wcap.writableFields]).toEqual(["fA"]);
+    // fA 放行；fB（掩码外）整单拒
+    expect(() => assertWriteOnlyFields(["fA"], wcap)).not.toThrow();
+    try {
+      assertWriteOnlyFields(["fA", "fB"], wcap);
+      throw new Error("应拒绝掩码外字段");
+    } catch (e) {
+      expect(e).toBeInstanceOf(AuthzFieldError);
+      expect((e as AuthzFieldError).fieldIds).toEqual(["fB"]);
+    }
+  });
+
+  it("readOnlyFields 中的键即使在 allowFields 内也不可写（双查）", () => {
+    const policies = [pol({ actions: ["c"], fieldMask: { allowFields: ["fA", "fR"], readOnlyFields: ["fR"] } })];
+    const wcap = writeOnlyFieldCapability(policies, "c");
+    expect([...wcap.writableFields].sort()).toEqual(["fA"]);
+    expect(() => assertWriteOnlyFields(["fR"], wcap)).toThrow(AuthzFieldError);
+  });
+
+  it("宽 c（mask=null）-> writableAll=true，全字段放行（只写身份可用，不回归）", () => {
+    const wcap = writeOnlyFieldCapability([pol({ actions: ["c"], fieldMask: null })], "c");
+    expect(wcap.writeMatched).toBe(true);
+    expect(wcap.writableAll).toBe(true);
+    expect(() => assertWriteOnlyFields(["fA", "fB", "fx"], wcap)).not.toThrow();
+  });
+
+  it("只有 readOnlyFields 无 allowFields 的写来源：不放大为可写（无可写白名单）", () => {
+    const wcap = writeOnlyFieldCapability(
+      [pol({ actions: ["u"], fieldMask: { readOnlyFields: ["fR"] } })],
+      "u",
+    );
+    expect(wcap.writableAll).toBe(false);
+    expect(wcap.writableFields.size).toBe(0);
+    expect(() => assertWriteOnlyFields(["fX"], wcap)).toThrow(AuthzFieldError);
+  });
+
+  it("无该动作写来源 -> matched=false 且任意键 fail-closed（不回落全写）", () => {
+    const wcap = writeOnlyFieldCapability([pol({ actions: ["r"], fieldMask: { allowFields: ["fA"] } })], "c");
+    expect(wcap.writeMatched).toBe(false);
+    expect(wcap.writableAll).toBe(false);
+    expect(() => assertWriteOnlyFields(["fA"], wcap)).toThrow(AuthzFieldError);
+  });
+
+  it("多窄写来源取并集；c 与 u 动作互不串用", () => {
+    const policies = [
+      pol({ actions: ["c"], fieldMask: { allowFields: ["fA", "fB"] }, subjectId: "u2" }),
+      pol({ actions: ["c"], fieldMask: { allowFields: ["fB", "fC"] }, subjectId: "u3" }),
+    ];
+    const ccap = writeOnlyFieldCapability(policies, "c");
+    expect([...ccap.writableFields].sort()).toEqual(["fA", "fB", "fC"]);
+    // 同样策略但问 u：无 u 来源 -> fail-closed
+    const ucap = writeOnlyFieldCapability(policies, "u");
+    expect(ucap.writeMatched).toBe(false);
   });
 });

@@ -39,6 +39,19 @@ export interface McpFieldCapability {
   writableAll: boolean;
 }
 
+/**
+ * 按写动作（c/u）取的【纯写字段能力】（P1-B）：不要求主体有 r 来源（只写身份可用）。
+ * - matched：该资源是否命中至少一条承载该写动作的策略（闸门二 can(action) 已先判，这里供纵深）。
+ * - writableAll=true：任一写来源不裁剪（mask=null）-> 全字段可写（宽 c/u 授权）。
+ * - 否则 writableFields=各窄写来源「在该源可见且非只读」字段之并；payload 键必须落在此集。
+ */
+export interface McpWriteFieldCapability {
+  matched: boolean;
+  writableAll: boolean;
+  /** writableAll=false 时的可写物理字段并集（已排除各来源 readOnlyFields）；空集=无可写字段。 */
+  writableFields: string[];
+}
+
 export interface McpPermissionPort {
   /**
    * 闸门一：本主体在该族、**按给定动作集**（缺省 ["r"]）的可见资源集。
@@ -52,6 +65,12 @@ export interface McpPermissionPort {
   fieldCapability(tableNodeId: string): Promise<McpFieldCapability>;
   /** 同上，但按**资源**（kind+id）定位 nav 节点——工具层只有资源 id，无 nav 节点 id。 */
   fieldCapabilityOf(resource: McpResource): Promise<McpFieldCapability>;
+  /**
+   * 按写动作（c/u）取【纯写字段能力】（P1-B），按**资源**（kind+id）定位节点。
+   * 用 writeSources 语义而非拿 r-capability 顶替：只写身份（无 r 来源）也能得到正确的
+   * 字段写白名单；creator/owner 与 REST maskSession 同口径追加不裁剪宽来源。
+   */
+  writeFieldCapabilityOf(resource: McpResource, action: "c" | "u"): Promise<McpWriteFieldCapability>;
 }
 
 /** 族 -> 该族工具可作用的资源类型（list_bases 取 base、get_schema 取 table…）。 */

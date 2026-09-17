@@ -9,6 +9,19 @@
 import type { FieldMask, ResourceAction, ViewConfig, FilterNode, SortSpec, AggFunc } from "@gx/shared-types";
 import type { ScopedPolicy } from "./types.js";
 
+/**
+ * creator/owner 兜底合成的不裁剪宽来源（动作覆盖 r/c/u、fieldMask=null）。
+ * 与 engine.decide -> evaluateChainDecision 的 creator/owner 宽放同源同义：
+ * 兜底成立等价追加一条宽来源。REST（maskSession）与 MCP（m4Adapter 纯写判定）共用此单源。
+ */
+export function syntheticWidePolicy(userId: string, tableNodeId: string): ScopedPolicy {
+  return {
+    id: "__owner_fallback__", nodeId: tableNodeId, subjectType: "user",
+    subjectId: userId, actions: ["r", "c", "u"] as ResourceAction[],
+    fieldMask: null, viaAncestor: false,
+  };
+}
+
 /** 域内拒绝错误（纯类；S3 适配层映射为 HTTP 403 + 机器码，引擎不 import Hono）。 */
 export class AuthzFieldError extends Error {
   readonly status = 403;
@@ -41,6 +54,15 @@ export function fieldWritableInMask(mask: FieldMask | null, fieldId: string): bo
 }
 
 const WRITE_ACTIONS: ReadonlySet<ResourceAction> = new Set(["c", "u"]);
+
+/**
+ * 服务端计算/系统/autoNumber/tabs 字段不接受物理直写（applyFieldWrites 本就跳过）。
+ * 写键守卫只校验其余「物理可写」字段；单源，REST（maskSession）与 MCP（record.tools）共用。
+ */
+export const NON_WRITABLE_FIELD_TYPES: ReadonlySet<string> = new Set([
+  "lookup", "rollup", "count", "formula", "tabs",
+  "createdTime", "lastModifiedTime", "createdBy", "lastModifiedBy", "autoNumber",
+]);
 
 /**
  * 多源并集后的字段能力。判定逐源（无歧义覆盖"无 allowFields 但有 readOnlyFields"档）：
@@ -170,6 +192,69 @@ export function assertFieldsWritable(keys: readonly string[], cap: FieldCapabili
   const readOnly = keys.filter((k) => !canWriteField(cap, k));
   if (readOnly.length) {
     throw new AuthzFieldError("包含只读字段", "FORBIDDEN_FIELD", readOnly);
+  }
+}
+
+/**
+ * 纯写能力（P1-B）：**不要求该主体有任何 r 来源**——只写身份（actions 含 c/u 但无 r）也必须有
+ * 正确的字段写判定，不能像旧 MCP 守卫那样拿 read-capability 顶替，否则窄写掩码在 visibleFields=null
+ * 时被整段跳过（fail-open，可写掩码外任意物理列）。
+ *
+ * 语义与「并集只增不减」一致，但只看命中指定写动作（c 或 u）的来源：
+ *   - writableAll=true：任一写来源 fieldMask===null（不裁剪）-> 全字段可写（宽 c/u 授权保持可用）。
+ *   - 否则 writableFields=各窄写来源在该源可见且非只读字段之并；payload 键必须落在此并集内。
+ *   - 无任何该动作写来源：writeMatched=false、writableAll=false、writableFields=空集（fail-closed）。
+ */
+export interface WriteOnlyFieldCapability {
+  /** 主体在该节点上是否命中至少一条承载指定写动作的策略。 */
+  writeMatched: boolean;
+  /** 任一写来源不裁剪（mask=null）-> 全字段可写。 */
+  writableAll: boolean;
+  /** 所有写来源都裁剪时，可写物理字段 id 的并集（writableAll=true 时无意义）。 */
+  writableFields: Set<string>;
+}
+
+/**
+ * 由 cutoff 链命中策略计算某写动作（"c" | "u"）下的纯写能力。
+ * @param policies collectScopedNodes 收集的全部命中策略（含未承载该动作者，内部过滤）。
+ * @param action "c" 或 "u"。
+ */
+export function writeOnlyFieldCapability(
+  policies: readonly ScopedPolicy[],
+  action: "c" | "u",
+): WriteOnlyFieldCapability {
+  const writeSources = policies.filter((p) => p.actions.includes(action));
+  if (writeSources.length === 0) {
+    return { writeMatched: false, writableAll: false, writableFields: new Set() };
+  }
+  if (writeSources.some((p) => p.fieldMask === null)) {
+    return { writeMatched: true, writableAll: true, writableFields: new Set() };
+  }
+  const writableFields = new Set<string>();
+  for (const p of writeSources) {
+    const allow = p.fieldMask?.allowFields;
+    if (!allow) continue; // 只有 readOnlyFields 而无 allowFields 的来源：无可写白名单，跳过（不放大）
+    for (const f of asStringSet(allow) ?? []) {
+      if (fieldWritableInMask(p.fieldMask, f)) writableFields.add(f);
+    }
+  }
+  return { writeMatched: true, writableAll: false, writableFields };
+}
+
+/**
+ * 纯写键守卫（P1-B）：fail-closed。不要求 r 来源，只按纯写能力判定：
+ *   - writableAll=true -> 全部放行（宽 c/u，mask=null）；
+ *   - 否则任一物理写键不在可写并集内（含落入某来源 readOnlyFields 者）-> AuthzFieldError，整单不开事务。
+ * 计算字段/系统字段键不在此判定；调用方只传物理可写键（与 assertFieldsWritable 同纪律）。
+ */
+export function assertWriteOnlyFields(
+  keys: readonly string[],
+  cap: WriteOnlyFieldCapability,
+): void {
+  if (cap.writableAll) return;
+  const denied = keys.filter((k) => !cap.writableFields.has(k));
+  if (denied.length) {
+    throw new AuthzFieldError("包含无权写入的字段", "FORBIDDEN_FIELD", [...new Set(denied)]);
   }
 }
 
