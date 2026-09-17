@@ -359,3 +359,28 @@ export async function createRecordTx(tx: DbTx, params: CreateRecordParams): Prom
     });
     return created;
 }
+
+/** updateRecordTx 入参（MCP 与 REST 同口径；显式传参、无 Hono Context）。 */
+export interface UpdateRecordParams {
+  tableId: string;
+  recordId: string;
+  /** 本次写入的字段映射（仅含 payload 出现的键）。 */
+  patch: Record<string, unknown>;
+  fields: Awaited<ReturnType<typeof loadTableFields>>;
+  userId: string;
+}
+
+/**
+ * 更新记录的事务体（**从 routes/records.ts:388-396 原样移动** + 显式传参）。
+ * 顺序未改：assertUnique（排除自身）-> applyFieldWrites（含 links/sidecar）-> record.update(updatedBy)
+ * -> outbox upsert。调用方负责 defaults 联动、写后 hydrate 与掩码投影。
+ */
+export async function updateRecordTx(tx: DbTx, params: UpdateRecordParams): Promise<void> {
+    await assertUnique(params.tableId, params.fields, params.patch, params.recordId, undefined, tx);
+    await applyFieldWrites(params.tableId, params.recordId, params.patch, params.fields, tx);
+    await tx.record.update({ where: { id: params.recordId }, data: { updatedBy: params.userId } });
+    // M5/S1：记录改，同事务登记 upsert（与物理字段写共生死）。
+    await enqueueChangeEventTx(tx, {
+      entityType: "record", entityId: params.recordId, op: "upsert", version: BigInt(Date.now()),
+    });
+}

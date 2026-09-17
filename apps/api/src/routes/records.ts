@@ -40,7 +40,7 @@ import { resolveTableMask } from "../domain/authz/maskGate.js";
 export const records = new Hono();
 
 // M6/S4：写原语已移入 domain/recordWrite.ts（纯移动）+ re-export 保持既有导入点不变。
-import { applyFieldWrites, assertUnique, createRecordTx, parseStoredFields, runMaskWriteGate, softDeleteRecordTx } from "../domain/recordWrite.js";
+import { applyFieldWrites, assertUnique, createRecordTx, parseStoredFields, runMaskWriteGate, softDeleteRecordTx, updateRecordTx } from "../domain/recordWrite.js";
 export { assertRequiredOnCreate, assertUnique } from "../domain/recordWrite.js";
 
 // ============ 工具 ============
@@ -385,15 +385,10 @@ records.patch("/:recordId", async (c) => {
 
   // 事务：unique 校验 + 物理字段写入 + link_row 写入 + updatedBy 落库，
   // 任一步失败整体回滚，避免「链接写了一半、文本没写」的中间态。
-  await withWriteTx("record.update", async (tx) => {
-    await assertUnique(rec.tableId, fields, parsed.data.fields, recordId, undefined, tx);
-    await applyFieldWrites(rec.tableId, recordId, parsed.data.fields, fields, tx);
-    await tx.record.update({ where: { id: recordId }, data: { updatedBy: userId } });
-    // M5/S1：记录改，同事务登记 upsert（与物理字段写共生死）。
-    await enqueueChangeEventTx(tx, {
-      entityType: "record", entityId: recordId, op: "upsert", version: BigInt(Date.now()),
-    });
-  });
+  // M6/S4：事务体已移入 domain/recordWrite.ts（纯移动 + 显式传参）。
+  await withWriteTx("record.update", (tx) => updateRecordTx(tx, {
+    tableId: rec.tableId, recordId, patch: parsed.data.fields, fields, userId,
+  }));
 
   // 编辑期默认值联动：被触发的 lookup/formula 默认字段（及子表格重播种）由后端权威重算
   const changed = new Set(Object.keys(parsed.data.fields));
