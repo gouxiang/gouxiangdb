@@ -166,7 +166,13 @@ step "3d-verify-restore" "$NODE_BIN" "$API_DIR/scripts/backup/verify-restore.mjs
 # ---------------- 阶段4：复制升级库 + generate + build + migrate 11->23 ----------------
 cp "$LEGACY_DB" "$UPGRADED_DB"
 step "4a-prisma-generate" "$NODE_BIN" "$PRISMA_NEW" generate --schema "$API_DIR/prisma/schema.prisma"
-step "4b-build-dist" "$NODE_BIN" "$API_DIR/scripts/build.mjs"
+# 候选构建必须真实成功：esbuild 先 rmSync 整个 dist（合法产品构建动作）。WorkBuddy agent shell
+# 经 NODE_OPTIONS 注入 node-language-shim，把 fs.rmSync 劫持成走 genie-trash 的"安全删除"，
+# 实测在该步 spawnSync 该二进制 ETIMEDOUT 致 build.mjs exit1（真实 CI/裸机/Docker 无此 shim，
+# 走原生 rmSync），故仅对本构建步骤 CODEBUDDY_SAFE_DELETE_ENABLED=0 关 shim；且失败必须 die——
+# 绝不允许在残留 dist 上继续验收（否则后续全绿也是在旧候选物上跑的，无意义）。
+step "4b-build-dist" env CODEBUDDY_SAFE_DELETE_ENABLED=0 "$NODE_BIN" "$API_DIR/scripts/build.mjs" \
+  || die "候选构建（build.mjs）失败；拒绝在残留 dist 上继续门②验收"
 # 三发布入口必须齐全（缺件即环境错 exit 64，不继续往下打空发布物）。
 for f in "$DIST_ENTRY" "$DIST_MCP" "$DIST_NAV"; do
   [[ -f "$f" ]] || die "build 后发布入口缺失：$f"
