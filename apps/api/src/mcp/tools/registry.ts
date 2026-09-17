@@ -1,5 +1,8 @@
 // M6/S3 工具注册枢纽（闸门一）：按 PAT scope 粗筛 + 族可见集非空，决定"注册哪些工具"。
-// M6/S7 追加**调用审计**（本文件是唯一包装点，不改各 handler）：每次 call 收尾落 mcp_tool_call。
+// M6/S7 追加**调用信封**（本文件是唯一包装点，不改各 handler）：
+//   ① 超时：Promise.race 30s（config.mcpToolTimeoutMs），超时返结构化 TIMEOUT 且响应正常返回（不挂死连接）；
+//   ② 幂等：**写工具**（meta.readOnly===false）且入参带 requestId 时，落库 mcp_idempotency 去重（24h 窗）；
+//   ③ 审计：每次 call 收尾落 mcp_tool_call（成功/被拒/超时都记，resultCode 区分）。
 //
 // 铁律：
 //   1. 未注册的工具对客户端**不存在**——直调返回与"真不存在的工具名"逐字节一致的 UNKNOWN_TOOL
@@ -11,8 +14,10 @@
 //      但冒泡前释放幂等占位并记一条审计（AC-M6-4「每次调用入审计」不留缺口）。
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { config } from "../../config.js";
 import type { McpPermissionPort, ResourceFamily } from "../permissions/types.js";
 import { emitToolCall, UNKNOWN_AUDIT_CTX, type McpCallAuditCtx } from "../audit.js";
+import { finalizeIdempotency, idempotencyKey, releaseIdempotency, reserveIdempotency } from "../idempotency.js";
 import { TOOL_CATALOG } from "./catalog.js";
 import type { ToolCtx, ToolMeta, ToolResult, ToolSpec } from "./types.js";
 
@@ -55,7 +60,7 @@ async function familyVisible(
   }
 }
 
-/* ----------------------------- M6/S7 调用审计 ----------------------------- */
+/* ------------------------------ M6/S7 调用信封 ------------------------------ */
 
 /** 从 ToolResult 提取 §317 resultCode（isError 时取结构化 code；非 isError 即 OK）。 */
 export function resultCodeOf(result: ToolResult): string {
@@ -71,20 +76,94 @@ export function resultCodeOf(result: ToolResult): string {
   return "INVALID_PARAMS";
 }
 
+/** 超时哨兵（Symbol 保证不与任何 ToolResult 混淆）。 */
+const TIMED_OUT = Symbol("mcp.timeout");
+
+/** 超时结果：不声称成功/失败（写可能已落库），引导客户端先重读再决策（§409）。 */
+function timeoutResult(tool: string): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          code: "TIMEOUT",
+          message: `工具 ${tool} 超过 ${config.mcpToolTimeoutMs}ms 未返回：服务端已停止等待，但该写操作是否落库未知，请先重读资源状态再决定是否重试（勿盲目重放）。`,
+        }),
+      },
+    ],
+    isError: true,
+  };
+}
+
+/** 并发同 requestId 且首调仍在执行：结构化拒绝（绝不 500，不臆造成功）。 */
+function inProgressResult(tool: string): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({ code: "IN_PROGRESS", message: `工具 ${tool} 的同一 requestId 正在处理中；请稍后用同一 requestId 重试以取得首次结果。` }),
+      },
+    ],
+    isError: true,
+  };
+}
+
+async function withTimeout(promise: Promise<ToolResult>, ms: number): Promise<ToolResult | typeof TIMED_OUT> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => resolve(TIMED_OUT), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
- * 单次调用的审计信封：执行 handler 后落一条 mcp_tool_call（成功/被拒都记，resultCode 区分）。
- * 注：UNKNOWN_TOOL 不经过此处（SDK 在调用回调前即拒），由 transport 层补记（见 streamableHttp.ts）。
+ * 单次调用的信封：幂等占位 -> 超时执行 -> 回填/释放 -> 审计。
+ * 幂等仅在「写工具 + 入参带 requestId」时生效（读工具与无 requestId 的调用逐字节维持原行为）。
  */
-async function invokeWithAudit(spec: ToolSpec, ctx: ToolCtx, args: Record<string, unknown>, deps: ToolDeps): Promise<ToolResult> {
+async function invokeWithEnvelope(spec: ToolSpec, ctx: ToolCtx, args: Record<string, unknown>, deps: ToolDeps): Promise<ToolResult> {
   const auditCtx = deps.audit ?? UNKNOWN_AUDIT_CTX;
   const started = Date.now();
   const tool = spec.meta.name;
   const requestId = typeof args.requestId === "string" && args.requestId.length > 0 ? args.requestId : undefined;
+  const key =
+    spec.meta.readOnly === false && requestId
+      ? idempotencyKey(ctx.subject.patId, tool, requestId)
+      : undefined;
+
+  if (key) {
+    const reserved = await reserveIdempotency(key, ctx.subject.patId, tool);
+    if (reserved.kind === "replay") {
+      const first = JSON.parse(reserved.responseJson) as ToolResult;
+      emitToolCall({
+        ctx: auditCtx, actorId: ctx.subject.userId, patId: ctx.subject.patId, tool,
+        resultCode: resultCodeOf(first), args, requestId, durationMs: Date.now() - started, idempotentReplay: true,
+      });
+      return first;
+    }
+    if (reserved.kind === "in_progress") {
+      const result = inProgressResult(tool);
+      emitToolCall({ ctx: auditCtx, actorId: ctx.subject.userId, patId: ctx.subject.patId, tool, resultCode: "IN_PROGRESS", args, requestId, durationMs: Date.now() - started });
+      return result;
+    }
+  }
+
   let result: ToolResult;
+  let timedOut = false;
   try {
-    result = await spec.run(ctx, args);
+    const raced = await withTimeout(spec.run(ctx, args), config.mcpToolTimeoutMs);
+    if (raced === TIMED_OUT) {
+      timedOut = true;
+      result = timeoutResult(tool);
+    } else {
+      result = raced;
+    }
   } catch (e) {
-    // handler 异常原样冒泡；但先留审计（AC-M6-4「每次调用入审计」零缺口）。
+    // handler 异常原样冒泡；但先释放占位（不得把"未完成"固化成首次结果）并留审计（AC-M6-4 零缺口）。
+    if (key) await releaseIdempotency(key).catch(() => undefined);
     emitToolCall({
       ctx: auditCtx, actorId: ctx.subject.userId, patId: ctx.subject.patId, tool,
       // INTERNAL_ERROR 仅用于审计（§317 词汇表描述的是"工具级"结果码；本码标记适配层未预期异常）
@@ -92,9 +171,19 @@ async function invokeWithAudit(spec: ToolSpec, ctx: ToolCtx, args: Record<string
     });
     throw e;
   }
+
+  if (key) {
+    if (timedOut) {
+      // 超时结果不确定 -> 释放占位，允许后续重放重新执行（客户端应先重读再重试）
+      await releaseIdempotency(key).catch(() => undefined);
+    } else {
+      await finalizeIdempotency(key, JSON.stringify(result)).catch(() => undefined);
+    }
+  }
+
   emitToolCall({
     ctx: auditCtx, actorId: ctx.subject.userId, patId: ctx.subject.patId, tool,
-    resultCode: resultCodeOf(result), args, requestId, durationMs: Date.now() - started,
+    resultCode: timedOut ? "TIMEOUT" : resultCodeOf(result), args, requestId, durationMs: Date.now() - started,
   });
   return result;
 }
@@ -121,7 +210,7 @@ export async function registerTools(server: McpServer, subject: { userId: string
         inputSchema: spec.inputShape,
         annotations: { readOnlyHint: spec.meta.readOnly },
       },
-      async (args: Record<string, unknown>) => invokeWithAudit(spec, ctx, args ?? {}, deps),
+      async (args: Record<string, unknown>) => invokeWithEnvelope(spec, ctx, args ?? {}, deps),
     );
   }
   deps.onRegistered?.(registered);

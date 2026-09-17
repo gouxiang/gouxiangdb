@@ -28,6 +28,20 @@ export const listBasesShape = {};
 /** 读工具共用的 limit（§3-8 配额：≤200；超限由 SDK 入参校验直接返 -32602）。 */
 const LIMIT_MAX = MCP_LIMITS.READ_LIMIT_MAX;
 
+/* ------------------------------- M6/S7 幂等入参 ------------------------------- */
+
+/**
+ * 写工具的可选幂等键（§242/§409，C-8 定稿：落库 mcp_idempotency，24h 窗）。
+ * **刻意可选**：不传即不参与幂等，与 S4/S5/S6b 既有调用逐字节一致（零破坏）。
+ * 键 = patId + tool + requestId（服务端拼接，客户端只管传一个稳定的自有 id）。
+ */
+export const requestId = z
+  .string()
+  .min(1)
+  .max(128)
+  .optional()
+  .describe("幂等键（可选）：同令牌+同工具+同 requestId 的重放在 24h 内返回首次结果且不重复执行；缺省=不参与幂等");
+
 /** 受控 filter 算子白名单（§4.5：禁任意 SQL/公式；非法算子由 zod4 enum 拦为 -32602）。 */
 export const FILTER_OPS = [
   "is", "isNot", "contains", "notContains", "isEmpty", "isNotEmpty",
@@ -72,6 +86,7 @@ export const deleteRecordShape = {
   tableId: z.string().min(1),
   recordId: z.string().min(1),
   confirm: z.literal(true).describe("删除确认；必须是字面量 true（破坏性操作强制显式确认）"),
+  requestId,
 };
 
 /** record.create_record：fields 为 {fieldId: value}；confirm 必须字面量 true。 */
@@ -79,6 +94,7 @@ export const createRecordShape = {
   tableId: z.string().min(1),
   fields: z.record(z.string(), z.unknown()).describe("字段映射 {fieldId: value}"),
   confirm: z.literal(true).describe("写入确认；必须是字面量 true"),
+  requestId,
 };
 
 /** record.update_record：fields 为 {fieldId: value}（仅含要改的键）。 */
@@ -86,6 +102,7 @@ export const updateRecordShape = {
   tableId: z.string().min(1),
   recordId: z.string().min(1),
   fields: z.record(z.string(), z.unknown()).describe("要更新的字段映射 {fieldId: value}"),
+  requestId,
 };
 
 /* ------------------------- M6/S5 doc 族（文档块语言） ------------------------- */
@@ -172,6 +189,7 @@ export const appendBlocksShape = {
   afterBlockId: z.string().min(1).optional().describe("在该块 id 之后插入（缺省=追加到文档末尾）"),
   ops: z.array(blockOpShape).min(1).max(MCP_LIMITS.WRITE_OPS_MAX).describe(`要追加的块操作（≤${MCP_LIMITS.WRITE_OPS_MAX}）`),
   baseVersion: z.number().int().min(0).optional().describe("读取时的 contentVersion（乐观锁）；缺省=last-write-wins，与 REST PUT /docs/:docId/content 同口径"),
+  requestId,
 };
 
 /** doc.update_block：patch 仅 text/checked/align；align 仅走注释通道（写 Block.align，不手写 md）。 */
@@ -186,6 +204,7 @@ export const updateBlockShape = {
     })
     .describe("要修改的块属性（至少一项）"),
   baseVersion: z.number().int().min(0).optional().describe("读取时的 contentVersion（乐观锁）；缺省=last-write-wins，与 REST PUT /docs/:docId/content 同口径"),
+  requestId,
 };
 
 /** doc.delete_blocks：原子批删（任一 id 不存在整批失败）；confirm 必须字面量 true。 */
@@ -194,6 +213,7 @@ export const deleteBlocksShape = {
   blockIds: z.array(z.string().min(1)).min(1).max(MCP_LIMITS.WRITE_OPS_MAX).describe(`要删除的块 id（≤${MCP_LIMITS.WRITE_OPS_MAX}）`),
   baseVersion: z.number().int().min(0).optional().describe("读取时的 contentVersion（乐观锁）；缺省=last-write-wins，与 REST PUT /docs/:docId/content 同口径"),
   confirm: z.literal(true).describe("删除确认；必须是字面量 true（破坏性操作强制显式确认）"),
+  requestId,
 };
 
 /* ------------------------- M6/S6 canvas 族（画布只读） ------------------------- */
@@ -223,4 +243,5 @@ export const commitElementsShape = {
     .describe(`图元操作批（≤${MCP_LIMITS.WRITE_OPS_MAX}）；当前仅支持 op:"element.create" 创建 geometry/rectangle，其它操作名整批拒绝`),
   baseVersion: z.number().int().min(0).optional().describe("读取时的 contentVersion（乐观锁）；缺省=last-write-wins，与 REST PUT 同口径"),
   confirm: z.literal(true).describe("写入确认；必须是字面量 true"),
+  requestId,
 };

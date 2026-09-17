@@ -212,6 +212,11 @@ export interface AppConfig {
   /** M6/S2 PAT REST 敏感档（§5.2：30 次/60s/人）；与 /mcp 桶分名避免歧义。 */
   mcpPatRestWindowMs: number;
   mcpPatRestMax: number;
+  /**
+   * M6/S7 单次 MCP 工具调用超时（GX_MCP_TOOL_TIMEOUT_MS，**默认 30000 = 30s**，SPEC §10 铁律）。
+   * 在 mcp 适配层用 Promise.race 实现（不改 service 签名）；超时返结构化 TIMEOUT 并正常返回响应。
+   */
+  mcpToolTimeoutMs: number;
   auditDir: string;
   backupDir: string;
   rateLimitEnabled: boolean;
@@ -293,6 +298,8 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     mcpRateIpMax: parseNonNegInt(env.GX_MCP_RATE_IP_MAX, 300),
     mcpPatRestWindowMs: parseNonNegInt(env.GX_MCP_RATE_PAT_REST_WINDOW_SEC, 60) * 1000,
     mcpPatRestMax: parseNonNegInt(env.GX_MCP_RATE_PAT_REST_MAX, 30),
+    // 30s 为 SPEC §10 铁律；env 只用于测试注入短超时，生产不得调大（超时是"不挂死连接"的保证）。
+    mcpToolTimeoutMs: parseNonNegInt(env.GX_MCP_TOOL_TIMEOUT_MS, 30_000),
     bodyLimitUploadBytes: parseBodyLimit(
       env.GX_BODY_LIMIT_UPLOAD,
       DEFAULT_BODY_LIMIT_UPLOAD_MB * 1024 * 1024,
