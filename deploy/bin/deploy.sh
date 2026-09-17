@@ -6,6 +6,7 @@
 #
 # 流程：环境检查 → 当前 readyz 探活 → 强制在线快照（无快照不继续）→ 解包到
 #       releases/<ts> → checksum 校验 → prisma migrate deploy（生产 env，只增迁移）
+#       → nav-reconcile --apply（迁移后 path 重算，M3-S11-A/AC-UPG-1）
 #       → ln -sfn 原子切换 → systemctl restart → 轮询 readyz 最多 30s
 #       → 失败自动回滚 → 成功则保留最近 N 个 release。
 #
@@ -118,6 +119,18 @@ say "迁移（prisma migrate deploy）"
 ( cd "$STAGE/api" && DATABASE_URL="$DATABASE_URL" \
     "$NODE_BIN" node_modules/prisma/build/index.js "${MIGRATE_ARGS[@]}" ) \
   || die "migrate deploy 失败；新版本未切换，现网不受影响。按 restore.md 评估后处理。"
+
+# ---------------------------------------------------------------------------
+# 4b) 迁移后、原子切换前：nav path 全量重算（M3-S11-A / AC-UPG-1）。
+#     迁移 B 只给根节点（base/kb）path，非根节点 path/depth 留空；必须在此跑一次
+#     dist/nav-reconcile.js --apply 重建，否则深层 tree 索引缺节点、菜单 shortcut 全 disabled。
+#     必须先于 symlink 切换与 systemctl restart：失败即 die，与 migrate 失败同姿态，
+#     现网仍跑旧版本完全不受影响。exit 1=仍有 A/B/C 阻断差异；64=用法/环境/库缺失。
+# ---------------------------------------------------------------------------
+say "迁移后导航 path 重算（nav-reconcile --apply）"
+( cd "$STAGE/api" && DATABASE_URL="$DATABASE_URL" \
+    "$NODE_BIN" dist/nav-reconcile.js --apply ) \
+  || die "nav reconcile 失败；新版本未切换，现网不受影响。"
 
 # ---------------------------------------------------------------------------
 # 5) 原子切换 current → restart → 30s readyz 轮询；失败自动回滚。

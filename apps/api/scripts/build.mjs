@@ -28,6 +28,10 @@ const distDir = path.join(apiRoot, "dist");
 const outFile = path.join(distDir, "index.js");
 // M6/S6：stdio 第二入口 -> dist/mcp-stdio.js（C-5：随包投递的文件，不常驻、不占端口）。
 const stdioOutFile = path.join(distDir, "mcp-stdio.js");
+// M3-S11-A/AC-UPG-1：nav 对账第三入口 -> dist/nav-reconcile.js。
+// 四个部署面在 prisma migrate deploy 后必须跑一次 --apply（迁移只给根节点 path），
+// 故该脚本必须随生产 dist 投递，不能只以 tsx 源码形式存在。
+const navReconcileOutFile = path.join(distDir, "nav-reconcile.js");
 
 // 外置：运行时从发布包 node_modules 解析。
 // better-sqlite3 含 .node 原生二进制，严禁打包；@prisma/client 自带 query engine。
@@ -51,10 +55,13 @@ fs.mkdirSync(distDir, { recursive: true });
 
 await esbuild.build({
   // M6/S6：双入口 —— index（HTTP 服务） + mcp-stdio（stdio 命令行入口）。
-  // 多入口须用 outdir + 逐入口 out 名（用 outfile 会报错）；产物 dist/index.js + dist/mcp-stdio.js。
+  // M3-S11-A：第三入口 nav-reconcile（migrate deploy 后 path 重算，部署链路调用）。
+  // 多入口须用 outdir + 逐入口 out 名（用 outfile 会报错）；
+  // 产物 dist/index.js + dist/mcp-stdio.js + dist/nav-reconcile.js。
   entryPoints: [
     { in: path.join(apiRoot, "src/index.ts"), out: "index" },
     { in: path.join(apiRoot, "src/mcp/stdio.ts"), out: "mcp-stdio" },
+    { in: path.join(apiRoot, "scripts/nav/reconcile-nav.ts"), out: "nav-reconcile" },
   ],
   bundle: true,
   platform: "node",
@@ -80,9 +87,14 @@ if (!fs.existsSync(stdioOutFile)) {
   console.error("[build] 构建结束但 dist/mcp-stdio.js 不存在（M6/S6 第二入口产物缺失）");
   process.exit(1);
 }
+if (!fs.existsSync(navReconcileOutFile)) {
+  console.error("[build] 构建结束但 dist/nav-reconcile.js 不存在（M3-S11-A 第三入口产物缺失）");
+  process.exit(1);
+}
 
 const stat = fs.statSync(outFile);
 const stdioStat = fs.statSync(stdioOutFile);
+const navReconcileStat = fs.statSync(navReconcileOutFile);
 console.log(
-  `[build] OK dist/index.js ${(stat.size / 1024).toFixed(1)} KiB, dist/mcp-stdio.js ${(stdioStat.size / 1024).toFixed(1)} KiB, GX_VERSION=${rootPkg.version}`,
+  `[build] OK dist/index.js ${(stat.size / 1024).toFixed(1)} KiB, dist/mcp-stdio.js ${(stdioStat.size / 1024).toFixed(1)} KiB, dist/nav-reconcile.js ${(navReconcileStat.size / 1024).toFixed(1)} KiB, GX_VERSION=${rootPkg.version}`,
 );

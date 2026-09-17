@@ -100,7 +100,10 @@ fs.mkdirSync(serverDir, { recursive: true });
 const srcApi = path.join(repoRoot, "apps", "api");
 
 const distSrc = path.join(srcApi, "dist");
+// fail-fast 三入口断言：mcp-stdio（M6）/nav-reconcile（M3-S11 迁移后 path 重算）必须随包。
 if (!fs.existsSync(path.join(distSrc, "index.js"))) fail("缺少 apps/api/dist/index.js");
+if (!fs.existsSync(path.join(distSrc, "mcp-stdio.js"))) fail("缺少 apps/api/dist/mcp-stdio.js");
+if (!fs.existsSync(path.join(distSrc, "nav-reconcile.js"))) fail("缺少 apps/api/dist/nav-reconcile.js");
 copyDir(distSrc, path.join(serverDir, "dist"));
 copyFile(path.join(srcApi, "prisma", "schema.prisma"), path.join(serverDir, "prisma", "schema.prisma"));
 copyDir(path.join(srcApi, "prisma", "migrations"), path.join(serverDir, "prisma", "migrations"));

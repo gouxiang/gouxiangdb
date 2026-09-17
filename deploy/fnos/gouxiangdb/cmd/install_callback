@@ -37,4 +37,9 @@ set -a; source "$ENV_FILE"; set +a
 node node_modules/prisma/build/index.js migrate deploy --schema=prisma/schema.prisma \
   || { echo "prisma migrate deploy failed on install" > "$TRIM_TEMP_LOGFILE"; exit 1; }
 
+# M3-S11-A/AC-UPG-1：迁移只给根节点 path，安装迁移后必须全量重算非根节点 path/depth
+#（cwd=$APP_DIR 即 server/，dist 布局与裸机 release/api 同构：dist/nav-reconcile.js）。
+node dist/nav-reconcile.js --apply \
+  || { echo "nav reconcile failed on install" > "$TRIM_TEMP_LOGFILE"; exit 1; }
+
 exit 0

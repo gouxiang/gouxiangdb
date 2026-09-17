@@ -25,4 +25,9 @@ fi
 node node_modules/prisma/build/index.js migrate deploy --schema=prisma/schema.prisma \
   || { echo "prisma migrate deploy failed on upgrade" > "$TRIM_TEMP_LOGFILE"; exit 1; }
 
+# 3) M3-S11-A/AC-UPG-1：迁移后全量重算非根节点 path/depth（cwd=$APP_DIR=server/，
+#    dist 与裸机 release/api 同构）。失败即 exit 1，fpk 升级中止、旧版应用不被切换。
+node dist/nav-reconcile.js --apply \
+  || { echo "nav reconcile failed on upgrade" > "$TRIM_TEMP_LOGFILE"; exit 1; }
+
 exit 0
