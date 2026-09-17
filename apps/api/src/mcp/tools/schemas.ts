@@ -195,3 +195,10 @@ export const deleteBlocksShape = {
   baseVersion: z.number().int().min(0).optional().describe("读取时的 contentVersion（乐观锁）；缺省=last-write-wins，与 REST PUT /docs/:docId/content 同口径"),
   confirm: z.literal(true).describe("删除确认；必须是字面量 true（破坏性操作强制显式确认）"),
 };
+
+/* ------------------------- M6/S6 canvas 族（画布只读） ------------------------- */
+
+/** canvas.get_board：画布只读（content=PlaitElement[] JSON；未知键透传不剥离）。 */
+export const getBoardShape = {
+  docId: z.string().min(1).describe("画布文档 id（须在该令牌可见集内）"),
+};

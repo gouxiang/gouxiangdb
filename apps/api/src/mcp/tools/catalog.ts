@@ -6,8 +6,9 @@
 import { config } from "../../config.js";
 import { tableGetSchema, tableListBases } from "./table.tools.js";
 import { recordCreateRecord, recordDeleteRecord, recordUpdateRecord, recordListRecords, recordQueryRecords, recordSearch } from "./record.tools.js";
+import { canvasGetBoard } from "./canvas.tools.js";
 import { docAppendBlocks, docDeleteBlocks, docGetDocBlocks, docUpdateBlock } from "./doc.tools.js";
-import { appendBlocksShape, createRecordShape, deleteBlocksShape, deleteRecordShape, updateBlockShape, updateRecordShape, getDocBlocksShape, getSchemaShape, listBasesShape, listRecordsShape, pingEchoShape, queryRecordsShape, recordSearchShape } from "./schemas.js";
+import { appendBlocksShape, createRecordShape, deleteBlocksShape, deleteRecordShape, updateBlockShape, updateRecordShape, getBoardShape, getDocBlocksShape, getSchemaShape, listBasesShape, listRecordsShape, pingEchoShape, queryRecordsShape, recordSearchShape } from "./schemas.js";
 import { text, type ToolSpec } from "./types.js";
 
 export const TOOL_CATALOG: readonly ToolSpec[] = [
@@ -134,5 +135,14 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     },
     inputShape: deleteBlocksShape,
     run: docDeleteBlocks,
+  },
+  {
+    meta: {
+      name: "canvas.get_board", title: "读取画布",
+      description: "只读读取画布元素与内容版本（元素原样返回，未知键不剥离；画布写入为二期能力）。",
+      scopes: ["canvas:read"], family: "canvas", actions: ["r"], readOnly: true,
+    },
+    inputShape: getBoardShape,
+    run: canvasGetBoard,
   },
 ];

@@ -26,6 +26,8 @@ if (typeof rootPkg.version !== "string" || !rootPkg.version) {
 
 const distDir = path.join(apiRoot, "dist");
 const outFile = path.join(distDir, "index.js");
+// M6/S6：stdio 第二入口 -> dist/mcp-stdio.js（C-5：随包投递的文件，不常驻、不占端口）。
+const stdioOutFile = path.join(distDir, "mcp-stdio.js");
 
 // 外置：运行时从发布包 node_modules 解析。
 // better-sqlite3 含 .node 原生二进制，严禁打包；@prisma/client 自带 query engine。
@@ -48,12 +50,17 @@ fs.rmSync(distDir, { recursive: true, force: true });
 fs.mkdirSync(distDir, { recursive: true });
 
 await esbuild.build({
-  entryPoints: [path.join(apiRoot, "src/index.ts")],
+  // M6/S6：双入口 —— index（HTTP 服务） + mcp-stdio（stdio 命令行入口）。
+  // 多入口须用 outdir + 逐入口 out 名（用 outfile 会报错）；产物 dist/index.js + dist/mcp-stdio.js。
+  entryPoints: [
+    { in: path.join(apiRoot, "src/index.ts"), out: "index" },
+    { in: path.join(apiRoot, "src/mcp/stdio.ts"), out: "mcp-stdio" },
+  ],
   bundle: true,
   platform: "node",
   format: "esm",
   target: "node20",
-  outfile: outFile,
+  outdir: distDir,
   sourcemap: false,
   keepNames: true,
   // 不用 packages:"external"——那会把 workspace 的 @gx/* 也外置；
@@ -69,8 +76,13 @@ if (!fs.existsSync(outFile)) {
   console.error("[build] 构建结束但 dist/index.js 不存在");
   process.exit(1);
 }
+if (!fs.existsSync(stdioOutFile)) {
+  console.error("[build] 构建结束但 dist/mcp-stdio.js 不存在（M6/S6 第二入口产物缺失）");
+  process.exit(1);
+}
 
 const stat = fs.statSync(outFile);
+const stdioStat = fs.statSync(stdioOutFile);
 console.log(
-  `[build] OK dist/index.js ${(stat.size / 1024).toFixed(1)} KiB, GX_VERSION=${rootPkg.version}`,
+  `[build] OK dist/index.js ${(stat.size / 1024).toFixed(1)} KiB, dist/mcp-stdio.js ${(stdioStat.size / 1024).toFixed(1)} KiB, GX_VERSION=${rootPkg.version}`,
 );
