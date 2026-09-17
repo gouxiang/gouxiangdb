@@ -417,3 +417,197 @@ export interface BaseStatsDTO {
   fieldCount: number;
   memberCount: number;
 }
+
+// ============ M5 统一检索 /api/v1/*（S9 冻结契约；只增不改既有导出） ============
+// 依据：docs/api/openapi.yaml 的 SearchApiKeyStatus/EmbeddingConfig/SearchStatus 等 schema
+// 与 routes/v1/search.ts 的 UnifiedSearchResponse。后端仅在 GX_M5_SEARCH=on|shadow 挂载，
+// off 时 /api/v1/search 与 /api/v1/admin/* 落 v1 自身 404，前端据此回退旧链。
+
+/** v1 统一检索命中实体类别（与后端 SearchEntityType 对齐）。 */
+export type V1SearchEntityType = "record" | "doc" | "canvas";
+/** 请求侧类型过滤。 */
+export type V1SearchTypeFilter = "all" | V1SearchEntityType;
+/** 请求侧检索方式（auto=后端按配置自行路由）。 */
+export type V1RequestedMode = "auto" | "vector" | "fts";
+/** 实际执行路由（响应侧），含降级后的 like 关键词兜底。 */
+export type V1EffectiveMode = "hybrid" | "vector" | "fts" | "like";
+/** 降级原因码（实现细节，UI 必须翻译成中性文案，不直接展示）。 */
+export type V1SearchDegradedReason =
+  | "vec_unavailable"
+  | "embedding_unhealthy"
+  | "dim_mismatch"
+  | "search_store_recovering";
+
+/** 单条 v1 检索命中（record/doc/canvas 共用，定位上下文按类型可选挂字段）。 */
+export interface V1SearchItem {
+  type: V1SearchEntityType;
+  entityId: string;
+  /** 实体挂载的 nav 节点 id（record=table 节点；doc/canvas=自身节点）。 */
+  nodeId: string;
+  title: string;
+  snippet: string;
+  // record 定位上下文
+  baseId?: string;
+  baseName?: string;
+  tableId?: string;
+  tableName?: string;
+  // doc/canvas 定位上下文
+  kbId?: string;
+  kbName?: string;
+  docId?: string;
+  score: number;
+  /** 实体命中的召回路（仅 fts|vec；like 路不入此标，由 mode 表达）。 */
+  matchedVia: Array<"fts" | "vec">;
+  /** doc/canvas 最佳命中块序号；record 为 null。 */
+  chunkSeq: number | null;
+  /** 命中字段名；无字段命中为 null。 */
+  matchedField: string | null;
+}
+
+/** GET /api/v1/search 响应。 */
+export interface V1SearchResponse {
+  items: V1SearchItem[];
+  total: number;
+  limit: number;
+  mode: V1EffectiveMode;
+  degraded: V1SearchDegradedReason[];
+  scopeTruncated: boolean;
+  policyVersion: number;
+}
+
+export interface V1SearchQuery {
+  q: string;
+  type?: V1SearchTypeFilter;
+  mode?: V1RequestedMode;
+  limit?: number;
+}
+
+/** GET /admin/embedding/config.apiKey 存在性形状（绝不回明文）。 */
+export interface EmbeddingApiKeyStatus {
+  configured: boolean;
+  source: "env" | "db" | "none";
+  /** 仅末 4 位；无 key 为 null。 */
+  maskedLast4: string | null;
+}
+
+export type EmbeddingMode = "off" | "cloud";
+
+/** GET /admin/embedding/config。 */
+export interface EmbeddingConfigDTO {
+  mode: EmbeddingMode;
+  baseURL: string;
+  model: string;
+  /** 现役向量维度；未建库/未向量化为 0（只读，dim 不允许出现在 PATCH）。 */
+  dim: number;
+  batchSize: number;
+  timeoutMs: number;
+  fieldChunkCap: number;
+  apiKey: EmbeddingApiKeyStatus;
+}
+
+/** PATCH /admin/embedding/config 请求体（dim/reindex 出现即 400）。 */
+export interface EmbeddingConfigPatch {
+  mode?: EmbeddingMode;
+  baseURL?: string;
+  model?: string;
+  batchSize?: number;
+  timeoutMs?: number;
+  fieldChunkCap?: number;
+  /** off->cloud 必须显式 true，否则 409 NEED_CLOUD_CONFIRM。 */
+  confirmCloud?: boolean;
+  /** 字符串=覆盖落库；字段缺省=保持；显式 null=清 db key。 */
+  apiKey?: string | null;
+}
+
+/** PATCH 成功响应：配置 + 是否需要显式重建。 */
+export interface EmbeddingConfigPatchResult extends EmbeddingConfigDTO {
+  reindexRequired: boolean;
+}
+
+/** POST /admin/embedding/api-key/rotate 请求体。 */
+export interface ApiKeyRotateRequest {
+  apiKey: string;
+}
+
+/** POST /admin/reindex 请求体（省略 type/entityId=全量）。 */
+export interface ReindexRequest {
+  type?: "record" | "doc" | "canvas";
+  entityId?: string;
+}
+
+/** POST /admin/reindex 202 响应。 */
+export interface ReindexStarted {
+  job: "reindex";
+  status: "started";
+}
+
+/** 覆盖度六项（A-F），UI 翻译为可读标签，不暴露表名/SQL。 */
+export interface SearchCoverage {
+  /** 活实体无 chunk（漏索引）。 */
+  a: number;
+  /** chunk 实体不存在/已删（脏行）。 */
+  b: number;
+  /** nodeId 悬空（可自愈警告）。 */
+  c: number;
+  /** cloud 下 chunk 缺 vec（向量欠账；off 不适用）。 */
+  d: number;
+  /** chunk 缺 fts 行。 */
+  e: number;
+  /** field chunk 缺 field_grant（授权漏登）。 */
+  f: number;
+}
+
+export interface SearchIndexChunks {
+  records: number;
+  docs: number;
+  canvas: number;
+  total: number;
+  fieldChunks: number;
+  /** 超 fieldChunkCap 被截断的记录数。 */
+  fieldChunksCapped: number;
+  fieldChunkCap: number;
+}
+
+export interface SearchIndexBacklog {
+  /** pending+processing。 */
+  pending: number;
+  failed: number;
+  dead: number;
+}
+
+export interface SearchIndexStatus {
+  schemaVersion: number;
+  indexedAt: string | null;
+  chunks: SearchIndexChunks;
+  backlog: SearchIndexBacklog;
+  coverage: SearchCoverage;
+  rebuilding: boolean;
+}
+
+/** GET /admin/search/status。 */
+export interface SearchStatusDTO {
+  vec: {
+    loaded: boolean;
+    version: string | null;
+    extPathKind: "builtin" | "env-override" | "platform";
+  };
+  embedding: {
+    mode: EmbeddingMode;
+    model: string;
+    dim: number;
+    healthy: boolean;
+    /** 技术态中性细节，不含凭据。 */
+    detail?: string;
+    reindexRequired: boolean;
+  };
+  /** search.db 尚未建库为 null（UI 显示"尚未建立索引"空态，不是全 0）。 */
+  index: SearchIndexStatus | null;
+}
+
+/** M5 管理面错误码全集（{error,code} 信封的 code）。 */
+export type M5AdminErrorCode =
+  | "EMBEDDING_CONFIG_INVALID"
+  | "NEED_CLOUD_CONFIRM"
+  | "REINDEX_IN_PROGRESS"
+  | "SEARCH_UNAVAILABLE"
+  | "REINDEX_FAILED";

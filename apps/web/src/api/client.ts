@@ -117,6 +117,20 @@ export type {
   CSVImportResult,
   TrashItemDTO,
 } from "@gx/shared-types";
+// M5 统一检索类型：本文件内部用于 apiFetch 泛型与请求体，必须 import 成本地绑定
+// （不能只放在下面的 export type 重导出块——重导出不会在本模块产生绑定）。
+import type {
+  V1SearchResponse,
+  V1SearchQuery,
+  EmbeddingConfigDTO,
+  EmbeddingConfigPatch,
+  EmbeddingConfigPatchResult,
+  EmbeddingApiKeyStatus,
+  ApiKeyRotateRequest,
+  ReindexRequest,
+  ReindexStarted,
+  SearchStatusDTO,
+} from "@gx/shared-types";
 
 export class ApiError extends Error {
   constructor(
@@ -1002,5 +1016,65 @@ export const AuthzApi = {
   /** 中性化面包屑（on 态已截无权祖先；truncatedAbove=true 时链首渲染截断标记）。 */
   getBreadcrumb: (id: string) =>
     apiFetch<NodeBreadcrumbDTO>(`/api/v1/nodes/${id}/breadcrumb`),
+};
+
+// ============ M5 统一检索 /api/v1/*（GX_M5_SEARCH=on|shadow 挂载；off 落 v1 自身 404） ============
+//
+// 与 M3 nav 同一套 flag 回退风格：v1 端点 off 时返回 404（{code:"NOT_FOUND"}），
+// 由数据适配层 search-adapter 捕获后回退旧 /api/search，组件不感知差异。
+// 管理面（/admin/*）仅 role_owner 可访问，403 由设置面板静默降级为不可见。
+
+export const SearchV1Api = {
+  /** 统一检索（record/doc/canvas + auto/vector/fts）。off 时 404，调用方回退旧链。 */
+  search: (params: V1SearchQuery) =>
+    apiFetch<V1SearchResponse>(
+      `/api/v1/search${qs({
+        q: params.q,
+        type: params.type,
+        mode: params.mode,
+        limit: params.limit,
+      })}`,
+    ),
+};
+
+export const EmbeddingAdminApi = {
+  /** 读嵌入配置（apiKey 仅存在性 + 末 4，role_owner）。 */
+  getConfig: () => apiFetch<EmbeddingConfigDTO>("/api/v1/admin/embedding/config"),
+  /** 改配置；off->cloud 缺 confirmCloud 时后端 409 NEED_CLOUD_CONFIRM。 */
+  patchConfig: (patch: EmbeddingConfigPatch) =>
+    apiFetch<EmbeddingConfigPatchResult>("/api/v1/admin/embedding/config", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  /** 轮换 db 嵌入 key（AES-GCM 落库），回存在性形状。 */
+  rotateApiKey: (apiKey: string) =>
+    apiFetch<EmbeddingApiKeyStatus>("/api/v1/admin/embedding/api-key/rotate", {
+      method: "POST",
+      body: JSON.stringify({ apiKey } satisfies ApiKeyRotateRequest),
+    }),
+  /** 清除 db 嵌入 key（随后回落 env 种子或 none），204 无体，需容忍空响应。 */
+  clearApiKey: async () => {
+    const token = useAuthStore.getState().token;
+    const res = await fetch(`${BASE_URL}/api/v1/admin/embedding/api-key`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 401) handleUnauthorized();
+      throw new ApiError(res.status, body);
+    }
+  },
+  /** 触发重建索引（异步，202）；进行中再调 409 REINDEX_IN_PROGRESS。 */
+  reindex: (body: ReindexRequest = {}) =>
+    apiFetch<ReindexStarted>("/api/v1/admin/reindex", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  /** 检索子系统状态（覆盖度/积压/chunks/embedding 健康）。 */
+  status: () => apiFetch<SearchStatusDTO>("/api/v1/admin/search/status"),
 };
 
