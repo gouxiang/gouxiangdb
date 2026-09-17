@@ -26,6 +26,7 @@
   "dependencies": {
     "@gx/design-tokens": "workspace:*",
     "@gx/blocks": "workspace:*",
+    "@gx/canvas": "workspace:*",
     "@gx/shared-types": "workspace:*",
     "@hono/node-server": "^1.13.0",
     "@modelcontextprotocol/sdk": "1.30.0",

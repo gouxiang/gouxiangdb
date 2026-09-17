@@ -23,6 +23,8 @@
       "@gx/shared-types/*": ["./packages/shared-types/src/*"],
       "@gx/blocks": ["./packages/blocks/src/index.ts"],
       "@gx/blocks/*": ["./packages/blocks/src/*"],
+      "@gx/canvas": ["./packages/canvas/src/index.ts"],
+      "@gx/canvas/*": ["./packages/canvas/src/*"],
       "@gx/design-tokens": ["./packages/design-tokens/src/index.ts"],
       "@gx/design-tokens/*": ["./packages/design-tokens/src/*"]
     }

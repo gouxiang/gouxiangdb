@@ -40,6 +40,9 @@ importers:
       '@gx/blocks':
         specifier: workspace:*
         version: link:../../packages/blocks
+      '@gx/canvas':
+        specifier: workspace:*
+        version: link:../../packages/canvas
       '@gx/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
@@ -263,6 +266,15 @@ importers:
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
+
+  packages/canvas:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.1)(jiti@1.21.7)(tsx@4.23.13)
 
   packages/design-tokens:
     devDependencies:
