@@ -645,9 +645,8 @@ records.post("/csv-import", async (c) => {
     const colValues = dataRows.map((r) => r[ci] ?? "");
     const type = inferFieldType(colValues);
     try {
-      const { field } = await runWrite("field.createFromCsv", () =>
-        createField({ tableId, name: colName || `列 ${ci + 1}`, type: type as never }),
-      );
+      // 结构写事务由 createField 内部 withWriteTx 提供；此处不包 runWrite（避免队列自死锁）。
+      const { field } = await createField({ tableId, name: colName || `列 ${ci + 1}`, type: type as never });
       columnFieldIds.push(field.id);
       createdFields += 1;
     } catch {

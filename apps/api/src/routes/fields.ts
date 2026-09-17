@@ -3,7 +3,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { prisma, withWriteBatch, runWrite } from "../db.js";
+import { prisma, withWriteBatch } from "../db.js";
 import { requireCanView, requireCanManageSchema, HttpError } from "../guards.js";
 import { createField, updateField, deleteField, lookupTargetFields, relationDisplayName, relationIsMultiple } from "../domain/fieldService.js";
 import { loadTableFields } from "../domain/recordService.js";
@@ -134,8 +134,9 @@ fields.post("/", async (c) => {
   });
   if (validationError) return c.json({ error: validationError }, 400);
 
-  const result = await runWrite("field.create", () =>
-    createField({
+  // 结构写的串行化 + 事务已由 fieldService 内部 withWriteTx 提供；外层不再包 runWrite，
+  // 否则外层占住并发度 1 的写队列、内部 withWriteTx 再入队会自死锁（db.ts 铁律）。
+  const result = await createField({
       tableId,
       name: parsed.data.name,
       type: parsed.data.type,
@@ -159,8 +160,7 @@ fields.post("/", async (c) => {
       visibleFieldIds: parsed.data.visibleFieldIds ?? null,
       defaultConfig: parsed.data.defaultConfig ?? null,
       numberRule: parsed.data.numberRule ?? null,
-    }),
-  );
+    });
 
   return c.json({ field: result.field, reverseField: result.reverseField ?? null }, 201);
 });
@@ -198,8 +198,8 @@ fields.patch("/:fieldId", async (c) => {
 
   // 注意：直接透传 parsed.data 的值。zod 未提供的 key 为 undefined（service 跳过不改），
   // 显式 null 会原样转发（service 据此清空字段）。不能用 `?? undefined`，否则把清空用的 null 吞掉。
-  const updated = await runWrite("field.update", () =>
-    updateField(fieldId, {
+  // 串行化 + 事务由 updateField 内部 withWriteTx 提供，外层不包 runWrite（避免自死锁）。
+  const updated = await updateField(fieldId, {
     name: parsed.data.name,
     description: parsed.data.description,
     required: parsed.data.required,
@@ -222,8 +222,7 @@ fields.patch("/:fieldId", async (c) => {
     visibleFieldIds: parsed.data.visibleFieldIds,
     defaultConfig: parsed.data.defaultConfig,
     numberRule: parsed.data.numberRule,
-    }),
-  );
+  });
   if (!updated) throw new HttpError(404, "字段不存在");
   return c.json({ field: updated });
 });
@@ -234,7 +233,7 @@ fields.delete("/:fieldId", async (c) => {
   const fieldId = c.req.param("fieldId");
   const baseId = await baseIdOfField(fieldId);
   await requireCanManageSchema(c, baseId);
-  const { deleted } = await runWrite("field.delete", () => deleteField(fieldId));
+  const { deleted } = await deleteField(fieldId);
   return c.json({ ok: true, deleted });
 });
 

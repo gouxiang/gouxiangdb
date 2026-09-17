@@ -1,33 +1,29 @@
 // apps/api/src/domain/fieldService.ts
-// 字段元数据服务：创建 / 更新 / 删除
+// 字段元数据服务：创建 / 更新 / 删除（对外编排层）。
 //
 // 三个必须保真的 v1 行为：
 //   1. 创建 links 字段时自动在关联表创建「反向字段」，两者 reverseFieldId 互指
 //   2. relationKind 反向映射：mm↔mm、hm↔bt、bt↔hm（bt→bt 是 v1 修掉的真 bug）
 //   3. 删除 links 字段时对称软删配对反向字段；删除被依赖字段时级联处理 lookup/rollup/count
+//
+// 本文件只负责：入参规整、开交互事务（withWriteTx）、提交成功后失效序号缓存。
+// 事务体内的多步结构写全部在 fieldServiceTx.ts，且回调内只用传入的 tx（RC-10 写路径全事务化）。
 
-import { prisma } from "../db.js";
+import { prisma, withWriteTx } from "../db.js";
 import type { FieldMeta, SelectOption, TabConfig } from "./types.js";
 import { toFieldMeta, invalidateOrdinalCache } from "./prismaDeps.js";
+import {
+  createSimpleFieldTx,
+  createLinkFieldPairTx,
+  updateFieldTx,
+  deleteFieldTx,
+} from "./fieldServiceTx.js";
 
-export type RelationKind = "mm" | "hm" | "bt";
-
-/** 关系类型反向映射（v1 GXRelationType.reverse 1:1） */
-export function reverseRelation(kind: RelationKind): RelationKind {
-  switch (kind) {
-    case "mm":
-      return "mm"; // 多对多 ↔ 多对多
-    case "hm":
-      return "bt"; // 一对多 ↔ 多对一
-    case "bt":
-      return "hm"; // 多对一 ↔ 一对多
-    default:
-      return "mm";
-  }
-}
+export type { RelationKind } from "./fieldServiceTx.js";
+export { reverseRelation } from "./fieldServiceTx.js";
 
 /** 关系类型显示名（v1 GXRelationType.displayName） */
-export function relationDisplayName(kind: RelationKind | null): string {
+export function relationDisplayName(kind: "mm" | "hm" | "bt" | null): string {
   switch (kind) {
     case "mm":
       return "多对多";
@@ -41,7 +37,7 @@ export function relationDisplayName(kind: RelationKind | null): string {
 }
 
 /** 该关系是否允许选多条（v1 isMultiple） */
-export function relationIsMultiple(kind: RelationKind | null): boolean {
+export function relationIsMultiple(kind: "mm" | "hm" | "bt" | null): boolean {
   return kind === "mm" || kind === "hm";
 }
 
@@ -80,7 +76,7 @@ export interface CreateFieldInput {
   maxLength?: number | null;
   defaultNow?: boolean;
   relatedTableId?: string | null;
-  relationKind?: RelationKind | null;
+  relationKind?: "mm" | "hm" | "bt" | null;
   linkDisplayFieldId?: string | null;
   lookupFieldId?: string | null;
   linkFieldId?: string | null;
@@ -100,115 +96,27 @@ export interface CreateFieldResult {
 }
 
 export async function createField(input: CreateFieldInput): Promise<CreateFieldResult> {
-  const maxOrder = await prisma.field.findFirst({
-    where: { tableId: input.tableId, deletedAt: null },
-    orderBy: { order: "desc" },
-    select: { order: true },
-  });
-  const order = maxOrder ? maxOrder.order + 1 : 0;
-
   // 子表格内部固定为「一对多（hm）」：一条主数据拥有多条子行（反向自动为多对一 bt）。
   // UI 隐藏关系类型选择；服务端强制，避免数据交叉混乱。
   if (input.type === "subtable" && input.relationKind) {
     input.relationKind = "hm";
   }
 
-  // ============ links / subtable：双向自动建 ============
-// subtable 在存储层与 links 完全一致（同一张 link_row 表），只是 UI 层呈现为子表格
-if ((input.type === "links" || input.type === "subtable") && input.relatedTableId && input.relationKind) {
-    return await createLinkFieldPair(input, order);
-  }
+  const isLinkPair =
+    (input.type === "links" || input.type === "subtable") &&
+    !!input.relatedTableId &&
+    !!input.relationKind;
 
-  const created = await prisma.field.create({
-    data: {
-      tableId: input.tableId,
-      name: input.name,
-      type: input.type,
-      description: input.description ?? undefined,
-      order,
-      required: input.required ?? false,
-      unique: input.unique ?? false,
-      options: input.options ? JSON.stringify(input.options) : null,
-      precision: input.precision ?? undefined,
-      maxLength: input.maxLength ?? undefined,
-      defaultNow: input.defaultNow ?? false,
-      recordFilter: input.recordFilter ? JSON.stringify(input.recordFilter) : null,
-      relatedTableId: input.relatedTableId ?? undefined,
-      relationKind: input.relationKind ?? undefined,
-      linkDisplayFieldId: input.linkDisplayFieldId ?? undefined,
-      lookupFieldId: input.lookupFieldId ?? undefined,
-      linkFieldId: input.linkFieldId ?? undefined,
-      rollupFunction: input.rollupFunction ?? undefined,
-      formula: input.formula ?? undefined,
-      tabsConfig: input.tabsConfig ? JSON.stringify(input.tabsConfig) : null,
-      displayedFieldIds: input.displayedFieldIds ? JSON.stringify(input.displayedFieldIds) : null,
-      visibleFieldIds: input.visibleFieldIds ? JSON.stringify(input.visibleFieldIds) : null,
-      defaultConfig: input.defaultConfig ? JSON.stringify(input.defaultConfig) : null,
-      numberRule: input.numberRule ? JSON.stringify(input.numberRule) : null,
-    },
-  });
+  // 全部结构写（普通字段一写；links/subtable 的反向占位→正向→回填互指三写）收进单个
+  // 交互事务：任一步失败整体回滚，绝不留孤立反向占位字段或单向链。RC-10 写路径全事务化。
+  const result = await withWriteTx("field.create", (tx) =>
+    isLinkPair ? createLinkFieldPairTx(tx, input) : createSimpleFieldTx(tx, input),
+  );
+
+  // 缓存失效只能在事务提交成功后做（纯同步内存操作，不经写队列）。
   invalidateOrdinalCache(input.tableId);
-  return { field: toFieldMeta(created) };
-}
-
-async function createLinkFieldPair(input: CreateFieldInput, order: number): Promise<CreateFieldResult> {
-  const kind = input.relationKind!;
-  const reverseKind = reverseRelation(kind);
-  const relatedTableId = input.relatedTableId!;
-
-  const maxReverse = await prisma.field.findFirst({
-    where: { tableId: relatedTableId, deletedAt: null },
-    orderBy: { order: "desc" },
-    select: { order: true },
-  });
-  const reverseOrder = maxReverse ? maxReverse.order + 1 : 0;
-
-  // 先建反向字段（占位，稍后回填 reverseFieldId）；与正向保持同一类型
-  const reverseField = await prisma.field.create({
-    data: {
-      tableId: relatedTableId,
-      name: `${input.name}（反向）`,
-      type: input.type,
-      order: reverseOrder,
-      relatedTableId: input.tableId,
-      relationKind: reverseKind,
-      isReverse: true,
-      linkDisplayFieldId: input.linkDisplayFieldId ?? undefined,
-    },
-  });
-
-  // 再建正向字段，linkFieldId 指向反向字段（v1 同构：正向.linkFieldId = 反向字段 id）
-  const forwardField = await prisma.field.create({
-    data: {
-      tableId: input.tableId,
-      name: input.name,
-      type: input.type,
-      description: input.description ?? undefined,
-      order,
-      required: input.required ?? false,
-      unique: input.unique ?? false,
-      relatedTableId,
-      relationKind: kind,
-      linkFieldId: reverseField.id,
-      isReverse: false,
-      linkDisplayFieldId: input.linkDisplayFieldId ?? undefined,
-      recordFilter: input.recordFilter ? JSON.stringify(input.recordFilter) : null,
-      displayedFieldIds: input.displayedFieldIds ? JSON.stringify(input.displayedFieldIds) : null,
-      visibleFieldIds: input.visibleFieldIds ? JSON.stringify(input.visibleFieldIds) : null,
-      defaultConfig: input.defaultConfig ? JSON.stringify(input.defaultConfig) : null,
-    },
-  });
-
-  // 互指：反向字段的 reverseFieldId / linkFieldId = 正向字段 id
-  const updatedReverse = await prisma.field.update({
-    where: { id: reverseField.id },
-    data: { reverseFieldId: forwardField.id, linkFieldId: forwardField.id },
-  });
-
-  invalidateOrdinalCache(input.tableId);
-  invalidateOrdinalCache(relatedTableId);
-
-  return { field: toFieldMeta(forwardField), reverseField: toFieldMeta(updatedReverse) };
+  if (isLinkPair) invalidateOrdinalCache(input.relatedTableId!);
+  return result;
 }
 
 export interface UpdateFieldInput {
@@ -223,7 +131,7 @@ export interface UpdateFieldInput {
   defaultNow?: boolean;
   recordFilter?: unknown | null;
   relatedTableId?: string | null;
-  relationKind?: RelationKind | null;
+  relationKind?: "mm" | "hm" | "bt" | null;
   linkDisplayFieldId?: string | null;
   lookupFieldId?: string | null;
   linkFieldId?: string | null;
@@ -275,84 +183,24 @@ export async function updateField(fieldId: string, patch: UpdateFieldInput): Pro
   if (patch.defaultConfig !== undefined) data["defaultConfig"] = patch.defaultConfig ? JSON.stringify(patch.defaultConfig) : null;
   if (patch.numberRule !== undefined) data["numberRule"] = patch.numberRule ? JSON.stringify(patch.numberRule) : null;
 
-  const updated = await prisma.field.update({ where: { id: fieldId }, data });
-
-  // links/subtable 首次从「无关联表」补配关联表：此时字段还是孤立占位（无 linkFieldId、
-  // 无反向字段、link_row 链路未建）。需补建双向配对，否则后续关联数据无处挂载。
   const isLinkLike = existing.type === "links" || existing.type === "subtable";
-  let pairBackfilled = false;
-  if (
+  const backfilled =
     isLinkLike &&
     !existing.linkFieldId &&
     !existing.isReverse &&
-    patch.relatedTableId &&
-    patch.relatedTableId !== existing.relatedTableId
-  ) {
-    const targetTableId = patch.relatedTableId;
-    const rawKind = (patch.relationKind as RelationKind | null | undefined) ?? (existing.relationKind as RelationKind | null) ?? "mm";
-    // 子表格固定一对多（多个子行归属一条主数据）
-    const kind: RelationKind = existing.type === "subtable" ? "hm" : rawKind;
-    const reverseKind = reverseRelation(kind);
+    !!patch.relatedTableId &&
+    patch.relatedTableId !== existing.relatedTableId;
 
-    const maxReverse = await prisma.field.findFirst({
-      where: { tableId: targetTableId, deletedAt: null },
-      orderBy: { order: "desc" },
-      select: { order: true },
-    });
-    const reverseOrder = maxReverse ? maxReverse.order + 1 : 0;
+  // 主 update + links/subtable 首次补配三写 + 尾部 partner 同步全部收进同一个交互事务：
+  // 中途失败整体回滚，不留孤立反向字段/单向链。RC-10 写路径全事务化。
+  const finalRow = await withWriteTx("field.update", (tx) =>
+    updateFieldTx(tx, fieldId, existing, patch, data, isLinkLike),
+  );
 
-    // 建反向字段（占位 → 回填互指）
-    const reverseField = await prisma.field.create({
-      data: {
-        tableId: targetTableId,
-        name: `${updated.name}（反向）`,
-        type: existing.type,
-        order: reverseOrder,
-        relatedTableId: existing.tableId,
-        relationKind: reverseKind,
-        isReverse: true,
-        linkDisplayFieldId: (patch.linkDisplayFieldId as string | null | undefined) ?? existing.linkDisplayFieldId ?? undefined,
-      },
-    });
-    // 正向字段回填 linkFieldId / reverseFieldId
-    await prisma.field.update({
-      where: { id: fieldId },
-      data: { linkFieldId: reverseField.id, reverseFieldId: reverseField.id, relatedTableId: targetTableId, relationKind: kind },
-    });
-    // 反向字段回填互指
-    await prisma.field.update({
-      where: { id: reverseField.id },
-      data: { reverseFieldId: fieldId, linkFieldId: fieldId },
-    });
-    invalidateOrdinalCache(targetTableId);
-    pairBackfilled = true;
-  }
-
-  // 补建配对后正向字段的 linkFieldId/reverseFieldId 已变，重新读取保证返回最新值
-  const finalField = pairBackfilled
-    ? await prisma.field.findUnique({ where: { id: fieldId } })
-    : updated;
-  // 关联字段改名 / 改关系类型 / 改显示字段 → 同步反向字段（v1 syncReverseLink）
-  if (isLinkLike) {
-    const selfLinkId = finalField?.linkFieldId ?? existing.linkFieldId;
-    const partnerId = existing.isReverse ? (existing.reverseFieldId ?? existing.linkFieldId) : selfLinkId;
-    if (partnerId) {
-      const partnerPatch: Record<string, unknown> = {};
-      if (patch.name !== undefined) partnerPatch["name"] = `${patch.name}（反向）`;
-      if (patch.relationKind !== undefined) {
-        partnerPatch["relationKind"] = reverseRelation(patch.relationKind ?? "mm");
-      }
-      if (patch.linkDisplayFieldId !== undefined) {
-        partnerPatch["linkDisplayFieldId"] = patch.linkDisplayFieldId;
-      }
-      if (Object.keys(partnerPatch).length > 0) {
-        await prisma.field.update({ where: { id: partnerId }, data: partnerPatch });
-      }
-    }
-  }
-
+  // 缓存失效在提交成功后（纯同步内存操作）。
   invalidateOrdinalCache(existing.tableId);
-  return toFieldMeta(finalField ?? updated);
+  if (backfilled) invalidateOrdinalCache(patch.relatedTableId!);
+  return toFieldMeta(finalRow);
 }
 
 /**
@@ -364,46 +212,11 @@ export async function deleteField(fieldId: string): Promise<{ deleted: string[] 
   const field = await prisma.field.findUnique({ where: { id: fieldId } });
   if (!field || field.deletedAt) return { deleted: [] };
 
-  const now = new Date();
-  const deleted: string[] = [fieldId];
+  // 本字段软删 + partner 对称软删 + linkRow 打标 + lookup/rollup/count 级联软删全部收进
+  // 单个交互事务：中途失败整体回滚，不出现「本字段已删、partner/关联未删」的半删态。
+  const deleted = await withWriteTx("field.delete", (tx) => deleteFieldTx(tx, field));
 
-  await prisma.field.update({ where: { id: fieldId }, data: { deletedAt: now } });
-
-  // 对称删除配对反向字段（v1 MetaRepository.deleteField 级联对称软删）
-  // links 与 subtable 在存储层同构（同一张 link_row 表），删除处理一致
-  if (field.type === "links" || field.type === "subtable") {
-    const partnerId = field.isReverse ? field.reverseFieldId : field.linkFieldId;
-    if (partnerId) {
-      const partner = await prisma.field.findUnique({ where: { id: partnerId } });
-      if (partner && !partner.deletedAt) {
-        await prisma.field.update({ where: { id: partnerId }, data: { deletedAt: now } });
-        deleted.push(partnerId);
-      }
-    }
-    // 关联数据只打软删标记：字段进回收站后仍可恢复，恢复时关联一并回来（见 trash restore）
-    await prisma.linkRow.updateMany({
-      where: {
-        linkFieldId: { in: [fieldId, ...(field.linkFieldId ? [field.linkFieldId] : [])] },
-        deletedAt: null,
-      },
-      data: { deletedAt: now },
-    });
-  }
-
-  // 级联：删除依赖该字段的 lookup/rollup/count
-  const dependents = await prisma.field.findMany({
-    where: {
-      deletedAt: null,
-      OR: [{ lookupFieldId: fieldId }, { linkFieldId: fieldId }],
-    },
-  });
-  for (const d of dependents) {
-    if (d.type === "lookup" || d.type === "rollup" || d.type === "count") {
-      await prisma.field.update({ where: { id: d.id }, data: { deletedAt: now } });
-      deleted.push(d.id);
-    }
-  }
-
+  // 缓存失效在提交成功后（纯同步内存操作）。
   invalidateOrdinalCache(field.tableId);
   return { deleted };
 }
