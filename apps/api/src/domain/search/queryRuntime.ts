@@ -52,7 +52,10 @@ export function resetQueryRuntimeCaches(): void {
 function resolveStore(opts: BuildRuntimeOptions): SearchStore {
   if (opts.store) return opts.store;
   const filePath = resolveSearchDbPath(opts.env, opts.dataDir);
-  return getSearchStore({ filePath, appDir: opts.appDir });
+  // GX_VEC_EXT_PATH 运维覆盖在服役读路径同样生效（S12 前仅 reindex 接线，属遗漏）；
+  // 未设环境时为 undefined，回落 bundled/node_modules，默认行为零变化。
+  const vecExtPath = opts.env.GX_VEC_EXT_PATH?.trim() || undefined;
+  return getSearchStore({ filePath, appDir: opts.appDir, ...(vecExtPath ? { vecExtPath } : {}) });
 }
 
 /** 向量门：把 mode/配置/vec0/dim/embed 成败归一为一个 blob 或降级理由（§4.9）。 */

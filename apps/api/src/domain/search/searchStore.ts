@@ -30,6 +30,7 @@ import {
   type VecPlatform,
   type VecExtKind,
 } from "./vecLoader.js";
+import { isCorruptionError, SearchStoreCorruptError } from "./searchCorruption.js";
 
 /** search.db 文件名（可被 GX_SEARCH_DB_PATH 整路径覆盖）。 */
 export const SEARCH_DB_FILENAME = "search.db";
@@ -92,10 +93,19 @@ export function openSearchStore(opts: OpenSearchOptions): SearchStore {
   fs.mkdirSync(path.dirname(opts.filePath), { recursive: true });
 
   const db = new Database(opts.filePath, { timeout: opts.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS });
-  db.pragma(`busy_timeout = ${opts.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS}`);
-  // 派生库单写者 + 后续只读 KNN 连接；WAL 降低读写互斥（独立文件，不影响主库）。
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = OFF"); // 派生库无外键，显式关闭避免误触发。
+  try {
+    db.pragma(`busy_timeout = ${opts.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS}`);
+    // 派生库单写者 + 后续只读 KNN 连接；WAL 降低读写互斥（独立文件，不影响主库）。
+    db.pragma("journal_mode = WAL");
+    db.pragma("foreign_keys = OFF"); // 派生库无外键，显式关闭避免误触发。
+  } catch (err) {
+    // 损坏文件在首个 PRAGMA（读写 page/header）即可能抛 NOTADB/CORRUPT：先关连接再翻译。
+    if (isCorruptionError(err)) {
+      try { db.close(); } catch { /* 已不可用 */ }
+      throw new SearchStoreCorruptError(opts.filePath, err);
+    }
+    throw err;
+  }
 
   // 来源类别独立于是否尝试加载（off/tryLoadVec=false 也报候选来源面）。
   const vecExtKind = classifyVecExtKind(opts.vecExtPath, opts.appDir, platformInfo);
@@ -115,9 +125,18 @@ export function openSearchStore(opts: OpenSearchOptions): SearchStore {
     vecError = "vec load disabled by option";
   }
 
-  bootstrapBaseSchema(db);
-  setMeta(db, META_KEYS.vecLoaded, vecAvailable ? "1" : "0");
-  if (vecVersion) setMeta(db, META_KEYS.vecVersion, vecVersion);
+  try {
+    bootstrapBaseSchema(db);
+    setMeta(db, META_KEYS.vecLoaded, vecAvailable ? "1" : "0");
+    if (vecVersion) setMeta(db, META_KEYS.vecVersion, vecVersion);
+  } catch (err) {
+    // 损坏文件常在读 sqlite_master（CREATE IF NOT EXISTS/setMeta）时抛 NOTADB/CORRUPT。
+    if (isCorruptionError(err)) {
+      try { db.close(); } catch { /* 已不可用 */ }
+      throw new SearchStoreCorruptError(opts.filePath, err);
+    }
+    throw err;
+  }
 
   const store: SearchStore = {
     db,

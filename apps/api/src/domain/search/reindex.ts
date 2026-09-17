@@ -1,6 +1,7 @@
 // M5/S9 手动 reindex：单实体原地幂等 + 全量/改 dim 双库原子切换（M5-implementation-plan §5.4、§4.9）。
+// S12 新增：损坏自愈后向新建空库的后台重播 repopulateActiveStore（不走双库切换）。
 //
-// 两条路径（派工要求讲清一致性）：
+// 两条重建路径（派工要求讲清一致性）：
 //   A. 单实体重建（带 entityId）：在【现役 search.db】上走 extractEntity -> applyUpsert（内部
 //      "先删该实体全部旧派生行 -> 取新 rowid -> 写 chunks/fts/field_grant -> cloud 补 vec"），
 //      原地幂等；不换文件、不影响其它实体、旧库全程在线。
@@ -8,66 +9,24 @@
 //      <search.db>.rebuild-<ts>，扫主库活实体全量灌入；灌库期间现役库持续读服务；全部成功并
 //      wal_checkpoint 后，在最后一刻关闭现役单例 -> POSIX rename 原子替换主文件 ->
 //      closeSearchStore() 让下次请求惰性重开新文件。任一步失败只删临时库三件，绝不碰现役库。
-// 两路径共用同一 extractEntity/applyUpsert（S5 灌库真源），派生内容口径完全一致，差别仅在
-// "写现役文件"还是"写临时文件后整库替换"。
+//
+// 活实体枚举/上下文装配/单实体灌库原语在 reindexPump.ts，与 S12 重播共用同一抽取真源。
 //
 // 锁：进程内重建互斥（better-sqlite3 同进程、worker 默认不自启）。全量/单实体都进锁；
 // 第二次 POST 在重建中 -> ReindexInProgress（路由映射 409 REINDEX_IN_PROGRESS）。锁只在内存
 // （单进程 admin+worker），不引分布式锁；跨进程 CLI 停机维护直跑同函数，不与在线服务并发。
 
 import fs from "node:fs";
-import type { PrismaClient } from "@prisma/client";
 import {
   getSearchStore, closeSearchStore, openSearchStore, deleteSearchDbFiles,
   resolveSearchDbPath, type SearchStore,
 } from "./searchStore.js";
 import { META_KEYS, setMeta, getMeta } from "./schema.js";
-import { extractEntity, type ExtractedEntity } from "./entityExtract.js";
-import { applyUpsert, deleteDerived } from "./indexerDerive.js";
-import { FIELD_CHUNK_CAP } from "./chunks.js";
-import { EmbeddingConfigStore } from "./embeddingConfig.js";
-import { createEmbeddingProvider } from "./embedding/cloud.js";
-import type { EmbeddingProvider, EmbeddingMode } from "./embedding/types.js";
-import { DEFAULT_WORKSPACE } from "../authz/adapter.js";
+import { buildContext, listLiveEntities, pumpOne } from "./reindexPump.js";
+import type { ReindexDeps, ReindexEntityType, ReindexResult, ReindexScope } from "./reindexTypes.js";
 
-export type ReindexEntityType = "record" | "doc" | "canvas";
-
-export interface ReindexDeps {
-  prisma: PrismaClient;
-  env: NodeJS.ProcessEnv;
-  dataDir: string;
-  appDir: string;
-  jwtSecret: string;
-  workspaceId?: string;
-  /** 测试注入：覆写现役 store（生产走单例）。 */
-  activeStore?: SearchStore;
-  /** 测试注入：覆写 search.db 物理路径（生产按 env/dataDir 解析）。 */
-  searchPath?: string;
-  /** 测试注入 mock cloud（不触外网）；不给则按配置构造。 */
-  provider?: EmbeddingProvider | null;
-  /** 测试注入：env 覆盖路径（GX_VEC_EXT_PATH）。 */
-  vecExtPath?: string;
-  now?: () => Date;
-  /** 全量重建进度回调（每灌完一个实体；观测/测试用，可 await 以在灌库中途断言旧库仍可读）。 */
-  onProgress?: (done: number, total: number) => Promise<void> | void;
-}
-
-export interface ReindexScope {
-  /** 全量=省略；单实体=record|doc|canvas。 */
-  type?: ReindexEntityType;
-  entityId?: string;
-}
-
-export interface ReindexResult {
-  scope: ReindexScope;
-  mode: "single" | "full";
-  entities: number;
-  chunksWritten: number;
-  vecWritten: number;
-  vecDebt: number;
-  swapped: boolean;
-  activePath: string;
-}
+// 类型再导出，保持既有 import 面（adminSearch 路由与各测试）不变。
+export type { ReindexDeps, ReindexEntityType, ReindexResult, ReindexScope };
 
 // ---- 进程内重建互斥（第二次 POST 在重建中据此 409）----
 let inflight: Promise<ReindexResult> | null = null;
@@ -89,88 +48,32 @@ export class ReindexInProgressError extends Error {
   }
 }
 
-interface LiveEntityRef {
-  entityType: ReindexEntityType;
-  entityId: string;
-  version: bigint;
-}
-
-/** 枚举全量活实体（确定性顺序）；不依赖事件史（§5.4 直接扫主库）。 */
-async function listLiveEntities(prisma: PrismaClient): Promise<LiveEntityRef[]> {
-  const out: LiveEntityRef[] = [];
-  const records = await prisma.record.findMany({
-    where: { deletedAt: null },
-    select: { id: true, updatedAt: true },
-    orderBy: { createdAt: "asc" },
+/**
+ * S12 损坏自愈后重播：把全部活实体【直接灌入现役（已重建的空）库】，不走双库切换。
+ * 复用 listLiveEntities/pumpOne（与全量 reindex 同一抽取/灌库真源，不另写抽取）；
+ * cloud 期间 embed 失败按既有 vecDebt 口径欠账，不抛（§4.9：FTS 先恢复、向量补齐在后）。
+ * 供 searchRecovery 在隔离坏库、重开空库后后台 await 调用。
+ */
+export async function repopulateActiveStore(d: ReindexDeps): Promise<{
+  entities: number; chunksWritten: number; vecWritten: number; vecDebt: number;
+}> {
+  const active = openActive(d);
+  const ctx = await buildContext(d, d.prisma, active);
+  const refs = await listLiveEntities(d.prisma);
+  let chunksWritten = 0;
+  let vecWritten = 0;
+  let vecDebt = 0;
+  for (let i = 0; i < refs.length; i += 1) {
+    const r = await pumpOne(ctx, refs[i]!);
+    chunksWritten += r.chunks;
+    vecWritten += r.vec;
+    vecDebt += r.debt;
+    await d.onProgress?.(i + 1, refs.length);
+  }
+  active.writeTxn("repopulate-meta", (tx) => {
+    setMeta(tx, META_KEYS.indexedAt, new Date().toISOString());
   });
-  for (const r of records) {
-    out.push({ entityType: "record", entityId: r.id, version: BigInt(new Date(r.updatedAt).getTime()) });
-  }
-  const docs = await prisma.kbDoc.findMany({
-    where: { deletedAt: null },
-    select: { id: true, kind: true, contentVersion: true },
-    orderBy: { createdAt: "asc" },
-  });
-  for (const d of docs) {
-    if (d.kind !== "doc" && d.kind !== "canvas") continue;
-    out.push({ entityType: d.kind, entityId: d.id, version: BigInt(d.contentVersion) });
-  }
-  return out;
-}
-
-interface ReindexContext {
-  prisma: PrismaClient;
-  store: SearchStore;
-  mode: EmbeddingMode;
-  provider: EmbeddingProvider | null;
-  cap: number;
-  workspaceId: string;
-  now?: () => Date;
-}
-
-/** 装配 store + 配置视图 + cloud provider（复刻 queryRuntime 的配置口径，不改冻结文件）。 */
-async function buildContext(
-  d: ReindexDeps,
-  prisma: PrismaClient,
-  store: SearchStore,
-): Promise<ReindexContext> {
-  const cfgStore = new EmbeddingConfigStore(prisma, d.jwtSecret);
-  const view = await cfgStore.resolveView(d.env);
-  let mode: EmbeddingMode = "off";
-  let provider: EmbeddingProvider | null = null;
-  if (d.provider !== undefined) {
-    if (d.provider && d.provider.mode === "cloud") { mode = "cloud"; provider = d.provider; }
-  } else if (view.mode === "cloud") {
-    const apiKey = await cfgStore.getApiKey().catch(() => null);
-    const candidate = createEmbeddingProvider("cloud", {
-      baseURL: view.baseURL,
-      apiKey: apiKey ?? d.env.GX_EMBEDDING_API_KEY?.trim() ?? "",
-      model: view.model,
-      batchSize: view.batchSize,
-      timeoutMs: view.timeoutMs,
-    });
-    // createEmbeddingProvider 在配置不齐时回落 off provider；只在确为 cloud 时采用。
-    if (candidate.mode === "cloud") { mode = "cloud"; provider = candidate; }
-  }
-  return {
-    prisma, store, mode, provider,
-    cap: view.fieldChunkCap || FIELD_CHUNK_CAP,
-    workspaceId: d.workspaceId ?? DEFAULT_WORKSPACE,
-    now: d.now,
-  };
-}
-
-/** 抽一个实体当前活内容并灌入 ctx.store（删除/upsert 两态共用 applyUpsert/deleteDerived）。 */
-async function pumpOne(ctx: ReindexContext, ref: LiveEntityRef) {
-  const entity: ExtractedEntity = await extractEntity(ctx.prisma, ref, ctx.cap);
-  if (!entity.present) {
-    const removed = deleteDerived(ctx.store, ref.entityType, ref.entityId);
-    return { chunks: removed, vec: 0, debt: 0 };
-  }
-  const s = await applyUpsert(ctx.store, entity, {
-    workspaceId: ctx.workspaceId, mode: ctx.mode, provider: ctx.provider, now: ctx.now,
-  });
-  return { chunks: s.chunksWritten, vec: s.vecWritten, debt: s.vecDebt };
+  return { entities: refs.length, chunksWritten, vecWritten, vecDebt };
 }
 
 function resolveActivePath(d: ReindexDeps): string {

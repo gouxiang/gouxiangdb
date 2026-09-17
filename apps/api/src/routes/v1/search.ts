@@ -14,8 +14,19 @@ import { Hono } from "hono";
 import { config } from "../../config.js";
 import { prisma } from "../../db.js";
 import { HttpError } from "../../guards.js";
+import { writeAudit } from "../../audit/audit.js";
+import { sourceIp } from "../../utils/client-ip.js";
 import { executeUnifiedSearch } from "../../domain/search/query.js";
 import { buildQueryRuntime } from "../../domain/search/queryRuntime.js";
+import { resolveSearchDbPath } from "../../domain/search/searchStore.js";
+import { isCorruptionError } from "../../domain/search/searchCorruption.js";
+import {
+  recoverCorruptSearchStore,
+  repopulateRecoveredStore,
+  isRepopulating,
+} from "../../domain/search/searchRecovery.js";
+import { executeEmergencyLike } from "../../domain/search/emergencyLike.js";
+import { observeDegrade } from "../../domain/search/degradeAudit.js";
 import { runLegacyGlobalSearch } from "../../domain/search/legacySearch.js";
 import {
   compareSearchShadow,
@@ -64,27 +75,43 @@ searchRoutes.get("/", async (c) => {
     return c.json(emptySearchResponse(limit));
   }
 
-  // shadow 态：旧链结果始终是响应真源（先算，保证新链任何异常都不污染响应）。
-  const legacy = config.m5Search === "shadow"
-    ? await runLegacyGlobalSearch(prisma, userId, rawQ)
-    : null;
+  // 降级跳变采样（on/shadow 共用同一份纯状态机）；仅在状态变化时落一条脱敏 search_degraded。
+  const sampleDegrade = (res: { mode: string; degraded: readonly string[] }): void => {
+    const hit = observeDegrade({
+      mode: res.mode,
+      reasons: res.degraded,
+      recovering: res.degraded.includes("search_store_recovering"),
+    });
+    if (hit) {
+      writeAudit(config.auditDir, {
+        event: "search_degraded",
+        actorId: null, // 系统事件：不挂检索主体，detail 只含技术态（无 q/标题/字段/key/向量）
+        ip: sourceIp(c),
+        method: "GET",
+        path: c.req.path,
+        status: 200,
+        detail: hit.detail,
+      });
+    }
+  };
 
-  // 新链路（on=返回它；shadow=只跑用于对拍）。shadow 下其异常默认吞掉只记日志，STRICT 才失败。
-  const { deps } = await buildQueryRuntime(userId, type, {
-    prisma, env: process.env, dataDir: config.dataDir, appDir: config.appDir,
-    jwtSecret: config.jwtSecret,
-  });
-  let unified: Awaited<ReturnType<typeof executeUnifiedSearch>> | null = null;
-  let newChainError: unknown = null;
-  try {
-    unified = await executeUnifiedSearch(deps, { q: rawQ, type, mode, limit }, false);
-  } catch (err) {
-    newChainError = err;
-  }
+  let unified: Awaited<ReturnType<typeof executeUnifiedSearch>>;
 
   if (config.m5Search === "shadow") {
+    // shadow 态：旧链结果始终是响应真源（先算，保证新链任何异常都不污染响应）。
+    const legacy = await runLegacyGlobalSearch(prisma, userId, rawQ);
+    let newChainError: unknown = null;
+    try {
+      const { deps } = await buildQueryRuntime(userId, type, {
+        prisma, env: process.env, dataDir: config.dataDir, appDir: config.appDir,
+        jwtSecret: config.jwtSecret,
+      });
+      unified = await executeUnifiedSearch(deps, { q: rawQ, type, mode, limit }, false);
+    } catch (err) {
+      newChainError = err;
+    }
     if (newChainError) {
-      // 新链自身故障：非 STRICT 不影响旧响应，仅记脱敏日志。
+      // 新链自身故障（含 search.db 损坏）：shadow 不自愈、不污染旧响应，仅记脱敏日志。
       console.warn("[m5-search-shadow] new chain error:",
         newChainError instanceof Error ? newChainError.message : String(newChainError));
       if (config.m5ShadowStrict) {
@@ -92,7 +119,7 @@ searchRoutes.get("/", async (c) => {
       }
       return c.json(legacy);
     }
-    const report = compareSearchShadow(unified!.mode, unified!.items, legacy!, hadQuery);
+    const report = compareSearchShadow(unified!.mode, unified!.items, legacy, hadQuery);
     searchShadowRegistry.record(report, userId);
     if (config.m5ShadowStrict && report.comparable && report.driftCount > 0) {
       // §6 对拍闸门：strict 下 drift 非 0 让请求失败（不含实体业务值）。
@@ -101,7 +128,52 @@ searchRoutes.get("/", async (c) => {
     return c.json(legacy); // 响应永远是旧结果
   }
 
-  // on：新链异常直接走错误信封（不回退旧链，避免 on 态偷偷改变契约；search.db 损坏的应急在 S12）。
-  if (newChainError) throw newChainError;
+  // on 态：先收敛后召回。search.db 物理损坏时自愈——隔离坏库三件、重开空库、当次回主库
+  // 参数化 LIKE 应急（scope 仍每查实时收敛，绝不放宽授权），后台重播活实体补齐。
+  //
+  // 恢复窗口（isRepopulating）：新空库 schema 有效但内容未补齐，派生召回会静默返回半空结果。
+  // 此时不读 search.db 召回，直接走主库应急 LIKE（scope 只依赖主库 authz），避免二次损坏后
+  // 在重播完成前漏召回；窗口结束自动回到正常路径，默认健康路径仅一次内存布尔读、零额外查询。
+  if (isRepopulating()) {
+    const { deps } = await buildQueryRuntime(userId, type, {
+      prisma, env: process.env, dataDir: config.dataDir, appDir: config.appDir,
+      jwtSecret: config.jwtSecret,
+    });
+    unified = await executeEmergencyLike(prisma, await deps.resolveScope(), rawQ.trim(), limit);
+    sampleDegrade(unified);
+    return c.json(unified);
+  }
+
+  try {
+    const { deps } = await buildQueryRuntime(userId, type, {
+      prisma, env: process.env, dataDir: config.dataDir, appDir: config.appDir,
+      jwtSecret: config.jwtSecret,
+    });
+    unified = await executeUnifiedSearch(deps, { q: rawQ, type, mode, limit }, false);
+  } catch (err) {
+    if (!isCorruptionError(err)) throw err; // 非损坏：维持既有错误信封，不改变契约
+    const searchPath = resolveSearchDbPath(process.env, config.dataDir);
+    const recovered = await recoverCorruptSearchStore(searchPath, {
+      appDir: config.appDir,
+      ...(process.env.GX_VEC_EXT_PATH?.trim() ? { vecExtPath: process.env.GX_VEC_EXT_PATH.trim() } : {}),
+    });
+    console.warn(`[search] search.db 损坏已隔离至 ${recovered.quarantinedPath}，当次回主库 LIKE 应急并重播`);
+    // 全新 runtime 指向重开的空库；scope 只走主库 authz，不受空 search.db 影响。
+    const { deps: freshDeps } = await buildQueryRuntime(userId, type, {
+      prisma, env: process.env, dataDir: config.dataDir, appDir: config.appDir,
+      jwtSecret: config.jwtSecret, store: recovered.store,
+    });
+    const scope = await freshDeps.resolveScope();
+    unified = await executeEmergencyLike(prisma, scope, rawQ.trim(), limit);
+    // 后台重播（fire-and-forget）：复用 reindex 抽取/灌库真源；cloud embed 失败按欠账后补。
+    // vecExtPath 透传：运维覆盖加载的 vec0 在重建库必须保持可用（否则 cloud 静默退成 fts-only）。
+    void repopulateRecoveredStore({
+      prisma, env: process.env, dataDir: config.dataDir, appDir: config.appDir,
+      jwtSecret: config.jwtSecret, searchPath,
+      ...(process.env.GX_VEC_EXT_PATH?.trim() ? { vecExtPath: process.env.GX_VEC_EXT_PATH.trim() } : {}),
+    });
+  }
+
+  sampleDegrade(unified);
   return c.json(unified);
 });
