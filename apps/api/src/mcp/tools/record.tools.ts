@@ -10,8 +10,8 @@ import { loadTableFields, parseViewConfig, queryRecords } from "../../domain/rec
 import { runMcpUnifiedSearch } from "../../domain/mcpSearchBridge.js";
 import { config } from "../../config.js";
 import { recordBriefById } from "../../domain/mcpReadModels.js";
-import { createRecordTx, softDeleteRecordTx } from "../../domain/recordWrite.js";
-import { applyCreateDefaults, applyReverseDefaultsForChild } from "../../domain/defaults.js";
+import { createRecordTx, softDeleteRecordTx, updateRecordTx } from "../../domain/recordWrite.js";
+import { applyCreateDefaults, applyEditDefaults, applyReverseDefaultsForChild } from "../../domain/defaults.js";
 import { runWrite, withWriteTx } from "../../db.js";
 import { buildFilterNode, buildSortSpec, InvalidParamsError, type FilterArg } from "./filterMap.js";
 import { deny, text, type ToolCtx, type ToolResult } from "./types.js";
@@ -150,8 +150,10 @@ export async function recordCreateRecord(ctx: ToolCtx, args: Record<string, unkn
   }
   // 字段级：非「全字段可写」来源时，payload 键必须落在可见字段集内，否则整单拒绝（不静默丢弃）
   const cap = await ctx.port.fieldCapabilityOf({ kind: "table", id: tableId });
-  if (!cap.writableAll) {
-    const allowed = new Set(cap.visibleFields ?? []);
+  // 仅当能力真的携带字段收窄（visibleFields !== null）时才做白名单拒绝；无读掩码（null）不代表"全字段不可写"，
+  // 写权已由闸门二 can("c") 判定 —— 否则"只写身份"会被误判为 0 可写字段（实测回归）。
+  if (!cap.writableAll && cap.visibleFields !== null) {
+    const allowed = new Set(cap.visibleFields);
     const bad = Object.keys(payloadFields).filter((k) => !allowed.has(k));
     if (bad.length > 0) return deny("FORBIDDEN_FIELD", `不可写字段：${bad.join(", ")}`);
   }
@@ -166,4 +168,44 @@ export async function recordCreateRecord(ctx: ToolCtx, args: Record<string, unkn
   }
   const canRead = await ctx.port.can("r", { kind: "table", id: tableId });
   return text(JSON.stringify(canRead ? { ok: true, recordId: created.id } : { ok: true }));
+}
+
+/**
+ * record.update_record：闸门二 enforce `u` + 字段级整单拒；复用 domain/recordWrite.updateRecordTx
+ * （与 REST 同一事务体）；事务后 defaults 联动（失败不阻断）；写而无 `r` -> 精简 {ok:true}。
+ */
+export async function recordUpdateRecord(ctx: ToolCtx, args: Record<string, unknown>): Promise<ToolResult> {
+  if (!ctx.port) return deny("FORBIDDEN_RESOURCE", "权限引擎未接入");
+  const tableId = String(args.tableId ?? "");
+  const recordId = String(args.recordId ?? "");
+  const patch = (args.fields ?? {}) as Record<string, unknown>;
+  if (!(await ctx.port.can("u", { kind: "table", id: tableId }))) {
+    return deny("FORBIDDEN_RESOURCE", "无权更新该表的记录（或该表不存在）");
+  }
+  const cap = await ctx.port.fieldCapabilityOf({ kind: "table", id: tableId });
+  // 同 create：仅当确有字段收窄时才做白名单拒绝（visibleFields === null = 无收窄信息，写权由 can("u") 判定）
+  if (!cap.writableAll && cap.visibleFields !== null) {
+    const allowed = new Set(cap.visibleFields);
+    const bad = Object.keys(patch).filter((k) => !allowed.has(k));
+    if (bad.length > 0) return deny("FORBIDDEN_FIELD", `不可写字段：${bad.join(", ")}`);
+  }
+  const brief = await recordBriefById(recordId);
+  if (!brief || brief.deletedAt !== null || brief.tableId !== tableId) {
+    return deny("FORBIDDEN_RESOURCE", "记录不存在或不属于该表");
+  }
+  const fields = await loadTableFields(tableId);
+  await withWriteTx("record.update", (tx) =>
+    updateRecordTx(tx, { tableId, recordId, patch, fields, userId: ctx.subject.userId }),
+  );
+  // 编辑期默认值联动（与 REST 同口径；失败不阻断已提交的更新）
+  const changed = new Set(Object.keys(patch));
+  if (changed.size > 0) {
+    try {
+      await runWrite("defaults.edit", () => applyEditDefaults(tableId, recordId, changed, ctx.subject.userId));
+    } catch (err) {
+      console.error("[mcp] defaults.edit failed (不阻断):", err);
+    }
+  }
+  const canRead = await ctx.port.can("r", { kind: "table", id: tableId });
+  return text(JSON.stringify(canRead ? { ok: true, recordId } : { ok: true }));
 }

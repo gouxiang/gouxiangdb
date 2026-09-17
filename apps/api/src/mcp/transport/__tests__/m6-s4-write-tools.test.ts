@@ -73,7 +73,7 @@ beforeAll(async () => {
     { id: "p_t1", nodeId: "nav_t1", subjectType: "user", subjectId: "u1", actions: "r,c,u,d" },
     { id: "p_t1_w", nodeId: "nav_t1", subjectType: "user", subjectId: "u2", actions: "c,u,d" },
     // u3：读+建 + 字段白名单（用于 FORBIDDEN_FIELD）
-    { id: "p_t1_m", nodeId: "nav_t1", subjectType: "user", subjectId: "u3", actions: "r,c", fieldMask: JSON.stringify({ allowFields: [] }) },
+    { id: "p_t1_m", nodeId: "nav_t1", subjectType: "user", subjectId: "u3", actions: "r,c,u", fieldMask: JSON.stringify({ allowFields: [] }) },
   ]);
   const svc = await import("../../pat/patService.js");
   rwToken = (await svc.createPat("u1", { name: "rw", scopes: ["record:read", "record:write"], expiresInDays: 90 })).plaintext;
@@ -141,7 +141,9 @@ describe("S4 record.delete_record", () => {
 
 describe("S4 裁决 (b)：动作敏感闸门一（只写身份）", () => {
   it("只写身份 tools/list **恰为写工具**（无任何读工具）——注册集 == 有效动作集", async () => {
-    expect(await names(woToken)).toEqual(["ping_echo", "record.create_record", "record.delete_record"]);
+    expect(await names(woToken)).toEqual([
+      "ping_echo", "record.create_record", "record.delete_record", "record.update_record",
+    ]);
   });
 
   it("只写身份直调读工具 -> UNKNOWN_TOOL（未注册，不越权）", async () => {
@@ -189,6 +191,47 @@ describe("S4 record.create_record", () => {
 
   it("只写身份创建成功且回执为**精简 {ok:true}**（无 recordId/字段映射）", async () => {
     const r = await callTool("record.create_record", { tableId, fields: {}, confirm: true }, woToken);
+    expect(r.result.isError ?? false).toBe(false);
+    expect(JSON.parse(r.result.content[0]!.text)).toEqual({ ok: true });
+  });
+});
+
+describe("S4 record.update_record", () => {
+  it("更新成功且 **REST 侧读到同一改动**（双侧断言）；回执 {ok,recordId}", async () => {
+    const f1 = await prisma.field.findFirstOrThrow({ where: { tableId, name: "列" } });
+    const created = await prisma.record.create({
+      data: { tableId, fields: JSON.stringify({ [f1.id]: "before" }), createdBy: "u1", updatedBy: "u1" },
+    });
+    const r = await callTool("record.update_record", { tableId, recordId: created.id, fields: { [f1.id]: "after" } }, rwToken);
+    expect(r.result.isError ?? false).toBe(false);
+    expect(JSON.parse(r.result.content[0]!.text)).toEqual({ ok: true, recordId: created.id });
+    // 库内改动
+    const row = await prisma.record.findUniqueOrThrow({ where: { id: created.id } });
+    expect(JSON.parse(row.fields)[f1.id]).toBe("after");
+    // REST 侧同语义可见（list_records 读到新值）
+    const list = await callTool("record.list_records", { tableId, limit: 50 }, rwToken);
+    const recs = JSON.parse(list.result.content[0]!.text).records as Array<{ id: string; fields: Record<string, string> }>;
+    expect(recs.find((x) => x.id === created.id)!.fields[f1.id]).toBe("after");
+  });
+
+  it("字段级：字段受限身份更新白名单外字段 -> FORBIDDEN_FIELD", async () => {
+    const r = await callTool("record.update_record", { tableId, recordId: recordIds[0]!, fields: { fld_x: "v" } }, maskedWToken);
+    expect(r.result.isError).toBe(true);
+    expect(JSON.parse(r.result.content[0]!.text).code).toBe("FORBIDDEN_FIELD");
+  });
+
+  it("不存在/跨表 recordId -> FORBIDDEN_RESOURCE", async () => {
+    const r = await callTool("record.update_record", { tableId, recordId: "no_such", fields: {} }, rwToken);
+    expect(r.result.isError).toBe(true);
+    expect(JSON.parse(r.result.content[0]!.text).code).toBe("FORBIDDEN_RESOURCE");
+  });
+
+  it("只写身份更新成功且回执为**精简 {ok:true}**", async () => {
+    const f1 = await prisma.field.findFirstOrThrow({ where: { tableId, name: "列" } });
+    const rec = await prisma.record.create({
+      data: { tableId, fields: JSON.stringify({ [f1.id]: "x" }), createdBy: "u2", updatedBy: "u2" },
+    });
+    const r = await callTool("record.update_record", { tableId, recordId: rec.id, fields: { [f1.id]: "y" } }, woToken);
     expect(r.result.isError ?? false).toBe(false);
     expect(JSON.parse(r.result.content[0]!.text)).toEqual({ ok: true });
   });

@@ -79,3 +79,10 @@ export const createRecordShape = {
   fields: z.record(z.string(), z.unknown()).describe("字段映射 {fieldId: value}"),
   confirm: z.literal(true).describe("写入确认；必须是字面量 true"),
 };
+
+/** record.update_record：fields 为 {fieldId: value}（仅含要改的键）。 */
+export const updateRecordShape = {
+  tableId: z.string().min(1),
+  recordId: z.string().min(1),
+  fields: z.record(z.string(), z.unknown()).describe("要更新的字段映射 {fieldId: value}"),
+};

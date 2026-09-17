@@ -5,8 +5,8 @@
 
 import { config } from "../../config.js";
 import { tableGetSchema, tableListBases } from "./table.tools.js";
-import { recordCreateRecord, recordDeleteRecord, recordListRecords, recordQueryRecords, recordSearch } from "./record.tools.js";
-import { createRecordShape, deleteRecordShape, getSchemaShape, listBasesShape, listRecordsShape, pingEchoShape, queryRecordsShape, recordSearchShape } from "./schemas.js";
+import { recordCreateRecord, recordDeleteRecord, recordUpdateRecord, recordListRecords, recordQueryRecords, recordSearch } from "./record.tools.js";
+import { createRecordShape, deleteRecordShape, updateRecordShape, getSchemaShape, listBasesShape, listRecordsShape, pingEchoShape, queryRecordsShape, recordSearchShape } from "./schemas.js";
 import { text, type ToolSpec } from "./types.js";
 
 export const TOOL_CATALOG: readonly ToolSpec[] = [
@@ -69,6 +69,15 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     },
     inputShape: createRecordShape,
     run: recordCreateRecord,
+  },
+  {
+    meta: {
+      name: "record.update_record", title: "更新记录",
+      description: "更新一条记录的字段（字段级写权约束；不可见字段整单拒绝）。",
+      scopes: ["record:write"], family: "table", actions: ["u"], readOnly: false,
+    },
+    inputShape: updateRecordShape,
+    run: recordUpdateRecord,
   },
   {
     meta: {
