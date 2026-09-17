@@ -155,4 +155,16 @@ describe("S6 说明书与 TOOL_CATALOG 一致性护栏", () => {
     const missing = TOOL_CATALOG.map((t) => t.meta.name).filter((n) => n !== "ping_echo" && !mentioned.has(n));
     expect(missing).toEqual([]);
   });
+
+  // 时序一致性（S6 只读片特有，防"说明书用现在时宣称一个尚未注册的操作"——本次复验真抓到：
+  // 原画布说明书同时写"当前支持写入最小集 element.create"与"当前画布能力为只读"，自相矛盾，
+  // 而 element.create 要到 S6b 才随 canvas.commit_elements 注册）。
+  it("画布说明书在只读期不得宣称写入已上线：须明示尚无写入工具、element.create 尚未注册", () => {
+    const canvas = MANUAL_RESOURCES.find((m) => m.uri === "gx://manuals/canvas")!.text;
+    expect(canvas).toContain("尚无写入工具");
+    expect(canvas).toContain("尚未注册");
+    // 【S6b 挂账】canvas.commit_elements 上线后，把 element.create 描述移回"当前支持"并更新本断言；
+    // 同时 S9 出口收口时核对三份说明书的时态与 TOOL_CATALOG 完全一致。
+    expect(TOOL_CATALOG.some((t) => t.meta.name === "canvas.commit_elements")).toBe(false);
+  });
 });
