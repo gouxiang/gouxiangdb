@@ -16,7 +16,7 @@ M0 生产基座的可执行运维流程。所有手册与仓内脚本/配置一�
 | [authz-engine-flip-on.md](authz-engine-flip-on.md) | M4 权限引擎切 on（enforce）操作清单：五条前置、双零证据、一步回滚、总监下令签收（含 S10 前 enforce 接线未就位的现状边界） | `GX_AUTHZ_ENGINE=on`、就绪门、drift 双零、回滚 = env 回 off |
 | [authz-drift-and-incidents.md](authz-drift-and-incidents.md) | M4 权限应急四章：D 类决策漂移排查（shadow drift 与 reconcile A/B/C 分工）、成员锁外/误授两条处置路线、inheritance 误关恢复、旧表投影不一致修复 | driftRegistry/authz_drift、reconcile-policies.ts、effective/impact 端点 |
 | [ci.md](ci.md) | 平台中立质量门、真 ESLint 基线、本地复现 CI、Gitee Go 开通与 runner | `scripts/ci-quality.sh`、`eslint.config.mjs`、`.workflow/ci.yml` |
-| [m5-search.md](m5-search.md) | M5 统一检索：off/cloud 零外网抓包验收（AC-M5-5）、search.db 损坏自愈与降级审计判读、vec0/musl/NFS/资产边界、reindex 与 model 切换 | `GX_M5_SEARCH`、`GX_EMBEDDING_MODE`、`GX_VEC_EXT_PATH`、`/api/v1/admin/{reindex,search/status,embedding/config}` |
+| [m5-search.md](m5-search.md) | M5 统一检索：off/cloud 零外网抓包验收（AC-M5-5）、search.db 损坏自愈与降级审计判读、vec0/musl/NFS/资产边界、reindex 与 model 切换、**S13 真机压测（一条命令 + 资源/排查）** | `GX_M5_SEARCH`、`GX_EMBEDDING_MODE`、`GX_VEC_EXT_PATH`、`/api/v1/admin/{reindex,search/status,embedding/config}`、`scripts/bench/m5-gate.ts` |
 
 ## 相关架构决策（ADR）
 

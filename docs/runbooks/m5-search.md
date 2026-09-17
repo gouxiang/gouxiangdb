@@ -198,3 +198,64 @@ ls -lt "$DATA" | grep -E 'search\.db(\.corrupt-|-wal|-shm)?'
 - **积压/worker**：indexer worker（`SearchIndexer`）默认不在 API 进程自动启动（S5 纪律），派生由 reindex/接线的 outbox 处理推进；status 暴露 outbox backlog/dead，旧索引继续服务、主写不被阻。排障可在受控进程内实例化 worker 或停机跑 reindex 补齐。
 
 相关手册：[wal-crash-recovery.md](./wal-crash-recovery.md)、[backup.md](./backup.md)、[restore.md](./restore.md)、[deploy.md](./deploy.md)、[m1-sidecar.md](./m1-sidecar.md)。
+
+---
+
+## 7. S13 真机压测（规模门 / 参考画像）
+
+**口径**：输出**参考画像**（p95 十轮、warm RSS、库文件大小、可流畅 chunk 上限外推、EXPLAIN 断言），
+**不是硬 500ms 承诺**。测量对象是 search.db 的召回+融合核心（FTS + vec KNN + RRF/boost），
+不起 HTTP/主库/authz；`scope` = 全部生成节点（≤`--scope-cap`，即"最坏上界 JOIN"）。
+与 S11 `docs/baseline/2026-09-17-m5-gate.md`（EXPLAIN/SQL 计数常量化）互补：本压测补**规模曲线**。
+
+### 7.1 前置依赖
+
+- Ubuntu (glibc，**非 musl/Alpine**)、Node ≥ 20、pnpm 9、git；本地 ext4（**不要 NFS/网络盘**）。
+- 已 `pnpm install`（含 `sqlite-vec` 平台子包；`vec0.so` 需 glibc ≤ 机器版本）。
+- **arm64 本次不做真机**：仅保留 CI 交叉构建冒烟（linux/arm64 加载 vec0 + 1 次 KNN）；
+  arm 性能数字在 S14 出口文档标为【未实测缺口】。
+
+### 7.2 一条命令
+
+```bash
+cd <repo>/apps/api
+npx tsx scripts/bench/m5-gate.ts --out /tmp/m5-gate-$(uname -m).json \
+  [--sizes 1000,10000,100000] [--dims 512,1024,1536] [--rounds 10] \
+  [--seed 20260917] [--data-dir /tmp] [--min-free-mb 256] [--target-p95-ms 500] \
+  [--scope-cap 5000] [--keep-db] [--force]
+```
+
+- 幂等、可中断：每次重建该档 `search.db`（`--keep-db` 保留供检查，默认跑完即删）。
+- 产物：`--out` 指定的 **JSON** + 同目录同名 **`.md`**（可直接并入 baseline）。回传这两个文件即可。
+- `--force`：覆盖 RAM 守卫（仅当确认机器空闲；macOS `freemem` 因文件缓存低估，dev 自测需它）。
+- 分档建议（大机慢跑可分次）：先 `--sizes 1000,10000`，再 `--dims` 单档跑 100k。
+
+### 7.3 预计资源与耗时（2C4G x86_64 估算，实测为准）
+
+| 档 | 库大小 | 峰值 RSS | 备注 |
+|---|---|---|---|
+| 1万 × 512/1536 | ~26 / ~66 MiB | ~60 / ~180 MiB | 建库秒级 |
+| 10万 × 1536 | ~660 MiB | ~150–250 MiB（流式，不随总量线性涨） | 建库写盘 660MB，数十秒–分钟级 |
+
+- 磁盘：预留 ≥ 2 GiB（含多档残留）；内存：流式写入 + 分批（2000 行/事务），**不会 OOM**；
+  RAM 守卫不足时**跳过该档并给"需降维/降规模"结论**（不会崩）。
+- 耗时：9 组默认档在本机约数分钟–十几分钟（100k 档单轮 query 达秒级）；`--rounds` 可调。
+
+### 7.4 失败排查
+
+| 症状 | 处置 |
+|---|---|
+| `vec0 未加载` / `no such module: vec0` | glibc/arch 与 sqlite-vec 平台包不匹配：换 Ubuntu glibc 或 `GX_VEC_EXT_PATH` 指到正确 `vec0.so`；**不是 musl** |
+| 该档 SKIP: insufficient_memory / disk | 降维（512）或降规模（1 万）；确认数据盘可用空间 |
+| 单档 query 秒级（慢） | 见 §7.5：宽 scope 下白名单收敛成本随"scope 覆盖 chunk 数"增长；缩小 scope / 调小 `k` |
+| `SQLITE_BUSY` | 确认无第二进程占用该临时库（压测器建独立库，与生产库无关） |
+
+### 7.5 本机（开发机 macOS）自测留档（仅留档，不作为 Tier-L 结论）
+
+- 1k×512：p95 ≈ 8–13 ms；10k×512：p95 ≈ 300–370 ms；20k×512：752 ms；50k×512：1774 ms。
+- **dim 不改变时延**：10k 在 dim 512/1024/1536 下 p95 均 ≈300 ms——瓶颈是**白名单收敛（allowed 集物化 + `rowid IN` 子查询）**，而非向量距离计算（后者才随 dim）；dim 只影响库大小（26/46/66 MiB）与 RSS（63/143/178 MiB）。
+- 分阶段（10k×512）：scope 物化 ~1 ms、FTS ~78 ms、vec ~230 ms、融合 ~0.4 ms → **vec 段主导**。
+- 结论性提示：混合检索延迟近似随「**scope 覆盖的 chunk 数**」增长（scope=全节点时为最坏上界，倾向超线性）；
+  真机须用**真实用户 scope**复核。若宽 scope 下 10 万档超阈值，属需在 S13 出口处理的性能议题
+  （缩小 scope / 调 k / 优化 allowed 集表示），**本片不改生产 SQL**。
+- 由本机曲线线性外推的可流畅上限（p95≤500ms，dim 512）≈ **1.4 万 chunk**（参考画像，非承诺）。
