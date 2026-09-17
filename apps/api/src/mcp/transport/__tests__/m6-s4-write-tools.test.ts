@@ -19,6 +19,7 @@ let app: { request: (u: string, i?: RequestInit) => Promise<Response> };
 let tableId = "";
 let rwToken = ""; // record:read + record:write
 let roToken = ""; // 仅 record:read
+let woToken = ""; // 仅 record:write（且 M4 侧只授 d、无 r）——只写身份
 const recordIds: string[] = [];
 
 const H = { "content-type": "application/json", accept: "application/json, text/event-stream" };
@@ -49,6 +50,8 @@ beforeAll(async () => {
   globalThis.__gx_prisma = prisma;
 
   await prisma.user.create({ data: { id: "u1", email: "u1@x.com", displayName: "u1", passwordHash: "x", status: "ACTIVE" } });
+  // 只写身份：策略仅授予 d（无 r）——用于验证裁决 (b)：写工具可达而读工具不可见
+  await prisma.user.create({ data: { id: "u2", email: "u2@x.com", displayName: "u2", passwordHash: "x", status: "ACTIVE" } });
   const base = await prisma.base.create({ data: { id: "b1", name: "库一", createdBy: "u1" } });
   const table = await prisma.table.create({ data: { baseId: base.id, name: "表一", primaryFieldId: "", createdBy: "u1" } });
   tableId = table.id;
@@ -66,10 +69,12 @@ beforeAll(async () => {
     { id: "p_b1", nodeId: "nav_b1", subjectType: "user", subjectId: "u1", actions: "r" },
     // 表级授予 r + c + u + d（MCP 写工具执行期做 d 判定）
     { id: "p_t1", nodeId: "nav_t1", subjectType: "user", subjectId: "u1", actions: "r,c,u,d" },
+    { id: "p_t1_w", nodeId: "nav_t1", subjectType: "user", subjectId: "u2", actions: "d" },
   ]);
   const svc = await import("../../pat/patService.js");
   rwToken = (await svc.createPat("u1", { name: "rw", scopes: ["record:read", "record:write"], expiresInDays: 90 })).plaintext;
   roToken = (await svc.createPat("u1", { name: "ro", scopes: ["record:read"], expiresInDays: 90 })).plaintext;
+  woToken = (await svc.createPat("u2", { name: "wo", scopes: ["record:write"], expiresInDays: 90 })).plaintext;
   app = (await import("../../../app.js")).createApp().app as unknown as typeof app;
 }, 120000);
 
@@ -126,5 +131,32 @@ describe("S4 record.delete_record", () => {
       expect(r.result.isError).toBe(true);
       expect(JSON.parse(r.result.content[0]!.text).code).toBe("FORBIDDEN_RESOURCE");
     }
+  });
+});
+
+describe("S4 裁决 (b)：动作敏感闸门一（只写身份）", () => {
+  it("只写身份 tools/list **恰为写工具**（无任何读工具）——注册集 == 有效动作集", async () => {
+    expect(await names(woToken)).toEqual(["ping_echo", "record.delete_record"]);
+  });
+
+  it("只写身份直调读工具 -> UNKNOWN_TOOL（未注册，不越权）", async () => {
+    for (const tool of ["record.list_records", "record.query_records", "table.get_schema", "table.list_bases"]) {
+      const r = await callTool(tool, { tableId }, woToken);
+      expect(r.status).toBe(200);
+      expect(r.result.isError).toBe(true);
+      expect(r.result.content[0]!.text).toContain("-32602");
+    }
+  });
+
+  it("只写身份删除成功且回执为**精简 {ok:true}**（无 recordId/deleted/字段映射，防派生值泄漏）", async () => {
+    const rec = await prisma.record.create({
+      data: { tableId, fields: JSON.stringify({}), createdBy: "u2", updatedBy: "u2" },
+    });
+    const r = await callTool("record.delete_record", { tableId, recordId: rec.id, confirm: true }, woToken);
+    expect(r.result.isError ?? false).toBe(false);
+    const payload = JSON.parse(r.result.content[0]!.text) as Record<string, unknown>;
+    expect(payload).toEqual({ ok: true });           // 精确形状：无任何附加键
+    expect(Object.keys(payload)).toEqual(["ok"]);
+    expect((await prisma.record.findUniqueOrThrow({ where: { id: rec.id } })).deletedAt).not.toBeNull();
   });
 });

@@ -40,8 +40,12 @@ export interface McpFieldCapability {
 }
 
 export interface McpPermissionPort {
-  /** 闸门一：本主体在该族的可见资源集（族为空 -> 不注册该族工具）。 */
-  listAccessibleResources(family: ResourceFamily): Promise<AccessibleResources>;
+  /**
+   * 闸门一：本主体在该族、**按给定动作集**（缺省 ["r"]）的可见资源集。
+   * 动作敏感（team-lead 裁决 b）：读工具传 ["r"]、写工具传其所需动作（c/u/d）；
+   * 集合为空 -> 该工具不注册。**"注册出的工具集 == 主体有效动作集"，不多不少**。
+   */
+  listAccessibleResources(family: ResourceFamily, actions?: McpAction[]): Promise<AccessibleResources>;
   /** 闸门二：单资源动作判定。资源不存在或不可见都返回 false（不泄漏存在性）。 */
   can(action: McpAction, resource: McpResource): Promise<boolean>;
   /** 字段能力（schema 收窄 + 出参投影）；nodeId 非可见节点 -> visible:false。 */

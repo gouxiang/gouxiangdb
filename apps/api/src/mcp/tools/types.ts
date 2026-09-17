@@ -1,7 +1,7 @@
 // M6/S3 工具层共享类型（不入协议层 zod4，只描述 handler 契约）。
 
 import type { ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
-import type { McpPermissionPort, McpSubject, ResourceFamily } from "../permissions/types.js";
+import type { McpAction, McpPermissionPort, McpSubject, ResourceFamily } from "../permissions/types.js";
 import type { PatScope } from "../pat/tokens.js";
 
 /** handler 运行上下文：主体 + 已绑定 scope 缓存的权限端口（可能为 null=未接入引擎的骨架态）。 */
@@ -26,6 +26,8 @@ export interface ToolMeta extends Record<string, unknown> {
   scopes: PatScope[];
   /** 资源族；null=不涉资源（连通性工具），不做闸门一。 */
   family: ResourceFamily | null;
+  /** 该工具需要的 M4 动作集（闸门一口径；缺省 ["r"]）。 */
+  actions?: McpAction[];
   readOnly: boolean;
   /** 可选可用性门（如 record.search 仅在 GX_M5_SEARCH != off 时注册）。缺省恒可用。 */
   available?: () => boolean;

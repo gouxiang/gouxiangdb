@@ -35,14 +35,16 @@ export function createMcpPermissionPort(
 
   return {
     preload: async () => { await prepared(); },
-    async listAccessibleResources(family: ResourceFamily): Promise<AccessibleResources> {
+    async listAccessibleResources(family: ResourceFamily, actions: McpAction[] = ["r"]): Promise<AccessibleResources> {
       const p = await prepared();
+      // 动作敏感：任一所需动作可见即纳入该资源（缺省读动作，保持既有调用语义）
+      const wanted = actions.length > 0 ? actions : (["r"] as McpAction[]);
       const kinds = new Set<string>(FAMILY_KINDS[family]);
       const byKind: Partial<Record<string, string[]>> = {};
       for (const node of p.nodes) {
         const kind = node.resourceType;
         if (!kind || !node.resourceId || !kinds.has(kind)) continue;
-        if (!nodeVisibleInPrepared(p, node, "r")) continue;
+        if (!wanted.some((a) => nodeVisibleInPrepared(p, node, a))) continue;
         (byKind[kind] ??= []).push(node.resourceId);
       }
       for (const k of Object.keys(byKind)) byKind[k]!.sort();

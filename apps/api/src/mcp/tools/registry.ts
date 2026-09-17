@@ -32,7 +32,8 @@ async function familyVisible(
 ): Promise<{ ok: boolean; truncated: boolean }> {
   if (!port) return { ok: false, truncated: false };
   try {
-    const acc = await port.listAccessibleResources(family);
+    // 闸门一按**该工具所需动作**求可见集（裁决 b）：读工具 ["r"]、写工具 ["c"|"u"|"d"]
+    const acc = await port.listAccessibleResources(family, meta.actions ?? ["r"]);
     const has = Object.values(acc.byKind).some((ids) => (ids?.length ?? 0) > 0);
     return { ok: has, truncated: acc.truncated };
   } catch (err) {

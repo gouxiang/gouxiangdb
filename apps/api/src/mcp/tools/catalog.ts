@@ -65,7 +65,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     meta: {
       name: "record.delete_record", title: "删除记录",
       description: "软删一条记录（需 confirm=true；与 REST DELETE 同语义，可由回收站恢复）。",
-      scopes: ["record:write"], family: "table", readOnly: false,
+      scopes: ["record:write"], family: "table", actions: ["d"], readOnly: false,
     },
     inputShape: deleteRecordShape,
     run: recordDeleteRecord,
