@@ -9,17 +9,40 @@
 //   DELETE /api/v1/pats/:id -> 204（仅本人行；非本人/不存在统一 404 PAT_NOT_FOUND，不泄漏存在性）
 //
 // 门控：随 v1 挂载（C-5 定稿：/api/v1/pats 与 /mcp 同受 GX_ENTERPRISE_ORG；off 即 404）。
-// 限流：C-1 的 PAT 敏感档（30/60s/人）随 S2 的 GX_MCP_RATE_* 配置组落地；本片由全局 /api 兜底档覆盖。
+// 限流（C-1 终审定稿，S2 落地）：**创建/删除**独立敏感档，默认 30 次/60s/**人**（键=userId），
+// 超限 429 + Retry-After + MCP_RATE_LIMITED。GET（只读列表）不设该档，由全局 /api 兜底档覆盖。
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { HttpError } from "../../guards.js";
 import { audit } from "../../audit/emit.js";
+import { config } from "../../config.js";
+import { FixedWindowCounter, type RateRule } from "../../middleware/rateLimit.js";
 import { createPat, listPats, revokePat } from "../../mcp/pat/patService.js";
 import {
   PAT_DEFAULT_EXPIRY_DAYS, PatValidationError, validateExpiry, validateName, validateScopes,
 } from "../../mcp/pat/tokens.js";
 
 export const patRoutes = new Hono();
+
+/** 每进程一个 PAT REST 敏感桶（与 /mcp 桶分实例，互不干扰；单实例部署前提）。 */
+const patRestCounter = new FixedWindowCounter();
+
+/** 创建/删除的敏感档判定；超限返回 429 响应，否则 null。 */
+function patRestRateLimit(c: Context, userId: string): Response | null {
+  if (!config.rateLimitEnabled) return null;
+  const rule: RateRule = {
+    name: "mcp-pat-rest",
+    limit: config.mcpPatRestMax,
+    windowMs: config.mcpPatRestWindowMs,
+    match: () => true,
+  };
+  const d = patRestCounter.hit(userId, rule, Date.now());
+  c.header("X-RateLimit-Limit", String(d.limit));
+  c.header("X-RateLimit-Remaining", String(d.remaining));
+  if (d.allowed) return null;
+  c.header("Retry-After", String(d.retryAfterSec));
+  return c.json({ error: "请求过于频繁，请稍后再试", code: "MCP_RATE_LIMITED" }, 429);
+}
 
 /** PatValidationError（400 三码）原样映射为 {@link HttpError}，其余错误透传。 */
 function rethrow(err: unknown): never {
@@ -29,6 +52,8 @@ function rethrow(err: unknown): never {
 
 patRoutes.post("/", async (c) => {
   const userId = c.get("auth").userId;
+  const limited = patRestRateLimit(c, userId);
+  if (limited) return limited;
   const raw = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   try {
     const name = validateName(raw.name);
@@ -65,6 +90,8 @@ patRoutes.get("/", async (c) => {
 
 patRoutes.delete("/:id", async (c) => {
   const userId = c.get("auth").userId;
+  const limited = patRestRateLimit(c, userId);
+  if (limited) return limited;
   const patId = c.req.param("id");
   const revoked = await revokePat(userId, patId);
   if (!revoked) {

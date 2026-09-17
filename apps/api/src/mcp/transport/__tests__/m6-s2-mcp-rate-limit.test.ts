@@ -11,10 +11,11 @@ import os from "node:os";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
+import { sign } from "hono/jwt";
 
 const ENV_KEYS = ["DATABASE_URL", "GX_DATA_DIR", "GX_AUDIT_DIR", "JWT_SECRET", "NODE_ENV",
   "GX_RATE_LIMIT", "GX_ENTERPRISE_ORG", "GX_MCP_RATE_WINDOW_SEC", "GX_MCP_RATE_PAT_MAX",
-  "GX_MCP_RATE_IP_MAX"] as const;
+  "GX_MCP_RATE_IP_MAX", "GX_MCP_RATE_PAT_REST_MAX", "GX_MCP_RATE_PAT_REST_WINDOW_SEC"] as const;
 const PREV: Record<string, string | undefined> = {};
 
 let tmpDir: string;
@@ -26,11 +27,12 @@ const INIT = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVe
 
 type Req = (u: string, i?: RequestInit) => Promise<Response>;
 
-async function buildApp(env: { patMax?: string; ipMax?: string }): Promise<{ request: Req }> {
+async function buildApp(env: { patMax?: string; ipMax?: string; patRestMax?: string }): Promise<{ request: Req }> {
   process.env.GX_RATE_LIMIT = "on"; // test 环境需显式 on 才启用限流
   process.env.GX_MCP_RATE_WINDOW_SEC = "60";
   if (env.patMax === undefined) delete process.env.GX_MCP_RATE_PAT_MAX; else process.env.GX_MCP_RATE_PAT_MAX = env.patMax;
   if (env.ipMax === undefined) delete process.env.GX_MCP_RATE_IP_MAX; else process.env.GX_MCP_RATE_IP_MAX = env.ipMax;
+  if (env.patRestMax === undefined) delete process.env.GX_MCP_RATE_PAT_REST_MAX; else process.env.GX_MCP_RATE_PAT_REST_MAX = env.patRestMax;
   vi.resetModules();
   const app = (await import("../../../app.js")).createApp().app as unknown as { request: Req };
   return app;
@@ -94,5 +96,27 @@ describe("S2 限流：IP 预桶（认证前，未认证请求也计数）", () =
     expect(fourth.status).toBe(429);
     expect(fourth.headers.get("www-authenticate")).toBeNull(); // 认证前拦截，无 401 头
     expect(await fourth.json()).toEqual({ jsonrpc: "2.0", error: { code: -32029, message: "RATE_LIMITED" }, id: null });
+  });
+});
+
+describe("S2 限流：PAT REST 创建/删除敏感档（C-1，键=userId）", () => {
+  const bearer = async (): Promise<{ Authorization: string; "content-type": string }> => {
+    const now = Math.floor(Date.now() / 1000);
+    const jwt = await sign({ userId: "rl-user", tv: 0, iat: now, exp: now + 3600 }, "m6-s2-rl-secret-at-least-16-chars", "HS256");
+    return { Authorization: `Bearer ${jwt}`, "content-type": "application/json" };
+  };
+
+  it("超过 GX_MCP_RATE_PAT_REST_MAX -> 429 MCP_RATE_LIMITED + Retry-After（GET 不占该档）", async () => {
+    const app = await buildApp({ patRestMax: "2" });
+    const h = await bearer();
+    const create = () => app.request("/api/v1/pats", { method: "POST", headers: h, body: JSON.stringify({ name: "r", scopes: ["record:read"] }) });
+    expect((await create()).status).toBe(201);
+    expect((await create()).status).toBe(201);
+    const third = await create();
+    expect(third.status).toBe(429);
+    expect(Number(third.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(await third.json()).toEqual({ error: "请求过于频繁，请稍后再试", code: "MCP_RATE_LIMITED" });
+    // GET 只读列表不设该档（仍 200），证明档位只覆盖创建/删除
+    expect((await app.request("/api/v1/pats", { headers: h })).status).toBe(200);
   });
 });
