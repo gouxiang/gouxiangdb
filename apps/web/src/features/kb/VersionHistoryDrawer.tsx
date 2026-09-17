@@ -7,7 +7,7 @@ import { Modal, Spinner, toast } from "../../components/ui";
 import type { KbDocDTO, KbDocVersionDTO } from "../../api/client";
 import { useVersions, useVersion, useCreateVersion, useRollback } from "./kb-hooks";
 import { formatTime } from "./kb-ui";
-import { renderMarkdown } from "./markdown";
+import { renderMarkdown } from "@gx/blocks";
 import { DrawnixCanvas, type DrawnixCanvasHandle } from "./DrawnixCanvas";
 import { CanvasPreviewToolbar } from "./canvas/CanvasPreviewToolbar";
 

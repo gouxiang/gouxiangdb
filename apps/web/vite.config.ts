@@ -18,6 +18,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@gx/shared-types": path.resolve(__dirname, "../../packages/shared-types/src"),
+      "@gx/blocks": path.resolve(__dirname, "../../packages/blocks/src"),
       "@gx/design-tokens": path.resolve(__dirname, "../../packages/design-tokens/src"),
     },
   },

@@ -11,7 +11,7 @@
 //
 // 与现有 `kb-history.ts`（如有）等无关；本模块刻意独立以避免循环依赖。
 
-import type { Block } from "./blocks";
+import type { Block } from "@gx/blocks";
 
 export interface EditorHistory {
   /** 记录一次状态变更；与上一次快照相同时为 no-op。 */

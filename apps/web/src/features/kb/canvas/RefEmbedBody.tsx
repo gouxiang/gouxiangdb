@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../../../components/icons";
 import { Spinner } from "../../../components/ui";
-import { renderMarkdown } from "../markdown";
+import { renderMarkdown } from "@gx/blocks";
 import { DrawnixCanvas } from "../DrawnixCanvas";
 import { enhanceCanvasEmbeds } from "../enhanceEmbeds";
 import type { UseResolvedDocResult } from "../hooks/useResolvedDoc";

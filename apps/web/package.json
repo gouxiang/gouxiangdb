@@ -16,6 +16,7 @@
   "dependencies": {
     "@drawnix/drawnix": "0.4.0-0",
     "@floating-ui/react": "^0.26.24",
+    "@gx/blocks": "workspace:*",
     "@gx/design-tokens": "workspace:*",
     "@gx/shared-types": "workspace:*",
     "@plait-board/markdown-to-drawnix": "0.0.7",

@@ -37,6 +37,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@gx/blocks':
+        specifier: workspace:*
+        version: link:../../packages/blocks
       '@gx/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
@@ -133,6 +136,9 @@ importers:
       '@floating-ui/react':
         specifier: ^0.26.24
         version: 0.26.28(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@gx/blocks':
+        specifier: workspace:*
+        version: link:../../packages/blocks
       '@gx/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
@@ -251,6 +257,12 @@ importers:
       vitest:
         specifier: ^3.0.5
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.1)(jiti@1.21.7)(tsx@4.23.13)
+
+  packages/blocks:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
 
   packages/design-tokens:
     devDependencies:

@@ -6,8 +6,8 @@
 
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { renderMarkdown } from "../features/kb/markdown";
-import { inlineMdToHtml } from "../features/kb/blocks";
+import { renderMarkdown } from "@gx/blocks";
+import { inlineMdToHtml } from "@gx/blocks";
 import { makeLinkClickHandler } from "../lib/internal-links";
 
 export function MdContent({

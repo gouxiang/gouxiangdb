@@ -31,9 +31,9 @@ import {
   mediaKindOf,
   newBlock,
   uid,
-} from "./blocks";
-import { shiftTableSpans, tableOccupancy } from "./blocks";
-import { slugify } from "./markdown";
+} from "@gx/blocks";
+import { shiftTableSpans, tableOccupancy } from "@gx/blocks";
+import { slugify } from "@gx/blocks";
 import { loadUploadLimits, validateUpload } from "./upload-limits";
 import { createEditorHistory } from "./editor-history";
 import "./kb.css";
