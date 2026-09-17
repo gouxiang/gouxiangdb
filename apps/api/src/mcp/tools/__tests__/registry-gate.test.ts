@@ -12,12 +12,14 @@ function fakePort(byFamily: Partial<Record<ResourceFamily, AccessibleResources>>
       listAccessibleResources: async () => { throw new Error("engine down"); },
       can: async () => false,
       fieldCapability: async () => ({ visible: false, visibleAll: false, visibleFields: null, writableAll: false }),
+      fieldCapabilityOf: async () => ({ visible: false, visibleAll: false, visibleFields: null, writableAll: false }),
     };
   }
   return {
     listAccessibleResources: async (f) => byFamily[f] ?? { byKind: {}, truncated: false },
     can: async () => true,
     fieldCapability: async () => ({ visible: true, visibleAll: true, visibleFields: null, writableAll: false }),
+    fieldCapabilityOf: async () => ({ visible: true, visibleAll: true, visibleFields: null, writableAll: false }),
   };
 }
 
@@ -44,10 +46,11 @@ describe("S3 闸门一：注册决策", () => {
     expect(names()).toEqual(["ping_echo"]);
   });
 
-  it("scope 通过且族非空 -> 工具注册", async () => {
+  it("scope 通过且族非空 -> 注册该族全部可用工具（含 S4 读工具）", async () => {
     const { server, names } = collector();
     await registerTools(server, SUBJ(["record:read"]), { port: fakePort({ table: { byKind: { base: ["b1"] }, truncated: false } }) });
-    expect(names()).toEqual(["ping_echo", "table.list_bases"]);
+    // M5 off（测试环境默认）-> record.search 不注册（运行期可用性门）
+    expect(names()).toEqual(["ping_echo", "record.list_records", "record.query_records", "table.get_schema", "table.list_bases"]);
   });
 
   it("引擎抛错：不冒泡（不 500）+ 该族工具缺席 + 记 metric", async () => {

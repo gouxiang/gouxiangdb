@@ -46,6 +46,8 @@ export interface McpPermissionPort {
   can(action: McpAction, resource: McpResource): Promise<boolean>;
   /** 字段能力（schema 收窄 + 出参投影）；nodeId 非可见节点 -> visible:false。 */
   fieldCapability(tableNodeId: string): Promise<McpFieldCapability>;
+  /** 同上，但按**资源**（kind+id）定位 nav 节点——工具层只有资源 id，无 nav 节点 id。 */
+  fieldCapabilityOf(resource: McpResource): Promise<McpFieldCapability>;
 }
 
 /** 族 -> 该族工具可作用的资源类型（list_bases 取 base、get_schema 取 table…）。 */

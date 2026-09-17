@@ -3,8 +3,10 @@
 // 闸门一在 registry 依本目录过滤：PAT scope 粗筛（无 record:write 则写工具不入册）+ 族可见集非空。
 // S3 目录仅两件：连接性自检 ping_echo、最小资源工具 table.list_bases；S4 起按 §4.5 增补。
 
-import { tableListBases } from "./table.tools.js";
-import { listBasesShape, pingEchoShape } from "./schemas.js";
+import { config } from "../../config.js";
+import { tableGetSchema, tableListBases } from "./table.tools.js";
+import { recordListRecords, recordQueryRecords, recordSearch } from "./record.tools.js";
+import { getSchemaShape, listBasesShape, listRecordsShape, pingEchoShape, queryRecordsShape, recordSearchShape } from "./schemas.js";
 import { text, type ToolSpec } from "./types.js";
 
 export const TOOL_CATALOG: readonly ToolSpec[] = [
@@ -31,5 +33,42 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     },
     inputShape: listBasesShape,
     run: tableListBases,
+  },
+  {
+    meta: {
+      name: "table.get_schema", title: "读取表结构",
+      description: "返回该 base 下可见表与可见字段的元数据（不可见字段不出现在 schema 中）。",
+      scopes: ["record:read"], family: "table", readOnly: true,
+    },
+    inputShape: getSchemaShape,
+    run: tableGetSchema,
+  },
+  {
+    meta: {
+      name: "record.list_records", title: "列出记录",
+      description: "按 keyset 游标分页读取表内记录（limit≤200；不可见字段物理缺席）。",
+      scopes: ["record:read"], family: "table", readOnly: true,
+    },
+    inputShape: listRecordsShape,
+    run: recordListRecords,
+  },
+  {
+    meta: {
+      name: "record.query_records", title: "查询记录",
+      description: "带受控 filter/sort 的 keyset 查询（算子白名单；禁公式与裸 SQL）。",
+      scopes: ["record:read"], family: "table", readOnly: true,
+    },
+    inputShape: queryRecordsShape,
+    run: recordQueryRecords,
+  },
+  {
+    meta: {
+      name: "record.search", title: "统一检索",
+      description: "薄封装 M5 统一检索（关键词/向量混合；scope 先收敛由 M5 保证）。",
+      scopes: ["record:read"], family: null, readOnly: true,
+      available: () => config.m5Search !== "off",
+    },
+    inputShape: recordSearchShape,
+    run: recordSearch,
   },
 ];

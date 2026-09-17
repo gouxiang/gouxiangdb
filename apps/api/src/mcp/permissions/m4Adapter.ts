@@ -59,6 +59,13 @@ export function createMcpPermissionPort(
       return nodeVisibleInPrepared(p, node, action);
     },
 
+    async fieldCapabilityOf(resource: McpResource): Promise<McpFieldCapability> {
+      const p = await prepared();
+      const node = p.nodes.find((n) => n.resourceType === resource.kind && n.resourceId === resource.id);
+      if (!node) return { visible: false, visibleAll: false, visibleFields: null, writableAll: false };
+      return this.fieldCapability(node.id);
+    },
+
     async fieldCapability(tableNodeId: string): Promise<McpFieldCapability> {
       const p = await prepared();
       const node = p.byId.get(tableNodeId);

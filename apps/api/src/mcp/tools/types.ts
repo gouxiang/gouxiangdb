@@ -27,6 +27,8 @@ export interface ToolMeta extends Record<string, unknown> {
   /** 资源族；null=不涉资源（连通性工具），不做闸门一。 */
   family: ResourceFamily | null;
   readOnly: boolean;
+  /** 可选可用性门（如 record.search 仅在 GX_M5_SEARCH != off 时注册）。缺省恒可用。 */
+  available?: () => boolean;
 }
 
 export interface ToolSpec {

@@ -53,6 +53,9 @@ beforeAll(async () => {
   for (const id of ["uFull", "uNone", "uOther"]) {
     await prisma.user.create({ data: { id, email: `${id}@x.com`, displayName: id, passwordHash: "x", status: "ACTIVE" } });
   }
+  // S4 起 list_bases 会回填 name，故需真实 base 行（此前只造 nav 节点）
+  await prisma.base.create({ data: { id: "b1", name: "库一", createdBy: "uFull" } });
+  await prisma.base.create({ data: { id: "b2", name: "库二", createdBy: "uOther" } });
   await createNavNodes(prisma, [
     { id: NB, kind: "base", resourceType: "base", resourceId: "b1" },
     { id: NT, kind: "table", resourceType: "table", resourceId: "t1", parentId: NB },
@@ -93,16 +96,16 @@ describe("S3 四身份 tools/list 快照", () => {
     expect(await toolNames(tokens.none!)).toEqual(["ping_echo"]);
   });
 
-  it("② 只读（有可见 base）-> 出现 table.list_bases", async () => {
-    expect(await toolNames(tokens.readonly!)).toEqual(["ping_echo", "table.list_bases"]);
+  it("② 只读（有可见 base）-> 出现该族全部读工具", async () => {
+    expect(await toolNames(tokens.readonly!)).toEqual(["ping_echo", "record.list_records", "record.query_records", "table.get_schema", "table.list_bases"]);
   });
 
-  it("③ 读写（scope 更宽）-> 与只读同集合（S3 目录暂无写工具，S4 起分化）", async () => {
-    expect(await toolNames(tokens.readwrite!)).toEqual(["ping_echo", "table.list_bases"]);
+  it("③ 读写（scope 更宽）-> 与只读同集合（S4 只落读工具；写工具随 S4 写片）", async () => {
+    expect(await toolNames(tokens.readwrite!)).toEqual(["ping_echo", "record.list_records", "record.query_records", "table.get_schema", "table.list_bases"]);
   });
 
-  it("④ 字段受限 -> 集合同只读（字段级收窄体现在 schema 层，S4 get_schema 起分化）", async () => {
-    expect(await toolNames(tokens.masked!)).toEqual(["ping_echo", "table.list_bases"]);
+  it("④ 字段受限 -> 集合与只读同（字段级收窄体现在 schema/出参，见 m6-s4-read-tools）", async () => {
+    expect(await toolNames(tokens.masked!)).toEqual(["ping_echo", "record.list_records", "record.query_records", "table.get_schema", "table.list_bases"]);
   });
 
   it("scope 粗筛：仅 doc:read 的 PAT 不见 record 族工具", async () => {
@@ -148,14 +151,15 @@ describe("S3 IDOR：结果只含可见资源", () => {
     const res = await call({ jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: "table.list_bases", arguments: {} } }, tokens.readonly!);
     const body = await res.json() as { result: { content: Array<{ text: string }>; isError?: boolean } };
     expect(body.result.isError ?? false).toBe(false);
-    const payload = JSON.parse(body.result.content[0]!.text) as { bases: string[] };
-    expect(payload.bases).toEqual(["b1"]);
-    expect(payload.bases).not.toContain("b2");
+    const payload = JSON.parse(body.result.content[0]!.text) as { bases: Array<{ id: string }> };
+    // S4 起 bases 为 {id,name} 对象
+    expect(payload.bases.map((b) => b.id)).toEqual(["b1"]);
+    expect(payload.bases.map((b) => b.id)).not.toContain("b2");
   });
 
   it("uOther 调 table.list_bases -> 仅 b2（各自可见集隔离）", async () => {
     const res = await call({ jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: "table.list_bases", arguments: {} } }, tokens.other!);
-    const payload = JSON.parse(((await res.json()) as { result: { content: Array<{ text: string }> } }).result.content[0]!.text) as { bases: string[] };
-    expect(payload.bases).toEqual(["b2"]);
+    const payload = JSON.parse(((await res.json()) as { result: { content: Array<{ text: string }> } }).result.content[0]!.text) as { bases: Array<{ id: string }> };
+    expect(payload.bases.map((b) => b.id)).toEqual(["b2"]);
   });
 });

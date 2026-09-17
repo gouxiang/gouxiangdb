@@ -21,5 +21,47 @@ export const pingEchoShape = {
   text: z.string().max(200).describe("回显文本（≤200 字符）"),
 };
 
-/** table.list_bases：无入参（S4 增 baseId 等）。 */
+/** table.list_bases：无入参。 */
 export const listBasesShape = {};
+
+/** 读工具共用的 limit（§3-8 配额：≤200；超限由 SDK 入参校验直接返 -32602）。 */
+const LIMIT_MAX = MCP_LIMITS.READ_LIMIT_MAX;
+
+/** 受控 filter 算子白名单（§4.5：禁任意 SQL/公式；非法算子由 zod4 enum 拦为 -32602）。 */
+export const FILTER_OPS = [
+  "is", "isNot", "contains", "notContains", "isEmpty", "isNotEmpty",
+  "gte", "lte", "gt", "lt", "isAnyOf", "checked", "notChecked",
+] as const;
+
+const filterNode = z.object({
+  fieldId: z.string().min(1),
+  op: z.enum(FILTER_OPS),
+  value: z.string().optional(),
+});
+
+export const getSchemaShape = {
+  baseId: z.string().min(1).describe("基础库 id（须在该令牌可见集内）"),
+};
+
+export const listRecordsShape = {
+  tableId: z.string().min(1),
+  cursor: z.string().max(2048).optional(),
+  limit: z.number().int().min(1).max(LIMIT_MAX).optional(),
+  search: z.string().max(200).optional(),
+};
+
+export const queryRecordsShape = {
+  tableId: z.string().min(1),
+  filter: z.array(filterNode).max(20).optional(),
+  sortFieldId: z.string().min(1).optional(),
+  sortDirection: z.enum(["asc", "desc"]).optional(),
+  cursor: z.string().max(2048).optional(),
+  limit: z.number().int().min(1).max(LIMIT_MAX).optional(),
+};
+
+export const recordSearchShape = {
+  q: z.string().min(1).max(200),
+  // 与 M5 实际 RequestedMode 对齐（计划写 "like" 已过期；M5 为 auto|fts|vector）
+  mode: z.enum(["auto", "fts", "vector"]).optional(),
+  limit: z.number().int().min(1).max(LIMIT_MAX).optional(),
+};

@@ -47,6 +47,7 @@ export async function registerTools(server: McpServer, subject: { userId: string
   const ctx: ToolCtx = { subject: { ...subject, scopes: [...subject.scopes] } as ToolCtx["subject"], port: deps.port ?? null };
 
   for (const spec of TOOL_CATALOG) {
+    if (spec.meta.available && !spec.meta.available()) continue; // 运行期可用性门（如 M5 未启用）
     if (!scopeAllows(spec.meta, subject.scopes)) continue; // 闸门一前半：PAT scope 粗筛
     if (spec.meta.family) {
       const vis = await familyVisible(deps.port ?? null, spec.meta.family, spec.meta, deps.onMetric);
