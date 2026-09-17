@@ -44,9 +44,13 @@ export type AuditEventName =
   | "embedding_api_key_cleared"
   // S12 状态降级跳变采样（S9 仅预留常量，不打点）
   | "search_degraded"
-  // M6/S1 鉴权 MCP 服务：PAT 生命周期（S1 起接线；S7 补 mcp_* 工具调用/认证失败四枚）
+  // M6/S1 鉴权 MCP 服务：PAT 生命周期（S1 起接线；S7 补 mcp_* 工具调用/认证失败两枚）
   | "mcp_pat_create"
-  | "mcp_pat_revoke";
+  | "mcp_pat_revoke"
+  // M6/S7 鉴权 MCP 服务调用面（§409）：每次 tools/call 收尾必记（成功/被拒/未注册工具同记，
+  // resultCode 区分）；认证失败单独一枚（ip/patPrefix 级，绝不记完整 token）。
+  | "mcp_tool_call"
+  | "mcp_auth_failure";
 
 export interface AuditInput {
   event: AuditEventName;

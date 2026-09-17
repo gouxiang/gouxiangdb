@@ -14,7 +14,10 @@ import { Hono, type Context } from "hono";
 import { config } from "../../config.js";
 import { FixedWindowCounter, type RateRule } from "../../middleware/rateLimit.js";
 import { sourceIp } from "../../utils/client-ip.js";
-import { authenticatePat, type McpAuthFailReason } from "./authenticate.js";
+import { effectivePath } from "../../utils/request-path.js";
+import { emitAuthFailure } from "../audit.js";
+import { PAT_PREFIX_DISPLAY_LEN, hasPatPrefix } from "../pat/tokens.js";
+import { authenticatePat, bearerValue, type McpAuthFailReason } from "./authenticate.js";
 import { handleMcpRequest } from "./streamableHttp.js";
 
 /** 失败原因 -> 对外文案（§4.3：无 Bearer/前缀不符/查不到 三者同口径；revoked/expired/disabled 各自可辨识）。 */
@@ -48,6 +51,21 @@ function unauthorized(c: Context, reason: McpAuthFailReason): Response {
   return jsonRpcError(c, 401, -32001, AUTH_MESSAGE[reason]);
 }
 
+/**
+ * 认证失败审计（M6/S7）：ip + 明文前缀级（14 字符，不可认证，tokens.ts:16）+ 原因。
+ * **绝不记完整 token**——patPrefix 只用于"同一坏 token 反复尝试"的关联分析。
+ * 非 PAT 形态（无 gxpat_ 前缀）时不带 patPrefix（避免把任意 Authorization 值截断后落盘）。
+ */
+function auditAuthFailure(c: Context, reason: McpAuthFailReason): void {
+  const bearer = bearerValue(c.req.header("Authorization"));
+  const patPrefix = hasPatPrefix(bearer) ? bearer.slice(0, PAT_PREFIX_DISPLAY_LEN) : undefined;
+  emitAuthFailure({
+    ctx: { ip: sourceIp(c), path: effectivePath(c), method: c.req.method },
+    reason,
+    patPrefix,
+  });
+}
+
 /** 429：HTTP 层 + Retry-After + X-RateLimit-*（JSON-RPC 外信封，§5.3）。 */
 function rateLimited(c: Context, limit: number, remaining: number, retryAfterSec: number): Response {
   c.header("Retry-After", String(retryAfterSec));
@@ -69,7 +87,10 @@ export function createMcpApp(): Hono {
     }
     // ② 边缘认证（每请求独立，无会话信任）
     const auth = await authenticatePat(c.req.header("Authorization"));
-    if (!auth.ok) return unauthorized(c, auth.reason);
+    if (!auth.ok) {
+      auditAuthFailure(c, auth.reason); // S7：认证失败必审计（ip + patPrefix 级，无 token）
+      return unauthorized(c, auth.reason);
+    }
     // ③ 认证后 patId 正式桶
     if (enabled) {
       const d = counter.hit(`pat:${auth.subject.patId}`, patRule(), now);

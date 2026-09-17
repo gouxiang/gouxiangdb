@@ -11,6 +11,8 @@
 
 import process from "node:process";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { STDIO_AUDIT_CTX, emitAuthFailure } from "./audit.js";
+import { PAT_PREFIX_DISPLAY_LEN, hasPatPrefix } from "./pat/tokens.js";
 import { mcpPermissionPortFactory } from "./permissions/m4Adapter.js";
 import { buildServer } from "./server.js";
 import { authenticatePat } from "./transport/authenticate.js";
@@ -24,16 +26,25 @@ function fail(reason: string): never {
 }
 
 async function main(): Promise<void> {
-  const raw = process.env.GX_MCP_TOKEN ?? "";
-  if (raw.trim() === "") {
+  const raw = (process.env.GX_MCP_TOKEN ?? "").trim();
+  if (raw === "") {
     fail("GX_MCP_TOKEN missing: 请在启动前设置完整 PAT 明文（gxpat_...）");
   }
-  const auth = await authenticatePat(`Bearer ${raw.trim()}`);
+  const auth = await authenticatePat(`Bearer ${raw}`);
   if (!auth.ok) {
+    // S7：stdio 认证失败同样入审计（来源固定 stdio；只记明文前缀，绝不记完整 token）。
+    emitAuthFailure({
+      ctx: STDIO_AUDIT_CTX,
+      reason: auth.reason,
+      patPrefix: hasPatPrefix(raw) ? raw.slice(0, PAT_PREFIX_DISPLAY_LEN) : undefined,
+    });
     fail(`GX_MCP_TOKEN invalid (${auth.reason}): token 不可用`);
   }
-  // 与 HTTP 同构：每连接按主体构建权限端口（内部惰性预取一次 scope 复用）。
-  const server = await buildServer(auth.subject, { port: mcpPermissionPortFactory(auth.subject) });
+  // 与 HTTP 同构：每连接按主体构建权限端口（内部惰性预取一次 scope 复用）；审计来源固定 stdio。
+  const server = await buildServer(auth.subject, {
+    port: mcpPermissionPortFactory(auth.subject),
+    audit: STDIO_AUDIT_CTX,
+  });
   const transport = new StdioServerTransport();
   // 客户端关闭 stdin（管道 EOF）即视为会话结束，正常退出，避免残留进程。
   process.stdin.on("end", () => process.exit(0));
