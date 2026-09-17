@@ -105,16 +105,32 @@ async function guardWriteFields(
 ): Promise<ToolResult | null> {
   if (!ctx.port) return deny("FORBIDDEN_RESOURCE", "权限引擎未接入");
   const cap = await ctx.port.writeFieldCapabilityOf({ kind: "table", id: tableId }, action);
-  const physicalKeys = Object.keys(payload).filter((k) => {
+  // 宽来源（任一 c/u mask=null，含 creator/owner 兜底）：全字段放行，载荷键不再逐键校验。
+  if (cap.writableAll) return null;
+  // 掩码身份下把载荷键分三类：
+  //  ① 已定义的物理可写键 -> 必须落在可写并集；
+  //  ② 已定义但服务端计算/系统键（公式/lookup/rollup/…，applyFieldWrites 本就跳过）-> 不误拒（保 p1b-b4）；
+  //  ③ 未知键（本表无该字段定义，如 fld_x）-> 必须拒绝，绝不静默丢弃（S4 AC：掩码身份写白名单外
+  //     字段整单拒绝）。P1-B 初版只保留①，把③一并滤掉导致 fail-open（277fd95 回归），此处补回。
+  const writableKeys: string[] = [];
+  const unknownKeys: string[] = [];
+  for (const k of Object.keys(payload)) {
     const f = fields.find((x) => x.id === k);
-    return !!f && !NON_WRITABLE_FIELD_TYPES.has(f.type);
-  });
+    if (!f) {
+      unknownKeys.push(k);
+    } else if (!NON_WRITABLE_FIELD_TYPES.has(f.type)) {
+      writableKeys.push(k);
+    }
+  }
   try {
-    assertWriteOnlyFields(physicalKeys, {
+    assertWriteOnlyFields(writableKeys, {
       writeMatched: cap.matched,
       writableAll: cap.writableAll,
       writableFields: new Set(cap.writableFields),
     });
+    if (unknownKeys.length) {
+      throw new AuthzFieldError("包含无权写入的字段", "FORBIDDEN_FIELD", [...new Set(unknownKeys)]);
+    }
   } catch (e) {
     if (e instanceof AuthzFieldError) return deny("FORBIDDEN_FIELD", e.message);
     throw e;

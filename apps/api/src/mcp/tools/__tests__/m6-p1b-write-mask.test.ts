@@ -104,6 +104,24 @@ describe("P1-B create_record 字段掩码 fail-closed", () => {
     expect(r.isError).toBeUndefined();
     expect(txSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("(b6 回归) 窄 c 下，载荷含【本表无定义的未知键】必须整单拒绝，不得静默丢弃（S4 白名单外字段）", async () => {
+    txSpy.mockClear();
+    // loadTableFields 只定义 fA/fB/fR/fFx；fUnknown 不在其中 -> 未知键 -> FORBIDDEN_FIELD。
+    const port = portFor({ matched: true, writableAll: false, writableFields: ["fA"] });
+    const r = await recordCreateRecord(ctx(port), { tableId: "t1", fields: { fA: "ok", fUnknown: "x" } });
+    expect(r.isError).toBe(true);
+    expect(codeOf(r)).toBe("FORBIDDEN_FIELD");
+    expect(txSpy).not.toHaveBeenCalled(); // 整单拒绝，事务不开
+  });
+
+  it("(b7) 宽 c（writableAll）下未知键也不逐键拦（宽授权保持可用，语义同 applyFieldWrites 跳过未知键）", async () => {
+    txSpy.mockClear();
+    const port = portFor({ matched: true, writableAll: true, writableFields: [] });
+    const r = await recordCreateRecord(ctx(port), { tableId: "t1", fields: { fA: "a", fUnknown: "x" } });
+    expect(r.isError).toBeUndefined();
+    expect(txSpy).toHaveBeenCalledWith("create", { fA: "a", fUnknown: "x" });
+  });
 });
 
 describe("P1-B update_record 字段掩码 fail-closed", () => {
