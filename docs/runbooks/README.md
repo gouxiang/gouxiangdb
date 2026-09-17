@@ -16,7 +16,7 @@ M0 生产基座的可执行运维流程。所有手册与仓内脚本/配置一�
 | [authz-engine-flip-on.md](authz-engine-flip-on.md) | M4 权限引擎切 on（enforce）操作清单：五条前置、双零证据、一步回滚、总监下令签收（含 S10 前 enforce 接线未就位的现状边界） | `GX_AUTHZ_ENGINE=on`、就绪门、drift 双零、回滚 = env 回 off |
 | [authz-drift-and-incidents.md](authz-drift-and-incidents.md) | M4 权限应急四章：D 类决策漂移排查（shadow drift 与 reconcile A/B/C 分工）、成员锁外/误授两条处置路线、inheritance 误关恢复、旧表投影不一致修复 | driftRegistry/authz_drift、reconcile-policies.ts、effective/impact 端点 |
 | [ci.md](ci.md) | 平台中立质量门、真 ESLint 基线、本地复现 CI、Gitee Go 开通与 runner | `scripts/ci-quality.sh`、`eslint.config.mjs`、`.workflow/ci.yml` |
-| [m5-search.md](m5-search.md) | M5 统一检索：off/cloud 零外网抓包验收（AC-M5-5）、search.db 损坏自愈与降级审计判读、vec0/musl/NFS/资产边界、reindex 与 model 切换、**S13 真机压测（一条命令 + 资源/排查）** | `GX_M5_SEARCH`、`GX_EMBEDDING_MODE`、`GX_VEC_EXT_PATH`、`/api/v1/admin/{reindex,search/status,embedding/config}`、`scripts/bench/m5-gate.ts` |
+| [m5-search.md](m5-search.md) | M5 统一检索：off/cloud 零外网抓包验收（AC-M5-5）、search.db 损坏自愈与降级审计判读、vec0/musl/NFS/资产边界、reindex 与 model 切换、**S13 真机压测（一条命令 + 三杠杆参数 + 容量指引）** | `GX_M5_SEARCH`、`GX_EMBEDDING_MODE`、`GX_VEC_EXT_PATH`、`/api/v1/admin/{reindex,search/status,embedding/config}`、`scripts/bench/m5-gate.ts --mode|--k|--scope-caps` |
 
 ## 相关架构决策（ADR）
 
@@ -31,6 +31,20 @@ M0 生产基座的可执行运维流程。所有手册与仓内脚本/配置一�
 - [ADR-0023](../adr/0023-materialized-path-dept-tree.md)：部门树物化路径、移动子树重写、32 护栏
 - [ADR-0024](../adr/0024-org-role-vs-resource-role-layering.md)：组织角色与资源角色物理分层，M4 auth_policies 衔接点
 - [ADR-0025](../adr/0025-runtime-entities-uncollected-by-default.md)：运行期实体默认未收纳（nav 重算只修派生 path/节点，不自动补菜单快捷项）
+
+**M5 统一检索（ADR-0042~0050，S14 由架构师归档；编号与题名见 [M5 出口基线](../baseline/2026-09-17-m5-exit.md) §5）**：
+
+- ADR-0042 独立 search.db 分库连接（非 ATTACH/非主库虚表）
+- ADR-0043 同进程 outbox + 可重建派生库（主写零等待）
+- ADR-0044 sqlite-vec 暴力 KNN 与降级一等公民（无 ANN；50 万或真机持续超标升级 LanceDB）
+- ADR-0045 embedding 默认仅远端：cloud/off 两态半，local 为未来可选 provider
+- ADR-0046 先收敛后召回（temp_scope + field_grant 物化 + RRF）
+- ADR-0047 FTS5 trigram + 短词 LIKE 中文策略
+- ADR-0048 授权信息不入索引、权限变更零 reindex + 字段 chunk 召回前排除
+- ADR-0049 reindex 双库原子切换与派生库损坏自愈
+- ADR-0050 cloud embedding 凭据管理与供应链边界
+
+> 归档落点：`docs/adr/00{42..50}-*.md`（**S14 由架构师产出**；本索引先挂编号/题名，文件名以后者为准）。
 
 ## 速查
 

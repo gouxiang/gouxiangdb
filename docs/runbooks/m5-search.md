@@ -205,7 +205,7 @@ ls -lt "$DATA" | grep -E 'search\.db(\.corrupt-|-wal|-shm)?'
 
 **口径**：输出**参考画像**（p95 十轮、warm RSS、库文件大小、可流畅 chunk 上限外推、EXPLAIN 断言），
 **不是硬 500ms 承诺**。测量对象是 search.db 的召回+融合核心（FTS + vec KNN + RRF/boost），
-不起 HTTP/主库/authz；`scope` = 全部生成节点（≤`--scope-cap`，即"最坏上界 JOIN"）。
+不起 HTTP/主库/authz；`scope` = 生成节点前 `--scope-caps` 个（默认 5000 = "最坏上界 JOIN"）。
 与 S11 `docs/baseline/2026-09-17-m5-gate.md`（EXPLAIN/SQL 计数常量化）互补：本压测补**规模曲线**。
 
 ### 7.1 前置依赖
@@ -300,3 +300,13 @@ Ubuntu 22.04.5 + glibc 2.35，Node v22.22.1，sqlite-vec 0.1.9 linux-x64 加载 
 本次用户仅提供 x86_64 VM；**arm64 不做真机**（对计划原"x86/arm 各一台"的已授权偏离），
 仅保留 CI 交叉构建冒烟（linux/arm64 加载 vec0 + 1 次 KNN）。**arm 性能数字未实测**，S14 出口标为【未实测缺口】；
 不得以 x86/开发机 arm64 数字近似冒充。
+
+---
+
+## 8. M5 证据文档与出口索引
+
+- 旧链字节级基线（S0）：[../baseline/2026-09-16-m5-baseline.md](../baseline/2026-09-16-m5-baseline.md)
+- 检索核证（S11：三路 EXPLAIN / SQL 计数 / RRF 标题 boost 标定 / shadow 闸门语义）：[../baseline/2026-09-17-m5-gate.md](../baseline/2026-09-17-m5-gate.md)
+- 真机规模门（S13：本文 §7 的完整证据）：[../baseline/2026-09-17-m5-gate-tierL.md](../baseline/2026-09-17-m5-gate-tierL.md)
+- **里程碑出口基线（S14，含 DoD 对照与遗留登记）**：[../baseline/2026-09-17-m5-exit.md](../baseline/2026-09-17-m5-exit.md)
+- 合同冻结：[../api/openapi.yaml](../api/openapi.yaml)（S9 冻结）
