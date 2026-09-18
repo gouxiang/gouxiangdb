@@ -2,6 +2,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, EmptyState, Input, Spinner } from "../../components/ui";
 import { Icon } from "../../components/icons";
+// 阶段 4：R-D-15 延迟加载态 / R-D-16 错误态 / R-I-29 截断带 title
+import { ErrorState } from "../../components/states";
+import { TruncatedText, useDelayedFlag } from "../../components/interaction";
 import type { UserAccountStatus } from "@gx/shared-types";
 import {
   useDepartments,
@@ -79,6 +82,11 @@ export function MemberList({
     }
   });
 
+  // R-D-15：≥300ms 才显示加载态。成员列表通常 <300ms 就回来，
+  // 直接渲染 spinner 会造成「空白 → spinner → 内容」的闪烁。
+  const showLoading = useDelayedFlag(query.isLoading);
+  const filtering = filter.q.trim() !== "" || filter.deptId != null || filter.status != null;
+
   const win = virtualWindow(scrollTop, viewportH, ROW_H, query.items.length, OVERSCAN);
   const visibleRows = query.items.slice(win.start, win.end);
 
@@ -129,10 +137,32 @@ export function MemberList({
 
       {/* 虚拟列表 */}
       <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto">
-        {query.isLoading ? (
+        {query.isError ? (
+          // R-D-16 区域加载失败：就地卡片 + 重试，不用全屏错误页、也不静默空列表
+          <ErrorState
+            title="成员列表加载失败"
+            reason={query.error instanceof Error ? query.error.message : undefined}
+            onRetry={() => void query.refetch()}
+            retrying={query.isFetching && !query.isLoading}
+          />
+        ) : showLoading ? (
           <div className="flex h-full items-center justify-center"><Spinner size={20} /></div>
         ) : query.items.length === 0 ? (
-          <EmptyState icon="users" title="没有匹配的成员" description="试试调整搜索关键字或筛选条件" />
+          // R-D-14 筛选空态：文案固定「没有匹配的内容」+「清除筛选」，不给新建按钮
+          <EmptyState
+            kind={filtering ? "filtered" : "first"}
+            icon="users"
+            title={filtering ? undefined : "还没有成员"}
+            description={filtering ? undefined : "邀请同事加入后即可在这里统一管理角色与部门。"}
+            onClearFilters={filtering ? () => onFilterChange({ q: "", deptId: null, status: null }) : undefined}
+            action={
+              filtering || !canManageMembers ? undefined : (
+                <Button size="sm" variant="primary" icon="userPlus" onClick={() => setInviteOpen(true)}>
+                  添加成员
+                </Button>
+              )
+            }
+          />
         ) : (
           <div style={{ height: win.totalHeight, position: "relative" }}>
             <div style={{ transform: `translateY(${win.padTop}px)` }}>
@@ -152,10 +182,10 @@ export function MemberList({
                     <Avatar name={m.displayName || m.email} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="truncate text-gx-13 font-medium text-gx-text-primary">{m.displayName}</span>
+                        <TruncatedText text={m.displayName} className="text-gx-13 font-medium text-gx-text-primary" />
                         <StatusBadge status={m.status} />
                       </div>
-                      <div className="truncate text-gx-12 text-gx-text-tertiary">{m.email}</div>
+                      <TruncatedText text={m.email} className="text-gx-12 text-gx-text-tertiary" />
                     </div>
                     <div className="hidden shrink-0 items-center gap-1 sm:flex">
                       {mainDept && (

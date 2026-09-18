@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useBases } from "../../api/hooks";
 import { useKbList } from "../kb/kb-hooks";
-import { Spinner } from "../../components/ui";
+import { EmptyState, Spinner } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
 import { useMyOrgActions, useIsWorkspaceOwner } from "../contacts/contacts-hooks";
 import { NavComposer } from "./NavComposer";
@@ -51,7 +51,7 @@ function AssetsSection() {
         {loadingBases ? (
           <Spinner size={16} />
         ) : stableBases.length === 0 ? (
-          <p className="text-gx-12 text-gx-text-hint">暂无数据库</p>
+          <EmptyState icon="database" title="暂无数据库" description="创建第一个智能数据库来存放结构化数据。" />
         ) : (
           <ul className="flex flex-col divide-y divide-gx-separator rounded-gx-lg border border-gx-separator">
             {stableBases.map((b) => (
@@ -76,7 +76,7 @@ function AssetsSection() {
         {loadingKb ? (
           <Spinner size={16} />
         ) : stableKbs.length === 0 ? (
-          <p className="text-gx-12 text-gx-text-hint">暂无知识库</p>
+          <EmptyState icon="book" title="暂无知识库" description="知识库用来沉淀文档与画布，可与数据库互链。" />
         ) : (
           <ul className="flex flex-col divide-y divide-gx-separator rounded-gx-lg border border-gx-separator">
             {stableKbs.map((k) => (

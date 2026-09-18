@@ -6,6 +6,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useViews, useGXMutations } from "../../api/hooks";
 import type { LockMode, PermissionSet, ViewDTO } from "@gx/shared-types";
 import { Button, Input, SegmentedControl, toast } from "../../components/ui";
+import { confirmIrreversible } from "../../components/feedback";
 
 export interface ViewSettingsPanelProps {
   view: ViewDTO;
@@ -55,6 +56,13 @@ export default function ViewSettingsPanel({ view, tableId, permissions, onClose 
 
   const remove = async () => {
     if (onlyOne) return;
+    // R-D-23 L4（视图删除不可恢复，回收站只收 record/table/field）+ R-D-24 主按钮必须是具体动词
+    const ok = await confirmIrreversible({
+      title: "删除视图",
+      confirmText: "删除视图",
+      description: `视图「${view.name}」会被删除，此操作不可撤销。至少要保留一个视图。`,
+    });
+    if (!ok) return;
     try {
       await m.deleteView.mutateAsync({ viewId: view.id, tableId });
       toast("已删除视图", "success");
@@ -112,7 +120,7 @@ export default function ViewSettingsPanel({ view, tableId, permissions, onClose 
           variant="danger"
           block
           disabled={!canSchema || onlyOne}
-          onClick={remove}
+          onClick={() => void remove()}
           title={onlyOne ? "至少保留一个视图" : undefined}
         >
           {onlyOne ? "删除视图（至少保留一个）" : "删除视图"}

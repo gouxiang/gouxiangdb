@@ -6,6 +6,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import {
   Badge,
+  EmptyState,
   Input,
   Menu,
   MenuItem,
@@ -17,8 +18,11 @@ import {
   toast,
 } from "../../components/ui";
 import type { KbDocDTO, KbDocKind } from "../../api/client";
-import { useKb, useKbDocs, useCreateDoc, useRenameDoc, useDeleteDoc } from "./kb-hooks";
+import { useKb, useKbDocs, useCreateDoc, useRenameDoc, useDeleteDoc, useRestoreDoc } from "./kb-hooks";
 import { DocKindIcon, formatTime, roleLabel } from "./kb-ui";
+// 阶段 4：删除统一走 L2 确认 + 撤销 toast（R-D-23 / R-I-08 / R-D-22）
+import { confirmSoftDelete } from "../../components/feedback";
+import { toastDeleted } from "../../components/interaction";
 import { DocAclModal } from "./DocAclModal";
 
 type Filter = "all" | KbDocKind;
@@ -34,11 +38,11 @@ export default function KbHomePage() {
   const [renameVal, setRenameVal] = useState("");
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [aclFor, setAclFor] = useState<KbDocDTO | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<KbDocDTO | null>(null);
 
   const { data: docs, isLoading } = useKbDocs(kbId, filter, debouncedQ);
   const createDoc = useCreateDoc(kbId!);
   const deleteDoc = useDeleteDoc(kbId!);
+  const restoreDoc = useRestoreDoc(kbId!);
   // 重命名目标变化时，mutation 闭包跟随最新 docId（hook 始终调用，仅参数变化）
   const renameDoc = useRenameDoc(renaming?.id ?? "__none__", kbId ?? "__none__");
 
@@ -84,12 +88,22 @@ export default function KbHomePage() {
     }
   }
 
-  async function doDelete() {
-    if (!confirmDelete) return;
+  // 阶段 4：删除确认改走 feedback.tsx 的 L2（与 KbTree 同一套文案与分级），
+  // 并补齐 R-I-08 要求的撤销 toast——此前这里删完既无撤销也无与树一致的确认口径。
+  async function doDelete(d: KbDocDTO) {
+    const ok = await confirmSoftDelete({
+      title: `删除「${d.title}」`,
+      confirmText: "删除并移入回收站",
+      description: "文档会移入回收站，30 天内可恢复；下级文档会一并保留在回收站。",
+    });
+    if (!ok) return;
     try {
-      await deleteDoc.mutateAsync(confirmDelete.id);
-      toast("已移入回收站", "success");
-      setConfirmDelete(null);
+      await deleteDoc.mutateAsync(d.id);
+      toastDeleted({
+        message: `已移入回收站「${d.title}」`,
+        restoredMessage: `已恢复「${d.title}」`,
+        onUndo: () => restoreDoc.mutateAsync(d.id),
+      });
     } catch (e) {
       toast(e instanceof Error ? e.message : "删除失败", "error");
     }
@@ -158,17 +172,14 @@ export default function KbHomePage() {
         {isLoading ? (
           <div className="flex justify-center py-20"><Spinner size={22} /></div>
         ) : (docs ?? []).length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gx-surface text-gx-text-hint">
-              <Icon name="doc" size={22} />
-            </div>
-            <div className="text-gx-14 font-medium text-gx-text-secondary">
-              {debouncedQ ? "没有匹配的内容" : "还没有内容"}
-            </div>
-            <div className="text-gx-12 text-gx-text-hint">
-              {debouncedQ ? "换个关键词试试" : "新建一篇 Markdown 文档或一张流程图画布开始"}
-            </div>
-          </div>
+          // R-D-13/14：搜索无结果走「筛选空态」（带清除筛选），首次为空走「首次空态」
+          <EmptyState
+            icon="doc"
+            kind={debouncedQ ? "filtered" : "first"}
+            title={debouncedQ ? undefined : "还没有内容"}
+            description={debouncedQ ? undefined : "新建一篇 Markdown 文档或一张流程图画布开始"}
+            onClearFilters={debouncedQ ? () => onSearch("") : undefined}
+          />
         ) : (
           <div className="overflow-hidden rounded-gx-lg border border-gx-border bg-gx-surface">
             {(docs ?? []).map((d, idx) => (
@@ -200,7 +211,7 @@ export default function KbHomePage() {
                       <MenuItem icon="edit" label="重命名" onClick={() => openRename(d)} />
                       <MenuItem icon="lock" label="独立权限" onClick={() => { setMenuFor(null); setAclFor(d); }} />
                       <MenuDivider />
-                      <MenuItem icon="trash" label="删除" danger onClick={() => { setMenuFor(null); setConfirmDelete(d); }} />
+                      <MenuItem icon="trash" label="删除" danger onClick={() => { setMenuFor(null); void doDelete(d); }} />
                     </Menu>
                   </Popover>
                 </span>
@@ -231,30 +242,6 @@ export default function KbHomePage() {
         }
       >
         <Input autoFocus value={renameVal} onChange={(e) => setRenameVal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitRename()} />
-      </Modal>
-
-      {/* 删除确认 */}
-      <Modal
-        open={!!confirmDelete}
-        title="删除确认"
-        onClose={() => setConfirmDelete(null)}
-        footer={
-          <>
-            <button className="text-gx-13 text-gx-text-tertiary hover:text-gx-text-primary" onClick={() => setConfirmDelete(null)}>
-              取消
-            </button>
-            <button
-              className="rounded-gx-lg bg-gx-danger px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
-              onClick={doDelete}
-            >
-              移入回收站
-            </button>
-          </>
-        }
-      >
-        <p className="text-gx-13 text-gx-text-secondary">
-          确定删除「{confirmDelete?.title}」吗？删除后进入回收站，可在 30 天内找回。
-        </p>
       </Modal>
 
       {/* 独立权限 */}

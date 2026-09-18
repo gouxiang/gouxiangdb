@@ -14,6 +14,9 @@ import { AVATAR_PALETTE } from "@gx/design-tokens";
 import { useAuthStore } from "../../store/auth";
 import { Badge, Input, Menu, MenuDivider, MenuItem, Modal, Popover, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
+// 阶段 4：删除统一走 L2 确认 + 撤销 toast（R-D-23 / R-I-08 / R-D-22）
+import { confirmSoftDelete } from "../../components/feedback";
+import { toastDeleted } from "../../components/interaction";
 import { LibrarySwitcher } from "../../components/LibrarySwitcher";
 import { PersonalCenterDrawer } from "../settings/PersonalCenterDrawer";
 import { DetailLayoutEditor } from "../detail/DetailLayout";
@@ -95,12 +98,24 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     }
   }
 
+  // 阶段 4 · R-D-23 L2（软删除进回收站，可恢复）+ R-I-08（toast 带撤销）
   async function deleteTable(id: string) {
     if (!baseId) return;
+    const name = (tables ?? []).find((t) => t.id === id)?.name ?? "该数据表";
+    const ok = await confirmSoftDelete({
+      title: `删除数据表「${name}」`,
+      confirmText: "删除数据表",
+      description: "数据表会移入回收站，30 天内可恢复。",
+    });
+    if (!ok) return;
     try {
       await m.deleteTable.mutateAsync({ tableId: id, baseId });
       if (id === tableId) navigate(`/base/${baseId}`);
-      toast("已删除数据表", "success");
+      toastDeleted({
+        message: `已删除数据表「${name}」`,
+        restoredMessage: `已恢复数据表「${name}」`,
+        onUndo: () => m.restoreTrash.mutateAsync({ id, kind: "table", baseId }),
+      });
     } catch (e) {
       toast(e instanceof Error ? e.message : "删除失败", "error");
     }

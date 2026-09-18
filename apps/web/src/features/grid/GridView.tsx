@@ -19,7 +19,18 @@ import { useRecordsInfinite } from "../../api/records-paging-hooks";
 import { isComputedInMem } from "../../api/records-paging";
 import { EmptyState, IconButton, Modal, Select, Input, Button, toast, COLOR_PALETTE } from "../../components/ui";
 import { SkeletonTable } from "../../components/states";
-import { confirmIrreversible } from "../../components/feedback";
+import { confirmIrreversible, confirmSoftDelete } from "../../components/feedback";
+// 阶段 4：R-D-15 延迟加载态 / R-I-26 防重复提交 / R-I-02 已加载 N 条 / R-I-05 列宽下限
+import {
+  MIN_COL_WIDTH,
+  TriStateCheckbox,
+  bulkDeleteText,
+  loadedCountText,
+  refreshingClass,
+  toastDeleted,
+  useDelayedFlag,
+  useWriteGuard,
+} from "../../components/interaction";
 import { ResultNotice, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
 import { GridToolbar } from "./GridToolbar";
 import { ViewSwitcher } from "./ViewSwitcher";
@@ -126,6 +137,12 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
   const [editingFieldMeta, setEditingFieldMeta] = useState<FieldDTO | null>(null);
   const [fieldEditorOpen, setFieldEditorOpen] = useState(false);
   const { data: tablesData } = useTables(baseId);
+  // R-I-26 写操作在途守卫（新建记录 / 批量删除）
+  const newRecordGuard = useWriteGuard();
+  // R-D-15：骨架屏 ≥300ms 才显示，避免「空白 → 骨架 → 内容」闪烁
+  const showSkeleton = useDelayedFlag(isLoading);
+  // R-D-27：局部刷新（续翻 / 筛选）保留旧内容 + 降透明度，不用骨架屏
+  const locallyRefreshing = isFetchingNextPage;
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
@@ -170,7 +187,8 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
       if (!f) return;
       setColWidths((prev) => ({
         ...prev,
-        [fieldId]: Math.max(60, (prev[fieldId] ?? defaultColWidth(f)) + delta),
+        // R-I-05：列宽拖拽最小 80px（此前是 60，低于规范下限）
+        [fieldId]: Math.max(MIN_COL_WIDTH, (prev[fieldId] ?? defaultColWidth(f)) + delta),
       }));
     },
     [visibleFields],
@@ -202,9 +220,26 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
       updateConfig({ hiddenFieldIds: [...cfg.hiddenFieldIds, fieldId] });
     }
   };
-  const deleteField = (fieldId: string) => {
+  // 阶段 4 · R-D-23 L2（软删除进回收站，可恢复）+ R-I-08（toast 带撤销）
+  const deleteField = async (fieldId: string) => {
     if (!permissions.canManageSchema) return;
-    void m.deleteField.mutateAsync({ fieldId, tableId, viewId }).then(() => toast("字段已删除", "success"));
+    const name = visibleFields.find((f) => f.id === fieldId)?.name ?? "该字段";
+    const ok = await confirmSoftDelete({
+      title: `删除字段「${name}」`,
+      confirmText: "删除字段",
+      description: "字段会移入回收站，30 天内可恢复；该列的数据会一并移入。",
+    });
+    if (!ok) return;
+    try {
+      await m.deleteField.mutateAsync({ fieldId, tableId, viewId });
+      toastDeleted({
+        message: `已删除字段「${name}」`,
+        restoredMessage: `已恢复字段「${name}」`,
+        onUndo: () => m.restoreTrash.mutateAsync({ id: fieldId, kind: "field", baseId }),
+      });
+    } catch (e) {
+      toast((e as Error)?.message ?? "删除失败", "error");
+    }
   };
 
   // 分组折叠
@@ -331,30 +366,37 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
 
   // ---------- 工具栏动作 ----------
   // 就地新建草稿行：先建空记录再逐格补值，draft 跳过创建期必填（与编辑期允许临时为空一致）。
+  //
+  // R-I-26：走写操作在途守卫。新建是最典型的"双击产生两条记录"入口——
+  // 按钮 loading 只能挡住单个按钮，这里的 key 级去重还能挡住连点与多入口并发。
   const onNewRecord = () =>
-    void m.createRecord
-      .mutateAsync({ tableId, fields: {}, viewId, draft: true })
-      .catch((e: unknown) => toast((e as Error)?.message || "新建记录失败", "error"));
-  // R-D-22 批量删除进回收站（可恢复）→ toast 必须带「撤销」，窗口 6s
-  const onBulkDelete = () => {
+    void newRecordGuard.run("new-record", () =>
+      m.createRecord
+        .mutateAsync({ tableId, fields: {}, viewId, draft: true })
+        .catch((e: unknown) => toast((e as Error)?.message || "新建记录失败", "error")),
+    );
+  // R-I-15 批量删除 = L2 确认 + 可撤销；R-D-22 撤销窗口 6s
+  const onBulkDelete = async () => {
     const ids = Array.from(selection.selectedIds);
     if (ids.length === 0) return;
-    void m.bulkDeleteRecords.mutateAsync({ ids, tableId, viewId }).then(() => {
-      selection.clear();
-      toast(`已删除 ${ids.length} 行`, {
-        kind: "success",
-        action: {
-          label: "撤销",
-          onClick: () => {
-            void Promise.all(
-              ids.map((id) => m.restoreTrash.mutateAsync({ id, kind: "record", baseId })),
-            )
-              .then(() => toast(`已恢复 ${ids.length} 行`, "success"))
-              .catch((e: unknown) => toast((e as Error)?.message ?? "撤销失败", "error"));
-          },
-        },
-      });
+    const ok = await confirmSoftDelete({
+      title: bulkDeleteText(ids.length, "行记录"),
+      confirmText: bulkDeleteText(ids.length, "行记录"),
+      description: "记录会先进入回收站，30 天内可恢复。",
+      count: ids.length,
     });
+    if (!ok) return;
+    try {
+      await m.bulkDeleteRecords.mutateAsync({ ids, tableId, viewId });
+      selection.clear();
+      toastDeleted({
+        message: `已删除 ${ids.length} 行`,
+        restoredMessage: `已恢复 ${ids.length} 行`,
+        onUndo: () => Promise.all(ids.map((id) => m.restoreTrash.mutateAsync({ id, kind: "record", baseId }))),
+      });
+    } catch (e) {
+      toast((e as Error)?.message ?? "删除失败", "error");
+    }
   };
   const onClearSelection = () => selection.clear();
   const onExport = () => exportCsv(visibleFields, records);
@@ -479,6 +521,14 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
 
   const totalWidth = ROW_HEADER_W + visibleFields.reduce((s, f) => s + widthOf(f), 0);
 
+  // R-I-13 表头三态：全选 / 部分选 / 未选（只按当前已加载行判定，符合"全选只作用于当前页"）
+  const headerCheckState: "none" | "partial" | "all" =
+    records.length > 0 && selection.count >= records.length
+      ? "all"
+      : selection.count > 0
+        ? "partial"
+        : "none";
+
   return (
     <div className="flex h-full flex-col bg-gx-surface">
       <GridToolbar
@@ -498,8 +548,10 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
         selectionCount={selection.count}
         onUpdateConfig={(p) => void updateConfig(p)}
         onNewRecord={onNewRecord}
+        newRecordBusy={newRecordGuard.isBusy("new-record")}
         onBulkDelete={onBulkDelete}
         onBulkEdit={() => setBulkEditOpen(true)}
+        onSelectAllPage={() => selection.toggleAll(records.map((r) => r.id))}
         onClearSelection={onClearSelection}
         onImport={onImport}
         onExport={onExport}
@@ -542,9 +594,9 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
         </div>
       )}
 
-      {isLoading ? (
+      {showSkeleton ? (
         // R-D-15 / R-D-25 / R-D-26：首屏加载用与表格同构的骨架屏（3–8 行），不用全屏遮罩。
-        // 局部刷新（翻页 / 筛选）按 R-D-27 保留旧内容，不走这里。
+        // 且只有请求超过 300ms 才走到这里（R-D-15）；局部刷新按 R-D-27 保留旧内容。
         <div className="flex-1 overflow-hidden">
           <SkeletonTable rows={6} cols={Math.min(Math.max(visibleFields.length, 3), 6)} />
         </div>
@@ -570,7 +622,7 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
         <div
           ref={scrollRef}
           tabIndex={0}
-          className="flex-1 overflow-auto outline-none"
+          className={clsx("flex-1 overflow-auto outline-none", refreshingClass(locallyRefreshing))}
           onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
           onKeyDown={onContainerKeyDown}
         >
@@ -580,7 +632,16 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
                 <th
                   className="sticky left-0 z-30 border-b border-r border-gx-separator bg-gx-table-header"
                   style={{ width: ROW_HEADER_W, minWidth: ROW_HEADER_W, height: 32 }}
-                />
+                >
+                  {/* R-I-13 表头复选框三态：未选 / 部分选（横线）/ 全选，只作用于当前页 */}
+                  <div className="flex h-full items-center justify-center">
+                    <TriStateCheckbox
+                      state={headerCheckState}
+                      onChange={() => selection.toggleAll(records.map((r) => r.id))}
+                      label="选择本页全部记录"
+                    />
+                  </div>
+                </th>
                 {visibleFields.map((f) => (
                   <GridHeaderCell
                     key={f.id}
@@ -687,6 +748,8 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
       {/* 状态栏 */}
       <div className="flex h-7 items-center gap-3 border-t border-gx-separator bg-gx-bg px-3 text-gx-11 text-gx-text-hint">
         <span>共 {total} 条</span>
+        {/* R-I-02：无限滚动口径下底部要告诉用户「已加载 N 条」 */}
+        <span>{loadedCountText(records.length, total)}</span>
         {filteredTotal !== total && <span>筛选后 {filteredTotal} 条</span>}
         {selection.count > 0 && <span className="text-gx-accent">已选 {selection.count} 行</span>}
         <span className="flex-1" />

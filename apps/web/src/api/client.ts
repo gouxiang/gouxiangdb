@@ -196,16 +196,62 @@ function handleUnauthorized(): void {
   }, 3000);
 }
 
-export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * 阶段 4 · 请求超时（UI-SPEC v1.0 R-I-27）
+ *
+ *   网络超时（>15s）提示「请求超时，请重试」，**不自动重试写操作**（避免重复创建）。
+ *
+ * 口径（保守，不改变任何既有行为）：
+ *   - `timeoutMs` 缺省 = 不设超时，与改造前完全一致（长任务 / 大响应不受影响）；
+ *   - 只有显式传入 `timeoutMs` 的请求才挂 AbortController，超时抛 `ApiTimeoutError`；
+ *   - 调用方拿到 `ApiTimeoutError` 后只提示、不重试（R-I-27 后半句）。
+ */
+export const WRITE_TIMEOUT_MS = 15_000;
+/** 长任务（导入 / 导出 / 重建索引）单独放宽：它们本来就慢，超时只用于兜住"永久挂起"。 */
+export const LONG_TASK_TIMEOUT_MS = 120_000;
+
+/** 请求超时错误。message 固定「请求超时，请重试」，便于 UI 直接展示。 */
+export class ApiTimeoutError extends Error {
+  constructor(
+    public path: string,
+    public timeoutMs: number,
+  ) {
+    super("请求超时，请重试");
+    this.name = "ApiTimeoutError";
+  }
+}
+
+export interface ApiFetchInit extends RequestInit {
+  /** R-I-27 超时毫秒数；不传 = 不超时（保持既有行为） */
+  timeoutMs?: number;
+}
+
+export async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
   const token = useAuthStore.getState().token;
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(token),
-      ...init?.headers,
-    },
-  });
+  const timeoutMs = init?.timeoutMs;
+  // 调用方显式给了 signal（可取消请求）时不抢它的控制器，直接透传
+  const controller = timeoutMs != null && timeoutMs > 0 && !init?.signal ? new AbortController() : null;
+  const timer =
+    controller && typeof setTimeout === "function"
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      ...init,
+      signal: controller?.signal ?? init?.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+        ...init?.headers,
+      },
+    });
+  } catch (e) {
+    if (controller?.signal.aborted) throw new ApiTimeoutError(path, timeoutMs ?? 0);
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     // 登录态失效（token 过期 / 被移除 / 服务端重启换密钥）：清理本地凭据并回登录页
@@ -305,7 +351,8 @@ export const Bases = {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
-  remove: (baseId: string) => apiFetch<{ ok: true }>(`/api/bases/${baseId}`, { method: "DELETE" }),
+  remove: (baseId: string) =>
+    apiFetch<{ ok: true }>(`/api/bases/${baseId}`, { method: "DELETE", timeoutMs: WRITE_TIMEOUT_MS }),
   stats: (baseId: string) =>
     apiFetch<{ stats: { tableCount: number; recordCount: number; fieldCount: number; memberCount: number } }>(
       `/api/bases/${baseId}/stats`,
@@ -367,14 +414,15 @@ export const Tables = {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
-  remove: (tableId: string) => apiFetch<{ ok: true }>(`/api/tables/${tableId}`, { method: "DELETE" }),
+  remove: (tableId: string) =>
+    apiFetch<{ ok: true }>(`/api/tables/${tableId}`, { method: "DELETE", timeoutMs: WRITE_TIMEOUT_MS }),
   duplicate: (tableId: string, data: { name?: string; withData?: boolean }) =>
     apiFetch<{ table: TableDTO }>(`/api/tables/${tableId}/duplicate`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
   clear: (tableId: string) =>
-    apiFetch<{ ok: true }>(`/api/tables/${tableId}/clear`, { method: "POST" }),
+    apiFetch<{ ok: true }>(`/api/tables/${tableId}/clear`, { method: "POST", timeoutMs: WRITE_TIMEOUT_MS }),
   exportUrl: (tableId: string, viewId?: string) =>
     `${BASE_URL}/api/tables/${tableId}/export.csv${qs({ viewId })}`,
   /**
@@ -387,7 +435,18 @@ export const Tables = {
   exportCsvText: async (tableId: string, viewId?: string): Promise<string> => {
     const path = `/api/tables/${tableId}/export.csv${qs({ viewId })}`;
     const token = useAuthStore.getState().token;
-    const res = await fetch(`${BASE_URL}${path}`, { headers: { ...authHeaders(token) } });
+    // R-I-27 长任务兜底超时：导出整表可能很慢（keyset 分批），故用 LONG_TASK 档而非写档。
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), LONG_TASK_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(`${BASE_URL}${path}`, { headers: { ...authHeaders(token) }, signal: controller.signal });
+    } catch (e) {
+      if (controller.signal.aborted) throw new ApiTimeoutError(path, LONG_TASK_TIMEOUT_MS);
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) {
       if (res.status === 401 && !isSelfCredential401Path(path)) handleUnauthorized();
       throw new ApiError(res.status, {}, parseRetryAfter(res.headers.get("Retry-After")));
@@ -410,7 +469,11 @@ export const Fields = {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
-  remove: (fieldId: string) => apiFetch<{ ok: true; deleted: string[] }>(`/api/fields/${fieldId}`, { method: "DELETE" }),
+  remove: (fieldId: string) =>
+    apiFetch<{ ok: true; deleted: string[] }>(`/api/fields/${fieldId}`, {
+      method: "DELETE",
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
   move: (fieldId: string, toIndex: number) =>
     apiFetch<{ fields: FieldDTO[] }>(`/api/fields/${fieldId}/move`, {
       method: "POST",
@@ -467,30 +530,38 @@ export const Records = {
     apiFetch<{ record: RecordDTO; affectedParents?: AffectedParent[] }>(`/api/records${qs({ tableId })}`, {
       method: "POST",
       body: JSON.stringify(data),
+      timeoutMs: WRITE_TIMEOUT_MS,
     }),
   get: (recordId: string) => apiFetch<{ record: RecordDTO; fields: FieldDTO[] }>(`/api/records/${recordId}`),
   update: (recordId: string, data: { fields: Record<string, unknown> }) =>
     apiFetch<{ record: RecordDTO | null; affectedParents?: AffectedParent[] }>(`/api/records/${recordId}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+      timeoutMs: WRITE_TIMEOUT_MS,
     }),
   remove: (recordId: string) =>
-    apiFetch<{ ok: true; affectedParents?: AffectedParent[] }>(`/api/records/${recordId}`, { method: "DELETE" }),
+    apiFetch<{ ok: true; affectedParents?: AffectedParent[] }>(`/api/records/${recordId}`, {
+      method: "DELETE",
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
 
   bulkDelete: (ids: string[]) =>
     apiFetch<{ ok: true; count: number }>("/api/records/bulk-delete", {
       method: "POST",
       body: JSON.stringify({ ids }),
+      timeoutMs: WRITE_TIMEOUT_MS,
     }),
   bulkUpdate: (ids: string[], fields: Record<string, unknown>) =>
     apiFetch<{ ok: true; count: number }>("/api/records/bulk-update", {
       method: "POST",
       body: JSON.stringify({ ids, fields }),
+      timeoutMs: WRITE_TIMEOUT_MS,
     }),
   csvImport: (tableId: string, data: { csv: string; hasHeader: boolean; mapping?: Record<string, string | null> }) =>
     apiFetch<{ result: CSVImportResult }>(`/api/records/csv-import${qs({ tableId })}`, {
       method: "POST",
       body: JSON.stringify(data),
+      timeoutMs: LONG_TASK_TIMEOUT_MS,
     }),
 
   comments: (recordId: string) => apiFetch<{ comments: CommentDTO[] }>(`/api/records/${recordId}/comments`),
@@ -498,18 +569,26 @@ export const Records = {
     apiFetch<{ comment: CommentDTO }>(`/api/records/${recordId}/comments`, {
       method: "POST",
       body: JSON.stringify({ body }),
+      timeoutMs: WRITE_TIMEOUT_MS,
     }),
   removeComment: (commentId: string) =>
-    apiFetch<{ ok: true }>(`/api/records/comments/${commentId}`, { method: "DELETE" }),
+    apiFetch<{ ok: true }>(`/api/records/comments/${commentId}`, {
+      method: "DELETE",
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
 
   trash: (baseId: string) => apiFetch<{ items: TrashItemDTO[] }>(`/api/records/trash${qs({ baseId })}`),
   restore: (id: string, kind: "record" | "table" | "field") =>
     apiFetch<{ ok: true }>(`/api/records/trash/${id}/restore`, {
       method: "POST",
       body: JSON.stringify({ kind }),
+      timeoutMs: WRITE_TIMEOUT_MS,
     }),
   purge: (id: string, kind: "record" | "table" | "field") =>
-    apiFetch<{ ok: true }>(`/api/records/trash/${id}${qs({ kind })}`, { method: "DELETE" }),
+    apiFetch<{ ok: true }>(`/api/records/trash/${id}${qs({ kind })}`, {
+      method: "DELETE",
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
 
   search: (baseId: string, q: string) =>
     apiFetch<{
@@ -569,7 +648,8 @@ export const Views = {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
-  remove: (viewId: string) => apiFetch<{ ok: true }>(`/api/views/${viewId}`, { method: "DELETE" }),
+  remove: (viewId: string) =>
+    apiFetch<{ ok: true }>(`/api/views/${viewId}`, { method: "DELETE", timeoutMs: WRITE_TIMEOUT_MS }),
   duplicate: (viewId: string) => apiFetch<{ view: ViewDTO }>(`/api/views/${viewId}/duplicate`, { method: "POST" }),
 };
 
@@ -655,7 +735,8 @@ export const KbApi = {
     apiFetch<{ knowledgeBase: KbDTO }>("/api/kb", { method: "POST", body: JSON.stringify(data) }),
   update: (kbId: string, data: { name?: string; iconColor?: string }) =>
     apiFetch<{ knowledgeBase: KbDTO }>(`/api/kb/${kbId}`, { method: "PATCH", body: JSON.stringify(data) }),
-  remove: (kbId: string) => apiFetch<{ ok: true }>(`/api/kb/${kbId}`, { method: "DELETE" }),
+  remove: (kbId: string) =>
+    apiFetch<{ ok: true }>(`/api/kb/${kbId}`, { method: "DELETE", timeoutMs: WRITE_TIMEOUT_MS }),
 
   members: (kbId: string) => apiFetch<{ members: KbMemberDTO[] }>(`/api/kb/${kbId}/members`),
   addMember: (kbId: string, data: { email: string; role: Role }) =>
@@ -664,7 +745,10 @@ export const KbApi = {
       body: JSON.stringify(data),
     }),
   removeMember: (kbId: string, userId: string) =>
-    apiFetch<{ ok: true }>(`/api/kb/${kbId}/members/${userId}`, { method: "DELETE" }),
+    apiFetch<{ ok: true }>(`/api/kb/${kbId}/members/${userId}`, {
+      method: "DELETE",
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
 
   docs: (kbId: string, params?: { kind?: KbDocKind; q?: string }) =>
     apiFetch<{ docs: KbDocDTO[] }>(`/api/kb/${kbId}/docs${qs(params ?? {})}`),
@@ -700,10 +784,20 @@ export const KbApi = {
     apiFetch<{ ok: true; snapshotted: boolean; savedAt: string; contentVersion: number | null }>(`/api/kb/docs/${docId}/content`, {
       method: "PUT",
       body: JSON.stringify(data),
+      timeoutMs: WRITE_TIMEOUT_MS,
     }),
-  deleteDoc: (docId: string) => apiFetch<{ ok: true }>(`/api/kb/docs/${docId}`, { method: "DELETE" }),
-  restoreDoc: (docId: string) => apiFetch<{ ok: true }>(`/api/kb/docs/${docId}/restore`, { method: "POST" }),
-  purgeDoc: (docId: string) => apiFetch<{ ok: true }>(`/api/kb/docs/${docId}/permanent`, { method: "DELETE" }),
+  deleteDoc: (docId: string) =>
+    apiFetch<{ ok: true }>(`/api/kb/docs/${docId}`, { method: "DELETE", timeoutMs: WRITE_TIMEOUT_MS }),
+  restoreDoc: (docId: string) =>
+    apiFetch<{ ok: true }>(`/api/kb/docs/${docId}/restore`, {
+      method: "POST",
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
+  purgeDoc: (docId: string) =>
+    apiFetch<{ ok: true }>(`/api/kb/docs/${docId}/permanent`, {
+      method: "DELETE",
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
 
   trash: (kbId: string) => apiFetch<{ docs: KbDocDTO[] }>(`/api/kb/${kbId}/trash`),
 

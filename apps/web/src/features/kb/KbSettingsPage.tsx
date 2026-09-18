@@ -5,10 +5,11 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { Icon } from "../../components/icons";
-import { Input, Select, Spinner, toast } from "../../components/ui";
+import { EmptyState, Input, Select, Spinner, toast } from "../../components/ui";
 import { useKb, useKbMembers, useAddKbMember, useRemoveKbMember } from "./kb-hooks";
 import { roleLabel, KB_ROLE_RANK } from "./kb-ui";
 import { UploadLimitsPanel } from "./UploadLimitsPanel";
+import { confirmAction } from "../../components/feedback";
 import { useAuthStore } from "../../store/auth";
 
 const ADD_ROLES = [
@@ -43,8 +44,17 @@ export default function KbSettingsPage() {
     }
   }
 
-  async function remove(userId: string) {
+  async function remove(userId: string, label: string) {
     if (userId === me?.id) return;
+    // 与库成员同一口径：无撤销接口 → 显式确认；可重新邀请 → L2 而非 L4。
+    const ok = await confirmAction({
+      title: "移除成员",
+      confirmText: "移除成员",
+      cancelText: "取消",
+      level: 2,
+      description: `${label} 将失去本知识库的访问权限，可重新添加恢复。`,
+    });
+    if (!ok) return;
     try {
       await removeMember.mutateAsync(userId);
       toast("已移除成员", "success");
@@ -96,7 +106,7 @@ export default function KbSettingsPage() {
                     {canRemove && (
                       <button
                         type="button"
-                        onClick={() => remove(m.userId)}
+                        onClick={() => void remove(m.userId, m.displayName || m.email || "该成员")}
                         className="rounded p-1 text-gx-text-tertiary hover:bg-gx-danger-bg hover:text-gx-danger"
                         title="移除成员"
                       >
@@ -107,7 +117,11 @@ export default function KbSettingsPage() {
                 );
               })}
               {(members ?? []).length === 0 && (
-                <div className="px-4 py-8 text-center text-gx-12 text-gx-text-hint">暂无其他成员</div>
+                <EmptyState
+                  icon="users"
+                  title="暂无其他成员"
+                  description="用上方表单按邮箱添加成员，并为其指定可编辑 / 可评论 / 仅查看。"
+                />
               )}
             </div>
           )}

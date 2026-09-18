@@ -21,6 +21,14 @@ import { GroupPanel } from "./GroupPanel";
 import { RowColorPanel } from "./RowColorPanel";
 import FieldEditorSheet from "../designer/FieldEditorSheet";
 import { isSortGroupRestricted } from "../../api/records-paging";
+// 阶段 4：批量条（R-I-12/13/14）、搜索框 170×32 与防抖 300ms（R-I-03）、「筛选中」徽标（R-I-04）
+import {
+  BulkActionBar,
+  FilterActiveBadge,
+  ListSearchBox,
+  bulkDeleteText,
+  useDebouncedCommit,
+} from "../../components/interaction";
 
 export interface GridToolbarProps {
   config: ViewConfig;
@@ -37,10 +45,13 @@ export interface GridToolbarProps {
   filteredTotal: number;
   permissions: { canEditData: boolean; canManageSchema: boolean };
   selectionCount: number;
+  /** R-I-26 新建记录在途（按钮立即禁用 + spinner，防双击产生两条） */
+  newRecordBusy?: boolean;
   onUpdateConfig: (partial: Partial<ViewConfig>) => void;
   onNewRecord: () => void;
   onBulkDelete: () => void;
   onBulkEdit: () => void;
+  onSelectAllPage: () => void;
   onClearSelection: () => void;
   onImport: () => void;
   onExport: () => void;
@@ -95,10 +106,12 @@ export function GridToolbar(props: GridToolbarProps) {
     filteredTotal,
     permissions,
     selectionCount,
+    newRecordBusy,
     onUpdateConfig,
     onNewRecord,
     onBulkDelete,
     onBulkEdit,
+    onSelectAllPage,
     onClearSelection,
     onImport,
     onExport,
@@ -108,39 +121,32 @@ export function GridToolbar(props: GridToolbarProps) {
   } = props;
 
   const [open, setOpen] = useState<string | null>(null);
-  const [search, setSearch] = useState(config.search);
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // 搜索防抖 300ms
-  useEffect(() => {
-    setSearch(config.search);
-  }, [config.search]);
-
-  const onSearchChange = (v: string) => {
-    setSearch(v);
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => onUpdateConfig({ search: v }), 300);
-  };
+  // R-I-03：搜索输入防抖 300ms（此前是各列表各写一份 setTimeout，口径统一到 hook）
+  const search = useDebouncedCommit(config.search, (v) => onUpdateConfig({ search: v }));
 
   const filterActive = config.filters != null;
   const filterCount = filterActive ? countConditions(config.filters) : 0;
 
-  // 批量操作条
+  // R-I-12 批量条：勾选后**替换**原工具栏，显示「已选 N 条」+ 操作 + 取消选择
   if (selectionCount > 0) {
     return (
-      <div className="flex h-12 items-center gap-2 border-b border-gx-separator bg-gx-accent-bg px-3">
-        <span className="text-gx-13 font-medium text-gx-accent">{selectionCount} 行已选</span>
-        <div className="h-5 w-px bg-gx-border" />
-        <Button size="sm" variant="secondary" onClick={onBulkEdit}>
-          批量修改字段…
-        </Button>
-        <Button size="sm" variant="danger" icon="trash" onClick={onBulkDelete}>
-          删除
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onClearSelection}>
-          取消选择
-        </Button>
-      </div>
+      <BulkActionBar
+        count={selectionCount}
+        total={filteredTotal}
+        onSelectAll={onSelectAllPage}
+        onClearSelection={onClearSelection}
+        actions={
+          <>
+            <Button size="sm" variant="secondary" onClick={onBulkEdit}>
+              批量修改字段…
+            </Button>
+            {/* R-I-14：批量操作前展示影响条数——按钮文案直接带条数 */}
+            <Button size="sm" variant="danger" icon="trash" onClick={onBulkDelete}>
+              {bulkDeleteText(selectionCount, "行")}
+            </Button>
+          </>
+        }
+      />
     );
   }
 
@@ -155,11 +161,20 @@ export function GridToolbar(props: GridToolbarProps) {
         variant="primary"
         icon="plus"
         disabled={!permissions.canEditData}
+        loading={newRecordBusy}
         onClick={onNewRecord}
         title={!permissions.canEditData ? "无编辑权限" : "新建记录"}
       >
         新建记录
       </Button>
+
+      {/* R-I-04：筛选生效后在工具栏显示「筛选中」徽标，可一键清空 */}
+      {filterActive && (
+        <FilterActiveBadge
+          count={filterCount || undefined}
+          onClear={() => onUpdateConfig({ filters: null })}
+        />
+      )}
 
       <div className="relative">
         <ToolButton icon="rowHeight" label="行高" onClick={() => setOpen(open === "rh" ? null : "rh")} />
@@ -309,16 +324,13 @@ export function GridToolbar(props: GridToolbarProps) {
 
       <div className="flex-1" />
 
-      {/* 右段：搜索 */}
-      <div className="relative">
-        <Icon name="search" size={14} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-gx-text-hint" />
-        <Input
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="搜索此视图…"
-          className="h-8 w-48 pl-7"
-        />
-      </div>
+      {/* 右段：搜索（R-I-03 宽 170 / 高 32 / 防抖 300ms / 搜索中置灰保留旧结果） */}
+      <ListSearchBox
+        value={search.value}
+        onChange={search.setValue}
+        placeholder="搜索此视图…"
+        searching={search.pending}
+      />
 
       <div className="relative">
         <ToolButton icon="download" label="更多" onClick={() => setOpen(open === "more" ? null : "more")} />

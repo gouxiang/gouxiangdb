@@ -21,6 +21,9 @@ import {
 } from "../../components/ui";
 import { DetailLayoutEditor, DetailLayoutRenderer } from "../detail/DetailLayout";
 import { Icon } from "../../components/icons";
+// 阶段 4：删除走 L2 确认 + 统一撤销 toast；写操作走在途守卫（R-D-23 / R-I-08 / R-I-26）
+import { confirmSoftDelete } from "../../components/feedback";
+import { toastDeleted, useWriteGuard } from "../../components/interaction";
 
 export interface RecordDrawerProps {
   open: boolean;
@@ -150,6 +153,8 @@ function RecordDrawer({
   const user = useAuthStore((s) => s.user);
   const [draftComment, setDraftComment] = useState("");
   const [showComments, setShowComments] = useState(true);
+  // R-I-26 写操作在途守卫：删除 / 发评论 / 删评论各按 key 去重，防双击重复提交
+  const guard = useWriteGuard();
 
   // 抽屉宽度：localStorage 持久化，clamp 到 [340, 960]
   const [drawerWidth, setDrawerWidth] = useState<number>(() => getStoredDrawerWidth());
@@ -183,45 +188,52 @@ function RecordDrawer({
   const submitComment = async () => {
     const body = draftComment.trim();
     if (!body || !currentId) return;
-    try {
-      await m.addComment.mutateAsync({ recordId: currentId, body });
-      setDraftComment("");
-    } catch (err) {
-      toast((err as Error).message || "评论失败", "error");
-    }
+    await guard.run("comment:add", async () => {
+      try {
+        await m.addComment.mutateAsync({ recordId: currentId, body });
+        setDraftComment("");
+      } catch (err) {
+        toast((err as Error).message || "评论失败", "error");
+      }
+    });
   };
 
   const removeComment = async (commentId: string) => {
     if (!currentId) return;
-    try {
-      await m.removeComment.mutateAsync({ commentId, recordId: currentId });
-    } catch (err) {
-      toast((err as Error).message || "删除失败", "error");
-    }
+    await guard.run(`comment:del:${commentId}`, async () => {
+      try {
+        await m.removeComment.mutateAsync({ commentId, recordId: currentId });
+      } catch (err) {
+        toast((err as Error).message || "删除失败", "error");
+      }
+    });
   };
 
   const handleDelete = async () => {
     if (!currentId || !permissions.canEditData) return;
     const deletedId = currentId;
-    try {
-      await m.deleteRecord.mutateAsync({ recordId: deletedId, tableId });
-      // R-D-22 删除类成功 toast 必须带「撤销」，窗口 6 秒（记录进回收站，30 天内可恢复）
-      toast("已删除记录", {
-        kind: "success",
-        action: {
-          label: "撤销",
-          onClick: () => {
-            void m.restoreTrash
-              .mutateAsync({ id: deletedId, kind: "record", baseId })
-              .then(() => toast("已恢复记录", "success"))
-              .catch((e: unknown) => toast((e as Error)?.message ?? "撤销失败", "error"));
-          },
-        },
-      });
-      onClose();
-    } catch (err) {
-      toast((err as Error).message || "删除失败", "error");
-    }
+    const name = title || "未命名";
+    // R-D-23 L2：软删除是可恢复操作，走普通确认（不是 L4——记录进回收站可找回）
+    const ok = await confirmSoftDelete({
+      title: `删除记录「${name}」`,
+      confirmText: "删除记录",
+      description: "记录会移入回收站，30 天内可恢复。",
+    });
+    if (!ok) return;
+    await guard.run("record:delete", async () => {
+      try {
+        await m.deleteRecord.mutateAsync({ recordId: deletedId, tableId });
+        // R-D-22 删除类成功 toast 必须带「撤销」，窗口 6 秒（记录进回收站，30 天内可恢复）
+        toastDeleted({
+          message: `已删除记录「${name}」`,
+          restoredMessage: `已恢复记录「${name}」`,
+          onUndo: () => m.restoreTrash.mutateAsync({ id: deletedId, kind: "record", baseId }),
+        });
+        onClose();
+      } catch (err) {
+        toast((err as Error).message || "删除失败", "error");
+      }
+    });
   };
 
   // 抽屉内联编辑后刷新当前记录展示
@@ -355,7 +367,8 @@ function RecordDrawer({
                         size="sm"
                         variant="primary"
                         disabled={!currentId || !draftComment.trim()}
-                        onClick={submitComment}
+                        loading={guard.isBusy("comment:add")}
+                        onClick={() => void submitComment()}
                       >
                         发表
                       </Button>
@@ -377,6 +390,7 @@ function RecordDrawer({
                             <button
                               type="button"
                               onClick={() => void removeComment(c.id)}
+                              disabled={guard.isBusy(`comment:del:${c.id}`)}
                               className="ml-auto text-gx-11 text-gx-text-hint hover:text-gx-danger"
                             >
                               删除
@@ -396,7 +410,13 @@ function RecordDrawer({
         {/* 底部操作栏 */}
         <div className="flex items-center gap-2 border-t border-gx-separator px-4 py-2.5">
           {permissions.canEditData && (
-            <Button variant="danger" size="sm" icon="trash" onClick={handleDelete}>
+            <Button
+              variant="danger"
+              size="sm"
+              icon="trash"
+              loading={guard.isBusy("record:delete")}
+              onClick={() => void handleDelete()}
+            >
               删除记录
             </Button>
           )}

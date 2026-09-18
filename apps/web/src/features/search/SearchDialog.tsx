@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useUnifiedSearch } from "./search-hooks";
 import { hitHref, type UnifiedHit } from "./search-adapter";
-import { Spinner } from "../../components/ui";
+import { EmptyState, Spinner } from "../../components/ui";
 import { Icon } from "../../components/icons";
 
 export interface SearchDialogProps {
@@ -191,9 +191,8 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
           )}
 
           {q && !isFetching && hits.length === 0 && (
-            <div className="px-4 py-10 text-center text-gx-13 text-gx-text-hint">
-              没有找到匹配的记录或文档
-            </div>
+            // R-D-14 筛选空态：三要素齐备（图标 + 主文案 + 次文案），不再只剩一句灰字
+            <EmptyState kind="filtered" title="没有找到匹配的记录或文档" description="换个关键词试试，或改用更短的关键词。" />
           )}
 
           {docs.length > 0 && (

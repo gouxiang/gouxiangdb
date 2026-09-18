@@ -85,6 +85,56 @@ export function confirmIrreversible(opts: Omit<ConfirmOptions, "level">): Promis
 }
 
 /**
+ * 「关闭会丢失未保存改动」确认（R-F-20「表单有未保存改动时，关闭弹窗/抽屉需二次确认」）。
+ *
+ * 走 L2 普通确认即可（改动还没丢，用户只是被拦一下）。
+ *
+ * 替换原生 `window.confirm` 的两个理由：
+ *   ① 原生 confirm 在自动化测试环境（jsdom / node 无 UI 实现）会挂死或恒返回默认值，
+ *      关闭路径因此无法被断言——这是本次替换的现实动因；
+ *   ② 原生弹窗文案与按钮不可控，与 R-D-24「主按钮必须是具体动词」冲突。
+ *
+ * @returns true = 用户确认放弃改动，调用方应继续关闭；false = 保留当前弹窗。
+ */
+export function confirmDiscardChanges(opts?: {
+  /** 覆盖说明文案（默认说明"未保存的改动会被丢弃"） */
+  description?: ReactNode;
+  /** 覆盖主按钮文案（默认「放弃改动」，具体动词，不用「确定」） */
+  confirmText?: string;
+  /** 次按钮文案，默认「继续编辑」（比「取消」更贴合语境） */
+  cancelText?: string;
+}): Promise<boolean> {
+  return confirmAction({
+    title: "放弃未保存的改动？",
+    confirmText: opts?.confirmText ?? "放弃改动",
+    cancelText: opts?.cancelText ?? "继续编辑",
+    level: 2,
+    description: opts?.description ?? "关闭后这些改动不会保存，也无法找回。",
+  });
+}
+
+/**
+ * 清空表数据（R-D-23 L3）。
+ *
+ * 与「删除数据表」不同：服务端 `POST /tables/:id/clear` 是**软删**全部记录（进回收站，
+ * 30 天内可恢复），但只回 `{ ok: true }`，**不返回被清掉的 id 列表**——因此做不出
+ * 「一键撤销」的 toast（不知道该恢复哪些）。故：
+ *   - 升到 L3（需原样输入表名）而不是 L2，用强度补偿缺失的撤销；
+ *   - 文案明说「没有一键撤销，需到回收站逐条恢复」，不谎称可撤销（R-D-22 的精神是
+ *     「删除必须给用户退路」，退路在回收站，不是假按钮）。
+ */
+export function confirmClearTable(opts: { tableName: string; scopedToView?: boolean }): Promise<boolean> {
+  return confirmAction({
+    title: `清空「${opts.tableName}」的数据`,
+    confirmText: "清空数据",
+    cancelText: "取消",
+    level: 3,
+    confirmName: opts.tableName,
+    description: `${opts.scopedToView ? "当前视图内" : "整张表"}的记录会被清空并移入回收站，30 天内可在回收站恢复。清空没有一键撤销，需要在回收站逐条恢复。`,
+  });
+}
+
+/**
  * R-D-23 分级 → 确认强度的纯映射（抽出来便于单测，组件内部同样走它）。
  * L1 无确认（不弹窗）；L2 普通；L3 需输入名称；L4 不可恢复红色；L5 勾选 + 输入。
  */

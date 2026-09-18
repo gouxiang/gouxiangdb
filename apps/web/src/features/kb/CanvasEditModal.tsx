@@ -11,6 +11,8 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../../components/icons";
 import { Spinner, toast } from "../../components/ui";
+// 阶段 4：关闭确认从 window.confirm 换成 feedback 的 L2 确认（原生 confirm 在自动化测试环境会挂死）
+import { confirmDiscardChanges } from "../../components/feedback";
 import { KbApi, PublicApi } from "../../api/client";
 import { useResolvedDoc } from "./hooks/useResolvedDoc";
 import { useModalKeyboardGuard } from "./hooks/useModalKeyboardGuard";
@@ -56,9 +58,12 @@ export function CanvasEditModal({
   // C-6：画布内容脏标记。GxCanvas 的 onContentChange 有 lastEmitted 去重（初始挂载不触发），
   // 回调触发即代表用户真实修改过；关闭时据此确认，避免 Esc/遮罩直接丢弃未保存内容。
   const dirtyRef = useRef(false);
-  const requestClose = () => {
+  const requestClose = async () => {
     if (savingRef.current) return;
-    if (dirtyRef.current && !window.confirm("画布有未保存的修改，关闭将丢弃这些修改。确定关闭吗？")) return;
+    if (dirtyRef.current) {
+      const ok = await confirmDiscardChanges({ description: "画布有未保存的修改，关闭后不会保存。" });
+      if (!ok) return;
+    }
     onClose();
   };
 
@@ -93,10 +98,10 @@ export function CanvasEditModal({
       ref={modalRef}
       className="gx-z-canvas-modal fixed inset-0 flex items-center justify-center p-6"
       onKeyDown={(e) => {
-        if (e.key === "Escape" && !saving) requestClose();
+        if (e.key === "Escape" && !saving) void requestClose();
       }}
     >
-      <div className="absolute inset-0 bg-black/40" onClick={saving ? undefined : requestClose} />
+      <div className="absolute inset-0 bg-black/40" onClick={saving ? undefined : () => void requestClose()} />
       <div className="relative flex h-[86vh] w-[90vw] flex-col overflow-hidden rounded-gx-xl bg-gx-surface shadow-2xl">
         {/* 顶栏 */}
         <div className="flex items-center gap-2 border-b border-gx-separator px-4 py-2.5">
@@ -115,7 +120,7 @@ export function CanvasEditModal({
           </button>
           <button
             type="button"
-            onClick={requestClose}
+            onClick={() => void requestClose()}
             disabled={saving}
             className="inline-flex h-8 items-center rounded-gx-lg border border-gx-border bg-gx-surface px-3 text-gx-12 text-gx-text-secondary hover:bg-gx-bg disabled:opacity-50"
           >

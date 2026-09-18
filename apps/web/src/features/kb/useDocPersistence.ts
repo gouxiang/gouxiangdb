@@ -26,6 +26,14 @@ export function useDocPersistence(
   const qc = useQueryClient();
   const [status, setStatus] = useState<SaveStatus>("saved");
   const [recovered, setRecovered] = useState<Draft | null>(null);
+  /**
+   * 阶段 4 · R-D-18 冲突（409）：保存撞上他人已保存时置位，由页面就地渲染
+   * `<ConflictNotice>`（「查看最新版本 / 保留我的版本」二选一），禁止静默覆盖。
+   * 带上服务端回给的 currentVersion，供「保留我的版本」以新版本号为基线重写。
+   */
+  const [conflict, setConflict] = useState<{ currentVersion: number | null } | null>(null);
+  const conflictRef = useRef<{ currentVersion: number | null } | null>(null);
+  conflictRef.current = conflict;
 
   const pending = useRef<string | null>(null); // 待保存的最新内容
   const lastSaved = useRef<string>(serverContent ?? ""); // 已成功落库的内容
@@ -67,9 +75,10 @@ export function useDocPersistence(
   }, [docId, serverContent === undefined ? "" : serverContent, serverVersion]);
 
   const persist = useCallback(
-    async (content: string, opts: { manual?: boolean } = {}) => {
+    async (content: string, opts: { manual?: boolean; force?: boolean } = {}) => {
       if (!canEdit) return;
-      if (content === lastSaved.current) {
+      // force：冲突后「保留我的版本」重写时，内容可能与 lastSaved 字面相同，必须跳过短路
+      if (!opts.force && content === lastSaved.current) {
         pending.current = null;
         setStatus("saved");
         return;
@@ -89,11 +98,13 @@ export function useDocPersistence(
         setStatus("unsaved");
         // 落库失败：内容留在本地草稿，绝不丢
         saveDraft(docIdRef.current, { content, baseContent: baseContent.current });
-        // S-1：版本冲突（他人已保存）——本地内容已入草稿，提示并刷新缓存供用户合并
-        const conflict = e instanceof ApiError && e.status === 409;
-        if (conflict) {
+        // S-1：版本冲突（他人已保存）——本地内容已入草稿；置位冲突态让页面就地提示，
+        // 由用户二选一（R-D-18），不再只用一条 toast 把决定权静默交给"刷新"。
+        const conflictErr = e instanceof ApiError && e.status === 409;
+        if (conflictErr) {
+          const cur = (e.body as { currentVersion?: number | null } | undefined)?.currentVersion ?? null;
+          setConflict({ currentVersion: cur });
           void qc.invalidateQueries({ queryKey: ["kb", "doc", docIdRef.current] });
-          toast("文档已被他人修改，你的内容已保留在本地草稿，请刷新后合并", "error");
         } else if (opts.manual) {
           toast(e instanceof Error ? `保存失败：${e.message}` : "保存失败，已保留本地草稿", "error");
         }
@@ -101,8 +112,34 @@ export function useDocPersistence(
         saving.current = false;
       }
     },
-    [canEdit],
+    [canEdit, qc],
   );
+
+  /**
+   * R-D-18「查看最新版本」：丢弃本地未落库内容，基线跟到服务端最新版本号。
+   * 页面调用后应 refetch 并把编辑器内容重置为服务端值（本 hook 不持有编辑器状态）。
+   * 本地草稿同步清除——用户已明确选择以服务端版本为准。
+   */
+  const takeLatestVersion = useCallback(() => {
+    const cur = conflictRef.current;
+    if (cur?.currentVersion != null) versionRef.current = cur.currentVersion;
+    pending.current = null;
+    clearDraft(docIdRef.current);
+    setConflict(null);
+    setStatus("saved");
+  }, []);
+
+  /**
+   * R-D-18「保留我的版本」：以服务端最新版本号为新基线，把本地内容覆盖写回。
+   * 走 force 跳过「与上次已保存内容相同」的短路，确保这一次一定会发出 PUT。
+   */
+  const keepMineVersion = useCallback(async () => {
+    const cur = conflictRef.current;
+    if (cur?.currentVersion != null) versionRef.current = cur.currentVersion;
+    setConflict(null);
+    const content = pending.current ?? lastSaved.current;
+    await persist(content, { manual: true, force: true });
+  }, [persist]);
 
   // 内容变更（编辑中高频调用）
   const markDirty = useCallback(
@@ -196,5 +233,21 @@ export function useDocPersistence(
     pending.current = null;
   }, [docId]);
 
-  return { status, markDirty, saveNow, flush, recovered, recoverDraft, discardDraft };
+  // 新文档 / 新版本基线：清掉上一份文档遗留的冲突态，避免串台误报
+  useEffect(() => {
+    setConflict(null);
+  }, [docId]);
+
+  return {
+    status,
+    markDirty,
+    saveNow,
+    flush,
+    recovered,
+    recoverDraft,
+    discardDraft,
+    conflict,
+    takeLatestVersion,
+    keepMineVersion,
+  };
 }

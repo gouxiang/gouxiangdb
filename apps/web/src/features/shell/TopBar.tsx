@@ -5,9 +5,12 @@
 import { useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Tables } from "../../api/client";
-import { useBase, useGXMutations } from "../../api/hooks";
+import { useBase, useGXMutations, useTables } from "../../api/hooks";
 import { IconButton, Input, Menu, MenuItem, Modal, Popover, toast } from "../../components/ui";
 import { Icon, VIEW_ICON } from "../../components/icons";
+// 阶段 4：删除统一走 L2 确认 + 撤销 toast（R-D-23 / R-I-08 / R-D-22）
+import { confirmSoftDelete, confirmClearTable } from "../../components/feedback";
+import { toastDeleted } from "../../components/interaction";
 import { VIEW_TYPES, VIEW_TYPE_LABEL, type ViewType } from "@gx/shared-types";
 import { ViewTabs } from "./ViewTabs";
 
@@ -16,6 +19,7 @@ export function TopBar() {
   const { baseId, tableId, viewId } = useParams();
 
   const baseQ = useBase(baseId ?? null);
+  const { data: tables } = useTables(baseId ?? null);
   const perms = baseQ.data?.permissions;
   const canManageSchema = perms?.canManageSchema ?? false;
   const canManageBase = perms?.canManageBase ?? false;
@@ -88,21 +92,37 @@ export function TopBar() {
   async function clearTable() {
     setMore(false);
     if (!tableId) return;
+    // R-D-23 L3：清空是软删进回收站但没有批量撤销接口，故用「输入表名」的强度补偿
+    const tableName = (tables ?? []).find((t) => t.id === tableId)?.name ?? "该数据表";
+    const ok = await confirmClearTable({ tableName, scopedToView: !!viewId });
+    if (!ok) return;
     try {
       await m.clearTable.mutateAsync({ tableId, viewId });
-      toast("已清空数据", "success");
+      toast("已清空数据，记录已移入回收站", "success");
     } catch (e) {
       toast(e instanceof Error ? e.message : "清空失败", "error");
     }
   }
 
+  // 阶段 4 · R-D-23 L2（软删除进回收站，可恢复）+ R-I-08（toast 带撤销）
   async function deleteTable() {
     setMore(false);
-    if (!tableId) return;
+    if (!tableId || !baseId) return;
+    const tableName = (tables ?? []).find((t) => t.id === tableId)?.name ?? "该数据表";
+    const ok = await confirmSoftDelete({
+      title: `删除数据表「${tableName}」`,
+      confirmText: "删除数据表",
+      description: "数据表会移入回收站，30 天内可恢复。",
+    });
+    if (!ok) return;
     try {
-      await m.deleteTable.mutateAsync({ tableId, baseId: baseId ?? "" });
+      await m.deleteTable.mutateAsync({ tableId, baseId });
       navigate(`/base/${baseId}`);
-      toast("已删除数据表", "success");
+      toastDeleted({
+        message: `已删除数据表「${tableName}」`,
+        restoredMessage: `已恢复数据表「${tableName}」`,
+        onUndo: () => m.restoreTrash.mutateAsync({ id: tableId, kind: "table", baseId }),
+      });
     } catch (e) {
       toast(e instanceof Error ? e.message : "删除失败", "error");
     }

@@ -5,8 +5,10 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { useBase, useTrash, useGXMutations } from "../../api/hooks";
 import { Button, EmptyState, toast } from "../../components/ui";
-import { SkeletonList } from "../../components/states";
+// 阶段 4：R-D-15 延迟加载态 / R-D-16 错误态 / R-I-29 截断带 title
+import { ErrorState, SkeletonList } from "../../components/states";
 import { confirmIrreversible } from "../../components/feedback";
+import { TruncatedText, useDelayedFlag } from "../../components/interaction";
 import { Icon } from "../../components/icons";
 import type { TrashItemDTO } from "@gx/shared-types";
 
@@ -30,9 +32,12 @@ function fmt(s: string): string {
 export default function TrashPage() {
   const { baseId } = useParams();
   const navigate = useNavigate();
-  const { data: items, isLoading } = useTrash(baseId ?? null);
+  const trashQ = useTrash(baseId ?? null);
+  const { data: items, isLoading, isError, error, refetch } = trashQ;
   const baseQ = useBase(baseId ?? null);
   const m = useGXMutations();
+  // R-D-15：≥300ms 才显示骨架屏，避免「空白 → 骨架 → 内容」的闪烁
+  const showSkeleton = useDelayedFlag(isLoading);
 
   const canEditData = baseQ.data?.permissions?.canEditData ?? false;
   const canManageBase = baseQ.data?.permissions?.canManageBase ?? false;
@@ -92,10 +97,20 @@ export default function TrashPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
-        {/* R-D-15/25 列表首屏用骨架屏，不用「加载中…」裸文案 */}
-        {isLoading && <SkeletonList rows={5} className="px-0" />}
+        {/* R-D-16 区域加载失败：就地卡片 + 重试（回收站不是路由级失败，不上全屏错误页） */}
+        {isError && (
+          <ErrorState
+            title="回收站加载失败"
+            reason={error instanceof Error ? error.message : undefined}
+            onRetry={() => void refetch()}
+            retrying={trashQ.isFetching && !isLoading}
+          />
+        )}
 
-        {!isLoading && (!items || items.length === 0) && (
+        {/* R-D-15/25 列表首屏用骨架屏（≥300ms 才显示），不用「加载中…」裸文案 */}
+        {!isError && showSkeleton && <SkeletonList rows={5} className="px-0" />}
+
+        {!isError && !isLoading && (!items || items.length === 0) && (
           // R-D-13 空态三要素齐备：图标 + 主文案 + 次文案 + 一个主行动入口
           <EmptyState
             icon="trash"
@@ -109,7 +124,7 @@ export default function TrashPage() {
           />
         )}
 
-        {items && items.length > 0 && (
+        {!isError && items && items.length > 0 && (
           <div className="overflow-hidden rounded-gx-lg border border-gx-border">
             <div className="flex items-center gap-3 border-b border-gx-separator bg-gx-table-header px-3 py-2 text-gx-12 font-medium text-gx-text-secondary">
               <span className="w-16">类型</span>
@@ -124,8 +139,9 @@ export default function TrashPage() {
                   <Icon name={KIND_ICON[it.kind]} size={14} />
                   {KIND_LABEL[it.kind]}
                 </span>
-                <span className="flex-1 truncate text-gx-13 text-gx-text-primary">{it.name}</span>
-                <span className="w-40 truncate text-gx-12 text-gx-text-tertiary">{it.parentName ?? "—"}</span>
+                {/* R-I-29 长名称截断必须带 title 全文 */}
+                <TruncatedText text={it.name} className="flex-1 text-gx-13 text-gx-text-primary" />
+                <TruncatedText text={it.parentName ?? "—"} className="w-40 text-gx-12 text-gx-text-tertiary" />
                 <span className="w-44 text-gx-12 text-gx-text-tertiary">{fmt(it.deletedAt)}</span>
                 <div className="flex w-32 items-center justify-end gap-1">
                   <button

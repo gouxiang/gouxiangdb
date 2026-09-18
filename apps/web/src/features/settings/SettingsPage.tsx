@@ -11,8 +11,11 @@ import {
   useFields,
   useGXMutations,
 } from "../../api/hooks";
-import { Button, ColorPicker, Input, Modal, toast } from "../../components/ui";
+import { Button, ColorPicker, EmptyState, Input, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
+// 阶段 4：危险操作统一走 feedback.tsx 的 L1~L5 分级（R-D-23 / R-D-24）
+import { confirmAction, confirmSoftDelete, confirmClearTable } from "../../components/feedback";
+import { toastDeleted } from "../../components/interaction";
 import { colors } from "@gx/design-tokens";
 import { MembersPanel } from "./MembersPanel";
 import { SharePanel } from "./SharePanel";
@@ -47,6 +50,42 @@ function TableStatRow({ baseId, tableId, name, recordCount, canManageSchema }: {
   const { data: fields } = useFields(tableId);
   const m = useGXMutations();
 
+  // 阶段 4 · R-D-23 L2（软删除进回收站，可恢复）+ R-I-08（toast 带撤销）
+  async function removeTable() {
+    if (!baseId) return;
+    const ok = await confirmSoftDelete({
+      title: `删除数据表「${name}」`,
+      confirmText: "删除数据表",
+      description: "数据表会移入回收站，30 天内可恢复。",
+    });
+    if (!ok) return;
+    try {
+      await m.deleteTable.mutateAsync({ tableId, baseId });
+      navigate(`/base/${baseId}`);
+      toastDeleted({
+        message: `已删除数据表「${name}」`,
+        restoredMessage: `已恢复数据表「${name}」`,
+        onUndo: () => m.restoreTrash.mutateAsync({ id: tableId, kind: "table", baseId }),
+      });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "删除失败", "error");
+    }
+  }
+
+  // 阶段 4 · R-D-23 L3：清空是软删进回收站，但服务端不回 id 列表 → 做不出一键撤销，
+  // 用「输入表名确认」的强度补偿（与顶栏同一口径）。
+  async function clearTable() {
+    if (!baseId) return;
+    const ok = await confirmClearTable({ tableName: name });
+    if (!ok) return;
+    try {
+      await m.clearTable.mutateAsync({ tableId });
+      toast("已清空数据，记录已移入回收站", "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "清空失败", "error");
+    }
+  }
+
   return (
     <div className="flex items-center gap-3 border-b border-gx-separator px-3 py-2.5">
       <Icon name="table" size={15} className="text-gx-text-tertiary" />
@@ -64,10 +103,10 @@ function TableStatRow({ baseId, tableId, name, recordCount, canManageSchema }: {
           <Button size="sm" variant="ghost" onClick={() => m.duplicateTable.mutate({ tableId })}>
             复制
           </Button>
-          <Button size="sm" variant="ghost" className="text-gx-danger" onClick={() => m.clearTable.mutate({ tableId })}>
+          <Button size="sm" variant="ghost" className="text-gx-danger" onClick={() => void clearTable()}>
             清空
           </Button>
-          <Button size="sm" variant="ghost" className="text-gx-danger" onClick={() => { if (baseId) { m.deleteTable.mutate({ tableId, baseId }); navigate(`/base/${baseId}`); } }}>
+          <Button size="sm" variant="ghost" className="text-gx-danger" onClick={() => void removeTable()}>
             删除
           </Button>
         </div>
@@ -95,8 +134,7 @@ export default function SettingsPage() {
 
   const [name, setName] = useState(baseQ.data?.name ?? "");
   const [iconColor, setIconColor] = useState(baseQ.data?.iconColor ?? colors.accent);
-  const [showDelete, setShowDelete] = useState(false);
-  const [confirmName, setConfirmName] = useState("");
+  // 阶段 4：删除库的确认已改走 feedback.tsx 的 L3 分级弹窗，不再需要页内 Modal 的开关与输入框状态
 
   // base 加载后同步名称
   useEffect(() => {
@@ -116,11 +154,22 @@ export default function SettingsPage() {
     }
   }
 
+  // 阶段 4：删除库 = L3（需原样输入库名确认）。原先是页内自建 Modal，
+  // 与回收站 / 数据表删除走的是两套文案与按钮，现统一到 feedback.tsx 的分级确认。
   async function deleteBase() {
     if (!baseId) return;
+    const baseName = baseQ.data?.name ?? "";
+    const ok = await confirmAction({
+      level: 3,
+      confirmName: baseName,
+      title: `删除数据库「${baseName}」`,
+      confirmText: "删除数据库",
+      description: "库内所有数据表、记录与视图都会被删除，且不进回收站、不可恢复。",
+    });
+    if (!ok) return;
     try {
       await m.deleteBase.mutateAsync(baseId);
-      toast("已删除 Base", "success");
+      toast("已删除数据库", "success");
       navigate("/");
     } catch (e) {
       toast(e instanceof Error ? e.message : "删除失败", "error");
@@ -235,7 +284,11 @@ export default function SettingsPage() {
                 />
               ))}
               {(!tables || tables.length === 0) && (
-                <div className="px-3 py-6 text-center text-gx-13 text-gx-text-hint">还没有数据表</div>
+                <EmptyState
+                  icon="table"
+                  title="还没有数据表"
+                  description="数据表是结构化数据的容器，建库后即可在此新增。"
+                />
               )}
             </div>
           )}
@@ -247,7 +300,7 @@ export default function SettingsPage() {
                 删除后所有数据表、记录与分享链接将被移入回收站，操作不可逆。
               </div>
               <div className="mt-3">
-                <Button variant="danger" disabled={!canManageBase} onClick={() => setShowDelete(true)}>
+                <Button variant="danger" disabled={!canManageBase} onClick={() => void deleteBase()}>
                   删除整个 Base
                 </Button>
                 {!canManageBase && (
@@ -259,33 +312,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* 删除 Base 二次确认 */}
-      <Modal
-        open={showDelete}
-        title="确认删除 Base"
-        onClose={() => setShowDelete(false)}
-        footer={
-          <>
-            <button className="text-gx-13 text-gx-text-tertiary hover:text-gx-text-primary" onClick={() => setShowDelete(false)}>
-              取消
-            </button>
-            <button
-              className="rounded-gx-lg bg-gx-danger px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
-              disabled={confirmName !== baseQ.data?.name}
-              onClick={deleteBase}
-            >
-              删除
-            </button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-2 text-gx-13 text-gx-text-secondary">
-          <span>
-            请输入 Base 名称 <span className="font-semibold text-gx-text-primary">{baseQ.data?.name}</span> 以确认删除：
-          </span>
-          <Input value={confirmName} onChange={(e) => setConfirmName(e.target.value)} placeholder="Base 名称" />
-        </div>
-      </Modal>
     </div>
   );
 }

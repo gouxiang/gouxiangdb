@@ -11,6 +11,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { colors } from "@gx/design-tokens";
 import { Spinner, toast } from "../../components/ui";
+// 阶段 4：409 冲突就地提示（R-D-18）
+import { ConflictNotice } from "../../components/states";
 import { useDoc, useRenameDoc } from "./kb-hooks";
 import { DocAccessError } from "./kb-ui";
 import { ApiError } from "../../api/client";
@@ -163,6 +165,26 @@ export default function CanvasEditorPage() {
           版本历史
         </button>
       </div>
+
+      {/* R-D-18 保存冲突（409）：就地二选一，不静默覆盖 */}
+      {persist.conflict && (
+        <div className="shrink-0 border-b border-gx-separator px-4 py-2">
+          <ConflictNotice
+            description="保存时发现服务端版本比你的更新。选择「查看最新版本」会丢弃本地未保存内容；选择「保留我的版本」会以你的内容覆盖服务端。"
+            onViewLatest={() => {
+              persist.takeLatestVersion();
+              void refetch().then((r) => {
+                if (r.data) {
+                  setTitle(r.data.title);
+                  setOverrideContent(r.data.content ?? "[]");
+                  setContentKey((k) => k + 1);
+                }
+              });
+            }}
+            onKeepMine={() => void persist.keepMineVersion()}
+          />
+        </div>
+      )}
 
       {/* 草稿恢复提示 */}
       {persist.recovered && canEdit && (

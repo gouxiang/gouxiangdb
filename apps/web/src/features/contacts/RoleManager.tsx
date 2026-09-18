@@ -24,6 +24,7 @@ import {
 } from "./contacts-hooks";
 import { buildDeptTree, flattenVisible } from "./lib/tree";
 import { errText } from "./contacts-ui";
+import { confirmIrreversible } from "../../components/feedback";
 
 const ACTION_LABEL: Record<OrgAction, string> = {
   manage_departments: "管理部门",
@@ -389,6 +390,13 @@ function RoleEditModal({ role, onClose }: { role: OrgRoleDTO | null; onClose: ()
 
   async function remove() {
     if (!role) return;
+    // 角色删除无撤销接口（后端若有授予悬挂会返 409），按 L4 不可恢复确认
+    const ok = await confirmIrreversible({
+      title: "删除角色",
+      confirmText: "删除角色",
+      description: `自定义角色「${role.name}」会被删除，此操作不可撤销。若仍有成员挂着该角色，删除会失败并提示你先迁移。`,
+    });
+    if (!ok) return;
     try {
       await m.removeRole.mutateAsync({ id: role.id });
       toast("已删除角色", "success");
@@ -416,7 +424,7 @@ function RoleEditModal({ role, onClose }: { role: OrgRoleDTO | null; onClose: ()
           onCancel={onClose}
           leading={
             role ? (
-              <Button variant="danger" icon="trash" loading={m.removeRole.isPending} onClick={remove}>
+              <Button variant="danger" icon="trash" loading={m.removeRole.isPending} onClick={() => void remove()}>
                 删除
               </Button>
             ) : undefined

@@ -17,6 +17,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button, FieldIcon, toast } from "../../components/ui";
 import { confirmAction } from "../../components/feedback";
+// 阶段 4：软删除类统一带撤销 toast（R-I-08 / R-D-22）
+import { toastDeleted } from "../../components/interaction";
 import { Icon } from "../../components/icons";
 import { TYPE_GROUPS } from "../designer/FieldEditorSheet";
 import { FieldInput } from "../views/field-controls";
@@ -578,8 +580,14 @@ export function FormDesigner({
 
     // 3) 物理删除字段（失败仅提示：布局已移除，不影响保存）
     try {
-      await m.deleteField.mutateAsync({ fieldId: containerId as string, tableId });
-      toast(`已删除「${containerName}」`, "success");
+      const fieldId = containerId as string;
+      await m.deleteField.mutateAsync({ fieldId, tableId });
+      // 阶段 4 · R-I-08：字段是软删除（进回收站），toast 必须带撤销
+      toastDeleted({
+        message: `已删除「${containerName}」`,
+        restoredMessage: `已恢复「${containerName}」`,
+        onUndo: () => m.restoreTrash.mutateAsync({ id: fieldId, kind: "field", baseId }),
+      });
     } catch (err) {
       toast((err as Error).message || "删除选项卡字段失败", "error");
     }

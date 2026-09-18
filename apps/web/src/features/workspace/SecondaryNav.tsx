@@ -241,7 +241,11 @@ export function SecondaryNav({ containerMenuId, containerName, onClose }: {
 
       {/* R-I-16 表级操作行：导入 ｜ 导出 ｜ 分享数据（表级能力，不在顶栏也不在表格工具栏）。
           仅当前路由落在某张表上时渲染；库首页 / 知识库 / 工作区路由下不占位。 */}
-      <TableActionRow tableId={tableId} viewId={viewMatch?.params.viewId ?? null} />
+      <TableActionRow
+        tableId={tableId}
+        viewId={viewMatch?.params.viewId ?? null}
+        baseId={tableMatch?.params.baseId ?? null}
+      />
 
       <div ref={virt.scrollerRef} className="min-h-0 flex-1 overflow-y-auto py-1.5">
         {isLoading ? (

@@ -4,12 +4,13 @@
 
 import { useMemo, useState } from "react";
 import { Icon } from "../../components/icons";
-import { Input, Modal, Select, Spinner, toast } from "../../components/ui";
+import { EmptyState, Input, Modal, Select, Spinner, toast } from "../../components/ui";
 import type { KbDocDTO } from "../../api/client";
 import { useDocAcl, useSetDocAcl } from "./kb-hooks";
 import { roleLabel } from "./kb-ui";
 import { useAuthzCapability } from "../authz/useAuthzCapability";
 import { useNavNodeIndex } from "../workspace/nav-hooks";
+import { confirmAction } from "../../components/feedback";
 import { DocPolicyView } from "../authz/DocPolicyView";
 
 const ROLE_OPTIONS = [
@@ -66,6 +67,15 @@ function LegacyDocAcl({ doc }: { doc: KbDocDTO }) {
   }
 
   async function revoke(userId: string, userEmail: string) {
+    // 撤销独立权限会让该成员退回知识库角色；可重新授权，按 L2 普通确认（R-D-24 具体动词）
+    const ok = await confirmAction({
+      title: "撤销独立权限",
+      confirmText: "撤销独立权限",
+      cancelText: "取消",
+      level: 2,
+      description: `${userEmail} 将不再拥有此${doc.kind === "canvas" ? "画布" : "文档"}的独立权限，回退到知识库角色。`,
+    });
+    if (!ok) return;
     try {
       await setAcl.mutateAsync({ email: userEmail, role: null });
       toast("已撤销独立权限", "success");
@@ -110,7 +120,11 @@ function LegacyDocAcl({ doc }: { doc: KbDocDTO }) {
         {isLoading ? (
           <div className="flex justify-center py-8"><Spinner size={18} /></div>
         ) : (acls ?? []).length === 0 ? (
-          <div className="px-3 py-6 text-center text-gx-12 text-gx-text-hint">暂无独立授权成员</div>
+          <EmptyState
+            icon="users"
+            title="暂无独立授权成员"
+            description="为指定成员单独授权后，其权限与知识库角色叠加、取较高者。"
+          />
         ) : (
           (acls ?? []).map((a) => (
             <div key={a.userId} className="flex items-center gap-2 border-b border-gx-separator px-3 py-2 last:border-0">
@@ -124,7 +138,7 @@ function LegacyDocAcl({ doc }: { doc: KbDocDTO }) {
               <span className="text-gx-12 text-gx-text-secondary">{roleLabel(a.role)}</span>
               <button
                 type="button"
-                onClick={() => revoke(a.userId, a.email)}
+                onClick={() => void revoke(a.userId, a.email)}
                 className="rounded p-1 text-gx-text-tertiary hover:bg-gx-danger-bg hover:text-gx-danger"
                 title="撤销独立权限"
               >

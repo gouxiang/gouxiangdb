@@ -6,9 +6,10 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Bases, withBase } from "../../api/client";
 import { QK, useShareLinks, useGXMutations } from "../../api/hooks";
-import { Badge, Input, Select, toast } from "../../components/ui";
+import { Badge, EmptyState, Input, Select, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { ROLE_LABEL, type Role } from "@gx/shared-types";
+import { confirmIrreversible } from "../../components/feedback";
 
 const SHARE_ROLES: Role[] = ["editor", "commenter", "viewer"];
 
@@ -52,7 +53,14 @@ export function SharePanel({ baseId, canManageBase }: { baseId: string; canManag
     }
   }
 
-  async function remove(linkId: string) {
+  async function remove(linkId: string, label: string) {
+    // 删除分享链接无撤销接口，拿到链接的人会立刻失效 → L4 不可恢复确认（R-D-23/24）
+    const ok = await confirmIrreversible({
+      title: "删除分享链接",
+      confirmText: "删除链接",
+      description: `链接「${label}」会被删除，正在使用它的人将立即失去访问，此操作不可撤销。`,
+    });
+    if (!ok) return;
     try {
       await m.removeShareLink.mutateAsync({ baseId, linkId });
       toast("已删除链接", "success");
@@ -132,7 +140,7 @@ export function SharePanel({ baseId, canManageBase }: { baseId: string; canManag
               <button type="button" onClick={() => copyLink(l.token)} className="text-gx-12 text-gx-text-tertiary hover:text-gx-accent" title="复制">
                 <Icon name="copy" size={14} />
               </button>
-              <button type="button" onClick={() => remove(l.id)} className="text-gx-12 text-gx-danger hover:underline" title="删除">
+              <button type="button" onClick={() => void remove(l.id, l.token)} className="text-gx-12 text-gx-danger hover:underline" title="删除">
                 <Icon name="trash" size={14} />
               </button>
             </div>
@@ -140,7 +148,12 @@ export function SharePanel({ baseId, canManageBase }: { baseId: string; canManag
         ))}
 
         {(!links || links.length === 0) && (
-          <div className="px-3 py-6 text-center text-gx-13 text-gx-text-hint">还没有分享链接</div>
+          // R-D-13 首次空态：图标 + 主文案 + 次文案 + 主行动入口（创建区就在上方，这里只给说明）
+          <EmptyState
+            icon="link"
+            title="还没有分享链接"
+            description="在上方选择角色与有效期后创建链接，拿到链接的人即可加入本库。"
+          />
         )}
       </div>
     </div>

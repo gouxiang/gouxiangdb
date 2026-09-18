@@ -5,7 +5,7 @@
 // 部门/角色授予/非标动作组合无三档可映射：只读标"仅企业权限引擎生效"，不伪造档位、不回旧弹窗。
 import { useEffect, useMemo, useState } from "react";
 import type { NavNodeDTO, ResourceAction } from "@gx/shared-types";
-import { Button, Spinner, toast } from "../../components/ui";
+import { Button, EmptyState, Spinner, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { useNodePolicies, useSavePolicies } from "./authz-hooks";
 import { SubjectPicker, type PickedSubject } from "./SubjectPicker";
@@ -169,9 +169,11 @@ export function DocPolicyView({ node }: { node: NavNodeDTO }) {
           </div>
         ))}
         {userRows.length === 0 && otherRows.length === 0 && (
-          <div className="rounded-gx-lg border border-dashed border-gx-separator px-3 py-6 text-center text-gx-12 text-gx-text-hint">
-            暂无独立授权成员
-          </div>
+          <EmptyState
+            icon="users"
+            title="暂无独立授权成员"
+            description="直接授权会覆盖继承来的权限；不授权则完全按上级继承。"
+          />
         )}
       </div>
 

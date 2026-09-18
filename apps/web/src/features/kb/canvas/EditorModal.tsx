@@ -14,6 +14,7 @@ import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Icon } from "../../../components/icons";
 import { Spinner, toast } from "../../../components/ui";
+import { confirmDiscardChanges } from "../../../components/feedback";
 import { KbApi } from "../../../api/client";
 import { useRenameDoc } from "../kb-hooks";
 import { useResolvedDoc } from "../hooks/useResolvedDoc";
@@ -64,18 +65,24 @@ export function EditorModal({
 
   // C-6：关闭前确认。正文 dirty = latestContent 与已加载内容不同；
   // 标题 dirty = 输入框有未 blur 提交的非空改动（commitTitle 在 blur 时已保存）。
-  const requestClose = useCallback(() => {
+  //
+  // 阶段 4：原生 window.confirm → feedback.tsx 的 confirmDiscardChanges（L2 普通确认）。
+  // 原生 confirm 在自动化测试环境无 UI 实现会挂死，替换后关闭路径可被断言。
+  const requestClose = useCallback(async () => {
     if (savingRef.current) return;
     const contentDirty = !isCanvas && !!doc && latestContent.current !== (doc.content ?? "");
     const titleDirty = !!doc && title.trim() !== "" && title.trim() !== doc.title;
-    if ((contentDirty || titleDirty) && !window.confirm("有未保存的修改，关闭将丢弃这些修改。确定关闭吗？")) return;
+    if (contentDirty || titleDirty) {
+      const ok = await confirmDiscardChanges();
+      if (!ok) return;
+    }
     onClose();
   }, [onClose, isCanvas, doc, title]);
 
   // Esc 关闭（除非正在保存）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !saving) requestClose();
+      if (e.key === "Escape" && !saving) void requestClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -139,7 +146,7 @@ export function EditorModal({
       ref={modalRef}
       className="gx-z-canvas-modal fixed inset-0 flex items-center justify-center p-6"
     >
-      <div className="absolute inset-0 bg-black/40" onClick={saving ? undefined : requestClose} />
+      <div className="absolute inset-0 bg-black/40" onClick={saving ? undefined : () => void requestClose()} />
       <div className="relative flex h-[86vh] w-[90vw] flex-col overflow-hidden rounded-gx-xl bg-gx-surface shadow-2xl">
         {/* 顶栏：内联标题 + 保存 / 关闭 */}
         <div className="flex items-center gap-2 border-b border-gx-separator px-4 py-2.5">
@@ -169,7 +176,7 @@ export function EditorModal({
           </button>
           <button
             type="button"
-            onClick={requestClose}
+            onClick={() => void requestClose()}
             disabled={saving}
             className="inline-flex h-8 items-center rounded-gx-lg border border-gx-border bg-gx-surface px-3 text-gx-12 text-gx-text-secondary hover:bg-gx-bg disabled:opacity-50"
           >

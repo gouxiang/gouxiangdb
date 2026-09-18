@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { useMembers, useGXMutations } from "../../api/hooks";
 import { Input, Select, toast } from "../../components/ui";
+import { confirmAction } from "../../components/feedback";
 import { Icon } from "../../components/icons";
 import {
   ROLES,
@@ -47,7 +48,17 @@ export function MembersPanel({ baseId, canManageBase }: { baseId: string; canMan
     }
   }
 
-  async function remove(memberId: string) {
+  async function remove(memberId: string, label: string) {
+    // 移除成员无撤销接口（回收站只收 record/table/field），故必须显式确认；
+    // 可重新邀请，按 L2 普通确认而非 L4。R-D-24：主按钮用具体动词「移除成员」。
+    const ok = await confirmAction({
+      title: "移除成员",
+      confirmText: "移除成员",
+      cancelText: "取消",
+      level: 2,
+      description: `${label} 将失去本库的访问权限，可重新邀请恢复。`,
+    });
+    if (!ok) return;
     try {
       await m.removeMember.mutateAsync({ baseId, memberId });
       toast("已移除成员", "success");
@@ -124,7 +135,7 @@ export function MembersPanel({ baseId, canManageBase }: { baseId: string; canMan
                     type="button"
                     disabled={isOwner}
                     title={isOwner ? "不能修改所有者" : "移除成员"}
-                    onClick={() => remove(mem.id)}
+                    onClick={() => void remove(mem.id, mem.email || "该成员")}
                     className="text-gx-12 text-gx-danger hover:underline disabled:cursor-not-allowed disabled:text-gx-text-hint disabled:no-underline"
                   >
                     移除

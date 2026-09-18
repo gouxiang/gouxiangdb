@@ -11,6 +11,9 @@ import { useRecordsInfinite } from "../../api/records-paging-hooks";
 import { isComputedInMem } from "../../api/records-paging";
 import type { DetailLayout, FieldDTO, RecordDTO } from "@gx/shared-types";
 import { Button, EmptyState, IconButton, Menu, MenuItem, Popover, Spinner, toast } from "../../components/ui";
+// 阶段 4：删除统一走 L2 确认 + 撤销 toast（R-D-23 / R-I-08 / R-D-22）
+import { confirmSoftDelete } from "../../components/feedback";
+import { toastDeleted } from "../../components/interaction";
 import { ResultNotice, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
 import { DetailLayoutEditor, DetailLayoutRenderer } from "../detail/DetailLayout";
 import type { ViewProps } from "./field-controls";
@@ -70,11 +73,24 @@ export default function DetailView({
     onOpenRecord?.({ tableId, recordId: r.id, title: title || "未命名" });
   };
 
+  // 阶段 4 · R-D-23 L2（软删除进回收站，可恢复）+ R-I-08（toast 带撤销）
   const handleDelete = async (r: RecordDTO) => {
     if (!permissions.canEditData) return;
+    const title = primaryField ? String(r.fields[primaryField.id] ?? "") : "";
+    const name = title || "未命名";
+    const ok = await confirmSoftDelete({
+      title: `删除记录「${name}」`,
+      confirmText: "删除记录",
+      description: "记录会移入回收站，30 天内可恢复。",
+    });
+    if (!ok) return;
     try {
       await m.deleteRecord.mutateAsync({ recordId: r.id, tableId, viewId });
-      toast("已删除记录", "success");
+      toastDeleted({
+        message: `已删除记录「${name}」`,
+        restoredMessage: `已恢复记录「${name}」`,
+        onUndo: () => m.restoreTrash.mutateAsync({ id: r.id, kind: "record", baseId }),
+      });
     } catch (err) {
       toast((err as Error).message || "删除失败", "error");
     }

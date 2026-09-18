@@ -6,6 +6,8 @@ import type { FieldDTO, SortDirection } from "@gx/shared-types";
 import { Icon } from "../../components/icons";
 import { FieldIcon } from "../../components/ui";
 import { Popover, MenuItem, MenuDivider } from "../../components/ui";
+// 阶段 4：R-I-29 截断带 title
+import { TruncatedText } from "../../components/interaction";
 
 export interface GridHeaderCellProps {
   field: FieldDTO;
@@ -66,7 +68,8 @@ export function GridHeaderCell({
     >
       <div className="flex h-8 items-center gap-1">
         <FieldIcon type={field.type} size={14} />
-        <span className="flex-1 truncate text-gx-12 font-medium text-gx-text-secondary">{field.name}</span>
+        {/* R-I-29：长字段名截断必须带 title 全文 */}
+        <TruncatedText text={field.name} className="flex-1 text-gx-12 font-medium text-gx-text-secondary" />
         {sortDirection && (
           <Icon name={sortDirection === "asc" ? "sortAsc" : "sortDesc"} size={13} className="text-gx-accent" />
         )}

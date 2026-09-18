@@ -8,8 +8,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../../components/icons";
-import { Menu, MenuItem, Popover, toast } from "../../components/ui";
+import { Button, Menu, MenuItem, Popover, EmptyState, toast } from "../../components/ui";
 import { confirmSoftDelete } from "../../components/feedback";
+// 阶段 4：统一撤销 toast（R-D-22）+ 长标题截断带 title（R-I-29）
+import { TruncatedText, toastDeleted } from "../../components/interaction";
 import type { KbDocDTO, KbDocKind } from "../../api/client";
 import {
   useKb,
@@ -148,17 +150,10 @@ export function KbTree({ kbId }: { kbId: string }) {
     try {
       await deleteDoc.mutateAsync(d.id);
       // R-D-22 删除类成功 toast 必须带「撤销」，窗口 6 秒
-      toast("已移入回收站", {
-        kind: "success",
-        action: {
-          label: "撤销",
-          onClick: () => {
-            void restoreDoc
-              .mutateAsync(d.id)
-              .then(() => toast("已恢复", "success"))
-              .catch((e: unknown) => toast(e instanceof Error ? e.message : "撤销失败", "error"));
-          },
-        },
+      toastDeleted({
+        message: `已移入回收站「${d.title || "未命名"}」`,
+        restoredMessage: `已恢复「${d.title || "未命名"}」`,
+        onUndo: () => restoreDoc.mutateAsync(d.id),
       });
       if (activeDocId === d.id) navigate(`/kb/${kbId}`);
     } catch (e) {
@@ -264,7 +259,8 @@ export function KbTree({ kbId }: { kbId: string }) {
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <span className="kb-tree-label">{node.title || "未命名"}</span>
+              // R-I-29：树里缩进后可用宽度很窄，长标题必须截断 + title 全文
+              <TruncatedText text={node.title || "未命名"} className="kb-tree-label" />
             )}
           </button>
           {canEdit && !renaming && (
@@ -318,7 +314,7 @@ export function KbTree({ kbId }: { kbId: string }) {
               onClick={(e) => e.stopPropagation()}
             />
           ) : (
-            <span className="kb-tree-label">{d.title || "未命名"}</span>
+            <TruncatedText text={d.title || "未命名"} className="kb-tree-label" />
           )}
         </button>
         {canEdit && !renaming && (
@@ -391,7 +387,24 @@ export function KbTree({ kbId }: { kbId: string }) {
               拖到此处移到顶级
             </div>
           )}
-          {docTree.length === 0 ? <div className="kb-tree-empty">暂无文档</div> : docTree.map((n) => renderDocNode(n, 0))}
+          {docTree.length === 0 ? (
+            // R-D-13 空态：图标 + 主文案 + 次文案 + 行动入口（保住「新建」入口，不丢信息）
+            <EmptyState
+              icon="doc"
+              title="暂无文档"
+              description={canEdit ? "点击上方「+」新建第一篇文档。" : undefined}
+              action={
+                canEdit ? (
+                  <Button size="sm" variant="primary" icon="plus" onClick={() => create("doc")}>
+                    新建文档
+                  </Button>
+                ) : undefined
+              }
+              className="py-8"
+            />
+          ) : (
+            docTree.map((n) => renderDocNode(n, 0))
+          )}
         </>
       ) : (
         <>
@@ -404,7 +417,23 @@ export function KbTree({ kbId }: { kbId: string }) {
               </button>
             )}
           </div>
-          {canvases.length === 0 ? <div className="kb-tree-empty">暂无画布</div> : canvases.map(renderCanvas)}
+          {canvases.length === 0 ? (
+            <EmptyState
+              icon="canvas"
+              title="暂无画布"
+              description={canEdit ? "点击上方「+」新建一块画布。" : undefined}
+              action={
+                canEdit ? (
+                  <Button size="sm" variant="primary" icon="plus" onClick={() => create("canvas")}>
+                    新建画布
+                  </Button>
+                ) : undefined
+              }
+              className="py-8"
+            />
+          ) : (
+            canvases.map(renderCanvas)
+          )}
         </>
       )}
     </div>

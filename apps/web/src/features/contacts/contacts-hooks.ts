@@ -83,6 +83,8 @@ export function useOrgMembers(filter: MemberFilter) {
     isFetchingNextPage: query.isFetchingNextPage,
     fetchNextPage: query.fetchNextPage,
     isLoading: query.isLoading,
+    /** 是否有任意请求在途（首屏或重试）——供「重试中」按钮态使用 */
+    isFetching: query.isFetching,
     isError: query.isError,
     error: query.error,
     refetch: query.refetch,

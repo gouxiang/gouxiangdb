@@ -22,6 +22,7 @@ import {
   wouldFormCycle,
 } from "./lib/tree";
 import { errText } from "./contacts-ui";
+import { confirmIrreversible } from "../../components/feedback";
 
 interface DeptTreeProps {
   selectedDeptId: string | null;
@@ -38,7 +39,24 @@ export function DeptTree({ selectedDeptId, onSelectDept, canManage }: DeptTreePr
   const [creatingParent, setCreatingParent] = useState<string | null | undefined>(undefined);
   const [renaming, setRenaming] = useState<DeptDTO | null>(null);
   const [moving, setMoving] = useState<DeptDTO | null>(null);
-  const [deleting, setDeleting] = useState<DeptDTO | null>(null);
+
+  /** 删除部门：无撤销接口 → L4 不可恢复确认（R-D-23），主按钮用具体动词（R-D-24）。 */
+  async function removeDept(dept: DeptDTO) {
+    const ok = await confirmIrreversible({
+      title: "删除部门",
+      confirmText: "删除部门",
+      description: `部门「${dept.name}」会被删除，此操作不可撤销。若其下仍有子部门或成员，删除会失败并提示你先移动或移除。`,
+    });
+    if (!ok) return;
+    try {
+      await m.removeDept.mutateAsync(dept.id);
+      toast("已删除部门", "success");
+      if (selectedDeptId === dept.id) onSelectDept(null);
+    } catch (e) {
+      // 409：后端在 error 文案里给出子部门/成员数，直接展示引导先处理
+      toast(errText(e, "删除失败"), "error");
+    }
+  }
 
   // 稳定化派生数组（?? [] 每次渲染产生新引用会触发 exhaustive-deps）。
   const depts = useMemo(() => flat ?? [], [flat]);
@@ -148,7 +166,7 @@ export function DeptTree({ selectedDeptId, onSelectDept, canManage }: DeptTreePr
                       <MenuItem icon="plus" label="新建子部门" onClick={() => { setMenuFor(null); setCreatingParent(dept.id); }} />
                       <MenuItem icon="edit" label="重命名" onClick={() => { setMenuFor(null); setRenaming(dept); }} />
                       <MenuItem icon="swap" label="移动到…" onClick={() => { setMenuFor(null); setMoving(dept); }} />
-                      <MenuItem icon="trash" label="删除部门" danger onClick={() => { setMenuFor(null); setDeleting(dept); }} />
+                      <MenuItem icon="trash" label="删除部门" danger onClick={() => { setMenuFor(null); void removeDept(dept); }} />
                     </Menu>
                   </Popover>
                 </span>
@@ -219,43 +237,6 @@ export function DeptTree({ selectedDeptId, onSelectDept, canManage }: DeptTreePr
         />
       )}
 
-      {deleting && (
-        <Modal
-          open
-          onClose={() => setDeleting(null)}
-          title={<span className="text-gx-danger">删除部门</span>}
-          width={420}
-          footer={
-            <>
-              <Button variant="ghost" onClick={() => setDeleting(null)} disabled={m.removeDept.isPending}>取消</Button>
-              <Button
-                variant="danger"
-                loading={m.removeDept.isPending}
-                onClick={async () => {
-                  try {
-                    await m.removeDept.mutateAsync(deleting.id);
-                    toast("已删除部门", "success");
-                    if (selectedDeptId === deleting.id) onSelectDept(null);
-                    setDeleting(null);
-                  } catch (e) {
-                    // 409：后端在 error 文案里给出子部门/成员数，直接展示引导先处理
-                    toast(errText(e, "删除失败"), "error");
-                  }
-                }}
-              >
-                确认删除
-              </Button>
-            </>
-          }
-        >
-          <p className="text-gx-13 text-gx-text-primary">
-            确定删除部门「<span className="font-medium">{deleting.name}</span>」吗？
-          </p>
-          <p className="text-gx-12 text-gx-text-tertiary">
-            若该部门下仍有子部门或成员，将无法删除并提示你先移动或移除。
-          </p>
-        </Modal>
-      )}
     </div>
   );
 }
