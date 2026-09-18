@@ -61,6 +61,16 @@ export default tseslint.config(
     },
   },
   {
+    // @gx/blocks 序列化/反序列化器：\u0000 占位符正则与 switch 内 let 是有意且稳定的写法
+    // （见上 no-control-regex / no-case-declarations 基线注释）。该包 lint 阈值 --max-warnings 0，
+    // 故在包级显式关掉这两条已背书的风格规则；潜在 bug 类规则仍全部保持 error。
+    files: ["packages/blocks/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-control-regex": "off",
+      "no-case-declarations": "off",
+    },
+  },
+  {
     // React Hooks 规则仅对 web 包生效（api/shared 无 React）。
     // rules-of-hooks 违反几乎必是真 bug，保持 error；
     // exhaustive-deps 历史代码有意 disable/省略，降为 warn 纳入基线计数。

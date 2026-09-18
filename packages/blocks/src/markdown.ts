@@ -95,16 +95,11 @@ function attrOf(tag: string, name: string): string {
   const m = new RegExp(`${name}\\s*=\\s*"([^"]*)"`, "i").exec(tag);
   return m ? m[1]! : "";
 }
-const CALLOUT_LABEL: Record<string, string> = {
-  note: "备注", tip: "提示", warning: "注意", important: "重要", caution: "警告",
-};
 const VIDEO_LINE = /^<video\b[^>]*>\s*(?:<\/video>)?\s*$/i;
 const AUDIO_LINE = /^<audio\b[^>]*>\s*(?:<\/audio>)?\s*$/i;
 const PDF_LINE = /^<iframe\b[^>]*class="[^"]*kb-pdf[^"]*"[^>]*>\s*<\/iframe>\s*$/i;
 const ATTACH_LINE = /^<a\b[^>]*class="[^"]*kb-attach[^"]*"[^>]*>([\s\S]*?)<\/a>\s*$/i;
 const PAGEBREAK_LINE = /^<div\b[^>]*class="[^"]*kb-page-break[^"]*"[^>]*>\s*(?:<\/div>)?\s*$/i;
-const DETAILS_OPEN = /^<details\b[^>]*>\s*$/i;
-const DETAILS_CLOSE = /^\s*<\/details>\s*$/i;
 const SUMMARY_LINE = /^<summary[^>]*>([\s\S]*?)<\/summary>\s*$/i;
 
 // B3: 标题 slug 生成——保留中英文 + 数字，小写化 + 去重音，空格转 -
@@ -112,7 +107,7 @@ export function slugify(text: string): string {
   return text
     .trim()
     .toLowerCase()
-    .replace(/[\u2000-\u206f\u2e00-\u2e7f'!"#$%&()*+,./:;<=>?@\[\]^`{|}~]/g, "")
+    .replace(/[\u2000-\u206f\u2e00-\u2e7f'!"#$%&()*+,./:;<=>?@[\]^`{|}~]/g, "")
     .replace(/\s+/g, "-")
     .slice(0, 40) || "untitled";
 }
