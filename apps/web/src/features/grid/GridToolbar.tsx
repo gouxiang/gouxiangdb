@@ -1,6 +1,6 @@
 // 网格工具栏：新建 / 行高 / 字段显隐 / 筛选 / 分组 / 排序 / 行颜色 / 搜索 / 导入导出 / 批量操作。
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { clsx } from "clsx";
 import type { FieldDTO, TableDTO, ViewConfig, SortSpec, SortDirection } from "@gx/shared-types";
 import { Icon } from "../../components/icons";
@@ -24,6 +24,8 @@ import { isSortGroupRestricted } from "../../api/records-paging";
 
 export interface GridToolbarProps {
   config: ViewConfig;
+  /** 工具栏最左侧插入的节点（视图切换器）；由宿主按 tableId/viewId 装配 */
+  leading?: ReactNode;
   allFields: FieldDTO[];
   visibleFields: FieldDTO[];
   /** S8：服务端降级原因码（如 computedInMem），用于排序/分组对非物理字段逐项置灰。 */
@@ -83,6 +85,7 @@ function ToolButton({
 export function GridToolbar(props: GridToolbarProps) {
   const {
     config,
+    leading,
     allFields,
     visibleFields,
     degradedCodes,
@@ -140,7 +143,10 @@ export function GridToolbar(props: GridToolbarProps) {
 
   return (
     <div className="flex h-12 items-center gap-1 border-b border-gx-separator bg-gx-surface px-2">
-      {/* 左段 */}
+      {/* 左段：视图切换器 */}
+      {leading}
+      {leading && <div className="h-5 w-px bg-gx-separator" />}
+
       <Button
         size="sm"
         variant="primary"

@@ -20,6 +20,7 @@ import { isComputedInMem } from "../../api/records-paging";
 import { Spinner, EmptyState, IconButton, Modal, Select, Input, Button, toast, COLOR_PALETTE } from "../../components/ui";
 import { ResultNotice, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
 import { GridToolbar } from "./GridToolbar";
+import { ViewSwitcher } from "./ViewSwitcher";
 import { GridHeaderCell } from "./GridHeaderCell";
 import { GridRow } from "./GridRow";
 import { AggregationBar } from "./AggregationBar";
@@ -449,6 +450,14 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
   return (
     <div className="flex h-full flex-col bg-gx-surface">
       <GridToolbar
+        leading={
+          <ViewSwitcher
+            baseId={baseId}
+            tableId={tableId}
+            viewId={viewId}
+            canManageSchema={permissions.canManageSchema}
+          />
+        }
         config={cfg}
         allFields={visibleFields}
         visibleFields={visibleFields}
