@@ -91,11 +91,14 @@
 - 待办：裸机 / 飞牛 fpk / Docker / macOS 四形态冒烟矩阵；SDK/vec0/stdio bin 核查；checksums
 - 本机可用 colima（Docker）做 Linux 面；飞牛/arm 双架构为外部依赖
 
-## 7. 默认姿态确认（§4.1）+ 四项签字 — **未完成**
+## 7. 默认姿态确认（§4.1）+ 四项签字 — **checklist 已产出，签字未完成**
 
-- 待门③ R1~R7 实演后逐旗确认实际 env 与旧行为
-- 四项总监签字：authz 姿态、embedding 姿态、Tier-L 措辞、M1 读路径姿态 —— 均未签
 - 门⑦ checklist（逐条可勾、每条挂硬证据）：`docs/baseline/2026-09-18-m7-checklist.md`（86 条：过 46 / 不过 3 / 未做 26 / 待签字 11）
+- 该 checklist 抓出**三处最容易被"绿灯误导"的项**，已按"未做"登记，此处同步明示：
+  1. **门③ `ROLLBACK_VERDICT=PASS` 不等于 R8/R9 过**：`report.mjs:47` 的 `allAutoPass` 只统计 R1~R7+R6b，PASS 不含 R8/R9；`/tmp/gx-rb-lead-r6b-1789704671/REPORT.md` 里 R8-1~R8-4、R9-1~R9-4 八行执行人/日期/耗时/断言**全空**，R8 只有静态读码、R9 只确认 runbook 存在（119 行）
+  2. **门② 脚本全绿不等于目检段签完**：`scripts/acceptance/R8-manual-checklist.md` RC-13~RC-25 的"结果/验收人/日期"三列全空
+  3. **`RELEASE.md` 不是 M7 发布说明**：该文件抬头自带"历史档案声明"，是 2026-09-04 自测记录（最后一次改动 `de6f374`），其中 DATABASE_URL 绝对路径/PostgreSQL 等说法均已过时
+- 四项总监签字：authz 姿态、embedding 姿态、Tier-L 措辞、M1 读路径姿态 —— **均未签**，待各项前置证据齐备后签
 
 ## 8. 缺陷清单
 
