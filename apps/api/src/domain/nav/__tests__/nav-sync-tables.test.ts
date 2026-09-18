@@ -19,11 +19,18 @@ import { nodeId } from "../backfill.js";
 let h: CharHarness;
 const OWNER = "owner";
 
+// makeNavHarness 每建一次就拉起 `prisma migrate deploy` 子进程（真建库 + 16 个迁移），
+// 2C 低配机上单次 5~7s，超 vitest 默认 hookTimeout=10000ms 的风险实在；且 hook 超时必须
+// 写在 beforeAll 的第二个参数上（写在 it 上无效），故显式给 30s 预算。
 beforeAll(async () => {
   h = await makeNavHarness("gx-m3-s3-tables-");
   await h.createUser(OWNER, { email: "owner-t@x.com", displayName: "Owner" });
+}, 30_000);
+// 守卫而非兜 bug：beforeAll 一旦超时，h 仍是 undefined，直接 h.cleanup() 会再抛
+// "Cannot read properties of undefined"，把一个超时掩盖成两个报错、干扰定位。
+afterAll(async () => {
+  if (h) await h.cleanup();
 });
-afterAll(async () => h.cleanup());
 afterEach(async () => stopFailing(h));
 
 async function makeBase(name: string): Promise<string> {
