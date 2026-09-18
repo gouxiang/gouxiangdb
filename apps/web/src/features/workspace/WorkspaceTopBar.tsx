@@ -2,7 +2,7 @@
 // 中部全局搜索（提权现有 SearchDialog，⌘K 不变）、右侧个人中心。
 // 旧两壳的侧栏内搜索按钮/库切换器在新壳由此处统一承接；组件本身不删（flag off 仍用）。
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useMatch, useNavigate, useParams } from "react-router-dom";
 import { LibrarySwitcher } from "../../components/LibrarySwitcher";
 import { Icon } from "../../components/icons";
 import { useAuthStore } from "../../store/auth";
@@ -17,12 +17,19 @@ function avatarColor(seed: string): string {
 
 export function WorkspaceTopBar({ onOpenSearch }: { onOpenSearch: () => void }) {
   const navigate = useNavigate();
-  const { baseId, kbId } = useParams();
+  const { baseId: pBaseId, kbId: pKbId } = useParams();
+  // 同 PrimaryNav：本组件挂在无 path 的壳层布局路由下，useParams 恒为 {}，
+  // 故库切换器的「当前库」改由 useMatch 对 pathname 取参，否则永远显示「选择库」。
+  const baseMatch = useMatch("/base/:baseId/*");
+  const kbMatch = useMatch("/kb/:kbId/*");
+  const baseId = baseMatch?.params.baseId ?? pBaseId ?? null;
+  const kbId = kbMatch?.params.kbId ?? pKbId ?? null;
   const user = useAuthStore((s) => s.user);
   const [personalCenterOpen, setPersonalCenterOpen] = useState(false);
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-gx-separator bg-gx-surface px-3">
+    // 骨架 S-1（UI-SPEC A.3）：顶栏高 56、左右 padding 20、元素间距 12。
+    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-gx-hairline bg-gx-surface px-5">
       {/* 品牌 + 工作区切换 */}
       <button
         type="button"

@@ -139,14 +139,16 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                 type="button"
                 onClick={() => navigate(`/base/${baseId}/table/${t.id}`)}
                 className={[
-                  "flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 text-left text-gx-13 transition-colors",
-                  active ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-primary hover:bg-gx-row-hover",
+                  // R-N-09：选中态 = 白底卡片 + 圆角 8 + accent 600 字，**不用左侧色条**
+                  "flex w-full items-center gap-2 rounded-gx-lg px-2 py-1.5 text-left text-gx-13 transition-colors",
+                  active ? "bg-white font-semibold text-gx-accent" : "text-gx-text-primary hover:bg-gx-row-hover",
                 ].join(" ")}
               >
-                {active && (
-                  <span className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r bg-gx-accent" />
-                )}
-                <Icon name="table" size={14} className="shrink-0 opacity-70" />
+                <Icon
+                  name="table"
+                  size={14}
+                  className={`shrink-0 ${active ? "text-gx-accent" : "opacity-70"}`}
+                />
                 <span className="flex-1 truncate">{t.name}</span>
                 {t.recordCount > 0 && <Badge>{t.recordCount}</Badge>}
                 {canManageSchema && (

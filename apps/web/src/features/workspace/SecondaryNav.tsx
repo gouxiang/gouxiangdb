@@ -6,7 +6,7 @@
 //   - 已收纳：当前菜单容器子树引用的实体
 // 行操作：收纳到导航（menu insert 到当前容器）、移动到分组（权威 move，必经 impact 确认）。
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useMatch, useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { Spinner, toast } from "../../components/ui";
 import { useNavMenu, useNavNodeIndex, useNavTreeDeep, usePatchMenu, useMoveNode } from "./nav-hooks";
@@ -31,6 +31,8 @@ import {
 } from "./SecondaryNavSections";
 import { MoveToGroupModal } from "./MoveToGroupModal";
 import { MoveImpactModal, type PendingMove } from "./MoveImpactModal";
+import { TableActionRow } from "./TableActionRow";
+import { L2_WIDTH } from "./lib/l1-collapse";
 import type { NavNodeDTO } from "@gx/shared-types";
 
 const TABS: { key: CollectionView; label: string }[] = [
@@ -55,7 +57,14 @@ export function SecondaryNav({ containerMenuId, containerName, onClose }: {
   const patch = usePatchMenu();
   const moveNode = useMoveNode();
   const navigate = useNavigate();
-  const params = useParams();
+  // 路由作用域改用 useMatch 而非 useParams：本组件挂在无 path 的壳层路由下，
+  // useParams 取到的是布局路由自身的 params（恒为空），无法还原当前表/文档。
+  // 用 useMatch 直接对 pathname 取参，刷新/直访都能拿到（R-N-02）。
+  const tableMatch = useMatch("/base/:baseId/table/:tableId/*");
+  const viewMatch = useMatch("/base/:baseId/table/:tableId/view/:viewId");
+  const docMatch = useMatch("/kb/:kbId/doc/:docId");
+  const canvasMatch = useMatch("/kb/:kbId/canvas/:docId");
+  const tableId = tableMatch?.params.tableId ?? null;
 
   const collection = useMemo(
     () => buildCollection(tree?.items ?? [], menu?.items ?? []),
@@ -93,7 +102,7 @@ export function SecondaryNav({ containerMenuId, containerName, onClose }: {
     return groupByKind([...mk("table"), ...mk("doc"), ...mk("canvas")]);
   }, [collection, tab, query, containerMenuId, menu?.items, scopeIds]);
 
-  const currentResource = params.tableId ?? params.docId ?? null;
+  const currentResource = tableMatch?.params.tableId ?? docMatch?.params.docId ?? canvasMatch?.params.docId ?? null;
 
   // 文档父 → 子文档映射（权威 parentId 镜像，用于文档分段树展开）
   const docChildren = useMemo(() => {
@@ -179,14 +188,18 @@ export function SecondaryNav({ containerMenuId, containerName, onClose }: {
   const virt = useMenuVirtualizer(flatRows, SECONDARY_ROW_H);
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-gx-separator bg-gx-bg">
-      <div className="flex items-center gap-1 border-b border-gx-separator px-2 py-2">
-        <span className="flex-1 truncate px-1 text-gx-13 font-medium text-gx-text-primary" title={containerName}>
+    <aside
+      className="flex h-full shrink-0 flex-col border-r border-gx-hairline bg-gx-nav2"
+      style={{ width: L2_WIDTH }}
+    >
+      <div className="flex h-[52px] shrink-0 items-center gap-2 border-b border-gx-hairline px-3.5">
+        <span className="flex-1 truncate text-gx-14 font-semibold text-gx-text-primary" title={containerName}>
           {containerName}
         </span>
         <button
           type="button"
-          aria-label="收起二级导航"
+          aria-label="收起二级面板"
+          title="收起二级面板"
           onClick={onClose}
           className="rounded-gx-sm p-1 text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary"
         >
@@ -213,7 +226,7 @@ export function SecondaryNav({ containerMenuId, containerName, onClose }: {
               className={[
                 "rounded-full px-2 py-0.5 text-gx-12 transition-colors",
                 tab === t.key
-                  ? "bg-gx-accent-bg font-medium text-gx-accent"
+                  ? "bg-white font-semibold text-gx-accent"
                   : "text-gx-text-secondary hover:bg-gx-row-hover",
               ].join(" ")}
             >
@@ -225,6 +238,10 @@ export function SecondaryNav({ containerMenuId, containerName, onClose }: {
           ))}
         </div>
       </div>
+
+      {/* R-I-16 表级操作行：导入 ｜ 导出 ｜ 分享数据（表级能力，不在顶栏也不在表格工具栏）。
+          仅当前路由落在某张表上时渲染；库首页 / 知识库 / 工作区路由下不占位。 */}
+      <TableActionRow tableId={tableId} viewId={viewMatch?.params.viewId ?? null} />
 
       <div ref={virt.scrollerRef} className="min-h-0 flex-1 overflow-y-auto py-1.5">
         {isLoading ? (

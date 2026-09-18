@@ -37,10 +37,11 @@ export default function AppShell() {
       <Sidebar onOpenSearch={() => setSearchOpen(true)} />
 
       <div className="flex min-w-0 flex-1 flex-col">
+        {/* 骨架 S-1：顶栏高 56（与 WorkspaceTopBar 同高，两壳切换不跳高） */}
         {hasTable ? (
           <TopBar />
         ) : (
-          <div className="flex h-12 items-center gap-1.5 border-b border-gx-separator bg-gx-surface px-3">
+          <div className="flex h-14 items-center gap-1.5 border-b border-gx-hairline bg-gx-surface px-3">
             {isContacts ? (
               <>
                 <Icon name="building" size={16} className="text-gx-text-tertiary" />

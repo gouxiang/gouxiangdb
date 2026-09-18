@@ -5,7 +5,7 @@
 import { useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Tables } from "../../api/client";
-import { useBase, useTables, useGXMutations } from "../../api/hooks";
+import { useBase, useGXMutations } from "../../api/hooks";
 import { IconButton, Input, Menu, MenuItem, Modal, Popover, toast } from "../../components/ui";
 import { Icon, VIEW_ICON } from "../../components/icons";
 import { VIEW_TYPES, VIEW_TYPE_LABEL, type ViewType } from "@gx/shared-types";
@@ -16,7 +16,6 @@ export function TopBar() {
   const { baseId, tableId, viewId } = useParams();
 
   const baseQ = useBase(baseId ?? null);
-  const { data: tables } = useTables(baseId ?? null);
   const perms = baseQ.data?.permissions;
   const canManageSchema = perms?.canManageSchema ?? false;
   const canManageBase = perms?.canManageBase ?? false;
@@ -31,9 +30,6 @@ export function TopBar() {
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<ViewType>("grid");
   const fileRef = useRef<HTMLInputElement>(null);
-
-  const baseName = baseQ.data?.name ?? "Base";
-  const tableName = tables?.find((t) => t.id === tableId)?.name ?? "数据表";
 
   async function createView() {
     if (!newName.trim() || !tableId) return;
@@ -58,10 +54,23 @@ export function TopBar() {
     }
   }
 
-  function exportCsv() {
+  // 带凭据导出：服务端只认 Authorization / X-GX-Token 请求头，window.open(exportUrl)
+  // 发起的是无自定义头的浏览器导航 → 401。故改为经 client.ts 取回文本后本地落盘。
+  async function exportCsv() {
     setMore(false);
     if (!tableId) return;
-    window.open(Tables.exportUrl(tableId, viewId), "_blank");
+    try {
+      const csv = await Tables.exportCsvText(tableId, viewId);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `table-${tableId}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "导出失败", "error");
+    }
   }
 
   async function importCsv() {
@@ -101,25 +110,8 @@ export function TopBar() {
 
   return (
     <div className="flex h-12 items-center gap-2 border-b border-gx-separator bg-gx-surface px-3">
-      {/* 面包屑 */}
-      <div className="flex shrink-0 items-center gap-1.5 text-gx-13">
-        <button
-          type="button"
-          onClick={() => navigate(`/base/${baseId}`)}
-          className="text-gx-text-tertiary hover:text-gx-text-primary"
-        >
-          {baseName}
-        </button>
-        <Icon name="chevronRight" size={13} className="text-gx-text-hint" />
-        <button
-          type="button"
-          onClick={() => tableId && navigate(`/base/${baseId}/table/${tableId}`)}
-          className="font-semibold text-gx-text-primary"
-        >
-          {tableName}
-        </button>
-      </div>
-
+      {/* R-N-19：主壳内不渲染面包屑——L1 + L2 的选中态已表达位置，再加面包屑是冗余。
+          原「库名 › 表名」链整段移除；库/表的可达性由侧栏与视图标签条承担。 */}
       {/* 视图标签 */}
       <ViewTabs />
 

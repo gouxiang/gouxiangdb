@@ -372,6 +372,23 @@ export const Tables = {
     apiFetch<{ ok: true }>(`/api/tables/${tableId}/clear`, { method: "POST" }),
   exportUrl: (tableId: string, viewId?: string) =>
     `${BASE_URL}/api/tables/${tableId}/export.csv${qs({ viewId })}`,
+  /**
+   * 带凭据拉取 CSV 导出文本（表级导出，服务端 keyset 分批、按视图筛选排序导出全量）。
+   *
+   * 为什么不能 `window.open(exportUrl())`：服务端只认 `Authorization: Bearer` /
+   * `X-GX-Token` 两个**请求头**（domain/org/authState.ts），而 window.open 发起的是
+   * 无自定义头的浏览器导航 → 401。故统一走本方法取回文本，再在调用方本地落盘下载。
+   */
+  exportCsvText: async (tableId: string, viewId?: string): Promise<string> => {
+    const path = `/api/tables/${tableId}/export.csv${qs({ viewId })}`;
+    const token = useAuthStore.getState().token;
+    const res = await fetch(`${BASE_URL}${path}`, { headers: { ...authHeaders(token) } });
+    if (!res.ok) {
+      if (res.status === 401 && !isSelfCredential401Path(path)) handleUnauthorized();
+      throw new ApiError(res.status, {}, parseRetryAfter(res.headers.get("Retry-After")));
+    }
+    return res.text();
+  },
 };
 
 // ============ Fields ============

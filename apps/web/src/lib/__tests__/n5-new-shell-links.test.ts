@@ -138,12 +138,14 @@ describe("N5 §1.3 旧链接生成点源码守卫（换壳/窗口化重构后仍
     expect(s).toContain('navigate(loggedIn ? "/" : "/login")');
   });
 
-  it("表页 TopBar：视图切换、库名面包屑、表名面包屑、分享设置锚点全为旧形", () => {
+  it("表页 TopBar：视图切换、分享设置锚点、删表回落仍为旧形；面包屑按 R-N-19 下线", () => {
     const s = read("../../features/shell/TopBar.tsx");
     expect(s).toContain("navigate(`/base/${baseId}/table/${tableId}/view/${v.id}`)");
-    expect(s).toContain("navigate(`/base/${baseId}`)");
-    expect(s).toContain("navigate(`/base/${baseId}/table/${tableId}`)");
     expect(s).toContain("navigate(`/base/${baseId}/settings#share`)");
+    expect(s).toContain("navigate(`/base/${baseId}`)");
+    // R-N-19：主壳内不渲染面包屑——原「库名 › 表名」链整段移除，该条旧形随链一起下线，
+    // 故此处改断言它【不再】出现（防后续有人把面包屑加回来）。
+    expect(s).not.toContain("navigate(`/base/${baseId}/table/${tableId}`)");
   });
 
   it("ViewTabs 切视图仍跳 /base/:id/table/:tid/view/:vid", () => {

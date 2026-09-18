@@ -164,14 +164,18 @@ export function WorkspaceSettingsPage() {
             type="button"
             onClick={() => goSection(s.key)}
             className={[
-              "relative mx-2 flex items-center gap-2 rounded-gx-sm px-2 py-1.5 text-left text-gx-13 transition-colors",
+              // R-N-10：L2 选中态 = 白底卡片 + 圆角 8 + accent 600 字，**不用左侧色条**
+              "mx-2 flex items-center gap-2 rounded-gx-lg px-2 py-1.5 text-left text-gx-13 transition-colors",
               effectiveSection === s.key
-                ? "bg-gx-accent-bg font-medium text-gx-accent"
+                ? "bg-white font-semibold text-gx-accent"
                 : "text-gx-text-primary hover:bg-gx-row-hover",
             ].join(" ")}
           >
-            {effectiveSection === s.key && <span className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r bg-gx-accent" />}
-            <Icon name={s.icon} size={14} className="shrink-0 opacity-80" />
+            <Icon
+              name={s.icon}
+              size={14}
+              className={`shrink-0 ${effectiveSection === s.key ? "text-gx-accent" : "opacity-80"}`}
+            />
             {s.label}
           </button>
         ))}

@@ -20,6 +20,7 @@ export type IconName =
   | "close"
   | "check"
   | "more"
+  | "moreVertical"
   | "table"
   | "grid"
   | "gallery"
@@ -138,6 +139,12 @@ const PATHS: Record<IconName, string[]> = {
   close: ["M18 6L6 18", "M6 6l12 12"],
   check: ["M20 6L9 17l-5-5"],
   more: ["M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z", "M19 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z", "M5 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"],
+  // 竖向三点（行尾操作菜单入口，R-N-11/12）：三圆点沿 y 轴排列，与横向 more 区分
+  moreVertical: [
+    "M12 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z",
+    "M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z",
+    "M12 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z",
+  ],
   table: ["M3 5h18v14H3z", "M3 10h18", "M9 10v9", "M15 10v9"],
   grid: ["M3 5h18v14H3z", "M3 10h18", "M3 15h18", "M9 5v14", "M15 5v14"],
   gallery: ["M3 5h8v8H3z", "M13 5h8v8h-8z", "M3 15h8v4H3z", "M13 15h8v4h-8z"],

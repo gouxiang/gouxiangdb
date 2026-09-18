@@ -41,12 +41,12 @@ export function KbSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       type="button"
       onClick={onClick}
       className={[
-        "relative flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 text-left text-gx-13 transition-colors",
-        active ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-primary hover:bg-gx-row-hover",
+        // R-N-09：选中态 = 白底卡片 + 圆角 8 + accent 600 字，**不用左侧色条**
+        "flex w-full items-center gap-2 rounded-gx-lg px-2 py-1.5 text-left text-gx-13 transition-colors",
+        active ? "bg-white font-semibold text-gx-accent" : "text-gx-text-primary hover:bg-gx-row-hover",
       ].join(" ")}
     >
-      {active && <span className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r bg-gx-accent" />}
-      <Icon name={icon} size={14} className="shrink-0 opacity-80" />
+      <Icon name={icon} size={14} className={`shrink-0 ${active ? "text-gx-accent" : "opacity-80"}`} />
       <span className="flex-1 truncate">{label}</span>
     </button>
   );
@@ -94,22 +94,24 @@ export function KbSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
               type="button"
               onClick={() => navigate(`/kb/${kbId}/trash`)}
               className={[
-                "flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 text-gx-13 hover:bg-gx-row-hover",
-                isTrash ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-primary",
+                // R-N-09：L1 底部选中态同样走白底卡片，不用左侧色条
+                "flex w-full items-center gap-2 rounded-gx-lg px-2 py-1.5 text-gx-13 hover:bg-gx-row-hover",
+                isTrash ? "bg-white font-semibold text-gx-accent" : "text-gx-text-primary",
               ].join(" ")}
             >
-              <Icon name="trash" size={14} />
+              <Icon name="trash" size={14} className={isTrash ? "text-gx-accent" : undefined} />
               <span>回收站</span>
             </button>
             <button
               type="button"
               onClick={() => navigate(`/kb/${kbId}/settings`)}
               className={[
-                "flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 text-gx-13 hover:bg-gx-row-hover",
-                isSettings ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-primary",
+                // R-N-09：同上
+                "flex w-full items-center gap-2 rounded-gx-lg px-2 py-1.5 text-gx-13 hover:bg-gx-row-hover",
+                isSettings ? "bg-white font-semibold text-gx-accent" : "text-gx-text-primary",
               ].join(" ")}
             >
-              <Icon name="settings" size={14} />
+              <Icon name="settings" size={14} className={isSettings ? "text-gx-accent" : undefined} />
               <span>设置</span>
             </button>
           </>
