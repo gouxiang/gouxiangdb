@@ -32,7 +32,9 @@ import {
   useWriteGuard,
 } from "../../components/interaction";
 import { ResultNotice, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
+import { useBreakpointTier } from "../../lib/breakpoint";
 import { GridToolbar } from "./GridToolbar";
+import { RecordCardList } from "./RecordCardList";
 import { ViewSwitcher } from "./ViewSwitcher";
 import { GridHeaderCell } from "./GridHeaderCell";
 import { GridRow } from "./GridRow";
@@ -147,6 +149,10 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
   const scrollRef = useRef<HTMLDivElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const selection = useGridSelection();
+  // R-D-32 / R-D-33：<1024 表格转卡片列表（表格在窄屏必然横向溢出；卡片单栏不横滚）。
+  // 档位走 JS 是因为「表格 → 卡片」是结构替换，不是同一元素换 class。
+  const tier = useBreakpointTier();
+  const cardMode = tier === "sm" || tier === "md";
 
   useEffect(() => {
     if (scrollRef.current) setContainerH(scrollRef.current.clientHeight);
@@ -618,6 +624,22 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
             }
           />
         </div>
+      ) : cardMode ? (
+        // R-D-32 / R-D-33：卡片列表（<1024）。能力与表格态一致：勾选、展开记录、
+        // 行颜色、分组标题、续翻；仅呈现形态不同。
+        <RecordCardList
+          records={records}
+          fields={visibleFields}
+          primaryFieldId={primaryFieldId}
+          groups={groups ?? null}
+          selectedIds={selection.selectedIds}
+          rowColorOf={rowColorOf}
+          onToggleRowSelect={selection.toggle}
+          onOpenRecord={(ref) => onOpenRecord?.(ref)}
+          hasNextPage={hasNextPage}
+          loadingMore={isFetchingNextPage}
+          onLoadMore={() => loadMore()}
+        />
       ) : (
         <div
           ref={scrollRef}

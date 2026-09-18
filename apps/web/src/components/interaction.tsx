@@ -115,6 +115,9 @@ export function useDebouncedCommit(
 /**
  * 列表搜索框（R-I-03）：宽 170 × 高 32，底 gx-control，图标 14，占位 12 hint 色。
  * `searching` 为真时按「搜索期间保留旧结果并置灰」处理（只降透明度，不卸载内容）。
+ *
+ * `width={null}` 表示不定宽（交给 className 控制）：窄屏（<768）工具栏要让它随主轴伸缩，
+ * 内联 width:170px 会把它顶出容器。默认仍是规范的 170（R-I-03 / 附录 B）。
  */
 export function ListSearchBox({
   value,
@@ -128,11 +131,14 @@ export function ListSearchBox({
   onChange: (v: string) => void;
   placeholder?: string;
   searching?: boolean;
-  width?: number;
+  width?: number | null;
   className?: string;
 }) {
   return (
-    <div className={clsx("relative shrink-0", className)} style={{ width }}>
+    <div
+      className={clsx("relative shrink-0", width == null && "w-full", className)}
+      style={width == null ? undefined : { width }}
+    >
       <Icon
         name="search"
         size={14}

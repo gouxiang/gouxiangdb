@@ -44,15 +44,26 @@ export function WorkspaceTopBar({ onOpenSearch }: { onOpenSearch: () => void }) 
         <LibrarySwitcher active={kbId ? { kind: "kb", id: kbId } : { kind: "base", id: baseId ?? null }} />
       </div>
 
-      {/* 全局搜索（提权顶栏；⌘K 由 Shell 绑定，此处点击同样打开） */}
+      {/*
+        全局搜索（提权顶栏；⌘K 由 Shell 绑定，此处点击同样打开）。
+        R-D-33（<768）：折叠为 32×32 图标按钮。原实现是 `w-full max-w-md` 的长文案按钮，
+        窄屏下被压到内容宽度以下后中文逐字换行（与工具栏同一类断行），且规范本档就要求
+        「顶栏搜索折叠为图标」。≥768 的形态与改动前完全一致（文案、⌘K 徽标、mx-auto 居中）。
+      */}
       <button
         type="button"
         onClick={onOpenSearch}
-        className="mx-auto flex h-8 w-full max-w-md items-center gap-2 rounded-gx-lg border border-gx-border bg-gx-bg px-2.5 text-gx-12 text-gx-text-tertiary transition-colors hover:bg-gx-row-hover"
+        aria-label="搜索记录、文档与画布"
+        title="搜索（⌘K）"
+        className="mx-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-gx-lg border border-gx-border bg-gx-bg text-gx-12 text-gx-text-tertiary transition-colors hover:bg-gx-row-hover md:w-full md:max-w-md md:justify-start md:gap-2 md:px-2.5"
       >
         <Icon name="search" size={14} />
-        <span className="flex-1 text-left">搜索记录、文档与画布</span>
-        <span className="rounded bg-gx-surface px-1 text-gx-11 text-gx-text-hint">⌘K</span>
+        <span className="hidden min-w-0 flex-1 truncate whitespace-nowrap text-left md:block">
+          搜索记录、文档与画布
+        </span>
+        <span className="hidden rounded bg-gx-surface px-1 text-gx-11 text-gx-text-hint md:inline-block">
+          ⌘K
+        </span>
       </button>
 
       {/* 个人中心（真实入口：资料/账号；不放假"帮助"占位） */}

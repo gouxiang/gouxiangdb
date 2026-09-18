@@ -6,6 +6,7 @@
 //   - 已收纳：当前菜单容器子树引用的实体
 // 行操作：收纳到导航（menu insert 到当前容器）、移动到分组（权威 move，必经 impact 确认）。
 import { useMemo, useState } from "react";
+import { clsx } from "clsx";
 import { useMatch, useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { Spinner, toast } from "../../components/ui";
@@ -41,10 +42,18 @@ const TABS: { key: CollectionView; label: string }[] = [
   { key: "collected", label: "已收纳" },
 ];
 
-export function SecondaryNav({ containerMenuId, containerName, onClose }: {
+export function SecondaryNav({ containerMenuId, containerName, onClose, variant = "static", width = L2_WIDTH }: {
   containerMenuId: string;
   containerName: string;
   onClose: () => void;
+  /**
+   * static   ：骨架 S-1 常驻栏（≥1440 / 1280–1439），在流内占位。
+   * floating ：R-D-31 / R-D-32「浮出面板」——768–1279 由壳层绝对定位到内容区左侧，
+   *            覆盖内容而不挤压内容宽度（浮层带阴影，符合「浮出面板」语义）。
+   */
+  variant?: "static" | "floating";
+  /** 面板宽度；R-D-30 档由壳层传 208，缺省仍是规范 240。 */
+  width?: number;
 }) {
   const { menu } = useNavMenu();
   const { tree, isLoading } = useNavTreeDeep();
@@ -189,8 +198,11 @@ export function SecondaryNav({ containerMenuId, containerName, onClose }: {
 
   return (
     <aside
-      className="flex h-full shrink-0 flex-col border-r border-gx-hairline bg-gx-nav2"
-      style={{ width: L2_WIDTH }}
+      className={clsx(
+        "flex h-full shrink-0 flex-col border-r border-gx-hairline bg-gx-nav2",
+        variant === "floating" && "shadow-gx-lg",
+      )}
+      style={{ width }}
     >
       <div className="flex h-[52px] shrink-0 items-center gap-2 border-b border-gx-hairline px-3.5">
         <span className="flex-1 truncate text-gx-14 font-semibold text-gx-text-primary" title={containerName}>

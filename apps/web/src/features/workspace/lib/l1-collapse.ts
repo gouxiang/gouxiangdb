@@ -13,6 +13,9 @@ export const L1_WIDTH_COLLAPSED = 56;
 /** L2 常驻宽度（骨架 S-1）。无二级内容时为 0（不占位）。 */
 export const L2_WIDTH = 240;
 
+/** R-D-30：1280–1439 档 L2 压到 208（其余档仍为 240）。 */
+export const L2_WIDTH_COMPACT = 208;
+
 /** 顶栏高度（骨架 S-1）。 */
 export const TOPBAR_H = 56;
 
