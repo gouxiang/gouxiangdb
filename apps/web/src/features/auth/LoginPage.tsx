@@ -37,7 +37,9 @@ export default function LoginPage() {
           ? await Auth.signup({ email: email.trim(), password, displayName: displayName.trim() })
           : await Auth.login({ email: email.trim(), password });
       setAuth(res.token, res.user);
-      navigate("/");
+      // 初始超级管理员（mustChangePassword=true）登录后闸门会挡住除白名单外的全部 /api，
+      // 必须先去改密页，否则进来就是一片空白。
+      navigate(res.user.mustChangePassword === true ? "/change-password" : "/");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "操作失败";
       toast(msg, "error");

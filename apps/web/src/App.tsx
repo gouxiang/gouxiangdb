@@ -3,6 +3,7 @@
 //
 // 页面组件由各模块实现（路径固定，勿改）：
 //   features/auth/LoginPage.tsx      — 登录 / 注册
+//   features/auth/ForceChangePassword.tsx — 首次登录强制改密（mustChangePassword）
 //   features/auth/ShareJoinPage.tsx  — 通过分享链接加入
 //   features/shell/AppShell.tsx      — 两栏骨架（侧栏 + 顶栏 + Outlet）
 //   features/views/ViewRouter.tsx    — 按 view.type 分发到具体视图
@@ -13,11 +14,13 @@ import type { ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from "react-router-dom";
 
 import { useAuthStore } from "./store/auth";
+import { CHANGE_PASSWORD_PATH, shouldForceChangePassword } from "./features/auth/force-change-guard";
 import { useBases, useTables, useViews } from "./api/hooks";
 import { Spinner } from "./components/ui";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 import LoginPage from "./features/auth/LoginPage";
+import ForceChangePassword from "./features/auth/ForceChangePassword";
 import ShareJoinPage from "./features/auth/ShareJoinPage";
 import ViewRouter from "./features/views/ViewRouter";
 import SettingsPage from "./features/settings/SettingsPage";
@@ -42,6 +45,19 @@ function Loading() {
       <Spinner size={20} />
     </div>
   );
+}
+
+/**
+ * 强制改密守卫：已登录且 user.mustChangePassword=true 时，除改密页外一律重定向过去
+ * （判定与路径常量见 features/auth/force-change-guard.ts）。
+ */
+function RequirePasswordChanged({ children }: { children: ReactNode }) {
+  const user = useAuthStore((s) => s.user);
+  const { pathname } = useLocation();
+  if (shouldForceChangePassword(user, pathname)) {
+    return <Navigate to={CHANGE_PASSWORD_PATH} replace />;
+  }
+  return <>{children}</>;
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -102,6 +118,15 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={token ? <Navigate to="/" replace /> : <LoginPage />} />
+      {/* 首次登录强制改密：需要登录态，但不套业务壳（壳内接口会被闸门 403 挡住） */}
+      <Route
+        path={CHANGE_PASSWORD_PATH}
+        element={
+          <RequireAuth>
+            <ForceChangePassword />
+          </RequireAuth>
+        }
+      />
       <Route path="/join/:token" element={<ShareJoinPage />} />
       {/* 公开分享页：匿名可访问，不走登录守卫 */}
       <Route path="/s/:token" element={<PublicSharePage />} />
@@ -118,9 +143,11 @@ export default function App() {
       <Route
         element={
           <RequireAuth>
-            <ErrorBoundary key={`shell-${boundaryKey}`}>
-              <ShellGate />
-            </ErrorBoundary>
+            <RequirePasswordChanged>
+              <ErrorBoundary key={`shell-${boundaryKey}`}>
+                <ShellGate />
+              </ErrorBoundary>
+            </RequirePasswordChanged>
           </RequireAuth>
         }
       >
