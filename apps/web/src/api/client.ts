@@ -268,6 +268,25 @@ export const Auth = {
     }),
 };
 
+/**
+ * 系统初始化状态（免鉴权探针 GET /api/auth/bootstrap-status）。
+ * initialized=false 表示空库：首个注册者由后端自举为 owner（超级管理员）。
+ */
+export interface BootstrapStatus {
+  /** false = 库内还没有任何账号，登录页应进入「创建超级管理员」引导。 */
+  initialized: boolean;
+  /** 注册入口是否开放；false 时登录页隐藏注册 tab。 */
+  signupOpen: boolean;
+}
+
+/**
+ * 读初始化状态（免鉴权）。失败不在这里吞：由调用方降级为常规登录页并告警
+ * （features/auth/login-bootstrap.ts），避免探针异常把用户卡在错误页。
+ */
+export function fetchBootstrapStatus(): Promise<BootstrapStatus> {
+  return apiFetch<BootstrapStatus>("/api/auth/bootstrap-status");
+}
+
 
 // ============ Bases ============
 
