@@ -133,6 +133,13 @@ export default function App() {
         }
       />
       <Route path="/join/:token" element={<ShareJoinPage />} />
+      {/*
+        后端 bases.ts 的 GET/POST /:baseId/share 把展示用 url 拼成 `/share/<token>`
+        （apps/api/src/routes/bases.ts:445），而本路由表历史上只注册了 `/join/:token`，
+        两者同指「通过分享链接加入 Base」这一种业务 —— 用户复制库分享链接给他人打开时会
+        命中兜底路由无法加入。此处补上等价路由消歧义（ShareJoinPage 只依赖 :token 参数）。
+      */}
+      <Route path="/share/:token" element={<ShareJoinPage />} />
       {/* 公开分享页：匿名可访问，不走登录守卫 */}
       <Route path="/s/:token" element={<PublicSharePage />} />
       <Route path="/s/:token/doc/:docId" element={<PublicSharePage />} />
