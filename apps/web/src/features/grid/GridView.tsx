@@ -90,6 +90,13 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
   );
   // 全字段（含 tabs/subtable）—— 只给 FieldEditorSheet 用，让用户能编辑/管理布局字段
   const allSchemaFields = useMemo(() => allFieldsData ?? [], [allFieldsData]);
+  // 字段显隐面板的候选集：必须是「全部可列字段」而非「当前可见字段」。
+  // 旧实现把 visibleFields（已按 view.hiddenFieldIds 过滤后的结果）传给面板，导致取消勾选后
+  // 该字段立刻从面板列表里消失、用户无法再从界面勾回来（隐藏不可逆）。2026-09-18 真机验收发现。
+  const gridManageableFields = useMemo(
+    () => allSchemaFields.filter((f) => f.type !== "tabs" && f.type !== "subtable"),
+    [allSchemaFields],
+  );
   const groups = infiniteData.groups;
   const aggregations = infiniteData.aggregations;
   const filteredTotal = infiniteData.filteredTotal;
@@ -459,7 +466,7 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
           />
         }
         config={cfg}
-        allFields={visibleFields}
+        allFields={gridManageableFields}
         visibleFields={visibleFields}
         degradedCodes={infiniteData.degraded ?? []}
         filteredTotal={filteredTotal}
