@@ -189,7 +189,9 @@ describe("delete / purge / 恢复：清四表与重建", () => {
     expect(chunkCounts(store, "dl_r1").chunks.length).toBeGreaterThan(0);
     store.close();
     await dh.cleanup();
-  });
+    // 真建独立主库 + 真迁移 + 三轮 runOnce（含 delete/恢复重建），低配机（2C）
+    // 跑不完 vitest 默认 5s 预算（Tier-L 实测 ~5.9s），故显式放宽到 30s。
+  }, 30_000);
 
   it("purge（实体物理不存在）的 upsert/delete 都只清理不重建", () => {
     const store = h.openStore("purge", false);

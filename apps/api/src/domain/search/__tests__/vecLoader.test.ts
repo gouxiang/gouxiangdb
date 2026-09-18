@@ -84,13 +84,19 @@ describe("resolveVecPath", () => {
   });
 });
 
-describe("loadVec0 真实加载（本机 darwin-arm64）", () => {
+// 原生扩展名由宿主平台决定（darwin→dylib / linux→so / win32→dll）。这里复用生产同一套
+// 映射表（describeVecPlatform，loadVec0 的默认入参也是它）推导，而不是把某个平台写死——
+// 否则换到 Linux（含低配 NAS 目标机）或 Windows 上必然误判。
+const hostPlatform = describeVecPlatform(process.platform, process.arch);
+const hostExt = hostPlatform.ext;
+
+describe(`loadVec0 真实加载（宿主 ${process.platform}-${process.arch}）`, () => {
   it("vec0 加载成功且 vec_version 可读（H1）", () => {
     const db = new Database(":memory:");
     const r = loadVec0(db, { appDir: process.cwd() });
-    // 本机已装 sqlite-vec 平台子包，应命中 node_modules 候选。
+    // 宿主平台子包已安装，应命中 node_modules 候选。
     expect(r.vecAvailable).toBe(true);
-    expect(r.path).toMatch(/vec0\.dylib$/);
+    expect(r.path).toMatch(new RegExp(`vec0\\.${hostExt}$`));
     expect(r.error).toBeNull();
     const v = readVecVersion(db);
     expect(v).toMatch(/^v?\d+\.\d+\.\d+$/);

@@ -1,5 +1,9 @@
 // M5/S9 embedding 配置 service 单测：JWT_SECRET 轮换致旧密文不可解不 500（§9 硬点）、
 // PATCH 两步标记与字段白名单。真临时主库（AppSetting 表），无 search.db 依赖、零外网。
+//
+// 预算说明：每例都要真建一套临时主库（真迁移 + 真 AppSetting 读写），低配机（2C）上单例
+// 跑不完 vitest 默认 5s 预算。故各例（含 afterEach 清理钩子）显式给 30s——只放宽等待预算，
+// 断言语义与是否执行一律不变（不 skip、不改判定）。
 
 import { afterEach, describe, expect, it } from "vitest";
 import { makeIndexerHarness, type IndexerHarness } from "./indexerHarness.js";
@@ -19,9 +23,10 @@ const SECRET_B = "m5-s9-cfg-secret-B-rotated-16";
 describe("M5/S9 EmbeddingConfigService（JWT 轮换不 500 + 两步纪律）", () => {
   let h: IndexerHarness;
 
+  // 清理钩子同样给预算：低配机上真临时库的拆除（关连接 + 删目录）也可能超 5s 默认。
   afterEach(async () => {
     await h?.cleanup();
-  });
+  }, 30_000);
 
   function deps(secret = SECRET_A) {
     return { prisma: h.prisma, env: {}, jwtSecret: secret };
@@ -37,14 +42,14 @@ describe("M5/S9 EmbeddingConfigService（JWT 轮换不 500 + 两步纪律）", (
     // 密钥轮换为 SECRET_B：GET 不 500，回落未配置。
     const cfg = await getEmbeddingConfig(deps(SECRET_B));
     expect(cfg.apiKey).toEqual({ configured: false, source: "none", maskedLast4: null });
-  });
+  }, 30_000);
 
   it("PATCH dim/dimensions/reindex 入参 -> EmbeddingConfigInvalid", async () => {
     h = await makeIndexerHarness("gx-m5-s9-cfg-dim-");
     for (const body of [{ dim: 8 }, { dimensions: 8 }, { reindex: true }]) {
       await expect(patchEmbeddingConfig(deps(), body)).rejects.toBeInstanceOf(EmbeddingConfigInvalid);
     }
-  });
+  }, 30_000);
 
   it("off->cloud 缺 confirmCloud -> NeedCloudConfirm；带确认后 reindexRequired=true", async () => {
     h = await makeIndexerHarness("gx-m5-s9-cfg-cloud-");
@@ -56,7 +61,7 @@ describe("M5/S9 EmbeddingConfigService（JWT 轮换不 500 + 两步纪律）", (
     expect(r.reindexRequired).toBe(true);
     expect(r.keyRotated).toBe(true);
     expect(r.config.apiKey).toMatchObject({ configured: true, source: "db", maskedLast4: "1234" });
-  });
+  }, 30_000);
 
   it("cloud->off 不需确认；baseURL/batch/timeout 变更不置 reindexRequired，model 变更才置", async () => {
     h = await makeIndexerHarness("gx-m5-s9-cfg-off-");
@@ -79,7 +84,7 @@ describe("M5/S9 EmbeddingConfigService（JWT 轮换不 500 + 两步纪律）", (
     expect(fresh.changed.sort()).toEqual(["baseURL", "batchSize", "timeoutMs"]);
     expect(fresh.reindexRequired).toBe(false);
     await h2.cleanup();
-  });
+  }, 30_000);
 
   it("rotate 加密落库；clear 清 db 回 none（不回明文）", async () => {
     h = await makeIndexerHarness("gx-m5-s9-cfg-key-");
@@ -91,7 +96,7 @@ describe("M5/S9 EmbeddingConfigService（JWT 轮换不 500 + 两步纪律）", (
     const cleared = await clearApiKey(deps());
     expect(cleared).toEqual({ configured: false, source: "none", maskedLast4: null });
     expect(await h.prisma.appSetting.findUnique({ where: { k: "embedding.api_key_cipher" } })).toBeNull();
-  });
+  }, 30_000);
 
   it("fieldChunkCap 越界、坏 URL、非正整数 -> EmbeddingConfigInvalid", async () => {
     h = await makeIndexerHarness("gx-m5-s9-cfg-val-");
@@ -102,5 +107,5 @@ describe("M5/S9 EmbeddingConfigService（JWT 轮换不 500 + 两步纪律）", (
     ]) {
       await expect(patchEmbeddingConfig(deps(), body)).rejects.toBeInstanceOf(EmbeddingConfigInvalid);
     }
-  });
+  }, 30_000);
 });

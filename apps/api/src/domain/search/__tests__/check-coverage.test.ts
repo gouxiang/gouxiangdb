@@ -4,6 +4,10 @@
 // S9：A-F 判定单一真源已抽到 src/domain/search/searchCoverage.ts，本测试直接对拍该 domain
 // 函数（CLI scripts/search/check-coverage.ts 与 admin status 端点都只调它）；末尾另加一条
 // `pnpm tsx` CLI 端到端烟测，保证脚本入口/路径解析/exit code 不回归。
+//
+// 预算说明：A-F 每例都要真建独立临时主库 + 真迁移 + 真建独立 search.db + 真跑一轮索引，
+// 单例在低配机（2C）实测 5.0~7.7s，跑不完 vitest 默认 5s 预算。故 A-F 各例显式给 30s
+// ——只放宽等待预算，断言语义、判定口径、是否被跳过一律不变。
 
 import { describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
@@ -60,7 +64,7 @@ describe("check-coverage A-F（domain 单一真源，每用例独立库）", () 
     expect(rep.samples).not.toHaveProperty("D");
     store.close();
     await c.h.cleanup();
-  });
+  }, 30_000);
 
   it("A 漏索引：活实体无 chunk -> A=1、exit 1、blockingCodes 含 A", async () => {
     const c = await freshCtx("a");
@@ -74,7 +78,7 @@ describe("check-coverage A-F（domain 单一真源，每用例独立库）", () 
     expect(rep.exitCode).toBe(1);
     expect(rep.blockingCodes).toEqual(["A"]);
     await c.h.cleanup();
-  });
+  }, 30_000);
 
   it("B 脏行：实体软删但 chunk 仍在 -> B>=2（identity+field）、A=0、exit 1", async () => {
     const c = await freshCtx("b");
@@ -88,7 +92,7 @@ describe("check-coverage A-F（domain 单一真源，每用例独立库）", () 
     expect(rep.exitCode).toBe(1);
     store.close();
     await c.h.cleanup();
-  });
+  }, 30_000);
 
   it("E fts 缺失 + F 授权漏登 -> 各 1，exit 1", async () => {
     const c = await freshCtx("ef");
@@ -110,7 +114,7 @@ describe("check-coverage A-F（domain 单一真源，每用例独立库）", () 
     expect(rep.exitCode).toBe(1);
     store.close();
     await c.h.cleanup();
-  });
+  }, 30_000);
 
   it("C 悬空 nodeId 仅警告 exit 0（补 fts 不触发 E；实体仍活不算 A/B）", async () => {
     const c = await freshCtx("c");
@@ -136,7 +140,7 @@ describe("check-coverage A-F（domain 单一真源，每用例独立库）", () 
     expect(rep.exitCode).toBe(0);
     store.close();
     await c.h.cleanup();
-  });
+  }, 30_000);
 
   it("D 向量欠账仅 cloud 计、exit 0；off 跳过 D", async () => {
     const c = await freshCtx("d");
@@ -151,7 +155,7 @@ describe("check-coverage A-F（domain 单一真源，每用例独立库）", () 
     expect(cloud.exitCode).toBe(0);
     store.close();
     await c.h.cleanup();
-  });
+  }, 30_000);
 });
 
 describe("check-coverage CLI（pnpm tsx 端到端，脚本调 domain 真源）", () => {
