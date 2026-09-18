@@ -88,11 +88,19 @@ run("pnpm", ["--filter", "@gx/web", "run", "build"], {
   env: { ...process.env, VITE_BASE_PATH: GATEWAY_PREFIX },
 });
 
-// --- 2) 写 manifest.platform ----------------------------------------------------
+// --- 2) 写 manifest.platform / manifest.version -----------------------------------
+// version 必须和 platform 一样由 rootPkg 统一重写，不能留在 manifest 里手改：
+// 2026-09-18 真机实证——手工把 manifest 改成 0.1.1 后装上，应用中心显示 0.1.1，
+// 但 /healthz 与 /readyz 仍报 "version":"0.1.0"（dist 内版本来自 rootPkg.version），
+// 两个版本各说各话，出事故时无法判断线上跑的到底是哪个包。
 const manifestPath = path.join(packDir, "manifest");
-const manifest = fs.readFileSync(manifestPath, "utf8").replace(/^platform=.*$/m, `platform=${arch}`);
+const manifestRaw = fs.readFileSync(manifestPath, "utf8");
+const manifest = manifestRaw
+  .replace(/^platform\s*=.*$/m, `platform=${arch}`)
+  .replace(/^version\s*=.*$/m, `version               = ${version}`);
+if (!/^version\s*=/m.test(manifestRaw)) fail("manifest 缺少 version 行，无法统一版本真相源");
 fs.writeFileSync(manifestPath, manifest);
-log(`manifest.platform=${arch}`);
+log(`manifest.platform=${arch}，manifest.version=${version}`);
 
 // --- 3) 组装 server/（白名单） ---------------------------------------------------
 rimraf(serverDir);
