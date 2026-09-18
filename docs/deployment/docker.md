@@ -106,7 +106,16 @@ GX_MIN_DISK_MB=1024
 # AGE_RECIPIENT=
 # AGE_BIN=age
 # GX_OFFSITE_TARGET=
+
+# 可选：首次部署自动创建超级管理员（三个都取消注释并填真值才生效）
+# GX_INIT_ADMIN_EMAIL=admin@example.com
+# GX_INIT_ADMIN_PASSWORD=<openssl rand -base64 24>
+# GX_INIT_ADMIN_NAME=超级管理员
 ```
+
+#### 首次部署的超级管理员（可选）
+
+`docker-entrypoint.sh` 在 `prisma migrate deploy` + nav-reconcile 之后、`exec node dist/index.js` 之前执行一次 `node dist/init-admin.js`：只在 `GX_INIT_ADMIN_EMAIL` 与 `GX_INIT_ADMIN_PASSWORD` **两个都非空**时创建第一个 ACTIVE 用户、授予系统 owner、标记首登强制改密；任一为空则打印一行提示并**正常继续、不阻断启动**（首个通过 `/api/auth/signup` 注册的用户会自动成为所有者）。脚本**幂等**（`users` 表已有任何用户即跳过），初始化完成后建议把这三行从 `gouxiangdb.env` 删掉。失败即非零退出、不接流量（容器按 `restart: unless-stopped` 重启）。详见 [`first-admin-init.md`](./first-admin-init.md)。
 
 生成密钥：
 
@@ -207,6 +216,7 @@ docker compose -f deploy/docker/docker-compose.yml down        # 停容器，命
 | `GX_MIN_DISK_MB` | 否 | 1024 | disk 探针下限 |
 | `GX_BODY_LIMIT_JSON` / `GX_BODY_LIMIT_UPLOAD` | 否 | 1 / 6（MB） | |
 | `GX_RATE_LIMIT` | 否 | on | 压测才设 off |
+| `GX_INIT_ADMIN_EMAIL`/`GX_INIT_ADMIN_PASSWORD`/`GX_INIT_ADMIN_NAME` | 否 | 空 | 首次部署创建超级管理员；两者（EMAIL/PASSWORD）都非空才执行，空则跳过且不失败，详见 [`first-admin-init.md`](./first-admin-init.md) |
 | `GX_SOCKET_PATH`/`GX_BASE_PATH` | 否 | 空 | Docker 走 TCP 根路径，**不用**；仅飞牛原生用 |
 | 备份四变量 | 否 | 关 | 异地加密预留，默认不启用 |
 
@@ -235,6 +245,28 @@ curl -fsS http://127.0.0.1:3001/api/health
 ```
 
 `/readyz` 返回体含五探针（`dbPing/dbWritable/migrations/uploadsWritable/disk`）；任一 false 会以短码给出 503。
+
+**初始超级管理员验证**（仅配置了 `GX_INIT_ADMIN_*` 时）：
+
+```bash
+# 1) entrypoint 日志出现初始化步骤（未配置凭据时应是"跳过自动初始化"且不失败）
+docker compose -f deploy/docker/docker-compose.yml logs gouxiangdb | grep -E 'init-admin|超级管理员'
+
+# 2) 用初始账号登录：期望 200 且 user.mustChangePassword 为 true
+curl -sS -X POST http://127.0.0.1:3001/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"<GX_INIT_ADMIN_EMAIL>","password":"<GX_INIT_ADMIN_PASSWORD>"}'
+
+# 3) 查库确认用户与 owner 授予（镜像无 sqlite3 CLI，用发布包自带的 better-sqlite3）
+docker compose -f deploy/docker/docker-compose.yml exec gouxiangdb node -e \
+  "const D=require('better-sqlite3');const db=new D('/data/app.db',{readonly:true});\
+console.log(db.prepare('SELECT id,email,displayName,status,mustChangePassword FROM users').all());\
+console.log(db.prepare(\"SELECT id,roleId,subjectType,subjectId FROM role_assignments WHERE roleId='role_owner' AND subjectType='user'\").all());"
+
+# 4) 审计事件
+docker compose -f deploy/docker/docker-compose.yml exec gouxiangdb \
+  grep '"event":"admin_initialized"' /data/log/audit.logl
+```
 
 **持久化验证**：写几条记录 → `docker compose down` → 重新 `up -d` → 数据仍在；附件可访问。
 

@@ -7,6 +7,7 @@
 # 流程：环境检查 → 当前 readyz 探活 → 强制在线快照（无快照不继续）→ 解包到
 #       releases/<ts> → checksum 校验 → prisma migrate deploy（生产 env，只增迁移）
 #       → nav-reconcile --apply（迁移后 path 重算，M3-S11-A/AC-UPG-1）
+#       → init-admin（仅首次部署创建超级管理员，幂等；无凭据则跳过）
 #       → ln -sfn 原子切换 → systemctl restart → 轮询 readyz 最多 30s
 #       → 失败自动回滚 → 成功则保留最近 N 个 release。
 #
@@ -131,6 +132,24 @@ say "迁移后导航 path 重算（nav-reconcile --apply）"
 ( cd "$STAGE/api" && DATABASE_URL="$DATABASE_URL" \
     "$NODE_BIN" dist/nav-reconcile.js --apply ) \
   || die "nav reconcile 失败；新版本未切换，现网不受影响。"
+
+# ---------------------------------------------------------------------------
+# 4c) 迁移 + nav 重算之后、原子切换之前：首次部署创建超级管理员（幂等）。
+#     users 表已有任何用户时脚本打印"已初始化，跳过"并 exit 0，绝不重复创建；
+#     这是为了不与"首个注册用户自动成为所有者"抢跑（bootstrapFirstOwnerTx 仅在
+#     该用户是唯一用户且尚无 user 级 owner 授予时才授予）。
+#     凭据来自 /etc/gouxiangdb/env.conf（本脚本开头已 set -a; source 注入本进程环境）。
+#     两者任一为空即跳过（warn，不阻断部署）；失败与 migrate/nav 同姿态：die 在 symlink
+#     切换之前，现网仍跑旧版本完全不受影响。详见 docs/deployment/first-admin-init.md。
+# ---------------------------------------------------------------------------
+if [[ -n "${GX_INIT_ADMIN_EMAIL:-}" && -n "${GX_INIT_ADMIN_PASSWORD:-}" ]]; then
+  say "创建初始超级管理员：${GX_INIT_ADMIN_EMAIL}"
+  ( cd "$STAGE/api" && DATABASE_URL="$DATABASE_URL" \
+      "$NODE_BIN" dist/init-admin.js ) \
+    || die "init-admin 失败；新版本未切换，现网不受影响。修好 GX_INIT_ADMIN_EMAIL/GX_INIT_ADMIN_PASSWORD 后重跑 deploy.sh 即可（脚本幂等）。"
+else
+  warn "未配置初始管理员凭据，跳过自动初始化（首个通过 /api/auth/signup 注册的用户会自动成为所有者）"
+fi
 
 # ---------------------------------------------------------------------------
 # 5) 原子切换 current → restart → 30s readyz 轮询；失败自动回滚。

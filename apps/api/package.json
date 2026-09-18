@@ -19,6 +19,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
+    "init:admin": "tsx scripts/init-admin.ts",
     "db:reset": "prisma migrate reset --force",
     "backup:online": "node scripts/backup/online-backup.mjs",
     "backup:verify": "node scripts/backup/verify-restore.mjs"

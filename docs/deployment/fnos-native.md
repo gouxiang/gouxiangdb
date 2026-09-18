@@ -411,13 +411,15 @@ node deploy/fnos/build-fpk.mjs --arch arm     # 产 gouxiangdb-0.1.0-arm.fpk
 
 ### 7.1 安装（两种）
 
-- **应用中心手动安装（本地测试/单台）**：打开飞牛应用中心 → 手动安装本地 `.fpk` → 选安装存储空间 → （有向导则填 `external_origin`）→ 完成。框架顺序：`install_init` → 落应用文件 → `install_callback`（生成 env + `migrate deploy`）。
+- **应用中心手动安装（本地测试/单台）**：打开飞牛应用中心 → 手动安装本地 `.fpk` → 选安装存储空间 → （有向导则填 `external_origin`）→ 完成。框架顺序：`install_init` → 落应用文件 → `install_callback`（生成 env + `migrate deploy` + nav-reconcile + **创建超级管理员**）。
 - **设备命令行**：
 
   ```bash
   appcenter-cli install-fpk gouxiangdb-0.1.0-x86.fpk
   # 带向导/配置：appcenter-cli install-fpk gouxiangdb-0.1.0-x86.fpk --env config.env
   ```
+
+- **（可选，推荐）预置初始管理员凭据**：`install_callback` 只在 `GX_INIT_ADMIN_EMAIL` 与 `GX_INIT_ADMIN_PASSWORD` **两个都非空**时创建超级管理员，两者读自 `${TRIM_PKGETC}/gouxiangdb.env`（首装由 `install_callback` 生成，可事后编辑并在应用中心重启补跑）。任一为空则跳过——**不阻断安装**，首个通过 `/api/auth/signup` 注册的用户会自动成为所有者。凭据只在 `install_callback`（首次安装）里被消费，`upgrade_callback`（升级）不做初始化。初始化完成后建议把这三行从 env 删除（脚本幂等，删了不会重复创建）。详见 [`first-admin-init.md`](./first-admin-init.md)。
 
 ### 7.2 启动 / 停止 / 状态
 
@@ -445,6 +447,7 @@ node deploy/fnos/build-fpk.mjs --arch arm     # 产 gouxiangdb-0.1.0-arm.fpk
 8. **多用户隔离头**：不同 fnOS 用户经网关，应用收到各自的 `X-Trim-Userid`（应用层账号体系独立，此头可用于审计/未来映射）。
 9. **升级演练**：装旧版→造数据→升级新版，确认快照生成、迁移只增、数据无损。
 10. **卸载演练**：卸载后 data-share 数据仍在（默认保留策略生效）。
+11. **初始超级管理员**（仅配置了凭据时）：`install_callback` 输出「创建初始超级管理员：\<email\>」；用该账号经网关 `POST /app/gouxiangdb/api/auth/login` 登录返回 200 且 `user.mustChangePassword` 为 `true`；审计 `${TRIM_PKGVAR}/log/audit.logl` 有 `"event":"admin_initialized"`。未配置凭据时应看到「未配置初始管理员凭据，跳过自动初始化」且安装仍成功（首个注册用户自动成为所有者）。
 
 ---
 
