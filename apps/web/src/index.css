@@ -16,6 +16,35 @@
 }
 
 /* ============ 个人中心弹窗动画（全局，任意视图可用） ============ */
+/* ============ R-N-11/12 行尾「竖向三点」入口：默认隐藏但占位常驻 ============ */
+/* 四条护栏（缺一不可，故集中在此处用一条类保证，避免各调用点各写一半）：
+   ① .gx-row-more 容器恒为 20×20 占位（由 Tailwind h-5 w-5 提供），显隐不改行宽行高；
+   ② 菜单打开期间强制可见（data-open="true"）；
+   ③ 触屏（hover: none）常驻可见；
+   ④ 键盘 focus-within / focus-visible 可见。 */
+.gx-row-more {
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.gx-row-more[data-open="true"],
+.gx-row-more:focus-within,
+.gx-row-more:focus-visible,
+.group:hover .gx-row-more,
+.group:focus-within .gx-row-more,
+[data-row-hover="true"] .gx-row-more {
+  opacity: 1;
+}
+@media (hover: none) {
+  .gx-row-more {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gx-row-more {
+    transition: none;
+  }
+}
+
 @keyframes kb-pcdialog-in {
   from { opacity: 0; transform: scale(0.96) translateY(8px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
@@ -29,4 +58,65 @@
 }
 .animate-pcdrawer-fade {
   animation: kb-pcdrawer-fade-in 0.18s ease-out;
+}
+
+/* ============ 阶段 2 · 统一表单骨架（UI-SPEC R-F-01~R-F-17）============ */
+/* 骨架件见 components/form.tsx（Form / FormSection / FormRow / FormField / FormActions / FormBanner）。
+   这里只放「Tailwind 单类表达不了」的两件事：12 栅格的跨度和容器降列、控件高度三档。 */
+
+/* R-F-01 12 栅格 + gap 12。
+   控件宽度由 grid 列宽决定，故直接子级 input/select/textarea 统一占满整列，
+   避免 <select> 退回内容宽度（它是替换元素，脱离 flex stretch 后会收缩）。 */
+.gx-form-row {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px;
+}
+
+/* R-F-02 字段最小宽 200px：容器窄于 200×n + 12×(n-1) 时自动降列 3→2→1，不出现横向滚动。
+   用原生 CSS 容器查询实现（零新增依赖）；不支持容器查询的浏览器按声明跨度渲染（保守降级）。
+   container-type 只加在多列行（.gx-form-row--multi）上，单列行不受 containment 影响。 */
+.gx-form-row--multi {
+  container-type: inline-size;
+}
+.gx-field {
+  min-width: 0;
+}
+/* 非 FormField 的直接子级（说明块、自带标签的组合控件等）默认占满整行，
+   否则 grid 自动放置会把它塞进 1/12 列宽。该规则在前，.gx-field-* 跨度规则在后覆盖。 */
+.gx-form-row > * {
+  grid-column: span 12 / span 12;
+}
+.gx-field-12 { grid-column: span 12 / span 12; }
+.gx-field-8  { grid-column: span 8 / span 8; }
+.gx-field-6  { grid-column: span 6 / span 6; }
+.gx-field-4  { grid-column: span 4 / span 4; }
+/* 容器 < 412px：连 2×200+12 都放不下 → 全部降为整行 */
+@container (max-width: 411px) {
+  .gx-field-8,
+  .gx-field-6,
+  .gx-field-4 { grid-column: span 12 / span 12; }
+}
+/* 容器 412–623px：3×200+24 放不下 → 4 跨降为半行（3 列 → 2 列） */
+@container (min-width: 412px) and (max-width: 623px) {
+  .gx-field-4 { grid-column: span 6 / span 6; }
+}
+
+/* R-F-05 字段高度只有三档：32（紧凑：表格内/筛选）、34（标准：弹窗/抽屉/页面）、auto（多行文本）。
+   选择器特指度 0,1,1 高于 Tailwind 单一工具类 0,1,0，故无需 !important 即可覆盖 Input/Select 的 h-8。
+   只作用于**直接子级**，嵌套的组合编辑器（选项行、默认值编辑器等）内部控件高度保持原样。 */
+/* 排除 checkbox / radio：它们的高度与宽度由控件自身决定，套 32/34 会把勾选框拉变形。 */
+.gx-field-ctl > :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  width: 100%;
+}
+.gx-field-ctl-32 > :is(input:not([type="checkbox"]):not([type="radio"]), select) { height: 32px; }
+.gx-field-ctl-34 > :is(input:not([type="checkbox"]):not([type="radio"]), select) { height: 34px; }
+.gx-field-ctl-auto > :is(input:not([type="checkbox"]):not([type="radio"]), select) { height: auto; }
+/* 多行文本永远走自动高度，不参与 32/34 档 */
+.gx-field-ctl > textarea { height: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gx-field-ctl {
+    transition: none;
+  }
 }

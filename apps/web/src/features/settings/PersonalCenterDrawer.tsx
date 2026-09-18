@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Input, toast } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
+import { Form, FormActions, FormBanner, FormField, FormRow, FormSection } from "../../components/form";
 import { useAuthStore } from "../../store/auth";
 import {
   useUpdateMe,
@@ -165,6 +166,9 @@ function ProfileTab({ user }: { user: UserDTO }) {
   const [bio, setBio] = useState(user.bio ?? "");
   const [err, setErr] = useState<string | null>(null);
   const updateMe = useUpdateMe();
+  // R-F-10 ①失焦即校验；③已报错字段在输入时实时消错（error 由当前值推导）
+  const [nameTouched, setNameTouched] = useState(false);
+  const nameError = nameTouched && !displayName.trim() ? "昵称不能为空" : null;
   const dirty =
     displayName !== user.displayName ||
     phone !== (user.phone ?? "") ||
@@ -194,59 +198,88 @@ function ProfileTab({ user }: { user: UserDTO }) {
     }
   };
 
+  // 阶段 2：抽屉表单走统一骨架 —— 12 栅格 + gap 12 + 控件 34 + 错误行 16px 预留
   return (
-    <div className="space-y-5">
-      <SectionTitle title="基本信息" desc="展示给他人的公开资料" />
+    <Form variant="drawer" padding={false}>
+      {/* R-F-13 无法归属到具体字段的服务端错误 → 表单顶部横幅 */}
+      {err && <FormBanner message={err} onDismiss={() => setErr(null)} />}
 
-      <FormField label="昵称" required>
-        <Input
-          value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
-          maxLength={60}
-          placeholder="显示名"
-          disabled={updateMe.isPending}
+      <FormSection title="基本信息" description="展示给他人的公开资料">
+        <FormRow>
+          <FormField label="昵称" required error={nameError} labelExtra={`${displayName.length}/60`}>
+            <Input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              onBlur={() => setNameTouched(true)}
+              maxLength={60}
+              placeholder="显示名"
+              disabled={updateMe.isPending}
+            />
+          </FormField>
+        </FormRow>
+
+        <FormRow>
+          {/* R-D-11 只读字段：去边框去底色、用 readOnly 而非 disabled（disabled 无法选中复制） */}
+          <FormField label="邮箱" help="登录账号，不可修改">
+            <Input
+              value={user.email}
+              readOnly
+              className="!border-transparent !bg-transparent !text-gx-text-tertiary"
+            />
+          </FormField>
+        </FormRow>
+
+        <FormRow>
+          <FormField label="手机号" optional labelExtra={`${phone.length}/30`}>
+            <Input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              maxLength={30}
+              placeholder="例如 138 0000 0000"
+              disabled={updateMe.isPending}
+            />
+          </FormField>
+        </FormRow>
+
+        <FormRow>
+          <FormField
+            label="个人简介"
+            control="auto"
+            optional
+            labelExtra={`${bio.length}/500`}
+            help="一句话介绍你自己"
+          >
+            <textarea
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              maxLength={500}
+              rows={4}
+              disabled={updateMe.isPending}
+              placeholder="例如：负责产品需求池的梳理与排期"
+              className="w-full rounded-gx-md border border-gx-border bg-gx-bg px-3 py-2 text-gx-13 text-gx-text-primary outline-none focus:border-gx-accent focus:bg-gx-surface disabled:opacity-60 resize-none"
+            />
+          </FormField>
+        </FormRow>
+
+        <FormActions
+          align="right"
+          submitText="保存修改"
+          onSubmit={onSave}
+          submitting={updateMe.isPending}
+          submitDisabled={!dirty}
+          submitDisabledReason={!dirty ? "表单未改动" : undefined}
+          onReset={() => {
+            setDisplayName(user.displayName);
+            setPhone(user.phone ?? "");
+            setBio(user.bio ?? "");
+            setNameTouched(false);
+            setErr(null);
+            toast("已恢复到修改前的内容", "info");
+          }}
+          resetEnabled={dirty}
         />
-      </FormField>
-
-      <FormField label="邮箱" hint="登录账号，不可修改">
-        <Input value={user.email} disabled readOnly />
-      </FormField>
-
-      <FormField label="手机号">
-        <Input
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          maxLength={30}
-          placeholder="选填"
-          disabled={updateMe.isPending}
-        />
-      </FormField>
-
-      <FormField label="个人简介" hint={`${bio.length}/500`}>
-        <textarea
-          value={bio}
-          onChange={(e) => setBio(e.target.value)}
-          maxLength={500}
-          rows={4}
-          disabled={updateMe.isPending}
-          placeholder="一句话介绍你自己..."
-          className="w-full rounded-gx-md border border-gx-border bg-gx-bg px-3 py-2 text-gx-13 text-gx-text-primary outline-none focus:border-gx-accent focus:bg-gx-surface disabled:opacity-60 resize-none"
-        />
-      </FormField>
-
-      {err && <div className="text-gx-12 text-gx-danger">{err}</div>}
-
-      <div className="flex justify-end gap-2 pt-2">
-        <Button
-          variant="primary"
-          onClick={onSave}
-          loading={updateMe.isPending}
-          disabled={!dirty || updateMe.isPending}
-        >
-          保存修改
-        </Button>
-      </div>
-    </div>
+      </FormSection>
+    </Form>
   );
 }
 
@@ -256,6 +289,8 @@ function AccountTab({ user }: { user: UserDTO }) {
   const [username, setUsername] = useState(user.username ?? "");
   const [err, setErr] = useState<string | null>(null);
   const updateMe = useUpdateMe();
+  // R-F-10 ①失焦即校验；③已报错字段在输入时实时消错
+  const [touched, setTouched] = useState(false);
   const dirty = username !== (user.username ?? "");
 
   const validateUsername = (s: string): string | null => {
@@ -283,37 +318,55 @@ function AccountTab({ user }: { user: UserDTO }) {
   };
 
   return (
-    <div className="space-y-5">
-      <SectionTitle title="账号标识" desc="唯一用户名，用于 @ 提及、URL 等" />
+    <Form variant="drawer" padding={false}>
+      {err && <FormBanner message={err} onDismiss={() => setErr(null)} />}
 
-      <FormField label="用户名" required hint="3-24 字符，仅字母/数字/_/-">
-        <Input
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          maxLength={24}
-          placeholder="例如 alice_2026"
-          disabled={updateMe.isPending}
+      <FormSection title="账号标识" description="唯一用户名，用于 @ 提及、URL 等">
+        <FormRow>
+          <FormField
+            label="用户名"
+            required
+            error={touched ? validateUsername(username) : null}
+            help="3-24 字符，仅字母/数字/_/-"
+            labelExtra={`${username.length}/24`}
+          >
+            <Input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onBlur={() => setTouched(true)}
+              maxLength={24}
+              placeholder="例如 alice_2026"
+              disabled={updateMe.isPending}
+            />
+          </FormField>
+        </FormRow>
+
+        <FormActions
+          align="right"
+          submitText="保存修改"
+          onSubmit={onSave}
+          submitting={updateMe.isPending}
+          submitDisabled={!dirty}
+          submitDisabledReason={!dirty ? "表单未改动" : undefined}
+          onReset={() => {
+            setUsername(user.username ?? "");
+            setTouched(false);
+            setErr(null);
+          }}
+          resetEnabled={dirty}
         />
-      </FormField>
+      </FormSection>
 
-      {err && <div className="text-gx-12 text-gx-danger">{err}</div>}
-
-      <div className="flex justify-end gap-2 pt-2">
-        <Button
-          variant="primary"
-          onClick={onSave}
-          loading={updateMe.isPending}
-          disabled={!dirty || updateMe.isPending}
-        >
-          保存修改
-        </Button>
-      </div>
-
-      <SectionTitle title="第三方账号" desc="微信 / GitHub / Google 绑定（即将上线）" />
-      <div className="rounded-gx-md border border-dashed border-gx-border bg-gx-bg px-4 py-6 text-center text-gx-12 text-gx-text-tertiary">
-        暂未开放，敬请期待
-      </div>
-    </div>
+      <FormSection title="第三方账号" description="微信 / GitHub / Google 绑定（即将上线）">
+        <FormRow>
+          <FormField label="绑定状态" control="auto">
+            <div className="rounded-gx-md border border-dashed border-gx-border bg-gx-bg px-4 py-6 text-center text-gx-12 text-gx-text-tertiary">
+              暂未开放，敬请期待
+            </div>
+          </FormField>
+        </FormRow>
+      </FormSection>
+    </Form>
   );
 }
 
@@ -329,6 +382,19 @@ function PasswordTab({ onSuccess }: { onSuccess: () => void }) {
   // 密码强度（弱 1 / 中 2 / 强 3）
   const strength = useMemo(() => passwordStrength(next), [next]);
   const dirty = current.length > 0 || next.length > 0 || confirm.length > 0;
+  // R-F-10 ①失焦即校验；③已报错字段在输入时实时消错（error 由当前值推导，输入即重算）
+  const [touched, setTouched] = useState({ current: false, next: false, confirm: false });
+  const currentError = touched.current && !current ? "请输入当前密码" : null;
+  const nextError =
+    touched.next && next.length > 0
+      ? next.length < 8
+        ? "新密码至少 8 位"
+        : next.length > 72
+          ? "新密码不超过 72 位"
+          : null
+      : null;
+  const confirmError =
+    touched.confirm && confirm.length > 0 && next !== confirm ? "两次输入的新密码不一致" : null;
 
   const onSave = async () => {
     setErr(null);
@@ -351,80 +417,96 @@ function PasswordTab({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <div className="space-y-5">
-      <SectionTitle title="修改密码" desc="定期更换密码可提高账号安全" />
+    <Form variant="drawer" padding={false}>
+      {err && <FormBanner message={err} onDismiss={() => setErr(null)} />}
 
-      <FormField label="当前密码" required>
-        <Input
-          type="password"
-          value={current}
-          onChange={(e) => setCurrent(e.target.value)}
-          autoComplete="current-password"
-          disabled={cp.isPending}
+      <FormSection title="修改密码" description="定期更换密码可提高账号安全">
+        <FormRow>
+          <FormField label="当前密码" required error={currentError}>
+            <Input
+              type="password"
+              value={current}
+              onChange={(e) => setCurrent(e.target.value)}
+              onBlur={() => setTouched((p) => ({ ...p, current: true }))}
+              autoComplete="current-password"
+              disabled={cp.isPending}
+            />
+          </FormField>
+        </FormRow>
+
+        <FormRow>
+          <FormField
+            label="新密码"
+            required
+            error={nextError}
+            help="至少 8 位，建议字母+数字+符号混合"
+          >
+            <Input
+              type="password"
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              onBlur={() => setTouched((p) => ({ ...p, next: true }))}
+              autoComplete="new-password"
+              disabled={cp.isPending}
+            />
+            {next.length > 0 && (
+              <div className="mt-1.5 flex items-center gap-2">
+                <div className="flex flex-1 gap-1">
+                  {[1, 2, 3].map((s) => (
+                    <div
+                      key={s}
+                      className={
+                        "h-1 flex-1 rounded-full " +
+                        (strength >= s
+                          ? s === 1
+                            ? "bg-gx-danger"
+                            : s === 2
+                              ? "bg-gx-warning"
+                              : "bg-gx-success"
+                          : "bg-gx-bg")
+                      }
+                    />
+                  ))}
+                </div>
+                <span className="text-gx-11 text-gx-text-tertiary">
+                  {strength <= 1 ? "弱" : strength === 2 ? "中" : "强"}
+                </span>
+              </div>
+            )}
+          </FormField>
+        </FormRow>
+
+        <FormRow>
+          <FormField label="确认新密码" required error={confirmError}>
+            <Input
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              onBlur={() => setTouched((p) => ({ ...p, confirm: true }))}
+              autoComplete="new-password"
+              disabled={cp.isPending}
+            />
+          </FormField>
+        </FormRow>
+
+        <FormActions
+          align="right"
+          submitText="修改密码"
+          onSubmit={onSave}
+          submitting={cp.isPending}
+          submitDisabled={!dirty}
+          submitDisabledReason={!dirty ? "请先填写密码" : undefined}
+          onReset={() => {
+            setCurrent("");
+            setNext("");
+            setConfirm("");
+            setTouched({ current: false, next: false, confirm: false });
+            setErr(null);
+          }}
+          resetEnabled={dirty}
         />
-      </FormField>
-
-      <FormField label="新密码" required hint="至少 8 位，建议字母+数字+符号混合">
-        <Input
-          type="password"
-          value={next}
-          onChange={(e) => setNext(e.target.value)}
-          autoComplete="new-password"
-          disabled={cp.isPending}
-        />
-        {next.length > 0 && (
-          <div className="mt-1.5 flex items-center gap-2">
-            <div className="flex flex-1 gap-1">
-              {[1, 2, 3].map((s) => (
-                <div
-                  key={s}
-                  className={
-                    "h-1 flex-1 rounded-full " +
-                    (strength >= s
-                      ? s === 1
-                        ? "bg-gx-danger"
-                        : s === 2
-                          ? "bg-gx-warning"
-                          : "bg-gx-success"
-                      : "bg-gx-bg")
-                  }
-                />
-              ))}
-            </div>
-            <span className="text-gx-11 text-gx-text-tertiary">
-              {strength <= 1 ? "弱" : strength === 2 ? "中" : "强"}
-            </span>
-          </div>
-        )}
-      </FormField>
-
-      <FormField
-        label="确认新密码"
-        required
-        hint={confirm.length > 0 && next !== confirm ? "两次输入不一致" : undefined}
-      >
-        <Input
-          type="password"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          autoComplete="new-password"
-          disabled={cp.isPending}
-        />
-      </FormField>
-
-      {err && <div className="text-gx-12 text-gx-danger">{err}</div>}
-
-      <div className="flex justify-end gap-2 pt-2">
-        <Button
-          variant="primary"
-          onClick={onSave}
-          loading={cp.isPending}
-          disabled={!dirty || cp.isPending}
-        >
-          修改密码
-        </Button>
-      </div>
-    </div>
+      </FormSection>
+    </Form>
   );
 }
 
@@ -502,75 +584,76 @@ function AvatarTab({ user }: { user: UserDTO }) {
   };
 
   return (
-    <div className="space-y-5">
-      <SectionTitle title="头像" desc="支持 JPG / PNG / WebP / GIF，最大 5MB" />
+    <Form variant="drawer" padding={false}>
+      {err && <FormBanner message={err} onDismiss={() => setErr(null)} />}
 
-      <div className="flex items-center gap-4">
-        {/* 头像预览 */}
-        {displayAvatar ? (
-          <img
-            src={displayAvatar}
-            alt="头像"
-            className="h-20 w-20 rounded-full border border-gx-border object-cover"
-          />
-        ) : (
-          <span
-            className="flex h-20 w-20 items-center justify-center rounded-full text-gx-24 font-semibold text-white"
-            style={{ backgroundColor: avatarColor(user.displayName ?? user.email ?? "?") }}
-          >
-            {initial}
-          </span>
+      <FormSection title="头像" description="支持 JPG / PNG / WebP / GIF，最大 5MB">
+        <FormRow>
+          <FormField label="当前头像" control="auto">
+            <div className="flex items-center gap-4">
+              {displayAvatar ? (
+                <img
+                  src={displayAvatar}
+                  alt="头像"
+                  className="h-20 w-20 rounded-full border border-gx-border object-cover"
+                />
+              ) : (
+                <span
+                  className="flex h-20 w-20 items-center justify-center rounded-full text-gx-24 font-semibold text-white"
+                  style={{ backgroundColor: avatarColor(user.displayName ?? user.email ?? "?") }}
+                >
+                  {initial}
+                </span>
+              )}
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon="upload"
+                    loading={busy}
+                    disabled={busy}
+                    onClick={() => fileRef.current?.click()}
+                  >
+                    {busy ? "上传中..." : "上传新头像"}
+                  </Button>
+                  {user.avatarUrl && (
+                    <Button variant="ghost" size="sm" onClick={onRemove} disabled={busy || removeAvatar.isPending}>
+                      移除
+                    </Button>
+                  )}
+                </div>
+                <p className="text-gx-11 text-gx-text-tertiary">
+                  建议使用正方形图片；超过 1MB 将自动压缩
+                </p>
+              </div>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                className="hidden"
+                onChange={onSelect}
+                disabled={busy}
+              />
+            </div>
+          </FormField>
+        </FormRow>
+
+        {/* 上传进度条（R-D-28 长任务进度） */}
+        {progress !== null && (
+          <FormRow>
+            <FormField label="上传进度" control="auto" labelExtra={`${progress}%`}>
+              <div className="h-1.5 overflow-hidden rounded-full bg-gx-bg">
+                <div
+                  className="h-full rounded-full bg-gx-accent transition-all duration-150"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </FormField>
+          </FormRow>
         )}
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="upload"
-              loading={busy}
-              disabled={busy}
-              onClick={() => fileRef.current?.click()}
-            >
-              {busy ? "上传中..." : "上传新头像"}
-            </Button>
-            {user.avatarUrl && (
-              <Button variant="ghost" size="sm" onClick={onRemove} disabled={busy || removeAvatar.isPending}>
-                移除
-              </Button>
-            )}
-          </div>
-          <p className="text-gx-11 text-gx-text-tertiary">
-            建议使用正方形图片；超过 1MB 将自动压缩
-          </p>
-        </div>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp,image/gif"
-          className="hidden"
-          onChange={onSelect}
-          disabled={busy}
-        />
-      </div>
-
-      {/* 上传进度条 */}
-      {progress !== null && (
-        <div className="space-y-1">
-          <div className="flex justify-between text-gx-11 text-gx-text-tertiary">
-            <span>上传中</span>
-            <span>{progress}%</span>
-          </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-gx-bg">
-            <div
-              className="h-full rounded-full bg-gx-accent transition-all duration-150"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      {err && <div className="text-gx-12 text-gx-danger">{err}</div>}
-    </div>
+      </FormSection>
+    </Form>
   );
 }
 
@@ -597,90 +680,72 @@ function DangerTab({ onDeleted }: { onDeleted: () => void }) {
   };
 
   return (
-    <div className="space-y-5">
-      <div className="rounded-gx-md border border-gx-danger/40 bg-gx-danger-bg px-4 py-3">
-        <div className="flex items-center gap-2 text-gx-danger">
-          <Icon name="alertCircle" size={14} />
-          <span className="text-gx-13 font-medium">危险操作</span>
-        </div>
-        <p className="mt-1 text-gx-12 text-gx-text-secondary">
-          注销账号将永久删除你的个人信息、评论以及你能被访问的链接，且无法恢复。
-          如果你仍是某些 Base 的唯一 owner，请先转让 owner 再注销。
-        </p>
-      </div>
+    <Form variant="drawer" padding={false}>
+      {err && <FormBanner message={err} onDismiss={() => setErr(null)} />}
 
-      <SectionTitle title="二次确认" desc="请输入「注销」二字 + 当前密码" />
+      <FormSection title="危险操作">
+        <FormRow>
+          <FormField label="注销后果" control="auto">
+            <div className="rounded-gx-md border border-gx-danger/40 bg-gx-danger-bg px-4 py-3">
+              <div className="flex items-center gap-2 text-gx-danger">
+                <Icon name="alertCircle" size={14} />
+                <span className="text-gx-13 font-medium">危险操作</span>
+              </div>
+              <p className="mt-1 text-gx-12 text-gx-text-secondary">
+                注销账号将永久删除你的个人信息、评论以及你能被访问的链接，且无法恢复。
+                如果你仍是某些 Base 的唯一 owner，请先转让 owner 再注销。
+              </p>
+            </div>
+          </FormField>
+        </FormRow>
+      </FormSection>
 
-      <FormField label='输入"注销"以确认' required>
-        <Input
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          placeholder='输入"注销"'
-          disabled={del.isPending}
+      <FormSection title="二次确认" description='请输入「注销」二字 + 当前密码'>
+        <FormRow>
+          <FormField label='输入"注销"以确认' required>
+            <Input
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder="注销"
+              disabled={del.isPending}
+            />
+          </FormField>
+        </FormRow>
+
+        <FormRow>
+          <FormField label="当前密码" required>
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              disabled={del.isPending}
+            />
+          </FormField>
+        </FormRow>
+
+        {/* R-F-15 按钮区固定底部、右对齐；R-F-17 条件不满足时主按钮禁用并说明原因 */}
+        <FormActions
+          align="right"
+          submitText="永久注销账号"
+          onSubmit={onDelete}
+          submitting={del.isPending}
+          submitDisabled={!ready}
+          submitDisabledReason={
+            confirm !== "注销"
+              ? '请先在上方输入「注销」二字'
+              : password.length === 0
+                ? "请输入当前密码"
+                : undefined
+          }
+          danger
         />
-      </FormField>
-
-      <FormField label="当前密码" required>
-        <Input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="current-password"
-          disabled={del.isPending}
-        />
-      </FormField>
-
-      {err && <div className="text-gx-12 text-gx-danger">{err}</div>}
-
-      <div className="flex justify-end gap-2 pt-2">
-        <Button
-          variant="danger"
-          onClick={onDelete}
-          loading={del.isPending}
-          disabled={!ready || del.isPending}
-        >
-          永久注销账号
-        </Button>
-      </div>
-    </div>
+      </FormSection>
+    </Form>
   );
 }
 
 // ============ 共享小组件 ============
-
-function SectionTitle({ title, desc }: { title: string; desc?: string }) {
-  return (
-    <div>
-      <div className="text-gx-13 font-medium text-gx-text-primary">{title}</div>
-      {desc && <div className="mt-0.5 text-gx-12 text-gx-text-tertiary">{desc}</div>}
-    </div>
-  );
-}
-
-function FormField({
-  label,
-  hint,
-  required,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  required?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="block">
-      <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-gx-12 font-medium text-gx-text-primary">
-          {label}
-          {required && <span className="ml-0.5 text-gx-danger">*</span>}
-        </span>
-        {hint && <span className="text-gx-11 text-gx-text-tertiary">{hint}</span>}
-      </div>
-      {children}
-    </label>
-  );
-}
 
 function passwordStrength(s: string): 0 | 1 | 2 | 3 {
   if (s.length === 0) return 0;

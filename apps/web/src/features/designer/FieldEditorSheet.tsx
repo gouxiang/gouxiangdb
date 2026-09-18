@@ -31,6 +31,7 @@ import {
 } from "../../components/ui";
 import { COLOR_PALETTE } from "../../components/ui";
 import { Icon } from "../../components/icons";
+import { Form, FormActions, FormField, FormRow, FormSection } from "../../components/form";
 import { FilterRuleField } from "./FilterRuleModal";
 import FormulaEditorModal from "./FormulaEditorModal";
 import { DefaultValueEditor, sanitizeDefaultConfig } from "./DefaultValueEditor";
@@ -275,6 +276,19 @@ function FieldEditorSheet({
   // 已建立双向配对后锁定关联表/关系类型（改表会断链），与 FieldSettingsPanel 一致
   const isLinkLocked = (isRelated || isSubtable) && !!managedField?.linkFieldId;
   const isLookupLike = type === "lookup" || type === "rollup" || type === "count";
+  // 「字段配置」分区是否有内容：没有任何类型专属配置项时不渲染空分区（避免只留一个空标题）
+  const hasTypeConfig =
+    ["singleSelect", "multiSelect"].includes(type) ||
+    ["number", "currency", "percent", "duration"].includes(type) ||
+    type === "date" ||
+    type === "datetime" ||
+    type === "autoNumber" ||
+    isRelated ||
+    isLookupLike ||
+    type === "formula" ||
+    isSubtable ||
+    type === "tabs" ||
+    allowedDefaultSources(type).length > 0;
 
   const buildPayload = (): Record<string, unknown> => {
     const data: Record<string, unknown> = { name: name.trim(), type };
@@ -345,457 +359,509 @@ function FieldEditorSheet({
       onClose={onClose}
       width={520}
       footer={
-        <>
-          {!permissions.canManageSchema && (
-            <span className="mr-auto text-gx-12 text-gx-text-hint">无表结构管理权限</span>
-          )}
-          <Button variant="ghost" onClick={onClose}>
-            取消
-          </Button>
-          <Button variant="primary" disabled={!canSave || isSystem} onClick={handleSave}>
-            保存
-          </Button>
-        </>
+        <FormActions
+          align="right"
+          submitText="保存"
+          onSubmit={handleSave}
+          submitDisabled={!canSave || isSystem}
+          submitDisabledReason={
+            isSystem
+              ? "系统字段由平台自动维护，不可编辑"
+              : !permissions.canManageSchema
+                ? "无表结构管理权限"
+                : !name.trim()
+                  ? "请先填写字段名称"
+                  : undefined
+          }
+          onCancel={onClose}
+          leading={
+            !permissions.canManageSchema ? (
+              <span className="text-gx-12 text-gx-text-hint">无表结构管理权限</span>
+            ) : undefined
+          }
+        />
       }
     >
-      <div className="flex flex-col gap-4">
-        {/* 字段切换：让用户能切到任意字段进行编辑（含 tabs/subtable 等不在 grid 显示的布局字段） */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-gx-12 font-medium text-gx-text-secondary">
-            字段 {isNew ? "（新建模式）" : "（编辑模式）"}
-          </label>
-          <Select
-            value={managedFieldId ?? ""}
-            onChange={(e) => {
-              const v = e.target.value;
-              setManagedFieldId(v === "" ? null : v);
-            }}
-            groups={[
-              { label: "操作", options: [{ value: "", label: "+ 新建字段" }] },
-              ...buildFieldGroups(allFields),
-            ]}
-            className="font-normal"
-          />
-        </div>
+      {/* 阶段 2：弹窗/抽屉表单走统一骨架 —— 12 栅格 + gap 12 + 控件 34 + 错误行 16px 预留 */}
+      <Form variant="modal" padding={false}>
+        <FormSection title="基本信息">
+          {/* 字段切换：让用户能切到任意字段进行编辑（含 tabs/subtable 等不在 grid 显示的布局字段） */}
+          <FormRow>
+            <FormField label={`字段 ${isNew ? "（新建模式）" : "（编辑模式）"}`}>
+              <Select
+                value={managedFieldId ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setManagedFieldId(v === "" ? null : v);
+                }}
+                groups={[
+                  { label: "操作", options: [{ value: "", label: "+ 新建字段" }] },
+                  ...buildFieldGroups(allFields),
+                ]}
+                className="font-normal"
+              />
+            </FormField>
+          </FormRow>
 
-        {/* 名称 */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-gx-12 font-medium text-gx-text-secondary">字段名称</label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：任务名称" />
-        </div>
+          <FormRow>
+            <FormField label="字段名称" required>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：任务名称" />
+            </FormField>
+          </FormRow>
 
-        {/* 类型选择（仅新建可选） */}
-        {isNew ? (
-          <div className="flex flex-col gap-2">
-            <label className="text-gx-12 font-medium text-gx-text-secondary">字段类型</label>
-            {TYPE_GROUPS.map((grp) => (
-              <div key={grp.group}>
-                <div className="mb-1 text-gx-11 text-gx-text-tertiary">{grp.group}</div>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {grp.items.map((it) => (
-                    <button
-                      key={it.type}
-                      type="button"
-                      onClick={() => setType(it.type)}
-                      className={
-                        "flex items-center gap-1.5 rounded-gx-md border px-2 py-1.5 text-gx-12 transition-colors " +
-                        (type === it.type
-                          ? "border-gx-accent bg-gx-accent-bg text-gx-accent"
-                          : "border-gx-border bg-gx-surface text-gx-text-primary hover:bg-gx-bg")
-                      }
-                    >
-                      <FieldIcon type={it.type} size={13} />
-                      <span className="truncate">{it.label}</span>
-                    </button>
+          {/* 类型选择（仅新建可选） */}
+          {isNew ? (
+            <FormRow>
+              <FormField label="字段类型" control="auto">
+                <div className="flex flex-col gap-2 pt-0.5">
+                  {TYPE_GROUPS.map((grp) => (
+                    <div key={grp.group}>
+                      <div className="mb-1 text-gx-11 text-gx-text-tertiary">{grp.group}</div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {grp.items.map((it) => (
+                          <button
+                            key={it.type}
+                            type="button"
+                            onClick={() => setType(it.type)}
+                            className={
+                              "flex items-center gap-1.5 rounded-gx-md border px-2 py-1.5 text-gx-12 transition-colors " +
+                              (type === it.type
+                                ? "border-gx-accent bg-gx-accent-bg text-gx-accent"
+                                : "border-gx-border bg-gx-surface text-gx-text-primary hover:bg-gx-bg")
+                            }
+                          >
+                            <FieldIcon type={it.type} size={13} />
+                            <span className="truncate">{it.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 rounded-gx-md bg-gx-bg px-2 py-1.5 text-gx-12 text-gx-text-secondary">
-            <FieldIcon type={type} size={14} />
-            类型：{type}（编辑模式下不可更改类型）
-          </div>
-        )}
+              </FormField>
+            </FormRow>
+          ) : (
+            <FormRow>
+              <FormField
+                label="字段类型"
+                help={isSystem ? SYSTEM_DESC[type] : "编辑模式下不可更改类型"}
+              >
+                <div className="flex items-center gap-2 rounded-gx-md bg-gx-bg px-2 py-1.5 text-gx-12 text-gx-text-secondary">
+                  <FieldIcon type={type} size={14} />
+                  类型：{type}（编辑模式下不可更改类型）
+                </div>
+              </FormField>
+            </FormRow>
+          )}
+        </FormSection>
 
-        {/* 系统字段说明 */}
-        {isSystem && (
-          <div className="rounded-gx-md bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-hint">
-            {SYSTEM_DESC[type]}
-          </div>
-        )}
+        {hasTypeConfig && (
+          <FormSection title="字段配置">
+            {/* 单选/多选 选项 */}
+            {["singleSelect", "multiSelect"].includes(type) && (
+              <FormRow>
+                <FormField label="选项" control="auto" help="选项顺序即为下拉与胶囊的展示顺序">
+                  <div className="flex flex-col gap-1.5">
+                    {options.map((o, i) => (
+                      <div key={o.id} className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => cycleColor(i)}
+                          className="h-6 w-6 flex-shrink-0 rounded-full border border-gx-border"
+                          style={{ backgroundColor: o.color }}
+                          title="点击切换颜色"
+                        />
+                        <Input value={o.name} onChange={(e) => setOptions((p) => p.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+                        {/* 图标统一走 icons.tsx，不用字符符号（emoji）当功能图标 */}
+                        <button type="button" onClick={() => removeOption(i)} className="rounded-gx-sm p-0.5 text-gx-text-hint hover:bg-gx-bg hover:text-gx-danger" title="删除选项">
+                          <Icon name="close" size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <Button variant="ghost" size="sm" icon="plus" onClick={addOption} className="self-start">
+                    添加选项
+                  </Button>
+                </FormField>
+              </FormRow>
+            )}
 
-        {/* 单选/多选 选项 */}
-        {["singleSelect", "multiSelect"].includes(type) && (
-          <div className="flex flex-col gap-2">
-            <label className="text-gx-12 font-medium text-gx-text-secondary">选项</label>
-            <div className="flex flex-col gap-1.5">
-              {options.map((o, i) => (
-                <div key={o.id} className="flex items-center gap-2">
+            {/* 数字精度 */}
+            {["number", "currency", "percent", "duration"].includes(type) && (
+              <FormRow cols={2}>
+                <FormField label="小数精度" span={6} help="取值范围 0~8，影响展示与导出的小数位数">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={8}
+                    value={precision}
+                    onChange={(e) => setPrecision(Math.max(0, Math.min(8, Number(e.target.value) || 0)))}
+                  />
+                </FormField>
+              </FormRow>
+            )}
+
+            {/* 日期默认当前时间 */}
+            {(type === "date" || type === "datetime") && (
+              <FormRow>
+                <FormField label="默认值" control="auto">
+                  <Checkbox checked={dateDefaultNow} onChange={setDateDefaultNow} label="新建记录时默认填入当前时间" />
+                </FormField>
+              </FormRow>
+            )}
+
+            {/* 自动编号规则 */}
+            {type === "autoNumber" && (
+              <FormRow>
+                <FormField label="编号规则" control="auto">
+                  <NumberRuleEditor value={numberRule} onChange={setNumberRule} selfFields={selfMatchFields as FieldDTO[]} />
+                </FormField>
+              </FormRow>
+            )}
+
+            {/* 默认内容（三态：自定义 / 关联已有数据 / 公式计算） */}
+            {allowedDefaultSources(type).length > 0 && (
+              <FormRow>
+                <FormField label="默认内容" control="auto">
+                  <DefaultValueEditor
+                    fieldType={type}
+                    value={defaultConfig}
+                    onChange={setDefaultConfig}
+                    selfFields={formulaFields as FieldDTO[]}
+                    tables={tables}
+                    subtableTargetTableId={isSubtable ? relTableId : null}
+                  />
+                </FormField>
+              </FormRow>
+            )}
+
+            {/* 关联字段 */}
+            {isRelated && (
+              <>
+                <FormRow>
+                  <FormField
+                    label="关联到表"
+                    help={
+                      isLinkLocked
+                        ? "关联已建立，目标表不可更改；如需改表请删除该字段后重建。"
+                        : undefined
+                    }
+                  >
+                    <Select
+                      value={relTableId}
+                      disabled={isLinkLocked}
+                      onChange={(e) => {
+                        setRelTableId(e.target.value);
+                        setDisplayFieldId("");
+                      }}
+                      options={[
+                        { value: "", label: "请选择目标表" },
+                        ...tables.filter((t) => t.id !== tableId).map((t) => ({ value: t.id, label: t.name })),
+                      ]}
+                    />
+                  </FormField>
+                </FormRow>
+                <FormRow>
+                  <FormField label="关系类型" help={RELATION_DESC[relKind]} labelExtra={`反向：${reverseName || "—"}`}>
+                    <Select
+                      value={relKind}
+                      disabled={isLinkLocked}
+                      onChange={(e) => setRelKind(e.target.value as "mm" | "hm" | "bt")}
+                      options={relationTypes.map((r) => ({ value: r.id, label: r.name }))}
+                    />
+                  </FormField>
+                </FormRow>
+                <FormRow>
+                  <FormField label="显示字段（胶囊标题）" help="未指定时取目标表主字段">
+                    <Select
+                      value={displayFieldId}
+                      onChange={(e) => setDisplayFieldId(e.target.value)}
+                      options={[
+                        { value: "", label: "默认（主字段）" },
+                        ...targetFields.map((f) => ({ value: f.id, label: f.name })),
+                      ]}
+                      disabled={!relTableId}
+                    />
+                  </FormField>
+                </FormRow>
+                <div className="rounded-gx-sm bg-gx-bg px-2 py-1 text-gx-11 text-gx-text-hint">
+                  系统将自动在目标表创建反向关联字段
+                </div>
+
+                {/* 关联字段级筛选（v2）：选择记录时按对面表的字段条件筛候选 */}
+                <FormRow>
+                  <FilterRuleField
+                    label="关联筛选条件（可选）"
+                    value={recordFilter}
+                    peerFields={targetFields as FieldDTO[]}
+                    selfFields={selfMatchFields as FieldDTO[]}
+                    onChange={setRecordFilter}
+                  />
+                </FormRow>
+              </>
+            )}
+
+            {/* 查阅/聚合/计数 */}
+            {isLookupLike && (
+              <>
+                <FormRow>
+                  <FormField label="本表的关联字段">
+                    <Select
+                      value={linkFieldId}
+                      onChange={(e) => {
+                        setLinkFieldId(e.target.value);
+                        setSubFieldId("");
+                      }}
+                      options={[
+                        { value: "", label: "请选择关联字段" },
+                        ...linkFields.map((f) => ({ value: f.id, label: f.name })),
+                      ]}
+                    />
+                  </FormField>
+                </FormRow>
+
+                {(type === "lookup" || type === "rollup") && (
+                  <FormRow>
+                    <FormField label={type === "lookup" ? "查阅子字段" : "聚合子字段"}>
+                      <Select
+                        value={subFieldId}
+                        onChange={(e) => setSubFieldId(e.target.value)}
+                        disabled={!linkFieldId}
+                        options={[
+                          { value: "", label: linkFieldId ? "请选择子字段" : "请先选择关联字段" },
+                          ...subFields.map((f) => ({ value: f.id, label: f.name })),
+                        ]}
+                      />
+                    </FormField>
+                  </FormRow>
+                )}
+
+                {type === "rollup" && (
+                  <FormRow>
+                    <FormField label="聚合函数" help="求和/平均值仅支持数值类字段；最小/最大支持数值与日期类；计数适用于任意类型。">
+                      <Select
+                        value={rollupFn}
+                        onChange={(e) => setRollupFn(e.target.value as "sum" | "avg" | "min" | "max" | "count")}
+                        options={rollupAggOptions(subFields.find((f) => f.id === subFieldId)?.type)}
+                      />
+                    </FormField>
+                  </FormRow>
+                )}
+
+                {/* 子集筛选条件：仅当已选关联字段且可见子字段时显示 */}
+                <FormRow>
+                  <FilterRuleField
+                    label="子集筛选条件（可选）"
+                    value={recordFilter}
+                    peerFields={subFields as FieldDTO[]}
+                    selfFields={selfMatchFields as FieldDTO[]}
+                    onChange={setRecordFilter}
+                  />
+                </FormRow>
+              </>
+            )}
+
+            {/* 公式 */}
+            {type === "formula" && (
+              <FormRow>
+                <FormField label="公式" control="auto">
                   <button
                     type="button"
-                    onClick={() => cycleColor(i)}
-                    className="h-6 w-6 flex-shrink-0 rounded-full border border-gx-border"
-                    style={{ backgroundColor: o.color }}
-                    title="点击切换颜色"
-                  />
-                  <Input value={o.name} onChange={(e) => setOptions((p) => p.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
-                  <button type="button" onClick={() => removeOption(i)} className="text-gx-text-hint hover:text-gx-danger">
-                    ✕
+                    onClick={() => setFormulaModalOpen(true)}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-gx-md bg-gx-bg px-3 py-2.5 text-gx-14 font-medium text-gx-accent transition-colors hover:bg-gx-accent-bg"
+                  >
+                    <Icon name="formula" size={14} /> {formula.trim() ? "编辑公式" : "设置公式"}
                   </button>
+                  <div className="mt-1.5 rounded-gx-md bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
+                    {formula.trim() ? <code className="break-all font-mono">{formula}</code> : <span className="text-gx-text-hint">未设置公式</span>}
+                  </div>
+                  {formulaModalOpen && (
+                    <FormulaEditorModal
+                      value={formula}
+                      fields={formulaFields}
+                      onClose={() => setFormulaModalOpen(false)}
+                      onConfirm={(f) => { setFormula(f); setFormulaModalOpen(false); }}
+                    />
+                  )}
+                </FormField>
+              </FormRow>
+            )}
+
+            {/* 子表格字段 */}
+            {type === "subtable" && (
+              <div className="rounded-gx-md border border-gx-border bg-gx-bg/40 p-3">
+                <p className="mb-3 text-gx-12 text-gx-text-hint">
+                  子表格字段在详情页以一张内嵌网格呈现对面表符合条件的记录。关联目标表、显示字段、筛选条件均在此配置；详情页点击「添加」按钮从对面表选记录代入。
+                </p>
+                <div className="flex flex-col gap-4">
+                  <FormRow>
+                    <FormField
+                      label="关联到表"
+                      help={
+                        isLinkLocked
+                          ? "子表格已建立，目标表不可更改；如需改表请删除该字段后重建。"
+                          : undefined
+                      }
+                    >
+                      <Select
+                        value={relTableId}
+                        disabled={isLinkLocked}
+                        onChange={(e) => {
+                          setRelTableId(e.target.value);
+                          setDisplayFieldId("");
+                          setDisplayedFieldIds([]);
+                        }}
+                        options={[
+                          { value: "", label: "请选择目标表" },
+                          ...tables.filter((t) => t.id !== tableId).map((t) => ({ value: t.id, label: t.name })),
+                        ]}
+                      />
+                    </FormField>
+                  </FormRow>
+                  <FormRow>
+                    <FormField label="关系类型">
+                      <div className="rounded-gx-sm bg-gx-bg px-2.5 py-1.5 text-gx-12 text-gx-text-secondary">
+                        一对多（固定）：一条主数据拥有多条子表行，多个子表行归属同一条主数据。
+                      </div>
+                    </FormField>
+                  </FormRow>
+                  <FormRow>
+                    <FormField label="记录标题字段（详情视图胶囊标题）">
+                      <Select
+                        value={displayFieldId}
+                        onChange={(e) => setDisplayFieldId(e.target.value)}
+                        options={[
+                          { value: "", label: "默认（对面表主字段）" },
+                          ...targetFields.map((f) => ({ value: f.id, label: f.name })),
+                        ]}
+                        disabled={!relTableId}
+                      />
+                    </FormField>
+                  </FormRow>
+                  <FormRow>
+                    <FormField label="子表格显示字段（多选）" control="auto" help="未选时子表格默认显示对面表主字段列。">
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {targetFields.map((f) => {
+                          const checked = displayedFieldIds.includes(f.id);
+                          return (
+                            <label key={f.id} className="flex cursor-pointer items-center gap-1.5 rounded-gx-sm border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 hover:bg-gx-bg">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  setDisplayedFieldIds((prev) => checked ? prev.filter((x) => x !== f.id) : [...prev, f.id]);
+                                }}
+                              />
+                              <FieldIcon type={f.type} size={12} />
+                              <span className="truncate">{f.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </FormField>
+                  </FormRow>
+                  <FormRow>
+                    <FormField label="选择弹窗可见字段（多选）" control="auto" help="仅作用于「选择数据」弹窗展示列；公式引用子表格字段不受显示/可见字段限制。">
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {targetFields.map((f) => {
+                          const checked = visibleFieldIds.includes(f.id);
+                          return (
+                            <label key={f.id} className="flex cursor-pointer items-center gap-1.5 rounded-gx-sm border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 hover:bg-gx-bg">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  setVisibleFieldIds((prev) => checked ? prev.filter((x) => x !== f.id) : [...prev, f.id]);
+                                }}
+                              />
+                              <FieldIcon type={f.type} size={12} />
+                              <span className="truncate">{f.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </FormField>
+                  </FormRow>
+                  <FormRow>
+                    <FilterRuleField
+                      label="子集筛选条件（可选）"
+                      value={recordFilter}
+                      peerFields={targetFields as FieldDTO[]}
+                      selfFields={selfMatchFields as FieldDTO[]}
+                      onChange={setRecordFilter}
+                    />
+                  </FormRow>
                 </div>
-              ))}
-            </div>
-            <Button variant="ghost" size="sm" icon="plus" onClick={addOption} className="self-start">
-              添加选项
-            </Button>
-          </div>
-        )}
-
-        {/* 数字精度 */}
-        {["number", "currency", "percent", "duration"].includes(type) && (
-          <div className="flex flex-col gap-1.5">
-            <label className="text-gx-12 font-medium text-gx-text-secondary">小数精度（0~8）</label>
-            <Input
-              type="number"
-              min={0}
-              max={8}
-              value={precision}
-              onChange={(e) => setPrecision(Math.max(0, Math.min(8, Number(e.target.value) || 0)))}
-              className="w-24"
-            />
-          </div>
-        )}
-
-        {/* 日期默认当前时间 */}
-        {(type === "date" || type === "datetime") && (
-          <Checkbox checked={dateDefaultNow} onChange={setDateDefaultNow} label="新建记录时默认填入当前时间" />
-        )}
-
-        {/* 自动编号规则 */}
-        {type === "autoNumber" && (
-          <div className="flex flex-col gap-2">
-            <label className="text-gx-12 font-medium text-gx-text-secondary">编号规则</label>
-            <NumberRuleEditor value={numberRule} onChange={setNumberRule} selfFields={selfMatchFields as FieldDTO[]} />
-          </div>
-        )}
-
-        {/* 默认内容（三态：自定义 / 关联已有数据 / 公式计算） */}
-        {allowedDefaultSources(type).length > 0 && (
-          <div className="flex flex-col gap-2">
-            <label className="text-gx-12 font-medium text-gx-text-secondary">默认内容</label>
-            <DefaultValueEditor
-              fieldType={type}
-              value={defaultConfig}
-              onChange={setDefaultConfig}
-              selfFields={formulaFields as FieldDTO[]}
-              tables={tables}
-              subtableTargetTableId={isSubtable ? relTableId : null}
-            />
-          </div>
-        )}
-
-        {/* 关联字段 */}
-        {isRelated && (
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-gx-12 font-medium text-gx-text-secondary">关联到表</label>
-              <Select
-                value={relTableId}
-                disabled={isLinkLocked}
-                onChange={(e) => {
-                  setRelTableId(e.target.value);
-                  setDisplayFieldId("");
-                }}
-                options={[
-                  { value: "", label: "请选择目标表" },
-                  ...tables.filter((t) => t.id !== tableId).map((t) => ({ value: t.id, label: t.name })),
-                ]}
-              />
-              {isLinkLocked && <div className="text-gx-11 text-gx-text-hint">关联已建立，目标表不可更改；如需改表请删除该字段后重建。</div>}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-gx-12 font-medium text-gx-text-secondary">关系类型</label>
-              <Select
-                value={relKind}
-                disabled={isLinkLocked}
-                onChange={(e) => setRelKind(e.target.value as "mm" | "hm" | "bt")}
-                options={relationTypes.map((r) => ({ value: r.id, label: r.name }))}
-              />
-              <div className="text-gx-11 text-gx-text-hint">{RELATION_DESC[relKind]}</div>
-              <div className="text-gx-11 text-gx-text-hint">反向关系：{reverseName || "—"}</div>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-gx-12 font-medium text-gx-text-secondary">显示字段（胶囊标题）</label>
-              <Select
-                value={displayFieldId}
-                onChange={(e) => setDisplayFieldId(e.target.value)}
-                options={[
-                  { value: "", label: "默认（主字段）" },
-                  ...targetFields.map((f) => ({ value: f.id, label: f.name })),
-                ]}
-                disabled={!relTableId}
-              />
-            </div>
-            <div className="rounded-gx-sm bg-gx-bg px-2 py-1 text-gx-11 text-gx-text-hint">
-              系统将自动在目标表创建反向关联字段
-            </div>
-
-            {/* 关联字段级筛选（v2）：选择记录时按对面表的字段条件筛候选 */}
-            <FilterRuleField
-              label="关联筛选条件（可选）"
-              value={recordFilter}
-              peerFields={targetFields as FieldDTO[]}
-              selfFields={selfMatchFields as FieldDTO[]}
-              onChange={setRecordFilter}
-            />
-          </div>
-        )}
-
-        {/* 查阅/聚合/计数 */}
-        {isLookupLike && (
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-gx-12 font-medium text-gx-text-secondary">本表的关联字段</label>
-              <Select
-                value={linkFieldId}
-                onChange={(e) => {
-                  setLinkFieldId(e.target.value);
-                  setSubFieldId("");
-                }}
-                options={[
-                  { value: "", label: "请选择关联字段" },
-                  ...linkFields.map((f) => ({ value: f.id, label: f.name })),
-                ]}
-              />
-            </div>
-
-            {(type === "lookup" || type === "rollup") && (
-              <div className="flex flex-col gap-1.5">
-                <label className="text-gx-12 font-medium text-gx-text-secondary">
-                  {type === "lookup" ? "查阅子字段" : "聚合子字段"}
-                </label>
-                <Select
-                  value={subFieldId}
-                  onChange={(e) => setSubFieldId(e.target.value)}
-                  disabled={!linkFieldId}
-                  options={[
-                    { value: "", label: linkFieldId ? "请选择子字段" : "请先选择关联字段" },
-                    ...subFields.map((f) => ({ value: f.id, label: f.name })),
-                  ]}
-                />
               </div>
             )}
 
-            {(type === "rollup" || type === "count") && type === "rollup" && (
-              <div className="flex flex-col gap-1.5">
-                <label className="text-gx-12 font-medium text-gx-text-secondary">聚合函数</label>
-                <Select
-                  value={rollupFn}
-                  onChange={(e) => setRollupFn(e.target.value as "sum" | "avg" | "min" | "max" | "count")}
-                  options={rollupAggOptions(subFields.find((f) => f.id === subFieldId)?.type)}
-                />
-                <span className="text-gx-11 text-gx-text-hint">
-                  求和/平均值仅支持数值类字段；最小/最大支持数值与日期类；计数适用于任意类型。
-                </span>
-              </div>
-            )}
-
-            {/* 子集筛选条件：仅当已选关联字段且可见子字段时显示 */}
-            <FilterRuleField
-              label="子集筛选条件（可选）"
-              value={recordFilter}
-              peerFields={subFields as FieldDTO[]}
-              selfFields={selfMatchFields as FieldDTO[]}
-              onChange={setRecordFilter}
-            />
-          </div>
-        )}
-
-        {/* 公式 */}
-        {type === "formula" && (
-          <div className="flex flex-col gap-1.5">
-            <label className="text-gx-12 font-medium text-gx-text-secondary">公式</label>
-            <button
-              type="button"
-              onClick={() => setFormulaModalOpen(true)}
-              className="flex w-full items-center justify-center gap-1.5 rounded-gx-md bg-gx-bg px-3 py-2.5 text-gx-14 font-medium text-gx-accent transition-colors hover:bg-gx-accent-bg"
-            >
-              <Icon name="formula" size={14} /> {formula.trim() ? "编辑公式" : "设置公式"}
-            </button>
-            <div className="rounded-gx-md bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
-              {formula.trim() ? <code className="break-all font-mono">{formula}</code> : <span className="text-gx-text-hint">未设置公式</span>}
-            </div>
-            {formulaModalOpen && (
-              <FormulaEditorModal
-                value={formula}
-                fields={formulaFields}
-                onClose={() => setFormulaModalOpen(false)}
-                onConfirm={(f) => { setFormula(f); setFormulaModalOpen(false); }}
-              />
-            )}
-          </div>
-        )}
-
-        {/* 子表格字段 */}
-        {type === "subtable" && (
-          <div className="flex flex-col gap-3 rounded-gx-md border border-gx-border bg-gx-bg/40 p-3">
-            <div className="text-gx-12 text-gx-text-hint">
-              子表格字段在详情页以一张内嵌网格呈现对面表符合条件的记录。关联目标表、显示字段、筛选条件均在此配置；详情页点击「添加」按钮从对面表选记录代入。
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-gx-12 font-medium text-gx-text-secondary">关联到表</label>
-              <Select
-                value={relTableId}
-                disabled={isLinkLocked}
-                onChange={(e) => {
-                  setRelTableId(e.target.value);
-                  setDisplayFieldId("");
-                  setDisplayedFieldIds([]);
-                }}
-                options={[
-                  { value: "", label: "请选择目标表" },
-                  ...tables.filter((t) => t.id !== tableId).map((t) => ({ value: t.id, label: t.name })),
-                ]}
-              />
-              {isLinkLocked && <div className="text-gx-11 text-gx-text-hint">子表格已建立，目标表不可更改；如需改表请删除该字段后重建。</div>}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-gx-12 font-medium text-gx-text-secondary">关系类型</label>
-              <div className="rounded-gx-sm bg-gx-bg px-2.5 py-1.5 text-gx-12 text-gx-text-secondary">
-                一对多（固定）：一条主数据拥有多条子表行，多个子表行归属同一条主数据。
-              </div>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-gx-12 font-medium text-gx-text-secondary">记录标题字段（详情视图胶囊标题）</label>
-              <Select
-                value={displayFieldId}
-                onChange={(e) => setDisplayFieldId(e.target.value)}
-                options={[
-                  { value: "", label: "默认（对面表主字段）" },
-                  ...targetFields.map((f) => ({ value: f.id, label: f.name })),
-                ]}
-                disabled={!relTableId}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-gx-12 font-medium text-gx-text-secondary">子表格显示字段（多选）</label>
-              <div className="grid grid-cols-2 gap-1.5">
-                {targetFields.map((f) => {
-                  const checked = displayedFieldIds.includes(f.id);
-                  return (
-                    <label key={f.id} className="flex cursor-pointer items-center gap-1.5 rounded-gx-sm border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 hover:bg-gx-bg">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => {
-                          setDisplayedFieldIds((prev) => checked ? prev.filter((x) => x !== f.id) : [...prev, f.id]);
-                        }}
-                      />
-                      <FieldIcon type={f.type} size={12} />
-                      <span className="truncate">{f.name}</span>
-                    </label>
-                  );
-                })}
-              </div>
-              <span className="text-gx-11 text-gx-text-hint">未选时子表格默认显示对面表主字段列。</span>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-gx-12 font-medium text-gx-text-secondary">选择弹窗可见字段（多选）</label>
-              <div className="grid grid-cols-2 gap-1.5">
-                {targetFields.map((f) => {
-                  const checked = visibleFieldIds.includes(f.id);
-                  return (
-                    <label key={f.id} className="flex cursor-pointer items-center gap-1.5 rounded-gx-sm border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 hover:bg-gx-bg">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => {
-                          setVisibleFieldIds((prev) => checked ? prev.filter((x) => x !== f.id) : [...prev, f.id]);
-                        }}
-                      />
-                      <FieldIcon type={f.type} size={12} />
-                      <span className="truncate">{f.name}</span>
-                    </label>
-                  );
-                })}
-              </div>
-              <span className="text-gx-11 text-gx-text-hint">仅作用于「选择数据」弹窗展示列；公式引用子表格字段不受显示/可见字段限制。</span>
-            </div>
-            <FilterRuleField
-              label="子集筛选条件（可选）"
-              value={recordFilter}
-              peerFields={targetFields as FieldDTO[]}
-              selfFields={selfMatchFields as FieldDTO[]}
-              onChange={setRecordFilter}
-            />
-          </div>
-        )}
-
-        {/* tabs 选项卡分组 */}
-        {type === "tabs" && (
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-col gap-1">
-              <label className="text-gx-12 font-medium text-gx-text-secondary">选项卡列表</label>
-              <span className="text-gx-11 text-gx-text-hint">
-                每个 tab 下的具体字段分配在「字段布局编辑器」里完成。这里只配置 tab 名称和顺序。
-              </span>
-            </div>
-            {tabs.length === 0 && (
-              <div className="rounded-gx-sm border border-dashed border-gx-border py-3 text-center text-gx-12 text-gx-text-hint">
-                还没有 tab，点击下方「添加 tab」开始
-              </div>
-            )}
-            {tabs.map((tab, i) => (
-              <div key={tab.id} className="flex items-center gap-2 rounded-gx-sm border border-gx-border bg-gx-surface px-2 py-1.5">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gx-bg text-gx-11 text-gx-text-tertiary">{i + 1}</span>
-                <Input
-                  value={tab.name}
-                  onChange={(e) =>
-                    setTabs((prev) => prev.map((t, j) => (j === i ? { ...t, name: e.target.value } : t)))
-                  }
-                  placeholder={`Tab ${i + 1} 名称`}
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setTabs((prev) => prev.map((t, j) => (j === i ? { ...t, name: "" } : t)))
-                  }
-                  className="rounded-gx-sm px-2 text-gx-11 text-gx-text-hint hover:bg-gx-bg hover:text-gx-text-primary"
-                  title="清空名称"
+            {/* tabs 选项卡分组 */}
+            {type === "tabs" && (
+              <FormRow>
+                <FormField
+                  label="选项卡列表"
+                  control="auto"
+                  help="每个 tab 下的具体字段分配在「字段布局编辑器」里完成。这里只配置 tab 名称和顺序。"
                 >
-                  清空
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setTabs((prev) => prev.filter((_, j) => j !== i))
-                  }
-                  className="rounded-full p-1 text-gx-text-hint hover:bg-gx-bg hover:text-gx-danger"
-                  title="删除 tab"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-            <Button
-              variant="ghost"
-              size="sm"
-              icon="plus"
-              className="self-start"
-              onClick={() =>
-                setTabs((prev) => [
-                  ...prev,
-                  { id: `tab_${Date.now()}_${prev.length}_${Math.random().toString(36).slice(2, 6)}`, name: `Tab ${prev.length + 1}`, fieldIds: [] },
-                ])
-              }
-            >
-              添加 tab
-            </Button>
-          </div>
+                  {tabs.length === 0 && (
+                    <div className="rounded-gx-sm border border-dashed border-gx-border py-3 text-center text-gx-12 text-gx-text-hint">
+                      还没有 tab，点击下方「添加 tab」开始
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-2">
+                    {tabs.map((tab, i) => (
+                      <div key={tab.id} className="flex items-center gap-2 rounded-gx-sm border border-gx-border bg-gx-surface px-2 py-1.5">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gx-bg text-gx-11 text-gx-text-tertiary">{i + 1}</span>
+                        <Input
+                          value={tab.name}
+                          onChange={(e) =>
+                            setTabs((prev) => prev.map((t, j) => (j === i ? { ...t, name: e.target.value } : t)))
+                          }
+                          placeholder={`Tab ${i + 1} 名称`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setTabs((prev) => prev.map((t, j) => (j === i ? { ...t, name: "" } : t)))
+                          }
+                          className="rounded-gx-sm px-2 text-gx-11 text-gx-text-hint hover:bg-gx-bg hover:text-gx-text-primary"
+                          title="清空名称"
+                        >
+                          清空
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setTabs((prev) => prev.filter((_, j) => j !== i))
+                          }
+                          className="rounded-full p-1 text-gx-text-hint hover:bg-gx-bg hover:text-gx-danger"
+                          title="删除 tab"
+                        >
+                          <Icon name="close" size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="plus"
+                    className="mt-2 self-start"
+                    onClick={() =>
+                      setTabs((prev) => [
+                        ...prev,
+                        { id: `tab_${Date.now()}_${prev.length}_${Math.random().toString(36).slice(2, 6)}`, name: `Tab ${prev.length + 1}`, fieldIds: [] },
+                      ])
+                    }
+                  >
+                    添加 tab
+                  </Button>
+                </FormField>
+              </FormRow>
+            )}
+          </FormSection>
         )}
-      </div>
+      </Form>
     </Modal>
   );
 }

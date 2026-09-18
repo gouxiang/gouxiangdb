@@ -12,6 +12,7 @@ import {
   toast,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
+import { Form, FormActions, FormField, FormRow, FormSection } from "../../components/form";
 import { ORG_ACTIONS, type OrgAction, type OrgRoleDTO } from "@gx/shared-types";
 import {
   useDepartments,
@@ -356,8 +357,11 @@ function RoleEditModal({ role, onClose }: { role: OrgRoleDTO | null; onClose: ()
   const [name, setName] = useState(role?.name ?? "");
   const [description, setDescription] = useState(role?.description ?? "");
   const [actions, setActions] = useState<Set<OrgAction>>(new Set(role?.actions ?? []));
+  // R-F-10 ①失焦即校验；③已报错字段在输入时实时消错（error 由当前值推导，输入即重算）
+  const [nameTouched, setNameTouched] = useState(false);
 
   const nameOk = name.trim().length > 0 && name.trim().length <= 60;
+  const nameError = nameTouched && !name.trim() ? "角色名称不能为空" : null;
 
   function toggleAction(a: OrgAction) {
     setActions((prev) => {
@@ -402,42 +406,79 @@ function RoleEditModal({ role, onClose }: { role: OrgRoleDTO | null; onClose: ()
       title={role ? "编辑自定义角色" : "新建自定义角色"}
       width={460}
       footer={
-        <>
-          {role && (
-            <Button variant="danger" icon="trash" className="mr-auto" loading={m.removeRole.isPending} onClick={remove}>
-              删除
-            </Button>
-          )}
-          <Button variant="ghost" onClick={onClose} disabled={m.createRole.isPending || m.updateRole.isPending}>取消</Button>
-          <Button variant="primary" disabled={!nameOk} loading={m.createRole.isPending || m.updateRole.isPending} onClick={submit}>
-            保存
-          </Button>
-        </>
+        <FormActions
+          align="right"
+          submitText="保存"
+          onSubmit={submit}
+          submitting={m.createRole.isPending || m.updateRole.isPending}
+          submitDisabled={!nameOk}
+          submitDisabledReason={!name.trim() ? "请先填写角色名称" : undefined}
+          onCancel={onClose}
+          leading={
+            role ? (
+              <Button variant="danger" icon="trash" loading={m.removeRole.isPending} onClick={remove}>
+                删除
+              </Button>
+            ) : undefined
+          }
+        />
       }
     >
-      <div className="flex flex-col gap-3">
-        <label className="flex flex-col gap-1.5">
-          <span className="text-gx-12 font-medium text-gx-text-secondary">角色名称</span>
-          <Input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="例如：人事管理员" />
-        </label>
-        <label className="flex flex-col gap-1.5">
-          <span className="text-gx-12 font-medium text-gx-text-secondary">说明</span>
-          <Textarea rows={2} maxLength={200} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="可选，不超过 200 字" />
-        </label>
-        <fieldset className="flex flex-col gap-1.5">
-          <span className="text-gx-12 font-medium text-gx-text-secondary">组织管理动作</span>
-          <div className="flex flex-col gap-1">
-            {ORG_ACTIONS.map((a) => (
-              <label key={a} className="flex items-center gap-2 rounded-gx-sm px-1 py-1 hover:bg-gx-bg">
-                <Checkbox checked={actions.has(a)} onChange={() => toggleAction(a)} />
-                <span className="text-gx-13 text-gx-text-primary">{ACTION_LABEL[a]}</span>
-                <span className="text-gx-11 text-gx-text-hint">{a}</span>
-              </label>
-            ))}
-          </div>
-          <p className="text-gx-11 text-gx-text-hint">M2 自定义角色仅可授予组织管理动作；资源（Base/表/文档）权限不受此影响。</p>
-        </fieldset>
-      </div>
+      {/* 阶段 2：弹窗表单走统一骨架（12 栅格 + 控件 34 + 错误行 16px 预留） */}
+      <Form variant="modal" padding={false}>
+        <FormSection>
+          <FormRow>
+            <FormField
+              label="角色名称"
+              required
+              error={nameError}
+              help="用于成员列表与权限审计中的展示"
+              labelExtra={`${name.length}/60`}
+            >
+              <Input
+                value={name}
+                maxLength={60}
+                onChange={(e) => setName(e.target.value)}
+                onBlur={() => setNameTouched(true)}
+                placeholder="例如：人事管理员"
+              />
+            </FormField>
+          </FormRow>
+          <FormRow>
+            <FormField
+              label="说明"
+              optional
+              control="auto"
+              help="不超过 200 字"
+              labelExtra={`${description.length}/200`}
+            >
+              <Textarea
+                rows={2}
+                maxLength={200}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="例如：负责花名册维护与入离职办理"
+              />
+            </FormField>
+          </FormRow>
+          <FormRow>
+            <FormField
+              label="组织管理动作"
+              help="M2 自定义角色仅可授予组织管理动作；资源（Base/表/文档）权限不受此影响。"
+            >
+              <div className="flex flex-col gap-1">
+                {ORG_ACTIONS.map((a) => (
+                  <label key={a} className="flex items-center gap-2 rounded-gx-sm px-1 py-1 hover:bg-gx-bg">
+                    <Checkbox checked={actions.has(a)} onChange={() => toggleAction(a)} />
+                    <span className="text-gx-13 text-gx-text-primary">{ACTION_LABEL[a]}</span>
+                    <span className="text-gx-11 text-gx-text-hint">{a}</span>
+                  </label>
+                ))}
+              </div>
+            </FormField>
+          </FormRow>
+        </FormSection>
+      </Form>
     </Modal>
   );
 }

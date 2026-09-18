@@ -10,6 +10,7 @@ import type { FieldDTO, FilterNode, FilterCondition, FilterOp } from "@gx/shared
 import { operatorsForFieldType, FILTER_OP_LABEL, operatorNeedsValue, isTypeComparable } from "@gx/shared-types";
 import { Button, Input, Select } from "../../components/ui";
 import { Icon } from "../../components/icons";
+import { FormField } from "../../components/form";
 import FilterSummary from "./FilterSummary";
 
 export interface FilterRuleModalProps {
@@ -536,60 +537,44 @@ export function FilterRuleField({
     />
   );
 
+  // 两种变体共用同一套字段骨架（标签上置 + 控件区 + 16px 错误预留行），只是按钮文案/样式与摘要时机不同。
+  const control = (
+    <button
+      type="button"
+      onClick={() => setOpen(true)}
+      className={
+        "flex w-full items-center justify-center gap-1.5 rounded-gx-md px-3 py-2.5 text-gx-14 transition-colors " +
+        (configured
+          ? "bg-gx-bg font-medium text-gx-accent hover:bg-gx-accent-bg"
+          : "border border-dashed border-gx-border-strong bg-gx-surface text-gx-text-secondary hover:border-gx-accent hover:bg-gx-accent-bg/40 hover:text-gx-accent")
+      }
+    >
+      <Icon name="filter" size={14} />
+      {configured ? "编辑筛选条件" : "设置筛选条件"}
+    </button>
+  );
+
+  const helpIcon = title ? (
+    <span title={title} className="inline-flex items-center">
+      <Icon name="help" size={13} className="cursor-help text-gx-text-hint" />
+    </span>
+  ) : undefined;
+
   if (variant === "block") {
     return (
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1">
-          <span className="text-gx-13 font-semibold text-gx-text-primary">{label}</span>
-          {title && (
-            <span title={title}>
-              <Icon name="help" size={14} className="cursor-help text-gx-text-hint" />
-            </span>
-          )}
-        </div>
-        {configured ? (
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="flex w-full items-center justify-center gap-1.5 rounded-gx-md bg-gx-bg px-3 py-2.5 text-gx-14 font-medium text-gx-accent transition-colors hover:bg-gx-accent-bg"
-          >
-            <Icon name="filter" size={14} />
-            编辑筛选条件
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="flex w-full items-center justify-center gap-1.5 rounded-gx-md border border-dashed border-gx-border-strong bg-gx-surface px-3 py-2.5 text-gx-14 text-gx-text-secondary transition-colors hover:border-gx-accent hover:bg-gx-accent-bg/40 hover:text-gx-accent"
-          >
-            <Icon name="filter" size={14} />
-            设置筛选条件
-          </button>
-        )}
+      <FormField label={label} control="auto" labelExtra={helpIcon}>
+        {control}
         {configured && <FilterSummary node={value} fields={peerFields} selfFields={selfFields} />}
         {modal}
-      </div>
+      </FormField>
     );
   }
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-gx-12 font-medium text-gx-text-secondary">{label}</label>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className={
-          "flex w-full items-center justify-center gap-1.5 rounded-gx-md px-3 py-2.5 text-gx-14 transition-colors " +
-          (configured
-            ? "bg-gx-bg font-medium text-gx-accent hover:bg-gx-accent-bg"
-            : "border border-dashed border-gx-border-strong bg-gx-surface text-gx-text-secondary hover:border-gx-accent hover:bg-gx-accent-bg/40 hover:text-gx-accent")
-        }
-      >
-        <Icon name="filter" size={14} />
-        {configured ? "编辑筛选条件" : "设置筛选条件"}
-      </button>
+    <FormField label={label} control="auto" labelExtra={helpIcon}>
+      {control}
       <FilterSummary node={value} fields={peerFields} selfFields={selfFields} />
       {modal}
-    </div>
+    </FormField>
   );
 }
