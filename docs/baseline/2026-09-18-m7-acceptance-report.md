@@ -95,6 +95,7 @@
 
 - 待门③ R1~R7 实演后逐旗确认实际 env 与旧行为
 - 四项总监签字：authz 姿态、embedding 姿态、Tier-L 措辞、M1 读路径姿态 —— 均未签
+- 门⑦ checklist（逐条可勾、每条挂硬证据）：`docs/baseline/2026-09-18-m7-checklist.md`（86 条：过 46 / 不过 3 / 未做 26 / 待签字 11）
 
 ## 8. 缺陷清单
 
