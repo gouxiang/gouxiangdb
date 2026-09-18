@@ -28,3 +28,15 @@
 - **格6 R8 代码回滚（symlink 切换）**：属裸机 systemd 形态，门③已自动化覆盖 R1-R7 + R8/R9 手测模板。
 - **格7 macOS tar 直跑 / 旧 Tauri 桌面端连新服务**：见 tar 形态证据（另文件）；Tauri UI 手测属签字项。
 - **fnos fpk（x86/arm 真机）**：目标机不可达，标【未实测】。
+
+---
+
+## 封版补记（12:13，最终发布产物基于 11c4dc8）
+
+首次冒烟镜像 378fc41fbcb9 / tar 时间戳 035748 基于 982af97，**早于** P1 修复 `249df44`（接线内嵌索引 worker）。
+按封版纪律用最终代码 **11c4dc8** 重打并重验，两形态默认发布姿态结论不变且更稳：
+
+- 镜像 `gouxiangdb:m7-final`（arm64）：ready/23 迁移/五探针绿；**默认 GX_M5_SEARCH=off 零 worker 启动日志、零 /data/search.db（休眠零副作用）**；dist/index.js 内含 5 处 worker 接线代码（修复已打包但默认不启）；全新卷核心链路 7/7 PASS。
+- 封版 tar `gouxiangdb-release-0.1.0-20260918040846.tar.gz`（58MB，checksums 4163 文件 0 失败，禁带扫描过）：解压新目录 migrate=23、默认 off 零 worker/零 search.db、dist 含 worker(5)+stopSearchWorker 优雅关闭(4)、darwin dylib 在；核心链路 7/7、SIGTERM 优雅退出。
+- **P1 修复产品级独立坐实**（非单测、非 worker 自报）：真 dist 双实例——off(3020) 无 search.db/无日志；on(3021) 启动 `[search-worker] started mode=off vec=true`，HTTP 建记录后 **1.0s change_events pending=0/done=1/workerId=api-47019**，search.db 2 chunks 且 fts_chunks MATCH 锚点命中。search 全域 36 文件 456 测试通过（含 workerRuntime 6 新例：门控物理不建库/追平/reindex 互斥换库/停机交锁）。
+- 门③ R6 随之由 `63fbe71` 拆为 worker=off 看守面（check-outbox 不再伪造归零）+ worker=on 正立面 R6b（check-outbox-drain 真 dist pending 追平+workerId 溯源）；纯演练脚本零生产码，门③已过闸结论不变。
