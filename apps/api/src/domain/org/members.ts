@@ -23,7 +23,8 @@ export type {
 } from "./memberDirectory.js";
 export { listMembers, getMemberById, MEMBER_PAGE_MAX } from "./memberDirectory.js";
 
-const BCRYPT_ROUNDS = 10;
+// 导出供 initAdmin（首次部署 CLI）复用，避免第二处硬编码轮次。
+export const BCRYPT_ROUNDS = 10;
 
 export interface AssignDepartmentsInput {
   add?: unknown;

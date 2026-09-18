@@ -32,6 +32,10 @@ const stdioOutFile = path.join(distDir, "mcp-stdio.js");
 // 四个部署面在 prisma migrate deploy 后必须跑一次 --apply（迁移只给根节点 path），
 // 故该脚本必须随生产 dist 投递，不能只以 tsx 源码形式存在。
 const navReconcileOutFile = path.join(distDir, "nav-reconcile.js");
+// 首次部署超级管理员初始化第四入口 -> dist/init-admin.js。
+// 三套部署链路在 migrate deploy + nav-reconcile 之后、服务启动之前调 node dist/init-admin.js，
+// 缺该产物即首次部署无法创建管理员，故必须与主服务同包投递。
+const initAdminOutFile = path.join(distDir, "init-admin.js");
 
 // 外置：运行时从发布包 node_modules 解析。
 // better-sqlite3 含 .node 原生二进制，严禁打包；@prisma/client 自带 query engine。
@@ -62,6 +66,8 @@ await esbuild.build({
     { in: path.join(apiRoot, "src/index.ts"), out: "index" },
     { in: path.join(apiRoot, "src/mcp/stdio.ts"), out: "mcp-stdio" },
     { in: path.join(apiRoot, "scripts/nav/reconcile-nav.ts"), out: "nav-reconcile" },
+    // 首次部署建首个超级管理员（迁移后一次，幂等）。
+    { in: path.join(apiRoot, "scripts/init-admin.ts"), out: "init-admin" },
   ],
   bundle: true,
   platform: "node",
@@ -91,10 +97,15 @@ if (!fs.existsSync(navReconcileOutFile)) {
   console.error("[build] 构建结束但 dist/nav-reconcile.js 不存在（M3-S11-A 第三入口产物缺失）");
   process.exit(1);
 }
+if (!fs.existsSync(initAdminOutFile)) {
+  console.error("[build] 构建结束但 dist/init-admin.js 不存在（首次部署初始化第四入口产物缺失）");
+  process.exit(1);
+}
 
 const stat = fs.statSync(outFile);
 const stdioStat = fs.statSync(stdioOutFile);
 const navReconcileStat = fs.statSync(navReconcileOutFile);
+const initAdminStat = fs.statSync(initAdminOutFile);
 console.log(
-  `[build] OK dist/index.js ${(stat.size / 1024).toFixed(1)} KiB, dist/mcp-stdio.js ${(stdioStat.size / 1024).toFixed(1)} KiB, dist/nav-reconcile.js ${(navReconcileStat.size / 1024).toFixed(1)} KiB, GX_VERSION=${rootPkg.version}`,
+  `[build] OK dist/index.js ${(stat.size / 1024).toFixed(1)} KiB, dist/mcp-stdio.js ${(stdioStat.size / 1024).toFixed(1)} KiB, dist/nav-reconcile.js ${(navReconcileStat.size / 1024).toFixed(1)} KiB, dist/init-admin.js ${(initAdminStat.size / 1024).toFixed(1)} KiB, GX_VERSION=${rootPkg.version}`,
 );

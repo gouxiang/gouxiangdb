@@ -81,10 +81,12 @@ const relApi = path.join(releaseDir, "api");
 const srcApi = path.join(repoRoot, "apps", "api");
 
 const distSrc = path.join(srcApi, "dist");
-// fail-fast 三入口存在性断言：缺任一随包 CLI（M6 mcp-stdio / M3-S11 nav-reconcile）即拒绝打包。
+// fail-fast 四入口存在性断言：缺任一随包 CLI（M6 mcp-stdio / M3-S11 nav-reconcile /
+// 首次部署 init-admin）即拒绝打包——缺 init-admin 会导致首次部署建不出管理员。
 if (!fs.existsSync(path.join(distSrc, "index.js"))) fail("缺少 apps/api/dist/index.js，api 构建失败");
 if (!fs.existsSync(path.join(distSrc, "mcp-stdio.js"))) fail("缺少 apps/api/dist/mcp-stdio.js，api 构建失败");
 if (!fs.existsSync(path.join(distSrc, "nav-reconcile.js"))) fail("缺少 apps/api/dist/nav-reconcile.js，api 构建失败");
+if (!fs.existsSync(path.join(distSrc, "init-admin.js"))) fail("缺少 apps/api/dist/init-admin.js，api 构建失败（首次部署初始化入口）");
 copyDir(distSrc, path.join(relApi, "dist"));
 
 copyFile(path.join(srcApi, "prisma", "schema.prisma"), path.join(relApi, "prisma", "schema.prisma"));
