@@ -543,7 +543,7 @@ export function FilterRuleField({
       type="button"
       onClick={() => setOpen(true)}
       className={
-        "flex w-full items-center justify-center gap-1.5 rounded-gx-md px-3 py-2.5 text-gx-14 transition-colors " +
+        "flex w-full items-center justify-center gap-1.5 rounded-gx-lg px-3 py-2.5 text-gx-14 transition-colors " +
         (configured
           ? "bg-gx-bg font-medium text-gx-accent hover:bg-gx-accent-bg"
           : "border border-dashed border-gx-border-strong bg-gx-surface text-gx-text-secondary hover:border-gx-accent hover:bg-gx-accent-bg/40 hover:text-gx-accent")

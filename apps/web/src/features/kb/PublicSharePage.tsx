@@ -100,7 +100,7 @@ export default function PublicSharePage() {
         <button
           type="button"
           onClick={() => navigate("/login")}
-          className="mt-2 rounded-gx-md bg-gx-accent px-4 py-2 text-gx-13 font-medium text-white hover:brightness-95"
+          className="mt-2 rounded-gx-lg bg-gx-accent px-4 py-2 text-gx-13 font-medium text-white hover:brightness-95"
         >
           返回构想工作台
         </button>
@@ -164,7 +164,7 @@ export default function PublicSharePage() {
           <button
             type="button"
             onClick={() => navigate("/login")}
-            className="rounded-gx-md border border-gx-border bg-gx-surface px-2.5 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-bg"
+            className="rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-bg"
           >
             在构想工作台中打开
           </button>
@@ -249,7 +249,7 @@ function PublicCanvas({
             type="button"
             onClick={save}
             disabled={saving}
-            className="inline-flex h-8 items-center gap-1.5 rounded-gx-md bg-gx-accent px-3 text-gx-12 font-medium text-white hover:brightness-95 disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg bg-gx-accent px-3 text-gx-12 font-medium text-white hover:brightness-95 disabled:opacity-50"
           >
             <Icon name="save" size={14} />
             {saving ? "保存中…" : "保存"}

@@ -206,7 +206,7 @@ function TabsPanel({ field, allFields, values, tableId, recordId, canEdit }: Tab
   const totalFields = rows.reduce((s, r) => s + r.fields.length, 0);
 
   return (
-    <div className="rounded-gx-md border border-gx-border bg-gx-surface">
+    <div className="rounded-gx-lg border border-gx-border bg-gx-surface">
       {/* tab bar */}
       <div className="flex border-b border-gx-separator">
         {tabs.length === 0 && <span className="px-3 py-1.5 text-gx-12 text-gx-text-hint">该字段尚未配置选项卡</span>}
@@ -378,7 +378,7 @@ function SubtablePanel({ field, values, tableId, recordId, canEdit }: SubtablePa
   };
 
   return (
-    <div className="rounded-gx-md border border-gx-border bg-gx-surface">
+    <div className="rounded-gx-lg border border-gx-border bg-gx-surface">
       <div className="flex items-center gap-2 border-b border-gx-separator px-3 py-2">
         <FieldIcon type={field.type} size={13} />
         <span className="text-gx-12 font-medium text-gx-text-primary">{field.name}</span>
@@ -600,7 +600,7 @@ function PeerRecordPickerModal({
         </>
       }
     >
-      <div className="mb-2 flex items-center gap-2 rounded-gx-md border border-gx-border bg-gx-bg px-2 py-1.5">
+      <div className="mb-2 flex items-center gap-2 rounded-gx-lg border border-gx-border bg-gx-bg px-2 py-1.5">
         <Icon name="search" size={13} className="text-gx-text-hint" />
         <input
           autoFocus
@@ -618,7 +618,7 @@ function PeerRecordPickerModal({
           <ResultNotice tone="warning">{LINK_NARROW_TEXT}</ResultNotice>
         </div>
       )}
-      <div className="max-h-[50vh] overflow-y-auto rounded-gx-md border border-gx-border">
+      <div className="max-h-[50vh] overflow-y-auto rounded-gx-lg border border-gx-border">
         <table className="w-full text-gx-12">
           <thead className="sticky top-0">
             <tr className="border-b border-gx-separator bg-gx-table-header">

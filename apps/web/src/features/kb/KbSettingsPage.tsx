@@ -134,7 +134,7 @@ export default function KbSettingsPage() {
                 type="button"
                 disabled={!email.trim() || addMember.isPending}
                 onClick={add}
-                className="inline-flex h-8 items-center gap-1 rounded-gx-md bg-gx-accent px-3 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-40"
+                className="inline-flex h-8 items-center gap-1 rounded-gx-lg bg-gx-accent px-3 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-40"
               >
                 <Icon name="plus" size={14} />
                 添加

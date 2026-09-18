@@ -9,8 +9,17 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { Menu, MenuItem, Popover, toast } from "../../components/ui";
+import { confirmSoftDelete } from "../../components/feedback";
 import type { KbDocDTO, KbDocKind } from "../../api/client";
-import { useKb, useKbDocs, useCreateDoc, useRenameDoc, useDeleteDoc, useMoveDoc } from "./kb-hooks";
+import {
+  useKb,
+  useKbDocs,
+  useCreateDoc,
+  useRenameDoc,
+  useDeleteDoc,
+  useMoveDoc,
+  useRestoreDoc,
+} from "./kb-hooks";
 import { DocKindIcon } from "./kb-ui";
 
 interface TreeNode extends KbDocDTO {
@@ -39,6 +48,7 @@ export function KbTree({ kbId }: { kbId: string }) {
   const { data: docs, isLoading } = useKbDocs(kbId, "all");
   const createDoc = useCreateDoc(kbId);
   const deleteDoc = useDeleteDoc(kbId);
+  const restoreDoc = useRestoreDoc(kbId);
   const moveDoc = useMoveDoc(kbId);
 
   const [tab, setTab] = useState<"doc" | "canvas">(
@@ -128,10 +138,28 @@ export function KbTree({ kbId }: { kbId: string }) {
 
   async function doDelete(d: KbDocDTO) {
     setMenuFor(null);
-    if (!window.confirm(`确定删除「${d.title}」吗？其下级文档将保留在回收站，可在 30 天内找回。`)) return;
+    // R-D-23 L2（可恢复：软删除进回收站）+ R-D-24 主按钮用具体动词
+    const ok = await confirmSoftDelete({
+      title: `删除「${d.title}」`,
+      confirmText: "删除并移入回收站",
+      description: "文档会移入回收站，30 天内可恢复；下级文档会一并保留在回收站。",
+    });
+    if (!ok) return;
     try {
       await deleteDoc.mutateAsync(d.id);
-      toast("已移入回收站", "success");
+      // R-D-22 删除类成功 toast 必须带「撤销」，窗口 6 秒
+      toast("已移入回收站", {
+        kind: "success",
+        action: {
+          label: "撤销",
+          onClick: () => {
+            void restoreDoc
+              .mutateAsync(d.id)
+              .then(() => toast("已恢复", "success"))
+              .catch((e: unknown) => toast(e instanceof Error ? e.message : "撤销失败", "error"));
+          },
+        },
+      });
       if (activeDocId === d.id) navigate(`/kb/${kbId}`);
     } catch (e) {
       toast(e instanceof Error ? e.message : "删除失败", "error");
@@ -318,7 +346,7 @@ export function KbTree({ kbId }: { kbId: string }) {
   return (
     <div className="kb-tree">
       {/* 文档 / 画布 选项卡 */}
-      <div className="mx-2 mb-2 flex rounded-gx-md bg-gx-bg p-0.5">
+      <div className="mx-2 mb-2 flex rounded-gx-lg bg-gx-bg p-0.5">
         {(["doc", "canvas"] as const).map((t) => {
           const count = t === "doc" ? countNodes(docTree) : canvases.length;
           return (

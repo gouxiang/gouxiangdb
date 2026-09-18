@@ -17,6 +17,7 @@ import { useAuthStore } from "./store/auth";
 import { CHANGE_PASSWORD_PATH, shouldForceChangePassword } from "./features/auth/force-change-guard";
 import { useBases, useTables, useViews } from "./api/hooks";
 import { Spinner } from "./components/ui";
+import { OfflineBanner } from "./components/states";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 import LoginPage from "./features/auth/LoginPage";
@@ -117,7 +118,10 @@ export default function App() {
   const boundaryKey = location.pathname;
 
   return (
-    <Routes>
+    <>
+      {/* R-D-19 离线横幅：在线时渲染 null（零布局影响）；恢复后自动消失 */}
+      <OfflineBanner />
+      <Routes>
       <Route path="/login" element={token ? <Navigate to="/" replace /> : <LoginPage />} />
       {/* 首次登录强制改密：需要登录态，但不套业务壳（壳内接口会被闸门 403 挡住） */}
       <Route
@@ -178,5 +182,6 @@ export default function App() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   );
 }

@@ -119,7 +119,7 @@ export function SearchCoveragePanel({ onReindex }: { onReindex?: () => void }) {
                 const value = index.coverage[c.key];
                 const bad = value > 0;
                 return (
-                  <div key={c.key} className="flex items-center justify-between rounded-gx-md bg-gx-bg px-3 py-2">
+                  <div key={c.key} className="flex items-center justify-between rounded-gx-lg bg-gx-bg px-3 py-2">
                     <div className="flex items-center gap-2">
                       <span className={["h-2 w-2 rounded-full", bad ? (c.blocking ? "bg-gx-danger" : "bg-gx-warning") : "bg-gx-success"].join(" ")} />
                       <span className="text-gx-13 text-gx-text-primary">{c.label}</span>
@@ -143,7 +143,7 @@ export function SearchCoveragePanel({ onReindex }: { onReindex?: () => void }) {
               <Stat label="画布" value={index.chunks.canvas} />
               <Stat label="总计" value={index.chunks.total} />
             </div>
-            <div className="mt-3 flex items-center justify-between rounded-gx-md bg-gx-bg px-3 py-2 text-gx-12">
+            <div className="mt-3 flex items-center justify-between rounded-gx-lg bg-gx-bg px-3 py-2 text-gx-12">
               <span className="text-gx-text-tertiary">
                 字段索引分段上限 {index.chunks.fieldChunkCap}
               </span>
@@ -165,7 +165,7 @@ export function SearchCoveragePanel({ onReindex }: { onReindex?: () => void }) {
 
 function Stat({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
   return (
-    <div className="rounded-gx-md bg-gx-bg px-3 py-2.5">
+    <div className="rounded-gx-lg bg-gx-bg px-3 py-2.5">
       <div className={["font-mono text-gx-18 tabular-nums", warn ? "font-semibold text-gx-warning" : "text-gx-text-primary"].join(" ")}>
         {value}
       </div>

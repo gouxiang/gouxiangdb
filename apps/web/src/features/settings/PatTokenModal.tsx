@@ -49,14 +49,14 @@ export function PatTokenModal({
       }
     >
       <div className="flex flex-col gap-3">
-        <div className="flex items-start gap-2 rounded-gx-md border border-gx-warning bg-gx-warning-bg px-3 py-2">
+        <div className="flex items-start gap-2 rounded-gx-lg border border-gx-warning bg-gx-warning-bg px-3 py-2">
           <Icon name="alertCircle" size={15} className="mt-0.5 shrink-0 text-gx-warning" />
           <span className="text-gx-12 text-gx-text-secondary">{TOKEN_ONCE_WARNING}</span>
         </div>
 
         {name && <div className="text-gx-12 text-gx-text-tertiary">名称：{name}</div>}
 
-        <div className="rounded-gx-md border border-gx-border bg-gx-bg px-3 py-3">
+        <div className="rounded-gx-lg border border-gx-border bg-gx-bg px-3 py-3">
           <code className="block break-all font-mono text-gx-14 leading-relaxed text-gx-text-primary">
             {token}
           </code>

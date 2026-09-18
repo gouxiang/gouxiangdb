@@ -63,7 +63,7 @@ export function PopoverShell({
   return (
     <div
       ref={ref}
-      className="absolute gx-z-canvas-popover rounded-gx-md border border-gx-separator bg-gx-surface p-2 shadow-2xl"
+      className="absolute gx-z-canvas-popover rounded-gx-lg border border-gx-separator bg-gx-surface p-2 shadow-2xl"
       style={{ left: rect.left, top: rect.top, width, visibility: positioned ? undefined : "hidden" }}
       onPointerDown={(e) => e.stopPropagation()}
     >

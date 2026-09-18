@@ -319,7 +319,7 @@ export function FormBanner({
       role="alert"
       data-gx-banner="true"
       className={clsx(
-        "flex items-start gap-2 rounded-gx-md bg-gx-danger-bg px-3 py-2 text-gx-12 text-gx-danger",
+        "flex items-start gap-2 rounded-gx-lg bg-gx-danger-bg px-3 py-2 text-gx-12 text-gx-danger",
         className,
       )}
     >

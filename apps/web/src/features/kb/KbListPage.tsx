@@ -45,7 +45,7 @@ export default function KbListPage() {
           <button
             type="button"
             onClick={() => setShowNew(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-gx-md bg-gx-accent px-3 text-gx-13 font-medium text-white hover:brightness-95"
+            className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg bg-gx-accent px-3 text-gx-13 font-medium text-white hover:brightness-95"
           >
             <Icon name="plus" size={15} />
             新建知识库
@@ -64,7 +64,7 @@ export default function KbListPage() {
                 className="group flex items-start gap-3 rounded-gx-lg border border-gx-border bg-gx-surface p-4 text-left transition-shadow hover:shadow-md"
               >
                 <span
-                  className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-gx-md text-white"
+                  className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-gx-lg text-white"
                   style={{ backgroundColor: k.iconColor || dotColor(k.name) }}
                 >
                   <Icon name="book" size={18} />
@@ -104,7 +104,7 @@ export default function KbListPage() {
               取消
             </button>
             <button
-              className="rounded-gx-md bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
+              className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
               disabled={!name.trim() || createKb.isPending}
               onClick={create}
             >

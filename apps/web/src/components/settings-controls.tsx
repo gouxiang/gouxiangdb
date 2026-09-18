@@ -56,7 +56,7 @@ export function DropdownSelect({
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         className={clsx(
-          "h-10 w-full appearance-none rounded-gx-md border border-gx-border bg-gx-surface pl-3 pr-9 text-gx-14",
+          "h-10 w-full appearance-none rounded-gx-lg border border-gx-border bg-gx-surface pl-3 pr-9 text-gx-14",
           "focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent-bg",
           "disabled:cursor-not-allowed disabled:opacity-50",
           hasValue ? "text-gx-text-primary" : "text-gx-text-hint",
@@ -111,7 +111,7 @@ export function DashedSetupButton({
       type="button"
       onClick={onClick}
       className={clsx(
-        "flex w-full items-center justify-center gap-1.5 rounded-gx-md border border-dashed border-gx-border-strong",
+        "flex w-full items-center justify-center gap-1.5 rounded-gx-lg border border-dashed border-gx-border-strong",
         "bg-gx-surface px-3 py-2.5 text-gx-14 text-gx-text-secondary transition-colors",
         "hover:border-gx-accent hover:bg-gx-accent-bg/40 hover:text-gx-accent",
         className,
@@ -141,7 +141,7 @@ export function SoftActionButton({
       type="button"
       onClick={onClick}
       className={clsx(
-        "flex w-full items-center justify-center gap-1.5 rounded-gx-md bg-gx-bg px-3 py-2.5",
+        "flex w-full items-center justify-center gap-1.5 rounded-gx-lg bg-gx-bg px-3 py-2.5",
         "text-gx-14 font-medium text-gx-accent transition-colors hover:bg-gx-accent-bg",
         className,
       )}

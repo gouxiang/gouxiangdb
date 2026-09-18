@@ -57,7 +57,7 @@ export function MoveImpactModal({
             <ImpactRow icon="doc" label="子树内容" value={`${impact.subtreeItemCount} 项`} hint="数据表、文档与画布（不含视图/分组）" />
             <ImpactRow icon="link" label="菜单引用" value={`${impact.shortcutCount} 处`} hint="指向该子树节点的活快捷方式" />
           </ul>
-          <p className="rounded-gx-md bg-gx-accent-bg px-3 py-2 text-gx-12 text-gx-text-tertiary">
+          <p className="rounded-gx-lg bg-gx-accent-bg px-3 py-2 text-gx-12 text-gx-text-tertiary">
             M3 不改变权限继承（willBreakInheritanceHint = false）；权限继承语义在后续版本生效。
           </p>
         </div>
@@ -68,7 +68,7 @@ export function MoveImpactModal({
 
 function ImpactRow({ icon, label, value, hint }: { icon: Parameters<typeof Icon>[0]["name"]; label: string; value: string; hint: string }) {
   return (
-    <li className="flex items-start gap-2.5 rounded-gx-md border border-gx-separator px-3 py-2">
+    <li className="flex items-start gap-2.5 rounded-gx-lg border border-gx-separator px-3 py-2">
       <Icon name={icon} size={15} className="mt-0.5 shrink-0 text-gx-text-tertiary" />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">

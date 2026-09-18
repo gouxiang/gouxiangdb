@@ -66,6 +66,11 @@ export function FieldIcon({ type, size = 14 }: { type: string; size?: number }) 
   return <Icon name={fieldIconName(type)} size={size} style={{ color: fieldColor(type) }} />;
 }
 
+// ============ 焦点环（R-D-09 焦点态：可见、走 gx-accent）============
+// 全站控件共用同一条 focus ring，避免各写一套导致焦点态时隐时现。
+export const FOCUS_RING =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gx-accent/50 focus-visible:ring-offset-0";
+
 // ============ Button ============
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
@@ -76,32 +81,45 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: IconName;
   loading?: boolean;
   block?: boolean;
+  /** R-D-09：禁用必须说明原因（渲染为 title） */
+  disabledReason?: string;
 }
 
+// R-D-07 默认态取值；R-D-08 悬停：主按钮 brightness-95（不换色号），次按钮 / 行 #F1F5FB。
+// R-D-06：页面内按钮一律无阴影（阴影只有浮层能用），故 primary 不再挂 shadow-sm。
 const VARIANT_CLASS: Record<ButtonVariant, string> = {
-  primary: "bg-gx-accent text-white hover:brightness-95 shadow-sm",
-  secondary: "bg-gx-surface text-gx-text-primary border border-gx-border hover:bg-gx-bg",
-  ghost: "text-gx-text-secondary hover:bg-gx-bg",
+  primary: "bg-gx-accent text-white hover:brightness-95",
+  secondary: "border border-gx-border bg-gx-control text-gx-text-secondary hover:bg-gx-row-hover",
+  ghost: "text-gx-text-secondary hover:bg-gx-row-hover",
   danger: "bg-gx-danger text-white hover:brightness-95",
 };
 
+// R-D-05 控件圆角 = 8（rounded-gx-lg）
 const SIZE_CLASS = {
-  sm: "h-7 px-2 text-gx-12 rounded-gx-sm gap-1",
-  md: "h-8 px-3 text-gx-13 rounded-gx-md gap-1.5",
-  lg: "h-10 px-4 text-gx-14 rounded-gx-md gap-2",
+  sm: "h-7 px-2 text-gx-12 rounded-gx-lg gap-1",
+  md: "h-8 px-3 text-gx-13 rounded-gx-lg gap-1.5",
+  lg: "h-10 px-4 text-gx-14 rounded-gx-lg gap-2",
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = "secondary", size = "md", icon, loading, block, className, children, disabled, ...rest },
+  { variant = "secondary", size = "md", icon, loading, block, className, children, disabled, disabledReason, title, ...rest },
   ref,
 ) {
+  const isDisabled = !!disabled || !!loading;
   return (
     <button
       ref={ref}
-      disabled={disabled || loading}
+      disabled={isDisabled}
+      aria-busy={loading || undefined}
+      // R-D-09：禁用态必须说明原因；未给 reason 时沿用调用方自带 title，不静默丢提示
+      title={title ?? (isDisabled ? disabledReason : undefined)}
       className={clsx(
-        "inline-flex items-center justify-center font-medium transition-colors select-none",
-        "disabled:opacity-50 disabled:cursor-not-allowed",
+        "inline-flex items-center justify-center font-medium select-none",
+        // R-D-08 过渡 120ms
+        "transition-[background-color,filter,opacity,box-shadow] duration-[120ms]",
+        FOCUS_RING,
+        // R-D-09 禁用：只降透明度到 .5 + not-allowed，**保持原色号**（不得灰色化、不得改底色）
+        "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:brightness-100",
         VARIANT_CLASS[variant],
         SIZE_CLASS[size],
         block && "w-full",
@@ -110,11 +128,20 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       {...rest}
     >
       {loading ? (
-        <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        <>
+          {/* R-D-10 加载：文案换成 12px spinner，保留按钮宽度（文字继续占位） */}
+          <span
+            aria-hidden="true"
+            className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+          />
+          <span className="opacity-0">{children}</span>
+        </>
       ) : (
-        icon && <Icon name={icon} size={size === "sm" ? 13 : 15} />
+        <>
+          {icon && <Icon name={icon} size={size === "sm" ? 13 : 15} />}
+          {children}
+        </>
       )}
-      {children}
     </button>
   );
 });
@@ -137,8 +164,12 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       title={label}
       aria-label={label}
       className={clsx(
-        "inline-flex h-7 w-7 items-center justify-center rounded-gx-sm transition-colors",
-        active ? "bg-gx-accent-bg text-gx-accent" : "text-gx-text-tertiary hover:bg-gx-bg hover:text-gx-text-primary",
+        // R-D-05 控件圆角 8；R-D-08 过渡 120ms
+        "inline-flex h-7 w-7 items-center justify-center rounded-gx-lg transition-colors duration-[120ms]",
+        FOCUS_RING,
+        // R-D-09 禁用：opacity .5 保持原色，不改底色
+        "disabled:cursor-not-allowed disabled:opacity-50",
+        active ? "bg-gx-accent-bg text-gx-accent" : "text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary",
         danger && "hover:text-gx-danger",
         className,
       )}
@@ -151,56 +182,118 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
 
 // ============ 输入控件 ============
 
-export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
-  function Input({ className, ...rest }, ref) {
-    return (
-      <input
-        ref={ref}
-        className={clsx(
-          "h-8 w-full rounded-gx-md border border-gx-border bg-gx-surface px-2.5 text-gx-13",
-          "text-gx-text-primary placeholder:text-gx-text-hint",
-          "focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent-bg",
-          className,
-        )}
-        {...rest}
-      />
-    );
-  },
+// ============ 输入控件（R-D-07~R-D-11 五态）============
+//
+// 统一五态：
+//   默认  边框 #DFE3EA + 白底 + 主文本
+//   悬停  边框加深到 #C3CAD6（不换底色）
+//   焦点  边框 + 2px ring 走 gx-accent
+//   禁用  opacity .5 + not-allowed，**保持原色号**（R-D-09），并带 title 说明原因
+//   只读  去掉边框与底色、文字 #5B6785（R-D-11）；**用 readOnly 不用 disabled**——
+//        disabled 会让内容无法选中复制、也无法聚焦，只读字段必须还能复制。
+//
+// 控件圆角一律 8（R-D-05 / C.4）。
+
+/** 只读态样式：去边框、去底色，文字三级色，仍可选中复制、可聚焦 */
+const READONLY_CLASS =
+  "h-8 w-full rounded-gx-lg border-0 bg-transparent px-0 text-gx-13 text-gx-text-tertiary focus:outline-none";
+/** 默认 / 悬停 / 焦点 / 禁用四态共享的框体样式 */
+const FIELD_BASE_CLASS = clsx(
+  "h-8 w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 text-gx-13 text-gx-text-primary",
+  "transition-colors duration-[120ms]",
+  "hover:border-gx-border-strong",
+  "focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50",
+  "placeholder:text-gx-text-hint",
+  "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gx-border",
 );
 
-export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
-  function Textarea({ className, ...rest }, ref) {
-    return (
-      <textarea
-        ref={ref}
-        className={clsx(
-          "w-full rounded-gx-md border border-gx-border bg-gx-surface px-2.5 py-1.5 text-gx-13",
-          "text-gx-text-primary placeholder:text-gx-text-hint resize-y",
-          "focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent-bg",
-          className,
-        )}
-        {...rest}
-      />
-    );
-  },
-);
+export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
+  /** R-D-09 禁用原因（渲染为 title 提示） */
+  disabledReason?: string;
+}
+
+export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
+  { className, disabledReason, title, ...rest },
+  ref,
+) {
+  const readOnly = !!rest.readOnly;
+  return (
+    <input
+      ref={ref}
+      title={title ?? (rest.disabled ? disabledReason : undefined)}
+      aria-readonly={readOnly || undefined}
+      className={clsx(readOnly ? READONLY_CLASS : FIELD_BASE_CLASS, className)}
+      {...rest}
+    />
+  );
+});
+
+export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+  /** R-D-09 禁用原因（渲染为 title 提示） */
+  disabledReason?: string;
+}
+
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
+  { className, disabledReason, title, ...rest },
+  ref,
+) {
+  const readOnly = !!rest.readOnly;
+  return (
+    <textarea
+      ref={ref}
+      title={title ?? (rest.disabled ? disabledReason : undefined)}
+      aria-readonly={readOnly || undefined}
+      className={clsx(
+        readOnly
+          ? "rounded-gx-lg border-0 bg-transparent px-0 text-gx-13 text-gx-text-tertiary focus:outline-none"
+          : clsx(
+              "w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 py-1.5 text-gx-13",
+              "text-gx-text-primary placeholder:text-gx-text-hint resize-y",
+              "transition-colors duration-[120ms] hover:border-gx-border-strong",
+              "focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50",
+              "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gx-border",
+            ),
+        className,
+      )}
+      {...rest}
+    />
+  );
+});
 
 export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   options?: { value: string; label: string; disabled?: boolean }[];
   /** 分组渲染（optgroup）；与 options 二选一，groups 优先 */
   groups?: { label: string; options: { value: string; label: string; disabled?: boolean }[] }[];
+  /**
+   * R-D-11 只读：去边框去底色 + aria-readonly，**不用 disabled**。
+   * 原生 <select> 无 readonly 属性，故本组件只做「视觉 + 语义」处理，
+   * 是否允许改值由调用方决定是否传 onChange（不传即不会写回）。
+   */
+  readOnly?: boolean;
+  /** R-D-09 禁用原因（渲染为 title 提示） */
+  disabledReason?: string;
 }
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
-  { options, groups, className, ...rest },
+  { options, groups, className, readOnly, disabledReason, title, ...rest },
   ref,
 ) {
   return (
     <select
       ref={ref}
+      title={title ?? (rest.disabled ? disabledReason : undefined)}
+      aria-readonly={readOnly || undefined}
+      data-gx-readonly={readOnly ? "true" : undefined}
       className={clsx(
-        "h-8 rounded-gx-md border border-gx-border bg-gx-surface px-2 text-gx-13",
-        "text-gx-text-primary focus:border-gx-accent focus:outline-none",
+        "text-gx-13",
+        readOnly
+          ? "h-8 rounded-gx-lg border-0 bg-transparent px-0 text-gx-text-tertiary focus:outline-none"
+          : clsx(
+              "h-8 rounded-gx-lg border border-gx-border bg-gx-surface px-2 transition-colors duration-[120ms]",
+              "text-gx-text-primary hover:border-gx-border-strong",
+              "focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50",
+              "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gx-border",
+            ),
         className,
       )}
       {...rest}
@@ -293,18 +386,19 @@ export function SegmentedControl<T extends string>({
   size?: "sm" | "md";
 }) {
   return (
-    <div className="inline-flex rounded-gx-md border border-gx-border bg-gx-surface p-0.5">
+    <div className="inline-flex rounded-gx-lg border border-gx-border bg-gx-surface p-0.5">
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
           onClick={() => onChange(o.value)}
           className={clsx(
-            "rounded-gx-sm font-medium transition-colors",
+            "rounded-gx-lg font-medium transition-colors duration-[120ms]",
+            FOCUS_RING,
             size === "sm" ? "px-2 py-0.5 text-gx-11" : "px-2.5 py-1 text-gx-12",
             value === o.value
               ? "bg-gx-accent-bg text-gx-accent"
-              : "text-gx-text-tertiary hover:bg-gx-bg",
+              : "text-gx-text-tertiary hover:bg-gx-row-hover",
           )}
         >
           {o.label}
@@ -382,25 +476,63 @@ export function Spinner({ size = 16 }: { size?: number }) {
   );
 }
 
+/**
+ * 统一空态（R-D-13 首次空态 / R-D-14 筛选空态）。
+ *
+ * 三要素齐备：图标 + 主文案 + 次文案 + 主行动入口——
+ * 禁止只剩一句「暂无数据」的裸空态。
+ *   first    列表 / 库 / 回收站首次为空：必须给一个主按钮（新建 / 导入）。
+ *   filtered 搜索 / 筛选无结果：文案固定「没有匹配的内容」，给「清除筛选」，**不给新建按钮**。
+ */
 export function EmptyState({
   icon = "database",
   title,
   description,
   action,
+  kind = "first",
+  onClearFilters,
+  className,
 }: {
   icon?: IconName;
-  title: string;
+  title?: string;
   description?: string;
   action?: ReactNode;
+  /** first = 首次空态（有行动入口）；filtered = 筛选空态（有清除筛选入口） */
+  kind?: "first" | "filtered";
+  /** 筛选空态的「清除筛选」回调 */
+  onClearFilters?: () => void;
+  className?: string;
 }) {
+  const filtered = kind === "filtered";
+  const mainText = title ?? (filtered ? "没有匹配的内容" : "暂无数据");
+  const subText = description ?? (filtered ? "换个关键词试试" : undefined);
   return (
-    <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+    <div
+      data-gx-empty={filtered ? "filtered" : "first"}
+      className={clsx("flex flex-col items-center justify-center gap-3 px-6 py-16 text-center", className)}
+    >
+      {/* R-D-13 图标 24px / #8A94AC */}
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gx-bg text-gx-text-hint">
-        <Icon name={icon} size={22} />
+        <Icon name={filtered ? "search" : icon} size={24} />
       </div>
-      <div className="text-gx-14 font-semibold text-gx-text-primary">{title}</div>
-      {description && <div className="max-w-md text-gx-13 text-gx-text-tertiary">{description}</div>}
-      {action}
+      {/* 主文案 14px/500 */}
+      <div className="text-gx-14 font-medium text-gx-text-primary">{mainText}</div>
+      {/* 次文案 12px / #8A94AC */}
+      {subText && <div className="max-w-md text-gx-12 text-gx-text-hint">{subText}</div>}
+      {!filtered && action}
+      {filtered && onClearFilters && (
+        <button
+          type="button"
+          onClick={onClearFilters}
+          className={clsx(
+            "inline-flex h-8 items-center justify-center rounded-gx-lg px-2 text-gx-12 font-medium",
+            "text-gx-accent transition-colors duration-[120ms] hover:bg-gx-accent-bg",
+            FOCUS_RING,
+          )}
+        >
+          清除筛选
+        </button>
+      )}
     </div>
   );
 }
@@ -446,10 +578,10 @@ export function Modal({
   // 应用浮层一律 createPortal 到 document.body（z-index §2.5），脱离组件树内的画布堆叠上下文，
   // 避免被 .kb-canvas-wrap 内 z-60~80 的画布浮层遮挡（如 ShareModal 被嵌入编辑窗盖住）。
   return createPortal(
-    <div className="fixed inset-0 z-[800] flex items-center justify-center p-6">
+    <div className="fixed inset-0 gx-z-modal flex items-center justify-center p-6">
       <div className="absolute inset-0 bg-black/25" onClick={onClose} />
       <div
-        className="relative flex max-h-[85vh] w-full flex-col overflow-hidden rounded-gx-xl bg-gx-surface shadow-xl"
+        className="relative flex max-h-[85vh] w-full flex-col overflow-hidden rounded-gx-xl bg-gx-surface shadow-gx-xl"
         style={{ maxWidth: width }}
       >
         {title && (
@@ -554,9 +686,9 @@ export function Popover({
   if (!open) return null;
 
   const cls = clsx(
-    "overflow-hidden rounded-gx-lg border border-gx-border bg-gx-surface shadow-lg",
+    "overflow-hidden rounded-gx-lg border border-gx-border bg-gx-surface shadow-gx-lg",
     // fixed 模式 portal 到 body，归应用浮层 popover(900)；absolute 模式保持容器内局部 z-40
-    fixed ? "fixed z-[900]" : "absolute top-full z-40 mt-1",
+    fixed ? "fixed gx-z-popover" : "absolute top-full z-40 mt-1",
     !fixed && (align === "right" ? "right-0" : "left-0"),
     className,
   );
@@ -577,6 +709,19 @@ export function Popover({
   return fixed ? createPortal(node, document.body) : node;
 }
 
+export interface MenuItemProps {
+  icon?: IconName;
+  label: ReactNode;
+  description?: string;
+  onClick?: () => void;
+  danger?: boolean;
+  active?: boolean;
+  disabled?: boolean;
+  /** R-D-09 禁用必须说明原因（渲染为 title） */
+  disabledReason?: string;
+  shortcut?: string;
+}
+
 export function MenuItem({
   icon,
   label,
@@ -585,29 +730,25 @@ export function MenuItem({
   danger,
   active,
   disabled,
+  disabledReason,
   shortcut,
-}: {
-  icon?: IconName;
-  label: ReactNode;
-  description?: string;
-  onClick?: () => void;
-  danger?: boolean;
-  active?: boolean;
-  disabled?: boolean;
-  shortcut?: string;
-}) {
+  title,
+}: MenuItemProps & { title?: string }) {
   return (
     <button
       type="button"
       disabled={disabled}
+      title={title ?? (disabled ? disabledReason : undefined)}
       onClick={(e) => {
         e.stopPropagation();
         onClick?.();
       }}
       className={clsx(
-        "flex w-full items-start gap-2 px-3 py-1.5 text-left text-gx-13 transition-colors",
-        "disabled:opacity-40 disabled:cursor-not-allowed",
-        danger ? "text-gx-danger hover:bg-gx-danger-bg" : "text-gx-text-primary hover:bg-gx-bg",
+        "flex w-full items-start gap-2 px-3 py-1.5 text-left text-gx-13 transition-colors duration-[120ms]",
+        // R-D-09 禁用：opacity .5 保持原色 + not-allowed（菜单项此前的 .4 与规范不一致）
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gx-accent/50",
+        "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent",
+        danger ? "text-gx-danger hover:bg-gx-danger-bg" : "text-gx-text-primary hover:bg-gx-row-hover",
         active && "bg-gx-accent-bg text-gx-accent",
       )}
     >
@@ -752,7 +893,7 @@ export function ContextMenu({
       role="menu"
       data-context-menu="true"
       style={{ position: "fixed", left: pos.left, top: pos.top, width }}
-      className={clsx("z-[900] overflow-hidden rounded-gx-lg border border-gx-border bg-gx-surface shadow-lg", menuClassName)}
+      className={clsx("gx-z-popover overflow-hidden rounded-gx-lg border border-gx-border bg-gx-surface shadow-gx-lg", menuClassName)}
     >
       <div className="py-1">
         {items.map((it, i) => {
@@ -785,11 +926,13 @@ export function ContextMenu({
                 onClose();
               }}
               className={clsx(
-                "flex w-full items-start gap-2 px-3 py-1.5 text-left text-gx-13 transition-colors",
-                "disabled:opacity-40 disabled:cursor-not-allowed",
+                "flex w-full items-start gap-2 px-3 py-1.5 text-left text-gx-13 transition-colors duration-[120ms]",
+                // R-D-09 禁用统一 opacity .5；R-D-08 行 hover 统一 #F1F5FB
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gx-accent/50",
+                "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent",
                 it.danger
                   ? "text-gx-danger hover:bg-gx-danger-bg"
-                  : "text-gx-text-primary hover:bg-gx-bg",
+                  : "text-gx-text-primary hover:bg-gx-row-hover",
                 it.active && "bg-gx-accent-bg text-gx-accent",
               )}
             >
@@ -953,13 +1096,46 @@ function ContextSubmenu({
 }
 
 // ============ Toast ============
+// R-D-20 统一右下角（移动底部居中）· 圆角 8 · 最大宽度 360 · 同时最多 3 条
+// R-D-21 成功默认不带标题，只说结果且带对象名
+// R-D-22 删除 / 归档类成功 toast 必须带「撤销」，保留 6 秒
+// 3.4 反馈矩阵：成功 2.5s / 可撤销 6s / 系统级失败 4s 且可展开详情
 
-type ToastKind = "success" | "error" | "info";
+export type ToastKind = "success" | "error" | "info";
+
+export interface ToastAction {
+  /** 按钮文案（R-D-24 同款要求：具体动词，如「撤销」） */
+  label: string;
+  onClick: () => void;
+}
+
+export interface ToastOptions {
+  kind?: ToastKind;
+  /** 停留时长（ms）。缺省：带 action → 6000；error → 4000；其余 → 2500 */
+  duration?: number;
+  /** R-D-22 可撤销操作的「撤销」按钮 */
+  action?: ToastAction;
+  /** 失败 · 系统级：可展开的详情原文（服务端错误明细等） */
+  detail?: string;
+}
+
 interface ToastItem {
   id: number;
   kind: ToastKind;
   message: string;
+  duration: number;
+  action?: ToastAction;
+  detail?: string;
 }
+
+/** R-D-20 同屏最多 3 条 */
+export const TOAST_MAX = 3;
+/** R-D-22 撤销窗口 6 秒 */
+export const TOAST_UNDO_MS = 6000;
+/** 失败 · 系统级 4 秒 */
+export const TOAST_ERROR_MS = 4000;
+/** 成功 · 无需后续 2.5 秒 */
+export const TOAST_SUCCESS_MS = 2500;
 
 let toastSeq = 0;
 const toastListeners = new Set<(items: ToastItem[]) => void>();
@@ -969,14 +1145,136 @@ function emitToast() {
   for (const l of toastListeners) l([...toastItems]);
 }
 
-export function toast(message: string, kind: ToastKind = "info") {
-  const id = ++toastSeq;
-  toastItems = [...toastItems, { id, kind, message }];
+/**
+ * 当前存活的 toast 快照（只读副本）。供单测与调试断言「最多 3 条 / 撤销 6s / 错误 4s」。
+ */
+export function toastSnapshot(): {
+  id: number;
+  kind: ToastKind;
+  message: string;
+  duration: number;
+  hasAction: boolean;
+}[] {
+  return toastItems.map((t) => ({
+    id: t.id,
+    kind: t.kind,
+    message: t.message,
+    duration: t.duration,
+    hasAction: !!t.action,
+  }));
+}
+
+/** 关闭指定 toast（撤销 / 手动关闭后立刻收起，不等计时器） */
+export function dismissToast(id: number) {
+  const next = toastItems.filter((t) => t.id !== id);
+  if (next.length === toastItems.length) return;
+  toastItems = next;
   emitToast();
-  setTimeout(() => {
-    toastItems = toastItems.filter((t) => t.id !== id);
-    emitToast();
-  }, 3200);
+}
+
+/**
+ * 弹出 toast。向后兼容旧签名 `toast(message, "success")`；
+ * 新签名 `toast(message, { kind, action, detail, duration })`。
+ * @returns 该条 toast 的 id（可用于提前 dismiss）
+ */
+export function toast(message: string, kindOrOptions: ToastKind | ToastOptions = "info"): number {
+  const opt: ToastOptions =
+    typeof kindOrOptions === "string" ? { kind: kindOrOptions } : kindOrOptions;
+  const kind = opt.kind ?? "info";
+  const id = ++toastSeq;
+  const duration =
+    opt.duration ?? (opt.action ? TOAST_UNDO_MS : kind === "error" ? TOAST_ERROR_MS : TOAST_SUCCESS_MS);
+  // R-D-20 超出 3 条时挤掉最旧的一条（堆叠折叠）
+  toastItems = [
+    ...toastItems,
+    { id, kind, message, duration, action: opt.action, detail: opt.detail },
+  ].slice(-TOAST_MAX);
+  emitToast();
+  if (duration > 0) {
+    // 用全局 setTimeout（非 window.*）：SSR/单测的 node 环境同样可用
+    setTimeout(() => dismissToast(id), duration);
+  }
+  return id;
+}
+
+const TOAST_TONE: Record<ToastKind, string> = {
+  success: "bg-gx-success text-white",
+  error: "bg-gx-danger text-white",
+  info: "bg-gx-text-primary text-white",
+};
+
+const TOAST_ICON: Record<ToastKind, IconName> = {
+  success: "check",
+  error: "alertCircle",
+  info: "sparkles",
+};
+
+function ToastCard({ item }: { item: ToastItem }) {
+  const [detailOpen, setDetailOpen] = useState(false);
+  return (
+    <div
+      data-gx-toast={item.kind}
+      className={clsx(
+        "pointer-events-auto flex w-full max-w-[360px] items-start gap-2 rounded-gx-lg px-3 py-2",
+        "text-gx-13 shadow-gx-lg sm:w-[360px]",
+        TOAST_TONE[item.kind],
+      )}
+    >
+      <Icon name={TOAST_ICON[item.kind]} size={14} className="mt-0.5 shrink-0" />
+      <div className="min-w-0 flex-1">
+        {/* R-D-21 成功 toast 默认不带标题，只说结果且带对象名 */}
+        <div className="break-words">{item.message}</div>
+        {item.detail && (
+          <>
+            <button
+              type="button"
+              onClick={() => setDetailOpen((v) => !v)}
+              className={clsx(
+                "mt-1 text-gx-11 underline decoration-white/50 underline-offset-2",
+                "transition-opacity duration-[120ms] hover:decoration-white",
+              )}
+            >
+              {detailOpen ? "收起详情" : "展开详情"}
+            </button>
+            {detailOpen && (
+              <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words text-gx-11 text-white/90">
+                {item.detail}
+              </pre>
+            )}
+          </>
+        )}
+      </div>
+      {/* R-D-22 删除 / 归档类成功 toast 必须带「撤销」，窗口 6s */}
+      {item.action && (
+        <button
+          type="button"
+          onClick={() => {
+            item.action?.onClick();
+            dismissToast(item.id);
+          }}
+          className={clsx(
+            "shrink-0 rounded-gx-lg px-1.5 py-0.5 text-gx-12 font-medium underline",
+            "decoration-white/60 underline-offset-2 transition-colors duration-[120ms]",
+            "hover:bg-white/15 hover:decoration-white",
+            FOCUS_RING,
+          )}
+        >
+          {item.action.label}
+        </button>
+      )}
+      <button
+        type="button"
+        aria-label="关闭提示"
+        onClick={() => dismissToast(item.id)}
+        className={clsx(
+          "shrink-0 rounded-gx-lg p-0.5 text-white/80 transition-colors duration-[120ms] hover:bg-white/15 hover:text-white",
+          FOCUS_RING,
+        )}
+      >
+        <Icon name="close" size={12} />
+      </button>
+    </div>
+  );
 }
 
 export function ToastHost() {
@@ -984,6 +1282,8 @@ export function ToastHost() {
 
   useEffect(() => {
     toastListeners.add(setItems);
+    // 挂载时同步一次：组件可能在 toast 弹出后才挂载（如懒加载路由）
+    setItems(toastItems);
     return () => {
       toastListeners.delete(setItems);
     };
@@ -992,20 +1292,17 @@ export function ToastHost() {
   if (items.length === 0) return null;
 
   return (
-    <div className="pointer-events-none fixed bottom-6 left-1/2 z-[1000] flex -translate-x-1/2 flex-col items-center gap-2">
+    <div
+      aria-live="polite"
+      aria-label="操作反馈"
+      className={clsx(
+        // 移动：底部居中；桌面（≥640）：右下角
+        "pointer-events-none fixed inset-x-4 bottom-4 gx-z-toast flex flex-col items-center gap-2",
+        "sm:inset-x-auto sm:bottom-6 sm:right-6 sm:items-end",
+      )}
+    >
       {items.map((t) => (
-        <div
-          key={t.id}
-          className={clsx(
-            "pointer-events-auto flex items-center gap-2 rounded-gx-md px-3 py-2 text-gx-13 shadow-lg",
-            t.kind === "success" && "bg-gx-success text-white",
-            t.kind === "error" && "bg-gx-danger text-white",
-            t.kind === "info" && "bg-gx-text-primary text-white",
-          )}
-        >
-          <Icon name={t.kind === "error" ? "alertCircle" : t.kind === "success" ? "check" : "sparkles"} size={14} />
-          {t.message}
-        </div>
+        <ToastCard key={t.id} item={t} />
       ))}
     </div>
   );

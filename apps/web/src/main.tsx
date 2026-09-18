@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import App from "./App";
 import { ToastHost } from "./components/ui";
+import { ConfirmHost } from "./components/feedback";
 import "./index.css";
 
 // 部署子路径（飞牛网关 /app/gouxiangdb/）下作为 BrowserRouter basename；
@@ -31,7 +32,9 @@ createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter basename={routerBasename}>
         <App />
+        {/* R-D-20 Toast 宿主（右下角 / 最多 3 条） + R-D-23 危险操作确认宿主（L1~L5） */}
         <ToastHost />
+        <ConfirmHost />
       </BrowserRouter>
     </QueryClientProvider>
   </StrictMode>,

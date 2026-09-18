@@ -202,9 +202,22 @@ function RecordDrawer({
 
   const handleDelete = async () => {
     if (!currentId || !permissions.canEditData) return;
+    const deletedId = currentId;
     try {
-      await m.deleteRecord.mutateAsync({ recordId: currentId, tableId });
-      toast("已删除记录", "success");
+      await m.deleteRecord.mutateAsync({ recordId: deletedId, tableId });
+      // R-D-22 删除类成功 toast 必须带「撤销」，窗口 6 秒（记录进回收站，30 天内可恢复）
+      toast("已删除记录", {
+        kind: "success",
+        action: {
+          label: "撤销",
+          onClick: () => {
+            void m.restoreTrash
+              .mutateAsync({ id: deletedId, kind: "record", baseId })
+              .then(() => toast("已恢复记录", "success"))
+              .catch((e: unknown) => toast((e as Error)?.message ?? "撤销失败", "error"));
+          },
+        },
+      });
       onClose();
     } catch (err) {
       toast((err as Error).message || "删除失败", "error");

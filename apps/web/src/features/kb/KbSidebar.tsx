@@ -63,7 +63,7 @@ export function KbSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         <button
           type="button"
           onClick={onOpenSearch}
-          className="flex w-full items-center gap-2 rounded-gx-md border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 text-gx-text-tertiary hover:bg-gx-bg"
+          className="flex w-full items-center gap-2 rounded-gx-lg border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 text-gx-text-tertiary hover:bg-gx-bg"
         >
           <Icon name="search" size={14} />
           <span className="flex-1 text-left">搜索</span>

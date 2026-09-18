@@ -104,12 +104,12 @@ export function MemberList({
           <select
             value={filter.deptId ?? ""}
             onChange={(e) => onFilterChange({ ...filter, deptId: e.target.value || null })}
-            className="h-7 max-w-[140px] truncate rounded-gx-md border border-gx-border bg-gx-surface px-2 text-gx-12 text-gx-text-primary"
+            className="h-7 max-w-[140px] truncate rounded-gx-lg border border-gx-border bg-gx-surface px-2 text-gx-12 text-gx-text-primary"
           >
             <option value="">全部部门</option>
             {(depts ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
-          <div className="inline-flex rounded-gx-md border border-gx-border bg-gx-surface p-0.5">
+          <div className="inline-flex rounded-gx-lg border border-gx-border bg-gx-surface p-0.5">
             {([null, ...STATUS_ORDER] as (UserAccountStatus | null)[]).map((s) => (
               <button
                 key={s ?? "all"}

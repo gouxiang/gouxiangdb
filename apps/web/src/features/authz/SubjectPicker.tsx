@@ -71,7 +71,7 @@ export function SubjectPicker({
     (tab === "role" && rolesQ.isLoading);
 
   return (
-    <div className="rounded-gx-md border border-gx-separator">
+    <div className="rounded-gx-lg border border-gx-separator">
       <div className="flex items-center gap-1 border-b border-gx-separator px-2 py-1.5">
         {TABS.map((t) => (
           <button

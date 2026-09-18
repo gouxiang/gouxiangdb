@@ -102,7 +102,7 @@ function TableActionRowInner({ tableId, viewId }: { tableId: string; viewId: str
         type="button"
         onClick={() => toast(plannedHint("分享数据"), "info")}
         title="分享数据 · 规划中"
-        className="flex h-7 items-center gap-1 rounded-gx-md px-2 text-gx-12 text-gx-accent transition-colors hover:bg-gx-row-hover"
+        className="flex h-7 items-center gap-1 rounded-gx-lg px-2 text-gx-12 text-gx-accent transition-colors hover:bg-gx-row-hover"
       >
         <Icon name="share" size={13} />
         <span>分享数据</span>
@@ -142,7 +142,7 @@ function TableActionRowInner({ tableId, viewId }: { tableId: string; viewId: str
             onChange={(e) => setCsvText(e.target.value)}
             placeholder="首行为表头，后续为数据行"
             rows={5}
-            className="w-full rounded-gx-md border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 text-gx-text-primary focus:border-gx-accent focus:outline-none"
+            className="w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 text-gx-text-primary focus:border-gx-accent focus:outline-none"
           />
           <div className="mt-2 flex items-center justify-end gap-2">
             <button
@@ -155,7 +155,7 @@ function TableActionRowInner({ tableId, viewId }: { tableId: string; viewId: str
             <button
               type="button"
               onClick={() => void runImport(csvText)}
-              className="rounded-gx-md bg-gx-accent px-3 py-1.5 text-gx-12 font-medium text-white hover:brightness-95"
+              className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-12 font-medium text-white hover:brightness-95"
             >
               导入
             </button>
@@ -186,7 +186,7 @@ function Cell({
       type="button"
       onClick={onClick}
       title={label}
-      className="flex h-7 items-center gap-1 rounded-gx-md px-2 text-gx-12 text-gx-text-secondary transition-colors hover:bg-gx-row-hover"
+      className="flex h-7 items-center gap-1 rounded-gx-lg px-2 text-gx-12 text-gx-text-secondary transition-colors hover:bg-gx-row-hover"
     >
       <Icon name={icon} size={13} />
       <span>{label}</span>

@@ -2,10 +2,11 @@
 // 回收站：列出已删除项，支持恢复 / 彻底删除（二次确认）
 // 权限：canEditData 可恢复；canManageBase 可彻底删除
 
-import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useBase, useTrash, useGXMutations } from "../../api/hooks";
-import { Button, EmptyState, Modal, toast } from "../../components/ui";
+import { Button, EmptyState, toast } from "../../components/ui";
+import { SkeletonList } from "../../components/states";
+import { confirmIrreversible } from "../../components/feedback";
 import { Icon } from "../../components/icons";
 import type { TrashItemDTO } from "@gx/shared-types";
 
@@ -28,14 +29,13 @@ function fmt(s: string): string {
 
 export default function TrashPage() {
   const { baseId } = useParams();
+  const navigate = useNavigate();
   const { data: items, isLoading } = useTrash(baseId ?? null);
   const baseQ = useBase(baseId ?? null);
   const m = useGXMutations();
 
   const canEditData = baseQ.data?.permissions?.canEditData ?? false;
   const canManageBase = baseQ.data?.permissions?.canManageBase ?? false;
-
-  const [purgeTarget, setPurgeTarget] = useState<TrashItemDTO | null>(null);
 
   async function restore(it: TrashItemDTO) {
     try {
@@ -46,11 +46,16 @@ export default function TrashPage() {
     }
   }
 
-  async function confirmPurge() {
-    if (!purgeTarget) return;
+  // R-D-23/L4 不可恢复 → 红色确认；R-D-24 主按钮用具体动词（不用「确定」）
+  async function askPurge(it: TrashItemDTO) {
+    const ok = await confirmIrreversible({
+      title: "彻底删除",
+      confirmText: "彻底删除",
+      description: `「${it.name}」（${KIND_LABEL[it.kind]}）会被永久删除，不进回收站、不可恢复。`,
+    });
+    if (!ok) return;
     try {
-      await m.purgeTrash.mutateAsync({ id: purgeTarget.id, kind: purgeTarget.kind, baseId: baseId! });
-      setPurgeTarget(null);
+      await m.purgeTrash.mutateAsync({ id: it.id, kind: it.kind, baseId: baseId! });
       toast("已彻底删除", "success");
     } catch (e) {
       toast(e instanceof Error ? e.message : "删除失败", "error");
@@ -59,6 +64,12 @@ export default function TrashPage() {
 
   async function purgeAll() {
     if (!items) return;
+    const ok = await confirmIrreversible({
+      title: "清空回收站",
+      confirmText: "清空回收站",
+      description: `回收站里的 ${items.length} 项会被永久删除，不可恢复。`,
+    });
+    if (!ok) return;
     try {
       for (const it of items) {
         await m.purgeTrash.mutateAsync({ id: it.id, kind: it.kind, baseId: baseId! });
@@ -81,10 +92,21 @@ export default function TrashPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
-        {isLoading && <div className="py-10 text-center text-gx-13 text-gx-text-hint">加载中…</div>}
+        {/* R-D-15/25 列表首屏用骨架屏，不用「加载中…」裸文案 */}
+        {isLoading && <SkeletonList rows={5} className="px-0" />}
 
         {!isLoading && (!items || items.length === 0) && (
-          <EmptyState icon="trash" title="回收站是空的" description="被删除的数据表、字段与记录会暂时保存在这里" />
+          // R-D-13 空态三要素齐备：图标 + 主文案 + 次文案 + 一个主行动入口
+          <EmptyState
+            icon="trash"
+            title="回收站是空的"
+            description="被删除的数据表、字段与记录会暂时保存在这里"
+            action={
+              <Button variant="primary" size="sm" onClick={() => baseId && navigate(`/base/${baseId}`)}>
+                返回该库
+              </Button>
+            }
+          />
         )}
 
         {items && items.length > 0 && (
@@ -110,7 +132,7 @@ export default function TrashPage() {
                     type="button"
                     disabled={!canEditData}
                     onClick={() => restore(it)}
-                    className="rounded-gx-sm px-2 py-1 text-gx-12 text-gx-accent hover:bg-gx-accent-bg disabled:cursor-not-allowed disabled:text-gx-text-hint disabled:hover:bg-transparent"
+                    className="rounded-gx-lg px-2 py-1 text-gx-12 text-gx-accent hover:bg-gx-accent-bg disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                     title={canEditData ? "恢复" : "无编辑权限"}
                   >
                     恢复
@@ -118,9 +140,10 @@ export default function TrashPage() {
                   <button
                     type="button"
                     disabled={!canManageBase}
-                    onClick={() => setPurgeTarget(it)}
-                    className="rounded-gx-sm px-2 py-1 text-gx-12 text-gx-danger hover:bg-gx-danger-bg disabled:cursor-not-allowed disabled:text-gx-text-hint disabled:hover:bg-transparent"
-                    title={canManageBase ? "彻底删除" : "仅所有者可彻底删除"}
+                    onClick={() => void askPurge(it)}
+                    className="rounded-gx-lg px-2 py-1 text-gx-12 text-gx-danger hover:bg-gx-danger-bg disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+                    // R-D-09 禁用必须说明原因
+                    title={canManageBase ? "彻底删除" : "仅库管理者可彻底删除"}
                   >
                     彻底删除
                   </button>
@@ -130,30 +153,6 @@ export default function TrashPage() {
           </div>
         )}
       </div>
-
-      {/* 彻底删除二次确认 */}
-      <Modal
-        open={!!purgeTarget}
-        title="彻底删除"
-        onClose={() => setPurgeTarget(null)}
-        footer={
-          <>
-            <button className="text-gx-13 text-gx-text-tertiary hover:text-gx-text-primary" onClick={() => setPurgeTarget(null)}>
-              取消
-            </button>
-            <button
-              className="rounded-gx-md bg-gx-danger px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
-              onClick={confirmPurge}
-            >
-              彻底删除
-            </button>
-          </>
-        }
-      >
-        <div className="text-gx-13 text-gx-text-secondary">
-          确定要彻底删除「{purgeTarget?.name}」吗？此操作不可恢复。
-        </div>
-      </Modal>
     </div>
   );
 }

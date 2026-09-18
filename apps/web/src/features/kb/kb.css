@@ -474,7 +474,20 @@ h2.kb-block, h3.kb-block, h4.kb-block { width: 100%; }
 /* B2: @ 引用链接异常态视觉降级（已删除/无权限）—— 保留文本但视觉提示不可用 */
 .kb-wy .md-link-broken { color: #888780 !important; text-decoration: line-through !important; cursor: not-allowed; border-bottom-color: transparent !important; }
 .kb-wy .md-link-forbidden { color: #888780 !important; text-decoration: none !important; cursor: not-allowed; border-bottom: 1px dashed #c8c7c2 !important; }
-.kb-wy .md-link-forbidden::after { content: "🔒"; margin-left: 2px; font-size: 10px; vertical-align: top; }
+/* B2: @ 引用链接异常态视觉降级（已删除/无权限）—— 保留文本但视觉提示不可用 */
+/* 锁标记改用 icons.tsx 的 lock 图标（同一组 path）内联 SVG，不再是锁形 emoji：
+   用 mask 上色，跟随 currentColor（此处为降级灰），不引外部资源、不新增依赖。 */
+.kb-wy .md-link-forbidden::after {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 2px;
+  vertical-align: baseline;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 11h12v10H6z'/%3E%3Cpath d='M9 11V7a3 3 0 0 1 6 0v4'/%3E%3C/svg%3E") no-repeat center / contain;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 11h12v10H6z'/%3E%3Cpath d='M9 11V7a3 3 0 0 1 6 0v4'/%3E%3C/svg%3E") no-repeat center / contain;
+}
 /* B3: 标题锚点链接图标 + 粘贴降级为伪纯文本的样式 */
 .md-heading-anchor { opacity: 0; margin-left: 6px; color: #888780; transition: opacity 0.15s; vertical-align: middle; background: none; border: 0; cursor: pointer; padding: 0; }
 [data-heading-id]:hover .md-heading-anchor, .md-heading-anchor:focus { opacity: 1; }

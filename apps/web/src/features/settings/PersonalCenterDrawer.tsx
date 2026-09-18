@@ -104,7 +104,7 @@ export function PersonalCenterDrawer({
           <button
             type="button"
             onClick={onClose}
-            className="h-8 w-8 rounded-gx-md text-gx-text-secondary hover:bg-gx-bg hover:text-gx-text-primary flex items-center justify-center"
+            className="h-8 w-8 rounded-gx-lg text-gx-text-secondary hover:bg-gx-bg hover:text-gx-text-primary flex items-center justify-center"
             aria-label="关闭"
           >
             <Icon name="close" size={16} />
@@ -256,7 +256,7 @@ function ProfileTab({ user }: { user: UserDTO }) {
               rows={4}
               disabled={updateMe.isPending}
               placeholder="例如：负责产品需求池的梳理与排期"
-              className="w-full rounded-gx-md border border-gx-border bg-gx-bg px-3 py-2 text-gx-13 text-gx-text-primary outline-none focus:border-gx-accent focus:bg-gx-surface disabled:opacity-60 resize-none"
+              className="w-full rounded-gx-lg border border-gx-border bg-gx-bg px-3 py-2 text-gx-13 text-gx-text-primary outline-none focus:border-gx-accent focus:bg-gx-surface disabled:opacity-60 resize-none"
             />
           </FormField>
         </FormRow>
@@ -360,7 +360,7 @@ function AccountTab({ user }: { user: UserDTO }) {
       <FormSection title="第三方账号" description="微信 / GitHub / Google 绑定（即将上线）">
         <FormRow>
           <FormField label="绑定状态" control="auto">
-            <div className="rounded-gx-md border border-dashed border-gx-border bg-gx-bg px-4 py-6 text-center text-gx-12 text-gx-text-tertiary">
+            <div className="rounded-gx-lg border border-dashed border-gx-border bg-gx-bg px-4 py-6 text-center text-gx-12 text-gx-text-tertiary">
               暂未开放，敬请期待
             </div>
           </FormField>
@@ -686,7 +686,7 @@ function DangerTab({ onDeleted }: { onDeleted: () => void }) {
       <FormSection title="危险操作">
         <FormRow>
           <FormField label="注销后果" control="auto">
-            <div className="rounded-gx-md border border-gx-danger/40 bg-gx-danger-bg px-4 py-3">
+            <div className="rounded-gx-lg border border-gx-danger/40 bg-gx-danger-bg px-4 py-3">
               <div className="flex items-center gap-2 text-gx-danger">
                 <Icon name="alertCircle" size={14} />
                 <span className="text-gx-13 font-medium">危险操作</span>

@@ -122,7 +122,14 @@ export function formatCell(
 
   switch (field.type) {
     case "checkbox":
-      return value ? "✓" : "";
+      // 阶段 3：不再返回对勾字符（U+2713）当状态图标——
+      // ① 它是数据/导出口径（CSV 导出走本函数），而后端导入强制转换只认
+      //    "true"/"1"/"是"/"TRUE"（apps/api/src/domain/csv.ts:190），对勾会被解析成 false，
+      //    导出再导入必然丢勾；改为 "true" 后导出 → 导入闭环正确。
+      // ② 界面上的复选框从不走这里：CellRenderer 的 checkbox 分支渲染的是
+      //    <Icon name="check" />（见 CellRenderer.tsx:81-91），状态另有图标，不靠字符符号。
+      // ③ 后端公式 CONCAT 里的对勾字符属服务端文本口径（domain/types.ts:179），本次不改后端。
+      return value ? "true" : "";
 
     case "currency": {
       const num = Number(value);

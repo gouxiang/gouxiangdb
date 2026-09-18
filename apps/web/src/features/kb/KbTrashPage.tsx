@@ -98,7 +98,7 @@ export default function KbTrashPage() {
               取消
             </button>
             <button
-              className="rounded-gx-md bg-gx-danger px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
+              className="rounded-gx-lg bg-gx-danger px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
               onClick={doPurge}
               disabled={purge.isPending}
             >

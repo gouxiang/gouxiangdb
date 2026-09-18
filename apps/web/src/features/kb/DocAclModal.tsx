@@ -31,7 +31,7 @@ export function DocAclModal({ doc, onClose }: { doc: KbDocDTO; onClose: () => vo
   return (
     <Modal open title={`独立权限 · ${doc.title}`} onClose={onClose} width={520} footer={
       <button
-        className="rounded-gx-md bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
+        className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
         onClick={onClose}
       >
         完成
@@ -99,14 +99,14 @@ function LegacyDocAcl({ doc }: { doc: KbDocDTO }) {
           type="button"
           disabled={!email.trim() || setAcl.isPending}
           onClick={grant}
-          className="inline-flex h-8 items-center gap-1 rounded-gx-md bg-gx-accent px-3 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-40"
+          className="inline-flex h-8 items-center gap-1 rounded-gx-lg bg-gx-accent px-3 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-40"
         >
           <Icon name="check" size={14} />
           授权
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-gx-md border border-gx-border">
+      <div className="overflow-hidden rounded-gx-lg border border-gx-border">
         {isLoading ? (
           <div className="flex justify-center py-8"><Spinner size={18} /></div>
         ) : (acls ?? []).length === 0 ? (

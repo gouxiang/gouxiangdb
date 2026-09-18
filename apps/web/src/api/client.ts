@@ -60,6 +60,7 @@ import type {
   NodeBreadcrumbDTO,
 } from "@gx/shared-types";
 import { resolveApiBase, withBase as joinBase } from "../lib/base";
+import { saveSessionFrom } from "../lib/session-from";
 import { authHeaders } from "./authHeader";
 
 // API 同源前缀解析：
@@ -180,6 +181,10 @@ let unauthorizedHandled = false;
 function handleUnauthorized(): void {
   if (unauthorizedHandled) return;
   unauthorizedHandled = true;
+  // 记下当前页（含查询串），重新登录后回到原页（R-D-17）。失败不影响既有跳转。
+  if (typeof window !== "undefined") {
+    saveSessionFrom(window.location.pathname + window.location.search);
+  }
   useAuthStore.getState().logout();
   // 子路径部署时 pathname 形如 /app/gouxiangdb/...，用带 base 的 LOGIN_PATH 比较与跳转。
   if (typeof window !== "undefined" && !window.location.pathname.endsWith("/login")) {

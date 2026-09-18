@@ -113,7 +113,7 @@ export function PermNodeEditor({ node }: { node: NavNodeDTO }) {
       </div>
 
       {!editable && (
-        <div className="flex items-center gap-1.5 rounded-gx-md bg-gx-row-hover px-2.5 py-1.5 text-gx-12 text-gx-text-hint">
+        <div className="flex items-center gap-1.5 rounded-gx-lg bg-gx-row-hover px-2.5 py-1.5 text-gx-12 text-gx-text-hint">
           <Icon name="lock" size={13} className="shrink-0" />
           {canManage ? "你没有该节点的分享管理权限，当前为只读视图。" : "权限编辑未在本环境开放，当前为只读视图。"}
         </div>
@@ -132,7 +132,7 @@ export function PermNodeEditor({ node }: { node: NavNodeDTO }) {
       )}
 
       {unmappableNote.length > 0 && (
-        <div className="rounded-gx-md border border-gx-separator px-2.5 py-2">
+        <div className="rounded-gx-lg border border-gx-separator px-2.5 py-2">
           <div className="mb-1 text-gx-12 font-medium text-gx-text-secondary">以下授权已在企业权限引擎生效，但旧权限表无对应档：</div>
           <ul className="flex flex-col gap-0.5">
             {unmappableNote.map((line, i) => (
@@ -145,7 +145,7 @@ export function PermNodeEditor({ node }: { node: NavNodeDTO }) {
       <div className="flex flex-col gap-1.5">
         <SectionTitle>本节点直接授权</SectionTitle>
         {rows.filter((r) => !r.removed).length === 0 ? (
-          <div className="rounded-gx-md border border-dashed border-gx-separator px-2.5 py-6 text-center text-gx-12 text-gx-text-hint">
+          <div className="rounded-gx-lg border border-dashed border-gx-separator px-2.5 py-6 text-center text-gx-12 text-gx-text-hint">
             暂无直接授权，访问仅来自上级继承。
           </div>
         ) : (

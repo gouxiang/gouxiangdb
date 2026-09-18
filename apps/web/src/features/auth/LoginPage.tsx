@@ -5,8 +5,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Auth } from "../../api/client";
+import { takeSessionFrom } from "../../lib/session-from";
 import { useAuthStore } from "../../store/auth";
 import { Button, Input, SegmentedControl, toast } from "../../components/ui";
+import { SessionExpiredNotice } from "../../components/states";
 import {
   friendlyBootstrapError,
   resolveLoginEntry,
@@ -27,6 +29,8 @@ export default function LoginPage() {
   const [displayName, setDisplayName] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  // R-D-17 会话过期（401）：读到「来路」说明是被拦过来的，登录后回原页并给出说明横幅
+  const [sessionFrom] = useState(() => takeSessionFrom());
 
   // 注册入口关闭时把可能的 signup 态夹回 login，避免停在已隐藏的 tab 上
   const activeMode: "login" | "signup" = entry.signupVisible ? mode : "login";
@@ -77,7 +81,9 @@ export default function LoginPage() {
       setAuth(res.token, res.user);
       // 初始超级管理员（mustChangePassword=true）登录后闸门会挡住除白名单外的全部 /api，
       // 必须先去改密页，否则进来就是一片空白。
-      navigate(res.user.mustChangePassword === true ? "/change-password" : "/");
+      // R-D-17：会话过期被拦到登录页时，登录后回到原页（来路由 client.ts 在 401 时记下）
+      if (res.user.mustChangePassword === true) navigate("/change-password");
+      else navigate(sessionFrom ?? "/");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "操作失败";
       toast(msg, "error");
@@ -88,7 +94,13 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gx-bg px-4">
-      <div className="w-[360px] rounded-gx-xl bg-gx-surface p-6 shadow-lg">
+      <div className="w-[360px] rounded-gx-xl bg-gx-surface p-6 shadow-gx-lg">
+        {/* R-D-17 会话过期：说明「为什么在这里」+ 登录后回原页。正常访问登录页时不渲染。 */}
+        {sessionFrom && !entry.bootstrap && (
+          <div className="mb-4">
+            <SessionExpiredNotice />
+          </div>
+        )}
         {/* 品牌区 */}
         <div className="mb-5 text-center">
           <div className="text-gx-18 font-semibold text-gx-text-primary">构想工作台</div>
@@ -99,7 +111,7 @@ export default function LoginPage() {
 
         {entry.bootstrap ? (
           <>
-            <div className="mb-4 rounded-gx-md bg-gx-accent-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
+            <div className="mb-4 rounded-gx-lg bg-gx-accent-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
               当前工作区还没有任何账号。请创建第一个账号，它将自动成为超级管理员并拥有工作区全部权限。
             </div>
 

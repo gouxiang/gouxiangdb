@@ -78,7 +78,7 @@ export function ConfirmBody({
           <div className="mb-1 text-gx-11 font-medium text-gx-text-hint">
             {losing ? "将失去访问的成员" : "将重新获得访问的成员"}（{impact.count}）
           </div>
-          <div className="flex max-h-52 flex-col gap-0.5 overflow-y-auto rounded-gx-md border border-gx-separator p-1">
+          <div className="flex max-h-52 flex-col gap-0.5 overflow-y-auto rounded-gx-lg border border-gx-separator p-1">
             {impact.items.map((it) => (
               <div key={it.userId} className="flex items-center gap-2 rounded-gx-sm px-1.5 py-1">
                 <Icon name={it.via === "direct" ? "keyRound" : "inherit"} size={13} className="shrink-0 text-gx-text-hint" />

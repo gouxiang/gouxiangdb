@@ -63,7 +63,7 @@ export function SharePanel({ baseId, canManageBase }: { baseId: string; canManag
 
   if (!canManageBase) {
     return (
-      <div className="rounded-gx-md border border-gx-border bg-gx-bg px-3 py-3 text-gx-13 text-gx-text-secondary">
+      <div className="rounded-gx-lg border border-gx-border bg-gx-bg px-3 py-3 text-gx-13 text-gx-text-secondary">
         只有所有者可管理分享链接
       </div>
     );
@@ -89,13 +89,13 @@ export function SharePanel({ baseId, canManageBase }: { baseId: string; canManag
               type="datetime-local"
               value={expiresAt}
               onChange={(e) => setExpiresAt(e.target.value)}
-              className="h-8 rounded-gx-md border border-gx-border bg-gx-surface px-2 text-gx-13 text-gx-text-primary focus:border-gx-accent focus:outline-none"
+              className="h-8 rounded-gx-lg border border-gx-border bg-gx-surface px-2 text-gx-13 text-gx-text-primary focus:border-gx-accent focus:outline-none"
             />
           </div>
           <button
             type="button"
             onClick={create}
-            className="rounded-gx-md bg-gx-accent px-3 py-2 text-gx-13 font-medium text-white hover:brightness-95"
+            className="rounded-gx-lg bg-gx-accent px-3 py-2 text-gx-13 font-medium text-white hover:brightness-95"
           >
             创建链接
           </button>

@@ -48,7 +48,7 @@ export function WorkspaceTopBar({ onOpenSearch }: { onOpenSearch: () => void }) 
       <button
         type="button"
         onClick={onOpenSearch}
-        className="mx-auto flex h-8 w-full max-w-md items-center gap-2 rounded-gx-md border border-gx-border bg-gx-bg px-2.5 text-gx-12 text-gx-text-tertiary transition-colors hover:bg-gx-row-hover"
+        className="mx-auto flex h-8 w-full max-w-md items-center gap-2 rounded-gx-lg border border-gx-border bg-gx-bg px-2.5 text-gx-12 text-gx-text-tertiary transition-colors hover:bg-gx-row-hover"
       >
         <Icon name="search" size={14} />
         <span className="flex-1 text-left">搜索记录、文档与画布</span>

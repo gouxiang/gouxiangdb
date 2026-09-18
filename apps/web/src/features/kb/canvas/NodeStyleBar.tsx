@@ -243,7 +243,7 @@ export function NodeStyleBar({ anchor, elements: snapshotElements }: { anchor: S
   return (
     <>
       <div
-        className="absolute gx-z-canvas-bar flex h-8 items-center gap-0.5 rounded-gx-md border border-gx-separator bg-gx-surface px-1 shadow-xl"
+        className="absolute gx-z-canvas-bar flex h-8 items-center gap-0.5 rounded-gx-lg border border-gx-separator bg-gx-surface px-1 shadow-xl"
         style={{ left, top, width: BAR_W }}
         onPointerDown={stop}
       >
@@ -646,7 +646,7 @@ function PopoverWrap({ x, y, width, onClose, children }: { x: number; y: number;
   return (
     <div
       ref={ref}
-      className="absolute gx-z-canvas-popover rounded-gx-md border border-gx-separator bg-gx-surface p-1.5 shadow-2xl"
+      className="absolute gx-z-canvas-popover rounded-gx-lg border border-gx-separator bg-gx-surface p-1.5 shadow-2xl"
       style={{ left: Math.min(x, Math.max(8, vw - width - 8)), top: Math.min(y, Math.max(8, vh - 220 - 8)), width }}
       onPointerDown={(e) => e.stopPropagation()}
     >

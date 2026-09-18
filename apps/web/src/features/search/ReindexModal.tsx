@@ -50,7 +50,7 @@ export function ReindexModal({ open, busy, onClose, onConfirm }: ReindexModalPro
           {SCOPES.map((s) => (
             <label
               key={s.value}
-              className="flex cursor-pointer items-start gap-2 rounded-gx-md border border-gx-separator p-2.5"
+              className="flex cursor-pointer items-start gap-2 rounded-gx-lg border border-gx-separator p-2.5"
             >
               <input
                 type="radio"

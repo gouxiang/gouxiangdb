@@ -84,7 +84,7 @@ export function CanvasPreviewToolbar({ handle }: CanvasPreviewToolbarProps) {
 
   return (
     <div
-      className="canvas-preview-toolbar fixed bottom-4 right-4 z-50 flex items-center gap-0.5 rounded-gx-md border border-gx-separator bg-gx-surface p-1 shadow-lg"
+      className="canvas-preview-toolbar fixed bottom-4 right-4 z-50 flex items-center gap-0.5 rounded-gx-lg border border-gx-separator bg-gx-surface p-1 shadow-lg"
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
       onWheel={(e) => {

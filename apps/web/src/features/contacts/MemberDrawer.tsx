@@ -168,7 +168,7 @@ export function MemberDrawer({
             ) : (
               <ul className="flex flex-col gap-2">
                 {(effective.data ?? []).map((r) => (
-                  <li key={r.roleId} className="rounded-gx-md border border-gx-separator px-2.5 py-2">
+                  <li key={r.roleId} className="rounded-gx-lg border border-gx-separator px-2.5 py-2">
                     <div className="flex items-center gap-1.5">
                       {r.isSystem && <Icon name="crown" size={13} className="text-gx-warning" />}
                       <span className="text-gx-13 font-medium text-gx-text-primary">{r.name}</span>

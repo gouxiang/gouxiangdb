@@ -234,7 +234,7 @@ export function VersionHistoryDrawer({
                       <button
                         type="button"
                         onClick={() => setConfirmRollback(versionDetail)}
-                        className="inline-flex h-7 items-center gap-1.5 rounded-gx-md bg-gx-accent px-2.5 text-gx-12 font-medium text-white hover:brightness-95"
+                        className="inline-flex h-7 items-center gap-1.5 rounded-gx-lg bg-gx-accent px-2.5 text-gx-12 font-medium text-white hover:brightness-95"
                       >
                         <Icon name="rollback" size={13} />
                         回滚到此版本
@@ -286,7 +286,7 @@ export function VersionHistoryDrawer({
               取消
             </button>
             <button
-              className="rounded-gx-md bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
+              className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
               onClick={doRollback}
               disabled={rollback.isPending}
             >

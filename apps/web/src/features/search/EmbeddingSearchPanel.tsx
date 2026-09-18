@@ -329,7 +329,7 @@ function ModeOption({ active, title, subtitle, onClick }: { active: boolean; tit
       type="button"
       onClick={onClick}
       className={[
-        "flex items-start gap-2.5 rounded-gx-md border p-3 text-left",
+        "flex items-start gap-2.5 rounded-gx-lg border p-3 text-left",
         active ? "border-gx-accent bg-gx-accent-bg" : "border-gx-separator hover:bg-gx-bg",
       ].join(" ")}
     >

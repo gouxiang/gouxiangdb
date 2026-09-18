@@ -193,7 +193,7 @@ export default function DocEditorPage() {
             type="button"
             onClick={() => void persist.saveNow()}
             disabled={persist.status === "saving"}
-            className="inline-flex h-8 items-center gap-1.5 rounded-gx-md bg-gx-accent px-3 text-gx-12 font-medium text-white hover:brightness-95 disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg bg-gx-accent px-3 text-gx-12 font-medium text-white hover:brightness-95 disabled:opacity-50"
           >
             <Icon name="save" size={14} />
             保存
@@ -202,7 +202,7 @@ export default function DocEditorPage() {
         <button
           type="button"
           onClick={() => setShowShare(true)}
-          className="inline-flex h-8 items-center gap-1.5 rounded-gx-md border border-gx-border bg-gx-surface px-3 text-gx-12 font-medium text-gx-text-secondary hover:bg-gx-bg"
+          className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg border border-gx-border bg-gx-surface px-3 text-gx-12 font-medium text-gx-text-secondary hover:bg-gx-bg"
         >
           <Icon name="share" size={14} />
           分享
@@ -210,7 +210,7 @@ export default function DocEditorPage() {
         <button
           type="button"
           onClick={() => setShowVersions(true)}
-          className="inline-flex h-8 items-center gap-1.5 rounded-gx-md border border-gx-border bg-gx-surface px-2.5 text-gx-12 text-gx-text-secondary hover:bg-gx-bg"
+          className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 text-gx-12 text-gx-text-secondary hover:bg-gx-bg"
         >
           <Icon name="history" size={14} />
           版本历史

@@ -120,7 +120,7 @@ function ConditionRow({
     : [];
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-gx-md border border-gx-separator p-2">
+    <div className="flex flex-col gap-1.5 rounded-gx-lg border border-gx-separator p-2">
       <div className="flex items-center gap-1.5">
         <FieldIcon type={field?.type ?? "field"} size={13} />
         <Select
@@ -145,7 +145,7 @@ function ConditionRow({
             <input
               value={cond.value}
               onChange={(e) => onChange({ ...cond, value: e.target.value })}
-              className="h-8 flex-1 rounded-gx-md border border-gx-border bg-gx-surface px-2 text-gx-13"
+              className="h-8 flex-1 rounded-gx-lg border border-gx-border bg-gx-surface px-2 text-gx-13"
               placeholder="值"
             />
           ))}

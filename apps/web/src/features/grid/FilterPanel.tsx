@@ -113,7 +113,7 @@ export function FilterPanel({ fields, value, filteredTotal, onChange }: FilterPa
       </div>
 
       {root.children.length === 0 ? (
-        <div className="rounded-gx-md border border-dashed border-gx-border py-6 text-center text-gx-12 text-gx-text-hint">
+        <div className="rounded-gx-lg border border-dashed border-gx-border py-6 text-center text-gx-12 text-gx-text-hint">
           暂无筛选条件
         </div>
       ) : (
@@ -160,7 +160,7 @@ function GroupEditor({
   onRemoveChild: (idx: number) => void;
 }) {
   return (
-    <div className={clsx("rounded-gx-md border border-gx-border p-2", depth > 0 && "bg-gx-bg")}>
+    <div className={clsx("rounded-gx-lg border border-gx-border p-2", depth > 0 && "bg-gx-bg")}>
       <div className="mb-2 flex items-center justify-between">
         <button
           type="button"

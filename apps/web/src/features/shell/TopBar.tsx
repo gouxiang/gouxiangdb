@@ -160,7 +160,7 @@ export function TopBar() {
               取消
             </button>
             <button
-              className="rounded-gx-md bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
+              className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
               disabled={!newName.trim()}
               onClick={createView}
             >
@@ -177,7 +177,7 @@ export function TopBar() {
                 type="button"
                 onClick={() => setNewType(t)}
                 className={[
-                  "flex items-center gap-1.5 rounded-gx-md border px-2 py-1 text-gx-12",
+                  "flex items-center gap-1.5 rounded-gx-lg border px-2 py-1 text-gx-12",
                   newType === t ? "border-gx-accent bg-gx-accent-bg text-gx-accent" : "border-gx-border text-gx-text-primary hover:bg-gx-bg",
                 ].join(" ")}
               >
@@ -214,7 +214,7 @@ export function TopBar() {
               取消
             </button>
             <button
-              className="rounded-gx-md bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
+              className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
               disabled={!importText.trim()}
               onClick={importCsv}
             >
@@ -238,7 +238,7 @@ export function TopBar() {
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
-            className="rounded-gx-md border border-gx-border px-3 py-2 text-gx-13 text-gx-text-primary hover:bg-gx-bg"
+            className="rounded-gx-lg border border-gx-border px-3 py-2 text-gx-13 text-gx-text-primary hover:bg-gx-bg"
           >
             选择 CSV 文件
           </button>
@@ -247,7 +247,7 @@ export function TopBar() {
             onChange={(e) => setImportText(e.target.value)}
             placeholder="或将 CSV 内容粘贴到这里"
             rows={6}
-            className="w-full rounded-gx-md border border-gx-border bg-gx-surface px-2.5 py-1.5 text-gx-13 text-gx-text-primary focus:border-gx-accent focus:outline-none"
+            className="w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 py-1.5 text-gx-13 text-gx-text-primary focus:border-gx-accent focus:outline-none"
           />
         </div>
       </Modal>

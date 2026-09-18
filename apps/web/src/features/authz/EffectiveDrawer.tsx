@@ -96,7 +96,7 @@ function ActionSources({
   sources: EffectiveSourceDTO[];
 }) {
   return (
-    <div className="rounded-gx-md border border-gx-separator px-2.5 py-2">
+    <div className="rounded-gx-lg border border-gx-separator px-2.5 py-2">
       <div className="mb-1 flex items-center gap-2">
         <span className="font-mono text-gx-12 text-gx-text-secondary">{action}</span>
         <span className="flex-1 text-gx-13 font-medium text-gx-text-primary">{label}</span>

@@ -83,7 +83,7 @@ export function NumberRuleEditor({ value, onChange, selfFields }: NumberRuleEdit
       {/* 段列表 */}
       <div className="flex flex-col gap-2">
         {segments.length === 0 && (
-          <p className="rounded-gx-md bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-hint">
+          <p className="rounded-gx-lg bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-hint">
             未配置编号规则时，编号按记录创建顺序自动生成（1、2、3…）。
           </p>
         )}
@@ -111,7 +111,7 @@ export function NumberRuleEditor({ value, onChange, selfFields }: NumberRuleEdit
       />
 
       {/* 预览 */}
-      <div className="rounded-gx-md bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
+      <div className="rounded-gx-lg bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
         预览：<span className="font-mono text-gx-13 font-medium text-gx-text-primary">{preview || "—"}</span>
       </div>
       <p className="text-gx-11 leading-relaxed text-gx-text-hint">
@@ -141,7 +141,7 @@ function SegmentRow({
   canDown: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-2 rounded-gx-md border border-gx-border bg-gx-surface p-2.5">
+    <div className="flex flex-col gap-2 rounded-gx-lg border border-gx-border bg-gx-surface p-2.5">
       <div className="flex items-center gap-1.5">
         <span className="rounded bg-gx-accent-bg px-1.5 py-0.5 text-gx-11 font-medium text-gx-accent">{SEG_TYPE_LABEL[seg.type]}</span>
         <div className="ml-auto flex items-center gap-0.5">

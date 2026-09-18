@@ -355,7 +355,7 @@ function MoveDeptModal({
         <select
           value={parentId}
           onChange={(e) => setParentId(e.target.value)}
-          className="h-8 w-full rounded-gx-md border border-gx-border bg-gx-surface px-2 text-gx-13 text-gx-text-primary"
+          className="h-8 w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2 text-gx-13 text-gx-text-primary"
         >
           <option value="">无上级（顶级部门）</option>
           {candidates.map((d) => (

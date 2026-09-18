@@ -72,7 +72,7 @@ export function MembersPanel({ baseId, canManageBase }: { baseId: string; canMan
   return (
     <div className="flex flex-col gap-6">
       {!canManageBase && (
-        <div className="rounded-gx-md border border-gx-border bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
+        <div className="rounded-gx-lg border border-gx-border bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
           你不是 Base 所有者，只能查看成员与权限，无法修改。
         </div>
       )}
@@ -155,7 +155,7 @@ export function MembersPanel({ baseId, canManageBase }: { baseId: string; canMan
           <button
             type="button"
             onClick={invite}
-            className="rounded-gx-md bg-gx-accent px-3 py-2 text-gx-13 font-medium text-white hover:brightness-95"
+            className="rounded-gx-lg bg-gx-accent px-3 py-2 text-gx-13 font-medium text-white hover:brightness-95"
           >
             邀请
           </button>

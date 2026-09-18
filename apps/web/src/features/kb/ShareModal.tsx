@@ -105,7 +105,7 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
               内部成员
               <span className="font-normal text-gx-text-hint">（知识库团队 · 共 {data?.internal?.memberCount ?? 0} 人）</span>
             </div>
-            <div className="rounded-gx-md border border-gx-separator bg-gx-bg p-1">
+            <div className="rounded-gx-lg border border-gx-separator bg-gx-bg p-1">
               <RoleOption
                 active={internalRole === "viewer"}
                 title="仅可见"
@@ -136,7 +136,7 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
 
             {enabled ? (
               <div className="space-y-3">
-                <div className="flex items-center gap-2 rounded-gx-md border border-gx-separator bg-gx-bg px-2.5 py-2">
+                <div className="flex items-center gap-2 rounded-gx-lg border border-gx-separator bg-gx-bg px-2.5 py-2">
                   <Icon name="link" size={14} className="shrink-0 text-gx-text-tertiary" />
                   <input
                     readOnly
@@ -152,7 +152,7 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
 
                 <div>
                   <div className="mb-1.5 text-gx-12 text-gx-text-secondary">持链者权限</div>
-                  <div className="rounded-gx-md border border-gx-separator bg-gx-bg p-1">
+                  <div className="rounded-gx-lg border border-gx-separator bg-gx-bg p-1">
                     <RoleOption
                       active={linkRole === "viewer"}
                       title="仅可见"
@@ -171,7 +171,7 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
                 </div>
 
                 {kind === "doc" && (
-                  <label className={`flex items-start gap-2.5 rounded-gx-md border border-gx-separator p-2.5 ${canManage ? "cursor-pointer hover:bg-gx-bg" : "opacity-60"}`}>
+                  <label className={`flex items-start gap-2.5 rounded-gx-lg border border-gx-separator p-2.5 ${canManage ? "cursor-pointer hover:bg-gx-bg" : "opacity-60"}`}>
                     <input
                       type="checkbox"
                       className="mt-0.5 h-4 w-4 accent-[var(--gx-accent)]"
@@ -188,7 +188,7 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
                 )}
               </div>
             ) : (
-              <div className="rounded-gx-md border border-dashed border-gx-border bg-gx-bg px-3 py-3 text-gx-12 text-gx-text-hint">
+              <div className="rounded-gx-lg border border-dashed border-gx-border bg-gx-bg px-3 py-3 text-gx-12 text-gx-text-hint">
                 开启后，任何人通过链接即可访问（无需登录）。关闭后原链接立即失效。
               </div>
             )}

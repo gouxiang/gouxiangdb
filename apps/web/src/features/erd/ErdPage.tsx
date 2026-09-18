@@ -177,7 +177,7 @@ export default function ErdPage() {
             <button
               type="button"
               onClick={() => navigate(`/base/${baseId}/table/${n.id}`)}
-              className="group flex h-full w-full flex-col items-start gap-1 rounded-gx-md border border-gx-border bg-gx-surface p-2 text-left shadow-sm transition hover:border-gx-accent hover:shadow"
+              className="group flex h-full w-full flex-col items-start gap-1 rounded-gx-lg border border-gx-border bg-gx-surface p-2 text-left shadow-sm transition hover:border-gx-accent hover:shadow"
             >
               <div className="flex w-full items-center gap-1.5">
                 <Icon name="table" size={14} className="text-gx-accent" />

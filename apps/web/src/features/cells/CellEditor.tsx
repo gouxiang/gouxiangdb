@@ -353,7 +353,7 @@ function DateEditor({ value, field, onCommit, onCancel }: CellEditorProps) {
       ref={ref}
       type={field.type === "date" ? "date" : "datetime-local"}
       value={draft}
-      className="h-8 w-full rounded-gx-md border border-gx-accent bg-gx-surface px-2 text-gx-13 text-gx-text-primary focus:outline-none"
+      className="h-8 w-full rounded-gx-lg border border-gx-accent bg-gx-surface px-2 text-gx-13 text-gx-text-primary focus:outline-none"
       onChange={(e) => setDraft(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
@@ -519,7 +519,7 @@ function LinksEditor({ value, field, recordFields, onCommit, onCancel }: CellEdi
             </select>
             <Input placeholder="值" value={filterValue} onChange={(e) => setFilterValue(e.target.value)} className="w-24" />
             {filterFieldId && (
-              <button type="button" onClick={() => { setFilterFieldId(null); setFilterValue(""); }} className="px-1 text-gx-text-tertiary hover:text-gx-danger">×</button>
+              <button type="button" onClick={() => { setFilterFieldId(null); setFilterValue(""); }} aria-label="清除筛选" title="清除筛选" className="px-1 text-gx-text-tertiary hover:text-gx-danger"><Icon name="close" size={12} /></button>
             )}
           </div>
         </div>
@@ -529,7 +529,7 @@ function LinksEditor({ value, field, recordFields, onCommit, onCancel }: CellEdi
           {selected.map(([id, ref]) => (
             <span key={id} className="inline-flex items-center gap-1 rounded-gx-sm bg-gx-accent-bg px-2 py-0.5 text-gx-11 text-gx-accent">
               {ref.title}
-              <button type="button" onClick={() => removeSelected(id)} className="hover:text-gx-danger">×</button>
+              <button type="button" onClick={() => removeSelected(id)} aria-label={`移除 ${ref.title}`} title={`移除 ${ref.title}`} className="hover:text-gx-danger"><Icon name="close" size={11} /></button>
             </span>
           ))}
         </div>
@@ -641,7 +641,7 @@ function AttachmentEditor({ value, onCommit, onCancel }: CellEditorProps) {
   };
 
   return (
-    <div className="absolute inset-0 z-30 m-1 rounded-gx-md border border-gx-accent bg-gx-surface p-2 shadow-lg">
+    <div className="absolute inset-0 z-30 m-1 rounded-gx-lg border border-gx-accent bg-gx-surface p-2 shadow-lg">
       <div className="mb-1 flex items-center justify-between">
         <span className="text-gx-12 font-medium text-gx-text-secondary">附件</span>
         <button type="button" className="text-gx-12 text-gx-text-hint hover:text-gx-danger" onClick={onCancel}>
@@ -662,7 +662,7 @@ function AttachmentEditor({ value, onCommit, onCancel }: CellEditorProps) {
       </div>
       <button
         type="button"
-        className="mt-2 w-full rounded-gx-md border border-dashed border-gx-border py-1.5 text-gx-12 text-gx-accent hover:bg-gx-bg"
+        className="mt-2 w-full rounded-gx-lg border border-dashed border-gx-border py-1.5 text-gx-12 text-gx-accent hover:bg-gx-bg"
         onClick={() => inputRef.current?.click()}
       >
         添加文件

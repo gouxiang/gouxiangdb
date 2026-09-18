@@ -148,7 +148,7 @@ export function DocOutline({ rootRef, hidden }: { rootRef: RefObject<HTMLElement
               key={i}
               type="button"
               onClick={() => jump(h)}
-              className={`group relative flex w-full items-center rounded-gx-md py-1 pr-2 text-left text-gx-12 leading-snug transition-colors duration-150 ${
+              className={`group relative flex w-full items-center rounded-gx-lg py-1 pr-2 text-left text-gx-12 leading-snug transition-colors duration-150 ${
                 active
                   ? "bg-gx-accent-bg font-medium text-gx-accent"
                   : "text-gx-text-tertiary hover:bg-gx-bg hover:text-gx-text-primary"

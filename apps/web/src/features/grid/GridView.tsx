@@ -17,7 +17,9 @@ import { ROW_HEIGHT_PX } from "@gx/shared-types";
 import { useFields, useTables, useGXMutations } from "../../api/hooks";
 import { useRecordsInfinite } from "../../api/records-paging-hooks";
 import { isComputedInMem } from "../../api/records-paging";
-import { Spinner, EmptyState, IconButton, Modal, Select, Input, Button, toast, COLOR_PALETTE } from "../../components/ui";
+import { EmptyState, IconButton, Modal, Select, Input, Button, toast, COLOR_PALETTE } from "../../components/ui";
+import { SkeletonTable } from "../../components/states";
+import { confirmIrreversible } from "../../components/feedback";
 import { ResultNotice, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
 import { GridToolbar } from "./GridToolbar";
 import { ViewSwitcher } from "./ViewSwitcher";
@@ -333,21 +335,44 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
     void m.createRecord
       .mutateAsync({ tableId, fields: {}, viewId, draft: true })
       .catch((e: unknown) => toast((e as Error)?.message || "新建记录失败", "error"));
+  // R-D-22 批量删除进回收站（可恢复）→ toast 必须带「撤销」，窗口 6s
   const onBulkDelete = () => {
     const ids = Array.from(selection.selectedIds);
     if (ids.length === 0) return;
     void m.bulkDeleteRecords.mutateAsync({ ids, tableId, viewId }).then(() => {
       selection.clear();
-      toast(`已删除 ${ids.length} 行`, "success");
+      toast(`已删除 ${ids.length} 行`, {
+        kind: "success",
+        action: {
+          label: "撤销",
+          onClick: () => {
+            void Promise.all(
+              ids.map((id) => m.restoreTrash.mutateAsync({ id, kind: "record", baseId })),
+            )
+              .then(() => toast(`已恢复 ${ids.length} 行`, "success"))
+              .catch((e: unknown) => toast((e as Error)?.message ?? "撤销失败", "error"));
+          },
+        },
+      });
     });
   };
   const onClearSelection = () => selection.clear();
   const onExport = () => exportCsv(visibleFields, records);
   const onImport = () => importRef.current?.click();
   const onCopyView = () => void m.duplicateView.mutateAsync({ viewId, tableId });
+  // R-D-23 L4（不可恢复）+ R-D-24（主按钮用具体动词，不用「确定」）
   const onClearTable = () => {
-    if (!confirm("确定清空表中所有记录？此操作不可撤销。")) return;
-    void m.clearTable.mutateAsync({ tableId, viewId });
+    void confirmIrreversible({
+      title: "清空表中所有记录",
+      confirmText: "清空记录",
+      description: "表中全部记录会被立即清除，不进回收站、不可撤销。",
+    }).then((ok) => {
+      if (!ok) return;
+      void m.clearTable
+        .mutateAsync({ tableId, viewId })
+        .then(() => toast("已清空表中所有记录", "success"))
+        .catch((e: unknown) => toast((e as Error)?.message ?? "清空失败", "error"));
+    });
   };
   const onImportFile = async (file: File | undefined) => {
     if (!file) return;
@@ -518,12 +543,28 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
       )}
 
       {isLoading ? (
-        <div className="flex flex-1 items-center justify-center">
-          <Spinner size={24} />
+        // R-D-15 / R-D-25 / R-D-26：首屏加载用与表格同构的骨架屏（3–8 行），不用全屏遮罩。
+        // 局部刷新（翻页 / 筛选）按 R-D-27 保留旧内容，不走这里。
+        <div className="flex-1 overflow-hidden">
+          <SkeletonTable rows={6} cols={Math.min(Math.max(visibleFields.length, 3), 6)} />
         </div>
       ) : records.length === 0 ? (
         <div className="flex flex-1 items-center justify-center">
-          <EmptyState icon="table" title="暂无记录" description="点击「新建记录」开始添加数据。" />
+          {/* R-D-13 首次空态必须有行动入口；只读角色隐藏写入口（R-N-16） */}
+          <EmptyState
+            icon="table"
+            title="暂无记录"
+            description={
+              permissions.canEditData ? "点击「新建记录」开始添加数据。" : "这张表还没有数据。"
+            }
+            action={
+              permissions.canEditData ? (
+                <Button variant="primary" size="sm" icon="plus" onClick={onNewRecord}>
+                  新建记录
+                </Button>
+              ) : undefined
+            }
+          />
         </div>
       ) : (
         <div

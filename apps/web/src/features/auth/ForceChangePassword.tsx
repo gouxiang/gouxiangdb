@@ -92,7 +92,7 @@ export default function ForceChangePassword() {
         </div>
 
         {/* 为什么必须改 */}
-        <div className="mb-4 rounded-gx-md bg-gx-warning-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
+        <div className="mb-4 rounded-gx-lg bg-gx-warning-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
           <div className="mb-1 font-medium text-gx-text-primary">请先修改初始密码</div>
           <div>
             当前使用的是系统生成的初始密码，出于安全需要必须先修改，修改完成后才能使用其它功能。

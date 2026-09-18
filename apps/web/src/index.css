@@ -45,6 +45,35 @@
   }
 }
 
+/* ============ R-D-25 骨架屏微光动画 ============ */
+/* 底色由 Tailwind bg-gx-row-hover(#F1F5FB) 给出，这里只叠一层 1.2s 横向微光。
+   只写 #fff / rgba(255,255,255,…)——不引入规范外的新色值。 */
+@keyframes gx-skeleton-sheen {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+.gx-skeleton {
+  position: relative;
+  overflow: hidden;
+}
+.gx-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.65) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: gx-skeleton-sheen 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gx-skeleton::after {
+    animation: none;
+  }
+}
+
 @keyframes kb-pcdialog-in {
   from { opacity: 0; transform: scale(0.96) translateY(8px); }
   to { opacity: 1; transform: scale(1) translateY(0); }

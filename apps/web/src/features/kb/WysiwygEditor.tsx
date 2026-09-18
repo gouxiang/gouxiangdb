@@ -2383,7 +2383,7 @@ export function WysiwygEditor({
               if (href.startsWith("/kb") || href.startsWith("/base")) {
                 void resolveLink(href).then((res) => {
                   if (!res.ok) {
-                    // 视觉降级：保留文本（不删除），加 CSS 类变灰+删除线/🔒，鼠标悬浮保持原标题
+                    // 视觉降级：保留文本（不删除），加 CSS 类变灰+删除线/锁图标，鼠标悬浮保持原标题
                     anchor.classList.remove("md-link-broken", "md-link-forbidden");
                     anchor.classList.add(res.kind === "forbidden" ? "md-link-forbidden" : "md-link-broken");
                     if (res.toast) toast(res.toast, "error");

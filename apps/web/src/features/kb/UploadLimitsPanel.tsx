@@ -72,14 +72,14 @@ export function UploadLimitsPanel() {
           <button
             type="button"
             onClick={restoreDefaults}
-            className="rounded-gx-md px-2.5 py-1 text-gx-12 text-gx-text-tertiary hover:bg-gx-bg"
+            className="rounded-gx-lg px-2.5 py-1 text-gx-12 text-gx-text-tertiary hover:bg-gx-bg"
           >
             恢复默认
           </button>
           <button
             type="button"
             onClick={save}
-            className="inline-flex h-7 items-center gap-1 rounded-gx-md bg-gx-accent px-3 text-gx-12 font-medium text-white hover:brightness-95"
+            className="inline-flex h-7 items-center gap-1 rounded-gx-lg bg-gx-accent px-3 text-gx-12 font-medium text-white hover:brightness-95"
           >
             <Icon name="check" size={13} />
             保存{savedTick ? "（已保存）" : ""}

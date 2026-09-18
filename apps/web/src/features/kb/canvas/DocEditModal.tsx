@@ -109,7 +109,7 @@ export function DocEditModal({
             type="button"
             onClick={save}
             disabled={saveDisabled}
-            className="inline-flex h-8 items-center gap-1.5 rounded-gx-md bg-gx-accent px-3 text-gx-12 font-medium text-white hover:brightness-95 disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg bg-gx-accent px-3 text-gx-12 font-medium text-white hover:brightness-95 disabled:opacity-50"
           >
             <Icon name="save" size={14} />
             {saving ? "保存中…" : "保存"}
@@ -118,7 +118,7 @@ export function DocEditModal({
             type="button"
             onClick={requestClose}
             disabled={saving}
-            className="inline-flex h-8 items-center rounded-gx-md border border-gx-border bg-gx-surface px-3 text-gx-12 text-gx-text-secondary hover:bg-gx-bg disabled:opacity-50"
+            className="inline-flex h-8 items-center rounded-gx-lg border border-gx-border bg-gx-surface px-3 text-gx-12 text-gx-text-secondary hover:bg-gx-bg disabled:opacity-50"
           >
             关闭
           </button>

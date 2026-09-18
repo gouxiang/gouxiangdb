@@ -256,7 +256,7 @@ export function FieldSettingsPanel({
           <div className="mt-0.5 truncate text-gx-11 text-gx-text-secondary">纯视觉容器 · 无字段值</div>
         </div>
         <div className="flex-1 overflow-y-auto px-4 py-4">
-          <div className="flex flex-col gap-2 rounded-gx-md bg-gx-bg px-3 py-2.5 text-gx-12 text-gx-text-secondary">
+          <div className="flex flex-col gap-2 rounded-gx-lg bg-gx-bg px-3 py-2.5 text-gx-12 text-gx-text-secondary">
             <div className="font-medium text-gx-text-primary">选项卡分组</div>
             <p className="leading-relaxed text-gx-11 text-gx-text-hint">
               这是一个纯视觉容器（类似分组），本身不存数据、不需要字段名，也不能被关联、公式、查阅或聚合引用。
@@ -438,12 +438,12 @@ export function FieldSettingsPanel({
                   <button
                     type="button"
                     onClick={() => setFormulaModalOpen(true)}
-                    className="flex w-full items-center justify-center gap-1.5 rounded-gx-md bg-gx-bg px-3 py-2.5 text-gx-14 font-medium text-gx-accent transition-colors hover:bg-gx-accent-bg"
+                    className="flex w-full items-center justify-center gap-1.5 rounded-gx-lg bg-gx-bg px-3 py-2.5 text-gx-14 font-medium text-gx-accent transition-colors hover:bg-gx-accent-bg"
                   >
                     <Icon name="formula" size={14} />
                     {formula.trim() ? "编辑公式" : "设置公式"}
                   </button>
-                  <div className="mt-1.5 rounded-gx-md bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
+                  <div className="mt-1.5 rounded-gx-lg bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
                     {formula.trim() ? (
                       <code className="break-all font-mono">{formula}</code>
                     ) : (

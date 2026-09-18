@@ -107,7 +107,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
         i + offset === active ? "bg-gx-accent-bg" : "hover:bg-gx-bg",
       ].join(" ")}
     >
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-gx-md bg-gx-bg text-gx-text-secondary">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-gx-lg bg-gx-bg text-gx-text-secondary">
         <Icon name={h.type === "canvas" ? "canvas" : "doc"} size={15} />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -139,7 +139,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
         i + offset === active ? "bg-gx-accent-bg" : "hover:bg-gx-bg",
       ].join(" ")}
     >
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-gx-md bg-gx-bg text-gx-text-secondary">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-gx-lg bg-gx-bg text-gx-text-secondary">
         <Icon name="rowHeight" size={15} />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">

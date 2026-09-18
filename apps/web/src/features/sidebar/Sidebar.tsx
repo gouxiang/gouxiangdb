@@ -118,7 +118,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         <button
           type="button"
           onClick={onOpenSearch}
-          className="flex w-full items-center gap-2 rounded-gx-md border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 text-gx-text-tertiary hover:bg-gx-bg"
+          className="flex w-full items-center gap-2 rounded-gx-lg border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 text-gx-text-tertiary hover:bg-gx-bg"
         >
           <Icon name="search" size={14} />
           <span className="flex-1 text-left">搜索</span>
@@ -298,7 +298,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
               取消
             </button>
             <button
-              className="rounded-gx-md bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
+              className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
               onClick={renameTable}
             >
               保存

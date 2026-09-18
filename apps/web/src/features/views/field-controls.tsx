@@ -246,7 +246,7 @@ export function FieldInput({
     );
   }
 
-  const common = "w-full rounded-gx-md border border-gx-border bg-gx-surface px-2 py-1 text-gx-13 text-gx-text-primary focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent-bg disabled:opacity-50";
+  const common = "w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2 py-1 text-gx-13 text-gx-text-primary focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent-bg disabled:opacity-50";
 
   switch (field.type) {
     case "longText":
@@ -323,7 +323,7 @@ export function FieldInput({
         else onChange([...current, name]);
       };
       return (
-        <div className="flex flex-wrap gap-1 rounded-gx-md border border-gx-border bg-gx-surface p-2">
+        <div className="flex flex-wrap gap-1 rounded-gx-lg border border-gx-border bg-gx-surface p-2">
           {opts.length === 0 && <span className="text-gx-12 text-gx-text-hint">无选项</span>}
           {opts.map((o) => (
             <button

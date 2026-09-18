@@ -126,7 +126,7 @@ export function DocPolicyView({ node }: { node: NavNodeDTO }) {
           return (
             <div
               key={r.subjectId}
-              className="flex items-center gap-2 rounded-gx-md border border-gx-separator px-2.5 py-1.5"
+              className="flex items-center gap-2 rounded-gx-lg border border-gx-separator px-2.5 py-1.5"
             >
               <Icon name="keyRound" size={13} className="shrink-0 text-gx-text-hint" />
               <span className="min-w-0 flex-1 truncate text-gx-13 text-gx-text-primary">
@@ -159,7 +159,7 @@ export function DocPolicyView({ node }: { node: NavNodeDTO }) {
           );
         })}
         {otherRows.map((r) => (
-          <div key={`${r.subjectType}:${r.subjectId}`} className="flex items-center gap-2 rounded-gx-md bg-gx-row-hover px-2.5 py-1.5">
+          <div key={`${r.subjectType}:${r.subjectId}`} className="flex items-center gap-2 rounded-gx-lg bg-gx-row-hover px-2.5 py-1.5">
             <Icon name="shield" size={13} className="shrink-0 text-gx-text-hint" />
             <span className="min-w-0 flex-1 truncate text-gx-12 text-gx-text-secondary">
               {r.subjectType === "dept" ? "部门" : "角色"} {r.original?.subjectName ?? r.subjectId}
@@ -169,7 +169,7 @@ export function DocPolicyView({ node }: { node: NavNodeDTO }) {
           </div>
         ))}
         {userRows.length === 0 && otherRows.length === 0 && (
-          <div className="rounded-gx-md border border-dashed border-gx-separator px-3 py-6 text-center text-gx-12 text-gx-text-hint">
+          <div className="rounded-gx-lg border border-dashed border-gx-separator px-3 py-6 text-center text-gx-12 text-gx-text-hint">
             暂无独立授权成员
           </div>
         )}

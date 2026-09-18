@@ -89,7 +89,7 @@ export function DocAccessError({
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex h-8 items-center gap-1.5 rounded-gx-md border border-gx-border bg-gx-surface px-3 text-gx-12 text-gx-text-secondary hover:bg-gx-bg"
+          className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg border border-gx-border bg-gx-surface px-3 text-gx-12 text-gx-text-secondary hover:bg-gx-bg"
         >
           <Icon name="chevronLeft" size={14} />
           返回
@@ -98,7 +98,7 @@ export function DocAccessError({
           <button
             type="button"
             onClick={onRetry}
-            className="inline-flex h-8 items-center gap-1.5 rounded-gx-md bg-gx-accent px-3 text-gx-12 font-medium text-white hover:brightness-95"
+            className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg bg-gx-accent px-3 text-gx-12 font-medium text-white hover:brightness-95"
           >
             <Icon name="refresh" size={14} />
             重试

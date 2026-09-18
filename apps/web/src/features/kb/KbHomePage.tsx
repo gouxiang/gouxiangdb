@@ -114,7 +114,7 @@ export default function KbHomePage() {
               type="button"
               disabled={!canCreate}
               onClick={() => create("doc")}
-              className="inline-flex h-8 items-center gap-1.5 rounded-gx-md border border-gx-border bg-gx-surface px-3 text-gx-13 text-gx-text-primary hover:bg-gx-bg disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg border border-gx-border bg-gx-surface px-3 text-gx-13 text-gx-text-primary hover:bg-gx-bg disabled:opacity-40"
             >
               <Icon name="doc" size={15} className="text-gx-accent" />
               新建文档
@@ -123,7 +123,7 @@ export default function KbHomePage() {
               type="button"
               disabled={!canCreate}
               onClick={() => create("canvas")}
-              className="inline-flex h-8 items-center gap-1.5 rounded-gx-md bg-gx-accent px-3 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg bg-gx-accent px-3 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-40"
             >
               <Icon name="canvas" size={15} />
               新建画布
@@ -221,7 +221,7 @@ export default function KbHomePage() {
               取消
             </button>
             <button
-              className="rounded-gx-md bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
+              className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
               disabled={!renameVal.trim()}
               onClick={submitRename}
             >
@@ -244,7 +244,7 @@ export default function KbHomePage() {
               取消
             </button>
             <button
-              className="rounded-gx-md bg-gx-danger px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
+              className="rounded-gx-lg bg-gx-danger px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
               onClick={doDelete}
             >
               移入回收站

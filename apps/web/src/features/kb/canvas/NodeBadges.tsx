@@ -104,7 +104,7 @@ export function NodeBadges({
 
             {hover && !editing && (
               <div
-                className="absolute right-0 top-6 w-60 rounded-gx-md border border-gx-separator bg-gx-surface p-2.5 shadow-xl"
+                className="absolute right-0 top-6 w-60 rounded-gx-lg border border-gx-separator bg-gx-surface p-2.5 shadow-xl"
                 onMouseEnter={enter}
                 onMouseLeave={leave}
               >
@@ -174,7 +174,7 @@ function NoteInlineEditor({
   }, []);
   return (
     <div
-      className="absolute right-0 top-6 w-64 rounded-gx-md border border-gx-separator bg-gx-surface p-2 shadow-xl"
+      className="absolute right-0 top-6 w-64 rounded-gx-lg border border-gx-separator bg-gx-surface p-2 shadow-xl"
       onPointerDown={(e) => e.stopPropagation()}
     >
       <textarea

@@ -71,7 +71,7 @@ function ToolButton({
       type="button"
       onClick={onClick}
       className={clsx(
-        "inline-flex h-8 items-center gap-1.5 rounded-gx-md px-2.5 text-gx-13 transition-colors",
+        "inline-flex h-8 items-center gap-1.5 rounded-gx-lg px-2.5 text-gx-13 transition-colors",
         active ? "bg-gx-accent-bg text-gx-accent" : "text-gx-text-secondary hover:bg-gx-bg",
       )}
     >

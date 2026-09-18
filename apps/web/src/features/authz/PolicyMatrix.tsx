@@ -39,7 +39,7 @@ export function PolicyMatrixRow({
   const isLegacy = !!row.original?.reason && row.original.reason.startsWith("legacy:");
 
   return (
-    <div className="flex flex-col gap-1 rounded-gx-md border border-gx-separator bg-gx-surface px-2.5 py-2">
+    <div className="flex flex-col gap-1 rounded-gx-lg border border-gx-separator bg-gx-surface px-2.5 py-2">
       <div className="flex items-center gap-2">
         <Icon name={row.subjectType === "user" ? "building" : "shield"} size={13} className="shrink-0 text-gx-text-hint" />
         <span className="min-w-0 flex-1 truncate text-gx-13 text-gx-text-primary" title={name}>
@@ -120,7 +120,7 @@ export function AncestorSummary({
   actions: string[];
 }) {
   return (
-    <div className="flex items-center gap-2 rounded-gx-md bg-gx-row-hover px-2.5 py-1.5">
+    <div className="flex items-center gap-2 rounded-gx-lg bg-gx-row-hover px-2.5 py-1.5">
       <Icon name="inherit" size={13} className="shrink-0 text-gx-text-hint" />
       <span className="min-w-0 flex-1 truncate text-gx-12 text-gx-text-secondary">
         <span className="text-gx-text-primary">{subjectDisplay(subjectName)}</span>

@@ -79,6 +79,8 @@ export const gxTailwindConfig: Partial<Config> = {
         "gx-12": [`${fontSize.x12}px`, { lineHeight: "1.5" }],
         "gx-13": [`${fontSize.x13}px`, { lineHeight: "1.5" }],
         "gx-14": [`${fontSize.x14}px`, { lineHeight: "1.5" }],
+        // R-D-02 / A.2：九档字号含 15，行高按「11–16 → 1.5」绑定
+        "gx-15": [`${fontSize.x15}px`, { lineHeight: "1.5" }],
         "gx-16": [`${fontSize.x16}px`, { lineHeight: "1.5" }],
         "gx-18": [`${fontSize.x18}px`, { lineHeight: "1.4" }],
         "gx-20": [`${fontSize.x20}px`, { lineHeight: "1.4" }],

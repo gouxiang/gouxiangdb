@@ -87,7 +87,7 @@ export function LibrarySwitcher({ active }: { active: ActiveLibrary }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 rounded-gx-md px-2 py-1.5 text-left hover:bg-gx-row-hover"
+        className="flex w-full items-center gap-2 rounded-gx-lg px-2 py-1.5 text-left hover:bg-gx-row-hover"
       >
         <span
           className="h-4 w-4 shrink-0 rounded-full"
@@ -168,7 +168,7 @@ export function LibrarySwitcher({ active }: { active: ActiveLibrary }) {
               取消
             </button>
             <button
-              className="rounded-gx-md bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
+              className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
               disabled={!newName.trim() || creating}
               onClick={create}
             >
@@ -197,7 +197,7 @@ export function LibrarySwitcher({ active }: { active: ActiveLibrary }) {
                   type="button"
                   onClick={() => setNewType(opt.t)}
                   className={[
-                    "flex flex-col items-start gap-1 rounded-gx-md border p-3 text-left transition-colors",
+                    "flex flex-col items-start gap-1 rounded-gx-lg border p-3 text-left transition-colors",
                     newType === opt.t
                       ? "border-gx-accent bg-gx-accent-bg"
                       : "border-gx-border bg-gx-surface hover:bg-gx-bg",

@@ -75,14 +75,14 @@ export function DeleteMenuModal({
               <p className="text-gx-13 text-gx-text-secondary">
                 容器「{target.item.label ?? "未命名分组"}」内有 {target.childCount} 个菜单项。删除容器时：
               </p>
-              <label className="flex cursor-pointer items-start gap-2 rounded-gx-md border border-gx-separator p-3">
+              <label className="flex cursor-pointer items-start gap-2 rounded-gx-lg border border-gx-separator p-3">
                 <input type="radio" checked={mode === "cascade"} onChange={() => setMode("cascade")} className="mt-0.5" />
                 <span>
                   <span className="block text-gx-13 text-gx-text-primary">一并删除容器内全部菜单项</span>
                   <span className="mt-0.5 block text-gx-12 text-gx-text-hint">仅删菜单引用，实体不受影响</span>
                 </span>
               </label>
-              <label className="flex cursor-pointer items-start gap-2 rounded-gx-md border border-gx-separator p-3">
+              <label className="flex cursor-pointer items-start gap-2 rounded-gx-lg border border-gx-separator p-3">
                 <input type="radio" checked={mode === "move"} onChange={() => setMode("move")} className="mt-0.5" />
                 <span className="flex-1">
                   <span className="block text-gx-13 text-gx-text-primary">把子项移到其他容器后删除</span>

@@ -186,7 +186,7 @@ export function DefaultValueEditor({
                 /* 子表格整表抓取：不选单值字段，只选数据源表 + 结构兼容提示 */
                 <div
                   className={
-                    "rounded-gx-md px-3 py-2 text-gx-12 leading-relaxed " +
+                    "rounded-gx-lg px-3 py-2 text-gx-12 leading-relaxed " +
                     (subtableCompat && !subtableCompat.ok ? "bg-gx-danger-bg text-gx-danger" : "bg-gx-bg text-gx-text-secondary")
                   }
                 >
@@ -233,7 +233,7 @@ export function DefaultValueEditor({
           {value.formula.trim() ? (
             <>
               <SoftActionButton icon="formula" label="编辑公式计算" onClick={() => setFormulaOpen(true)} />
-              <div className="rounded-gx-md bg-gx-bg px-3 py-2">
+              <div className="rounded-gx-lg bg-gx-bg px-3 py-2">
                 <code className="break-all font-mono text-gx-12 text-gx-text-secondary">{value.formula}</code>
               </div>
             </>

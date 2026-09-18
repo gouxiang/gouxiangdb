@@ -13,6 +13,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useViews, useGXMutations } from "../../api/hooks";
 import { VIEW_TYPES, VIEW_TYPE_LABEL, type ViewType } from "@gx/shared-types";
 import { Icon, VIEW_ICON } from "../../components/icons";
+import { confirmIrreversible } from "../../components/feedback";
 import {
   Button,
   Input,
@@ -108,7 +109,13 @@ export function ViewSwitcher({ baseId, tableId, viewId, canManageSchema }: ViewS
 
   async function removeCurrent() {
     if (onlyOne || busy) return;
-    if (!window.confirm(`确定删除视图「${current?.name ?? ""}」？此操作不可撤销。`)) return;
+    // R-D-23 L4（不可恢复）+ R-D-24 主按钮必须是具体动词，不用「确定 / 是」
+    const ok = await confirmIrreversible({
+      title: "删除视图",
+      confirmText: "删除视图",
+      description: `视图「${current?.name ?? ""}」会被删除，此操作不可撤销。至少要保留一个视图。`,
+    });
+    if (!ok) return;
     setOpen(false);
     setBusy(true);
     try {
@@ -135,7 +142,7 @@ export function ViewSwitcher({ baseId, tableId, viewId, canManageSchema }: ViewS
         }}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="inline-flex h-8 max-w-[220px] items-center gap-1 rounded-gx-md px-2 text-gx-13 font-semibold text-gx-text-primary hover:bg-gx-bg"
+        className="inline-flex h-8 max-w-[220px] items-center gap-1 rounded-gx-lg px-2 text-gx-13 font-semibold text-gx-text-primary hover:bg-gx-bg"
       >
         <Icon name={VIEW_ICON[current?.type ?? "grid"] ?? "grid"} size={15} />
         <span className="truncate">{current?.name ?? "视图"}</span>
@@ -227,7 +234,7 @@ export function ViewSwitcher({ baseId, tableId, viewId, canManageSchema }: ViewS
                     type="button"
                     onClick={() => setType(t)}
                     className={[
-                      "flex items-center gap-1.5 rounded-gx-md border px-2 py-1 text-gx-12",
+                      "flex items-center gap-1.5 rounded-gx-lg border px-2 py-1 text-gx-12",
                       type === t
                         ? "border-gx-accent bg-gx-accent-bg text-gx-accent"
                         : "border-gx-border text-gx-text-primary hover:bg-gx-bg",

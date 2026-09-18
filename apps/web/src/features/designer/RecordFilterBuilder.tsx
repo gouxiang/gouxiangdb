@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { FieldDTO, FilterNode, FilterOp, FilterCondition } from "@gx/shared-types";
 import { operatorsForFieldType, FILTER_OP_LABEL, operatorNeedsValue } from "@gx/shared-types";
 import { Input, Select, Button } from "../../components/ui";
+import { Icon } from "../../components/icons";
 
 export interface RecordFilterBuilderProps {
   value: FilterNode | null;
@@ -92,7 +93,8 @@ export function RecordFilterBuilder({ value, peerFields, onChange }: RecordFilte
               className="flex-shrink-0 px-1 text-gx-text-hint hover:text-gx-danger"
               title="删除条件"
             >
-              ✕
+              {/* 统一用 icons.tsx 的 close 图标，不用字符符号当功能图标 */}
+              <Icon name="close" size={13} />
             </button>
           </div>
         );

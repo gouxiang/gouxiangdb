@@ -308,7 +308,7 @@ function SubjectPicker({
         </>
       }
     >
-      <div className="mb-2 inline-flex rounded-gx-md border border-gx-border bg-gx-surface p-0.5">
+      <div className="mb-2 inline-flex rounded-gx-lg border border-gx-border bg-gx-surface p-0.5">
         {([["user", "选成员"], ["dept", "选部门节点"]] as const).map(([v, label]) => (
           <button
             key={v}
@@ -324,7 +324,7 @@ function SubjectPicker({
       {tab === "user" ? (
         <div className="flex flex-col gap-2">
           <Input placeholder="搜索成员姓名/邮箱…" value={q} onChange={(e) => setQ(e.target.value)} />
-          <div className="max-h-72 overflow-y-auto rounded-gx-md border border-gx-separator">
+          <div className="max-h-72 overflow-y-auto rounded-gx-lg border border-gx-separator">
             {filtered.map((u) => (
               <label key={u.id} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gx-bg">
                 <Checkbox checked={draft.has(`user:${u.id}`)} onChange={() => onToggle("user", u.id)} />
@@ -336,7 +336,7 @@ function SubjectPicker({
           </div>
         </div>
       ) : (
-        <div className="max-h-80 overflow-y-auto rounded-gx-md border border-gx-separator">
+        <div className="max-h-80 overflow-y-auto rounded-gx-lg border border-gx-separator">
           {deptRows.map(({ dept, depth }) => (
             <label key={dept.id} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gx-bg" style={{ paddingLeft: 8 + depth * 16 }}>
               <Checkbox checked={draft.has(`dept:${dept.id}`)} onChange={() => onToggle("dept", dept.id)} />

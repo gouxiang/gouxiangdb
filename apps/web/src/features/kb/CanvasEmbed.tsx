@@ -61,7 +61,7 @@ export function CanvasEmbed({ docId, kbId, canEdit, publicToken, onNavigate }: C
 
   if (isLoading) {
     return (
-      <div className="flex h-48 items-center justify-center rounded-gx-md border border-gx-separator bg-gx-bg">
+      <div className="flex h-48 items-center justify-center rounded-gx-lg border border-gx-separator bg-gx-bg">
         <Spinner size={18} />
       </div>
     );
@@ -70,7 +70,7 @@ export function CanvasEmbed({ docId, kbId, canEdit, publicToken, onNavigate }: C
   // 无权限 / 已删除 / 不在分享子树内：渲染为受限占位
   if (error || !doc) {
     return (
-      <div className="mb-3 flex items-center gap-2 rounded-gx-md border border-dashed border-gx-border bg-gx-bg px-3 py-4 text-gx-12 text-gx-text-hint">
+      <div className="mb-3 flex items-center gap-2 rounded-gx-lg border border-dashed border-gx-border bg-gx-bg px-3 py-4 text-gx-12 text-gx-text-hint">
         <Icon name="lock" size={15} />
         该画布未包含在可访问范围内，或已被删除。
       </div>
@@ -78,7 +78,7 @@ export function CanvasEmbed({ docId, kbId, canEdit, publicToken, onNavigate }: C
   }
 
   return (
-    <div className="mb-3 overflow-hidden rounded-gx-md border border-gx-separator bg-gx-bg">
+    <div className="mb-3 overflow-hidden rounded-gx-lg border border-gx-separator bg-gx-bg">
       {/* 工具条 */}
       <div className="flex items-center gap-1.5 border-b border-gx-separator bg-gx-surface px-2.5 py-1.5">
         <Icon name="canvas" size={14} className="text-gx-text-secondary" />

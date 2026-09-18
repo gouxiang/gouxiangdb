@@ -58,7 +58,7 @@ export function SearchEnableGuide({ compact = false }: { compact?: boolean }) {
         </ol>
       )}
 
-      <pre className="mt-2 overflow-x-auto rounded-gx-md border border-gx-separator bg-gx-surface p-3 font-mono text-gx-11 leading-relaxed text-gx-text-primary">
+      <pre className="mt-2 overflow-x-auto rounded-gx-lg border border-gx-separator bg-gx-surface p-3 font-mono text-gx-11 leading-relaxed text-gx-text-primary">
         {G.snippet}
       </pre>
 

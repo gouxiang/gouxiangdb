@@ -186,7 +186,7 @@ export default function KanbanView({
                       onDragStart={() => setDragId(r.id)}
                       onDragEnd={() => setDragId(null)}
                       onClick={() => onOpenRecord?.({ tableId, recordId: r.id, title: title || "未命名" })}
-                      className="cursor-pointer rounded-gx-md border border-gx-border bg-gx-surface p-2.5 transition-shadow hover:shadow-sm"
+                      className="cursor-pointer rounded-gx-lg border border-gx-border bg-gx-surface p-2.5 transition-shadow hover:shadow-sm"
                     >
                       <div className="text-gx-13 font-medium text-gx-text-primary">{title || "未命名"}</div>
                       {subFields.map((f) => (

@@ -267,7 +267,7 @@ export function LinkBlockForeignObject({
   // 包裹层视觉：拖拽态高亮。gx-link-block 保留 box-shadow 过渡/hover 语义。
   useEffect(() => {
     if (!host) return;
-    host.className = `gx-link-block flex h-full w-full flex-col overflow-hidden rounded-gx-md border bg-gx-surface ${
+    host.className = `gx-link-block flex h-full w-full flex-col overflow-hidden rounded-gx-lg border bg-gx-surface ${
       dragging
         ? "border-gx-accent shadow-2xl ring-2 ring-gx-accent/40"
         : "border-gx-separator shadow-lg"

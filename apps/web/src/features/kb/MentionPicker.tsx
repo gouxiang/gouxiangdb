@@ -99,7 +99,7 @@ export function MentionPicker({
 
   return (
     <div
-      className="fixed z-50 w-72 overflow-hidden rounded-gx-md border border-gx-separator bg-gx-surface shadow-2xl"
+      className="fixed z-50 w-72 overflow-hidden rounded-gx-lg border border-gx-separator bg-gx-surface shadow-2xl"
       style={{ top: pos.top, left: pos.left }}
     >
       <div className="border-b border-gx-separator p-2">

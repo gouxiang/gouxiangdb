@@ -107,7 +107,7 @@ export function ViewTabs() {
               取消
             </button>
             <button
-              className="rounded-gx-md bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
+              className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
               disabled={!newName.trim()}
               onClick={create}
             >
@@ -124,7 +124,7 @@ export function ViewTabs() {
                 type="button"
                 onClick={() => setNewType(t)}
                 className={[
-                  "flex items-center gap-1.5 rounded-gx-md border px-2 py-1 text-gx-12",
+                  "flex items-center gap-1.5 rounded-gx-lg border px-2 py-1 text-gx-12",
                   newType === t ? "border-gx-accent bg-gx-accent-bg text-gx-accent" : "border-gx-border text-gx-text-primary hover:bg-gx-bg",
                 ].join(" ")}
               >

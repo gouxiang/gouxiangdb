@@ -224,7 +224,7 @@ export function WorkspaceSettingsPage() {
               <button
                 type="button"
                 onClick={() => navigate("/workspace/contacts")}
-                className="inline-flex w-fit items-center gap-2 rounded-gx-md bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
+                className="inline-flex w-fit items-center gap-2 rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
               >
                 <Icon name="building" size={14} />
                 打开通讯录

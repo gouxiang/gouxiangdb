@@ -424,7 +424,7 @@ function FieldEditorSheet({
                             type="button"
                             onClick={() => setType(it.type)}
                             className={
-                              "flex items-center gap-1.5 rounded-gx-md border px-2 py-1.5 text-gx-12 transition-colors " +
+                              "flex items-center gap-1.5 rounded-gx-lg border px-2 py-1.5 text-gx-12 transition-colors " +
                               (type === it.type
                                 ? "border-gx-accent bg-gx-accent-bg text-gx-accent"
                                 : "border-gx-border bg-gx-surface text-gx-text-primary hover:bg-gx-bg")
@@ -446,7 +446,7 @@ function FieldEditorSheet({
                 label="字段类型"
                 help={isSystem ? SYSTEM_DESC[type] : "编辑模式下不可更改类型"}
               >
-                <div className="flex items-center gap-2 rounded-gx-md bg-gx-bg px-2 py-1.5 text-gx-12 text-gx-text-secondary">
+                <div className="flex items-center gap-2 rounded-gx-lg bg-gx-bg px-2 py-1.5 text-gx-12 text-gx-text-secondary">
                   <FieldIcon type={type} size={14} />
                   类型：{type}（编辑模式下不可更改类型）
                 </div>
@@ -668,11 +668,11 @@ function FieldEditorSheet({
                   <button
                     type="button"
                     onClick={() => setFormulaModalOpen(true)}
-                    className="flex w-full items-center justify-center gap-1.5 rounded-gx-md bg-gx-bg px-3 py-2.5 text-gx-14 font-medium text-gx-accent transition-colors hover:bg-gx-accent-bg"
+                    className="flex w-full items-center justify-center gap-1.5 rounded-gx-lg bg-gx-bg px-3 py-2.5 text-gx-14 font-medium text-gx-accent transition-colors hover:bg-gx-accent-bg"
                   >
                     <Icon name="formula" size={14} /> {formula.trim() ? "编辑公式" : "设置公式"}
                   </button>
-                  <div className="mt-1.5 rounded-gx-md bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
+                  <div className="mt-1.5 rounded-gx-lg bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
                     {formula.trim() ? <code className="break-all font-mono">{formula}</code> : <span className="text-gx-text-hint">未设置公式</span>}
                   </div>
                   {formulaModalOpen && (
@@ -689,7 +689,7 @@ function FieldEditorSheet({
 
             {/* 子表格字段 */}
             {type === "subtable" && (
-              <div className="rounded-gx-md border border-gx-border bg-gx-bg/40 p-3">
+              <div className="rounded-gx-lg border border-gx-border bg-gx-bg/40 p-3">
                 <p className="mb-3 text-gx-12 text-gx-text-hint">
                   子表格字段在详情页以一张内嵌网格呈现对面表符合条件的记录。关联目标表、显示字段、筛选条件均在此配置；详情页点击「添加」按钮从对面表选记录代入。
                 </p>

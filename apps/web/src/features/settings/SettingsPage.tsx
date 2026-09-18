@@ -137,7 +137,7 @@ export default function SettingsPage() {
             type="button"
             onClick={() => setTab(t.key)}
             className={[
-              "flex w-full items-center gap-2 rounded-gx-md px-2 py-1.5 text-left text-gx-13",
+              "flex w-full items-center gap-2 rounded-gx-lg px-2 py-1.5 text-left text-gx-13",
               tab === t.key ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-primary hover:bg-gx-row-hover",
             ].join(" ")}
           >
@@ -270,7 +270,7 @@ export default function SettingsPage() {
               取消
             </button>
             <button
-              className="rounded-gx-md bg-gx-danger px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
+              className="rounded-gx-lg bg-gx-danger px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
               disabled={confirmName !== baseQ.data?.name}
               onClick={deleteBase}
             >

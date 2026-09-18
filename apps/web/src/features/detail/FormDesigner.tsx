@@ -16,6 +16,7 @@ import type { DetailLayout, DetailLayoutRow, DetailRowColumns, FieldDTO, FieldId
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button, FieldIcon, toast } from "../../components/ui";
+import { confirmAction } from "../../components/feedback";
 import { Icon } from "../../components/icons";
 import { TYPE_GROUPS } from "../designer/FieldEditorSheet";
 import { FieldInput } from "../views/field-controls";
@@ -548,7 +549,14 @@ export function FormDesigner({
   const deleteTabsContainer = async (containerId: FieldIdT) => {
     const f = fieldById.get(containerId);
     const containerName = f?.name ?? "选项卡分组";
-    if (!window.confirm(`确定删除「${containerName}」？\n容器内字段会退回表单末尾，不会被删除。`)) return;
+    // R-D-23 L2 普通确认（容器内的字段会退回表单末尾，不会丢）+ R-D-24 具体动词
+    const ok = await confirmAction({
+      title: `删除「${containerName}」`,
+      confirmText: "删除分组",
+      description: "分组内的字段会退回表单末尾，不会被删除。",
+      level: 2,
+    });
+    if (!ok) return;
     if (!permissions.canManageSchema) { toast("无表结构管理权限", "error"); return; }
 
     // 1) 先收集容器内字段，退回顶层（基于 ref 最新状态）
@@ -1192,7 +1200,7 @@ function FormDesignerToolbar({ activeTab, onTabChange, device, onDeviceChange, o
         ))}
       </div>
       <div className="ml-auto flex items-center gap-2">
-        <div className="flex items-center rounded-gx-md border border-gx-border p-0.5">
+        <div className="flex items-center rounded-gx-lg border border-gx-border p-0.5">
           <button
             type="button"
             onClick={() => onDeviceChange("desktop")}
@@ -1237,7 +1245,7 @@ function FieldPalette({ onBeginDrag, onEndDrag, mobile }: FieldPaletteProps) {
     <aside className={clsx("flex shrink-0 flex-col border-r border-gx-separator bg-gx-surface", mobile ? "w-full border-r-0" : "w-[220px]")}>
       <div className="border-b border-gx-separator px-3 py-2.5 text-gx-14 font-semibold text-gx-text-primary">字段库</div>
       <div className="px-3 py-2">
-        <div className="flex items-center gap-2 rounded-gx-md border border-gx-border bg-gx-bg px-2 py-1.5">
+        <div className="flex items-center gap-2 rounded-gx-lg border border-gx-border bg-gx-bg px-2 py-1.5">
           <Icon name="search" size={13} className="text-gx-text-hint" />
           <input
             type="text"
@@ -1259,7 +1267,7 @@ function FieldPalette({ onBeginDrag, onEndDrag, mobile }: FieldPaletteProps) {
                   draggable
                   onDragStart={(e) => onBeginDrag(it.type, e)}
                   onDragEnd={onEndDrag}
-                  className="flex cursor-grab items-center gap-1.5 rounded-gx-md border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 text-gx-text-secondary hover:border-gx-accent/50 hover:bg-gx-accent-bg/40 active:cursor-grabbing"
+                  className="flex cursor-grab items-center gap-1.5 rounded-gx-lg border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 text-gx-text-secondary hover:border-gx-accent/50 hover:bg-gx-accent-bg/40 active:cursor-grabbing"
                   title={`拖到表单中创建 ${it.label} 字段`}
                 >
                   <FieldIcon type={it.type} size={13} />
@@ -1635,7 +1643,7 @@ function TabsDesignerCard({
         )}
       >
         {!active || activeRows.length === 0 ? (
-          <div className="flex h-20 flex-col items-center justify-center gap-1 rounded-gx-md border border-dashed border-gx-border text-center">
+          <div className="flex h-20 flex-col items-center justify-center gap-1 rounded-gx-lg border border-dashed border-gx-border text-center">
             <Icon name="form" size={18} className="text-gx-text-hint" />
             <div className="text-gx-12 text-gx-text-secondary">该选项卡下还没有字段</div>
             <div className="text-gx-11 text-gx-text-hint">从左侧字段库拖入，或把其它字段拖到此处</div>

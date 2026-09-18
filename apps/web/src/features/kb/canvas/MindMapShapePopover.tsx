@@ -46,7 +46,7 @@ export function MindMapShapePopover({ x, y, onPick, onClose }: MindMapShapePopov
   return (
     <div
       ref={ref}
-      className="absolute gx-z-canvas-popover rounded-gx-md border border-gx-separator bg-gx-surface p-1.5 shadow-2xl"
+      className="absolute gx-z-canvas-popover rounded-gx-lg border border-gx-separator bg-gx-surface p-1.5 shadow-2xl"
       style={{ left: Math.min(x, Math.max(8, vw - 188 - 8)), top: Math.min(y, Math.max(8, vh - 220 - 8)), width: 180 }}
       onPointerDown={(e) => e.stopPropagation()}
     >

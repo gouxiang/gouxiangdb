@@ -1,0 +1,244 @@
+// apps/web/src/components/feedback.tsx
+// 阶段 3 · 确认弹窗危险分级（UI-SPEC v1.0 R-D-23 / R-D-24）
+//
+//   R-D-23 危险操作分级：
+//     L1 无确认        —— 切换视图、展开折叠等随时可反悔的操作
+//     L2 普通确认弹窗   —— 可恢复的批量操作（软删除、归档）
+//     L3 需输入名称确认 —— 删除库 / 删除表这类大范围不可逆入口
+//     L4 不可恢复红色确认 —— 彻底删除、清空回收站
+//     L5 需二次勾选 + 输入 —— 注销工作区、销毁密钥等毁灭级
+//   R-D-24 确认弹窗主按钮文案必须是**具体动词**（「彻底删除」「清空回收站」），
+//          禁止「确定 / OK / 是」这种无信息量的词。
+//
+// 用法（不新增依赖，纯 Promise + 模块级宿主，与 toast 同一套路）：
+//   const ok = await confirmAction({
+//     title: "删除 3 条记录",
+//     confirmText: "删除 3 条记录",
+//     level: 2,
+//     description: "记录会先进入回收站，30 天内可恢复。",
+//   });
+//   if (ok) { ... }
+//
+// 宿主 <ConfirmHost /> 必须在应用根挂载一次（见 main.tsx）。
+
+import { useEffect, useState, type ReactNode } from "react";
+import { clsx } from "clsx";
+import { Button, FOCUS_RING, Modal } from "./ui";
+import { Icon } from "./icons";
+
+/** R-D-23 危险分级：1 最轻，5 最重。 */
+export type DangerLevel = 1 | 2 | 3 | 4 | 5;
+
+export interface ConfirmOptions {
+  /** 弹窗标题（说清对象，如「删除视图「按状态分组」」） */
+  title: ReactNode;
+  /** R-D-24 主按钮文案：必须是具体动词 + 对象名，禁止「确定」 */
+  confirmText: string;
+  /** 危险分级，缺省 L2（普通确认） */
+  level?: DangerLevel;
+  /** 正文说明：后果 + 是否可恢复 */
+  description?: ReactNode;
+  /** L3 / L5：需用户原样输入该名称才能确认（如库名 / 表名） */
+  confirmName?: string;
+  /** L5：二次勾选文案（毁灭级确认） */
+  acknowledgeText?: string;
+  /** 次按钮文案，缺省「取消」 */
+  cancelText?: string;
+  /** 对象数量（用于「删除 3 条记录」这类文案的语义补充，可选） */
+  count?: number;
+}
+
+interface PendingConfirm extends ConfirmOptions {
+  level: DangerLevel;
+  resolve: (ok: boolean) => void;
+}
+
+let pending: PendingConfirm | null = null;
+const confirmListeners = new Set<() => void>();
+
+function emitConfirm() {
+  for (const l of confirmListeners) l();
+}
+
+/**
+ * 请求一次确认。L1 直接放行（不弹窗）。
+ * 同一时刻只允许一个确认挂起：新的请求会把旧的按「取消」结算，避免 Promise 悬挂。
+ */
+export function confirmAction(options: ConfirmOptions): Promise<boolean> {
+  const level = options.level ?? 2;
+  if (level <= 1) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    pending?.resolve(false);
+    pending = { ...options, level, resolve };
+    emitConfirm();
+  });
+}
+
+/** L2 软删除类快捷入口：可恢复，普通确认。 */
+export function confirmSoftDelete(opts: Omit<ConfirmOptions, "level"> & { level?: 2 }): Promise<boolean> {
+  return confirmAction({ ...opts, level: 2 });
+}
+
+/** L4 彻底删除 / 清空回收站：不可恢复，红色确认。 */
+export function confirmIrreversible(opts: Omit<ConfirmOptions, "level">): Promise<boolean> {
+  return confirmAction({ ...opts, level: 4 });
+}
+
+/**
+ * R-D-23 分级 → 确认强度的纯映射（抽出来便于单测，组件内部同样走它）。
+ * L1 无确认（不弹窗）；L2 普通；L3 需输入名称；L4 不可恢复红色；L5 勾选 + 输入。
+ */
+export interface ConfirmGate {
+  /** 是否弹窗（L1 为 false） */
+  modal: boolean;
+  /** L3+：需原样输入名称 */
+  needName: boolean;
+  /** L5：需二次勾选 */
+  needCheck: boolean;
+  /** L4+：主按钮走 danger 红底 */
+  danger: boolean;
+}
+
+export function confirmGateFor(
+  level: DangerLevel,
+  o: { confirmName?: string; acknowledgeText?: string },
+): ConfirmGate {
+  return {
+    modal: level >= 2,
+    needName: level >= 3 && typeof o.confirmName === "string" && o.confirmName.length > 0,
+    needCheck: level >= 5 && typeof o.acknowledgeText === "string" && o.acknowledgeText.length > 0,
+    danger: level >= 4,
+  };
+}
+
+function ConfirmBody({
+  req,
+  onDone,
+}: {
+  req: PendingConfirm;
+  onDone: (ok: boolean) => void;
+}) {
+  const [name, setName] = useState("");
+  const [checked, setChecked] = useState(false);
+
+  const gate = confirmGateFor(req.level, req);
+  const nameOk = !gate.needName || name.trim() === (req.confirmName ?? "").trim();
+  const blocked = !nameOk || (gate.needCheck && !checked);
+  const danger = gate.danger;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {req.description && (
+        <div className="text-gx-13 leading-5 text-gx-text-secondary">{req.description}</div>
+      )}
+
+      {gate.needName && (
+        <label className="flex flex-col gap-1.5">
+          <span className="text-gx-12 text-gx-text-secondary">
+            请输入 <span className="font-medium text-gx-text-primary">{req.confirmName}</span> 以确认
+          </span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={req.confirmName}
+            className={clsx(
+              "h-8 w-full rounded-gx-lg border bg-gx-surface px-2.5 text-gx-13 text-gx-text-primary",
+              "placeholder:text-gx-text-hint transition-colors duration-[120ms]",
+              nameOk ? "border-gx-border hover:border-gx-border-strong" : "border-gx-danger",
+              "focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50",
+            )}
+          />
+        </label>
+      )}
+
+      {gate.needCheck && (
+        <label className="flex items-start gap-2 text-gx-12 text-gx-text-secondary">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => setChecked(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-gx-accent"
+          />
+          <span>{req.acknowledgeText}</span>
+        </label>
+      )}
+
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            setName("");
+            setChecked(false);
+            onDone(false);
+          }}
+        >
+          {req.cancelText ?? "取消"}
+        </Button>
+        <Button
+          variant={danger ? "danger" : "primary"}
+          size="sm"
+          disabled={blocked}
+          disabledReason={
+            !nameOk
+              ? `请输入「${req.confirmName}」以确认`
+              : gate.needCheck && !checked
+                ? "请先勾选确认"
+                : undefined
+          }
+          onClick={() => {
+            setName("");
+            setChecked(false);
+            onDone(true);
+          }}
+        >
+          {req.confirmText}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 确认弹窗宿主：全局挂一次。
+ * 渲染落在 <Modal> 内，复用统一浮层规格（宽 480 / 圆角 12 / 遮罩 / 阴影 lg）。
+ */
+export function ConfirmHost() {
+  const [req, setReq] = useState<PendingConfirm | null>(null);
+
+  useEffect(() => {
+    const l = () => setReq(pending);
+    confirmListeners.add(l);
+    return () => {
+      confirmListeners.delete(l);
+    };
+  }, []);
+
+  if (!req) return null;
+
+  const close = (ok: boolean) => {
+    const cur = pending;
+    pending = null;
+    cur?.resolve(ok);
+    setReq(null);
+    emitConfirm();
+  };
+
+  const danger = req.level >= 4;
+
+  return (
+    <Modal
+      open
+      onClose={() => close(false)}
+      title={
+        <span className="flex items-center gap-2">
+          {danger && <Icon name="alertCircle" size={15} className="text-gx-danger" />}
+          {req.title}
+        </span>
+      }
+      width={480}
+    >
+      <ConfirmBody req={req} onDone={close} />
+    </Modal>
+  );
+}

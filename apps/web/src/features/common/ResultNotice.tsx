@@ -31,7 +31,7 @@ export function ResultNotice({
       role={role}
       aria-live="polite"
       className={clsx(
-        "flex items-start gap-2 rounded-gx-md border px-3 py-2 text-gx-12 leading-5 text-gx-text-secondary",
+        "flex items-start gap-2 rounded-gx-lg border px-3 py-2 text-gx-12 leading-5 text-gx-text-secondary",
         isWarning ? "border-gx-warning bg-gx-warning-bg" : "border-gx-border bg-gx-accent-bg",
         className,
       )}

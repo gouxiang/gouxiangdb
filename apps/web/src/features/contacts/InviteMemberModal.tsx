@@ -86,7 +86,7 @@ export function InviteMemberModal({ open, onClose }: { open: boolean; onClose: (
     >
       {inviteResult ? (
         <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2 rounded-gx-md bg-gx-success-bg px-3 py-2 text-gx-13 text-gx-success">
+          <div className="flex items-center gap-2 rounded-gx-lg bg-gx-success-bg px-3 py-2 text-gx-13 text-gx-success">
             <Icon name="check" size={15} />
             <span>已为 {inviteResult.email} 创建待激活账号</span>
           </div>
@@ -114,7 +114,7 @@ export function InviteMemberModal({ open, onClose }: { open: boolean; onClose: (
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          <div className="inline-flex w-fit rounded-gx-md border border-gx-border bg-gx-surface p-0.5">
+          <div className="inline-flex w-fit rounded-gx-lg border border-gx-border bg-gx-surface p-0.5">
             {([
               { v: "invite" as Mode, label: "邀请加入" },
               { v: "create" as Mode, label: "直接创建账号" },
@@ -150,7 +150,7 @@ export function InviteMemberModal({ open, onClose }: { open: boolean; onClose: (
               )}
             </label>
           ) : (
-            <p className="rounded-gx-md bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-tertiary">
+            <p className="rounded-gx-lg bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-tertiary">
               邀请方式先创建「待激活」账号并生成一次性激活链接，对方自行设置密码，无需在此填写密码。
             </p>
           )}

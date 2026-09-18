@@ -59,7 +59,7 @@ export function CanvasLinkEntry() {
           type="button"
           title="插入关联（文档 / 画布）"
           onClick={() => setOpen((v) => !v)}
-          className={`inline-flex h-8 items-center gap-1.5 rounded-gx-md border border-gx-separator bg-gx-surface px-2.5 text-gx-12 font-medium shadow-lg transition-colors ${
+          className={`inline-flex h-8 items-center gap-1.5 rounded-gx-lg border border-gx-separator bg-gx-surface px-2.5 text-gx-12 font-medium shadow-lg transition-colors ${
             open
               ? "bg-gx-accent-bg text-gx-accent"
               : "text-gx-text-secondary hover:bg-gx-bg hover:text-gx-accent"
