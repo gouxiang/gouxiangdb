@@ -5,13 +5,14 @@
 // 的模块求值之前完成生产环境校验（D3）。
 import "./config.js";
 
-import { serve, getRequestListener } from "@hono/node-server";
+import { getRequestListener } from "@hono/node-server";
 import { createServer, type Server } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 
 import { config, effectiveAuthzMode } from "./config.js";
 import { createApp } from "./app.js";
+import { prisma } from "./db.js";
 
 const { app, webRoot } = createApp();
 
@@ -24,9 +25,33 @@ console.log(
 const port = config.port;
 
 function startTcp(): void {
-  serve({ fetch: app.fetch, port }, () => {
-    console.log(`[GouXiangDB API] http://localhost:${port}`);
+  const server: Server = createServer(getRequestListener(app.fetch));
+  server.listen(port, () => {
+    const prefixNote = config.basePath ? ` basePath=${config.basePath}` : "";
+    const webNote = webRoot ? ` web=${webRoot}` : "";
+    console.log(`[GouXiangDB API] http://localhost:${port}${prefixNote}${webNote}`);
   });
+
+  // 优雅关闭：停止接收 → 排空在途请求 → 关闭 Prisma/SQLite 连接（释放热 WAL 帧，避免重启/升级
+  // 交接窗口里新进程读到未落盘帧）→ 退出。10s 兜底强退防 keep-alive 悬挂。
+  let closing = false;
+  const shutdown = (signal: string) => {
+    if (closing) return;
+    closing = true;
+    console.log(`[GouXiangDB API] 收到 ${signal}，开始优雅关闭`);
+    const forceTimer = setTimeout(() => process.exit(0), 10_000);
+    forceTimer.unref();
+    server.close(async () => {
+      try {
+        await prisma.$disconnect();
+      } catch {
+        // best-effort：即使 disconnect 异常也必须退出。
+      }
+      process.exit(0);
+    });
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 function startUnixSocket(socketPath: string): void {
@@ -57,9 +82,10 @@ function startUnixSocket(socketPath: string): void {
     console.log(`[GouXiangDB API] 收到 ${signal}，开始优雅关闭`);
     const forceTimer = setTimeout(() => process.exit(0), 10_000);
     forceTimer.unref();
-    server.close(() => {
+    server.close(async () => {
       try {
         fs.rmSync(socketPath, { force: true });
+        await prisma.$disconnect();
       } catch {
         // best-effort
       }
