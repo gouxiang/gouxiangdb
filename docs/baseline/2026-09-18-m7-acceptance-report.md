@@ -90,10 +90,37 @@
 4. 其余全部数字为开发机内部留档，只进内部台账
 5. 完整过闸还欠门⑧四项签字中的「Tier-L 措辞」与「M1 读路径姿态」（后者前置证据未做）
 
-## 6. 部署物与三环境冒烟（门⑥）— **未执行**
+## 6. 部署物与三环境冒烟（门⑥）— **部分执行（fpk 面已真机过，其余仍未实测）**
 
-- 待办：裸机 / 飞牛 fpk / Docker / macOS 四形态冒烟矩阵；SDK/vec0/stdio bin 核查；checksums
-- 本机可用 colima（Docker）做 Linux 面；飞牛/arm 双架构为外部依赖
+### 6.1 飞牛 fnOS fpk —— **已过（真机实证，2026-09-18）**
+
+用户新开飞牛虚拟机（fnOS 1.2.0604 / x86_64 / Debian 12）后首次达成真机验证，
+证据见 `docs/baseline/gate6-evidence/2026-09-18-lead-fnos-fpk-verify.md`。要点：
+
+- 装上并 **running**；`install_callback` 真跑通：迁移 `All migrations have been successfully applied`
+  + `nav-reconcile --apply` 完成；env 自动落 `DATABASE_URL=file:/vol1/@appshare/gouxiangdb/data/app.db`
+- `/healthz` 200；`/readyz` ready，五探针全 true，`applied=23 / latest=20260918090000_mcp_pat_ddl`
+  （与 Docker 复验完全一致）；`native/linux-x64/vec0.so` 就位
+- 业务链路（socket）：signup 200 → 建库 201 → 建表 201 → 写记录 201 → 读回 200；
+  PAT 201（`gxpat_…`）+ MCP `initialize` 200 / `notifications/initialized` 202 / `tools/list` 200
+- 生命周期 stop→start 正常，重启后 healthz 仍 200；网关 `/app/gouxiangdb/healthz` 返回 200（前缀已注册）
+- 产物：`gouxiangdb.fpk` **53.42 MiB**（56,013,564 B），`sha256=e16a74cddf00eb68926205623aee9894d7fa4f5e81d6f4ea60f4d23b15f87c65`
+  （x86_64 / hoisted 布局，构建于 x86 Linux VM `192.168.31.15`；未做可复现构建校验）
+- PAT 明文核查（台账 ⑦-12 的 fpk 腿）：建 PAT 后全量 grep，审计日志 2 处命中均为 **tokenPrefix(14)**，
+  库内为 prefix(14)+tokenHash(64)，**完整明文零落库、零落日志**
+- **同时暴露并修掉 3 个真缺陷**（提交 `f98bb8f`）：
+  1. `cmd/` 缺 5 个生命周期脚本 → fnpack 拒绝打包（此前 fpk 从未被真实安装过，故一直没暴露）
+  2. pnpm 默认布局（`.pnpm` 深层 + 274 符号链接）在真机必挂 `code 10234 acl_get_file failed`
+     → 改 `--node-linker=hoisted` 并实体化 `.bin`，打包前加"零符号链接"硬闸门
+  3. `build-fpk.mjs` 两处假绿：fnpack 校验失败仍 exit 0（改为以磁盘产物为准）；
+     better-sqlite3 自检只判空目录存在（改为必须真找到 `.node`）
+
+### 6.2 仍未实测
+
+- x86_64 裸机 tar 直跑 / x86_64 Docker 构建（已派工，VM `192.168.31.15` 进行中）
+- Caddy 真机反代、旧 Tauri 桌面 UI 手测
+- fpk 升级路径（`upgrade_callback`）、arm64 真机、卸载保留数据
+- 四形态 checksums 签字（fpk 已有产物，待并入）
 
 ## 7. 默认姿态确认（§4.1）+ 四项签字 — **checklist 已产出，签字未完成**
 
@@ -114,6 +141,7 @@
 | 挂账 | C-7 十万节点首屏门（task#158） | backlog，M7 后 |
 | 挂账（P2） | 富文本内联 `data:` 图片被 URL 白名单过拦（fail-closed 安全方向正确，功能限制） | 待产品决策，登记 RELEASE 限制 |
 | 待观察 | api 全量门在本机 swap 压力下收尾慢/易 flaky | 全量门归 VM/空闲机，需 VM 凭证 |
+| **P0 已修（本轮发现·飞牛真机实证）** | **fpk 从未被真实安装过，一装上就挂**：①`cmd/` 缺 5 个生命周期脚本，fnpack 直接拒绝打包；②pnpm 默认布局（`.pnpm` 深层 + 274 符号链接 / 5373 条目）在真机必报 `code 10234 set app dir permissions failed … acl_get_file failed`，`@appcenter/<name>` 建不出来（10 组对照实验定位：模板空包 ✅ / 仅 dist ✅ / 仅 node_modules ❌ / 5000 符号链接 ✅ / 目录链接 ✅ / 包外绝对链接 ❌但报错不同 / 最长路径 180 排除）；③`build-fpk.mjs` 两处假绿（fnpack 失败仍 exit 0 却打印"已生成"；better-sqlite3 自检只判空目录存在） | **已修 `f98bb8f`**：补齐 9 个生命周期脚本；`--node-linker=hoisted` + `.bin` 实体化（零符号链接）并在打包前设硬闸门；产物校验改为以磁盘为准且先清旧同名产物；架构自检必须真找到 `.node`。真机结果：running + 迁移全 applied + readyz 五探针全 true（applied=23）+ 业务/MCP 全通 |
 | **P1 已修（本轮发现·实证）** | **M5 增量索引链路未接线**：`GX_SEARCH_WORKER` 全仓零命中；`SearchIndexer` 从未被 new/start（仅测试实例化）；`reindex.ts` 不碰 outbox。实证：全量 reindex 完成（chunks=5528、coverage 全 0）后 **pending=520 不降** | **已修 `249df44`**：新增 `workerRuntime.ts` 并接线 `index.ts`（TCP + unix socket 两条，SIGTERM 前 stop）、`reindex.ts` 重建期挂起；门控 `GX_M5_SEARCH=on 且 GX_SEARCH_WORKER!=off` 才启动（出厂默认 off）。**行为层证据**：门③新增 R6b（`check-outbox-drain.mjs`）——全程不发 reindex 请求，outbox 自行 pending 4→0、done 0→4、done 行工牌 `workerId=api-<pid>@<ms>` 4/4、`status chunks=7`；R6 改看守回滚面（`GX_SEARCH_WORKER=off` 时 pending 静置不降、done=0）。**默认姿态零副作用**：不设 `GX_M5_SEARCH` 起服，dataDir 只有 app.db（**无 search.db/-wal/-shm**），`search-worker` 日志 0 行。残留观察（不作为阻塞）：`stop()` 是协作式的，挂起瞬间若工人正处理单条，该轮仍可能写旧文件（窗口＝单条处理耗时），彻底消除需给 indexer 加 quiesce 屏障（属改既有语义，未做） |
 
 ## 9. 结论
@@ -126,7 +154,7 @@
 - **P1 索引接线修复行为层坐实**：默认姿态零副作用（无 search.db、无 worker 日志）；`GX_M5_SEARCH=on` 后 outbox 自行追平 pending 4→0、工牌 `api-<pid>@ms` 4/4、chunks=7
 
 剩余阻塞（按顺序攻坚）：
-1. **门⑥**：arm64 双形态（Docker + 裸机 tar）已由 worker 取证由总监独立起容器坐实（见 `docs/baseline/gate6-evidence/2026-09-18-lead-docker-verify.md`）；x86_64 / Caddy 真机 / fnos fpk / Tauri 桌面仍为【未实测】，属目标机/权限外部依赖
+1. **门⑥**：arm64 双形态（Docker + 裸机 tar）已由 worker 取证由总监独立起容器坐实（见 `docs/baseline/gate6-evidence/2026-09-18-lead-docker-verify.md`）；**飞牛 fpk（x86）已真机过闸**（见 `docs/baseline/gate6-evidence/2026-09-18-lead-fnos-fpk-verify.md`）；x86_64 裸机 tar / x86_64 Docker / Caddy 真机 / Tauri 桌面 / arm64 fpk 仍为【未实测】
 2. **门⑦ checklist**：`47da0b8` 已产出 86 条（过 46 / 不过 3 / 未做 26 / 待签字 11），其中 26 条未做含 R8/R9 实跑、RC-13~25 目检签字、SQL 方言巡检白名单
 3. **门⑧四项签字**：authz 姿态、embedding 姿态、Tier-L 措辞、M1 读路径姿态 —— 均未签
 4. **RELEASE.md 需重写**：现文件抬头自带"历史档案声明"，是 2026-09-04 自测记录，不是 M7 发布说明

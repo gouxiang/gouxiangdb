@@ -114,12 +114,12 @@
 | M7-⑥-01 | Docker **arm64** 冒烟：格 1/2/3/4a/4b/5/6-R1/8 + 子路径 + 迁移 23 | 过 | `docs/baseline/gate6-evidence/2026-09-18-docker-arm64-smoke.md`（`072930a`）；镜像 `sha256:378fc41fbcb9`，37/37 步 | 逐格 PASS，8/8、3/3、7/7 |
 | M7-⑥-02 | 裸机 tar **macOS arm64** 直跑：格 1/3/4a/4b/5-7 + vec0 darwin + SIGTERM 优雅关闭 | 过 | `docs/baseline/gate6-evidence/2026-09-18-baremetal-tar-arm64-smoke.md`（`072930a`）；checksums 4163 文件 `shasum -a 256 -c` **0 失败** | 与 Docker arm64 逐格一致 |
 | M7-⑥-03 | 封版产物基于 `11c4dc8` 重验（P1 worker 修复：默认 off 休眠零副作用 / on 产品级 1s 追平） | 过 | `docs/baseline/gate6-evidence/2026-09-18-docker-arm64-smoke.md` §封版补记（`a23a68c`）；`gouxiangdb:m7-final`、tar `20260918040846` | 非单测、真 dist 双实例 |
-| M7-⑥-04 | **飞牛 fpk** 冒烟（x86 + arm 真机） | **未做** | 两份证据 §未实测 均标"目标机不可达" | 计划 §7.2 要求至少一台 x86 飞牛 |
+| M7-⑥-04 | **飞牛 fpk** 冒烟（x86 + arm 真机） | **部分过（x86 已过 / arm 未做）** | `docs/baseline/gate6-evidence/2026-09-18-lead-fnos-fpk-verify.md`（总监真机执行，提交 `f98bb8f`）：fnOS 1.2.0604 x86_64 安装成功并 running；install_callback 迁移全 applied + nav-reconcile 完成；healthz 200 / readyz ready 五探针全 true（applied=23、latest=20260918090000_mcp_pat_ddl）；socket 冒烟 signup→建库→建表→写记录→读回全通；PAT 201 + MCP initialize 200 / notifications 202 / tools/list 200；stop→start 生命周期正常；网关 `/app/gouxiangdb/healthz` 200（前缀已注册） | **arm64 真机仍未做**；未取到门户 token，故"带登录态打开 UI"未实测 |
 | M7-⑥-05 | **amd64 镜像 / buildx 双架构** | **未做** | docker 证据 §未实测："本机无 buildx、单 arm64 原生" | 计划 §7.3 要求双架构各跑一遍 |
 | M7-⑥-06 | **Caddy 真机反代 + /mcp**（11m client_body） | **未做** | docker 证据 §未实测："docker.io 不可达，拉不到 caddy 镜像"；仅 Caddyfile 静态审计（:21 /mcp matcher、:37-39 12MB） | 直连 11MB 档已实测，反代一跳待目标机签字 |
 | M7-⑥-07 | **Linux x86 裸机直跑** + `deploy.sh`/`rollback.sh` systemd 真机 | **未做** | tar 证据 §未实测："无 x86 目标机" | 与 ③-06 R8 同源 |
 | M7-⑥-08 | **macOS 旧 Tauri 桌面端**连新服务端升级提示、不白屏（SPEC:133） | **未做** | tar 证据 §未实测："需桌面 UI 手测" | — |
-| M7-⑥-09 | 三环境冒烟矩阵**逐格**过（计划 §10.2 判据 5） | **不过** | ⑥-04~⑥-08 五格在证据文件中显式标【未实测】 | 飞牛/arm 为外部依赖；在无可用降级路径前判据 5 不满足 |
+| M7-⑥-09 | 三环境冒烟矩阵**逐格**过（计划 §10.2 判据 5） | **不过** | ⑥-04 已由 x86 飞牛真机部分过（arm 仍缺）；⑥-05~⑥-08 四格仍【未实测】 | 判据 5 仍不满足（fpk 面已从"完全不可达"变为"x86 已过"） |
 
 ---
 
@@ -145,7 +145,7 @@
 | M7-⑦-09 | AC-M6-1/2/4 与 M4 越权矩阵全绿 | 过 | 台账 A.5（M6-1/2/4）、A.3（M4-6）；P0-A `ab5b956`、P1-B `277fd95`+`63020ea` 实跑绿 | — |
 | M7-⑦-10 | IDOR 零泄漏（四族） | 过 | 台账 A.5 M6-2：`e2e/m6-s8-idor(9)` | — |
 | M7-⑦-11 | 审计四事件 + 参数脱敏无业务值 | 过 | 台账 A.5 M6-4：`m6-s7-audit-idempotency(12)`；`e2e/m6-s8-401:113` 审计无 token | — |
-| M7-⑦-12 | PAT 明文全产物 grep（日志/库/产物零完整 token） | **待签字** | Docker 形态已查：`/data` 与 stdout 明文零命中、镜像 ENV 无 `JWT_SECRET`、库存 tokenPrefix(14)+tokenHash(sha256,64)（`072930a`） | tar/fpk 形态未做；台账 §D-10 仍列"待做" |
+| M7-⑦-12 | PAT 明文全产物 grep（日志/库/产物零完整 token） | **待签字** | Docker 形态已查：`/data` 与 stdout 明文零命中、镜像 ENV 无 `JWT_SECRET`、库存 tokenPrefix(14)+tokenHash(sha256,64)（`072930a`）；**fpk 形态 2026-09-18 真机补查**：建 PAT（`gxpat_…`，明文 38 字符）后全量 grep `gxpat_` —— 审计日志 `audit.logl` 2 处命中**长度均 14（＝tokenPrefix）**，数据库命中形态为 prefix(14)+tokenHash(64)（表列含 `tokenPrefix`/`tokenHash`），**完整明文 token 零落库、零落日志**；其余命中均为代码/schema 里的常量 `gxpat_` | tar 形态未做；签字栏未签 |
 | M7-⑦-13 | 备份：发布前在线快照成功 | 过 | `/tmp/gx-lead-rerun5/steps.tsv`：`3c-online-backup 0`、`3d-verify-restore 0` | 演练内成功，非生产环境 |
 | M7-⑦-14 | age 异地加密策略（默认不激活，PLAN-ADJUST 口径）按客户合同 | **待签字** | 无 M7 门时证据文档；`docs/adr/0010-offsite-age-encryption.md` 在库 | 姿态需总监/客户确认 |
 | M7-⑦-15 | restore 演练（R9）在克隆机过 | **未做** | 见 ③-07（R9-1~R9-4 全空） | — |
@@ -159,8 +159,8 @@
 | M7-⑦-18 | runbooks 增章齐（M2 四章 / M3 reconcile+新壳回退 / M4 五章 / M5 五章 / M6 章节）+ README 索引 | **待签字** | `git ls-files docs/runbooks/` 实查 13 份在库（README/authz×3/backup/ci/deploy/m1-sidecar/m5-search/mcp/org-contacts/restore/wal-crash-recovery） | **无逐章对账证据**；"M3 新壳回退"章 grep 未见（`docs/runbooks/` 仅 mcp.md/authz-policy-dual-write.md 提 `GX_ENTERPRISE_NAV`） |
 | M7-⑦-19 | 《MCP 客户端接入说明》协议无关版齐备 | 过 | `docs/guides/mcp-client-onboarding.md` 已 `git ls-files` 入库 | 协议无关性未逐句复核 |
 | M7-⑦-20 | RELEASE.md 发布说明（版本号/迁移数/§4.1 flag 姿态矩阵/降级姿态/§9 已知不做项/桌面端兼容提示） | **未做** | 仓内 `RELEASE.md` 实读为 **2026-09-04 单次迭代自测报告**，文件头自带"历史档案声明，不是当前部署/配置依据" | M7 发布说明尚未产出，不是"已交付" |
-| M7-⑦-21 | 三份产物 checksums **签字** | **待签字** | tar checksums 4163 文件 `shasum -a 256 -c` 0 失败（`072930a`）；fpk 无产物 | "签字"栏未签；三份不齐（缺 fpk） |
-| M7-⑦-22 | fpk / Docker 镜像 digest 入报告 | **未做** | Docker 镜像 ID 有（`sha256:378fc41fbcb9`），但总验收报告 §6 仍标"未执行"，未入报告；fpk 无 digest | — |
+| M7-⑦-21 | 三份产物 checksums **签字** | **待签字** | tar checksums 4163 文件 `shasum -a 256 -c` 0 失败（`072930a`）；**fpk 2026-09-18 已产出**：`gouxiangdb.fpk` 53.42 MiB / 56,013,564 B，`sha256=e16a74cddf00eb68926205623aee9894d7fa4f5e81d6f4ea60f4d23b15f87c65`（x86，hoisted 布局，构建于 VM 192.168.31.15） | "签字"栏未签；arm fpk 仍缺 |
+| M7-⑦-22 | fpk / Docker 镜像 digest 入报告 | **部分过** | 总验收报告 §6.1 已写入 fpk 真机过闸结果与 sha256；Docker 镜像 ID `sha256:378fc41fbcb9` 已有 | fpk 为单次构建产物、未做可复现构建校验；arm fpk 缺 |
 
 ### 7.4 决策签字（§8.4）——四项均未签
 
