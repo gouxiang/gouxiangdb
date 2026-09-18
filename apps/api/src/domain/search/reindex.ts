@@ -22,6 +22,7 @@ import {
   resolveSearchDbPath, type SearchStore,
 } from "./searchStore.js";
 import { META_KEYS, setMeta, getMeta } from "./schema.js";
+import { suspendSearchWorker, resumeSearchWorker } from "./workerRuntime.js";
 import { buildContext, listLiveEntities, pumpOne } from "./reindexPump.js";
 import type { ReindexDeps, ReindexEntityType, ReindexResult, ReindexScope } from "./reindexTypes.js";
 
@@ -85,101 +86,122 @@ function openActive(d: ReindexDeps): SearchStore {
   return getSearchStore({ filePath: resolveActivePath(d), appDir: d.appDir, vecExtPath: d.vecExtPath });
 }
 
-/** 路径 A：单实体原地幂等重建（现役库，不换文件）。 */
+/**
+ * 路径 A：单实体原地幂等重建（现役库，不换文件）。
+ * 与内嵌 worker 互斥：原地重建走"先删该实体全部旧派生行 -> 取新 rowid -> 重写"，工人若同时
+ * 写同一实体（尤其是刚被清空的窗口）会与之抢 rowid 并留下半套派生。故重建期间挂起工人，
+ * finally 恢复（工人从未启动时 suspend/resume 是 no-op，不影响 CLI/测试）。
+ */
 async function runSingle(d: ReindexDeps, type: ReindexEntityType, entityId: string): Promise<ReindexResult> {
-  const active = openActive(d);
-  const ctx = await buildContext(d, d.prisma, active);
-  // record 版本用当前毫秒；doc/canvas 用 contentVersion（与 outbox 接线口径一致）。
-  const version = type === "record"
-    ? BigInt(Date.now())
-    : BigInt((await d.prisma.kbDoc.findUnique({ where: { id: entityId }, select: { contentVersion: true } }))?.contentVersion ?? 0);
-  const r = await pumpOne(ctx, { entityType: type, entityId, version });
-  active.writeTxn("reindex-single-meta", (tx) => {
-    setMeta(tx, META_KEYS.indexedAt, new Date().toISOString());
-  });
-  return {
-    scope: { type, entityId }, mode: "single", entities: 1,
-    chunksWritten: r.chunks, vecWritten: r.vec, vecDebt: r.debt,
-    swapped: false, activePath: active.filePath,
-  };
-}
-
-/** 路径 B：全量双库原子切换。灌库全程不碰现役文件；仅在全部成功后最后一刻替换。 */
-async function runFull(d: ReindexDeps): Promise<ReindexResult> {
-  const activePath = resolveActivePath(d);
-  const ts = Date.now();
-  const rebuildPath = `${activePath}.rebuild-${ts}`;
-  deleteSearchDbFiles(rebuildPath); // 清同名崩溃残留。
-
-  const active = openActive(d);
-  // 临时库沿用现役库的 vec 加载态/来源，保证新库 vec0 可用性与现役一致。
-  const rebuild = openSearchStore({
-    filePath: rebuildPath,
-    appDir: d.appDir,
-    vecExtPath: d.vecExtPath,
-    tryLoadVec: active.vecAvailable,
-  });
-  rebuild.writeTxn("rebuild-start-meta", (tx) => {
-    setMeta(tx, META_KEYS.rebuilding, "1");
-    setMeta(tx, META_KEYS.activeDb, "rebuild");
-  });
-
-  let entities = 0;
-  let chunksWritten = 0;
-  let vecWritten = 0;
-  let vecDebt = 0;
-  let closedActive = false;
+  suspendSearchWorker();
   try {
-    const ctx = await buildContext(d, d.prisma, rebuild);
-    const refs = await listLiveEntities(d.prisma);
-    for (const ref of refs) {
-      const r = await pumpOne(ctx, ref);
-      entities += 1;
-      chunksWritten += r.chunks;
-      vecWritten += r.vec;
-      vecDebt += r.debt;
-      await d.onProgress?.(entities, refs.length);
-    }
-    // 灌完：合并 WAL 到主文件（持久化），再盖完成元数据并二次 checkpoint。
-    rebuild.db.pragma("wal_checkpoint(TRUNCATE)");
-    rebuild.writeTxn("rebuild-finish-meta", (tx) => {
-      setMeta(tx, META_KEYS.rebuilding, "0");
-      setMeta(tx, META_KEYS.activeDb, "active");
+    const active = openActive(d);
+    const ctx = await buildContext(d, d.prisma, active);
+    // record 版本用当前毫秒；doc/canvas 用 contentVersion（与 outbox 接线口径一致）。
+    const version = type === "record"
+      ? BigInt(Date.now())
+      : BigInt((await d.prisma.kbDoc.findUnique({ where: { id: entityId }, select: { contentVersion: true } }))?.contentVersion ?? 0);
+    const r = await pumpOne(ctx, { entityType: type, entityId, version });
+    active.writeTxn("reindex-single-meta", (tx) => {
       setMeta(tx, META_KEYS.indexedAt, new Date().toISOString());
     });
-    rebuild.db.pragma("wal_checkpoint(TRUNCATE)");
-    rebuild.close();
-
-    // 原子切换：最后一刻关闭现役单例（此刻只读连接瞬断），POSIX rename 替换主文件。
-    if (d.activeStore) active.close();
-    else closeSearchStore();
-    closedActive = true;
-    // 旧 wal/shm 在 close 前已随连接释放；显式清残留，避免与新主文件 salt 不匹配的脏帧。
-    for (const suffix of ["-wal", "-shm"]) {
-      try { fs.rmSync(activePath + suffix, { force: true }); } catch { /* ignore */ }
-    }
-    fs.renameSync(rebuildPath, activePath);
-    for (const suffix of ["-wal", "-shm"]) {
-      try { fs.rmSync(rebuildPath + suffix, { force: true }); } catch { /* ignore */ }
-    }
-  } catch (err) {
-    // 失败：关临时连接并清临时库三件；若现役已关（极端：rename 失败），立即惰性重开旧路径，不致停服。
-    try { rebuild.close(); } catch { /* already closed */ }
-    deleteSearchDbFiles(rebuildPath);
-    if (closedActive && !d.activeStore) {
-      // activePath 仍是旧文件（rename 未发生/失败）；重开现役单例继续服务。
-      openActive(d);
-    }
-    throw new Error(
-      `full reindex failed, active index untouched: ${err instanceof Error ? err.message : String(err)}`,
-      { cause: err },
-    );
+    return {
+      scope: { type, entityId }, mode: "single", entities: 1,
+      chunksWritten: r.chunks, vecWritten: r.vec, vecDebt: r.debt,
+      swapped: false, activePath: active.filePath,
+    };
+  } finally {
+    resumeSearchWorker();
   }
+}
 
-  return {
-    scope: {}, mode: "full", entities, chunksWritten, vecWritten, vecDebt,
-    swapped: true, activePath,
-  };
+/**
+ * 路径 B：全量双库原子切换。灌库全程不碰现役文件；仅在全部成功后最后一刻替换。
+ * 与内嵌 worker 互斥（比单实体更硬）：切换是"写独立 .rebuild-<ts> -> rename 原子替换主文件
+ * -> closeSearchStore()"。工人若持旧文件句柄继续写，会落到已被 unlink 的旧库 -> 索引分叉
+ * （现役库缺增量，旧文件无人读）。故重建开始前挂起工人；finally 恢复时工人重新取单例，
+ * 自动指向替换后的新现役库。
+ */
+async function runFull(d: ReindexDeps): Promise<ReindexResult> {
+  suspendSearchWorker();
+  try {
+    const activePath = resolveActivePath(d);
+    const ts = Date.now();
+    const rebuildPath = `${activePath}.rebuild-${ts}`;
+    deleteSearchDbFiles(rebuildPath); // 清同名崩溃残留。
+
+    const active = openActive(d);
+    // 临时库沿用现役库的 vec 加载态/来源，保证新库 vec0 可用性与现役一致。
+    const rebuild = openSearchStore({
+      filePath: rebuildPath,
+      appDir: d.appDir,
+      vecExtPath: d.vecExtPath,
+      tryLoadVec: active.vecAvailable,
+    });
+    rebuild.writeTxn("rebuild-start-meta", (tx) => {
+      setMeta(tx, META_KEYS.rebuilding, "1");
+      setMeta(tx, META_KEYS.activeDb, "rebuild");
+    });
+
+    let entities = 0;
+    let chunksWritten = 0;
+    let vecWritten = 0;
+    let vecDebt = 0;
+    let closedActive = false;
+    try {
+      const ctx = await buildContext(d, d.prisma, rebuild);
+      const refs = await listLiveEntities(d.prisma);
+      for (const ref of refs) {
+        const r = await pumpOne(ctx, ref);
+        entities += 1;
+        chunksWritten += r.chunks;
+        vecWritten += r.vec;
+        vecDebt += r.debt;
+        await d.onProgress?.(entities, refs.length);
+      }
+      // 灌完：合并 WAL 到主文件（持久化），再盖完成元数据并二次 checkpoint。
+      rebuild.db.pragma("wal_checkpoint(TRUNCATE)");
+      rebuild.writeTxn("rebuild-finish-meta", (tx) => {
+        setMeta(tx, META_KEYS.rebuilding, "0");
+        setMeta(tx, META_KEYS.activeDb, "active");
+        setMeta(tx, META_KEYS.indexedAt, new Date().toISOString());
+      });
+      rebuild.db.pragma("wal_checkpoint(TRUNCATE)");
+      rebuild.close();
+
+      // 原子切换：最后一刻关闭现役单例（此刻只读连接瞬断），POSIX rename 替换主文件。
+      if (d.activeStore) active.close();
+      else closeSearchStore();
+      closedActive = true;
+      // 旧 wal/shm 在 close 前已随连接释放；显式清残留，避免与新主文件 salt 不匹配的脏帧。
+      for (const suffix of ["-wal", "-shm"]) {
+        try { fs.rmSync(activePath + suffix, { force: true }); } catch { /* ignore */ }
+      }
+      fs.renameSync(rebuildPath, activePath);
+      for (const suffix of ["-wal", "-shm"]) {
+        try { fs.rmSync(rebuildPath + suffix, { force: true }); } catch { /* ignore */ }
+      }
+    } catch (err) {
+      // 失败：关临时连接并清临时库三件；若现役已关（极端：rename 失败），立即惰性重开旧路径，不致停服。
+      try { rebuild.close(); } catch { /* already closed */ }
+      deleteSearchDbFiles(rebuildPath);
+      if (closedActive && !d.activeStore) {
+        // activePath 仍是旧文件（rename 未发生/失败）；重开现役单例继续服务。
+        openActive(d);
+      }
+      throw new Error(
+        `full reindex failed, active index untouched: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
+
+    return {
+      scope: {}, mode: "full", entities, chunksWritten, vecWritten, vecDebt,
+      swapped: true, activePath,
+    };
+  } finally {
+    resumeSearchWorker();
+  }
 }
 
 /**

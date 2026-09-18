@@ -24,8 +24,10 @@ import { resolveAuthzEngineMode, type AuthzEngineMode } from "./configAuthz.js";
 // M5 统一检索总门（GX_M5_SEARCH 三态）真源在 configM5Search.ts；re-export 供
 // import { ... } from "./config.js" 调用方使用，与 configAuthz 同款无感接线。
 export type { M5SearchFlag } from "./configM5Search.js";
-export { parseM5SearchFlag, parseM5ShadowStrict } from "./configM5Search.js";
-import { parseM5SearchFlag, parseM5ShadowStrict, type M5SearchFlag } from "./configM5Search.js";
+export { parseM5SearchFlag, parseM5ShadowStrict, parseSearchWorkerFlag } from "./configM5Search.js";
+import {
+  parseM5SearchFlag, parseM5ShadowStrict, parseSearchWorkerFlag, type M5SearchFlag,
+} from "./configM5Search.js";
 
 // 历史上出现在源码/示例/.env 里的开发默认密钥，生产一律拒绝（即使 .env 被误打进发布包）。
 const BLOCKED_JWT_SECRETS = new Set([
@@ -240,6 +242,13 @@ export interface AppConfig {
    */
   m5Search: M5SearchFlag;
   /**
+   * GX_SEARCH_WORKER（计划 §4 R6 / M7 回滚面 R6）：内嵌索引 worker 排障开关。
+   * 显式 "off" = 不起 worker（即便 m5Search=on；检索读路径与 outbox 写入均不受损，
+   * 只是 change_events 积压待追平）；其余（含未设/"on"）= on。
+   * 单独一个开关不够启动 worker：还须 m5Search === "on"（出厂默认 off，故默认零副作用）。
+   */
+  searchWorker: boolean;
+  /**
    * GX_M5_SHADOW_STRICT（M5/S7，仅在 m5Search=shadow 时有意义）：严格小写 on 时，
    * 新链路与旧 /api/search 在可比集上对拍 drift 非 0 即让该请求失败（§6 对拍闸门）；
    * 默认 off，shadow 只记脱敏日志/metric，不改变响应。
@@ -319,6 +328,9 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     m5Search: parseM5SearchFlag(env.GX_M5_SEARCH),
     // M5/S7：shadow 对拍严格门（仅精确小写 on），默认 off 只记日志不改变响应。
     m5ShadowStrict: parseM5ShadowStrict(env.GX_M5_SHADOW_STRICT),
+    // M7 R6：内嵌索引 worker 排障开关（显式 off 才关）；是否真起由 workerRuntime 与
+    // m5Search==="on" 合取决定（出厂 m5Search=off，故默认不起 worker、不建 search.db）。
+    searchWorker: parseSearchWorkerFlag(env.GX_SEARCH_WORKER),
     authStateTtlMs: parseNonNegInt(env.GX_AUTH_STATE_TTL_MS, 0),
     socketPath: env.GX_SOCKET_PATH?.trim() ?? "",
     basePath: normalizeBasePath(env.GX_BASE_PATH),

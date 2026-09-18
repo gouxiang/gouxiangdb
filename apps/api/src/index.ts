@@ -13,6 +13,24 @@ import path from "node:path";
 import { config, effectiveAuthzMode } from "./config.js";
 import { createApp } from "./app.js";
 import { prisma } from "./db.js";
+import { startSearchWorker, stopSearchWorker } from "./domain/search/workerRuntime.js";
+
+/**
+ * M5 内嵌索引 worker 的启动依赖（门控在 workerRuntime 内：m5Search!=="on" 或
+ * GX_SEARCH_WORKER==="off" 时直接返回 false，零建库/零连接/零主库查询）。
+ * 失败只记日志，不影响监听与检索读路径。
+ */
+function bootSearchWorker(): void {
+  void startSearchWorker({
+    prisma,
+    env: process.env,
+    dataDir: config.dataDir,
+    appDir: config.appDir,
+    jwtSecret: config.jwtSecret,
+    m5Search: config.m5Search,
+    searchWorker: config.searchWorker,
+  });
+}
 
 const { app, webRoot } = createApp();
 
@@ -30,6 +48,7 @@ function startTcp(): void {
     const prefixNote = config.basePath ? ` basePath=${config.basePath}` : "";
     const webNote = webRoot ? ` web=${webRoot}` : "";
     console.log(`[GouXiangDB API] http://localhost:${port}${prefixNote}${webNote}`);
+    bootSearchWorker();
   });
 
   // 优雅关闭：停止接收 → 排空在途请求 → 关闭 Prisma/SQLite 连接（释放热 WAL 帧，避免重启/升级
@@ -42,6 +61,9 @@ function startTcp(): void {
     const forceTimer = setTimeout(() => process.exit(0), 10_000);
     forceTimer.unref();
     server.close(async () => {
+      // 先停 worker 再断 Prisma：worker 循环可能正在用 prisma 认领/回写 change_events，
+      // 先断连接会让在途那一条抛错并被判 failed（下次启动还得重跑）。
+      stopSearchWorker();
       try {
         await prisma.$disconnect();
       } catch {
@@ -72,6 +94,7 @@ function startUnixSocket(socketPath: string): void {
     const prefixNote = config.basePath ? ` basePath=${config.basePath}` : "";
     const webNote = webRoot ? ` web=${webRoot}` : "";
     console.log(`[GouXiangDB API] unix:${socketPath}${prefixNote}${webNote}`);
+    bootSearchWorker();
   });
 
   // 优雅关闭：停止接收 → 排空在途请求 → 删除 socket 文件。10s 兜底强退防 keep-alive 悬挂。
@@ -83,6 +106,7 @@ function startUnixSocket(socketPath: string): void {
     const forceTimer = setTimeout(() => process.exit(0), 10_000);
     forceTimer.unref();
     server.close(async () => {
+      stopSearchWorker(); // 同上：先停 worker 再断 Prisma。
       try {
         fs.rmSync(socketPath, { force: true });
         await prisma.$disconnect();

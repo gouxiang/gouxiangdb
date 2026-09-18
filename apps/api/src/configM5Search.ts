@@ -30,3 +30,15 @@ export function parseM5SearchFlag(raw: string | undefined): M5SearchFlag {
 export function parseM5ShadowStrict(raw: string | undefined): boolean {
   return raw?.trim() === "on";
 }
+
+/**
+ * GX_SEARCH_WORKER（计划 §4 R6 / M7 回滚面 R6）：内嵌索引 worker 排障开关。
+ *   - 显式 "off" = 不起 worker（即使 GX_M5_SEARCH=on）：主应用与检索读路径不受损，
+ *     outbox（change_events）只积压不消化，恢复后由 worker 追平；
+ *   - 其余（未设 / "on" / 任何其它值）= on。
+ * 与 config.ts 各 flag 同款 "`!== 'off'`" 读法（GX_RATE_LIMIT / GX_ENTERPRISE_ORG 同族），
+ * 且不引入第四种三态：这个开关只承担"排障时一键停写派生库"一件事。
+ */
+export function parseSearchWorkerFlag(raw: string | undefined): boolean {
+  return raw?.trim() !== "off";
+}
