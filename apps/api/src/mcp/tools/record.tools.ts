@@ -21,6 +21,7 @@ import { createRecordTx, softDeleteRecordTx, updateRecordTx } from "../../domain
 import { applyCreateDefaults, applyEditDefaults, applyReverseDefaultsForChild } from "../../domain/defaults.js";
 import { runWrite, withWriteTx } from "../../db.js";
 import { buildFilterNode, buildSortSpec, InvalidParamsError, type FilterArg } from "./filterMap.js";
+import { displaySelectValue, indexSelectOptions, type SelectDisplayIndex } from "./selectFields.js";
 import { deny, text, type ToolCtx, type ToolResult } from "./types.js";
 
 interface ReadArgs { tableId: string; cursor?: string; limit?: number; search?: string; filter?: unknown; sortFieldId?: string; sortDirection?: "asc" | "desc" }
@@ -32,15 +33,31 @@ async function guardTable(ctx: ToolCtx, tableId: string): Promise<ToolResult | n
   return ok ? null : deny("FORBIDDEN_RESOURCE", "无权访问该表（或该表不存在）");
 }
 
-/** 记录读出参投影：不可见字段物理缺席（与 REST 同口径）。 */
-function project(rows: Array<Record<string, unknown>>, visibleFieldIds: string[] | null): Array<Record<string, unknown>> {
-  if (visibleFieldIds === null) return rows;
-  const allow = new Set(visibleFieldIds);
+/**
+ * 记录读出参投影：不可见字段物理缺席（与 REST 同口径）。
+ *
+ * selectIndex 非空时额外输出 `fieldsDisplay`：一份与 fields 同键的**只读可读镜像**，
+ * 仅把选择类字段的选项 id 换成选项名；fields 本身维持 id 原值（写工具回写依赖它）。
+ * selectIndex 为 null（表内无选择类字段）时完全不输出该键，避免无谓膨胀。
+ */
+function project(
+  rows: Array<Record<string, unknown>>,
+  visibleFieldIds: string[] | null,
+  selectIndex: SelectDisplayIndex | null,
+): Array<Record<string, unknown>> {
+  if (visibleFieldIds === null && !selectIndex) return rows;
+  const allow = visibleFieldIds === null ? null : new Set(visibleFieldIds);
   return rows.map((r) => {
     const fields = (r.fields ?? {}) as Record<string, unknown>;
     const kept: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(fields)) if (allow.has(k)) kept[k] = v;
-    return { ...r, fields: kept };
+    for (const [k, v] of Object.entries(fields)) if (!allow || allow.has(k)) kept[k] = v;
+    if (!selectIndex) return { ...r, fields: kept };
+    const display: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(kept)) {
+      const byKey = selectIndex.get(k);
+      display[k] = byKey ? displaySelectValue(v, byKey) : v;
+    }
+    return { ...r, fields: kept, fieldsDisplay: display };
   });
 }
 
@@ -53,6 +70,9 @@ async function readPage(ctx: ToolCtx, args: ReadArgs, withFilter: boolean): Prom
   const cap = await port.fieldCapabilityOf({ kind: "table", id: args.tableId });
   const visibleIds = cap.visibleAll || cap.visibleFields === null ? null : cap.visibleFields;
   const queryFields = visibleIds === null ? fields : fields.filter((f) => visibleIds.includes(f.id));
+
+  // 选择类字段（单选/多选）的 id→名索引：表内无此类字段时为 null -> 不出 fieldsDisplay。
+  const selectIndex: SelectDisplayIndex | null = indexSelectOptions(queryFields);
 
   const baseConfig = parseViewConfig(null);
   const filterNode = withFilter ? buildFilterNode(args.filter as FilterArg[] | undefined) : null;
@@ -80,7 +100,7 @@ async function readPage(ctx: ToolCtx, args: ReadArgs, withFilter: boolean): Prom
     throw e;
   }
   const payload = {
-    records: project(result.records as unknown as Array<Record<string, unknown>>, visibleIds),
+    records: project(result.records as unknown as Array<Record<string, unknown>>, visibleIds, selectIndex),
     total: result.total, filteredTotal: result.filteredTotal,
     nextCursor: result.nextCursor ?? null, hasMore: result.hasMore ?? false,
     truncatedScope: false,

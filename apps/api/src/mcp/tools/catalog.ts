@@ -40,7 +40,8 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
   {
     meta: {
       name: "table.get_schema", title: "读取表结构",
-      description: "返回该 base 下可见表与可见字段的元数据（不可见字段不出现在 schema 中）。",
+      description: "返回该 base 下可见表与可见字段的元数据（不可见字段不出现在 schema 中）；"
+        + "单选型/多选型字段附 options:[{id,name,color}]，用于把记录里的选项 id 映射成可读名称。",
       scopes: ["record:read"], family: "table", readOnly: true,
     },
     inputShape: getSchemaShape,
@@ -49,7 +50,9 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
   {
     meta: {
       name: "record.list_records", title: "列出记录",
-      description: "按 keyset 游标分页读取表内记录（limit≤200；不可见字段物理缺席）。",
+      description: "按 keyset 游标分页读取表内记录（limit≤200；不可见字段物理缺席）。"
+        + "单选/多选字段在 fields 里的值是选项 id（回写请仍用 id）；可读名称见同一条记录的 fieldsDisplay"
+        + "（表内无选择类字段时不返回该键）与 table.get_schema 的 options。",
       scopes: ["record:read"], family: "table", readOnly: true,
     },
     inputShape: listRecordsShape,
@@ -58,7 +61,8 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
   {
     meta: {
       name: "record.query_records", title: "查询记录",
-      description: "带受控 filter/sort 的 keyset 查询（算子白名单；禁公式与裸 SQL）。",
+      description: "带受控 filter/sort 的 keyset 查询（算子白名单；禁公式与裸 SQL）。"
+        + "过滤/排序值用选项 id；读出的选项名见同一条记录的 fieldsDisplay（无选择类字段时不返回该键）。",
       scopes: ["record:read"], family: "table", readOnly: true,
     },
     inputShape: queryRecordsShape,

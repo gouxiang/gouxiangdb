@@ -9,8 +9,14 @@
 //   - 内存 sort 空值恒后；假分页 slice 只切 records
 //   - collapsedGroupKeys 当前不影响分组结果（现状怪癖，钉死）
 //
-// 不修正任何现状行为。单选用 optionId 存储，由此带出的「group label=optionId 原文、
-// color 匹配 name 失败为 null」也如实记录。夹具见 _recordServiceFixture.ts。
+// 不修正任何现状行为。
+//
+// M7 例外（有意为之，唯一一次）：本片原先如实记录了单选分组的两个缺陷表现
+//   「group label=optionId 原文、color 匹配 name 失败恒 null」，该缺陷已在 M7 修复
+//   （group.ts 增加 singleSelect 分支 + optionColor 改 id/name 双匹配），
+//   故单/多选两处的 key/label/color 期望值同步更新为**修复后**口径；
+//   其余口径（顺序/空白桶最后/多桶去重/聚合/假分页）维持原记录不变。
+//   新口径的可读性回归由 ../group-select.test.ts 专门钉死。夹具见 _recordServiceFixture.ts。
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
@@ -105,14 +111,17 @@ describe("排序（内存，空值恒后）", () => {
 });
 
 describe("分组（精确 key/label/color/recordIds/顺序）", () => {
-  it("singleSelect：options 序排桶、空白桶最后；label=optionId、color=null（现状）", async () => {
+  it("singleSelect：options 序排桶、空白桶最后；label=选项名、color=选项色（M7 修复前是 optionId/null）", async () => {
     const r = await query({ groupByFieldId: "f_status" });
     const g = r.groups!;
-    expect(g.map((x) => x.key)).toEqual(["val:s_todo", "val:s_done", "__empty__"]);
-    expect(g[0]!.label).toBe("s_todo");
-    expect(g[0]!.color).toBeNull();
+    expect(g.map((x) => x.key)).toEqual(["opt:s_todo", "opt:s_done", "__empty__"]);
+    expect(g[0]!.label).toBe("待办");
+    expect(g[0]!.color).toBe("#FF0000");
     expect(g[0]!.recordIds).toEqual(["r1", "r2"]);
+    expect(g[1]!.label).toBe("完成");
+    expect(g[1]!.color).toBe("#00FF00");
     expect(g[2]!.label).toBe("(空白)");
+    expect(g[2]!.color).toBeNull();
     expect(g[2]!.recordIds).toEqual(["r4"]);
   });
 
@@ -121,7 +130,9 @@ describe("分组（精确 key/label/color/recordIds/顺序）", () => {
     const byKey = new Map(r.groups!.map((x) => [x.key, x]));
     expect(byKey.get("opt:t_a")!.recordIds).toEqual(["r1"]);
     expect(byKey.get("opt:t_b")!.recordIds).toEqual(["r1", "r3"]);
-    expect(byKey.get("opt:t_a")!.color).toBeNull();
+    // M7 修复前 multiSelect 的 label 是 optionId 且 color 恒 null
+    expect(byKey.get("opt:t_a")!.label).toBe("标签A");
+    expect(byKey.get("opt:t_a")!.color).toBe("#111111");
     const last = r.groups![r.groups!.length - 1]!;
     expect(last.key).toBe("__empty__");
     expect(last.recordIds.sort()).toEqual(["r2", "r4"]);
@@ -140,8 +151,8 @@ describe("分组（精确 key/label/color/recordIds/顺序）", () => {
   });
 
   it("现状怪癖：collapsedGroupKeys 非空时分组仍照常计算", async () => {
-    const r = await query({ groupByFieldId: "f_status", collapsedGroupKeys: ["val:s_todo"] });
-    expect(r.groups!.map((x) => x.key)).toEqual(["val:s_todo", "val:s_done", "__empty__"]);
+    const r = await query({ groupByFieldId: "f_status", collapsedGroupKeys: ["opt:s_todo"] });
+    expect(r.groups!.map((x) => x.key)).toEqual(["opt:s_todo", "opt:s_done", "__empty__"]);
   });
 });
 
@@ -159,8 +170,8 @@ describe("聚合（表尾，分页前全量）", () => {
   it("分组桶聚合按桶内 recordIds；空白桶 null 年龄 sum=null", async () => {
     const r = await query({ groupByFieldId: "f_status", aggregations: { f_age: "sum" } });
     const byKey = new Map(r.groups!.map((x) => [x.key, x.aggregations]));
-    expect(byKey.get("val:s_todo")).toEqual({ f_age: 30 });
-    expect(byKey.get("val:s_done")).toEqual({ f_age: 30 });
+    expect(byKey.get("opt:s_todo")).toEqual({ f_age: 30 });
+    expect(byKey.get("opt:s_done")).toEqual({ f_age: 30 });
     expect(byKey.get("__empty__")).toEqual({ f_age: null });
   });
 });
@@ -171,7 +182,7 @@ describe("假分页（内存 slice）", () => {
     expect(r.records.map((x) => x.id)).toEqual(["r2", "r3"]);
     expect(r.total).toBe(4);
     expect(r.filteredTotal).toBe(4);
-    expect(r.groups!.map((x) => x.key)).toEqual(["val:s_todo", "val:s_done", "__empty__"]);
+    expect(r.groups!.map((x) => x.key)).toEqual(["opt:s_todo", "opt:s_done", "__empty__"]);
     expect(r.aggregations).toEqual({ f_age: 60 });
   });
 });

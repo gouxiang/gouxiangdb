@@ -5,6 +5,7 @@
 
 import { listBasesByIds, listTablesUnderBases } from "../../domain/mcpReadModels.js";
 import { loadTableFields } from "../../domain/recordService.js";
+import { withSelectOptions } from "./selectFields.js";
 import { deny, text, type ToolCtx, type ToolResult } from "./types.js";
 
 /** table.list_bases：列出主体可见的 base（闸门一给候选集，闸门二逐 base 复核 r），带 name。 */
@@ -47,7 +48,10 @@ export async function tableGetSchema(ctx: ToolCtx, args: Record<string, unknown>
     out.push({
       tableId: t.id,
       name: t.name,
-      fields: visible.map((f) => ({ fieldId: f.id, name: f.name, type: f.type, required: f.required, unique: f.unique })),
+      // 选择类字段（singleSelect/multiSelect）附 options，客户端据此把记录里的选项 id 映射成名称。
+      fields: visible.map((f) =>
+        withSelectOptions(f, { fieldId: f.id, name: f.name, type: f.type, required: f.required, unique: f.unique }),
+      ),
       truncatedScope: acc.truncated,
     });
   }
