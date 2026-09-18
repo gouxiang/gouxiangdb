@@ -27,6 +27,15 @@ export function isForbidden(e: unknown): boolean {
   return e instanceof ApiError && e.status === 403;
 }
 
+/**
+ * 检索子面未启用（GX_M5_SEARCH 关 → /api/v1 下不挂检索 admin 路由，端点回
+ * 404 {code:"NOT_FOUND"}）。这不是"稍后重试能好"的故障，而是功能没开，
+ * 调用方据此显示"未启用"空态并禁用重建，不要落进通用错误分支。
+ */
+export function isSearchNotEnabled(e: unknown): boolean {
+  return e instanceof ApiError && (e.status === 404 || errorCode(e) === "NOT_FOUND");
+}
+
 /** 读嵌入配置（apiKey 只有存在性 + 末 4，绝不回明文）。 */
 export function useEmbeddingConfig(enabled: boolean) {
   return useQuery({

@@ -74,7 +74,8 @@ function RootRedirect() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-gx-13 text-gx-text-tertiary">
         <div>还没有任何 Base</div>
-        <div className="text-gx-12 text-gx-text-hint">请通过侧栏新建一个 Base 开始使用</div>
+        {/* 新建入口在顶栏库名（无库时显示「选择库」）下拉里，不在侧栏；文案指向真实入口。 */}
+        <div className="text-gx-12 text-gx-text-hint">点击顶栏的库名（或「选择库」），选择「新建库」开始使用</div>
       </div>
     );
   }

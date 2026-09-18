@@ -3,17 +3,40 @@
 // index===null（尚未建库）显示"尚未建立索引"空态而非全 0。术语全部中性化，不暴露表名/SQL。
 import { Button, Spinner } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { useSearchStatus } from "./search-admin-hooks";
-import { BACKLOG_LABELS, COVERAGE_LABELS } from "./search-admin-copy";
+import { isSearchNotEnabled, useSearchStatus } from "./search-admin-hooks";
+import { BACKLOG_LABELS, COVERAGE_LABELS, SEARCH_NOT_ENABLED } from "./search-admin-copy";
 
 export function SearchCoveragePanel({ onReindex }: { onReindex?: () => void }) {
   const statusQ = useSearchStatus(true);
+  // 子面未启用（admin 端点 404 NOT_FOUND）≠ 故障：给"未启用"空态，不显示"稍后重试"。
+  const notEnabled = isSearchNotEnabled(statusQ.error);
 
   if (statusQ.isLoading) {
     return (
       <div className="flex h-32 items-center justify-center">
         <Spinner size={18} />
       </div>
+    );
+  }
+  if (notEnabled) {
+    return (
+      <section className="flex flex-col items-center gap-2 rounded-gx-lg border border-dashed border-gx-border-strong p-8 text-center">
+        <Icon name="search" size={22} className="text-gx-text-hint" />
+        <div className="text-gx-13 font-medium text-gx-text-secondary">{SEARCH_NOT_ENABLED.title}</div>
+        <p className="max-w-sm text-gx-12 text-gx-text-hint">{SEARCH_NOT_ENABLED.body}</p>
+        {onReindex && (
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-1"
+            disabled
+            title={SEARCH_NOT_ENABLED.reindexHint}
+          >
+            重建索引
+          </Button>
+        )}
+        <div className="text-gx-11 text-gx-text-hint">{SEARCH_NOT_ENABLED.reindexHint}</div>
+      </section>
     );
   }
   if (statusQ.isError) {

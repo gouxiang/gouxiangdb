@@ -11,12 +11,13 @@ import { Icon } from "../../components/icons";
 import {
   errorCode,
   isForbidden,
+  isSearchNotEnabled,
   useClearApiKey,
   useEmbeddingConfig,
   usePatchEmbeddingConfig,
   useRotateApiKey,
 } from "./search-admin-hooks";
-import { adminErrorMessage, CLOUD_CONSENT_TEXT } from "./search-admin-copy";
+import { adminErrorMessage, CLOUD_CONSENT_TEXT, SEARCH_NOT_ENABLED } from "./search-admin-copy";
 import { buildConfigPatch } from "./search-config";
 import type { EmbeddingMode } from "@gx/shared-types";
 
@@ -56,6 +57,8 @@ export function EmbeddingSearchPanel({ onReindex }: { onReindex?: () => void }) 
     );
   }
   const cfg = configQ.data;
+  // 子面未启用（配置端点 404 NOT_FOUND）：禁用写操作入口，避免点了没反应。
+  const notEnabled = isSearchNotEnabled(configQ.error);
 
   /** 收集表单为 patch（apiKey 仅在填了新值时随请求发送，缺省=保持）。 */
   function buildPatch(nextMode: EmbeddingMode, confirmCloud: boolean) {
@@ -68,7 +71,8 @@ export function EmbeddingSearchPanel({ onReindex }: { onReindex?: () => void }) 
   function onError(e: unknown) {
     // 越权静默降级（面板本应 owner 才见），其余给中性可读文案，不暴露实现。
     if (isForbidden(e)) return;
-    toast(adminErrorMessage(errorCode(e)), "error");
+    // 子面未启用：明说"没启用"，不用"稍后重试"误导。
+    toast(isSearchNotEnabled(e) ? SEARCH_NOT_ENABLED.toast : adminErrorMessage(errorCode(e)), "error");
   }
 
   // 切到 cloud：先弹出域确认；切到 off 直接保存（cloud->off 不需确认）。
@@ -233,9 +237,18 @@ export function EmbeddingSearchPanel({ onReindex }: { onReindex?: () => void }) 
           <h3 className="text-gx-14 font-semibold text-gx-text-primary">检索索引</h3>
           <p className="mt-0.5 text-gx-12 text-gx-text-tertiary">修改配置或大量变更内容后，可手动重建索引。</p>
         </div>
-        <Button variant="secondary" size="sm" onClick={() => onReindex?.()}>
-          重建索引
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {notEnabled && <span className="text-gx-11 text-gx-text-hint">{SEARCH_NOT_ENABLED.reindexHint}</span>}
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={notEnabled}
+            title={notEnabled ? SEARCH_NOT_ENABLED.reindexHint : undefined}
+            onClick={() => onReindex?.()}
+          >
+            重建索引
+          </Button>
+        </div>
       </section>
 
       {/* off->cloud 数据出域二次确认 */}

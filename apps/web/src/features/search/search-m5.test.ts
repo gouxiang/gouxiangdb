@@ -9,7 +9,8 @@ import { fetchUnifiedSearch } from "./search-query";
 import { normalizeV1, isV1NotFound } from "./search-adapter";
 import { buildConfigPatch } from "./search-config";
 import { adminErrorMessage } from "./search-admin-copy";
-import { errorCode, isForbidden } from "./search-admin-hooks";
+import { errorCode, isForbidden, isSearchNotEnabled } from "./search-admin-hooks";
+import { SEARCH_NOT_ENABLED } from "./search-admin-copy";
 
 function v1Res(over: Partial<V1SearchResponse> = {}): V1SearchResponse {
   return {
@@ -173,6 +174,29 @@ describe("403 静默降级与错误码中性文案", () => {
       for (const banned of ["sqlite", ".so", "endpoint", "vec0", "embedding 端点"]) {
         expect(text.toLowerCase()).not.toContain(banned.toLowerCase());
       }
+    }
+  });
+});
+
+describe("检索子面未启用判定（GX_M5_SEARCH off → admin 端点 404 NOT_FOUND）", () => {
+  it("404 / code=NOT_FOUND 认作未启用，不当普通错误", () => {
+    expect(isSearchNotEnabled(new ApiError(404, { error: "接口不存在", code: "NOT_FOUND" } as never))).toBe(true);
+    expect(isSearchNotEnabled(new ApiError(404, {}))).toBe(true);
+    expect(isSearchNotEnabled(new ApiError(500, { code: "NOT_FOUND" } as never))).toBe(true);
+  });
+
+  it("其它错误/越权不算未启用，仍走原有分支", () => {
+    expect(isSearchNotEnabled(new ApiError(403, {}))).toBe(false);
+    expect(isSearchNotEnabled(new ApiError(500, { code: "REINDEX_FAILED" } as never))).toBe(false);
+    expect(isSearchNotEnabled(new TypeError("x"))).toBe(false);
+  });
+
+  it("未启用文案讲清功能没开而非稍后重试，且关键词检索照常", () => {
+    expect(SEARCH_NOT_ENABLED.title).toContain("未启用");
+    expect(SEARCH_NOT_ENABLED.body).toContain("开启检索开关");
+    expect(SEARCH_NOT_ENABLED.body).toContain("关键词检索");
+    for (const t of [SEARCH_NOT_ENABLED.title, SEARCH_NOT_ENABLED.body, SEARCH_NOT_ENABLED.reindexHint]) {
+      expect(t).not.toContain("稍后重试");
     }
   });
 });

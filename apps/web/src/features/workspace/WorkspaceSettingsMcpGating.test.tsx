@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderToString } from "react-dom/server";
 import { StaticRouter } from "react-router-dom/server";
 import { Routes, Route } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 let enterpriseOn = false;
 let isOwner = false;
@@ -17,6 +18,7 @@ vi.mock("../contacts/contacts-hooks", () => ({
 vi.mock("../search/search-admin-hooks", () => ({
   useReindex: () => ({ mutate: vi.fn(), isPending: false }),
   isForbidden: () => false,
+  isSearchNotEnabled: () => false,
   errorCode: () => null,
 }));
 
@@ -30,13 +32,17 @@ vi.mock("../settings/pat-hooks", () => ({
 
 import { WorkspaceSettingsPage } from "./WorkspaceSettingsPage";
 
-function renderPage(): string {
+function renderPage(location = "/workspace/settings"): string {
+  // 资产/导航子页内部用 useQuery（SSR 不跑 queryFn），需要 QueryClient 上下文。
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderToString(
-    <StaticRouter location="/workspace/settings">
-      <Routes>
-        <Route path="/workspace/settings/*" element={<WorkspaceSettingsPage />} />
-      </Routes>
-    </StaticRouter>,
+    <QueryClientProvider client={qc}>
+      <StaticRouter location={location}>
+        <Routes>
+          <Route path="/workspace/settings/*" element={<WorkspaceSettingsPage />} />
+        </Routes>
+      </StaticRouter>
+    </QueryClientProvider>,
   ).replace(/<!--[^>]*-->/g, "");
 }
 
@@ -57,5 +63,31 @@ describe("工作区设置 MCP 接入入口门控（fail-closed）", () => {
     enterpriseOn = true;
     const html = renderPage();
     expect(html).toContain("MCP 接入");
+  });
+});
+
+// 子页由 URL 的 splat 驱动：刷新/直访/分享链接落到同一子页（旧的 /settings/nav 仍可用）。
+describe("工作区设置子页按 URL 落位", () => {
+  it("/workspace/settings/general → 通用", () => {
+    const html = renderPage("/workspace/settings/general");
+    expect(html).toContain("组织通讯录、导航编排与资产入口");
+  });
+
+  it("/workspace/settings/nav → 导航编排（旧链接不坏）", () => {
+    manageMenu = true;
+    const html = renderPage("/workspace/settings/nav");
+    expect(html).toContain("导航编排");
+    expect(html).not.toContain("组织通讯录、导航编排与资产入口");
+  });
+
+  it("/workspace/settings/assets → 资产", () => {
+    const html = renderPage("/workspace/settings/assets");
+    expect(html).toContain("智能数据库");
+  });
+
+  it("/workspace/settings/mcp（企业组织开启）→ MCP 接入", () => {
+    enterpriseOn = true;
+    const html = renderPage("/workspace/settings/mcp");
+    expect(html).toContain("为 AI 客户端签发访问令牌");
   });
 });

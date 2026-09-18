@@ -12,8 +12,8 @@ import { NavComposer } from "./NavComposer";
 import { EmbeddingSearchPanel } from "../search/EmbeddingSearchPanel";
 import { SearchCoveragePanel } from "../search/SearchCoveragePanel";
 import { ReindexModal } from "../search/ReindexModal";
-import { useReindex, isForbidden, errorCode } from "../search/search-admin-hooks";
-import { adminErrorMessage } from "../search/search-admin-copy";
+import { useReindex, isForbidden, isSearchNotEnabled, errorCode } from "../search/search-admin-hooks";
+import { adminErrorMessage, SEARCH_NOT_ENABLED } from "../search/search-admin-copy";
 import { PatListPanel } from "../settings/PatListPanel";
 import { useEnterpriseOrgFlag } from "../settings/pat-hooks";
 import { toast } from "../../components/ui";
@@ -111,19 +111,13 @@ export function WorkspaceSettingsPage() {
   const [reindexOpen, setReindexOpen] = useState(false);
   const reindex = useReindex();
 
-  const initial: Section =
-    splat === "contacts"
-      ? "contacts"
-      : splat === "nav"
-        ? "nav"
-        : splat === "search"
-          ? "search"
-          : splat === "mcp"
-            ? "mcp"
-            : splat === "assets"
-              ? "assets"
-              : "general";
-  const [section, setSection] = useState<Section>(initial);
+  // 子页由 URL 驱动（/workspace/settings/<section>）：刷新/直访落到同一子页，链接可分享。
+  // 无 splat（/workspace/settings）与未知 splat 一并落到「通用」，旧的 /settings/nav 仍可用。
+  const section: Section =
+    splat === "contacts" || splat === "nav" || splat === "search" || splat === "mcp" || splat === "assets"
+      ? splat
+      : "general";
+  const goSection = (s: Section) => navigate(`/workspace/settings/${s}`);
 
   const visibleSections = SECTIONS.filter(
     (s) => (!s.ownerOnly || isOwner) && (!s.enterpriseOnly || enterpriseOn),
@@ -141,7 +135,13 @@ export function WorkspaceSettingsPage() {
         toast("已开始在后台重建索引", "success");
       },
       onError: (e) => {
-        if (!isForbidden(e)) toast(adminErrorMessage(errorCode(e)), "error");
+        // 子面未启用（404 NOT_FOUND）明说"没启用"；越权静默；其余给中性文案。
+        if (!isForbidden(e)) {
+          toast(
+            isSearchNotEnabled(e) ? SEARCH_NOT_ENABLED.toast : adminErrorMessage(errorCode(e)),
+            "error",
+          );
+        }
         setReindexOpen(false);
       },
     });
@@ -162,7 +162,7 @@ export function WorkspaceSettingsPage() {
           <button
             key={s.key}
             type="button"
-            onClick={() => setSection(s.key)}
+            onClick={() => goSection(s.key)}
             className={[
               "relative mx-2 flex items-center gap-2 rounded-gx-sm px-2 py-1.5 text-left text-gx-13 transition-colors",
               effectiveSection === s.key
@@ -189,7 +189,7 @@ export function WorkspaceSettingsPage() {
               <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <button
                   type="button"
-                  onClick={() => setSection("contacts")}
+                  onClick={() => goSection("contacts")}
                   className="flex items-start gap-3 rounded-gx-lg border border-gx-separator p-4 text-left hover:bg-gx-row-hover"
                 >
                   <Icon name="building" size={18} className="mt-0.5 text-gx-accent" />
@@ -200,7 +200,7 @@ export function WorkspaceSettingsPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSection("nav")}
+                  onClick={() => goSection("nav")}
                   className="flex items-start gap-3 rounded-gx-lg border border-gx-separator p-4 text-left hover:bg-gx-row-hover"
                 >
                   <Icon name="sitemap" size={18} className="mt-0.5 text-gx-accent" />
