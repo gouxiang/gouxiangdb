@@ -200,3 +200,58 @@ describe("编排后 reconcile 口径", () => {
     expect(blocking.length).toBe(0);
   });
 });
+
+// AC-M3-1：菜单快捷项的拖拽 / 删除只改菜单编排（menu_items），不得改动被挂实体的权威归属
+// （nav_nodes.parentId）。这里用全新 c2_ 前缀资源，自证不依赖本文件其它用例的可变状态。
+describe("menu 快捷项 reorder/delete 不改权威 nav_nodes 归属（AC-M3-1）", () => {
+  it("拖拽 + 删除快捷项后：被挂表权威节点 parentId 严格不变、表仍可读、reconcile 阻断差全 0", async () => {
+    const tableNodeId = nodeId("table", ids.tableId);
+    const before = await h.prisma.navNode.findUnique({ where: { id: tableNodeId } });
+    expect(before).not.toBeNull();
+    expect(before!.deletedAt).toBeNull();
+    const beforeParent = before!.parentId;
+
+    // 两个全新容器各挂一个指向同一张表的快捷项。
+    const setup = await patchMenu("owner", [
+      { op: "insert", id: "c2_cA", type: "container", ord: 10 },
+      { op: "insert", id: "c2_cB", type: "container", ord: 11 },
+      { op: "insert", id: "c2_sA", type: "shortcut", parentId: "c2_cA", nodeId: tableNodeId, ord: 0 },
+      { op: "insert", id: "c2_sB", type: "shortcut", parentId: "c2_cB", nodeId: tableNodeId, ord: 0 },
+    ]);
+    expect(setup.status).toBe(200);
+
+    // 把 c2_sA 从 cA 拖到 cB（cB 此时含 sB+sA 两个快捷项）。
+    const move = await patchMenu("owner", [
+      { op: "reorder", id: "c2_sA", parentId: "c2_cB", ord: 1 },
+    ]);
+    expect(move.status).toBe(200);
+
+    // 删除容器 cB：级联软删其内两个快捷项（仅菜单编排变化）。
+    const del = await patchMenu("owner", [{ op: "delete", id: "c2_cB" }]);
+    expect(del.status).toBe(200);
+    const menu = await getMenu();
+    expect(menu.items.some((m) => m.id === "c2_cB")).toBe(false);
+    expect(menu.items.some((m) => m.id === "c2_sA")).toBe(false);
+    expect(menu.items.some((m) => m.id === "c2_sB")).toBe(false);
+
+    // 权威表节点行 parentId 零变化，节点仍存活——快捷项拖拽 / 删除未改权威归属。
+    const after = await h.prisma.navNode.findUnique({ where: { id: tableNodeId } });
+    expect(after).not.toBeNull();
+    expect(after!.parentId).toEqual(beforeParent);
+    expect(after!.deletedAt).toBeNull();
+
+    // 表仍可经真实读取路由读取（旧版 /api/tables/:id，requireCanView）。
+    const read = await h.app.request(`/api/tables/${ids.tableId}`, {
+      headers: await h.auth("owner"),
+    });
+    expect(read.status).toBe(200);
+
+    // 菜单编排不制造 reconcile 阻断差异 A/B/C。
+    const report = await h.prisma.$transaction((tx) => computeDiffs(tx));
+    const blocking = [...report.A, ...report.B, ...report.C];
+    if (blocking.length) {
+      throw new Error(blocking.map((d) => `${d.code}:${d.message}`).join("\n"));
+    }
+    expect(blocking.length).toBe(0);
+  });
+});

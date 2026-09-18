@@ -136,3 +136,31 @@ describe(`管理面成员列表 ${N} 成员规模（留证，非硬指标）`, (
     expect(elapsed).toBeLessThan(1000);
   });
 });
+
+// 门控硬阈值（SPEC 宽松门 p95<150ms）：默认 skip，常规 CI/全量门零抖动、零额外耗时；
+// 仅 GX_PERF_GATE=1 时执行。复用 beforeAll 已造好的同一批 500 成员夹具与 percentile 口径
+// （不新起造数），逐接口独立采样、去首轮冷启动后取 warm p95。
+const perfGateIt = process.env.GX_PERF_GATE ? it : it.skip;
+
+describe(`管理面 ${N} 成员性能硬门（GX_PERF_GATE=1 启用）`, () => {
+  perfGateIt("门控：通讯录三接口各自 warm p95 < 150ms（SPEC 宽松门）", async () => {
+    const endpoints = [
+      "/api/v1/org/members?page=1&limit=100",
+      "/api/v1/org/departments",
+      "/api/v1/org/roles",
+    ];
+    for (const url of endpoints) {
+      const durations: number[] = [];
+      for (let i = 0; i < SAMPLES; i++) {
+        const t0 = performance.now();
+        const res = await h.app.request(url, { headers: { Authorization: `Bearer ${ownerToken}` } });
+        durations.push(performance.now() - t0);
+        expect(res.status).toBe(200);
+      }
+      const warm = [...durations].sort((a, b) => a - b).slice(1); // 去首轮冷启动，与文件既有口径一致
+      const p95 = percentile(warm, 95);
+      console.log(`[S8 perf gate] ${url}: warmP95=${p95.toFixed(2)} ms (gate <150)`);
+      expect(p95).toBeLessThan(150);
+    }
+  });
+});
