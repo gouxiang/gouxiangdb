@@ -4,7 +4,7 @@
 
 import type { Config } from "tailwindcss";
 import plugin from "tailwindcss/plugin";
-import { colors, spacing, radius, fontSize, fontWeight, zIndex } from "./index.js";
+import { colors, spacing, radius, fontSize, fontWeight, shadow, zIndex } from "./index.js";
 
 export const gxTailwindConfig: Partial<Config> = {
   theme: {
@@ -14,27 +14,44 @@ export const gxTailwindConfig: Partial<Config> = {
           accent: colors.accent,
           "accent-bg": colors.accentBg,
           "accent-hover": colors.accentHover,
+          selected: colors.selected,
           "text-primary": colors.textPrimary,
           "text-secondary": colors.textSecondary,
           "text-tertiary": colors.textTertiary,
           "text-hint": colors.textHint,
+          "text-faint": colors.textFaint,
           bg: colors.bg,
+          nav1: colors.nav1,
+          nav2: colors.nav2,
           surface: colors.surface,
-          "card-bg": colors.cardBg,
-          zebra: colors.zebra,
-          separator: colors.separator,
+          "table-header": colors.tableHeader,
+          control: colors.control,
+          hover: colors.hover,
+          "row-hover": colors.rowHover,
+          hairline: colors.hairline,
           border: colors.border,
           "border-strong": colors.borderStrong,
-          "row-hover": colors.rowHover,
-          "table-header": colors.tableHeader,
-          "header-edge": colors.headerEdge,
+          "divider-v": colors.dividerV,
+          "logo-block": colors.logoBlock,
+          "avatar-sample": colors.avatarSample,
           success: colors.success,
           "success-bg": colors.successBg,
           warning: colors.warning,
           "warning-bg": colors.warningBg,
           danger: colors.danger,
           "danger-bg": colors.dangerBg,
+          // —— v1 遗留，附录 A 未列，保留供旧类名使用（去留由后续切片决定）——
+          "card-bg": colors.cardBg,
+          zebra: colors.zebra,
+          separator: colors.separator,
+          "header-edge": colors.headerEdge,
         },
+      },
+      boxShadow: {
+        "gx-sm": shadow.sm,
+        "gx-md": shadow.md,
+        "gx-lg": shadow.lg,
+        "gx-xl": shadow.xl,
       },
       spacing: {
         "gx-xxs": `${spacing.xxs}px`,

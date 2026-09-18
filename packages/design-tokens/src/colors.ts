@@ -1,36 +1,43 @@
 // packages/design-tokens/src/colors.ts
-// 从 v1 Shared/Theme.swift GXTheme 1:1 移植
+// 语义色令牌：取值对齐参考设计（docs/design/2026-09-ui-restructure/UI-SPEC.md 附录 A.1）
 // 跨端统一语义色（前后端 + Tailwind + Web 共享）
+// 注意：Tailwind 类名（bg-gx-* / text-gx-* / border-gx-*）保持不变，只换底层取值。
 
 export const colors = {
-  // 品牌主色（v1 GXTheme.accent）
-  accent: "#378ADD",
-  accentBg: "rgba(55, 138, 221, 0.12)",
-  accentHover: "rgba(55, 138, 221, 0.20)",
+  // 品牌主色
+  accent: "#3A6DF0",
+  accentBg: "#EAF2FC",
+  accentHover: "#2F5FD6",
+  /** 选中底（与 accentBg 同值，语义别名：数据行/Tab 选中态） */
+  selected: "#EAF2FC",
 
-  // 文本层级（v1 textPrimary/textSecondary/textTert）
-  textPrimary: "#26215C",
-  textSecondary: "#534AB7",
-  textTertiary: "#5F5E5A",
-  textHint: "#888780",
+  // 文本层级
+  textPrimary: "#16203A",
+  textSecondary: "#2A3550",
+  textTertiary: "#5B6785",
+  textHint: "#8A94AC",
+  textFaint: "#A6AFC6",
 
-  // 表面层级（v1 surface/bg/cardBg/zebra）
-  bg: "#F1EFE8", // 页面底色（v1 灰底）
-  surface: "#FFFFFF", // 主面板（v1 工作台白底）
-  cardBg: "#F1EFE8", // 卡片画布（v1 画廊浅灰画布）
-  zebra: "#F1EFE8", // 表格斑马纹
+  // 表面层级
+  bg: "#F7F9FC", // 页面/内容区底
+  nav1: "#E9EFF9", // L1 一级导航底
+  nav2: "#F4F8FD", // L2 二级面板底
+  surface: "#FFFFFF", // 主面板
+  tableHeader: "#F9FAFC", // 表头 / 汇总条（= gx-surface-alt）
+  control: "#F4F6FA", // 输入框 / 次按钮 / 全局搜索底
+  /** hover 底（与 rowHover 同值，语义别名） */
+  hover: "#F1F5FB",
+  rowHover: "#F1F5FB",
 
-  // 边框（v1 separator/border）
-  separator: "rgba(0, 0, 0, 0.06)",
-  border: "rgba(0, 0, 0, 0.10)",
-  borderStrong: "rgba(0, 0, 0, 0.20)",
+  // 边框与分隔
+  hairline: "#E9EFF9", // 发丝线
+  border: "#DFE3EA",
+  borderStrong: "#C3CAD6",
+  dividerV: "#E1E7F1", // 竖向分隔 1×16
 
-  // 行 hover
-  rowHover: "rgba(0, 0, 0, 0.05)",
-
-  // 表头
-  tableHeader: "#F1EFE8",
-  headerEdge: "rgba(0, 0, 0, 0.04)",
+  // 标识块 / 头像示例色
+  logoBlock: "#E6EDFF",
+  avatarSample: "#E08A34",
 
   // 语义
   success: "#1D9E75",
@@ -41,6 +48,12 @@ export const colors = {
   dangerBg: "rgba(226, 75, 74, 0.10)",
   /** 次级强调色（亮紫）：画布/文档/嵌套卡片等"次级主题" */
   secondaryAlt: "#7F77DD",
+
+  // —— 以下为 v1 GXTheme 遗留令牌（附录 A 未列，本次原样保留，去留由后续切片决定）——
+  cardBg: "#F1EFE8", // 卡片画布（v1 画廊浅灰画布）
+  zebra: "#F1EFE8", // 表格斑马纹
+  separator: "rgba(0, 0, 0, 0.06)",
+  headerEdge: "rgba(0, 0, 0, 0.04)",
 } as const;
 
 export type ColorToken = keyof typeof colors;
@@ -51,7 +64,7 @@ export type ColorToken = keyof typeof colors;
  * 避免视觉堆叠成「一片蓝色」。仅作为前端 JS 取色入口使用，色值集中管理。
  */
 export const AVATAR_PALETTE: readonly string[] = [
-  "#378ADD", // accent
+  "#3A6DF0", // accent（随主色令牌同步）
   "#1D9E75", // success
   "#993556", // 深玫红
   "#BA7517", // warning

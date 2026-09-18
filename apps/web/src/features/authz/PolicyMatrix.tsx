@@ -46,7 +46,7 @@ export function PolicyMatrixRow({
           {name}
         </span>
         {isLegacy && (
-          <span className="shrink-0 rounded-gx-pill bg-gx-row-hover px-1.5 py-0.5 text-gx-11 text-gx-text-hint">
+          <span className="shrink-0 rounded-full bg-gx-row-hover px-1.5 py-0.5 text-gx-11 text-gx-text-hint">
             旧权限投影
           </span>
         )}

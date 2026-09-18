@@ -143,7 +143,7 @@ export function DocPolicyView({ node }: { node: NavNodeDTO }) {
                   <option value="viewer">{ROLE_LABEL.viewer}</option>
                 </select>
               ) : (
-                <span className="rounded-gx-pill bg-gx-row-hover px-1.5 py-0.5 text-gx-11 text-gx-text-hint">
+                <span className="rounded-full bg-gx-row-hover px-1.5 py-0.5 text-gx-11 text-gx-text-hint">
                   仅企业权限引擎生效
                 </span>
               )}

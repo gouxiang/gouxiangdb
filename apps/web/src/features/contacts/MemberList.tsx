@@ -159,7 +159,7 @@ export function MemberList({
                     </div>
                     <div className="hidden shrink-0 items-center gap-1 sm:flex">
                       {mainDept && (
-                        <span className="max-w-[120px] truncate rounded-gx-pill bg-gx-bg px-2 py-0.5 text-gx-11 text-gx-text-secondary">
+                        <span className="max-w-[120px] truncate rounded-full bg-gx-bg px-2 py-0.5 text-gx-11 text-gx-text-secondary">
                           {deptName(mainDept)}
                         </span>
                       )}

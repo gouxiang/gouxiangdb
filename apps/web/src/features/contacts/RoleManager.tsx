@@ -120,7 +120,7 @@ function RoleDetail({
         <div className="flex items-center gap-2">
           <span className="text-gx-14 font-semibold text-gx-text-primary">{role.name}</span>
           {role.isSystem && (
-            <span className="rounded-gx-pill bg-gx-warning-bg px-2 py-0.5 text-gx-11 font-medium text-gx-warning">系统角色</span>
+            <span className="rounded-full bg-gx-warning-bg px-2 py-0.5 text-gx-11 font-medium text-gx-warning">系统角色</span>
           )}
           {canManage && !role.isSystem && (
             <Button size="sm" variant="ghost" icon="edit" className="ml-auto" onClick={onEdit}>编辑</Button>
@@ -132,7 +132,7 @@ function RoleDetail({
             <span className="text-gx-12 text-gx-text-hint">无组织管理动作</span>
           ) : (
             role.actions.map((a) => (
-              <span key={a} className="rounded-gx-pill bg-gx-accent-bg px-2 py-0.5 text-gx-11 font-medium text-gx-accent">
+              <span key={a} className="rounded-full bg-gx-accent-bg px-2 py-0.5 text-gx-11 font-medium text-gx-accent">
                 {ACTION_LABEL[a]}
               </span>
             ))

@@ -161,7 +161,7 @@ function Row(props: RowProps) {
           <span className="shrink-0 text-gx-11 text-gx-text-hint">→ {summary.name}</span>
         )}
         {dangling && (
-          <span className="shrink-0 rounded-gx-pill bg-gx-warning-bg px-1.5 py-0.5 text-gx-11 text-gx-warning">
+          <span className="shrink-0 rounded-full bg-gx-warning-bg px-1.5 py-0.5 text-gx-11 text-gx-warning">
             {STATE_LABEL[state]}
           </span>
         )}

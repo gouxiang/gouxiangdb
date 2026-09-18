@@ -102,7 +102,7 @@ function ActionSources({
         <span className="flex-1 text-gx-13 font-medium text-gx-text-primary">{label}</span>
         <span
           className={[
-            "rounded-gx-pill px-1.5 py-0.5 text-gx-11",
+            "rounded-full px-1.5 py-0.5 text-gx-11",
             allowed ? "bg-gx-accent-bg text-gx-accent" : "bg-gx-row-hover text-gx-text-hint",
           ].join(" ")}
         >

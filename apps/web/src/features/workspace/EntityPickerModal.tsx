@@ -104,7 +104,7 @@ export function EntityPickerModal({
               type="button"
               onClick={() => setTab(t.key)}
               className={[
-                "rounded-gx-pill px-2.5 py-1 text-gx-12 transition-colors",
+                "rounded-full px-2.5 py-1 text-gx-12 transition-colors",
                 tab === t.key
                   ? "bg-gx-accent-bg font-medium text-gx-accent"
                   : "text-gx-text-secondary hover:bg-gx-row-hover",

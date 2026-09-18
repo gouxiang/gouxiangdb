@@ -19,7 +19,7 @@ export function StatusBadge({ status }: { status: UserAccountStatus }) {
   };
   const s = map[status];
   return (
-    <span className={`inline-flex items-center gap-1 rounded-gx-pill px-2 py-0.5 text-gx-12 font-medium ${s.cls}`}>
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-gx-12 font-medium ${s.cls}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} aria-hidden="true" />
       {s.label}
     </span>

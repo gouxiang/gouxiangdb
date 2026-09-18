@@ -136,12 +136,12 @@ export function MemberDrawer({
                       <div className="ml-auto flex items-center gap-2">
                         {inDept && (
                           isMain ? (
-                            <span className="rounded-gx-pill bg-gx-accent-bg px-2 py-0.5 text-gx-11 font-medium text-gx-accent">主部门</span>
+                            <span className="rounded-full bg-gx-accent-bg px-2 py-0.5 text-gx-11 font-medium text-gx-accent">主部门</span>
                           ) : canManage ? (
                             <button
                               type="button"
                               onClick={() => setMainId(d.id)}
-                              className="rounded-gx-pill border border-gx-border px-2 py-0.5 text-gx-11 text-gx-text-tertiary hover:bg-gx-bg"
+                              className="rounded-full border border-gx-border px-2 py-0.5 text-gx-11 text-gx-text-tertiary hover:bg-gx-bg"
                             >
                               设为主部门
                             </button>

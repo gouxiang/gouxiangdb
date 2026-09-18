@@ -77,7 +77,7 @@ export function InheritanceToggle({
         onClick={begin}
         title={inheritAncestors ? "当前从上级继承，点击可中断" : "已中断继承，点击可恢复"}
         className={[
-          "flex items-center gap-1 rounded-gx-pill border px-2 py-1 text-gx-12 transition-colors",
+          "flex items-center gap-1 rounded-full border px-2 py-1 text-gx-12 transition-colors",
           inheritAncestors
             ? "border-gx-separator text-gx-text-secondary hover:bg-gx-row-hover"
             : "border-gx-accent bg-gx-accent-bg font-medium text-gx-accent",
