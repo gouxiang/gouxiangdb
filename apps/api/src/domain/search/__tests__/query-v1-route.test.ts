@@ -131,7 +131,13 @@ beforeEach(() => {
 function app(): Hono {
   const app = new Hono();
   app.use("*", async (c, next) => {
-    c.set("auth", { userId: U, status: "ACTIVE", tokenVersion: 0, workspaceId: "ws_default" });
+    c.set("auth", {
+      userId: U,
+      status: "ACTIVE",
+      tokenVersion: 0,
+      workspaceId: "ws_default",
+      mustChangePassword: false,
+    });
     await next();
   });
   app.onError((err, c) => {

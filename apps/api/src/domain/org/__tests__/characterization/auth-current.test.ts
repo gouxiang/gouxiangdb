@@ -115,9 +115,11 @@ describe("JWT 签发形态", () => {
 });
 
 describe("signup / login 响应契约（字段只许增不许减）", () => {
+  // 只许加不许减：迁移 #24（users.mustChangePassword）后 publicUser 增加该键，
+  // 属"加"而非契约破坏，故同步入基线集合（移除/改名即红）。
   const PUBLIC_USER_KEYS = [
     "avatarUrl", "bio", "createdAt", "displayName", "email", "id",
-    "phone", "updatedAt", "username",
+    "mustChangePassword", "phone", "updatedAt", "username",
   ].sort();
 
   it("signup -> 200 { token, user }，publicUser 键集合不变", async () => {

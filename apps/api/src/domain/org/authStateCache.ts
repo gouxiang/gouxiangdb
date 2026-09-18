@@ -12,6 +12,7 @@ export interface AuthStateRow {
   status: string;
   tokenVersion: number;
   workspaceId: string | null;
+  mustChangePassword: boolean;
 }
 
 interface Entry extends AuthStateRow {
@@ -41,7 +42,13 @@ export function createAuthStateCache(): AuthStateCache {
     // 命中提升为最近使用（Map 删除再置末尾）。
     map.delete(userId);
     map.set(userId, e);
-    return { userId: e.userId, status: e.status, tokenVersion: e.tokenVersion, workspaceId: e.workspaceId };
+    return {
+      userId: e.userId,
+      status: e.status,
+      tokenVersion: e.tokenVersion,
+      workspaceId: e.workspaceId,
+      mustChangePassword: e.mustChangePassword,
+    };
   }
 
   function set(row: AuthStateRow, ttlMs: number): void {

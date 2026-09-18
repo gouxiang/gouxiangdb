@@ -6,7 +6,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "./db.js";
 import { audit as recordAudit } from "./audit/emit.js";
-import { issueToken, resolveActiveAuth, USER_STATUS } from "./domain/org/authState.js";
+import { issueToken, resolveActiveAuth, invalidateAuthState, USER_STATUS } from "./domain/org/authState.js";
 import { publicUser } from "./domain/userProjection.js";
 import { withWriteTx } from "./db.js";
 import { bootstrapFirstOwnerTx } from "./domain/org/members.js";
@@ -165,7 +165,14 @@ auth.post("/me/change-password", async (c) => {
   const ok = await bcrypt.compare(parsed.data.currentPassword, user.passwordHash);
   if (!ok) return c.json({ error: "当前密码错误", code: "UNAUTHORIZED" }, 401);
   const passwordHash = await bcrypt.hash(parsed.data.newPassword, 10);
-  await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+  // 解除强制改密闸门：与 passwordHash 同一次写，避免"改了密但闸门还开着"的中间态；
+  // 同时失效 authStateCache，否则开短缓存（GX_AUTH_STATE_TTL_MS>0）时解析仍返回旧的 true，
+  // 用户刚改完密就被 403 拦住（不 bump tokenVersion：改密不应踢掉自己其它端的登录态）。
+  await prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash, mustChangePassword: false },
+  });
+  invalidateAuthState(userId);
   recordAudit(c, { event: "change_password", status: 200, actorId: userId });
   return c.json({ ok: true });
 });

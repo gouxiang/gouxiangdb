@@ -202,9 +202,15 @@ model User {
   //    故【只加列不建 Prisma 关系/FK】，引用完整性由应用层保证（计划 §11-11）。
   //  - disabledAt/inviteTokenHash/invitedAt 停用与邀请一次性激活链接所用；
   //    lastSeenAt 无消费方，不建（YAGNI）。
+  //  - mustChangePassword：首次部署由 init-admin 脚本创建的超级管理员置 true，登录后被
+  //    middleware/mustChangePassword.ts 的改密闸门拦截（白名单外一律 403）；改密成功后
+  //    置 false 解除。存量行默认 false，普通注册/邀请账号不受影响。
   status          String    @default("ACTIVE")
   workspaceId     String?
   tokenVersion    Int       @default(0)
+  // 首次部署由 init-admin 创建的超级管理员置 true：登录后被强制改密闸门拦截，
+  // 改密成功后清除（见 src/middleware/mustChangePassword.ts 与 auth.ts change-password）。
+  mustChangePassword Boolean @default(false)
   disabledAt      DateTime?
   inviteTokenHash String?
   invitedAt       DateTime?

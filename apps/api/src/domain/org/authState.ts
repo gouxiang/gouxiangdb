@@ -25,6 +25,8 @@ export interface ResolvedAuth {
   status: string;
   tokenVersion: number;
   workspaceId: string | null;
+  // 首次部署超级管理员强制改密标记（users.mustChangePassword）；改密成功后置 false。
+  mustChangePassword: boolean;
 }
 
 interface BearerHeader {
@@ -65,7 +67,7 @@ function readBearerToken(c: BearerHeader): string {
 /**
  * 鉴权共享解析核心：
  *   1) 取 Bearer token；2) 验签 HS256，无 tv claim 视为 tv=0（平滑升级，不踢存量登录）；
- *   3) 按 PK 查 users（status/tokenVersion/workspaceId），TTL>0 时先走有界缓存；
+ *   3) 按 PK 查 users（status/tokenVersion/workspaceId/mustChangePassword），TTL>0 时先走有界缓存；
  *   4) 用户不存在 / status 非 ACTIVE（DISABLED 或 INVITED）/ tv 不匹配 -> null。
  * 不向调用方区分失败原因（端点侧统一 401）。
  */
@@ -95,7 +97,7 @@ export async function resolveActiveAuth(c: BearerHeader): Promise<ResolvedAuth |
 
   const user = await prisma.user.findUnique({
     where: { id: payloadUserId },
-    select: { id: true, status: true, tokenVersion: true, workspaceId: true },
+    select: { id: true, status: true, tokenVersion: true, workspaceId: true, mustChangePassword: true },
   });
   if (!user) return null;
   if (user.status !== USER_STATUS.ACTIVE) return null;
@@ -106,6 +108,7 @@ export async function resolveActiveAuth(c: BearerHeader): Promise<ResolvedAuth |
     status: user.status,
     tokenVersion: user.tokenVersion,
     workspaceId: user.workspaceId,
+    mustChangePassword: user.mustChangePassword,
   };
   if (ttl > 0) authStateCache.set(resolved, ttl);
   return resolved;

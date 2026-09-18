@@ -37,6 +37,7 @@ import { VERSION } from "./version.js";
 import { secureHeadersMiddleware } from "./middleware/secureHeaders.js";
 import { bodyLimitDispatch } from "./middleware/bodyLimit.js";
 import { rateLimitMiddleware } from "./middleware/rateLimit.js";
+import { mustChangePasswordMiddleware } from "./middleware/mustChangePassword.js";
 import { benchMetricsMiddleware } from "./ops/benchMetrics.js";
 import { createWebStaticMiddleware, resolveWebDist } from "./ops/serveWeb.js";
 
@@ -98,6 +99,12 @@ function createMount(webRoot: string | null): Hono {
   mount.use("*", bodyLimitDispatch);
   // 限流：auth 端点严格 10/60s，其余 /api 兜底 600/60s；健康/上传在选择器内豁免。
   mount.use("*", rateLimitMiddleware);
+
+  // 强制改密闸门：**必须在业务路由之前**挂载，否则 /api 路由已执行完再拦无意义（挂到
+  // mount.route("/api", api) 之后时 Hono 按注册顺序先命中业务路由，闸门根本不会执行）。
+  // 只拦已登录且 users.mustChangePassword=true 的请求，白名单外的 /api 一律 403；
+  // 未登录/坏令牌放行交给各路由自己的 401（详见 middleware/mustChangePassword.ts）。
+  mount.use("/api/*", mustChangePasswordMiddleware);
 
   // 运维健康端点（根级、不鉴权）；/api/health 保留为兼容别名（桌面壳与旧脚本在用）。
   mount.route("/healthz", healthz);

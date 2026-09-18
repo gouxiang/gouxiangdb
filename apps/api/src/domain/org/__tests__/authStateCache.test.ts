@@ -4,7 +4,14 @@ import { describe, expect, it } from "vitest";
 import { createAuthStateCache, type AuthStateRow } from "../authStateCache.js";
 
 function row(userId: string, patch: Partial<AuthStateRow> = {}): AuthStateRow {
-  return { userId, status: "ACTIVE", tokenVersion: 0, workspaceId: "ws_default", ...patch };
+  return {
+    userId,
+    status: "ACTIVE",
+    tokenVersion: 0,
+    workspaceId: "ws_default",
+    mustChangePassword: false,
+    ...patch,
+  };
 }
 
 describe("createAuthStateCache", () => {

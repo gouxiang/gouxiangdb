@@ -6,7 +6,7 @@ import type { User } from "@prisma/client";
 type PublicUserSource = Pick<
   User,
   "id" | "email" | "displayName" | "username" | "phone" |
-  "avatarUrl" | "bio" | "createdAt" | "updatedAt"
+  "avatarUrl" | "bio" | "createdAt" | "updatedAt" | "mustChangePassword"
 >;
 
 export function publicUser(u: PublicUserSource) {
@@ -20,5 +20,7 @@ export function publicUser(u: PublicUserSource) {
     bio: u.bio,
     createdAt: u.createdAt.toISOString(),
     updatedAt: u.updatedAt?.toISOString() ?? null,
+    // 首次部署超级管理员为 true：前端据此渲染强制改密页（服务端另有 403 闸门兜底）。
+    mustChangePassword: u.mustChangePassword,
   };
 }

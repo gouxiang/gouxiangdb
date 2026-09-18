@@ -50,7 +50,10 @@ export type AuditEventName =
   // M6/S7 鉴权 MCP 服务调用面（§409）：每次 tools/call 收尾必记（成功/被拒/未注册工具同记，
   // resultCode 区分）；认证失败单独一枚（ip/patPrefix 级，绝不记完整 token）。
   | "mcp_tool_call"
-  | "mcp_auth_failure";
+  | "mcp_auth_failure"
+  // 首次部署超级管理员初始化（deploy 链路 init-admin 脚本在迁移后创建首个 ACTIVE 用户 +
+  // 系统 owner 授予，并置 mustChangePassword=true 强制首登改密）。detail 绝不落初始密码。
+  | "admin_initialized";
 
 export interface AuditInput {
   event: AuditEventName;

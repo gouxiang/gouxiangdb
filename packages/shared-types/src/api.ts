@@ -54,6 +54,8 @@ export interface UserDTO {
   bio: string | null;
   createdAt: string;
   updatedAt: string | null;
+  // 首次部署超级管理员为 true（可选：旧后端/存量响应不带该键，前端按 falsy 处理）。
+  mustChangePassword?: boolean;
 }
 
 // ============ Base ============
