@@ -1,5 +1,6 @@
 // 数据行：渲染复选框 + 行号 + 展开按钮（sticky 首列），以及各字段单元格。
 // 单元格在 active 时高亮、在 editing 时渲染 CellEditor。
+// 行颜色（rowColor）：按 RowColorPanel 约定以左侧色条呈现，不覆盖 zebra/selected/hover 背景。
 
 import { clsx } from "clsx";
 import type { FieldDTO, RecordDTO, LinkRefDTO, PermissionSet } from "@gx/shared-types";
@@ -9,6 +10,9 @@ import { CellRenderer } from "../cells/CellRenderer";
 import { CellEditor } from "../cells/CellEditor";
 import { cellTextAlign, isReadOnlyField } from "../cells/format";
 
+// 行颜色左侧色条宽度（px）
+const ROW_COLOR_BAR_PX = 3;
+
 export interface GridRowProps {
   record: RecordDTO;
   fields: FieldDTO[];
@@ -16,6 +20,8 @@ export interface GridRowProps {
   rowHeight: number;
   zebra: boolean;
   selected: boolean;
+  /** 行颜色（左侧色条），null/缺省表示不着色 */
+  rowColor?: string | null;
   activeFieldId: string | null;
   editing: { recordId: string; fieldId: string } | null;
   permissions: PermissionSet;
@@ -40,6 +46,7 @@ export function GridRow(props: GridRowProps) {
     rowHeight,
     zebra,
     selected,
+    rowColor,
     activeFieldId,
     editing,
     permissions,
@@ -73,7 +80,12 @@ export function GridRow(props: GridRowProps) {
       {/* 行首固定列：复选框 + 行号 + 展开 */}
       <td
         className="sticky left-0 z-20 border-b border-r border-gx-separator bg-gx-surface"
-        style={{ width: rowHeaderWidth, minWidth: rowHeaderWidth, height: rowHeight }}
+        style={{
+          width: rowHeaderWidth,
+          minWidth: rowHeaderWidth,
+          height: rowHeight,
+          ...(rowColor ? { boxShadow: `inset ${ROW_COLOR_BAR_PX}px 0 0 ${rowColor}` } : {}),
+        }}
       >
         <div className="flex h-full items-center gap-1 px-1.5">
           <Checkbox checked={selected} onChange={() => onToggleRowSelect(record.id)} />

@@ -889,7 +889,7 @@ function ReadValue({ field, value }: { field: FieldDTO; value: CellValue | undef
                   : { backgroundColor: "rgba(0,0,0,0.06)", color: "#5F5E5A" }
               }
             >
-              {typeof v === "string" ? v : JSON.stringify(v)}
+              {opt?.name ?? (typeof v === "string" ? v : JSON.stringify(v))}
             </span>
           );
         })}

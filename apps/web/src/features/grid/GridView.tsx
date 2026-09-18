@@ -17,7 +17,7 @@ import { ROW_HEIGHT_PX } from "@gx/shared-types";
 import { useFields, useTables, useGXMutations } from "../../api/hooks";
 import { useRecordsInfinite } from "../../api/records-paging-hooks";
 import { isComputedInMem } from "../../api/records-paging";
-import { Spinner, EmptyState, IconButton, Modal, Select, Input, Button, toast } from "../../components/ui";
+import { Spinner, EmptyState, IconButton, Modal, Select, Input, Button, toast, COLOR_PALETTE } from "../../components/ui";
 import { ResultNotice, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
 import { GridToolbar } from "./GridToolbar";
 import { GridHeaderCell } from "./GridHeaderCell";
@@ -37,6 +37,9 @@ export interface GridViewProps {
 }
 
 const ROW_HEADER_W = 56;
+
+// 「按选择」模式兜底色：选项缺 color（CSV 导入 / API 创建）时取调色板首色，避免整行不着色
+const ROW_COLOR_FALLBACK = COLOR_PALETTE[0];
 
 // 不同字段类型的默认列宽
 function defaultColWidth(field: FieldDTO): number {
@@ -301,11 +304,12 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
   const rowColorOf = (rec: RecordDTO): string | null => {
     const rc = cfg.rowColor;
     if (rc.mode === "bySelect" && rc.fieldId) {
-      const opt = resolveSelectOption(
-        visibleFields.find((f) => f.id === rc.fieldId) as FieldDTO,
-        rec.fields[rc.fieldId],
-      );
-      return opt?.color ?? null;
+      const field = visibleFields.find((f) => f.id === rc.fieldId);
+      if (!field) return null;
+      const opt = resolveSelectOption(field, rec.fields[rc.fieldId]);
+      // 无值或解析不到选项 → 不着色；选项存在但缺 color（CSV 导入 / API 创建）→ 调色板首色兜底
+      if (!opt) return null;
+      return opt.color ?? ROW_COLOR_FALLBACK;
     }
     if (rc.mode === "byCondition") {
       for (const c of rc.conditions) {
@@ -411,6 +415,7 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
                     rowHeight={ROW_HEIGHT_PX[cfg.rowHeight]}
                     zebra={i % 2 === 1}
                     selected={selection.isSelected(rec.id)}
+                    rowColor={rowColorOf(rec)}
                     activeFieldId={active?.recordId === rec.id ? active.fieldId : null}
                     editing={editing}
                     permissions={permissions}
@@ -578,7 +583,7 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
                       onStartEdit={onStartEdit}
                       onCommitEdit={onCommitEdit}
                       onCancelEdit={onCancelEdit}
-                      {...(color ? { rowColor: color } : {})}
+                      rowColor={color}
                     />
                   );
                 })}
@@ -741,8 +746,11 @@ function exportCsv(fields: FieldDTO[], records: RecordDTO[]) {
     fields.map((f) => {
       const v = r.fields[f.id];
       if (v == null) return esc("");
-      if (Array.isArray(v)) return esc(JSON.stringify(v));
-      return esc(String(v));
+      // 统一走单元格格式化器：选择类字段导出选项名而非 optionId，日期/货币/百分比按显示口径
+      const text = formatCell(v, f);
+      if (text !== "") return esc(text);
+      // 格式化器无输出时（空数组 / 未识别的对象数组）回退到可机读原文
+      return esc(Array.isArray(v) ? JSON.stringify(v) : String(v));
     }),
   );
   const csv = [header, ...rows].map((row) => row.join(",")).join("\n");

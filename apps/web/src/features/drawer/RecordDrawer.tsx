@@ -329,9 +329,21 @@ function RecordDrawer({
                       onChange={(e) => setDraftComment(e.target.value)}
                       placeholder="写下评论…"
                       rows={2}
+                      disabled={!currentId}
                     />
+                    {!currentId && (
+                      <div className="flex items-center gap-1.5 text-gx-12 text-gx-text-hint">
+                        <Icon name="alertCircle" size={13} />
+                        请先选择一条记录后再发表评论
+                      </div>
+                    )}
                     <div className="flex justify-end">
-                      <Button size="sm" variant="primary" disabled={!draftComment.trim()} onClick={submitComment}>
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={!currentId || !draftComment.trim()}
+                        onClick={submitComment}
+                      >
                         发表
                       </Button>
                     </div>
