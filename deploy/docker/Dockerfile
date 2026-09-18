@@ -51,20 +51,9 @@ RUN DATABASE_URL=file:./_builder_generate_placeholder.db \
 
 # 生成精简运行时 package.json（与 deploy/bin/package-release.mjs 同口径）：
 # 去掉 esbuild 已内化的 @gx/* workspace 依赖，把 prisma CLI（源工程在 devDeps）提入 deps。
-RUN node -e '\
-  const fs=require("fs");\
-  const root=JSON.parse(fs.readFileSync("package.json","utf8"));\
-  const api=JSON.parse(fs.readFileSync("apps/api/package.json","utf8"));\
-  const deps={...(api.dependencies||{})};\
-  for (const k of Object.keys(deps)) if (k.startsWith("@gx/")) delete deps[k];\
-  deps.prisma=api.devDependencies?.prisma ?? "^5.22.0";\
-  const opt=api.optionalDependencies?.["sqlite-vec"] ? {sqlite-vec: api.optionalDependencies["sqlite-vec"]} : {};\
-  fs.writeFileSync("runtime-package.json", JSON.stringify({\
-    name:"gouxiangdb-api-runtime", version:root.version||"0.0.0",\
-    private:true, type:"module", packageManager:root.packageManager??"pnpm@9.0.0",\
-    dependencies:deps,\
-    ...(Object.keys(opt).length?{optionalDependencies:opt}:{})\
-  },null,2)+"\n");'
+# 用独立脚本而非内联 node -e：长多行 JS 经 /bin/sh -c 单引号续行在 dash 下解析失败。
+# deploy/docker/runtime-package.mjs 已随上方 COPY . . 进入 builder 工作目录。
+RUN node deploy/docker/runtime-package.mjs runtime-package.json
 
 # ============================ runner ============================
 FROM node:22-bookworm-slim AS runner
@@ -103,9 +92,12 @@ RUN DATABASE_URL=file:./_runner_generate_placeholder.db \
   && rm -f _runner_generate_placeholder.db*
 
 # M5/S2：把目标架构 vec0 显式拷到白名单 native/<triplet>/（node:22-bookworm glibc，无 musl）。
-# 平台子包缺失时脚本仅 SKIP 不 fail——该容器降级 fts-only（H6/H8）。buildx 每目标架构各自执行。
-RUN node scripts/native/copy-vec-native.mjs --dest . --app-dir . || \
-  echo "[docker] vec0 native copy skipped (fts-only fallback)"
+# 故意不接 `|| echo 降级`：脚本对【合法降级】（平台不支持 / 可选依赖缺失 / getLoadablePath
+# 报 unsupported）已自行 return exit 0 并打印 SKIP；只有真错误（参数/拷贝/架构自检失败）才
+# 非零退出——那种情况必须让构建红，绝不能被 shell `||` 吞成"fts-only 正常"（曾掩盖相对
+# --app-dir 致 createRequire 崩溃，使 x64/arm64 镜像 vec0 白名单从不生成）。
+# buildx 每目标架构各自执行；musl/无预编译平台由脚本 SKIP 兜底，不阻断。
+RUN node scripts/native/copy-vec-native.mjs --dest . --app-dir .
 
 # 数据卷目录归属内置非 root 用户 node（uid 1000）。
 RUN mkdir -p /data/uploads /data/backups /data/log && chown -R node:node /data /app

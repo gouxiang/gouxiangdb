@@ -46,7 +46,9 @@ function describe(platform, arch) {
 
 function resolveInstalledVec(appDir) {
   // 从 apps/api 视角 require sqlite-vec（pnpm 下 apps/api/node_modules/sqlite-vec 是软链）。
-  const req = createRequire(path.join(appDir, "package.json"));
+  // createRequire 强制要【绝对路径】或 file URL：调用方（如 Dockerfile）可能传相对 --app-dir
+  // （"."），裸 path.join 得 "package.json" 会抛 ERR_INVALID_ARG_VALUE，故一律 path.resolve 归一。
+  const req = createRequire(path.resolve(appDir, "package.json"));
   let mod;
   try {
     mod = req("sqlite-vec");
