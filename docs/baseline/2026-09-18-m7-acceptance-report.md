@@ -66,6 +66,7 @@
 | 挂账 | C-7 十万节点首屏门（task#158） | backlog，M7 后 |
 | 挂账（P2） | 富文本内联 `data:` 图片被 URL 白名单过拦（fail-closed 安全方向正确，功能限制） | 待产品决策，登记 RELEASE 限制 |
 | 待观察 | api 全量门在本机 swap 压力下收尾慢/易 flaky | 全量门归 VM/空闲机，需 VM 凭证 |
+| **P1 挂账（本轮发现·实证）** | **M5 增量索引链路未接线**：`GX_SEARCH_WORKER` 全仓零命中；`SearchIndexer` 从未被 new/start（`src`/`scripts` 下无调用点，仅测试用）；`change_events` **无任何清理/截断**；`reindex.ts` 不碰 outbox。实证：门② `/tmp/gx-upgrade-drill-20260918-065029/after/search-result.json` 全量 reindex 完成（chunks=5528、coverage 全 0）后 **pending=520 不降** | 后果：① outbox 只增不减→长期运行表无限增长；② 增量同步从不发生，搜索数据只能靠手动 `/api/v1/admin/reindex` 全量刷新。**已实现能力（SearchIndexer.runOnce/processOne）是孤儿，未接电**。计划 §4.1 矩阵声称的 `GX_SEARCH_WORKER=on` 与实现不符。建议：M7 按已知限制发布 + 立即排 hotfix 接线（接通既有能力，非新功能）；是否纳入 M7 范围待总监/主理人裁决 |
 
 ## 9. 结论
 
