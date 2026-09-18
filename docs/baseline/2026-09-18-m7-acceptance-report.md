@@ -35,7 +35,8 @@
   - 计时实数（秒）：R1 0.573 / R2 0.582 / R3 0.570 / R4 0.583（on+off 两态共 23 hits）/ R5 0.569 / R6 0.586 / R7 0.605 —— 远低于"行为层 ≤30 分钟"判据
   - R5 netguard 自检先过才允许判绿（防假绿），实得外网出网计数 **0**
   - R7 同时核到 `dist/mcp-stdio.js`（430299 字节）独立 stdio 入口存在
-- **R6 如实登记的偏差**：计划 §4 R6 写的 `GX_SEARCH_WORKER` 开关在 src 零接线；`POST /api/v1/admin/reindex` 真实可用（202→chunks>0/coverage 全 0/rebuilding=false），但**不消化 change_events**（pending 静置不降、done=0）。这不是脚本缺陷，是产品缺陷，见 §8 P1（本轮已派修）
+- **R6 历史偏差（已修复）**：计划 §4 R6 写的 `GX_SEARCH_WORKER` 开关曾在 src 零接线；`POST /api/v1/admin/reindex` 真实可用（202→chunks>0/coverage 全 0/rebuilding=false），但**不消化 change_events**（pending 静置不降、done=0）。这不是脚本缺陷而是产品缺陷，已由 `249df44` 修复
+- **R6 / R6b 两面（修复后重设计，见 `63fbe71`）**：R6 改看守**回滚面**（显式 `GX_SEARCH_WORKER=off`：pending 静置不降、done=0、手动 reindex 仍可用）；新增 **R6b** 验收**修复正立面**（旗标缺省即起工人：全程不发 reindex 请求，`pending 4→0 / done 0→4`、done 行工牌 `workerId=api-<pid>@<ms>` 4/4、`status chunks.total=7`，2543ms 内完成）。`report.mjs` 的 `allAutoPass` 已纳入 R6b，**R6b 缺失或失败都会让 VERDICT 变 FAIL**，防止未来接线被改掉无人察觉
 
 ## 4. 用例台账（门④）
 
@@ -105,10 +106,10 @@
 | 挂账 | C-7 十万节点首屏门（task#158） | backlog，M7 后 |
 | 挂账（P2） | 富文本内联 `data:` 图片被 URL 白名单过拦（fail-closed 安全方向正确，功能限制） | 待产品决策，登记 RELEASE 限制 |
 | 待观察 | api 全量门在本机 swap 压力下收尾慢/易 flaky | 全量门归 VM/空闲机，需 VM 凭证 |
-| **P1 挂账（本轮发现·实证）** | **M5 增量索引链路未接线**：`GX_SEARCH_WORKER` 全仓零命中；`SearchIndexer` 从未被 new/start（`src`/`scripts` 下无调用点，仅测试用）；`change_events` **无任何清理/截断**；`reindex.ts` 不碰 outbox。实证：门② `/tmp/gx-upgrade-drill-20260918-065029/after/search-result.json` 全量 reindex 完成（chunks=5528、coverage 全 0）后 **pending=520 不降** | 后果：① outbox 只增不减→长期运行表无限增长；② 增量同步从不发生，搜索数据只能靠手动 `/api/v1/admin/reindex` 全量刷新。**已实现能力（SearchIndexer.runOnce/processOne）是孤儿，未接电**。计划 §4.1 矩阵声称的 `GX_SEARCH_WORKER=on` 与实现不符。建议：M7 按已知限制发布 + 立即排 hotfix 接线（接通既有能力，非新功能）；是否纳入 M7 范围待总监/主理人裁决 |
+| **P1 已修（本轮发现·实证）** | **M5 增量索引链路未接线**：`GX_SEARCH_WORKER` 全仓零命中；`SearchIndexer` 从未被 new/start（仅测试实例化）；`reindex.ts` 不碰 outbox。实证：全量 reindex 完成（chunks=5528、coverage 全 0）后 **pending=520 不降** | **已修 `249df44`**：新增 `workerRuntime.ts` 并接线 `index.ts`（TCP + unix socket 两条，SIGTERM 前 stop）、`reindex.ts` 重建期挂起；门控 `GX_M5_SEARCH=on 且 GX_SEARCH_WORKER!=off` 才启动（出厂默认 off）。**行为层证据**：门③新增 R6b（`check-outbox-drain.mjs`）——全程不发 reindex 请求，outbox 自行 pending 4→0、done 0→4、done 行工牌 `workerId=api-<pid>@<ms>` 4/4、`status chunks=7`；R6 改看守回滚面（`GX_SEARCH_WORKER=off` 时 pending 静置不降、done=0）。**默认姿态零副作用**：不设 `GX_M5_SEARCH` 起服，dataDir 只有 app.db（**无 search.db/-wal/-shm**），`search-worker` 日志 0 行。残留观察（不作为阻塞）：`stop()` 是协作式的，挂起瞬间若工人正处理单条，该轮仍可能写旧文件（窗口＝单条处理耗时），彻底消除需给 indexer 加 quiesce 屏障（属改既有语义，未做） |
 
 ## 9. 结论
 
-**尚未通过** —— 门②过闸、门①/④台账成稿且缺口已裁决关闭，但门③/⑤/⑥/⑦ 未执行，门⑧四项签字未签。
-判据（§10.2）中第 3/5/7 条不满足，故当前只能登记为"进行中"，不构成放行。
-剩余阻塞：**门③脚本与独立重跑**、**全量门独占跑**（需空闲机或 VM `192.168.31.15` 凭证）、**三环境冒烟**（飞牛/arm 为外部依赖）。
+**尚未通过** —— 门①②③④均已过闸（③④为总监独立重跑/独立复算坐实），但门⑤虽判"有条件过"仍需完成" Tier-L 措辞"与"M1 读路径姿态"两项签字，门⑥/⑦未执行，门⑧四项签字未签。
+判据（§10.2）中第 5/6/7 条尚不满足，故当前只能登记为"进行中"，不构成放行。
+剩余阻塞：**门⑥三环境冒烟**（飞牛/arm 为外部依赖）、**门⑦ checklist**、**门⑧四项签字**、**含 `249df44` 的 api 全量门需重跑**（此前全量跑在该修复之前，不能代表 HEAD）。
