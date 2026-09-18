@@ -117,6 +117,8 @@ const distSrc = path.join(srcApi, "dist");
 if (!fs.existsSync(path.join(distSrc, "index.js"))) fail("缺少 apps/api/dist/index.js");
 if (!fs.existsSync(path.join(distSrc, "mcp-stdio.js"))) fail("缺少 apps/api/dist/mcp-stdio.js");
 if (!fs.existsSync(path.join(distSrc, "nav-reconcile.js"))) fail("缺少 apps/api/dist/nav-reconcile.js");
+// 第四入口：首次部署超级管理员初始化（install_callback 在迁移后调用；缺失会导致安装失败）。
+if (!fs.existsSync(path.join(distSrc, "init-admin.js"))) fail("缺少 apps/api/dist/init-admin.js");
 copyDir(distSrc, path.join(serverDir, "dist"));
 copyFile(path.join(srcApi, "prisma", "schema.prisma"), path.join(serverDir, "prisma", "schema.prisma"));
 copyDir(path.join(srcApi, "prisma", "migrations"), path.join(serverDir, "prisma", "migrations"));
