@@ -184,7 +184,10 @@ export function WorkspaceSettingsPage() {
       {/* 右内容 */}
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-8 py-8">
-          {section === "general" && (
+          // 用 effectiveSection 而非 section：非 owner 直戳 search / 非企业环境直戳 mcp 时
+          // effectiveSection 已回落到 general，若此处仍判 section 会与下面 245/259 行的
+          // effectiveSection 守卫双双落空 → 右内容区整块空白（既不是通用也不是目标分区）。
+          {effectiveSection === "general" && (
             <div className="flex flex-col gap-2">
               <h2 className="text-gx-18 font-semibold text-gx-text-primary">工作区设置</h2>
               <p className="text-gx-13 text-gx-text-tertiary">
