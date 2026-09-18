@@ -50,11 +50,11 @@
 
 | # | 用例 | 结果 |
 |---|---|---|
-| A1 | 应用中心 → 手动安装 → 从 NAS 添加 → 选 fpk → 同意未验证应用提示 → 安装进度 → 完成 | 通过（0.1.2 首次安装 / 0.1.3、0.1.4、0.1.5 三次覆盖更新均成功） |
-| A2 | 安装向导参数页 / 许可协议勾选 | 通过 |
-| A3 | 首次打开 → 注册账号 → 进入应用 | 通过 |
-| A4 | 新建库（智能数据库 / 知识库二选） | 通过，创建后正确跳转 |
-| A5 | 覆盖更新后业务数据保留 | 通过（3 条记录、字段、视图、PAT 均在） |
+| A-01 | 应用中心 → 手动安装 → 从 NAS 添加 → 选 fpk → 同意未验证应用提示 → 安装进度 → 完成 | 通过（0.1.2 首次安装 / 0.1.3、0.1.4、0.1.5 三次覆盖更新均成功） |
+| A-02 | 安装向导参数页 / 许可协议勾选 | 通过 |
+| A-03 | 首次打开 → 注册账号 → 进入应用 | 通过 |
+| A-04 | 新建库（智能数据库 / 知识库二选） | 通过，创建后正确跳转 |
+| A-05 | 覆盖更新后业务数据保留 | 通过（3 条记录、字段、视图、PAT 均在） |
 
 ### 2.2 阶段二：一轮点遍式全覆盖
 
@@ -111,10 +111,11 @@
 | P1-5 | 前端 视图 | 「复制视图」创建的视图在 UI 无入口可达（无列表/切换/新建/重命名/删除） | P1 | `c134418` | 已修·已复验 |
 | ~~P1-6~~ | 知识库 | 「知识库无法创建」 | — | — | **撤销（一轮误判）** |
 | P2-7 | 前端 检索设置 | 后端子面未挂载（404）却仍显示整页、允许点「重建索引」且点击无任何反馈 | P2 | `04dc6ef` | 已修·已复验 |
+| P2-14 | 前端 检索设置 | 未启用时仍渲染整套配置表单，管理员无从得知如何开启（无开关、无指引） | P2 | 见 §5.3 | 已修（`SearchEnableGuide`）·待真机复验 |
 | P2-8 | 前端 评论 | 未选中记录时点「发表」静默失败 | P2 | `5f48dec` | 已修·已复验 |
 | P2-9 | 前端 空态 | 空库引导文案指向不存在的「侧栏」入口 | P2 | `04dc6ef` | 已修（触发条件未达） |
 | P3-10 | 前端 设置 | 工作区设置子页切换 URL 不变 | P3 | `04dc6ef` | 已修·已复验 |
-| P3-11 | 部署 | UI 安装向导无环境变量输入页，`GX_INIT_ADMIN_*` 只能事后 CLI 补跑 | P3 | — | **未修（不在本轮范围）**，已有 `docs/deployment/first-admin-init.md` 指引 |
+| ~~P3-11~~ | 部署 | ~~UI 安装向导无环境变量输入页~~ | — | — | **重新定性为非缺陷**：fnOS 安装向导由平台提供，三方应用无法加输入页；且**首次注册用户会被自动自举为工作区 owner**（`bootstrapFirstOwnerTx`），并不依赖 `GX_INIT_ADMIN_*`。该 CLI 仅用于无人值守预置场景，已有 `docs/deployment/first-admin-init.md` 指引 |
 
 ### 3.2 二轮新发现（已修复并终验）
 
@@ -173,13 +174,11 @@
 
 > **不可达原因（非缺陷）：** 出厂配置 `gouxiangdb.env` 不含 `GX_M5_SEARCH`，该开关默认 `off`，后端不挂载 `/api/v1/search` 与 `/api/v1/admin/*` 子面，实测全部 404。
 >
-> **唯一开启路径**：手工改写 `/vol1/@appconf/gouxiangdb/gouxiangdb.env` 增加 `GX_M5_SEARCH=on` 后重启应用 —— **界面无开关、无 CLI 命令**，普通用户无法自助开启。
+> **cloud 态另需**：外网可达 + `GX_EMBEDDING_BASE_URL` / `API_KEY` / `MODEL`。目标机为隔离内网，**无外网**，故 cloud 态在本环境不可验。
 >
-> **cloud 态另需**：外网可达 + `GX_EMBEDDING_BASE_URL` / `API_KEY` / `MODEL`。目标机为隔离内网，**无外网**，故 cloud 态同样不可验。
->
-> **本轮已做到的替代验证**：确认未启用时前端给出的是**明确空态**而非误导性文案，且「重建索引」按钮禁用并说明原因（P2-7 闭环）。
+> **本轮已解决「不可自助开启」**：原状态是界面无任何开关或指引，管理员只能靠翻源码才知道要改哪个文件（见 E-11）。现已改为未启用时直接给出**可自助执行的开启指引**——含环境变量文件常见位置、可直接复制的配置片段、重启后回本页的收尾步骤（新增 `apps/web/src/features/search/SearchEnableGuide.tsx`，同时接入语义检索面板与覆盖度面板）。
 
-**建议（供产品决策，不属本轮缺陷）：** 在「工作区设置 → 语义检索」页提供一键开启（或至少给出可复制的环境变量片段与重启指引），否则该功能对飞牛用户等于不可达。
+**本环境未能覆盖的部分**：cloud 态语义检索的端到端效果（需外网 + 真实 embedding 服务）。off 态（仅关键词）在开启后即可本机自验，无需外网。
 
 ---
 
@@ -188,52 +187,51 @@
 > 采集口径：仅收录仓库文档中**真实记载**的条目（`.workbuddy/memory/` 日志与归档、`docs/baseline/`、`docs/runbooks/`、`docs/planning/phase2/`），每条给出可核对来源。状态查不到闭环证据的一律写「未知」，不猜。
 > 用途：作为后续版本的回归基线；**本飞牛版验收只对其中的 E / F 两组负责**，A–D 为企业版与里程碑遗留项，不属本次用户体验验收范围。
 
-### A. 权限引擎 M4（8 条）
+### A. 权限引擎 M4（13 条）
 
 | 编号 | 来源 | 现象 | 等级 | 状态 |
 |---|---|---|---|---|
-| A-1 | `.workbuddy/memory/ARCHIVE-m4-m5.md:8` | `AUTHZ_ENFORCE_READY=false`，权限引擎翻 on 权在总监，尚未签收 | P1 | 未修（待决策） |
-| A-2 | `ARCHIVE-m4-m5.md:10` | `scopeSql` ≥500 时走 `expectsTempTable`，需物化 temp 表；若未物化则退化 | P1 | 已设计·待落地验证 |
-| A-3 | `ARCHIVE-m4-m5.md:11` | 旧三表 11 写点同事务双写 `auth_policies`；`legacyUnmappable` 仅为 200 提示 | P2 | 设计如此 |
-| A-4 | `ARCHIVE-m4-m5.md:11` | fieldMask 挂 table 行，compile 屏蔽 filter/sort/aggregate 但不写 degraded | P2 | 设计如此 |
-| A-5 | `ARCHIVE-m4-m5.md:12`（A-6） | 子节点 direct 有权时，tree 无位置 / URL 可直达 / 面包屑中性化 | P3 | 设计如此 |
-| A-6 | `ARCHIVE-m4-m5.md:14` | 旧守卫 R1-R5 清单保留（M4 不删旧分支），双轨并存 | P2 | 设计如此（待收敛） |
-| A-7 | `ARCHIVE-m4-m5.md:9` | 纯 allow 三源并集（role/dept/direct + owner_fallback），**无 deny 语义** | P2 | 设计如此（能力边界） |
-| A-8 | `.workbuddy/memory/2026-09-17.md:497` | **P1-B `277fd95` 写工具字段掩码 fail-open**：旧守卫拿 read-capability 顶替写判定，管理员窄策略下白名单整段跳过，可写掩码外任意物理列 | P1 | 已修（`277fd95`）·复验见 D-13 |
+| A-06 | `.workbuddy/memory/ARCHIVE-m4-m5.md:8` | `AUTHZ_ENFORCE_READY=false`，权限引擎翻 on 权在总监，尚未签收 | P1 | 未修（待决策） |
+| A-07 | `ARCHIVE-m4-m5.md:10` | `scopeSql` ≥500 时走 `expectsTempTable`，需物化 temp 表；若未物化则退化 | P1 | 已设计·待落地验证 |
+| A-08 | `ARCHIVE-m4-m5.md:11` | 旧三表 11 写点同事务双写 `auth_policies`；`legacyUnmappable` 仅为 200 提示 | P2 | 设计如此 |
+| A-09 | `ARCHIVE-m4-m5.md:11` | fieldMask 挂 table 行，compile 屏蔽 filter/sort/aggregate 但不写 degraded | P2 | 设计如此 |
+| A-10 | `ARCHIVE-m4-m5.md:12`（A-6） | 子节点 direct 有权时，tree 无位置 / URL 可直达 / 面包屑中性化 | P3 | 设计如此 |
+| A-11 | `ARCHIVE-m4-m5.md:14` | 旧守卫 R1-R5 清单保留（M4 不删旧分支），双轨并存 | P2 | 设计如此（待收敛） |
+| A-12 | `ARCHIVE-m4-m5.md:9` | 纯 allow 三源并集（role/dept/direct + owner_fallback），**无 deny 语义** | P2 | 设计如此（能力边界） |
+| A-13 | `.workbuddy/memory/2026-09-17.md:497` | **P1-B `277fd95` 写工具字段掩码 fail-open**：旧守卫拿 read-capability 顶替写判定，管理员窄策略下白名单整段跳过，可写掩码外任意物理列 | P1 | 已修（`277fd95`）·复验见 D-13 |
 
-### B. 统一检索 M5（11 条）
+### B. 统一检索 M5（10 条）
 
 | 编号 | 来源 | 现象 | 等级 | 状态 |
 |---|---|---|---|---|
-| B-1 | `ARCHIVE-m4-m5.md:29`（S13） | **hybrid 检索 p95：10k≈0.65s、100k≈14.6s**，未达「100k <500ms」判据；外推流畅上限 ≈6.5k chunk | P1 | 未修（走已预批 B-5 降级路径，不阻塞） |
-| B-2 | `ARCHIVE-m4-m5.md:29` | 瓶颈＝vec0 无 ANN 暴力全扫，成本 ∝ 向量总数 N；**收紧 scope 与调 k 经实测均无效**（负结论） | P2 | 已定位·不做 ANN |
-| B-3 | `docs/baseline/2026-09-18-m7-checklist.md:99` | Tier-L **arm64** 真机检索性能零实测 | P2 | 未做（对外不得给出 arm 数字） |
-| B-4 | `ARCHIVE-m4-m5.md:27` | shadow 闸门 ORDER 漂移由 500 降为可观测（总监裁决）：RRF+boost 属有意重排，硬门会致报警疲劳 | P2 | 已裁决（设计如此） |
-| B-5 | `ARCHIVE-m4-m5.md:22` | **键域铁律**：所有 mask/收敛 map 的键是 nav 节点 id 而非裸资源 id；用错会致 mask 判定静默失效 | P0 | 已修（`86cc81f`/`89c9efe`） |
-| B-6 | `ARCHIVE-m4-m5.md:22` | 标题由 hydrate 回主库现取 primaryVal **绕开召回**，primaryField 被 mask 时必须回退 record id | P1 | 已修 |
-| B-7 | `ARCHIVE-m4-m5.md:24`（S12） | search.db 损坏自愈：判损坏 → 三件 rename `.corrupt-<ts>`（只隔离不删）→ 重开空库后台重播 → 当次回主库 LIKE 应急 | P1 | 已修（`bdacc27`/`8eb86e5`） |
-| B-8 | `ARCHIVE-m4-m5.md:25` | 降级审计仅跳变打点，detail 恒 `{mode,reasons,recovering}`，禁带 q/标题/字段值/key/向量 | P1 | 已修 |
-| B-9 | `ARCHIVE-m4-m5.md:28`（AC-M5-5） | 零外网：off / `GX_M5_SEARCH=off` 全链零 fetch；**Node 全局 fetch 不读 HTTPS_PROXY**（代理抓包易假阴性） | P2 | 已修·有验证陷阱提示 |
-| B-10 | `ARCHIVE-m4-m5.md:20` | field chunk 软上限 N=50，待真机校准 | P3 | 未知 |
-| B-11 | `ARCHIVE-m4-m5.md:18` | 仅 cloud/off 两态，不做本地模型；cloud 需外网 + baseURL/API_KEY/MODEL | P3 | 设计如此 |
+| B-01 | `ARCHIVE-m4-m5.md:29`（S13） | **hybrid 检索 p95：10k≈0.65s、100k≈14.6s**，未达「100k <500ms」判据；外推流畅上限 ≈6.5k chunk | P1 | 未修（走已预批 B-4 降级路径，不阻塞） |
+| B-02 | `ARCHIVE-m4-m5.md:29` | 瓶颈＝vec0 无 ANN 暴力全扫，成本 ∝ 向量总数 N；**收紧 scope 与调 k 经实测均无效**（负结论） | P2 | 已定位·不做 ANN |
+| B-03 | `ARCHIVE-m4-m5.md:27` | shadow 闸门 ORDER 漂移由 500 降为可观测（总监裁决）：RRF+boost 属有意重排，硬门会致报警疲劳 | P2 | 已裁决（设计如此） |
+| B-04 | `ARCHIVE-m4-m5.md:22` | **键域铁律**：所有 mask/收敛 map 的键是 nav 节点 id 而非裸资源 id；用错会致 mask 判定静默失效 | P0 | 已修（`86cc81f`/`89c9efe`） |
+| B-05 | `ARCHIVE-m4-m5.md:22` | 标题由 hydrate 回主库现取 primaryVal **绕开召回**，primaryField 被 mask 时必须回退 record id | P1 | 已修 |
+| B-06 | `ARCHIVE-m4-m5.md:24`（S12） | search.db 损坏自愈：判损坏 → 三件 rename `.corrupt-<ts>`（只隔离不删）→ 重开空库后台重播 → 当次回主库 LIKE 应急 | P1 | 已修（`bdacc27`/`8eb86e5`） |
+| B-07 | `ARCHIVE-m4-m5.md:25` | 降级审计仅跳变打点，detail 恒 `{mode,reasons,recovering}`，禁带 q/标题/字段值/key/向量 | P1 | 已修 |
+| B-08 | `ARCHIVE-m4-m5.md:28`（AC-M5-5） | 零外网：off / `GX_M5_SEARCH=off` 全链零 fetch；**Node 全局 fetch 不读 HTTPS_PROXY**（代理抓包易假阴性） | P2 | 已修·有验证陷阱提示 |
+| B-09 | `ARCHIVE-m4-m5.md:20` | field chunk 软上限 N=50，待真机校准 | P3 | 未知 |
+| B-10 | `ARCHIVE-m4-m5.md:18` | 仅 cloud/off 两态，不做本地模型；cloud 需外网 + baseURL/API_KEY/MODEL | P3 | 设计如此 |
 
 ### C. MCP M6（11 条）
 
 | 编号 | 来源 | 现象 | 等级 | 状态 |
 |---|---|---|---|---|
-| C-1 | `.workbuddy/memory/2026-09-17.md:497` | 写工具字段掩码 fail-open（同 A-8） | P1 | 已修（`277fd95`） |
-| C-2 | `.workbuddy/memory/ARCHIVE-m6-mcp.md:30` | 掩码未知键 fail-closed 补强 | P1 | 已修（`63020ea`），测试 `m6-p1b-write-mask.test.ts` 9 例 |
-| C-3 | `.workbuddy/memory/2026-09-17.md:547` | **P1-B 修复引入的确定性回归**：新 `guardWriteFields` 先过滤非物理键，把「无定义的未知键」也滤掉 → physicalKeys 空 → 静默放行；旧守卫会拒 | P0 | 已修（复验时发现并修）·**根因＝只跑新增用例、没跑既存 m6-s4** |
-| C-4 | `docs/baseline/2026-09-18-m7-checklist.md:96` | MCP 超时机制 1200ms 档实测返 TIMEOUT 且连接未挂 | P2 | 已验 |
-| C-5 | `docs/baseline/2026-09-18-m7-checklist.md:96`（G-07） | **默认 30s 档未端到端实证** | P3 | 未知 |
-| C-6 | 同上（G-08） | 限流不拦正常流 **无实测** | P3 | 未知 |
-| C-7 | `docs/baseline/2026-09-18-m7-checklist.md:148` | PAT 明文零落库零落日志（fpk 形态真机补查：命中均为 prefix(14) 与 tokenHash(64)） | P1 | 已验·**待签字**（tar 形态未做） |
-| C-8 | `ARCHIVE-m6-mcp.md` | stdio 传输 | — | **文档中无缺陷记录** |
-| C-9 | `ARCHIVE-m6-mcp.md` | 审计幂等 | — | **文档中无缺陷记录** |
+| C-01 | `.workbuddy/memory/2026-09-17.md:497` | 写工具字段掩码 fail-open（同 A-8） | P1 | 已修（`277fd95`） |
+| C-02 | `.workbuddy/memory/ARCHIVE-m6-mcp.md:30` | 掩码未知键 fail-closed 补强 | P1 | 已修（`63020ea`），测试 `m6-p1b-write-mask.test.ts` 9 例 |
+| C-03 | `.workbuddy/memory/2026-09-17.md:547` | **P1-B 修复引入的确定性回归**：新 `guardWriteFields` 先过滤非物理键，把「无定义的未知键」也滤掉 → physicalKeys 空 → 静默放行；旧守卫会拒 | P0 | 已修（复验时发现并修）·**根因＝只跑新增用例、没跑既存 m6-s4** |
+| C-04 | `docs/baseline/2026-09-18-m7-checklist.md:96` | MCP 超时机制 1200ms 档实测返 TIMEOUT 且连接未挂 | P2 | 已验 |
+| C-05 | `docs/baseline/2026-09-18-m7-checklist.md:96`（G-07） | **默认 30s 档未端到端实证** | P3 | 未知 |
+| C-06 | 同上（G-08） | 限流不拦正常流 **无实测** | P3 | 未知 |
+| C-07 | `docs/baseline/2026-09-18-m7-checklist.md:148` | PAT 明文零落库零落日志（fpk 形态真机补查：命中均为 prefix(14) 与 tokenHash(64)） | P1 | 已验·**待签字**（tar 形态未做） |
+| C-08 | `ARCHIVE-m6-mcp.md` | stdio 传输 | — | **文档中无缺陷记录** |
+| C-09 | `ARCHIVE-m6-mcp.md` | 审计幂等 | — | **文档中无缺陷记录** |
 | C-10 | 本轮 §5.1 | 单选字段在 MCP 出口泄漏 `opt_xxx`（无可读名） | P1 | 已修（`4ddce6c`：双键 `fields`+`fieldsDisplay`、`get_schema` 附 options） |
 | C-11 | 本轮 §5.1 | 越权 base 访问 | P1 | 已验：返回 `FORBIDDEN_RESOURCE` |
 
-### D. M7 / 企业版（25 条，摘自检讨台账 `docs/baseline/2026-09-18-m7-checklist.md`，全表 86 条）
+### D. M7 / 企业版（24 条，摘自检讨台账 `docs/baseline/2026-09-18-m7-checklist.md`，全表 86 条）
 
 | 编号 | 来源（行） | 现象 | 等级 | 状态 |
 |---|---|---|---|---|
@@ -244,26 +242,25 @@
 | D-05 | :81 | CI 八步 `scripts/ci-quality.sh` **查无门时全量绿运行日志**（脚本存在 ≠ 跑过） | P1 | **未做** |
 | D-06 | :53 | 门② 证据不覆盖最终候选 HEAD | P2 | **未做** |
 | D-07 | :98 | 检索门 100k hybrid p95≈14.6s 未达判据（同 B-1） | P1 | **不过**（走预批降级，不阻塞） |
-| D-08 | :99 | arm64 真机性能零实测 | P2 | **未做** |
-| D-09 | :100 | SPEC:134「10 万节点首屏 <1s」指定证据位文档**不存在** | P1 | **未做**（按限定值登记） |
-| D-10 | :101 | M1 keyset/sidecar 读路径 shadow 集成等价证据缺失 | P1 | **未做**（门⑧签字前置） |
-| D-11 | :109 / :113 | 门⑥ consolidated 冒烟文档不存在，**门⑥整门登记未做** | P1 | **未做** |
-| D-12 | :117 | 飞牛 fpk 冒烟：**x86 已过 / arm 未做**；未取到门户 token 故"带登录态打开 UI"未实测（**本轮已补足该格**） | P1 | 部分过 |
-| D-13 | :118 | amd64 镜像 / buildx 双架构 | P2 | **未做** |
-| D-14 | :119 | Caddy 真机反代 + `/mcp`（docker.io 不可达，拉不到镜像） | P2 | **未做** |
-| D-15 | :120 | Linux x86 裸机直跑 + `deploy.sh`/`rollback.sh` systemd 真机 | P2 | **未做** |
-| D-16 | :121 | macOS 旧 Tauri 桌面端连新服务端升级提示、不白屏（SPEC:133） | P2 | **未做** |
-| D-17 | :137 | 全仓 P0 设计纪律扫描（emoji 充图标 / icons.tsx / 紫粉渐变 / 裸 z-[n] / 硬编码色值）无扫描脚本 | P3 | **未做** |
-| D-18 | :138 | 方言巡检：M1/S3 sidecar `AUTOINCREMENT` 为唯一 SQLite 硬写死，DDL 不动、注释订正 | P2 | 有条件过 |
-| D-19 | :151 | restore 演练（R9）在克隆机过（同 D-04） | P1 | **未做** |
-| D-20 | :153 | embedding key 落库仅 maskedLast4；**600 权限位核查缺证** | P2 | **未做** |
-| D-21 | :159 | runbooks 增章无逐章对账证据；「M3 新壳回退」章 grep 未见 | P3 | 待签字 |
-| D-22 | :51 | 二次 `migrate deploy` 幂等 | P1 | 已验（重启后 applied 恒 23，无 pending） |
-| D-23 | :95 | M4 规模门：decide P95 0.36–0.41ms、scope P95 41.8–44.0ms、EXPLAIN 全走索引、12000 次零分叉 | P1 | 已验（机器规格未逐项登记） |
-| D-24 | :78 / :79 | 各里程碑对抗组全在仓并实跑；台账无「未执行/未找到文件」行 | P2 | 已验 |
-| D-25 | — | **门⑦ 26 条、门⑧ 四项签字**为 M7 收口遗留 | P1 | 未收口（不属本轮） |
+| D-08 | :100 | SPEC:134「10 万节点首屏 <1s」指定证据位文档**不存在** | P1 | **未做**（按限定值登记） |
+| D-09 | :101 | M1 keyset/sidecar 读路径 shadow 集成等价证据缺失 | P1 | **未做**（门⑧签字前置） |
+| D-10 | :109 / :113 | 门⑥ consolidated 冒烟文档不存在，**门⑥整门登记未做** | P1 | **未做** |
+| D-11 | :117 | 飞牛 fpk 冒烟：**x86_64 已过**；未取到门户 token 故"带登录态打开 UI"未实测（**本轮已补足该格**） | P1 | 部分过 |
+| D-12 | :118 | amd64 镜像 / buildx 双架构 | P2 | **未做** |
+| D-13 | :119 | Caddy 真机反代 + `/mcp`（docker.io 不可达，拉不到镜像） | P2 | **未做** |
+| D-14 | :120 | Linux x86 裸机直跑 + `deploy.sh`/`rollback.sh` systemd 真机 | P2 | **未做** |
+| D-15 | :121 | macOS 旧 Tauri 桌面端连新服务端升级提示、不白屏（SPEC:133） | P2 | **未做** |
+| D-16 | :137 | 全仓 P0 设计纪律扫描（emoji 充图标 / icons.tsx / 紫粉渐变 / 裸 z-[n] / 硬编码色值）无扫描脚本 | P3 | **未做** |
+| D-17 | :138 | 方言巡检：M1/S3 sidecar `AUTOINCREMENT` 为唯一 SQLite 硬写死，DDL 不动、注释订正 | P2 | 有条件过 |
+| D-18 | :151 | restore 演练（R9）在克隆机过（同 D-04） | P1 | **未做** |
+| D-19 | :153 | embedding key 落库仅 maskedLast4；**600 权限位核查缺证** | P2 | **未做** |
+| D-20 | :159 | runbooks 增章无逐章对账证据；「M3 新壳回退」章 grep 未见 | P3 | 待签字 |
+| D-21 | :51 | 二次 `migrate deploy` 幂等 | P1 | 已验（重启后 applied 恒 23，无 pending） |
+| D-22 | :95 | M4 规模门：decide P95 0.36–0.41ms、scope P95 41.8–44.0ms、EXPLAIN 全走索引、12000 次零分叉 | P1 | 已验（机器规格未逐项登记） |
+| D-23 | :78 / :79 | 各里程碑对抗组全在仓并实跑；台账无「未执行/未找到文件」行 | P2 | 已验 |
+| D-24 | — | **门⑦ 26 条、门⑧ 四项签字**为 M7 收口遗留 | P1 | 未收口（不属本轮） |
 
-### E. 飞牛 fnOS 部署（16 条）—— **本轮主战场**
+### E. 飞牛 fnOS 部署（15 条）—— **本轮主战场**
 
 | 编号 | 来源 | 现象 | 等级 | 状态 |
 |---|---|---|---|---|
@@ -277,12 +274,11 @@
 | E-08 | 部署 | 应用名统一为「构想工作台」 | P3 | 已修 |
 | E-09 | `docs/deployment/first-admin-init.md` | 首次部署超级管理员初始化：触发/幂等/创建方式/凭据来源/安全约束 | P1 | 已修（文档+CLI 齐） |
 | E-10 | 本轮 P3-11 | **UI 安装向导无环境变量输入页**，`GX_INIT_ADMIN_*` 只能事后 CLI 补跑 | P3 | **未修**（不在本轮范围） |
-| E-11 | 本轮 §5.3 | **语义检索用户不可自助开启**：出厂 env 不含 `GX_M5_SEARCH`，界面无开关、无 CLI | P2 | **未修**（环境不可达，见 §5.3） |
-| E-12 | 本轮 | arm64 fpk 未构建（仅 x86_64） | P2 | **未做** |
-| E-13 | 本轮实测 | 覆盖更新（0.1.2→0.1.3→0.1.4→0.1.5）业务数据全保留 | P1 | 已验（四轮升级） |
-| E-14 | 本轮实测 | `/healthz` `/readyz` 返回 `version` 与五探针全 true、`migration.applied=24` | P2 | 已验 |
-| E-15 | 本轮实测 | 应用日志零 4xx/5xx、零 error/exception | P2 | 已验 |
-| E-16 | 本轮实测 | SSH 仅「戴静」可用（`daijing` 认证失败）；`sudo` 需密码不可用 | P3 | 环境约束（非缺陷） |
+| E-11 | 本轮 §5.3 / P2-14 | **语义检索用户不可自助开启**：出厂 env 不含 `GX_M5_SEARCH`，界面无开关、无指引 | P2 | **已修**（`SearchEnableGuide` 开启指引，待 0.1.6 真机复验） |
+| E-12 | 本轮实测 | 覆盖更新（0.1.2→0.1.3→0.1.4→0.1.5）业务数据全保留 | P1 | 已验（四轮升级） |
+| E-13 | 本轮实测 | `/healthz` `/readyz` 返回 `version` 与五探针全 true、`migration.applied=24` | P2 | 已验 |
+| E-14 | 本轮实测 | 应用日志零 4xx/5xx、零 error/exception | P2 | 已验 |
+| E-15 | 本轮实测 | SSH 仅「戴静」可用（`daijing` 认证失败）；`sudo` 需密码不可用 | P3 | 环境约束（非缺陷） |
 
 ### F. 前端体验（19 条，含本轮 13 项）
 
@@ -351,7 +347,6 @@
 
 ### 7.4 遗留与建议（不阻塞本次验收）
 
-1. **语义检索不可自助开启**（§5.3）——建议在设置页提供开关或明确指引。
+1. ~~**语义检索不可自助开启**（§5.3）~~——**本轮已修**：未启用时界面直接给出可复制的开启指引（见 P2-14 / §5.3），待 0.1.6 真机复验后销项。
 2. **P3-11 安装向导无环境变量输入页**——首次部署管理员初始化仍需事后 CLI 补跑。
-3. **arm 架构 fpk 未构建**——本轮仅 x86_64；飞牛 arm 机型需另出包。
-4. **门⑦ 26 条、门⑧ 四项签字**等 M7 企业版遗留项，不在本轮用户体验验收范围。
+3. **门⑦ 26 条、门⑧ 四项签字**等 M7 企业版遗留项，不在本轮用户体验验收范围。

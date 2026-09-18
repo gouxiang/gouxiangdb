@@ -18,6 +18,7 @@ import {
   useRotateApiKey,
 } from "./search-admin-hooks";
 import { adminErrorMessage, CLOUD_CONSENT_TEXT, SEARCH_NOT_ENABLED } from "./search-admin-copy";
+import { SearchEnableGuide } from "./SearchEnableGuide";
 import { buildConfigPatch } from "./search-config";
 import type { EmbeddingMode } from "@gx/shared-types";
 
@@ -59,6 +60,20 @@ export function EmbeddingSearchPanel({ onReindex }: { onReindex?: () => void }) 
   const cfg = configQ.data;
   // 子面未启用（配置端点 404 NOT_FOUND）：禁用写操作入口，避免点了没反应。
   const notEnabled = isSearchNotEnabled(configQ.error);
+
+  // 未启用时不渲染整套配置表单——那只会让人点了报"未启用"。直接给可自助执行的开启指引。
+  if (notEnabled) {
+    return (
+      <div className="flex max-w-2xl flex-col gap-5">
+        <div className="flex flex-col items-center gap-2 rounded-gx-lg border border-dashed border-gx-border-strong p-6 text-center">
+          <Icon name="search" size={22} className="text-gx-text-hint" />
+          <div className="text-gx-13 font-medium text-gx-text-secondary">{SEARCH_NOT_ENABLED.title}</div>
+          <p className="max-w-sm text-gx-12 text-gx-text-hint">{SEARCH_NOT_ENABLED.body}</p>
+        </div>
+        <SearchEnableGuide />
+      </div>
+    );
+  }
 
   /** 收集表单为 patch（apiKey 仅在填了新值时随请求发送，缺省=保持）。 */
   function buildPatch(nextMode: EmbeddingMode, confirmCloud: boolean) {

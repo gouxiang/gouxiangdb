@@ -5,6 +5,7 @@ import { Button, Spinner } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { isSearchNotEnabled, useSearchStatus } from "./search-admin-hooks";
 import { BACKLOG_LABELS, COVERAGE_LABELS, SEARCH_NOT_ENABLED } from "./search-admin-copy";
+import { SearchEnableGuide } from "./SearchEnableGuide";
 
 export function SearchCoveragePanel({ onReindex }: { onReindex?: () => void }) {
   const statusQ = useSearchStatus(true);
@@ -36,6 +37,9 @@ export function SearchCoveragePanel({ onReindex }: { onReindex?: () => void }) {
           </Button>
         )}
         <div className="text-gx-11 text-gx-text-hint">{SEARCH_NOT_ENABLED.reindexHint}</div>
+        <div className="mt-3 w-full text-left">
+          <SearchEnableGuide compact />
+        </div>
       </section>
     );
   }

@@ -35,6 +35,43 @@ export const SEARCH_NOT_ENABLED = {
   toast: "语义检索服务未启用，无法完成该操作",
 } as const;
 
+/**
+ * 「如何启用」自助指引：检索子面由服务端环境变量控制，界面天然无法代改（应用也无权改自己的
+ * 环境并重启）。与其让用户面对一个点了没反应的表单，不如直接把可执行步骤写出来、片段可复制。
+ *
+ * 只出现于子面未启用时；文案中性，不出现向量库/扩展/SQL 等实现词。
+ */
+export const SEARCH_ENABLE_GUIDE = {
+  title: "如何启用",
+  /** 一句话定位：这是服务端开关，不是界面能开的功能。 */
+  intro: "语义检索由应用所在机器的服务端开关控制，需要在环境变量配置文件中开启并重启应用后才能使用。",
+  /** 环境变量文件的位置（按部署形态给常见路径，够用户定位用）。 */
+  where: [
+    "飞牛 fnOS：/vol1/@appconf/gouxiangdb/gouxiangdb.env",
+    "Docker：compose 文件里该服务的 environment 段",
+    "裸机 / systemd：应用目录下的 .env",
+  ],
+  /** 可直接复制的配置片段（GX_M5_SEARCH 总门 + 检索方式，cloud 三项按需取消注释）。 */
+  snippet: [
+    "# 打开统一检索（关键词检索 + 可选语义检索）",
+    "GX_M5_SEARCH=on",
+    "",
+    "# 检索方式：off = 仅关键词，不出网；cloud = 额外启用语义理解",
+    "GX_EMBEDDING_MODE=off",
+    "",
+    "# 若上一行设为 cloud，再补齐这三项",
+    "# GX_EMBEDDING_BASE_URL=https://你的语义服务地址/v1",
+    "# GX_EMBEDDING_API_KEY=你的密钥",
+    "# GX_EMBEDDING_MODEL=你的模型名",
+  ].join("\n"),
+  /** 收尾步骤。 */
+  finish: "保存后重启应用，再回到本页即可看到索引覆盖与健康状态。",
+  /** 安抚：关键词检索本来就能用，不受影响。 */
+  reassure: "关键词检索无需任何配置，现在就可以正常使用；未启用期间本页的写入操作不可用。",
+  copyOk: "配置片段已复制到剪贴板",
+  copyFail: "复制失败，请手动选中并复制",
+} as const;
+
 /** 云端出域确认文案（off->cloud 二次确认弹窗）。 */
 export const CLOUD_CONSENT_TEXT =
   "启用云端语义检索后，用于检索的文本内容会发送到你填写的外部服务进行理解与匹配。请确认该服务符合你的数据合规要求。";
