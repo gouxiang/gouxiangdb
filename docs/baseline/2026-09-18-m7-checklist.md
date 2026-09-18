@@ -135,7 +135,7 @@
 | M7-⑦-04 | 错误码词汇表齐（`UNSUPPORTED_OPERATION`、`PAT_EXPIRY_INVALID`） | 过 | `docs/api/openapi.yaml` 实查：`UNSUPPORTED_OPERATION` 2 处、`PAT_EXPIRY_INVALID` 4 处 | — |
 | M7-⑦-05 | ADR 归档齐，状态字段无"越权 Accepted" | 过 | `docs/adr/` 实查 28 篇（0022-0025、0032-0055）状态行均带裁决/落地依据与日期；`0009` 仍 `Proposed / 占位`（非越权）；ADR-0008 状态行已由总监终检后置 Accepted 并**显式限定覆盖范围** | **计划 §8.1 写的 0026/0027/0041-0049/0050-0054 编号已过期**，实际编号区间见左 |
 | M7-⑦-06 | 全仓 P0 设计纪律扫描（emoji 充图标 / icons.tsx 单一 SVG 体系 / 紫粉渐变 / 裸 `z-[n]` / 硬编码色值） | **未做** | `scripts/` 实查无扫描脚本（仅 acceptance/ci-quality.sh/compare-test.sh/dev-up.sh/refresh-progress-data.mjs/smoke_defaults.py）；`ci-quality.sh:40-111` 八步无此项 | 需人工双检并留证 |
-| M7-⑦-07 | 方言巡检：企业版迁移无 SQLite 专有写死（SPEC:60），白名单逐处注释 | **未做** | 无巡检证据文档。本人 spot grep 已见：`20260913062000_record_field_index_sidecar/migration.sql:16` `INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT`，及 init/`add_doc_tree_and_share` 中 Prisma 生成的 `PRAGMA defer_foreign_keys/foreign_keys` 样板 | 未做白名单逐处注释归档，**不留"过"** |
+| M7-⑦-07 | 方言巡检：企业版迁移无 SQLite 专有写死（SPEC:60），白名单逐处注释 | **有条件过** | `cf9e00b` 巡检证据文档（53 条逐处清单 / 9 类负向结论 / 7 条未确认缺口）；并已订正 `20260913062000_record_field_index_sidecar/migration.sql:4-5` 的错误注释（原写"两库 DDL 均可平移"，与本文件 `AUTOINCREMENT` 自相矛盾） | 手写迁移（M2~M6 共 12 个）SQLite 专有写死 **0 处**且多数已有白名单注释；唯一硬写死在 **M1/S3 sidecar 的 `AUTOINCREMENT`**（M1 期遗留），处理方式＝**DDL 不动、注释订正**并登记为将来开 PG 的必改点。Prisma 生成的 `PRAGMA defer_foreign_keys/foreign_keys` 样板 8 条按"生成器产物不可控"登记豁免。应用层 SQLite 专有写法 26 处按 §4 口径登记不判 → 故判**有条件过**，非全绿 |
 | M7-⑦-08 | 旧 /api 与旧页面字节零 diff（各 S0 golden 汇总） | 过 | 台账 A.6：characterization 5 件 + org 3 件 + `m5-search-golden`+snapshot + `m6-s0-characterization` + `search-bounds` + `records-keyset(7)` + `keyset-flags(8)` = **9 文件 111 passed**（`f5fb7bc`） | — |
 
 ### 7.2 安全（§8.2）
@@ -202,7 +202,7 @@
 
 2. **M7-②-10 门② 人工目检段签字** —— 计划 §3.3 判据是"diff-snapshot exit 0 **且人工目检段全部签字**"。脚本侧 19 步全 0、`damageCount=0` 属实（`/tmp/gx-lead-rerun5`），但 `scripts/acceptance/R8-manual-checklist.md` 里 RC13~RC25 十三行的「结果 / 验收人 / 日期」**三列全空**，门② REPORT.md:81 亦自注"见 R8-manual-checklist.md 人工签字"。脚本绿 ≠ 目检签完，**未做**。
 
-3. **M7-⑦-07 方言巡检** —— 极易被写成"迁移跑通即合规"。计划 §8.1 要求的是"全部企业版迁移无 SQLite 专有写死 + **白名单逐处注释**"。本仓确实存在 SQLite 专有写法（`20260913062000_record_field_index_sidecar/migration.sql:16` 的 `INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT`，以及 Prisma 生成的 `PRAGMA defer_foreign_keys/foreign_keys` 样板），且**没有任何白名单注释/巡检证据文档**。跑通 ≠ 巡检完成，**未做**。
+3. **M7-⑦-07 方言巡检** —— 极易被写成"迁移跑通即合规"。计划 §8.1 要求的是"全部企业版迁移无 SQLite 专有写死 + **白名单逐处注释**"。现状（现已收口见上表）：企业版 M2~M6 共 12 个手写迁移 SQLite 专有写死 **0 处**且多数已有白名单注释；M1/S3 遗留的 `AUTOINCREMENT` 属 SQLite 专有硬写死，且其原注释"两库 DDL 均可平移"**与文件内语法自相矛盾**（错误交付），已按"DDL 不动、注释订正"处理。将来真开 PostgreSQL 通道时这一处是必改点，已在文件内留明。
 
 > 另附一条次高危（同样易被误判，虽不在上述三条内）：**M7-⑦-20 RELEASE.md** —— 仓内确有 `RELEASE.md`，但它自带头部的"历史档案声明"，是 2026-09-04 的自测记录，不是 M7 发布说明。按"存在 ≠ 交付"判 **未做**。
 
