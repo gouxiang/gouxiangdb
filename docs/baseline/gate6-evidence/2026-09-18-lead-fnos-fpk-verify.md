@@ -135,19 +135,39 @@ GET /readyz  → {"status":"ready","checks":{"dbPing":true,"dbWritable":true,"mi
 
 ---
 
+## 3.1 补充：升级 / 卸载 / 重装与版本一致性（同日追加）
+
+| 项 | 结果 |
+|---|---|
+| CLI 触发升级 | `appcenter-cli` **无 upgrade 子命令**；`install-fpk` 对已装同名应用只回 `Application [gouxiangdb] is installed.`（不升级）；`install-local` 实测会把应用**卸掉**（非升级路径） |
+| 版本升级（0.1.0 → 0.1.1，手工改 manifest 后重装） | 版本变 0.1.1、running、healthz 200、readyz ready；**数据逐项零丢失**：`_prisma_migrations=23 / bases=1 / tables=2 / records=1 / users=3 / personal_access_tokens=2 / nav_nodes=5` 与升级前**完全一致** |
+| **卸载保留数据**（`uninstall_callback` 语义） | 卸载成功；`/vol1/@appshare/gouxiangdb/data/app.db`（528,384 B）与 `/vol1/@appconf/gouxiangdb/gouxiangdb.env`（202 B）**均保留**（与"只清运行态、保留 data-share"的设计一致） |
+| 重装复用数据 | 重装后 bases 1→2、users 3→4、records 1→2（差额为期间冒烟累积），**旧数据一条没丢** |
+
+**顺带查出并修掉第 4 个缺陷（提交 `e4b10ee`）**：`build-fpk.mjs` 只重写 `manifest.platform`，
+`version` 是 manifest 里的静态值 → 手工改 manifest 到 0.1.1 装上后，应用中心显示 0.1.1，
+而 `/healthz` `/readyz` 仍报 `"version":"0.1.0"`（dist 内版本来自 `rootPkg.version`），
+**两个版本各说各话**。已改为由 `rootPkg.version` 统一重写 `manifest.version`
+（缺 version 行即 fail）。闭环：重建后 manifest.version=0.1.0 = /healthz version 0.1.0。
+
+> 仍未覆盖：真正走 `upgrade_callback`（在线快照 + migrate deploy + nav reconcile）的
+> **原地升级**没能触发（CLI 无升级入口，需应用中心 UI 或官方升级通道）。
+
+---
+
 ## 4. 本次未覆盖（如实标注，不美化）
 
 1. **带登录态的网关端到端 UI** —— 未取得飞牛门户 token（`/cgi/api/login` 一律返回 `invalid token`），
    故"桌面图标点开 → 看到 GouXiangDB 页面"这一段**未实测**；已验证的是网关前缀已注册 + 应用侧全通。
-2. **fpk 升级路径**（`upgrade_callback`：在线快照 + migrate deploy + nav reconcile）—— 未测（需另造 0.1.1 包）。
+2. **fpk 原地升级的 `upgrade_callback`**（在线快照 + migrate deploy + nav reconcile）—— **未能触发**：CLI 无 upgrade 入口（`install-fpk` 对已装应用只回 "is installed"，`install-local` 实测会把应用卸掉）。已用"卸载→重装"替代路径验证数据零丢失（见 §3.1），但 `upgrade_callback` 自身仍未跑到。
 3. **arm64 真机** —— 本次设备为 x86_64；`--arch arm` 仅经脚本守卫，无真机。
-4. **卸载保留数据** —— `uninstall_callback` 的语义（只清运行态、保留 data-share）未做真机卸载验证。
+4. ~~卸载保留数据~~ —— **已补测并通过**（§3.1：卸载后 app.db 与 gouxiangdb.env 均保留）。
 5. Caddy 真机反代、旧 Tauri 桌面 UI 手测 —— 门⑥ 其余格，仍【未实测】。
 
 ---
 
 ## 5. 落地产物
 
-- 代码：提交 **`f98bb8f`**（cmd/ 补 5 个生命周期脚本 + `deploy/fnos/build-fpk.mjs` 三处修复）
+- 代码：提交 **`f98bb8f`**（cmd/ 补 5 个生命周期脚本 + `deploy/fnos/build-fpk.mjs` 三处修复）、**`e4b10ee`**（manifest.version 统一由 rootPkg 重写）
 - 规范沉淀：`build-fpk.mjs` 内 `--node-linker=hoisted` 的**原因注释**与**零符号链接硬闸门**
   （下次再有人改回默认布局，构建阶段直接 FAIL，不会等到真机才发现装不上）
