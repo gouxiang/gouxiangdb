@@ -80,7 +80,7 @@ DATABASE_URL="file:$GOLD" "$NODE_BIN" "$PRISMA" migrate deploy --schema "$API_DI
 log "全开姿态起 dist 服务 + HTTP 最小种子"
 GOLD_DATA="$RUN_DIR/stages/seed-data"
 start_stage seed "$GOLD" "$GOLD_DATA" 0 \
-  GX_ENTERPRISE_ORG=on GX_ENTERPRISE_NAV=on GX_M5_SEARCH=on
+  GX_ENTERPRISE_ORG=on GX_ENTERPRISE_NAV=on GX_M5_SEARCH=on GX_SEARCH_WORKER=off
 REC_SEED="$(wait_readyz_stage seed)" || die "全开姿态服务未就绪"
 log "全开基线服务就绪（${REC_SEED}s）"
 "$NODE_BIN" "$ROLL_DIR/seed.mjs" --base-url "http://127.0.0.1:$RB_PORT" --out "$RUN_DIR/context.json" \
@@ -147,13 +147,24 @@ check r5 check-embedding.mjs --net-log "$RUN_DIR/stages/r5.netlog" --audit-out "
 record R5 "${P%%|*}" "$CHK_HITS" "$CHK_RC" "旧面 FTS 命中 + netguard 外网出网计数=0"
 stop_stage_server r5 || die "R5 停服失败"
 
-# ---------------- R6：outbox 积压保持 -> reindex 追平 ----------------
-log "R6 outbox 真实机制：pending 静置不消化 + reindex 建 chunks（无 worker/GX_SEARCH_WORKER，偏差待裁决）"
-P="$(serve r6 0 GX_ENTERPRISE_ORG=on GX_ENTERPRISE_NAV=on GX_M5_SEARCH=on)" || die "R6 服务未就绪"
+# ---------------- R6：worker 关闭面 GX_SEARCH_WORKER=off -> outbox 静置 + 手动 reindex ----------------
+# 2026-09-18 更新：此前 R6 记录的是「SearchIndexer 从未接线」的偏差；P1 已由 249df44 修复
+# （内嵌工人接线，门控 GX_M5_SEARCH=on 且 GX_SEARCH_WORKER!=off）。故 R6 改为显式把这个新
+# 旗标打到 off，验证「回滚面」仍成立：pending 静置不降、手动 /admin/reindex 入口仍可用。
+log "R6 GX_SEARCH_WORKER=off（回滚面）：pending 静置不消化 + /admin/reindex 仍可全量建 chunks"
+P="$(serve r6 0 GX_ENTERPRISE_ORG=on GX_ENTERPRISE_NAV=on GX_M5_SEARCH=on GX_SEARCH_WORKER=off)" || die "R6 服务未就绪"
 DB6="$(echo "$P" | awk -F'|' '{print $2}')"
 check r6 check-outbox.mjs --db "$DB6"
-record R6 "${P%%|*}" "$CHK_HITS" "$CHK_RC" "pending 静置不消化 + reindex 202 chunks>0/coverage0；reindex 不清 outbox 且无 worker 启动点（偏差，待裁决）"
+record R6 "${P%%|*}" "$CHK_HITS" "$CHK_RC" "worker=off：pending 静置不降、done=0；reindex 202 chunks>0/coverage 全 0（手动全量入口仍可用）"
 stop_stage_server r6 || die "R6 停服失败"
+
+# ---------------- R6b：worker 开启面（P1 修复正立面）-> outbox 被内嵌工人自行追平 ----------------
+log "R6b worker 缺省即开：outbox 由内嵌工人自行追平到 0 + 派生索引可读（249df44 修复证据）"
+P="$(serve r6b 0 GX_ENTERPRISE_ORG=on GX_ENTERPRISE_NAV=on GX_M5_SEARCH=on)" || die "R6b 服务未就绪"
+DB6B="$(echo "$P" | awk -F'|' '{print $2}')"
+check r6b check-outbox-drain.mjs --db "$DB6B"
+record R6b "${P%%|*}" "$CHK_HITS" "$CHK_RC" "worker=on：pending 追平 0/done>0 且 workerId=api-<pid>@ms；status chunks>0"
+stop_stage_server r6b || die "R6b 停服失败"
 
 # ---------------- R7：org off -> /mcp /pats 404 + stdio 文件存在 ----------------
 log "R7 org off：/mcp、/api/v1/pats 404；dist/mcp-stdio.js 文件存在（独立 stdio 入口）"

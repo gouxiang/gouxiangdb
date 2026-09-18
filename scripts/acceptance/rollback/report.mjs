@@ -14,7 +14,8 @@ const FLAG_META = [
   { id: "R3", name: "GX_AUTHZ_ENGINE shadow→off（旧三表守卫）", check: "check-authz" },
   { id: "R4", name: "GX_M1_SIDECAR_READ/KEYSET on→off（游标键消失）", check: "check-keyset" },
   { id: "R5", name: "GX_EMBEDDING_MODE cloud→off（纯 FTS，零外网）", check: "check-embedding" },
-  { id: "R6", name: "outbox 只进不出核实 + reindex 建 chunks（无 worker/GX_SEARCH_WORKER，偏差待裁决）", check: "check-outbox" },
+  { id: "R6", name: "outbox 回滚面：GX_SEARCH_WORKER=off 下 pending 静置不消化 + 手动 reindex 建 chunks", check: "check-outbox" },
+  { id: "R6b", name: "P1 修复正立面：默认起 worker 后 outbox 自行追平 + 派生索引可读（249df44）", check: "check-outbox-drain" },
   { id: "R7", name: "GX_ENTERPRISE_ORG=off（/mcp、/pats 404，stdio 文件仍在）", check: "check-mounts orgoff + fs" },
 ];
 
@@ -43,7 +44,7 @@ function main() {
     ? JSON.parse(fs.readFileSync(path.join(runDir, "net-audit.json"), "utf8"))
     : null;
 
-  const allAutoPass = ["R1", "R2", "R3", "R4", "R5", "R6", "R7"].every((id) => byId.get(id)?.rc === 0);
+  const allAutoPass = ["R1", "R2", "R3", "R4", "R5", "R6", "R6b", "R7"].every((id) => byId.get(id)?.rc === 0);
   const r8StaticOk = Boolean(r8.exists && r8.isSymlinkSwitch && r8.readyzPoll && r8.systemctlGuard);
   const verdict = allAutoPass && r8StaticOk ? "PASS" : "FAIL";
 
@@ -85,29 +86,23 @@ function main() {
   L.push("- FTS 命中证据见 R5 行命中清单（hit 文件）：旧面 GET /api/search?q=zephyrmarker 200 且返回体含标记词。");
   L.push("");
 
-  // R6 偏差
-  L.push("## 三、R6 计划/实现偏差（真机+读码双重核实，不伪装自动绿）");
+  // R6 / R6b：outbox 两面（回滚面 + 修复正立面）
+  L.push("## 三、R6 / R6b：outbox 消化链路（回滚面 + P1 修复正立面）");
   L.push("");
-  L.push("自动探针实际验证到的真实行为（全部命中，见 R6 行 hit 清单）：");
+  L.push("**历史背景（2026-09-18 之前）**：本用例曾坐实两处计划/实现偏差——① 计划 §4 R6 的开关");
+  L.push("`GX_SEARCH_WORKER` 在全 src 零接线；② 消化器 `SearchIndexer`（claim pending→processing→done）");
+  L.push("只在 `indexer.ts:114` 被定义，**从未被任何生产代码 new/start**，而 full reindex 只重建派生库、");
+  L.push("对 `change_events` 零写 → outbox 只进不出。该偏差由 team-lead 裁决为「属错误交付，须修」，");
+  L.push("已由 **`249df44`** 修复：内嵌工人接进 `apps/api/src/index.ts`，门控＝`GX_M5_SEARCH=on` 且");
+  L.push("`GX_SEARCH_WORKER!=off` 才启动；`reindex.ts` 重建期间挂起工人，避免换库后写旧句柄。");
   L.push("");
-  L.push("1. 写操作（record/doc）同事务向 `change_events` enqueue，默认 `pending`；种子后共 4 行 pending。");
-  L.push("2. 真实部署姿态【无常驻消化器】：静置 2.5s 后 pending/done 计数不变——不会被悄悄消化（这就是");
-  L.push("   计划所说 “worker off” 的真实表现）。");
-  L.push("3. owner `POST /api/v1/admin/reindex`（202）是真实可用的**索引构建**入口：rebuild search.db，");
-  L.push("   实测 chunks=7（record 6 + doc 1）、coverage a-f 全 0、rebuilding=false。");
-  L.push("");
-  L.push("但坐实两处与计划不符，**不判自动绿**：");
-  L.push("");
-  L.push("- **偏差1**：计划 §4 R6 的开关 `GX_SEARCH_WORKER=on/off` 在全 src 零接线，环境变量不存在。");
-  L.push("- **偏差2（更关键）**：消化器 `SearchIndexer`（claim pending→processing→done）在整个 src 中");
-  L.push("  仅在 `indexer.ts:114` 被**定义，从未被任何生产/CLI/HTTP 代码 new/start**（`src/index.ts` 启动无 worker，");
-  L.push("  `grep -rn 'new SearchIndexer' src` 零命中）。而 full reindex 走 `reindex.ts runFull`，全量重建");
-  L.push("  chunks 但**不更新 change_events 状态**（reindex.ts 对 change_events 零写）。真机实测：reindex 后");
-  L.push("  4 行 change_events **仍全为 pending**（attempts=0、workerId=null），done 恒为 0。");
-  L.push("");
-  L.push("**结论**：当前代码里 outbox 只进不出（无生产消费方）；增量检索的实际可用性依赖人工/运维触发的");
-  L.push("full reindex，而非 outbox 驱动。**待 team-lead 裁决**：(a) 给 SearchIndexer 增加生产启动点或运维 CLI，");
-  L.push("并落地 `GX_SEARCH_WORKER` 开关；或 (b) 修订计划/ADR，明确 M7 形态以 full reindex 为准、outbox 为预留。");
+  L.push("- **R6（回滚面，`GX_SEARCH_WORKER=off`）**：与修复前同姿态——pending 静置不降、done=0，手动");
+  L.push("  `POST /api/v1/admin/reindex` 仍可用（202 → chunks>0、coverage a-f 全 0）。证明旗标关闭时");
+  L.push("  **不会**有任何后台消化器偷跑（详见 R6 行 hit 清单）。");
+  L.push("- **R6b（P1 修复正立面，旗标缺省）**：全程**不发**任何 reindex 请求，outbox 由内嵌工人自行");
+  L.push("  追平 pending→0、done>0，且 done 行带工牌 `workerId=api-<pid>@<ms>`（SearchIndexer 写入，");
+  L.push("  与手动 reindex 路径零交集）；`GET /api/v1/admin/search/status` 读到 `chunks.total>0`、");
+  L.push("  `rebuilding=false`。这是 249df44 的行为层证据（详见 R6b 行 hit 清单）。");
   L.push("");
 
   // R8 静态核查 + 手测表
@@ -153,8 +148,9 @@ function main() {
   L.push("## 六、需人工签字 / 待裁决项（无法用 HTTP 机械验证或超出自动化范围，不伪装自动绿）");
   L.push("");
   L.push("- R8-* / R9-*：目标机/克隆机实跑（依赖 systemd、/srv/gouxiangdb 部署树、备份介质），本机不具备。");
-  L.push("- **R6 待 team-lead 裁决**（自动行为探针已如实命中，但计划假设与实现不符）：是否给 SearchIndexer");
-  L.push("  补生产启动点/CLI + GX_SEARCH_WORKER，或修订计划承认 M7 以 full reindex 为准。该项不自动过闸。");
+  L.push("- R6 / R6b 已由行为层自动探针机械验证（回滚面不偷跑、修复面自行追平），本轮无待裁决项。");
+  L.push("  残留观察：`SearchIndexer.stop()` 是协作式的，挂起中途若工人正处理单条，该轮仍可能写旧文件");
+  L.push("  （窗口＝单条处理耗时）；彻底消除需给 indexer 加 quiesce 屏障，属改既有语义，本轮未做。");
   L.push("- 前端壳/视觉类回滚表现（菜单消失、设置入口）不在 HTTP 行为层，由门①④/前端回归覆盖。");
   L.push("");
   L.push(`ROLLBACK_VERDICT=${verdict}`);
