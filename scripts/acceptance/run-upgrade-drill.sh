@@ -67,6 +67,43 @@ kill_tree() {
   kill "$pid" 2>/dev/null || true
 }
 
+# 轮询等待进程树真正退出（递归子进程也须消失）。硬 SIGTERM 后若立刻让下一个 node 打开同一
+# SQLite WAL 库，旧连接可能尚未释放热 WAL 帧——在 macOS 上曾观测到新进程首个 kbDoc.findMany()
+# 报 SQLITE_CORRUPT(11) "database disk image is malformed"，而库事后 integrity_check=ok、
+# 独立重跑稳定通过（典型热 WAL 交接竞态，非产品确定性缺陷）。故交接前必须等旧句柄彻底死亡。
+wait_tree_gone() {
+  local root="$1" i
+  for i in $(seq 1 120); do
+    if ! kill -0 "$root" 2>/dev/null && [[ -z "$(pgrep -P "$root" 2>/dev/null)" ]]; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+
+# 从静止（无任何进程持有）的源库复制一致三件套到 scratch 目标，供阶段8/9 各自独立开库。
+# 必须连同 -wal/-shm 一起复制，才能拿到含最新已提交帧的完整一致集；缺 wal 会丢 stage7 的写。
+clone_db_triplet() {
+  local src="$1" dst="$2"
+  rm -f "$dst" "$dst-wal" "$dst-shm"
+  cp "$src" "$dst"
+  [[ -f "$src-wal" ]] && cp "$src-wal" "$dst-wal"
+  [[ -f "$src-shm" ]] && cp "$src-shm" "$dst-shm"
+}
+
+# 在 apps/api 下跑 better-sqlite3（pnpm 依赖只在该目录可解析）对静止库做 WAL checkpoint(TRUNCATE)，
+# 把热 WAL 帧固化进主文件，给后续阶段一个确定一致的快照。库路径用绝对路径，与 cwd 无关。
+checkpoint_db() {
+  local db="$1"
+  ( cd "$API_DIR" && env CODEBUDDY_SAFE_DELETE_ENABLED=0 "$NODE_BIN" -e '
+const Database = require("better-sqlite3");
+const db = new Database(process.argv[1]);
+db.pragma("wal_checkpoint(TRUNCATE)");
+db.close();
+' "$db" )
+}
+
 # 任何中途 die/退出都回收本演练自起的服务（只按自记 PID，绝不碰无关 dev server）。
 cleanup_servers() {
   local pf
@@ -146,10 +183,13 @@ step "2-seed-legacy" "$NODE_BIN" "$AC_DIR/seed-legacy.mjs" \
   --db "$LEGACY_DB" --uploads "$OLD_UPLOADS" --out "$BEFORE_DIR" \
   || die "旧库播种失败"
 
-log "停旧服务 pid=$(cat "$RUN_DIR/old.pid")（含其 tsx 子进程）"
-kill_tree "$(cat "$RUN_DIR/old.pid")"
+OLD_PID="$(cat "$RUN_DIR/old.pid")"
+log "停旧服务 pid=${OLD_PID}（含其 tsx 子进程）"
+kill_tree "$OLD_PID"
+wait_tree_gone "$OLD_PID" || log "警告：旧进程树未在 30s 内全部退出（继续，但见热 WAL 风险）"
 rm -f "$RUN_DIR/old.pid"
-sleep 1
+# 旧连接彻底退出后固化 legacy WAL（它随后要被 dump/备份/复制为 upgraded.db，必须静止一致）。
+checkpoint_db "$LEGACY_DB" || die "阶段2后 checkpoint 旧库失败"
 
 # ---------------- 阶段3：before 取证 + 旧库备份/恢复校验 ----------------
 step "3a-dump-before" "$NODE_BIN" "$AC_DIR/dump-records.mjs" \
@@ -221,19 +261,30 @@ step "7a-verify-golden" "$NODE_BIN" "$AC_DIR/verify-golden.mjs" \
 step "7b-check-share-links" bash -c \
   "bash '$AC_DIR/check-share-links.sh' '$NEW_BASE' '$BEFORE_DIR/manifest.json' | tee '$AFTER_DIR/share-links.log'"
 
-log "停候选服务 pid=$(cat "$RUN_DIR/new.pid")（含其 tsx 子进程）"
-kill_tree "$(cat "$RUN_DIR/new.pid")"
+NEW_PID="$(cat "$RUN_DIR/new.pid")"
+log "停候选服务 pid=${NEW_PID}（含其 tsx 子进程）"
+kill_tree "$NEW_PID"
+wait_tree_gone "$NEW_PID" || log "警告：候选进程树未在 30s 内全部退出（继续，但见热 WAL 风险）"
 rm -f "$RUN_DIR/new.pid"
-sleep 1
+# 旧连接彻底释放后，固化 WAL 帧到主库文件（TRUNCATE），给阶段8/9 一个静止、确定的库快照。
+# 历史故障：硬杀后只 sleep 1 就让新 node 打开同一 20MB 热 WAL 库，曾触发 SQLITE_CORRUPT(11)
+# 误报（库本身 integrity_check=ok）；checkpoint 到静止态彻底消除该交接竞态。
+checkpoint_db "$UPGRADED_DB" || die "阶段7后 checkpoint 升级库失败"
 
-# ---------------- 阶段8：搜索 FTS-only（自管服务，纯净态之后） ----------------
+# ---------------- 阶段8：搜索 FTS-only（独立副本库，纯净态之后） ----------------
+# 用静止 upgraded.db 的一致副本，物理隔离热 WAL；search 内部还会做删库自愈，绝不碰证据主库。
+SEARCH_DB="$RUN_DIR/search-scratch.db"
+clone_db_triplet "$UPGRADED_DB" "$SEARCH_DB"
 step "8-check-search" "$NODE_BIN" "$AC_DIR/check-search.mjs" \
-  --db "$UPGRADED_DB" --data-dir "$DATA_DIR" --dist "$DIST_ENTRY" \
+  --db "$SEARCH_DB" --data-dir "$DATA_DIR" --dist "$DIST_ENTRY" \
   --manifest "$BEFORE_DIR/manifest.json" --out "$AFTER_DIR" --api-dir "$API_DIR"
 
-# ---------------- 阶段9：body 边界双实例（自管服务，最后跑：会大尺寸改写 scratch） ----------------
+# ---------------- 阶段9：body 边界双实例（独立副本库，最后跑：会大尺寸改写 scratch） ----------------
+# 阶段9 会对库做 2MB/10MB 大尺寸写，再复制一份，避免污染阶段8/最终证据库 upgraded.db。
+BODY_DB="$RUN_DIR/body-scratch.db"
+clone_db_triplet "$UPGRADED_DB" "$BODY_DB"
 step "9-check-body-limits" "$NODE_BIN" "$AC_DIR/check-body-limits.mjs" \
-  --db "$UPGRADED_DB" --data-dir "$DATA_DIR" --dist "$DIST_ENTRY" \
+  --db "$BODY_DB" --data-dir "$DATA_DIR" --dist "$DIST_ENTRY" \
   --manifest "$BEFORE_DIR/manifest.json" --out "$AFTER_DIR" --api-dir "$API_DIR"
 
 # ---------------- 收尾：run-manifest.json ----------------
