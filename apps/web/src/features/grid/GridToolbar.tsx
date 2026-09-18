@@ -26,8 +26,12 @@ export interface GridToolbarProps {
   config: ViewConfig;
   /** 工具栏最左侧插入的节点（视图切换器）；由宿主按 tableId/viewId 装配 */
   leading?: ReactNode;
+  /**
+   * 工具栏各面板（字段显隐 / 筛选 / 分组 / 排序 / 行颜色）的候选字段集。
+   * 必须是「全部可列字段」而非「当前可见字段」：旧实现传可见集，导致字段一隐藏就从所有面板
+   * 消失、再也选不回来（2026-09-18 真机验收发现，见 GridView.gridManageableFields）。
+   */
   allFields: FieldDTO[];
-  visibleFields: FieldDTO[];
   /** S8：服务端降级原因码（如 computedInMem），用于排序/分组对非物理字段逐项置灰。 */
   degradedCodes?: string[];
   filteredTotal: number;
@@ -87,7 +91,6 @@ export function GridToolbar(props: GridToolbarProps) {
     config,
     leading,
     allFields,
-    visibleFields,
     degradedCodes,
     filteredTotal,
     permissions,
@@ -239,7 +242,7 @@ export function GridToolbar(props: GridToolbarProps) {
         {open === "filter" && (
           <Popover open onClose={() => setOpen(null)} align="left" width={320} className="p-0">
             <FilterPanel
-              fields={visibleFields}
+              fields={allFields}
               value={config.filters}
               filteredTotal={filteredTotal}
               onChange={(next) => onUpdateConfig({ filters: next })}
@@ -258,7 +261,7 @@ export function GridToolbar(props: GridToolbarProps) {
         {open === "group" && (
           <Popover open onClose={() => setOpen(null)} align="left" width={300} className="p-0">
             <GroupPanel
-              fields={visibleFields}
+              fields={allFields}
               groupByFieldId={config.groupByFieldId}
               degradedCodes={degradedCodes}
               onChange={(id) => onUpdateConfig({ groupByFieldId: id })}
@@ -277,7 +280,7 @@ export function GridToolbar(props: GridToolbarProps) {
         {open === "sort" && (
           <Popover open onClose={() => setOpen(null)} align="left" width={260} className="p-2">
             <SortPanel
-              fields={visibleFields}
+              fields={allFields}
               sorts={config.sorts}
               degradedCodes={degradedCodes}
               onChange={(sorts) => onUpdateConfig({ sorts })}
@@ -296,7 +299,7 @@ export function GridToolbar(props: GridToolbarProps) {
         {open === "color" && (
           <Popover open onClose={() => setOpen(null)} align="left" width={320} className="p-0">
             <RowColorPanel
-              fields={visibleFields}
+              fields={allFields}
               value={config.rowColor}
               onChange={(rc) => onUpdateConfig({ rowColor: rc })}
             />
