@@ -282,5 +282,28 @@ SELECT COUNT(*) AS owner_grants FROM role_assignments WHERE roleId = 'role_owner
 
 ## 9. 落地状态（如实标注）
 
-- 已核对：部署链路三处插入点、环境样例模板、`pnpm --filter @gx/api init:admin` 脚本项、本文 §5 的表名/列名（`users` / `role_assignments` / `role_owner` / `mustChangePassword`）、`POST /api/auth/login` 响应体含 `user.mustChangePassword`。
-- **尚未实测**：所有依赖 `apps/api/dist/init-admin.js` 本体的命令（§4.2 手动补跑、§5.1 登录验证的端到端结果、§6 重跑、§7 回滚后的重跑）。CLI 脚本本体由另一名同事并行实现，落地后需在目标机上按本文 §5 逐条实测。
+**已实测（2026-09-18，临时 SQLite 库 + `prisma migrate deploy` 后，项目总监独立复跑，非脚本作者自报）**
+
+```
+$ node dist/init-admin.js --email lead@verify.local --password '<强口令>' --name 复核管理员
+[init-admin] 已创建超级管理员 cmu6ryirm000112zfz6kcx9hg lead@verify.local，已授予系统 owner，已标记首次登录强制改密
+[init-admin] 安全提示：请立即用初始账号登录并修改密码；完成后建议从 env 中删除 GX_INIT_ADMIN_* 三行。
+EXIT=0
+$ node dist/init-admin.js --email lead@verify.local --password '<强口令>'      # 第二次
+[init-admin] 已初始化，跳过（users 表已有 1 个用户）
+EXIT=0
+```
+
+- 落库核对：`users` 行 `status=ACTIVE`、`mustChangePassword=1`；`role_assignments` 行
+  `roleId=role_owner / subjectType=user / scopeType=workspace / createdBy=system-init-admin`（与 §5.2 的 SQL 一致）。
+- 审计落盘：`{"event":"admin_initialized",...,"detail":{"emailMasked":"l***@verify.local",...}}`，
+  **密码明文出现次数 = 0**。
+- 退出码：`NODE_ENV=production` 未提供凭据 → **64**；迁移未执行 → **1**；`--help` → 0。
+- 构建产物：`dist/init-admin.js`（第四入口）已产出，`build.mjs` / `package-release.mjs` / `build-fpk.mjs` 三处断言均已就位。
+- 三个部署 shell（`cmd/install_callback`、`docker-entrypoint.sh`、`deploy/bin/deploy.sh`）`bash -n` 语法检查通过。
+
+**已核对但未实测（需目标机/真机联调）**
+
+- §4.2 三套部署**整条链路**的实际执行（只做了接线块的分支冒烟，未跑真机安装）。
+- §5.1 登录 200 + `mustChangePassword:true` 的端到端结果、§6 重跑、§7 回滚后重跑 —— 需在飞牛 / 容器 / 裸机上按本文逐条执行。
+- 前端强制改密页的真机呈现（登录 → 跳 `/change-password` → 提交 → 进主界面），目前只有单测与 typecheck 覆盖。
