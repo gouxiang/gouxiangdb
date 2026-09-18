@@ -25,6 +25,9 @@ import { resolveAuthzEngineMode, type AuthzEngineMode } from "./configAuthz.js";
 // import { ... } from "./config.js" 调用方使用，与 configAuthz 同款无感接线。
 export type { M5SearchFlag } from "./configM5Search.js";
 export { parseM5SearchFlag, parseM5ShadowStrict, parseSearchWorkerFlag } from "./configM5Search.js";
+// 0.1.7 公开注册开关（GX_ALLOW_PUBLIC_SIGNUP）真源在 configSignup.ts（运行时 per-request 判定，
+// 故导出的是纯函数而非启动期快照字段）；此处 re-export 供 import { ... } from "./config.js" 复用。
+export { publicSignupOpen } from "./configSignup.js";
 import {
   parseM5SearchFlag, parseM5ShadowStrict, parseSearchWorkerFlag, type M5SearchFlag,
 } from "./configM5Search.js";

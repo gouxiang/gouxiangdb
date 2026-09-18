@@ -12,6 +12,7 @@ import { withWriteTx } from "./db.js";
 import { bootstrapFirstOwnerTx } from "./domain/org/members.js";
 import { DEFAULT_WORKSPACE_ID } from "./domain/org/workspace.js";
 import { config } from "./config.js";
+import { publicSignupOpen } from "./configSignup.js";
 
 // token 有效期常量与 JWT/状态解析核心已下沉到 domain/org/authState.ts（旧 /api 与 v1 共享）。
 export type Role = "owner" | "creator" | "editor" | "commenter" | "viewer";
@@ -28,6 +29,19 @@ const signupSchema = z.object({
   displayName: z.string().min(1),
 });
 
+/**
+ * GET /bootstrap-status：免鉴权公开引导状态（前端据此决定渲染「创建首个管理员」还是登录页）。
+ *
+ * 只回两个布尔，绝不回邮箱/数量/任何账号信息——未部署实例上任何账号细节都可能被枚举：
+ *   initialized = users 表是否已有任何用户（count>0，走 COUNT 不 hydrate）；
+ *   signupOpen  = 公开注册开关 GX_ALLOW_PUBLIC_SIGNUP 的判定（未设置恒开放）。
+ * 与 signup 同为免鉴权路由（在 requireActiveUser 之外，v1 路由见 routes/v1/index.ts:28）。
+ */
+auth.get("/bootstrap-status", async (c) => {
+  const userCount = await prisma.user.count();
+  return c.json({ initialized: userCount > 0, signupOpen: publicSignupOpen() });
+});
+
 auth.post("/signup", async (c) => {
   const body = await c.req.json().catch(() => null);
   const parsed = signupSchema.safeParse(body);
@@ -35,6 +49,12 @@ auth.post("/signup", async (c) => {
     return c.json({ error: "Invalid input", details: parsed.error.issues }, 400);
   }
   const { email, password, displayName } = parsed.data;
+  // 注册开关（0.1.7）：关闭时仅【空库】放行——首用户引导必须永远可行（否则重装/回滚会自举
+  // 死锁，首账号自举见 bootstrapFirstOwnerTx）；非空库一律 403 SIGNUP_CLOSED。
+  // 仅在关闭态多一次 count（开放态零新增查询，与 0.1.6 及更早完全等价）。
+  if (!publicSignupOpen() && (await prisma.user.count()) > 0) {
+    return c.json({ error: "注册已关闭，请联系管理员邀请", code: "SIGNUP_CLOSED" }, 403);
+  }
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
     return c.json({ error: "Email already registered" }, 409);
