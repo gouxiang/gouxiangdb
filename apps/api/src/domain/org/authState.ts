@@ -46,6 +46,23 @@ export function issueToken(userId: string, tokenVersion = 0): Promise<string> {
 }
 
 /**
+ * 取请求中的 JWT：优先标准 `Authorization: Bearer <jwt>`，其次自定义头 `X-GX-Token`。
+ *
+ * 为什么需要 X-GX-Token：飞牛 fnOS 的第三方应用 CGI 网关（/usr/trim/bin/trim_http_cgi）
+ * 会把请求里的 `Authorization` 头当作**它自己的 fnOS 令牌**校验，非 fnOS 令牌一律返回
+ * `200 invalid token` 并把请求吞掉（2026-09-18 在 fnOS 1.2.0604 实测：signup 无该头可穿过，
+ * 登录后所有带 Bearer 的 XHR 全被拦，界面永久 loading）。因此 Web 端改用 X-GX-Token 携带同一 JWT
+ * 绕开该校验；MCP/PAT 等外部客户端仍可用 Authorization（保留向后兼容）。
+ */
+function readBearerToken(c: BearerHeader): string {
+  const authHeader = c.req.header("Authorization") ?? "";
+  const fromAuth = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (fromAuth) return fromAuth;
+  const gx = (c.req.header("X-GX-Token") ?? "").trim();
+  return gx.startsWith("Bearer ") ? gx.slice(7).trim() : gx;
+}
+
+/**
  * 鉴权共享解析核心：
  *   1) 取 Bearer token；2) 验签 HS256，无 tv claim 视为 tv=0（平滑升级，不踢存量登录）；
  *   3) 按 PK 查 users（status/tokenVersion/workspaceId），TTL>0 时先走有界缓存；
@@ -53,8 +70,7 @@ export function issueToken(userId: string, tokenVersion = 0): Promise<string> {
  * 不向调用方区分失败原因（端点侧统一 401）。
  */
 export async function resolveActiveAuth(c: BearerHeader): Promise<ResolvedAuth | null> {
-  const authHeader = c.req.header("Authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  const token = readBearerToken(c);
   if (!token) return null;
 
   let payloadUserId: string;

@@ -87,7 +87,8 @@ function createMount(webRoot: string | null): Hono {
         return allowedOriginPatterns.some((re) => re.test(origin)) ? origin : null;
       },
       credentials: true,
-      allowHeaders: ["Content-Type", "Authorization"],
+      // X-GX-Token：飞牛 CGI 网关会吞掉带 Authorization 的请求，Web 端改用该头携带同一 JWT。
+      allowHeaders: ["Content-Type", "Authorization", "X-GX-Token"],
       allowMethods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     }),
   );
@@ -109,7 +110,7 @@ function createMount(webRoot: string | null): Hono {
   if (!webRoot) {
     mount.get("/", (c) =>
       c.json({
-        name: "GouXiangDB API",
+        name: "构想工作台 API",
         version: VERSION,
         endpoints: [
           "/api/health",

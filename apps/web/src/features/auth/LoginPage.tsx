@@ -51,7 +51,7 @@ export default function LoginPage() {
       <div className="w-[360px] rounded-gx-xl bg-gx-surface p-6 shadow-lg">
         {/* 品牌区 */}
         <div className="mb-5 text-center">
-          <div className="text-gx-18 font-semibold text-gx-text-primary">构象数据库</div>
+          <div className="text-gx-18 font-semibold text-gx-text-primary">构想工作台</div>
           <div className="mt-1 text-gx-12 text-gx-text-hint">智能表格 · 前后端分离重写</div>
         </div>
 

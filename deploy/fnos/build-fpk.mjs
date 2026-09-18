@@ -28,7 +28,12 @@ const repoRoot = path.resolve(here, "..", "..");
 const packDir = path.join(here, "gouxiangdb");
 const serverDir = path.join(packDir, "app", "server");
 const publicDir = path.join(serverDir, "public");
-const GATEWAY_PREFIX = "/app/gouxiangdb";
+// 前端 base 必须是【CGI 入口前缀】，不能是统一网关前缀 /app/gouxiangdb：
+// 三方应用的统一网关注册在 fnOS 1.2.0604 上不生效（实测请求被门户拦在 "invalid token"，
+// 桌面点开即空白页），对外入口是 /cgi/ThirdParty/<appname>/index.cgi/。
+// 该前缀同时决定了 index.html 里的资源路径与前端 API_BASE_URL（import.meta.env.BASE_URL），
+// CGI 脚本会剥离 index.cgi 之前的部分再转发给后端，所以后端看到的是 /api/...、/assets/...。
+const CGI_PREFIX = "/cgi/ThirdParty/gouxiangdb/index.cgi/";
 
 const args = process.argv.slice(2);
 let arch = "";
@@ -78,14 +83,14 @@ if (spawnSync("fnpack", ["--help"], { stdio: "ignore" }).status !== 0) {
 const rootPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 const apiPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "apps", "api", "package.json"), "utf8"));
 const version = rootPkg.version || "0.0.0-dev";
-log(`版本 ${version}，目标 arch=${arch}（linux/${wantArch}），网关前缀 ${GATEWAY_PREFIX}`);
+log(`版本 ${version}，目标 arch=${arch}（linux/${wantArch}），CGI 入口前缀 ${CGI_PREFIX}`);
 
 // --- 1) 构建 api（esbuild）与 web（网关子路径） -----------------------------------
 log("构建 @gx/api（esbuild）");
 run("pnpm", ["--filter", "@gx/api", "run", "build"]);
-log(`构建 @gx/web（VITE_BASE_PATH=${GATEWAY_PREFIX}）`);
+log(`构建 @gx/web（VITE_BASE_PATH=${CGI_PREFIX}）`);
 run("pnpm", ["--filter", "@gx/web", "run", "build"], {
-  env: { ...process.env, VITE_BASE_PATH: GATEWAY_PREFIX },
+  env: { ...process.env, VITE_BASE_PATH: CGI_PREFIX },
 });
 
 // --- 2) 写 manifest.platform / manifest.version -----------------------------------
@@ -211,6 +216,45 @@ run("node", [
   if (hasVec) log("找到 server/native/<triplet>/vec0.so");
   else console.warn("[fnpack-build] 未生成 server/native/<triplet>/vec0.so，运行时降级 fts-only");
 }
+
+// --- 5.5) 入口一致性自检（白屏闸门） ----------------------------------------------
+// 空白页最常见的三个来源，全部在这里堵死：
+//   1) app/ui/index.cgi 缺失或没有可执行位 → CGI 直接失败，iframe 里就是空白；
+//   2) 入口 url 与 CGI_PREFIX 不一致 → 门户打开的是另一个（不存在的）路径；
+//   3) 误留 gatewayPrefix/gatewaySocket → 三方应用的网关注册不生效，请求被门户拦在
+//      "invalid token"，同样表现为空（2026-09-18 真机实测）。
+(() => {
+  const uiDir = path.join(packDir, "app", "ui");
+  const cgiPath = path.join(uiDir, "index.cgi");
+  const cfgPath = path.join(uiDir, "config");
+  if (!fs.existsSync(cgiPath)) fail("缺少 app/ui/index.cgi（CGI 反代入口），装上去必然空白页");
+  try {
+    fs.accessSync(cgiPath, fs.constants.X_OK);
+  } catch {
+    fail("app/ui/index.cgi 没有可执行位，CGI 无法执行（构建产物的权限位必须在打包前设好）");
+  }
+  let cfg;
+  try {
+    cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+  } catch (e) {
+    fail(`app/ui/config 不是合法 JSON：${e?.message ?? e}`);
+  }
+  const entries = Object.values(cfg?.[".url"] ?? {});
+  if (entries.length === 0) fail("app/ui/config 的 .url 下没有任何入口");
+  for (const e of entries) {
+    if (e.gatewayPrefix || e.gatewaySocket) {
+      fail(
+        `入口 "${e.title}" 仍声明 gatewayPrefix/gatewaySocket：` +
+          `三方应用的统一网关注册在真机上不生效（实测被门户拦在 invalid token），会导致空白页。`,
+      );
+    }
+    if (e.url !== CGI_PREFIX) {
+      fail(`入口 "${e.title}" 的 url="${e.url}" 与 CGI_PREFIX="${CGI_PREFIX}" 不一致，会导致空白页`);
+    }
+    if (e.type !== "iframe") console.warn(`[fnpack-build] 入口 "${e.title}" 的 type=${e.type}（预期 iframe）`);
+  }
+  log(`入口一致性自检通过（${entries.length} 个入口，url=${CGI_PREFIX}，index.cgi 可执行）`);
+})();
 
 // 原生模块架构自检：至少应存在 better-sqlite3 的 .node 与 prisma libquery engine。
 function assertExists(globHint, predicate) {

@@ -102,7 +102,7 @@ export default function PublicSharePage() {
           onClick={() => navigate("/login")}
           className="mt-2 rounded-gx-md bg-gx-accent px-4 py-2 text-gx-13 font-medium text-white hover:brightness-95"
         >
-          返回 GouXiangDB
+          返回构想工作台
         </button>
       </div>
     );
@@ -166,7 +166,7 @@ export default function PublicSharePage() {
             onClick={() => navigate("/login")}
             className="rounded-gx-md border border-gx-border bg-gx-surface px-2.5 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-bg"
           >
-            在 GouXiangDB 中打开
+            在构想工作台中打开
           </button>
         </header>
 

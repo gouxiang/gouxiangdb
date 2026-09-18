@@ -11,6 +11,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "../../components/ui";
 import { KbApi, API_BASE_URL, ApiError, type KbDocDTO } from "../../api/client";
 import { useAuthStore } from "../../store/auth";
+import { authHeaders } from "../../api/authHeader";
 import { saveDraft, loadDraft, clearDraft, hasRecoverableDraft, type Draft } from "./draft";
 
 export type SaveStatus = "saved" | "saving" | "unsaved";
@@ -136,7 +137,7 @@ export function useDocPersistence(
       const token = useAuthStore.getState().token;
       void fetch(`${API_BASE_URL}/api/kb/docs/${docIdRef.current}/content`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: { "Content-Type": "application/json", ...authHeaders(token) },
         body: JSON.stringify({ content, baseVersion: versionRef.current }),
         keepalive: true,
       })

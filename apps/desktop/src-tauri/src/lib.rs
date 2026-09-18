@@ -5,7 +5,7 @@ use tauri::Manager;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
-    format!("Hello, {}! 欢迎使用 GouXiangDB 桌面壳", name)
+    format!("Hello, {}! 欢迎使用构想工作台桌面壳", name)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -16,10 +16,10 @@ pub fn run() {
         .setup(|app| {
             // 启动时拿到主窗口（v1 风格）
             let window = app.get_webview_window("main").unwrap();
-            window.set_title("GouXiangDB").unwrap();
+            window.set_title("构想工作台").unwrap();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())
-        .expect("启动 GouXiangDB 失败");
+        .expect("启动构想工作台失败");
 }

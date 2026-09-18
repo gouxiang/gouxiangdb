@@ -102,12 +102,12 @@ app/server/
 ```ini
 appname=gouxiangdb
 version=0.1.0
-display_name=勾享数据库
+display_name=构想工作台
 desc=面向个人与小团队的智能多维表格（SQLite，本地优先）
 source=thirdparty
 platform=x86
-maintainer=GouXiangDB Team
-distributor=GouXiangDB Team
+maintainer=构想工作台团队
+distributor=构想工作台团队
 os_min_version=1.1.3100
 install_dep_apps=nodejs_v22
 desktop_uidir=ui
@@ -150,28 +150,33 @@ ctl_stop=true
 
 安装时系统创建该共享目录并对应用用户授权；运行时经 `TRIM_DATA_SHARE_PATHS`（`:` 分隔多个）拿到绝对路径，也可经 `/var/apps/gouxiangdb/share/data` 软链访问。数据库、上传、本地快照都放这里（卸载可保留、用户可在文件管理器中备份）。
 
-### 3.4 `app/ui/config`（桌面卡片 + 统一网关注册）
+### 3.4 `app/ui/config`（桌面卡片 + CGI 反代入口）
 
 ```json
 {
   ".url": {
     "gouxiangdb.main": {
-      "title": "勾享数据库",
+      "title": "构想工作台",
       "icon": "images/icon_{0}.png",
       "type": "iframe",
       "protocol": "",
-      "gatewayPrefix": "/app/gouxiangdb",
-      "gatewaySocket": "app.sock",
-      "url": "/app/gouxiangdb/",
+      "url": "/cgi/ThirdParty/gouxiangdb/index.cgi/",
       "allUsers": true
     }
   }
 }
 ```
 
-- `gatewaySocket=app.sock` 对应 `cmd/main` 在 `${TRIM_APPDEST}/app.sock` 创建的 socket（宿主实际路径 `/var/apps/gouxiangdb/target/app.sock`）。
-- 走统一网关时 `protocol`/`port` 不参与路由，置空。
-- 网关先校验 fnOS 登录态，再把用户身份经 **`X-Trim-Userid`** 头转发给应用。
+- **不使用统一网关**（`gatewayPrefix` / `gatewaySocket`）：2026-09-18 在 fnOS 1.2.0604 上实测，
+  声明统一网关后访问 `http://<nas>:5666/app/gouxiangdb/` 返回的是门户自身的 `invalid token`，
+  请求根本没进到应用（桌面点开即空白页）。设备上唯一正常工作的第三方应用
+  `com.fnos.dashboard` 走的正是 CGI 反代路线。
+- `url` 必须指向 `app/ui/index.cgi`（fnOS 先校验 NAS 登录态，再执行该脚本；脚本用 `curl`
+  反代到 `127.0.0.1:${TRIM_SERVICE_PORT}`，端口由 manifest 的 `service_port=3001` 注入）。
+- 门户会把用户身份经 **`X-Trim-Userid` / `X-Trim-Username` / `X-Trim-Isadmin`** 头传给 CGI。
+- ⚠️ **不要把应用 JWT 放在 `Authorization` 头**：`trim_http_cgi` 会把它当 fnOS 令牌校验，
+  非 fnOS 令牌一律返回 `200 invalid token` 并吞掉请求。Web 端统一用 **`X-GX-Token`** 头
+  （后端 `resolveActiveAuth` 同时接受 `Authorization: Bearer` 与 `X-GX-Token`）。
 
 ### 3.5 图标
 

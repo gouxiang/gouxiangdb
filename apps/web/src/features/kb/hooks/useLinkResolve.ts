@@ -11,6 +11,7 @@
 import { useCallback, useMemo } from "react";
 import { useAuthStore } from "../../../store/auth";
 import { withBase } from "../../../api/client";
+import { authHeaders } from "../../../api/authHeader";
 
 export type LinkResolveKind = "ok" | "deleted" | "forbidden" | "network" | "external" | "unknown";
 
@@ -72,7 +73,7 @@ export function useLinkResolve() {
       void probe.kbId;
       fetch(withBase(`/api/kb/docs/${probe.docId}/acl`), {
         method: "GET",
-        headers: { Authorization: `Bearer ${tok}` },
+        headers: authHeaders(tok),
       })
         .then(async (r) => {
           if (r.status === 200) {

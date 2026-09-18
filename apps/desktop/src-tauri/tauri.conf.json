@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "GouXiangDB",
+  "productName": "构想工作台",
   "version": "0.1.0",
   "identifier": "com.gouxiangdb.desktop",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "GouXiangDB",
+        "title": "构想工作台",
         "width": 1280,
         "height": 800,
         "minWidth": 960,

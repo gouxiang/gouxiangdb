@@ -1,13 +1,11 @@
 {
   ".url": {
     "gouxiangdb.main": {
-      "title": "勾享数据库",
+      "title": "构想工作台",
       "icon": "images/icon_{0}.png",
       "type": "iframe",
       "protocol": "",
-      "gatewayPrefix": "/app/gouxiangdb",
-      "gatewaySocket": "app.sock",
-      "url": "/app/gouxiangdb/",
+      "url": "/cgi/ThirdParty/gouxiangdb/index.cgi/",
       "allUsers": true
     }
   }

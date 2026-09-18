@@ -1,16 +1,19 @@
 appname=gouxiangdb
 version=0.1.0
-display_name=勾享数据库
+display_name=构想工作台
 desc=面向个人与小团队的智能多维表格（SQLite，本地优先）
 source=thirdparty
 # 架构相关二进制（better-sqlite3 .node + Prisma query engine），禁止 all。
 # 构建脚本 build-fpk.mjs 会按 --arch x86|arm 重写本字段。
 platform=x86
-maintainer=GouXiangDB Team
-distributor=GouXiangDB Team
+maintainer=构想工作台团队
+distributor=构想工作台团队
 os_min_version=1.1.3100
 install_dep_apps=nodejs_v22
 desktop_uidir=ui
 desktop_applaunchname=gouxiangdb.main
-# 统一网关经 Unix socket 转发，不声明 service_port / checkport。
+# 对外经 CGI 入口反代到本端口（统一网关对三方应用不生效，见 app/ui/index.cgi）。
+# service_port 会让 fnOS 注入 TRIM_SERVICE_PORT，CGI 脚本据此反代。
+service_port=3001
+checkport=true
 ctl_stop=true

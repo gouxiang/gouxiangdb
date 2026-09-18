@@ -60,6 +60,7 @@ import type {
   NodeBreadcrumbDTO,
 } from "@gx/shared-types";
 import { resolveApiBase, withBase as joinBase } from "../lib/base";
+import { authHeaders } from "./authHeader";
 
 // API 同源前缀解析：
 //  - 显式 VITE_API_URL（非空）→ 绝对来源，去尾斜杠（保留跨域/独立域名能力）
@@ -179,7 +180,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     ...init,
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...authHeaders(token),
       ...init?.headers,
     },
   });
@@ -1149,7 +1150,7 @@ export const PatsApi = {
       method: "DELETE",
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...authHeaders(token),
       },
     });
     if (!res.ok) {

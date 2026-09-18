@@ -1,4 +1,7 @@
-# GouXiangDB — 前后端分离 · 客户端壳化 · 多端复用智能表格
+# 构想工作台 — 前后端分离 · 客户端壳化 · 多端复用智能表格
+
+> 产品名统一为「**构想工作台**」（飞牛应用包名 / 目录 / monorepo 根包名仍为 `gouxiangdb` / `gouxiangdb-v2`，
+> 仅为技术标识，界面与清单中的展示名一律为「构想工作台」）。
 
 > v1 是 macOS 原生智能表格（Swift 6 + SwiftUI + SQLite，clean-room 复刻 NocoDB）。
 > 当前版本（仓库内代号 v2）是前后端分离重构版：薄客户端壳 + 单一 Node.js API + 多端共用核心。

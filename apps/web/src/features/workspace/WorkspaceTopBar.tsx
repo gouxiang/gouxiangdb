@@ -28,10 +28,10 @@ export function WorkspaceTopBar({ onOpenSearch }: { onOpenSearch: () => void }) 
         type="button"
         onClick={() => navigate("/")}
         className="flex shrink-0 items-center gap-1.5 rounded-gx-sm px-1 py-1 hover:bg-gx-bg"
-        title="构象数据库"
+        title="构想工作台"
       >
         <Icon name="database" size={16} className="text-gx-accent" />
-        <span className="hidden text-gx-13 font-semibold text-gx-text-primary lg:inline">构象数据库</span>
+        <span className="hidden text-gx-13 font-semibold text-gx-text-primary lg:inline">构想工作台</span>
       </button>
       <div className="w-44 shrink-0">
         <LibrarySwitcher active={kbId ? { kind: "kb", id: kbId } : { kind: "base", id: baseId ?? null }} />

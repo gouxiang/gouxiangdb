@@ -26,6 +26,7 @@ import type { UserDTO } from "@gx/shared-types";
 import { withBase } from "../../api/client";
 import { AVATAR_PALETTE } from "@gx/design-tokens";
 import { ApiError } from "../../api/client";
+import { authHeaders } from "../../api/authHeader";
 
 type Tab = "profile" | "account" | "password" | "avatar" | "danger";
 
@@ -741,7 +742,8 @@ function uploadAvatarXHR(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", withBase("/api/auth/me/avatar"));
-    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    // 飞牛 CGI 网关会把 Authorization 当自家令牌校验并吞掉请求，故统一用 X-GX-Token。
+    for (const [k, v] of Object.entries(authHeaders(token))) xhr.setRequestHeader(k, v);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
     };

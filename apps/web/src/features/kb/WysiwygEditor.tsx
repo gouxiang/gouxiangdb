@@ -18,6 +18,7 @@ import { CanvasEmbed } from "./CanvasEmbed";
 import { useLinkResolve } from "./hooks/useLinkResolve";
 import { useAuthStore } from "../../store/auth";
 import { withBase } from "../../api/client";
+import { authHeaders } from "../../api/authHeader";
 import {
   Block,
   BlockType,
@@ -2453,7 +2454,7 @@ export function WysiwygEditor({
               // 修复 #3b：必须从 Zustand store 取 token（window.__gxAuth 在生产代码中从未赋值，
               // 之前 fetch 永远无 Authorization → 401 → 文档拉不到 → title 退化为 anchor 字符串）
               const token = useAuthStore.getState().token;
-              const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+              const headers: Record<string, string> = authHeaders(token);
               const docIdMatch = /\/kb\/[^/]+\/(?:doc|canvas)\/([^/?#]+)/.exec(path);
               const docId = docIdMatch?.[1];
               if (!docId) {
