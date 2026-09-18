@@ -1,0 +1,14 @@
+#!/bin/bash
+# GouXiangDB fnOS 生命周期占位：config_init
+#
+# 为什么存在：fnpack 打包校验要求 cmd/ 下 9 个生命周期脚本【全部存在】
+#（main / install_init / install_callback / uninstall_init / uninstall_callback /
+#  upgrade_init / upgrade_callback / config_init / config_callback），
+# 缺任一即报 "Required file "cmd/<name>" is missing" 并拒绝打包。
+#
+# 为什么只 exit 0：init 阶段（*_init）运行在文件解压前/停止后，
+# 飞牛官方明确 TRIM_PKGETC / TRIM_DATA_SHARE_PATHS 等变量【仅在 *_callback
+# 阶段保证就绪】，在 init 里引用它们会误中止安装/升级。本应用真正的初始化
+#（生成 gouxiangdb.env + prisma migrate deploy + nav reconcile）全部放在
+# install_callback / upgrade_callback，故此处不做任何事。
+exit 0

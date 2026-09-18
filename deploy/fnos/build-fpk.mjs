@@ -141,8 +141,45 @@ fs.writeFileSync(
 );
 
 // --- 4) 安装生产依赖（目标 Linux 架构原生模块）+ prisma generate ------------------
-log("在 server/ 安装仅生产依赖（应取 linux/" + wantArch + " 的 better-sqlite3 prebuild）");
-run("pnpm", ["install", "--prod", "--ignore-workspace"], { cwd: serverDir });
+// 【--node-linker=hoisted 是硬要求，不是风格选择】（2026-09-18 飞牛真机实测）：
+//   默认 pnpm 布局会在 app/server/node_modules 下产生 .pnpm/<pkg>@<ver>_<peer>/… 的
+//   **深层目录 + 274 个符号链接**（本仓实测 5373 条目 / 938 目录 / 4161 文件）。
+//   携带该布局的 fpk 在 fnOS 1.2.0604 上安装必定失败：
+//     [Error] code 10234 — set app dir permissions failed: installType=volume
+//     appname=<name>: acl_get_file failed
+//   （失败点：app.tgz 已解压到 /vol1/appcenter-downloads/<name>-<ver>-tpk，
+//     但 /vol1/@appcenter/<name> 始终建不出来 → 应用目录设 ACL 阶段失败。）
+//   对照实验（同一台设备、同一个 fnpack 1.2.1）：
+//     模板空包（68K）           → 成功
+//     模板 + 仅 dist（1.4M）    → 成功
+//     模板 + 仅 node_modules@pnpm 默认布局（142M/5373 条目）→ 失败（同 10234）
+//     模板 + 5000 个相对符号链接 → 成功（说明不是"链接多"本身）
+//   hoisted 布局是扁平真实目录：无 .pnpm、无符号链接、路径深度大幅下降，
+//   实测可装上。代价是 node_modules 体积变大（依赖去重由 pnpm 的扁平提升替代）。
+log("在 server/ 安装仅生产依赖（hoisted 扁平布局，应取 linux/" + wantArch + " 的 better-sqlite3 prebuild）");
+run("pnpm", ["install", "--prod", "--ignore-workspace", "--node-linker=hoisted"], { cwd: serverDir });
+
+// hoisted 后只剩 node_modules/.bin 下的少量 shim 链接，这里一并实体化，
+// 目标是 node_modules 内【零符号链接】（飞牛对含链接的应用目录设 ACL 会失败，见上）。
+(function derefBin() {
+  const bin = path.join(serverDir, "node_modules", ".bin");
+  if (!fs.existsSync(bin)) return;
+  let n = 0;
+  for (const e of fs.readdirSync(bin, { withFileTypes: true })) {
+    const full = path.join(bin, e.name);
+    if (!e.isSymbolicLink()) continue;
+    try {
+      const target = fs.realpathSync(full);
+      fs.unlinkSync(full);
+      fs.copyFileSync(target, full);
+      fs.chmodSync(full, 0o755);
+      n++;
+    } catch (err) {
+      fail(`实体化 .bin/${e.name} 失败：${err?.message ?? err}`);
+    }
+  }
+  if (n) log(`实体化 node_modules/.bin 链接 ${n} 个`);
+})();
 log("prisma generate（落地 linux/" + wantArch + " query engine）");
 run("node", ["node_modules/prisma/build/index.js", "generate", "--schema=prisma/schema.prisma"], {
   cwd: serverDir,
@@ -173,11 +210,35 @@ function assertExists(globHint, predicate) {
   if (!found) fail(`未找到期望的 ${globHint}（linux/${wantArch} 原生模块可能没装上）`);
   log(`找到 ${globHint}`);
 }
+// 注意（hoisted 后实测）：better-sqlite3 的原生二进制落在 <pkg>/prebuilds/<platform>-<arch>.node，
+// 而 build/Release 可能只是个空目录（源码编译路径才会真产出）。因此自检必须【真的找到一个 .node 文件】，
+// 不能只判 build/Release 目录存在——否则会出现"目录在、二进制不在"的假绿。
 assertExists("better-sqlite3 原生 .node", () => {
-  const base = path.join(serverDir, "node_modules", ".pnpm");
-  if (!fs.existsSync(base)) return fs.existsSync(path.join(serverDir, "node_modules", "better-sqlite3", "build", "Release"));
-  return fs.readdirSync(base).some((d) => d.startsWith("better-sqlite3@"));
+  const bs3 = path.join(serverDir, "node_modules", "better-sqlite3");
+  const pre = path.join(bs3, "prebuilds", `${process.platform}-${process.arch}.node`);
+  if (fs.existsSync(pre)) return true;
+  const rel = path.join(bs3, "build", "Release");
+  return fs.existsSync(rel) && fs.readdirSync(rel).some((f) => f.endsWith(".node"));
 });
+// hoisted 布局断言：fpk 能否装上取决于它，必须在打包前就把关（真机 10234 的教训）。
+(() => {
+  const nm = path.join(serverDir, "node_modules");
+  let links = 0;
+  (function walk(d) {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, e.name);
+      if (e.isSymbolicLink()) links++;
+      else if (e.isDirectory()) walk(full);
+    }
+  })(nm);
+  if (links > 0) {
+    fail(
+      `node_modules 内仍有 ${links} 个符号链接（期望 --node-linker=hoisted 全实体化）；` +
+        `飞牛应用中心对该布局设目录 ACL 会失败（code 10234 acl_get_file failed）。`,
+    );
+  }
+  log(`hoisted 布局自检通过（node_modules 内符号链接 ${links} 个）`);
+})();
 
 // --- 5) 禁带文件扫描 -------------------------------------------------------------
 const FORBIDDEN = [
@@ -204,7 +265,38 @@ if (offenders.length) fail(`包内含禁带文件：\n  ${offenders.join("\n  ")
 log("禁带文件扫描通过");
 
 // --- 6) fnpack build ------------------------------------------------------------
+// 坑（2026-09-18 飞牛真机实测）：fnpack 1.2.1 在【校验失败】时的行为是——
+//   stdout 打印 "Verifying files... / Packing failed. Required file "cmd/install_init" is missing"
+//   然后【以退出码 0 结束】。
+// 所以 run() 的退出码检查在这里完全失效，脚本会继续打印"fpk 已生成"，
+// 而磁盘上根本没有 .fpk —— 属于会误导发布决策的假绿。
+// 修法：以【产物是否真的落在磁盘】为准，构建前后各扫一次 *.fpk 做差集。
 log("fnpack build");
+function listFpk() {
+  const out = [];
+  for (const dir of [packDir, repoRoot]) {
+    if (!fs.existsSync(dir)) continue;
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.isFile() && e.name.endsWith(".fpk")) out.push(path.join(dir, e.name));
+    }
+  }
+  return out;
+}
+// 先清掉上一次的同名产物：否则新包【覆盖同名文件】，前后差集为空，会把"已产出"误判成"未产出"。
+for (const stale of listFpk()) {
+  fs.rmSync(stale, { force: true });
+  log(`清理旧产物 ${stale}`);
+}
 run("fnpack", ["build", "--directory", packDir]);
-log(`完成：gouxiangdb ${version} ${arch} fpk 已生成（按 fnpack 输出位置查看）。`);
+const fpkProduced = listFpk();
+if (fpkProduced.length === 0) {
+  fail(
+    "fnpack build 未产出任何 .fpk（fnpack 校验失败时打印 Packing failed 但仍以 0 退出，" +
+      "故此处以磁盘产物为准；请回看上方 fnpack 的 Verifying/Packing 输出定位缺失文件）。",
+  );
+}
+for (const p of fpkProduced) {
+  log(`产出 ${p}（${(fs.statSync(p).size / 1024 / 1024).toFixed(2)} MiB）`);
+}
+log(`完成：gouxiangdb ${version} ${arch} fpk 已生成。`);
 log("安装测试：appcenter-cli install-fpk <name>.fpk 或应用中心手动安装。");
