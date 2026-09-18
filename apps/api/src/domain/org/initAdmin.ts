@@ -94,22 +94,26 @@ export function maskInitAdminEmail(email: string): string {
   return `${email.slice(0, 1)}***@${email.slice(at + 1)}`;
 }
 
-function validateEmail(email: string): string | null {
+export function validateEmail(email: string): string | null {
   if (!EMAIL_RE.test(email)) {
     return `邮箱格式不正确：${maskInitAdminEmail(email)}（期望形如 admin@example.com）`;
   }
   return null;
 }
 
-function validatePassword(password: string): string | null {
+export function validatePassword(password: string): string | null {
   if (password.length < INIT_ADMIN_PASSWORD_MIN || password.length > INIT_ADMIN_PASSWORD_MAX) {
     return `初始密码长度须在 ${INIT_ADMIN_PASSWORD_MIN}-${INIT_ADMIN_PASSWORD_MAX} 之间（bcrypt 72 字节上限），当前 ${password.length}`;
   }
   return null;
 }
 
+// 以下三个内部件在 initAdminReset.ts（--reset 领域层）复用，故导出：
+// 邮箱/口令口径必须单一真源（members.ts:138 正则同源、auth.ts change-password 长度同源），
+// readArg 的参数写法（--email x 与 --email=x）也必须一致，否则 CLI 两侧行为会分叉。
+
 /** 读命令行参数：同时支持 "--email x" 与 "--email=x"；空值视为未提供。 */
-function readArg(argv: readonly string[], flag: string): string | undefined {
+export function readArg(argv: readonly string[], flag: string): string | undefined {
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     if (token === flag) {
@@ -200,8 +204,8 @@ export function resolveInitAdminCredentials(
   };
 }
 
-/** Prisma 错误 → 中文可读错误；表不存在明确指向"迁移没跑"。 */
-function toInitError(e: unknown, stage: string): InitAdminError {
+/** Prisma 错误 → 中文可读错误；表不存在明确指向"迁移没跑"。--reset 复用同一套映射。 */
+export function toInitError(e: unknown, stage: string): InitAdminError {
   const code = typeof e === "object" && e !== null && "code" in e
     ? String((e as { code?: unknown }).code)
     : "";

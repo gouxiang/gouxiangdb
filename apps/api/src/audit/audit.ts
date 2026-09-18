@@ -53,7 +53,10 @@ export type AuditEventName =
   | "mcp_auth_failure"
   // 首次部署超级管理员初始化（deploy 链路 init-admin 脚本在迁移后创建首个 ACTIVE 用户 +
   // 系统 owner 授予，并置 mustChangePassword=true 强制首登改密）。detail 绝不落初始密码。
-  | "admin_initialized";
+  | "admin_initialized"
+  // 0.1.7 管理员口令重置（init-admin --reset）：按邮箱重置既有账号口令并置强制改密 +
+  // 恢复 ACTIVE + tokenVersion+1 踢掉旧会话。detail 只落脱敏邮箱与版本号，绝不落新密码。
+  | "admin_password_reset";
 
 export interface AuditInput {
   event: AuditEventName;
