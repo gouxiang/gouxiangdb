@@ -35,11 +35,13 @@ export function isSafeUrlAttr(url: string): boolean {
   // 控制字符（含换行/制表）可绕过协议检测，先剔除再判断
   const cleaned = u.replace(/[\u0000-\u001F\u007F-\u009F]/g, "");
   if (cleaned.startsWith("/") || cleaned.startsWith("#") || cleaned.startsWith("?")) return true;
+  // 带 scheme 前缀：仅放行 http(s)/mailto/tel；其余（javascript:/vbscript:/data:
+  // 等，含内联 data: 图片与 data:text/html）一律 fail-closed。data: 已被上方
+  // scheme 正则命中，此处不再单列 data 特判（旧代码第 42 行永不可达，已删）。
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(cleaned)) {
     return /^(https?:|mailto:|tel:)/i.test(cleaned);
   }
-  // 无协议前缀：按相对路径放行（data: 媒体资源亦放行，仅拦 data:text/html）
-  if (/^data:/i.test(cleaned)) return !/^data:text\/html/i.test(cleaned);
+  // 无协议前缀：按相对路径放行
   return true;
 }
 
