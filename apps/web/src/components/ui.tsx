@@ -5,6 +5,7 @@
 import {
   forwardRef,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -549,6 +550,24 @@ export function FieldRow({ label, hint, children }: { label: string; hint?: stri
 
 // ============ 浮层 ============
 
+/**
+ * P3-a11y 焦点决策（纯函数，不碰 DOM，便于 node 环境无 jsdom 单测）。
+ *
+ * 规则：
+ *   - 面板还没挂载 → 什么都不做；
+ *   - 焦点已经在面板内（子元素 autoFocus / 受控输入框先拿了焦点）→ 不抢，保住原有自动聚焦；
+ *   - 否则 → 移入面板，并记下原焦点宿主；宿主是 body 时不记（归还给 body 没有意义）。
+ */
+export function resolveModalFocus(
+  panel: HTMLElement | null,
+  active: Element | null,
+  body: Element | null,
+): { moveInto: boolean; restoreTo: HTMLElement | null } {
+  if (!panel) return { moveInto: false, restoreTo: null };
+  if (active && panel.contains(active)) return { moveInto: false, restoreTo: null };
+  return { moveInto: true, restoreTo: active && active !== body ? (active as HTMLElement) : null };
+}
+
 export function Modal({
   open,
   title,
@@ -556,6 +575,7 @@ export function Modal({
   children,
   footer,
   width = 480,
+  ariaLabel,
 }: {
   open: boolean;
   title?: ReactNode;
@@ -563,7 +583,19 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   width?: number;
+  /**
+   * 无 title 时的可访问名称兜底。有 title 时一律走 aria-labelledby 指向标题节点，本值忽略。
+   * 阶段 4 收尾（P3-a11y）：模态必须有可访问名称，否则读屏与自动化脚本都定位不到。
+   */
+  ariaLabel?: string;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  // useId 稳定跨渲染；去掉 React 自带的冒号，避免 querySelector / CSS 选择器踩坑
+  const titleId = `gx-modal-title-${useId().replace(/:/g, "")}`;
+  /** 打开前的焦点宿主，关闭时归还（不记 body —— 归还给 body 没有意义） */
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+
+  // Esc 关闭：既有实现，此处不重复挂监听
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -573,6 +605,27 @@ export function Modal({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  /**
+   * 焦点管理（P3-a11y）：打开时把焦点移进面板，关闭时归还给触发元素。
+   * 只做「移入 / 归还」，不做焦点陷阱 —— Tab 仍可自由走出模态，避免用户被困住。
+   * 两条保护：
+   *   ① 焦点已在面板内（如子元素 autoFocus / 受控输入框）时不抢焦点，保住原有自动聚焦行为；
+   *   ② 归还前确认节点仍在文档里，避免聚焦到已被卸载的触发按钮。
+   */
+  useEffect(() => {
+    if (!open) return;
+    const panel = panelRef.current;
+    const { moveInto, restoreTo } = resolveModalFocus(panel, document.activeElement, document.body);
+    if (!moveInto || !panel) return;
+    restoreFocusRef.current = restoreTo;
+    panel.focus();
+    return () => {
+      const prev = restoreFocusRef.current;
+      restoreFocusRef.current = null;
+      if (prev && document.contains(prev)) prev.focus(); // ② 仍在文档内才归还
+    };
+  }, [open]);
+
   if (!open) return null;
 
   // 应用浮层一律 createPortal 到 document.body（z-index §2.5），脱离组件树内的画布堆叠上下文，
@@ -581,12 +634,22 @@ export function Modal({
     <div className="fixed inset-0 gx-z-modal flex items-center justify-center p-6">
       <div className="absolute inset-0 bg-black/25" onClick={onClose} />
       <div
-        className="relative flex max-h-[85vh] w-full flex-col overflow-hidden rounded-gx-xl bg-gx-surface shadow-gx-xl"
+        ref={panelRef}
+        // P3-a11y：dialog 语义 + 可访问名称（有 title 走 labelledby，无 title 走 ariaLabel 兜底）
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        aria-label={title ? undefined : ariaLabel}
+        // tabIndex=-1 只为「打开时移入焦点」，不进 Tab 序列；focus:outline-none 免得整块面板描边
+        tabIndex={-1}
+        className="relative flex max-h-[85vh] w-full flex-col overflow-hidden rounded-gx-xl bg-gx-surface shadow-gx-xl focus:outline-none"
         style={{ maxWidth: width }}
       >
         {title && (
           <div className="flex items-center justify-between border-b border-gx-separator px-4 py-3">
-            <div className="text-gx-14 font-semibold text-gx-text-primary">{title}</div>
+            <div id={titleId} className="text-gx-14 font-semibold text-gx-text-primary">
+              {title}
+            </div>
             <IconButton icon="close" label="关闭" onClick={onClose} />
           </div>
         )}

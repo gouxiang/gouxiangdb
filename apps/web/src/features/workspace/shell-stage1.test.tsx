@@ -41,7 +41,7 @@ vi.mock("../../api/hooks", () => ({
 import { PrimaryNav } from "./PrimaryNav";
 import { SecondaryNav } from "./SecondaryNav";
 import { TableActionRow } from "./TableActionRow";
-import { SecondaryRow } from "./SecondaryNavSections";
+import { RowMoreMenu, SecondaryRow } from "./SecondaryNavSections";
 import type { CollectableEntry } from "./lib/collection";
 import {
   L1_WIDTH_COLLAPSED,
@@ -265,10 +265,27 @@ describe("R-N-11/12 行尾竖向三点：四条护栏", () => {
     const html = renderOneRow(entry);
     expect(html).toContain("gx-row-more");
     expect(html).toContain("h-5 w-5");
-    expect(html).toContain('aria-label="行操作"');
+    // P3-a11y 收尾：行尾三点必须有具体作用名（table 行 → 「表操作菜单」），不再是泛泛的「行操作」
+    expect(html).toContain('aria-label="表操作菜单"');
     expect(html).toContain('data-open="false"');
     // 图标名不出现在 DOM 里（Icon 只吐 path），故对源码断言用的是竖向三点而非横向 more
     expect(read("./SecondaryNavSections.tsx")).toContain('name="moreVertical"');
+  });
+
+  it("行尾三点的可访问名称按行类型区分，且未指定时回落「行操作」", () => {
+    const entry: CollectableEntry = {
+      node: treeNode("nav_t", "table", "tbl_1", "nav_b"),
+      kind: "table",
+      shortcuts: [],
+      kbResourceId: null,
+      baseResourceId: "base_1",
+      isRootDoc: false,
+    };
+    expect(renderOneRow(entry, null, "doc")).toContain('aria-label="文档操作菜单"');
+    expect(renderOneRow(entry, null, "canvas")).toContain('aria-label="画布操作菜单"');
+    // 默认回落：不传 label 时仍念「行操作」，老调用点不被打断
+    const fallback = renderToString(<RowMoreMenu items={[{ label: "移动到分组…", icon: "folderOpen", onClick: vi.fn() }]} />);
+    expect(fallback).toContain('aria-label="行操作"');
   });
 
   it("护栏四条全部落在 index.css 里（触屏常驻 / hover / focus / 打开强制 / reduced-motion）", () => {
@@ -357,11 +374,15 @@ describe("骨架 S-1：L2 常驻 240 / nav2 底；主壳无面包屑", () => {
 });
 
 /** 只渲染单行二级行（绕过 SecondaryNav 的数据层），用于断言行尾三点与选中态。 */
-function renderOneRow(entry: CollectableEntry, currentResource: string | null = null): string {
+function renderOneRow(
+  entry: CollectableEntry,
+  currentResource: string | null = null,
+  kind: "table" | "doc" | "canvas" = "table",
+): string {
   return renderToString(
     <StaticRouter location="/">
       <SecondaryRow
-        kind="table"
+        kind={kind}
         entry={entry}
         depth={0}
         hasDocKids={false}

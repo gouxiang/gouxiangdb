@@ -156,7 +156,8 @@ export function TopBar() {
           onClick={() => navigate(`/base/${baseId}/settings#share`)}
         />
         <div className="relative">
-          <IconButton icon="more" label="更多" onClick={() => setMore((v) => !v)} />
+          {/* P3-a11y：纯图标菜单触发器，label 说明管的是视图/表操作，不再泛泛叫「更多」 */}
+          <IconButton icon="more" label="视图操作菜单" onClick={() => setMore((v) => !v)} />
           <Popover open={more} onClose={() => setMore(false)} align="right" width={180}>
             <Menu width={180}>
               <MenuItem icon="copy" label="复制视图" disabled={!canManageSchema} onClick={duplicateView} />

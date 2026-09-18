@@ -170,6 +170,11 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                   <span
                     role="button"
                     tabIndex={0}
+                    // P3-a11y：只有图标、无可见文本，必须给可访问名称且说明管的是哪张表
+                    aria-label={`${t.name} 表操作菜单`}
+                    aria-haspopup="menu"
+                    aria-expanded={menuFor === t.id}
+                    title="表操作菜单"
                     onClick={(e) => {
                       e.stopPropagation();
                       setMenuFor(menuFor === t.id ? null : t.id);

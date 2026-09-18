@@ -106,6 +106,8 @@ export default function KbSettingsPage() {
                     {canRemove && (
                       <button
                         type="button"
+                        // P3-a11y：成员行尾纯图标按钮，带上成员名，读屏能念出「移除谁」
+                        aria-label={`移除成员 ${m.displayName || m.email || "该成员"}`}
                         onClick={() => void remove(m.userId, m.displayName || m.email || "该成员")}
                         className="rounded p-1 text-gx-text-tertiary hover:bg-gx-danger-bg hover:text-gx-danger"
                         title="移除成员"

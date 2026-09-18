@@ -201,6 +201,11 @@ export default function KbHomePage() {
                 <span className="relative">
                   <button
                     type="button"
+                    // P3-a11y：KB 列表行尾纯图标菜单，按行类型给具体作用名
+                    aria-label={`${d.title || "未命名"} ${d.kind === "canvas" ? "画布操作菜单" : "文档操作菜单"}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menuFor === d.id}
+                    title={d.kind === "canvas" ? "画布操作菜单" : "文档操作菜单"}
                     onClick={() => setMenuFor(menuFor === d.id ? null : d.id)}
                     className="rounded p-1 text-gx-text-tertiary hover:bg-gx-bg hover:text-gx-text-primary"
                   >

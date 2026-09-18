@@ -230,6 +230,12 @@ export function KbTree({ kbId }: { kbId: string }) {
           <button
             type="button"
             className="flex h-4 w-4 shrink-0 items-center justify-center text-gx-text-hint"
+            // P3-a11y：纯图标折叠箭头必须有可访问名称；无子级时它只是对齐占位，
+            // 直接 aria-hidden + 移出 Tab 序列，别让读屏念出一个点不动的「按钮」。
+            aria-label={hasChildren ? `${node.title || "未命名"} ${isCollapsed ? "展开子文档" : "折叠子文档"}` : undefined}
+            aria-expanded={hasChildren ? !isCollapsed : undefined}
+            aria-hidden={hasChildren ? undefined : true}
+            tabIndex={hasChildren ? undefined : -1}
             onClick={() => hasChildren && toggleCollapse(node.id)}
           >
             {hasChildren ? (
@@ -268,6 +274,10 @@ export function KbTree({ kbId }: { kbId: string }) {
               <button
                 type="button"
                 className="kb-tree-more"
+                // P3-a11y：纯图标行尾菜单，给具体作用名（不写泛泛的「更多」）
+                aria-label={`${node.title || "未命名"} 文档操作菜单`}
+                aria-haspopup="menu"
+                aria-expanded={menuFor === node.id}
                 onClick={(e) => { e.stopPropagation(); openMenu(node.id, e.currentTarget); }}
                 title="更多操作"
               >
@@ -322,6 +332,10 @@ export function KbTree({ kbId }: { kbId: string }) {
             <button
               type="button"
               className="kb-tree-more"
+              // P3-a11y：画布行的行尾菜单，同上给具体作用名
+              aria-label={`${d.title || "未命名"} 画布操作菜单`}
+              aria-haspopup="menu"
+              aria-expanded={menuFor === d.id}
               onClick={(e) => { e.stopPropagation(); openMenu(d.id, e.currentTarget); }}
               title="更多操作"
             >
@@ -370,7 +384,7 @@ export function KbTree({ kbId }: { kbId: string }) {
             <Icon name="doc" size={13} className="text-gx-text-hint" />
             <span className="kb-tree-title">文档</span>
             {canEdit && (
-              <button type="button" className="kb-tree-add" title="新建文档" onClick={() => create("doc")}>
+              <button type="button" className="kb-tree-add" title="新建文档" aria-label="新建文档" onClick={() => create("doc")}>
                 <Icon name="plus" size={13} />
               </button>
             )}
@@ -412,7 +426,7 @@ export function KbTree({ kbId }: { kbId: string }) {
             <Icon name="canvas" size={13} className="text-gx-text-hint" />
             <span className="kb-tree-title">画布</span>
             {canEdit && (
-              <button type="button" className="kb-tree-add" title="新建画布" onClick={() => create("canvas")}>
+              <button type="button" className="kb-tree-add" title="新建画布" aria-label="新建画布" onClick={() => create("canvas")}>
                 <Icon name="plus" size={13} />
               </button>
             )}

@@ -64,6 +64,13 @@ export function sectionLabel(kind: SectionKind): string {
   return kind === "table" ? "数据表" : kind === "doc" ? "文档" : "画布";
 }
 
+/** P3-a11y：行尾三点菜单的可访问名称，按行类型给具体作用，不写泛泛的「更多」。 */
+const ROW_MORE_LABEL: Record<SectionKind, string> = {
+  table: "表操作菜单",
+  doc: "文档操作菜单",
+  canvas: "画布操作菜单",
+};
+
 export function SectionHeader({ kind, count }: { kind: SectionKind; count: number }) {
   return (
     <div
@@ -85,7 +92,13 @@ export function SectionHeader({ kind, count }: { kind: SectionKind; count: numbe
  *   ④ 键盘 focus-within / focus-visible 可见 —— 同上。
  * 默认隐藏与 hover 显现同样由 `.gx-row-more`（index.css）统一承载，避免各调用点各写一半。
  */
-export function RowMoreMenu({ items }: { items: RowMoreItem[] }) {
+/**
+ * P3-a11y 收尾：`label` 让调用点给出「表操作菜单 / 文档操作菜单 / 画布操作菜单」这类具体名称，
+ * 默认「行操作」保留给未指定的调用点（不破坏既有行为）。
+ * 该 label 是 `.gx-row-more` 键盘护栏（focus-within 可见）的必要配套：键盘用户 Tab 到这个
+ * 只有图标的按钮时，读屏必须能念出它管的是哪一行的操作。
+ */
+export function RowMoreMenu({ items, label = "行操作" }: { items: RowMoreItem[]; label?: string }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   if (items.length === 0) return <span aria-hidden className="h-5 w-5 shrink-0" />;
@@ -97,10 +110,10 @@ export function RowMoreMenu({ items }: { items: RowMoreItem[] }) {
       <button
         ref={btnRef}
         type="button"
-        aria-label="行操作"
+        aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="行操作"
+        title={label}
         onClick={() => setOpen((v) => !v)}
         className="relative flex h-5 w-5 items-center justify-center rounded-gx-sm text-gx-text-tertiary transition-colors hover:bg-gx-row-hover hover:text-gx-text-primary after:absolute after:-inset-1.5 after:content-['']"
       >
@@ -199,7 +212,7 @@ export function SecondaryRow({
         {e.node.name}
       </button>
       {e.shortcuts.length > 0 && <Icon name="check" size={12} className="shrink-0 text-gx-text-hint" />}
-      <RowMoreMenu items={menuItems} />
+      <RowMoreMenu items={menuItems} label={ROW_MORE_LABEL[kind]} />
     </div>
   );
 }

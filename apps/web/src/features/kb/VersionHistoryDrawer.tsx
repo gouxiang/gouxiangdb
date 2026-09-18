@@ -138,6 +138,8 @@ export function VersionHistoryDrawer({
           </div>
           <button
             type="button"
+            // P3-a11y：纯图标关闭按钮没有可访问名称
+            aria-label="关闭版本历史"
             onClick={onClose}
             className="rounded p-1 text-gx-text-tertiary hover:bg-gx-bg hover:text-gx-text-primary"
           >
