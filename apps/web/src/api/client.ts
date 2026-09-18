@@ -154,8 +154,25 @@ function parseRetryAfter(raw: string | null): number | undefined {
 /**
  * 这些接口本身会用 401 表达「凭据错误」（正常业务分支），
  * 不能触发全局登出，否则用户输入错密码就被踢出登录态。
+ *
+ * me/change-password：后端在"当前密码填错"时返回 401 { error:"当前密码错误" }
+ * （apps/api/src/auth.ts:166），这是**密码输错**的正常业务分支，不是登录态失效。
+ * 首登强制改密页（mustChangePassword 闸门）只有这一个出口且无跳过入口，若在此触发
+ * 全局登出，超级管理员只要把 env 注入的长串初始密码输错一次就会被踢回登录页，
+ * 等于把自己锁在系统外——故与 login/signup/register 同列白名单，401 只在页内提示。
+ * 代价：本路径上真正过期的 token（auth.ts:157 同样返回 401）也不会跳转登录页，
+ * 但用户下一步任何其它请求（如 /api/auth/me）仍会照常触发登出，不会卡死。
+ * 注：正则锚定到行尾，/api/auth/me 之类的前缀不会被误纳入。
  */
-const AUTH_SELF_401_PATHS = /^\/api\/auth\/(login|signup|register)$/;
+const AUTH_SELF_401_PATHS = /^\/api\/auth\/(login|signup|register|me\/change-password)$/;
+
+/**
+ * 供 apiFetch 与单测共用：该路径的 401 属于「自身凭据错误」，不应触发全局登出。
+ * 与 AUTH_SELF_401_PATHS 同源，避免判定逻辑散落两处。
+ */
+export function isSelfCredential401Path(path: string): boolean {
+  return AUTH_SELF_401_PATHS.test(path);
+}
 
 /** 并发请求可能同时 401，只处理一次，避免重复跳转 */
 let unauthorizedHandled = false;
@@ -187,7 +204,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     // 登录态失效（token 过期 / 被移除 / 服务端重启换密钥）：清理本地凭据并回登录页
-    if (res.status === 401 && !AUTH_SELF_401_PATHS.test(path)) handleUnauthorized();
+    if (res.status === 401 && !isSelfCredential401Path(path)) handleUnauthorized();
     throw new ApiError(res.status, body, parseRetryAfter(res.headers.get("Retry-After")));
   }
   return (await res.json()) as T;

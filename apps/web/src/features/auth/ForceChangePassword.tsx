@@ -12,7 +12,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { Auth } from "../../api/client";
+import { Auth, ApiError } from "../../api/client";
 import { useAuthStore } from "../../store/auth";
 import { Button, Input, toast } from "../../components/ui";
 
@@ -69,7 +69,13 @@ export default function ForceChangePassword() {
       toast("密码已修改，正在进入工作台", "success");
       navigate("/");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "修改密码失败";
+      // 后端错误文案在 ApiError.body.error（如当前密码填错 → 401「当前密码错误」）；
+      // 直接读 err.message 会拿到 "API 401: ..." 这种带前缀的串。与
+      // PersonalCenterDrawer 的改密分支（settings/PersonalCenterDrawer.tsx:348）同一模式。
+      const msg =
+        err instanceof ApiError
+          ? ((err.body as { error?: string })?.error ?? "修改密码失败")
+          : "修改密码失败";
       toast(msg, "error");
     } finally {
       setBusy(false);

@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 import type { UserDTO } from "@gx/shared-types";
 import { shouldForceChangePassword, CHANGE_PASSWORD_PATH } from "../force-change-guard";
 import { validateNewPassword } from "../ForceChangePassword";
+import { isSelfCredential401Path } from "../../../api/client";
 
 function user(mustChangePassword?: boolean): UserDTO {
   return {
@@ -66,5 +67,27 @@ describe("validateNewPassword（改密页本地校验）", () => {
     expect(validateNewPassword("初始密码", "newpass123", "newpass124")).toBe(
       "两次输入的新密码不一致",
     );
+  });
+});
+
+describe("改密接口 401 不触发全局登出（client.ts 白名单）", () => {
+  it("改密接口：当前密码填错是业务分支，401 必须留在页内提示", () => {
+    // apps/api/src/auth.ts:166 → 401 { error: "当前密码错误", code: "UNAUTHORIZED" }
+    expect(isSelfCredential401Path("/api/auth/me/change-password")).toBe(true);
+  });
+
+  it("登录/注册接口仍在白名单内（既有行为不回退）", () => {
+    expect(isSelfCredential401Path("/api/auth/login")).toBe(true);
+    expect(isSelfCredential401Path("/api/auth/signup")).toBe(true);
+    expect(isSelfCredential401Path("/api/auth/register")).toBe(true);
+  });
+
+  it("真正登录态失效的接口仍要触发登出（不能被放宽）", () => {
+    expect(isSelfCredential401Path("/api/auth/me")).toBe(false);
+    expect(isSelfCredential401Path("/api/auth/me/avatar")).toBe(false);
+    expect(isSelfCredential401Path("/api/bases")).toBe(false);
+    expect(isSelfCredential401Path("/api/v1/pats")).toBe(false);
+    // 整串精确匹配：改密接口加后缀后不应再被当作白名单
+    expect(isSelfCredential401Path("/api/auth/me/change-password/extra")).toBe(false);
   });
 });
