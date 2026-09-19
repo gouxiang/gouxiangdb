@@ -3,13 +3,12 @@
 // 单文档/画布的独立权限在内容列表与编辑器中按条目管理。
 
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { EmptyState, Input, Select, Spinner, toast } from "../../components/ui";
 import { EntityIconPicker } from "../../components/EntityIconPicker";
 import { useKb, useKbMembers, useAddKbMember, useRemoveKbMember, useUpdateKb } from "./kb-hooks";
 import { roleLabel, KB_ROLE_RANK } from "./kb-ui";
-import { UploadLimitsPanel } from "./UploadLimitsPanel";
 import { confirmAction } from "../../components/feedback";
 import { useAuthStore } from "../../store/auth";
 
@@ -21,6 +20,7 @@ const ADD_ROLES = [
 
 export default function KbSettingsPage() {
   const { kbId } = useParams();
+  const navigate = useNavigate();
   const me = useAuthStore((s) => s.user);
   const { data: kb } = useKb(kbId);
   const { data: members, isLoading } = useKbMembers(kbId);
@@ -90,9 +90,24 @@ export default function KbSettingsPage() {
           <span className="text-gx-12 text-gx-text-hint">{kb?.name}</span>
         </div>
 
-        {/* 上传限制（本机浏览器生效，跨全部知识库） */}
-        <div className="mb-4">
-          <UploadLimitsPanel />
+        {/* 上传限制已上提到工作区设置：它对本机浏览器内的全部知识库生效，
+            不是单个知识库的属性——这里只留说明 + 跳转，避免用户以为能按库分别设限。 */}
+        <div className="mb-4 flex items-start gap-2 rounded-gx-lg border border-gx-border bg-gx-surface px-4 py-3">
+          <Icon name="paperclip" size={16} className="mt-0.5 shrink-0 text-gx-accent" />
+          <div className="min-w-0 flex-1">
+            <div className="text-gx-13 font-medium text-gx-text-primary">上传限制</div>
+            <p className="mt-0.5 text-gx-12 text-gx-text-tertiary">
+              上传限制对这台浏览器里的全部知识库生效，不属于单个知识库，已移到「工作区设置 → 通用」统一管理。
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate("/workspace/settings/general")}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-gx-lg border border-gx-border px-2.5 py-1 text-gx-12 text-gx-text-primary hover:bg-gx-row-hover"
+            >
+              <Icon name="external" size={13} />
+              前往工作区设置修改
+            </button>
+          </div>
         </div>
 
         {/* 基本信息：名称 + 实体图标与颜色（图标/选色即时写库，失败由 EntityIconPicker toast） */}

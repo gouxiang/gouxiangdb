@@ -1,15 +1,20 @@
-// M3/S8 工作区设置中心（裁决 7：首版仅三个真实条目——通讯录 / 导航编排 / 资产）。
-// 左二级 + 右内容，仿 SettingsPage 布局；安全/备份/embedding/MCP 不放假入口、
-// 不放"即将上线"占位，随对应里程碑自然增列。
-import { useMemo, useState } from "react";
+// M3/S8 工作区设置中心。左二级 + 右内容，仿 SettingsPage 布局；
+// 安全/备份/embedding/MCP 不放假入口、不放"即将上线"占位，随对应里程碑自然增列。
+//
+// 分区口径纪律（本轮治理的核心，改这个文件时不要破坏）：
+//   1. 右内容的渲染判定只认 effectiveSection，**绝不认 URL 原始 section**。
+//      门控分区（search/mcp…）守卫回落后若仍按 section 判断，会与左栏的
+//      effectiveSection 判定双双落空 → 右内容区整块空白（既不是通用也不是目标分区）。
+//   2. effectiveSection 由 visibleSections 反查得出（单一真源）：
+//      新增 gated 分区只要在 SECTIONS 上打 ownerOnly/enterpriseOnly 标记就自动受约束，
+//      不需要再记得改第二处三元判断——这正是「点左侧右侧空白」的根因修复。
+//   3. 可解析的 splat 集合同样由 SECTIONS 推导，未知 splat 一律落「通用」。
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useBases } from "../../api/hooks";
-import { useKbList } from "../kb/kb-hooks";
-import { EmptyState, Spinner } from "../../components/ui";
-import { resolvedEntityColor, resolveEntityIcon } from "../../components/EntityIconPicker";
 import { Icon, type IconName } from "../../components/icons";
 import { useMyOrgActions, useIsWorkspaceOwner } from "../contacts/contacts-hooks";
 import { NavComposer } from "./NavComposer";
+import { AssetsSection, TrashSection } from "./WorkspaceSettingsSections";
 import { EmbeddingSearchPanel } from "../search/EmbeddingSearchPanel";
 import { SearchCoveragePanel } from "../search/SearchCoveragePanel";
 import { ReindexModal } from "../search/ReindexModal";
@@ -17,9 +22,11 @@ import { useReindex, isForbidden, isSearchNotEnabled, errorCode } from "../searc
 import { adminErrorMessage, SEARCH_NOT_ENABLED } from "../search/search-admin-copy";
 import { PatListPanel } from "../settings/PatListPanel";
 import { useEnterpriseOrgFlag } from "../settings/pat-hooks";
+// 上传限制：本机浏览器生效、跨全部知识库，属全局设置 → 上提到工作区层（原挂知识库设置页）。
+import { UploadLimitsPanel } from "../kb/UploadLimitsPanel";
 import { toast } from "../../components/ui";
 
-type Section = "general" | "contacts" | "nav" | "search" | "mcp" | "assets";
+type Section = "general" | "contacts" | "nav" | "search" | "mcp" | "assets" | "trash";
 
 const SECTIONS: {
   key: Section;
@@ -36,77 +43,54 @@ const SECTIONS: {
   { key: "search", label: "语义检索", icon: "sparkles", desc: "云端语义检索与索引覆盖度", ownerOnly: true },
   { key: "mcp", label: "MCP 接入", icon: "keyRound", desc: "为 AI 客户端签发访问令牌", enterpriseOnly: true },
   { key: "assets", label: "资产", icon: "database", desc: "数据库与知识库入口" },
+  { key: "trash", label: "回收站", icon: "trash", desc: "数据库与知识库回收站入口" },
 ];
 
-function AssetsSection() {
-  const navigate = useNavigate();
-  const { data: bases, isLoading: loadingBases } = useBases();
-  const { data: kbs, isLoading: loadingKb } = useKbList();
-  const stableBases = useMemo(() => bases ?? [], [bases]);
-  const stableKbs = useMemo(() => kbs ?? [], [kbs]);
+const SECTION_KEYS: string[] = SECTIONS.map((s) => s.key);
 
+/**
+ * 分区列表。桌面竖排常驻左栏；<1024 折叠成唤出条时改横向 wrap，避免竖排吃掉内容高度。
+ * 两种布局都在 DOM 里（由 Tailwind lg: 断点类控制显隐），不靠 JS 媒体查询，SSR/首屏无跳变。
+ */
+function SectionList({
+  sections,
+  active,
+  variant,
+  onPick,
+}: {
+  sections: typeof SECTIONS;
+  active: Section;
+  variant: "vertical" | "wrap";
+  onPick: (key: Section) => void;
+}) {
+  const wrap = variant === "wrap";
   return (
-    <div className="flex flex-col gap-6">
-      <section>
-        <h3 className="mb-2 text-gx-13 font-medium text-gx-text-primary">智能数据库</h3>
-        {loadingBases ? (
-          <Spinner size={16} />
-        ) : stableBases.length === 0 ? (
-          <EmptyState icon="database" title="暂无数据库" description="创建第一个智能数据库来存放结构化数据。" />
-        ) : (
-          <ul className="flex flex-col divide-y divide-gx-separator rounded-gx-lg border border-gx-separator">
-            {stableBases.map((b) => (
-              <li key={b.id}>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/base/${b.id}/settings`)}
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-gx-13 hover:bg-gx-row-hover"
-                >
-                  // 资产页行图标：读实体自定义图标（未自定义时仍是 database + tertiary 色）
-                  <Icon
-                    name={resolveEntityIcon(b, { name: "database" }).name}
-                    size={15}
-                    className="shrink-0 text-gx-text-tertiary"
-                    style={resolvedEntityColor(b) ? { color: resolvedEntityColor(b) } : undefined}
-                  />
-                  <span className="flex-1 truncate text-gx-text-primary">{b.name}</span>
-                  <Icon name="chevronRight" size={14} className="text-gx-text-hint" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-gx-13 font-medium text-gx-text-primary">知识库</h3>
-        {loadingKb ? (
-          <Spinner size={16} />
-        ) : stableKbs.length === 0 ? (
-          <EmptyState icon="book" title="暂无知识库" description="知识库用来沉淀文档与画布，可与数据库互链。" />
-        ) : (
-          <ul className="flex flex-col divide-y divide-gx-separator rounded-gx-lg border border-gx-separator">
-            {stableKbs.map((k) => (
-              <li key={k.id}>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/kb/${k.id}/settings`)}
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-gx-13 hover:bg-gx-row-hover"
-                >
-                  <Icon
-                    name={resolveEntityIcon(k, { name: "book" }).name}
-                    size={15}
-                    className="shrink-0 text-gx-text-tertiary"
-                    style={resolvedEntityColor(k) ? { color: resolvedEntityColor(k) } : undefined}
-                  />
-                  <span className="flex-1 truncate text-gx-text-primary">{k.name}</span>
-                  <Icon name="chevronRight" size={14} className="text-gx-text-hint" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+    <div className={wrap ? "flex flex-wrap gap-1" : "flex flex-col"}>
+      {sections.map((s) => {
+        const on = active === s.key;
+        return (
+          <button
+            key={s.key}
+            type="button"
+            onClick={() => onPick(s.key)}
+            aria-current={on ? "page" : undefined}
+            title={s.desc}
+            className={[
+              "flex items-center gap-2 rounded-gx-lg text-gx-13 transition-colors",
+              wrap ? "px-2.5 py-1.5" : "mx-2 px-2 py-1.5 text-left",
+              // R-N-10：L2 选中态 = 白底卡片 + 圆角 8 + accent 600 字，**不用左侧色条**
+              on ? "bg-white font-semibold text-gx-accent" : "text-gx-text-primary hover:bg-gx-row-hover",
+            ].join(" ")}
+          >
+            <Icon
+              name={s.icon}
+              size={14}
+              className={`shrink-0 ${on ? "text-gx-accent" : "opacity-80"}`}
+            />
+            {s.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -121,23 +105,25 @@ export function WorkspaceSettingsPage() {
   // M6 MCP 接入随企业组织门控；loading/探测失败/非 true 一律 false（fail-closed）。
   const enterpriseOn = useEnterpriseOrgFlag();
   const [reindexOpen, setReindexOpen] = useState(false);
+  // <1024 时左二级折叠成唤出条；仅窄屏可见，展开选中后自动收起。
+  const [navOpen, setNavOpen] = useState(false);
   const reindex = useReindex();
 
   // 子页由 URL 驱动（/workspace/settings/<section>）：刷新/直访落到同一子页，链接可分享。
-  // 无 splat（/workspace/settings）与未知 splat 一并落到「通用」，旧的 /settings/nav 仍可用。
-  const section: Section =
-    splat === "contacts" || splat === "nav" || splat === "search" || splat === "mcp" || splat === "assets"
-      ? splat
-      : "general";
+  // 无 splat（/workspace/settings）与未知 splat 一并落到「通用」。
+  const section: Section = SECTION_KEYS.includes(splat ?? "") ? (splat as Section) : "general";
   const goSection = (s: Section) => navigate(`/workspace/settings/${s}`);
 
   const visibleSections = SECTIONS.filter(
     (s) => (!s.ownerOnly || isOwner) && (!s.enterpriseOnly || enterpriseOn),
   );
 
-  // 非 owner 直戳 search / 非企业环境直戳 mcp 时回落通用，保证不渲染后台面板（403 在 hooks 静默）。
+  // 单一口径：分区不在 visibleSections 里（非 owner 直戳 search、非企业直戳 mcp、
+  // 或任何未来新增的门控分区）一律回落「通用」，保证右内容永不空白。
   const effectiveSection: Section =
-    (section === "search" && !isOwner) || (section === "mcp" && !enterpriseOn) ? "general" : section;
+    visibleSections.some((s) => s.key === section) ? section : "general";
+  // effectiveSection 由 visibleSections 反查得出，这里必定命中；兜底只为类型收窄。
+  const currentSection = visibleSections.find((s) => s.key === effectiveSection) ?? SECTIONS[0]!;
 
   const openReindex = () => setReindexOpen(true);
   const fireReindex = (body: Parameters<typeof reindex.mutate>[0]) =>
@@ -159,9 +145,54 @@ export function WorkspaceSettingsPage() {
     });
 
   return (
-    <div className="flex h-full">
-      {/* 左二级 */}
-      <aside className="flex w-52 shrink-0 flex-col border-r border-gx-separator bg-gx-bg py-3">
+    <div className="flex h-full min-w-0 flex-col lg:flex-row">
+      {/* <1024：左栏折叠成一条唤出条，不再横向硬占 208px（内容区不被压扁） */}
+      <div className="shrink-0 border-b border-gx-separator bg-gx-bg lg:hidden">
+        <div className="flex items-center gap-1.5 px-3 py-2">
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            aria-label="返回"
+            className="flex shrink-0 items-center rounded-gx-sm p-1.5 text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary"
+          >
+            <Icon name="chevronLeft" size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setNavOpen((v) => !v)}
+            aria-expanded={navOpen}
+            aria-controls="ws-section-list"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-gx-lg px-2 py-1.5 text-left hover:bg-gx-row-hover"
+          >
+            <Icon name={currentSection.icon} size={14} className="shrink-0 text-gx-accent" />
+            <span className="min-w-0 flex-1 truncate text-gx-13 font-medium text-gx-text-primary">
+              {currentSection.label}
+            </span>
+            <span className="shrink-0 text-gx-11 text-gx-text-hint">切换分区</span>
+            <Icon
+              name={navOpen ? "chevronUp" : "chevronDown"}
+              size={14}
+              className="shrink-0 text-gx-text-tertiary"
+            />
+          </button>
+        </div>
+        {navOpen && (
+          <div id="ws-section-list" className="border-t border-gx-separator px-3 py-2">
+            <SectionList
+              sections={visibleSections}
+              active={effectiveSection}
+              variant="wrap"
+              onPick={(k) => {
+                goSection(k);
+                setNavOpen(false);
+              }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* ≥1024：常驻左二级 */}
+      <aside className="hidden w-52 shrink-0 flex-col border-r border-gx-separator bg-gx-bg py-3 lg:flex">
         <button
           type="button"
           onClick={() => navigate(-1)}
@@ -170,35 +201,17 @@ export function WorkspaceSettingsPage() {
           <Icon name="chevronLeft" size={14} />
           返回
         </button>
-        {visibleSections.map((s) => (
-          <button
-            key={s.key}
-            type="button"
-            onClick={() => goSection(s.key)}
-            className={[
-              // R-N-10：L2 选中态 = 白底卡片 + 圆角 8 + accent 600 字，**不用左侧色条**
-              "mx-2 flex items-center gap-2 rounded-gx-lg px-2 py-1.5 text-left text-gx-13 transition-colors",
-              effectiveSection === s.key
-                ? "bg-white font-semibold text-gx-accent"
-                : "text-gx-text-primary hover:bg-gx-row-hover",
-            ].join(" ")}
-          >
-            <Icon
-              name={s.icon}
-              size={14}
-              className={`shrink-0 ${effectiveSection === s.key ? "text-gx-accent" : "opacity-80"}`}
-            />
-            {s.label}
-          </button>
-        ))}
+        <SectionList
+          sections={visibleSections}
+          active={effectiveSection}
+          variant="vertical"
+          onPick={goSection}
+        />
       </aside>
 
       {/* 右内容 */}
       <div className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-8 py-8">
-          // 用 effectiveSection 而非 section：非 owner 直戳 search / 非企业环境直戳 mcp 时
-          // effectiveSection 已回落到 general，若此处仍判 section 会与下面 245/259 行的
-          // effectiveSection 守卫双双落空 → 右内容区整块空白（既不是通用也不是目标分区）。
+        <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           {effectiveSection === "general" && (
             <div className="flex flex-col gap-2">
               <h2 className="text-gx-18 font-semibold text-gx-text-primary">工作区设置</h2>
@@ -229,13 +242,27 @@ export function WorkspaceSettingsPage() {
                   </span>
                 </button>
               </div>
+
+              {/* 上传限制（原挂知识库设置页）：本机浏览器生效、跨全部知识库 → 归全局层 */}
+              <div className="mt-6 flex flex-col gap-2">
+                <p className="text-gx-12 text-gx-text-tertiary">
+                  对这台浏览器里的全部知识库生效，不属于单个知识库；已由「知识库设置」上提到此处统一管理。
+                </p>
+                <UploadLimitsPanel />
+              </div>
             </div>
           )}
 
-          {section === "contacts" && (
+          {effectiveSection === "contacts" && (
             <div className="flex flex-col gap-3">
               <h2 className="text-gx-18 font-semibold text-gx-text-primary">通讯录</h2>
-              <p className="text-gx-13 text-gx-text-tertiary">组织部门、成员与角色管理在通讯录工作区。</p>
+              <p className="text-gx-13 text-gx-text-tertiary">
+                组织部门、成员与组织角色统一在「通讯录」工作区维护。这里只做入口，不提供第二套编辑能力，
+                避免与通讯录的口径分裂。
+              </p>
+              <p className="text-gx-12 text-gx-text-hint">
+                单个数据库 / 知识库的成员与角色是另一层切面，请到各自资产的「设置」页管理。
+              </p>
               <button
                 type="button"
                 onClick={() => navigate("/workspace/contacts")}
@@ -247,7 +274,7 @@ export function WorkspaceSettingsPage() {
             </div>
           )}
 
-          {section === "nav" &&
+          {effectiveSection === "nav" &&
             (canManageMenu ? (
               <NavComposer />
             ) : (
@@ -257,7 +284,7 @@ export function WorkspaceSettingsPage() {
               </div>
             ))}
 
-          {effectiveSection === "search" && isOwner && (
+          {effectiveSection === "search" && (
             <div className="flex flex-col gap-6">
               <div>
                 <h2 className="text-gx-18 font-semibold text-gx-text-primary">语义检索</h2>
@@ -271,7 +298,7 @@ export function WorkspaceSettingsPage() {
             </div>
           )}
 
-          {effectiveSection === "mcp" && enterpriseOn && (
+          {effectiveSection === "mcp" && (
             <div className="flex flex-col gap-6">
               <div>
                 <h2 className="text-gx-18 font-semibold text-gx-text-primary">MCP 接入</h2>
@@ -283,10 +310,20 @@ export function WorkspaceSettingsPage() {
             </div>
           )}
 
-          {section === "assets" && (
+          {effectiveSection === "assets" && (
             <div className="flex flex-col gap-3">
               <h2 className="mb-1 text-gx-18 font-semibold text-gx-text-primary">资产</h2>
               <AssetsSection />
+            </div>
+          )}
+
+          {effectiveSection === "trash" && (
+            <div className="flex flex-col gap-3">
+              <h2 className="text-gx-18 font-semibold text-gx-text-primary">回收站</h2>
+              <p className="text-gx-13 text-gx-text-tertiary">
+                数据库与知识库的回收站分别从这里进入，恢复或彻底删除都在各自的回收站里完成。
+              </p>
+              <TrashSection />
             </div>
           )}
         </div>
