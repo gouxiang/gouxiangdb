@@ -1,71 +1,24 @@
 // M3/S10 导航组件级回归（node 环境，react-dom/server + vi.mock，无 jsdom/新依赖）。
 //
-// 覆盖：
-//  - AC-M3-1 三态浏览渲染：alive 显示；soft_dangling/broken 在一级导航浏览态都不输出
-//  - N5 旧链回归：新 WorkspaceShell 下 PrimaryNav 的 shortcut 解析出的 href 仍是
-//    /base/:b/table/:t、/kb/:k/doc/:d 等旧形；命中当前旧路径的项高亮（active class）
-//  - 多处挂载：同一 node 多条 shortcut 都渲染（不被去重隐藏）
+// 第三批导航重构后本文件锁的是**新的渲染契约**：
+//   - 一级只渲染 bases + knowledge_bases 两组，实体名正常输出；
+//   - 一级里不出现任何二级内容（表 / 文档 / 画布）——用户定的红线；
+//   - 旧链不改名：/base/:id 与 /kb/:id 仍是这两个入口的 href 形态（N5 §1.3）；
+//   - 每个库在一级只出现一次（数据源改成实体列表后，天然不存在「同一实体多处挂载」）。
+//
+// 已随 menu_items 下线、不再在此断言的旧语义：
+//   三态浏览渲染（alive / soft_dangling / broken）——L1 不再渲染 shortcut；
+//   同一 node 的多条 shortcut 去重 —— L1 直接列实体，一行一库。
 // 纯函数层的编排/三分区/409 行为见 ac-m3-1.test.ts；本文件锁「渲染出来的 HTML」。
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
 import { StaticRouter } from "react-router-dom/server";
-import type { MenuItemDTO, MenuNodeSummaryDTO, MenuTreeDTO, NavNodeDTO } from "@gx/shared-types";
+import type { NavNodeDTO } from "@gx/shared-types";
 import { indexNavNodes, navNodeHref } from "./lib/nav-links";
 
-// ---- 可控夹具 ----
-let menuItems: MenuItemDTO[] = [];
-let treeItems: NavNodeDTO[] = [];
-
-vi.mock("./nav-hooks", () => ({
-  useNavMenu: () => ({
-    menu: { workspaceId: "ws", menuVersion: 1, items: menuItems } as MenuTreeDTO,
-    isLoading: false,
-    isError: false,
-  }),
-  useNavNodeIndex: () => ({
-    index: {
-      byId: new Map(treeItems.map((n) => [n.id, n])),
-      byResource: new Map(),
-    },
-  }),
-  useNavTreeDeep: () => ({ tree: { workspaceId: "ws", navVersion: 1, items: treeItems, truncated: false }, isLoading: false }),
-  usePatchMenu: () => ({ mutate: vi.fn() }),
-  useMoveNode: () => ({ mutate: vi.fn(), isPending: false }),
-}));
-
-import { PrimaryNav } from "./PrimaryNav";
-
 const TS = "2026-09-16T00:00:00.000Z";
-
-function summary(over: Partial<MenuNodeSummaryDTO> & { id: string }): MenuNodeSummaryDTO {
-  return {
-    id: over.id,
-    kind: over.kind ?? "table",
-    name: over.name ?? over.id,
-    iconName: null,
-    resourceType: over.resourceType ?? over.kind ?? "table",
-    resourceId: over.resourceId ?? over.id,
-    state: over.state ?? "alive",
-  };
-}
-
-function shortcut(
-  id: string,
-  nodeId: string,
-  state: MenuNodeSummaryDTO["state"] = "alive",
-  kind: MenuNodeSummaryDTO["kind"] = "table",
-  resourceId?: string,
-): MenuItemDTO {
-  return {
-    id, parentId: null, type: "shortcut", nodeId, label: null, iconName: null, ord: 0,
-    node: state === "alive" || state === "soft_dangling" || state === "broken"
-      ? summary({ id: nodeId, state, kind, resourceId: resourceId ?? nodeId.replace("nav_", "res_") })
-      : null,
-    createdAt: TS, updatedAt: null, deletedAt: null,
-  };
-}
 
 function treeNode(id: string, kind: NavNodeDTO["kind"], resourceId: string, parentId: string | null): NavNodeDTO {
   return {
@@ -75,47 +28,92 @@ function treeNode(id: string, kind: NavNodeDTO["kind"], resourceId: string, pare
   } as NavNodeDTO;
 }
 
-function renderNav(location = "/") {
+interface LibDTO {
+  id: string;
+  name: string;
+  icon?: string | null;
+  iconColor?: string | null;
+}
+
+const BASES: LibDTO[] = [
+  { id: "base_1", name: "客户主库", icon: null, iconColor: null },
+  { id: "base_2", name: "订单库", icon: null, iconColor: null },
+];
+const KBS: LibDTO[] = [{ id: "kb_9", name: "产品知识库", icon: null, iconColor: null }];
+
+function renderNav(location = "/", props: { bases?: LibDTO[]; kbs?: LibDTO[]; collapsed?: boolean } = {}) {
   return renderToString(
     <StaticRouter location={location}>
-      <PrimaryNav />
+      <PrimaryNav bases={props.bases ?? []} kbs={props.kbs ?? []} collapsed={props.collapsed} />
     </StaticRouter>,
   );
 }
 
+import { PrimaryNav } from "./PrimaryNav";
+
 beforeEach(() => {
-  menuItems = [];
-  treeItems = [];
+  // 夹具是常量，无需重置；保留 hook 以满足后续可能的扩展
 });
 
-describe("PrimaryNav 三态浏览渲染（AC-M3-1 C-12）", () => {
-  it("alive shortcut 输出名称；soft_dangling 与 broken 浏览态都不输出", () => {
-    menuItems = [
-      { ...shortcut("m_ok", "nav_ok", "alive", "table"), ord: 0 },
-      { ...shortcut("m_soft", "nav_soft", "soft_dangling", "table"), ord: 1 },
-      { ...shortcut("m_broken", "nav_broken", "broken", "table"), ord: 2 },
-    ];
-    menuItems[0]!.node = summary({ id: "nav_ok", name: "活表", state: "alive", resourceId: "res_ok" });
-    treeItems = [
-      treeNode("nav_ok", "table", "res_ok", "nav_base"),
-      treeNode("nav_base", "base", "base_1", null),
-    ];
-    const html = renderNav();
-    expect(html).toContain("活表");
-    expect(html).not.toContain("nav_soft");
-    expect(html).not.toContain("nav_broken");
+describe("PrimaryNav 一级只列数据库与知识库（第三批契约）", () => {
+  it("两个分组 + 全部库名都输出；空态不渲染分组", () => {
+    const html = renderNav("/", { bases: BASES, kbs: KBS });
+    expect(html).toContain("数据库");
+    expect(html).toContain("知识库");
+    expect(html).toContain("客户主库");
+    expect(html).toContain("订单库");
+    expect(html).toContain("产品知识库");
+
+    const empty = renderNav();
+    expect(empty).toContain("暂无数据库或知识库");
+    expect(empty).not.toContain('data-nav-row="item"');
   });
 
-  it("broken 项即便 node 摘要非 null（后端 brokenSummary 形态）也不渲染", () => {
-    menuItems = [shortcut("m_b", "nav_ghost", "broken", "table", "res_gone")];
-    const html = renderNav();
-    expect(html).not.toContain("res_gone");
+  it("一级内不出现任何二级内容（表 / 文档 / 画布）", () => {
+    const html = renderNav("/base/base_1", { bases: BASES, kbs: KBS });
+    // 数据源里根本没有二级实体，行标记只有 base / kb 两档
+    expect(html).toContain('data-nav-entity="base"');
+    expect(html).toContain('data-nav-entity="kb"');
+    expect(html).not.toContain('data-nav-entity="table"');
+    expect(html).not.toContain('data-nav-entity="doc"');
+    expect(html).not.toContain('data-nav-entity="canvas"');
+    // 只读实体列表，不消费 menu_items / nav 树（这是「一级无二级」的根因保证）
+    const src = readFileSync(fileURLToPath(new URL("./PrimaryNav.tsx", import.meta.url)), "utf8");
+    expect(src).not.toContain("useNavMenu");
+    expect(src).not.toContain("useNavNodeIndex");
+    expect(src).not.toContain("buildCollection");
+  });
+
+  it("每个库只占一行（L1 直接列实体，不存在「同一实体多处挂载」）", () => {
+    const html = renderNav("/", { bases: BASES });
+    expect((html.match(/data-nav-entity="base"/g) ?? []).length).toBe(2);
+    expect(html).toContain("客户主库");
+    expect(html).toContain("订单库");
+  });
+
+  it("停在库的任意子资源上，一级对应行仍是选中态（刷新/直访都成立）", () => {
+    const html = renderNav("/base/base_1/table/tbl_1", { bases: BASES, kbs: KBS });
+    expect(html).toContain("bg-white");
+    expect(html).toContain("text-gx-accent");
+    // 未命中的库不亮选中态
+    const other = renderNav("/kb/kb_9/doc/d1", { bases: BASES, kbs: KBS });
+    expect(other).toContain("bg-white");
+    expect(other).toContain("text-gx-accent");
+  });
+
+  it("渲染出的入口不含 /w/ 新形前缀；旧形 href 模板仍是 /base/:id 与 /kb/:id", () => {
+    const html = renderNav("/", { bases: BASES, kbs: KBS });
+    expect(html).not.toContain("/w/");
+    expect(html).not.toContain("/workspace/");
+    const src = readFileSync(fileURLToPath(new URL("./PrimaryNav.tsx", import.meta.url)), "utf8");
+    expect(src).toContain("`/base/${row.entityId}`");
+    expect(src).toContain("`/kb/${row.entityId}`");
   });
 });
 
-describe("PrimaryNav N5 旧链形态（href 不改名）", () => {
+describe("N5 §1.3 旧链形态：nav 树解析与路由声明仍为旧形（冷备未坏）", () => {
   it("navNodeHref 把 table/doc/canvas/base/kb 解析为旧形，且 App.tsx 仍声明对应旧路由", () => {
-    treeItems = [
+    const treeItems = [
       treeNode("nav_b", "base", "base_9", null),
       treeNode("nav_t", "table", "tbl_9", "nav_b"),
       treeNode("nav_k", "kb", "kb_9", null),
@@ -128,45 +126,9 @@ describe("PrimaryNav N5 旧链形态（href 不改名）", () => {
     expect(navNodeHref(idx, idx.byId.get("nav_c")!)).toBe("/kb/kb_9/canvas/can_9");
     expect(navNodeHref(idx, idx.byId.get("nav_b")!)).toBe("/base/base_9");
     expect(navNodeHref(idx, idx.byId.get("nav_k")!)).toBe("/kb/kb_9");
-    // 新壳换皮不换路由：旧路径仍在 App.tsx 声明（防 S8/S10 误改成 /w/:nodeId）
     const app = readFileSync(fileURLToPath(new URL("../../App.tsx", import.meta.url)), "utf8");
     expect(app).toContain('path="/base/:baseId/table/:tableId"');
     expect(app).toContain('path="/kb/:kbId/doc/:docId"');
     expect(app).toContain('path="/kb/:kbId/canvas/:docId"');
-  });
-
-  it("渲染出的 shortcut 不含新形前缀，实体名正常输出", () => {
-    const s = shortcut("m_t", "nav_t", "alive", "table", "tbl_9");
-    s.node = summary({ id: "nav_t", name: "客户", state: "alive", kind: "table", resourceId: "tbl_9" });
-    menuItems = [s];
-    treeItems = [
-      treeNode("nav_t", "table", "tbl_9", "nav_b"),
-      treeNode("nav_b", "base", "base_9", null),
-    ];
-    const html = renderNav();
-    expect(html).toContain("客户");
-    expect(html).not.toContain("/w/");
-    expect(html).not.toContain("/workspace/");
-  });
-});
-
-describe("PrimaryNav 同一实体多处挂载", () => {
-  it("同一 node 的两条 shortcut 都渲染（不去重），当前旧路径两处都高亮", () => {
-    const mk = (id: string, ord: number): MenuItemDTO => {
-      const s = shortcut(id, "nav_t", "alive", "table", "tbl_1");
-      s.ord = ord;
-      s.node = summary({ id: "nav_t", name: "共享表", state: "alive", kind: "table", resourceId: "tbl_1" });
-      return s;
-    };
-    menuItems = [mk("m1", 0), mk("m2", 1)];
-    treeItems = [
-      treeNode("nav_t", "table", "tbl_1", "nav_b"),
-      treeNode("nav_b", "base", "base_1", null),
-    ];
-    const html = renderNav("/base/base_1/table/tbl_1");
-    expect(html).toContain("共享表");
-    // 两处 active 3px 指示条（bg-gx-accent-bg 行），断言出现两次可点击项文本
-    const occurrences = html.split("共享表").length - 1;
-    expect(occurrences).toBe(2);
   });
 });

@@ -1,18 +1,33 @@
 // M3/S9 二级导航分区：table/doc/canvas 三段，doc 段支持按权威 parentId 树展开。
 // S10：三段合并为一条定高行序列（段头同样定高）交由 SecondaryNav 单窗口切片，
-// 大表未收纳列表（可达上千行）只挂载视口附近 DOM；本文件只保留纯函数与行组件。
+// 大表列表（可达上千行）只挂载视口附近 DOM；本文件只保留纯函数与行组件。
+//
+// 第三批导航重构：L2 的语义从「收纳/未收纳」改为「选中容器的子项」，
+// 数据源不再走 menu_items + buildCollection，而是直接用资源本体（TableDTO / KbDocDTO）
+// 摊成这里的轻量条目 SecondaryEntry —— 原来挂在 CollectableEntry 上的
+// 「已收纳处数 / shortcuts / 收纳到导航」一并不存在了。
 import { useRef, useState } from "react";
 import { Icon, type IconName } from "../../components/icons";
 import { Menu, MenuItem, Popover } from "../../components/ui";
-import type { NodeIndex } from "./lib/nav-links";
-import { navNodeHref } from "./lib/nav-links";
+import { resolveEntityIcon, resolvedEntityColor, type EntityIconValue } from "../../components/EntityIconPicker";
 import { navKindIcon } from "./PrimaryNav";
-import type { CollectableEntry, CollectionView } from "./lib/collection";
 
 /** 二级行固定行高（含段头；py-1.5 + 13px 内容 ≈ 31），窗口化按此映射滚动位置。 */
 export const SECONDARY_ROW_H = 31;
 
 export type SectionKind = "table" | "doc" | "canvas";
+
+/**
+ * 二级列表条目：与数据源解耦的最小形态（资源本体适配后的结果）。
+ * icon/iconColor 沿用五类实体统一的自定义图标口径（EntityIconValue）。
+ */
+export interface SecondaryEntry extends EntityIconValue {
+  id: string;
+  name: string;
+  kind: SectionKind;
+  parentId?: string | null;
+  href: string;
+}
 
 /** 摊平后的二级行：段头或实体行（depth 仅 doc 段可能 > 0）。 */
 export type SecondaryFlatRow =
@@ -20,7 +35,7 @@ export type SecondaryFlatRow =
   | {
       type: "entry";
       kind: SectionKind;
-      entry: CollectableEntry;
+      entry: SecondaryEntry;
       depth: number;
       hasDocKids: boolean;
       expanded: boolean;
@@ -32,9 +47,9 @@ export type SecondaryFlatRow =
  * 纯函数：大列表下总行数在此一次确定，组件再用 virtualWindow 切片，DOM 不随总量线性膨胀。
  */
 export function buildSecondaryRows(
-  sections: Record<SectionKind, CollectableEntry[]>,
+  sections: Record<SectionKind, SecondaryEntry[]>,
   expandedDocs: Set<string>,
-  docChildren: Map<string, CollectableEntry[]>,
+  docChildren: Map<string, SecondaryEntry[]>,
 ): SecondaryFlatRow[] {
   const rows: SecondaryFlatRow[] = [];
   (["table", "doc", "canvas"] as const).forEach((kind) => {
@@ -45,11 +60,11 @@ export function buildSecondaryRows(
       for (const entry of entries) rows.push({ type: "entry", kind, entry, depth: 0, hasDocKids: false, expanded: false });
       return;
     }
-    const roots = entries.filter((e) => e.isRootDoc || !docChildren.has(e.node.parentId ?? ""));
-    const push = (list: CollectableEntry[], depth: number) => {
+    const roots = entries.filter((e) => !e.parentId || !docChildren.has(e.parentId));
+    const push = (list: SecondaryEntry[], depth: number) => {
       for (const entry of list) {
-        const kids = docChildren.get(entry.node.id) ?? [];
-        const expanded = expandedDocs.has(entry.node.id);
+        const kids = docChildren.get(entry.id) ?? [];
+        const expanded = expandedDocs.has(entry.id);
         rows.push({ type: "entry", kind, entry, depth, hasDocKids: kids.length > 0, expanded });
         if (expanded) push(kids, depth + 1);
       }
@@ -64,12 +79,7 @@ export function sectionLabel(kind: SectionKind): string {
   return kind === "table" ? "数据表" : kind === "doc" ? "文档" : "画布";
 }
 
-/** P3-a11y：行尾三点菜单的可访问名称，按行类型给具体作用，不写泛泛的「更多」。 */
-const ROW_MORE_LABEL: Record<SectionKind, string> = {
-  table: "表操作菜单",
-  doc: "文档操作菜单",
-  canvas: "画布操作菜单",
-};
+/** P3-a11y：行尾三点菜单的可访问名称由调用点给出（按行类型给具体作用，不写泛泛的「更多」）。 */
 
 export function SectionHeader({ kind, count }: { kind: SectionKind; count: number }) {
   return (
@@ -147,41 +157,36 @@ export interface RowMoreItem {
   onClick: () => void;
 }
 
+/**
+ * 二级实体行（第三批）：纯导航行——点整行进对应的表 / 文档 / 画布。
+ *
+ * 行尾的「竖向三点」行菜单已随「收纳到导航」一并下线：它的两个动作分别是
+ *  ① 收纳到导航（menu_items，本批整体下线）；
+ *  ② 移动到分组…（依赖 CollectableEntry + nav group 树，属分组编排流）。
+ * RowMoreMenu 组件本体保留导出（它是与语义无关的通用行菜单，另有单测直接渲染）。
+ */
 export function SecondaryRow({
   kind,
   entry: e,
   depth,
   hasDocKids,
   expanded,
-  currentResource,
-  index,
-  tab,
+  active,
   onToggleDoc,
   onNavigate,
-  onCollect,
-  onMove,
 }: {
   kind: SectionKind;
-  entry: CollectableEntry;
+  entry: SecondaryEntry;
   depth: number;
   hasDocKids: boolean;
   expanded: boolean;
-  currentResource: string | null;
-  index: NodeIndex;
-  tab: CollectionView;
+  active: boolean;
   onToggleDoc: (id: string) => void;
   onNavigate: (href: string) => void;
-  onCollect: (e: CollectableEntry) => void;
-  onMove: (e: CollectableEntry) => void;
 }) {
-  const href = navNodeHref(index, e.node);
-  const active = currentResource === e.node.resourceId;
-  const icon: IconName = navKindIcon(kind);
+  const resolved = resolveEntityIcon(e, { name: navKindIcon(kind) });
+  const color = resolvedEntityColor(e);
   // R-N-10 选中态：白底 + 圆角 8 + accent 字 600；hover 底 #F1F5FB。左侧色条已按规范移除。
-  const menuItems: RowMoreItem[] = [
-    ...(tab === "uncollected" ? [{ label: "收纳到导航", icon: "plus" as IconName, onClick: () => onCollect(e) }] : []),
-    { label: "移动到分组…", icon: "folderOpen" as IconName, onClick: () => onMove(e) },
-  ];
   return (
     <div
       className={[
@@ -193,7 +198,7 @@ export function SecondaryRow({
       {kind === "doc" ? (
         <button
           type="button"
-          onClick={() => hasDocKids && onToggleDoc(e.node.id)}
+          onClick={() => hasDocKids && onToggleDoc(e.id)}
           className={`rounded p-0.5 ${hasDocKids ? "text-gx-text-hint hover:text-gx-text-secondary" : "invisible"}`}
           aria-label={expanded ? "折叠" : "展开"}
           aria-expanded={expanded}
@@ -201,27 +206,36 @@ export function SecondaryRow({
           <Icon name={expanded ? "chevronDown" : "chevronRight"} size={11} />
         </button>
       ) : null}
-      <Icon name={icon} size={13} className={`shrink-0 ${active ? "text-gx-accent" : "text-gx-text-tertiary"}`} />
+      <Icon
+        name={resolved.name}
+        size={13}
+        className={`shrink-0 ${active ? "text-gx-accent" : "text-gx-text-tertiary"}`}
+        style={color ? { color } : undefined}
+      />
       <button
         type="button"
-        disabled={!href}
-        onClick={() => href && onNavigate(href)}
-        className={`min-w-0 flex-1 truncate text-left text-gx-13 ${href ? "" : "cursor-not-allowed opacity-50"} ${active ? "font-medium text-gx-text-primary" : "text-gx-text-primary"}`}
-        title={e.shortcuts.length ? `已在 ${e.shortcuts.length} 处菜单引用` : undefined}
+        disabled={!e.href}
+        onClick={() => e.href && onNavigate(e.href)}
+        title={e.name}
+        className={`min-w-0 flex-1 truncate text-left text-gx-13 ${e.href ? "" : "cursor-not-allowed opacity-50"} ${active ? "font-medium text-gx-text-primary" : "text-gx-text-primary"}`}
       >
-        {e.node.name}
+        {e.name}
       </button>
-      {e.shortcuts.length > 0 && <Icon name="check" size={12} className="shrink-0 text-gx-text-hint" />}
-      <RowMoreMenu items={menuItems} label={ROW_MORE_LABEL[kind]} />
     </div>
   );
 }
 
 /** 三视角条目按类型分组（顺序 table → doc → canvas）。 */
-export function groupByKind(entries: CollectableEntry[]): Record<SectionKind, CollectableEntry[]> {
+export function groupByKind(entries: SecondaryEntry[]): Record<SectionKind, SecondaryEntry[]> {
   return {
     table: entries.filter((e) => e.kind === "table"),
     doc: entries.filter((e) => e.kind === "doc"),
     canvas: entries.filter((e) => e.kind === "canvas"),
   };
+}
+
+/** 空态文案：按当前 fragments（类型 + 是否有搜索词）给具体说法，不写泛泛的「暂无数据」。 */
+export function secondaryEmptyText(kind: SectionKind, query: string): string {
+  if (query.trim()) return "没有匹配的内容";
+  return kind === "table" ? "该数据库还没有数据表" : kind === "doc" ? "还没有文档" : "还没有画布";
 }

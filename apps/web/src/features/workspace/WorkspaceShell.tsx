@@ -22,27 +22,32 @@
 //
 // 阶段 6 菜单精细化：底部固定区与 L1 主区共用同一套行规格（高 32 / 图标 14 / 文字 13 /
 // 圆角 8 / 左右 padding 8 / 150ms ease-out），图标按语义重排（工作区设置 = settings）；
-// 底部固定区四项 + 折叠开关（原先最底的「用户卡片」已于交互治理阶段下线：
+// 底部固定区 + 折叠开关（原先最底的「用户卡片」已于交互治理阶段下线：
 //   个人信息/登出入口统一收口到右上角 WorkspaceTopBar 的个人中心抽屉，避免同一入口两处并存）。
+//
+// 第三批导航重构（本文件接线的三处变化）：
+//   1. L1 不再读 menu_items：改用 useBases() / useKbList() 两条既有查询喂给 PrimaryNav；
+//   2. L2 的「当前容器」不再由 menu 容器**反推**，而直接由 URL 的 base/kb id + 上述列表得出；
+//   3. `picked`（手动点一级容器开二级）随之删除 —— L1 点库就是导航，二级归属唯一真源是 URL。
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
 import { Icon, type IconName } from "../../components/icons";
 import type { ActiveLibrary } from "../../components/LibrarySwitcher";
-import { buildEntityIconIndex, type EntityIconIndex } from "../../components/EntityIconPicker";
+import { buildEntityIconIndex } from "../../components/EntityIconPicker";
 import { useBases } from "../../api/hooks";
 import { useKbList } from "../kb/kb-hooks";
 import { SearchDialog } from "../search/SearchDialog";
 import { useAuthzCapability } from "../authz/useAuthzCapability";
 import { visibleFooterNav } from "./lib/nav-gate";
+import { FOOTER_NAV_ITEMS } from "./lib/nav-footer";
+import type { LibraryEntity } from "./lib/menu-sections";
+import { deriveScopeContainer } from "./lib/route-container";
 import { useMyOrgActions } from "../contacts/contacts-hooks";
 import { WorkspaceTopBar } from "./WorkspaceTopBar";
 import { NavLibraryBlock } from "./NavLibraryBlock";
 import { L1_ROW_IDLE, L1_ROW_SELECTED, NAV_ROW_TRANSITION, PrimaryNav } from "./PrimaryNav";
-import { SecondaryNav } from "./SecondaryNav";
+import { SecondaryNav, type SecondaryContainer } from "./SecondaryNav";
 import { SecondaryNavRail } from "./SecondaryNavRail";
-import { useNavMenu, useNavNodeIndex } from "./nav-hooks";
-import { resolveRouteContainer } from "./lib/route-container";
-import { FOOTER_NAV_ITEMS } from "./lib/nav-footer";
 import { useBreakpointTier, isDrawerTier, isFloatingL2Tier } from "../../lib/breakpoint";
 import {
   L1_WIDTH_COLLAPSED,
@@ -53,12 +58,9 @@ import {
   writeL1Collapsed,
 } from "./lib/l1-collapse";
 import { readL2Collapsed, resolveL2Collapsed, writeL2Collapsed } from "./lib/l2-collapse";
-import type { MenuTreeNode } from "./lib/menu-tree";
 
-interface SecondaryState {
-  containerId: string;
-  name: string;
-}
+/** L2 当前容器：一级选中库本体（kind + id + name），由 URL 与实体列表得出。 */
+type ActiveContainer = SecondaryContainer;
 
 /**
  * 浮出面板（R-D-31 / R-D-32）的起始高度：内容区首行「工具栏带」高 48（附录 C.1）。
@@ -154,8 +156,6 @@ function CollapseToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle:
 function SideRail({
   collapsed,
   onToggleCollapsed,
-  activeContainerId,
-  onOpenSecondary,
   /** R-D-32：768–1023 档 L1 被强制锁在 56 图标档，此时不给展开开关（点了也不会变宽）。 */
   showCollapseToggle = true,
   /**
@@ -164,18 +164,23 @@ function SideRail({
    * （第一张卡片的标题就在那个位置）。折叠档下只留图标 + tooltip，符合 R-N-07。
    */
   secondaryToggle = null,
-  /** base/kb 实体自定义图标索引（由 WorkspaceShell 装配）。 */
-  entityIcons,
+  /** L1 数据源：bases / kbs 实体列表（第三批：不再读 menu_items）。 */
+  bases,
+  kbs,
+  navLoading = false,
+  navError = false,
   /** 一级导航顶部插槽：库切换器 + 新建数据库/新建知识库入口。 */
   header,
 }: {
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  activeContainerId: string | null;
-  onOpenSecondary: (c: MenuTreeNode) => void;
   showCollapseToggle?: boolean;
   secondaryToggle?: { label: string; onOpen: () => void } | null;
-  entityIcons?: EntityIconIndex;
+  /** L1 数据源所需的最小形态（BaseDTO / KbDTO 都结构化满足）。 */
+  bases?: readonly LibraryEntity[];
+  kbs?: readonly LibraryEntity[];
+  navLoading?: boolean;
+  navError?: boolean;
   header?: ReactNode;
 }) {
   return (
@@ -187,10 +192,11 @@ function SideRail({
       {/* PrimaryNav 自身窗口化滚动（S10 大菜单 DOM 有界），不再外包滚动容器避免双滚动条 */}
       <div className="min-h-0 flex-1">
         <PrimaryNav
-          onOpenSecondary={onOpenSecondary}
+          bases={bases}
+          kbs={kbs}
+          loading={navLoading}
+          error={navError}
           collapsed={collapsed}
-          activeContainerId={activeContainerId}
-          entityIcons={entityIcons}
           header={header}
         />
       </div>
@@ -223,8 +229,6 @@ export function WorkspaceShell() {
   const tier = useBreakpointTier();
   const [searchOpen, setSearchOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // 手动点 L1 容器打开的 L2；路由变化即清空（URL 是 L2 归属的唯一真源，R-N-02）
-  const [picked, setPicked] = useState<SecondaryState | null>(null);
   /**
    * L2 收起态拆成两份，根因是「响应式档位」原先冒充了「用户意图」：
    *   l2Intent —— 用户显式点过收起/展开，写 localStorage（gx.l2.collapsed），刷新保持。
@@ -238,46 +242,38 @@ export function WorkspaceShell() {
   const [collapsed, setCollapsed] = useState<boolean>(() => readL1Collapsed());
   const location = useLocation();
 
-  const { menu } = useNavMenu();
-  const { index } = useNavNodeIndex();
+  /** 当前库作用域（base / kb）：L1 数据源、L2 归属、库区块「当前库」的同一处判定。 */
   const baseMatch = useMatch("/base/:baseId/*");
   const kbMatch = useMatch("/kb/:kbId/*");
   const scopeKind: "base" | "kb" | null = baseMatch ? "base" : kbMatch ? "kb" : null;
   const scopeId = baseMatch?.params.baseId ?? kbMatch?.params.kbId ?? null;
 
-  /**
-   * 五类实体「自定义图标 + 颜色」索引：按实体资源 id 索引，L1 容器行与 L2 面板头按
-   * nav node.resourceId 取值。放在壳层装配是因为一级/二级导航都跑在多份不带
-   * QueryClientProvider 的 SSR 回归里，不能在它们内部直接 useQuery。
-   * 两份列表都是既有缓存（库切换器 / 资产页同源），这里不新增请求。
-   */
   // 库区块（切换器 + 新建入口）的「当前库」同样由 pathname 反推：
   // 壳层挂在无 path 的布局路由下，useParams 恒为 {}（同上面 L2 归属的反推）。
   const activeLibrary: ActiveLibrary =
     scopeKind === "kb" ? { kind: "kb", id: scopeId } : { kind: "base", id: scopeId };
 
-  const { data: basesForIcons } = useBases();
-  const { data: kbsForIcons } = useKbList();
+  /** L1 数据源（第三批：useBases/useKbList 就是一级导航本身，不再读 menu_items）。 */
+  const { data: bases, isLoading: basesLoading, isError: basesError } = useBases();
+  const { data: kbs, isLoading: kbsLoading, isError: kbsError } = useKbList();
+  /**
+   * L2 面板头的实体图标索引：按实体资源 id 索引。放在壳层装配是因为二级导航跑在多份
+   * 不带 QueryClientProvider 的 SSR 回归里，不能在它内部直接取这两个列表。
+   * 两份列表与 L1 同源（同一次请求），这里不新增网络开销。
+   */
   const entityIcons = useMemo(
-    () => buildEntityIconIndex(basesForIcons ?? [], kbsForIcons ?? []),
-    [basesForIcons, kbsForIcons],
+    () => buildEntityIconIndex(bases ?? [], kbs ?? []),
+    [bases, kbs],
   );
 
-  // 由当前库（base/kb）反推 L2 容器：刷新与直访都能还原同一个二级面板
-  const routeContainer = useMemo(() => {
-    if (!menu || !scopeKind || !scopeId) return null;
-    const item = resolveRouteContainer(menu.items, index, { kind: scopeKind, id: scopeId });
-    if (!item) return null;
-    return {
-      containerId: item.id,
-      name: item.label ?? index.byId.get(item.nodeId ?? "")?.name ?? "容器",
-    } satisfies SecondaryState;
-  }, [menu, index, scopeKind, scopeId]);
-
-  const openSecondary = (c: MenuTreeNode) => {
-    setPicked({ containerId: c.item.id, name: c.item.label ?? c.item.node?.name ?? "容器" });
-    setL2Peeked(true);
-  };
+  /**
+   * 由当前库（base/kb）直接得出 L2 容器：刷新与直访都能还原同一个二级面板。
+   * 名称取自同一批列表（未加载完先返回 null，避免面板头短暂的错名闪跳）。
+   */
+  const routeContainer = useMemo<ActiveContainer | null>(
+    () => deriveScopeContainer(bases, kbs, scopeKind && scopeId ? { kind: scopeKind, id: scopeId } : null),
+    [scopeKind, scopeId, bases, kbs],
+  );
 
   /** 显式收起：落盘（刷新保持），并清掉会话内 peek，否则 peek 会盖掉这次收起。 */
   const collapseL2 = useCallback(() => {
@@ -317,14 +313,13 @@ export function WorkspaceShell() {
   // 原先每次换档/换路由都按档位硬复位，正是「用户选择被档位锁死」的根因。
   useEffect(() => {
     setDrawerOpen(false);
-    setPicked(null);
     setL2Peeked(false);
   }, [location.pathname]);
 
   // 工作区级路由（/workspace/*）没有库上下文 → L2 收起为 0 宽、不占位
   const activeContainer = location.pathname.startsWith("/workspace")
     ? null
-    : (picked ?? routeContainer);
+    : routeContainer;
   const l2Hidden = l2Peeked ? false : resolveL2Collapsed(l2Intent, isFloatingL2Tier(tier));
   const showL2 = !!activeContainer && !l2Hidden;
 
@@ -339,11 +334,10 @@ export function WorkspaceShell() {
   const l2Width = tier === "xl" ? L2_WIDTH_COMPACT : L2_WIDTH;
 
   const secondary = activeContainer ? (
-    // key 随容器切换：tab/搜索词/展开态/移动弹层全部重挂重置，不把上个容器的视图状态带过来
+    // key 随容器切换：tab/搜索词/展开态全部重挂重置，不把上个容器的视图状态带过来
     <SecondaryNav
-      key={activeContainer.containerId}
-      containerMenuId={activeContainer.containerId}
-      containerName={activeContainer.name}
+      key={activeContainer.id}
+      container={activeContainer}
       variant={floatingL2 || drawer ? "floating" : "static"}
       width={l2Width}
       entityIcons={entityIcons}
@@ -385,9 +379,10 @@ export function WorkspaceShell() {
                 <SideRail
                   collapsed={collapsed}
                   onToggleCollapsed={toggleCollapsed}
-                  activeContainerId={activeContainer?.containerId ?? null}
-                  onOpenSecondary={openSecondary}
-                  entityIcons={entityIcons}
+                  bases={bases ?? []}
+                  kbs={kbs ?? []}
+                  navLoading={basesLoading || kbsLoading}
+                  navError={basesError || kbsError}
                   header={<NavLibraryBlock active={activeLibrary} collapsed={collapsed} />}
                 />
                 {showL2 && secondary && (
@@ -402,10 +397,11 @@ export function WorkspaceShell() {
           <SideRail
             collapsed={l1Collapsed}
             onToggleCollapsed={toggleCollapsed}
-            activeContainerId={activeContainer?.containerId ?? null}
-            onOpenSecondary={openSecondary}
+            bases={bases ?? []}
+            kbs={kbs ?? []}
+            navLoading={basesLoading || kbsLoading}
+            navError={basesError || kbsError}
             showCollapseToggle={tier !== "md"}
-            entityIcons={entityIcons}
             header={<NavLibraryBlock active={activeLibrary} collapsed={l1Collapsed} />}
             secondaryToggle={
               floatingL2 && !showL2 && activeContainer
@@ -439,7 +435,7 @@ export function WorkspaceShell() {
             // 浮出档不给窄条（会占掉内容宽度，违反 R-D-31/32），唤回入口在 L1 底部固定区。
             !floatingL2 && (
               <SecondaryNavRail
-                key={`rail-${activeContainer.containerId}`}
+                key={`rail-${activeContainer.id}`}
                 containerName={activeContainer.name}
                 onExpand={expandL2}
               />

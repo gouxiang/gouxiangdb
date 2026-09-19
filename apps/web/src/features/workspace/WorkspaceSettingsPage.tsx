@@ -12,8 +12,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon, type IconName } from "../../components/icons";
-import { useMyOrgActions, useIsWorkspaceOwner } from "../contacts/contacts-hooks";
-import { NavComposer } from "./NavComposer";
+import { useIsWorkspaceOwner } from "../contacts/contacts-hooks";
 import { AssetsSection, TrashSection } from "./WorkspaceSettingsSections";
 import { EmbeddingSearchPanel } from "../search/EmbeddingSearchPanel";
 import { SearchCoveragePanel } from "../search/SearchCoveragePanel";
@@ -26,7 +25,7 @@ import { useEnterpriseOrgFlag } from "../settings/pat-hooks";
 import { UploadLimitsPanel } from "../kb/UploadLimitsPanel";
 import { toast } from "../../components/ui";
 
-type Section = "general" | "contacts" | "nav" | "search" | "mcp" | "assets" | "trash";
+type Section = "general" | "contacts" | "search" | "mcp" | "assets" | "trash";
 
 const SECTIONS: {
   key: Section;
@@ -39,7 +38,6 @@ const SECTIONS: {
 }[] = [
   { key: "general", label: "通用", icon: "settings", desc: "工作区设置中心" },
   { key: "contacts", label: "通讯录", icon: "building", desc: "部门、成员与组织角色" },
-  { key: "nav", label: "导航编排", icon: "sitemap", desc: "一级导航与分组管理" },
   { key: "search", label: "语义检索", icon: "sparkles", desc: "云端语义检索与索引覆盖度", ownerOnly: true },
   { key: "mcp", label: "MCP 接入", icon: "keyRound", desc: "为 AI 客户端签发访问令牌", enterpriseOnly: true },
   { key: "assets", label: "资产", icon: "database", desc: "数据库与知识库入口" },
@@ -98,9 +96,6 @@ function SectionList({
 export function WorkspaceSettingsPage() {
   const navigate = useNavigate();
   const { "*": splat } = useParams();
-  const { actions } = useMyOrgActions();
-  const canManageMenu = actions.has("manage_menu");
-  // M5 检索管理面仅工作区所有者可见；加载未完成先按非 owner 处理（不闪现面板）。
   const { isOwner } = useIsWorkspaceOwner();
   // M6 MCP 接入随企业组织门控；loading/探测失败/非 true 一律 false（fail-closed）。
   const enterpriseOn = useEnterpriseOrgFlag();
@@ -216,7 +211,7 @@ export function WorkspaceSettingsPage() {
             <div className="flex flex-col gap-2">
               <h2 className="text-gx-18 font-semibold text-gx-text-primary">工作区设置</h2>
               <p className="text-gx-13 text-gx-text-tertiary">
-                管理组织通讯录、导航编排与资产入口。更多工作区能力将随对应版本在此增列。
+                管理组织通讯录与资产入口。更多工作区能力将随对应版本在此增列。
               </p>
               <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <button
@@ -228,17 +223,6 @@ export function WorkspaceSettingsPage() {
                   <span>
                     <span className="block text-gx-13 font-medium text-gx-text-primary">通讯录</span>
                     <span className="mt-0.5 block text-gx-12 text-gx-text-hint">部门、成员与组织角色</span>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => goSection("nav")}
-                  className="flex items-start gap-3 rounded-gx-lg border border-gx-separator p-4 text-left hover:bg-gx-row-hover"
-                >
-                  <Icon name="sitemap" size={18} className="mt-0.5 text-gx-accent" />
-                  <span>
-                    <span className="block text-gx-13 font-medium text-gx-text-primary">导航编排</span>
-                    <span className="mt-0.5 block text-gx-12 text-gx-text-hint">一级导航、快捷项与分组</span>
                   </span>
                 </button>
               </div>
@@ -273,16 +257,6 @@ export function WorkspaceSettingsPage() {
               </button>
             </div>
           )}
-
-          {effectiveSection === "nav" &&
-            (canManageMenu ? (
-              <NavComposer />
-            ) : (
-              <div className="flex flex-col gap-2">
-                <h2 className="text-gx-18 font-semibold text-gx-text-primary">导航编排</h2>
-                <p className="text-gx-13 text-gx-text-tertiary">你没有「导航编排」权限，请联系工作区所有者或具备 manage_menu 动作的角色。</p>
-              </div>
-            ))}
 
           {effectiveSection === "search" && (
             <div className="flex flex-col gap-6">

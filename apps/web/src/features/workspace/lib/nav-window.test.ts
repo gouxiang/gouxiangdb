@@ -8,11 +8,10 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { MenuItemDTO, MenuNodeSummaryDTO, NavNodeDTO } from "@gx/shared-types";
+import type { MenuItemDTO, MenuNodeSummaryDTO } from "@gx/shared-types";
 import { buildMenuTree, flattenMenuRows } from "./menu-tree";
 import { virtualWindow } from "../../contacts/lib/tree";
-import { buildSecondaryRows, SECONDARY_ROW_H } from "../SecondaryNavSections";
-import type { CollectableEntry } from "./collection";
+import { buildSecondaryRows, SECONDARY_ROW_H, type SecondaryEntry } from "../SecondaryNavSections";
 
 /** 一级行高（PrimaryNav.NAV_ROW_H，源码同名常量未导出，测试侧按同值锁定）。 */
 const PRIMARY_ROW_H = 32;
@@ -68,29 +67,6 @@ function container(id: string, parentId: string | null = null, ord = 0): MenuIte
   };
 }
 
-function navNode(
-  id: string,
-  kind: NavNodeDTO["kind"],
-  parentId: string | null = null,
-): NavNodeDTO {
-  return {
-    workspaceId: "ws",
-    id,
-    parentId,
-    kind,
-    resourceType: kind === "group" || kind === "view" ? null : kind,
-    resourceId: id,
-    name: id,
-    ord: 0,
-    path: `/${id}/`,
-    depth: 2,
-    isSystem: false,
-    iconName: null,
-    createdAt: "2026-09-16T00:00:00.000Z",
-    updatedAt: null,
-    deletedAt: null,
-  };
-}
 
 // ---------- 有界性 ----------
 
@@ -157,14 +133,20 @@ describe("PrimaryNav 扁平化 + 窗口：1000+ 容器折叠后 DOM 进一步收
   });
 });
 
-function entry(id: string, kind: CollectableEntry["kind"], parentId: string | null = null): CollectableEntry {
+function entry(id: string, kind: SecondaryEntry["kind"], parentId: string | null = null): SecondaryEntry {
   return {
+    id,
+    name: `${kind}-${id}`,
     kind,
-    node: navNode(id, kind, parentId),
-    shortcuts: [],
-    kbResourceId: kind === "table" ? null : "kb1",
-    baseResourceId: kind === "table" ? "base1" : null,
-    isRootDoc: kind === "doc" && parentId === "kb1",
+    parentId,
+    href:
+      kind === "table"
+        ? `/base/base1/table/${id}`
+        : kind === "canvas"
+          ? `/kb/kb1/canvas/${id}`
+          : `/kb/kb1/doc/${id}`,
+    icon: null,
+    iconColor: null,
   };
 }
 
@@ -172,7 +154,7 @@ describe("buildSecondaryRows 三段合并单序列（SecondaryNav 单窗口输�
   it("空段不产段头；段头计数 = 该段条目数；table/canvas depth 恒 0", () => {
     const sections = {
       table: Array.from({ length: 50 }, (_, i) => entry(`t${i}`, "table")),
-      doc: [] as CollectableEntry[],
+      doc: [] as SecondaryEntry[],
       canvas: Array.from({ length: 3 }, (_, i) => entry(`cv${i}`, "canvas", "kb1")),
     };
     const rows = buildSecondaryRows(sections, new Set(), new Map());
@@ -185,29 +167,29 @@ describe("buildSecondaryRows 三段合并单序列（SecondaryNav 单窗口输�
 
   it("doc 折叠只出根行；展开按 depth 递增摊平（S9 层级展开行为在窗口化后保持）", () => {
     const sections = {
-      table: [] as CollectableEntry[],
-      canvas: [] as CollectableEntry[],
+      table: [] as SecondaryEntry[],
+      canvas: [] as SecondaryEntry[],
       doc: [
         entry("d0", "doc", "kb1"),
         entry("d1", "doc", "d0"),
         entry("d2", "doc", "d1"),
       ],
     };
-    const docChildren = new Map<string, CollectableEntry[]>([
+    const docChildren = new Map<string, SecondaryEntry[]>([
       ["d0", [sections.doc[1]!]],
       ["d1", [sections.doc[2]!]],
     ]);
     const collapsed = buildSecondaryRows(sections, new Set(), docChildren);
     const collapsedIds = collapsed
       .filter((r) => r.type === "entry")
-      .map((r) => (r as { entry: CollectableEntry }).entry.node.id);
+      .map((r) => (r as { entry: SecondaryEntry }).entry.id);
     expect(collapsedIds).toEqual(["d0"]);
 
     const expanded = buildSecondaryRows(sections, new Set(["d0", "d1"]), docChildren);
     const entries = expanded.filter(
       (r) => r.type === "entry",
     ) as Extract<(typeof expanded)[number], { type: "entry" }>[];
-    expect(entries.map((e) => [e.entry.node.id, e.depth])).toEqual([
+    expect(entries.map((e) => [e.entry.id, e.depth])).toEqual([
       ["d0", 0],
       ["d1", 1],
       ["d2", 2],
@@ -217,8 +199,8 @@ describe("buildSecondaryRows 三段合并单序列（SecondaryNav 单窗口输�
   it("1000 条未收纳 table：总序列 1001 行（含段头），单窗口挂载 ≤ 49 行", () => {
     const sections = {
       table: Array.from({ length: 1000 }, (_, i) => entry(`t${i}`, "table")),
-      doc: [] as CollectableEntry[],
-      canvas: [] as CollectableEntry[],
+      doc: [] as SecondaryEntry[],
+      canvas: [] as SecondaryEntry[],
     };
     const rows = buildSecondaryRows(sections, new Set(), new Map());
     expect(rows).toHaveLength(1001);

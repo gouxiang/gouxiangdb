@@ -1,51 +1,67 @@
-// M3/S9 二级导航（N3 二级 P0）：三视角 全部 / 未收纳 / 已收纳（裁决 8，无收藏无最近）。
+// M3/S9 二级导航（N3 二级 P0）。
 //
-// 数据：nav tree 深层索引 + menu 引用（collection.ts 纯函数派生）。
-//   - 全部：容器内全部活 table/doc/canvas（按权威树 parentId 镜像，doc 支持层级展开）
-//   - 未收纳：C4 口径（table/canvas + kb 根级 doc 无任何活 shortcut）
-//   - 已收纳：当前菜单容器子树引用的实体
-// 行操作：收纳到导航（menu insert 到当前容器）、移动到分组（权威 move，必经 impact 确认）。
+// 第三批导航重构后的语义：**二级 = 一级选中容器的子项**（用户的规则）。
+//   选中数据库（base）  → 该库下的**数据表**列表；
+//   选中知识库（kb）    → 「文档 / 画布」两个选项卡 + 对应列表。
+// 右侧主区只按二级选中项渲染（路由即真源，R-N-02）。
+//
+// 数据源因此不再走 nav tree + menu_items 的「收纳/未收纳」派生
+// （buildCollection / usePatchMenu / 「收纳到导航」入口已下线），
+// 而是直接用资源本体的既有查询：useTables(baseId) 与 useKbDocs(kbId, kind)。
+// 两者都是页面上已经在用的缓存（库首页 / 表格页同源），这里不新增请求。
+//
+// 保留下来不许丢的能力：S10 窗口化（useMenuVirtualizer，DOM 有界）、
+// 面板收起展开（由壳层持有）、R-I-16 表级操作行、doc 段按 parentId 层级展开。
 import { useMemo, useState } from "react";
 import { clsx } from "clsx";
 import { useMatch, useNavigate } from "react-router-dom";
 import { Icon, type IconName } from "../../components/icons";
-import { Spinner, toast } from "../../components/ui";
-import { resolvedEntityColor, type EntityIconIndex } from "../../components/EntityIconPicker";
-import { useNavMenu, useNavNodeIndex, useNavTreeDeep, usePatchMenu, useMoveNode } from "./nav-hooks";
-import { extractMoveImpact } from "./nav-hooks";
-import {
-  buildCollection,
-  collectedUnderSubtree,
-  navSubtreeIds,
-  selectEntries,
-  uncollectedCount,
-  type CollectableEntry,
-  type CollectionView,
-} from "./lib/collection";
-import { newDraftId } from "./lib/menu-ops";
+import { Spinner } from "../../components/ui";
+import { resolveEntityIcon, resolvedEntityColor, type EntityIconIndex } from "../../components/EntityIconPicker";
+import { useTables } from "../../api/hooks";
+import { useKbDocs } from "../kb/kb-hooks";
+import type { KbDocDTO } from "../../api/client";
 import { useMenuVirtualizer } from "./lib/useMenuVirtualizer";
 import {
   buildSecondaryRows,
-  groupByKind,
+  secondaryEmptyText,
   SectionHeader,
   SecondaryRow,
   SECONDARY_ROW_H,
+  type SecondaryEntry,
+  type SectionKind,
 } from "./SecondaryNavSections";
-import { MoveToGroupModal } from "./MoveToGroupModal";
-import { MoveImpactModal, type PendingMove } from "./MoveImpactModal";
 import { TableActionRow } from "./TableActionRow";
 import { L2_WIDTH } from "./lib/l1-collapse";
-import type { NavNodeDTO } from "@gx/shared-types";
 
-const TABS: { key: CollectionView; label: string }[] = [
-  { key: "all", label: "全部" },
-  { key: "uncollected", label: "未收纳" },
-  { key: "collected", label: "已收纳" },
+/** 知识库二级的两个选项卡（顺序固定：文档在前）。 */
+const KB_TABS: { kind: SectionKind; label: string }[] = [
+  { kind: "doc", label: "文档" },
+  { kind: "canvas", label: "画布" },
 ];
 
-export function SecondaryNav({ containerMenuId, containerName, onClose, variant = "static", width = L2_WIDTH, entityIcons }: {
-  containerMenuId: string;
-  containerName: string;
+/** 二级容器：一级选中项本体（base / kb）。 */
+export interface SecondaryContainer {
+  kind: "base" | "kb";
+  id: string;
+  name: string;
+}
+
+/** 列表按名称本地过滤（区分度只看名字；后端 q 由其主页自己用）。 */
+function filterByName<T extends { name?: string; title?: string }>(rows: T[], query: string): T[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter((r) => (r.name ?? r.title ?? "").toLowerCase().includes(q));
+}
+
+export function SecondaryNav({
+  container,
+  onClose,
+  variant = "static",
+  width = L2_WIDTH,
+  entityIcons,
+}: {
+  container: SecondaryContainer;
   onClose: () => void;
   /**
    * static   ：骨架 S-1 常驻栏（≥1440 / 1280–1439），在流内占位。
@@ -57,148 +73,74 @@ export function SecondaryNav({ containerMenuId, containerName, onClose, variant 
   width?: number;
   /**
    * base/kb 实体自定义图标索引（壳层装配后传入，理由同 PrimaryNav：
-   * 本组件的多份 SSR 回归不带 QueryClientProvider，不能在组件内直接 useQuery）。
-   * 未自定义时不传色，面板头维持原来的纯文本形态。
+   * 本组件的多份 SSR 回归不带 QueryClientProvider，不能在组件内直接取「实体列表」的 mock）。
+   * 未自定义时不传色，面板头维持纯文本形态。
    */
   entityIcons?: EntityIconIndex;
 }) {
-  const { menu } = useNavMenu();
-  const { tree, isLoading } = useNavTreeDeep();
-  const { index } = useNavNodeIndex();
-  const [tab, setTab] = useState<CollectionView>("all");
-  const [query, setQuery] = useState("");
-  const [expandedDocs, setExpandedDocs] = useState<Set<string>>(new Set());
-  const [moveFor, setMoveFor] = useState<CollectableEntry | null>(null);
-  const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
-  const patch = usePatchMenu();
-  const moveNode = useMoveNode();
   const navigate = useNavigate();
-  // 路由作用域改用 useMatch 而非 useParams：本组件挂在无 path 的壳层路由下，
+  const [query, setQuery] = useState("");
+  const [kbTab, setKbTab] = useState<SectionKind>("doc");
+  const [expandedDocs, setExpandedDocs] = useState<Set<string>>(new Set());
+
+  // 路由作用域用 useMatch 而非 useParams：本组件挂在无 path 的壳层路由下，
   // useParams 取到的是布局路由自身的 params（恒为空），无法还原当前表/文档。
-  // 用 useMatch 直接对 pathname 取参，刷新/直访都能拿到（R-N-02）。
   const tableMatch = useMatch("/base/:baseId/table/:tableId/*");
   const viewMatch = useMatch("/base/:baseId/table/:tableId/view/:viewId");
   const docMatch = useMatch("/kb/:kbId/doc/:docId");
   const canvasMatch = useMatch("/kb/:kbId/canvas/:docId");
-  const tableId = tableMatch?.params.tableId ?? null;
+  const currentResource =
+    tableMatch?.params.tableId ?? docMatch?.params.docId ?? canvasMatch?.params.docId ?? null;
 
-  const collection = useMemo(
-    () => buildCollection(tree?.items ?? [], menu?.items ?? []),
-    [tree?.items, menu?.items],
-  );
+  const baseId = container.kind === "base" ? container.id : null;
+  const kbId = container.kind === "kb" ? container.id : null;
 
-  const groups = useMemo(
-    () => (tree?.items ?? []).filter((n) => n.kind === "group" && !n.deletedAt),
-    [tree?.items],
-  );
+  // 两个查询都按 enabled 互斥：选中 base 时不会去拉 kb 的文档，反之亦然。
+  const tablesQ = useTables(baseId);
+  const docsQ = useKbDocs(kbId ?? undefined, kbId ? (kbTab === "canvas" ? "canvas" : "doc") : undefined);
 
-  const uncount = useMemo(() => uncollectedCount(collection), [collection]);
+  const loading = container.kind === "base" ? tablesQ.isLoading : docsQ.isLoading;
+  const error = container.kind === "base" ? tablesQ.isError : docsQ.isError;
 
-  // 容器菜单引用的权威容器节点（base/kb），用于把"全部/未收纳"限定到该容器实体子树
-  const containerNodeId = useMemo(
-    () => menu?.items.find((i) => i.id === containerMenuId)?.nodeId ?? null,
-    [menu?.items, containerMenuId],
-  );
-  const scopeIds = useMemo(
-    () => (containerNodeId && tree ? navSubtreeIds(tree.items, containerNodeId) : null),
-    [tree, containerNodeId],
-  );
-
-  /**
-   * 面板头的实体图标：容器挂在 base/kb 且该实体自定义了图标时才显示。
-   * 未自定义（icon 为 null）→ headerEntity 为 null → 头仍是纯文本一行，与改动前一致。
-   */
-  const headerEntity = useMemo(() => {
-    if (!entityIcons || !containerNodeId) return null;
-    const node = index.byId.get(containerNodeId);
-    if (!node?.resourceId) return null;
-    return entityIcons.get(node.resourceId) ?? null;
-  }, [entityIcons, containerNodeId, index]);
-  const headerIcon =
-    headerEntity && headerEntity.icon
-      ? { name: headerEntity.icon as IconName, color: resolvedEntityColor(headerEntity) }
-      : null;
-
-  const sections = useMemo(() => {
-    if (tab === "collected") {
-      const entries = collectedUnderSubtree(collection, menu?.items ?? [], containerMenuId);
-      const q = query.trim().toLowerCase();
-      const hit = q ? entries.filter((e) => e.node.name.toLowerCase().includes(q)) : entries;
-      return groupByKind(hit);
+  /** 数据源 → SecondaryEntry（统一行模型交给行组件渲染）。 */
+  const entries = useMemo<SecondaryEntry[]>(() => {
+    if (container.kind === "base") {
+      const rows = tablesQ.data ?? [];
+      return filterByName(rows, query).map((t) => ({
+        id: t.id,
+        name: t.name,
+        kind: "table" as const,
+        parentId: null,
+        href: `/base/${t.baseId}/table/${t.id}`,
+        icon: t.icon,
+        iconColor: t.iconColor,
+      }));
     }
-    const mk = (kind: "table" | "doc" | "canvas") =>
-      selectEntries(collection, tab, { kind, query }).filter(
-        (e) => scopeIds === null || scopeIds.has(e.node.id),
-      );
-    return groupByKind([...mk("table"), ...mk("doc"), ...mk("canvas")]);
-  }, [collection, tab, query, containerMenuId, menu?.items, scopeIds]);
+    // 两个数据源跑同一个「按名字本地过滤」口径：后端 q 由各资源主页自己用，
+    // 这里只筛当前容器的子项，本地过滤足够且不引入额外请求。
+    const docs = docsQ.data ?? [];
+    return filterByName(docs, query).map((d) => toDocEntry(d, container.id));
+  }, [container.kind, container.id, tablesQ.data, docsQ.data, query]);
 
-  const currentResource = tableMatch?.params.tableId ?? docMatch?.params.docId ?? canvasMatch?.params.docId ?? null;
-
-  // 文档父 → 子文档映射（权威 parentId 镜像，用于文档分段树展开）
+  /** kb 才有的 doc 层级：子文档折叠由 expandedDocs 控制。 */
   const docChildren = useMemo(() => {
-    const m = new Map<string, CollectableEntry[]>();
-    for (const e of collection.byKind.doc) {
-      const pid = e.node.parentId;
+    const m = new Map<string, SecondaryEntry[]>();
+    if (container.kind !== "kb" || kbTab !== "doc") return m;
+    for (const e of entries) {
+      const pid = e.parentId;
       if (!pid) continue;
       const arr = m.get(pid) ?? [];
       arr.push(e);
       m.set(pid, arr);
     }
     return m;
-  }, [collection.byKind.doc]);
+  }, [entries, container.kind, kbTab]);
 
-  const collect = (entry: CollectableEntry) => {
-    // 直接落库（二级栏行内动作即时生效，非编排草稿）
-    patch.mutate(
-      [{ op: "insert", id: newDraftId("s"), type: "shortcut", parentId: containerMenuId, nodeId: entry.node.id }],
-      {
-        onSuccess: () => toast(`已收纳「${entry.node.name}」到${containerName}`, "success"),
-        onError: (e) => toast(e instanceof Error ? e.message : "收纳失败", "error"),
-      },
-    );
-  };
-
-  const requestMove = (entry: CollectableEntry, target: NavNodeDTO) => {
-    setMoveFor(null);
-    moveNode.mutate(
-      { id: entry.node.id, newParentId: target.id, confirmed: false },
-      {
-        onSuccess: () => setPendingMove(null), // 已确认过的移动不可能到这（409 分支处理）；防御性关闭
-        onError: (e) => {
-          const impact = extractMoveImpact(e);
-          if (impact) {
-            setPendingMove({
-              nodeId: entry.node.id,
-              nodeName: entry.node.name,
-              targetName: target.name,
-              newParentId: target.id,
-              impact,
-            });
-          } else {
-            toast(e instanceof Error ? e.message : "移动失败", "error");
-          }
-        },
-      },
-    );
-  };
-
-  const confirmMove = () => {
-    if (!pendingMove) return;
-    moveNode.mutate(
-      { id: pendingMove.nodeId, newParentId: pendingMove.newParentId, confirmed: true },
-      {
-        onSuccess: () => {
-          toast(`已移动到「${pendingMove.targetName}」`, "success");
-          setPendingMove(null);
-        },
-        onError: (e) => {
-          toast(e instanceof Error ? e.message : "移动失败", "error");
-          setPendingMove(null);
-        },
-      },
-    );
-  };
+  const flatRows = useMemo(
+    () => buildSecondaryRows(kindGroups(entries, kbTab), expandedDocs, docChildren),
+    [entries, kbTab, expandedDocs, docChildren],
+  );
+  const virt = useMenuVirtualizer(flatRows, SECONDARY_ROW_H);
 
   const toggleDoc = (id: string) => {
     setExpandedDocs((prev) => {
@@ -209,14 +151,17 @@ export function SecondaryNav({ containerMenuId, containerName, onClose, variant 
     });
   };
 
-  const empty = sections.table.length + sections.doc.length + sections.canvas.length === 0;
-
-  // S10：三段合并为一条定高行序列，单窗口切片，挂载 DOM 数不随未收纳/全部列表总量线性膨胀。
-  const flatRows = useMemo(
-    () => buildSecondaryRows(sections, expandedDocs, docChildren),
-    [sections, expandedDocs, docChildren],
-  );
-  const virt = useMenuVirtualizer(flatRows, SECONDARY_ROW_H);
+  /**
+   * 面板头图标：实体自定义了图标才显示（未自定义维持纯文本一行，与改动前一致）。
+   * 索引 key 现在直接是资源 id（第三批后不再绕 nav node.resourceId）。
+   */
+  const headerEntity = entityIcons?.get(container.id) ?? null;
+  const headerIcon = headerEntity
+    ? resolveEntityIcon(headerEntity, { name: container.kind === "base" ? "database" : "book" })
+    : { name: (container.kind === "base" ? "database" : "book") as IconName, color: undefined };
+  const headerColor = resolvedEntityColor(headerEntity);
+  const emptyText = secondaryEmptyText(container.kind === "base" ? "table" : kbTab, query);
+  const empty = flatRows.length === 0;
 
   return (
     <aside
@@ -225,18 +170,17 @@ export function SecondaryNav({ containerMenuId, containerName, onClose, variant 
         variant === "floating" && "shadow-gx-lg",
       )}
       style={{ width }}
+      data-l2-scope={container.kind}
     >
       <div className="flex h-[52px] shrink-0 items-center gap-2 border-b border-gx-hairline px-3.5">
-        {headerIcon && (
-          <Icon
-            name={headerIcon.name}
-            size={15}
-            className="shrink-0"
-            style={headerIcon.color ? { color: headerIcon.color } : undefined}
-          />
-        )}
-        <span className="flex-1 truncate text-gx-14 font-semibold text-gx-text-primary" title={containerName}>
-          {containerName}
+        <Icon
+          name={headerIcon.name}
+          size={15}
+          className="shrink-0"
+          style={headerColor ? { color: headerColor } : undefined}
+        />
+        <span className="flex-1 truncate text-gx-14 font-semibold text-gx-text-primary" title={container.name}>
+          {container.name}
         </span>
         <button
           type="button"
@@ -260,39 +204,43 @@ export function SecondaryNav({ containerMenuId, containerName, onClose, variant 
             className="min-w-0 flex-1 bg-transparent text-gx-12 text-gx-text-primary outline-none placeholder:text-gx-text-hint"
           />
         </div>
-        <div className="mt-2 flex items-center gap-1">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={[
-                "rounded-full px-2 py-0.5 text-gx-12 transition-colors",
-                tab === t.key
-                  ? "bg-white font-semibold text-gx-accent"
-                  : "text-gx-text-secondary hover:bg-gx-row-hover",
-              ].join(" ")}
-            >
-              {t.label}
-              {t.key === "uncollected" && uncount > 0 && (
-                <span className="ml-1 font-mono text-gx-11 tabular-nums">{uncount}</span>
-              )}
-            </button>
-          ))}
-        </div>
+        {/* 知识库专有：文档 / 画布 两个选项卡。数据库没有第二种子内容，不渲染 tab。 */}
+        {container.kind === "kb" && (
+          <div className="mt-2 flex items-center gap-1" role="tablist" aria-label="知识库内容类型">
+            {KB_TABS.map((t) => (
+              <button
+                key={t.kind}
+                type="button"
+                role="tab"
+                aria-selected={kbTab === t.kind}
+                onClick={() => setKbTab(t.kind)}
+                className={[
+                  "rounded-full px-2 py-0.5 text-gx-12 transition-colors",
+                  kbTab === t.kind
+                    ? "bg-white font-semibold text-gx-accent"
+                    : "text-gx-text-secondary hover:bg-gx-row-hover",
+                ].join(" ")}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* R-I-16 表级操作行：导入 ｜ 导出 ｜ 分享数据（表级能力，不在顶栏也不在表格工具栏）。
           仅当前路由落在某张表上时渲染；库首页 / 知识库 / 工作区路由下不占位。 */}
       <TableActionRow
-        tableId={tableId}
+        tableId={tableMatch?.params.tableId ?? null}
         viewId={viewMatch?.params.viewId ?? null}
         baseId={tableMatch?.params.baseId ?? null}
       />
 
       <div ref={virt.scrollerRef} className="min-h-0 flex-1 overflow-y-auto py-1.5">
-        {isLoading ? (
+        {loading ? (
           <div className="flex h-24 items-center justify-center"><Spinner size={16} /></div>
+        ) : error ? (
+          <div className="px-4 py-8 text-center text-gx-12 text-gx-text-hint">内容加载失败，请重试</div>
         ) : (
           <>
             <div className="px-1.5" style={{ paddingTop: virt.padTop, paddingBottom: virt.padBottom }}>
@@ -301,45 +249,49 @@ export function SecondaryNav({ containerMenuId, containerName, onClose, variant 
                   <SectionHeader key={`h-${row.kind}`} kind={row.kind} count={row.count} />
                 ) : (
                   <SecondaryRow
-                    key={row.entry.node.id}
+                    key={row.entry.id}
                     kind={row.kind}
                     entry={row.entry}
                     depth={row.depth}
                     hasDocKids={row.hasDocKids}
                     expanded={row.expanded}
-                    currentResource={currentResource}
-                    index={index}
-                    tab={tab}
+                    active={currentResource === row.entry.id}
                     onToggleDoc={toggleDoc}
                     onNavigate={(href) => navigate(href)}
-                    onCollect={collect}
-                    onMove={setMoveFor}
                   />
                 ),
               )}
             </div>
-            {empty && (
-              <div className="px-4 py-8 text-center text-gx-12 text-gx-text-hint">
-                {tab === "uncollected" ? "全部内容都已收纳" : "没有匹配的内容"}
-              </div>
-            )}
+            {empty && <div className="px-4 py-8 text-center text-gx-12 text-gx-text-hint">{emptyText}</div>}
           </>
         )}
       </div>
-
-      <MoveToGroupModal
-        entry={moveFor}
-        groups={groups}
-        busy={moveNode.isPending}
-        onPick={requestMove}
-        onClose={() => setMoveFor(null)}
-      />
-      <MoveImpactModal
-        pending={pendingMove}
-        busy={moveNode.isPending}
-        onConfirm={confirmMove}
-        onCancel={() => setPendingMove(null)}
-      />
     </aside>
   );
+}
+
+/** KbDocDTO → 二级条目（href 按 kind 分流到 doc / canvas 路由）。 */
+function toDocEntry(d: KbDocDTO, kbId: string): SecondaryEntry {
+  return {
+    id: d.id,
+    name: d.title,
+    kind: d.kind === "canvas" ? "canvas" : "doc",
+    parentId: d.parentId ?? null,
+    href: d.kind === "canvas" ? `/kb/${kbId}/canvas/${d.id}` : `/kb/${kbId}/doc/${d.id}`,
+    icon: d.icon ?? null,
+    iconColor: d.iconColor ?? null,
+  };
+}
+
+/**
+ * 当前视图的行分组。
+ * 数据库：全部行都是表，只有 table 段；
+ * 知识库：只显示当前选项卡那一段（文档 / 画布互斥，不再三段同列）。
+ */
+function kindGroups(entries: SecondaryEntry[], kbTab: SectionKind): Record<SectionKind, SecondaryEntry[]> {
+  return {
+    table: entries.filter((e) => e.kind === "table"),
+    doc: kbTab === "doc" ? entries.filter((e) => e.kind === "doc") : [],
+    canvas: kbTab === "canvas" ? entries.filter((e) => e.kind === "canvas") : [],
+  };
 }

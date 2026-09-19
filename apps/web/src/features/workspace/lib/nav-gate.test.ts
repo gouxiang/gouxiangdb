@@ -61,17 +61,23 @@ describe("能力判定：四项各自一套口径", () => {
 });
 
 describe("visibleFooterNav：过滤即剔除，且保持定稿顺序", () => {
-  it("owner（五枚动作齐全）：四项全可见，顺序不变", () => {
+  it("owner（五枚动作齐全）：三项全可见，顺序不变", () => {
     const visible = visibleFooterNav(FOOTER_NAV_ITEMS, { actions: OWNER, authzManage: false });
     expect(visible.map((i) => i.path)).toEqual([
       "/workspace/contacts",
       "/workspace/authz",
-      "/workspace/settings/nav",
       "/workspace/settings/assets",
     ]);
   });
 
-  it("无任何能力的成员（viewer/commenter）：四项全部不渲染", () => {
+  it("已下线的导航编排入口：即使持有 manage_menu 也永不可见（第三批）", () => {
+    // 该路径随 menu_items 手动收纳机制一并下线，落到 isFooterNavVisible 的默认分支。
+    expect(isFooterNavVisible("/workspace/settings/nav", { actions: OWNER, authzManage: true })).toBe(false);
+    expect(FOOTER_NAV_ITEMS.map((i) => i.path)).not.toContain("/workspace/settings/nav");
+    expect(canSeeNavComposer(OWNER)).toBe(true); // 纯函数保留给「工作区设置」的兜底判定
+  });
+
+  it("无任何能力的成员（viewer/commenter）：三项全部不渲染", () => {
     expect(visibleFooterNav(FOOTER_NAV_ITEMS, { actions: setOf(), authzManage: false })).toEqual([]);
   });
 
@@ -85,7 +91,7 @@ describe("visibleFooterNav：过滤即剔除，且保持定稿顺序", () => {
       actions: setOf("manage_menu"),
       authzManage: false,
     });
-    expect(visible.map((i) => i.path)).toEqual(["/workspace/settings/nav", "/workspace/settings/assets"]);
+    expect(visible.map((i) => i.path)).toEqual(["/workspace/settings/assets"]);
   });
 
   it("探针未完成（loading）：一律按无能力，避免闪现入口", () => {

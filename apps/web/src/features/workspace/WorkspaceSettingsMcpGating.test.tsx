@@ -66,18 +66,27 @@ describe("工作区设置 MCP 接入入口门控（fail-closed）", () => {
   });
 });
 
-// 子页由 URL 的 splat 驱动：刷新/直访/分享链接落到同一子页（旧的 /settings/nav 仍可用）。
+// 子页由 URL 的 splat 驱动：刷新/直访/分享链接落到同一子页。
+// 第三批导航重构后：旧的 /settings/nav（导航编排）splat 已不在可解析集合里，
+// 落「通用」分区——它不再可达，但不是白屏（旧链接不炸，只是回落）。
 describe("工作区设置子页按 URL 落位", () => {
   it("/workspace/settings/general → 通用", () => {
     const html = renderPage("/workspace/settings/general");
-    expect(html).toContain("组织通讯录、导航编排与资产入口");
+    expect(html).toContain("组织通讯录与资产入口");
   });
 
-  it("/workspace/settings/nav → 导航编排（旧链接不坏）", () => {
+  it("旧的 /workspace/settings/nav 不再进编排分区：回落通用且页面无「导航编排」文案", () => {
     manageMenu = true;
     const html = renderPage("/workspace/settings/nav");
-    expect(html).toContain("导航编排");
-    expect(html).not.toContain("组织通讯录、导航编排与资产入口");
+    expect(html).toContain("组织通讯录与资产入口");
+    expect(html).not.toContain("导航编排");
+    expect(html).not.toContain("一级导航、快捷项与分组");
+  });
+
+  it("/workspace/settings/nav 已从左侧分区列表消失", () => {
+    manageMenu = true;
+    const html = renderPage();
+    expect(html).not.toContain("一级导航与分组管理");
   });
 
   it("/workspace/settings/assets → 资产", () => {

@@ -7,7 +7,14 @@
 //   - 更深层级（container 下还有 container）不再就地展开，而是把子树的子节点交给
 //     buildFlyoutRows，由行组件在 hover / 键盘聚焦时向侧方浮出独立面板。
 //
+//
+// 第三批导航重构：一级导航不再读 menu_items 树 —— L1 的行序列改由下面的
+// buildLibraryRows 从「bases + knowledge_bases」两个实体列表直接摊平成同样的
+// 「分组标题 + 平铺项」形态，窗口化/行高/选中态全部沿用本那一套规格。
+//
 // 纯函数、无 DOM、无 React，可直接 vitest。
+import type { IconName } from "../../../components/icons";
+import { resolveEntityIcon, resolvedEntityColor, type EntityIconValue } from "../../../components/EntityIconPicker";
 import type { MenuTreeNode } from "./menu-tree";
 
 /** 菜单项行高（参考图实测 32）。 */
@@ -83,4 +90,67 @@ export function buildFlyoutRows(
     rows.push({ kind: "item", id: node.item.id, node, depth });
   }
   return rows;
+}
+
+// ==================== 第三批：L1 的一级行（数据源 = bases + knowledge_bases） ====================
+
+/** 实体列表摊平所需的最小形态（BaseDTO / KbDTO 都结构化满足它）。 */
+export interface LibraryEntity extends EntityIconValue {
+  id: string;
+  name: string;
+}
+
+/** 一级导航的平铺行。 */
+export type LibraryNavRow =
+  | { kind: "group"; id: string; label: string }
+  | {
+      kind: "item";
+      id: string;
+      label: string;
+      icon: IconName;
+      iconColor?: string;
+      entityKind: "base" | "kb";
+      entityId: string;
+    };
+
+/** 两个一级分组的标题（用户定的口径：一级只有「数据库 / 知识库」）。 */
+export const L1_GROUP_BASES = "数据库";
+export const L1_GROUP_KBS = "知识库";
+
+/**
+ * 库列表 → 「分组标题 + 平铺项」两层行序列（沿用原 menu 树的两层摊平口径）。
+ *
+ * - 顺序：先「数据库」后「知识库」，组内保持服务端返回顺序（不自作主张排序）；
+ * - 该组为空就不渲染它的标题行（空分组标题是噪音）；
+ * - 图标：走了自定义图标才连带带色（EntityIconPicker 的保守着色口径）。
+ */
+export function buildLibraryRows(
+  bases: readonly LibraryEntity[],
+  kbs: readonly LibraryEntity[],
+): LibraryNavRow[] {
+  const rows: LibraryNavRow[] = [];
+  const pushGroup = (id: string, label: string, list: readonly LibraryEntity[], kind: "base" | "kb") => {
+    if (list.length === 0) return;
+    rows.push({ kind: "group", id: `l1-${kind}s`, label });
+    for (const e of list) {
+      const fallback: IconName = kind === "base" ? "database" : "book";
+      rows.push({
+        kind: "item",
+        id: e.id,
+        label: e.name,
+        icon: resolveEntityIcon(e, { name: fallback }).name,
+        iconColor: resolvedEntityColor(e),
+        entityKind: kind,
+        entityId: e.id,
+      });
+    }
+  };
+  pushGroup("l1-bases", L1_GROUP_BASES, bases, "base");
+  pushGroup("l1-kbs", L1_GROUP_KBS, kbs, "kb");
+  return rows;
+}
+
+/** 一级行的逐行占位高度（分组标题 24 / 库项 32，各带 2px 行距）。 */
+export function libraryRowHeights(rows: readonly LibraryNavRow[]): number[] {
+  return rows.map((r) => (r.kind === "group" ? NAV_GROUP_ROW_H : NAV_ITEM_ROW_H) + NAV_ROW_GAP);
 }

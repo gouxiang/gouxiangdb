@@ -8,41 +8,28 @@
 //   R-N-17     「规划中」徽标 + 点击有明确反馈（非静默）
 //   R-I-16     导入 / 导出 / 分享数据落在 L2 表级操作行
 //   R-N-19     主壳内无面包屑
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
 import { Route, Routes } from "react-router-dom";
 import { StaticRouter } from "react-router-dom/server";
-import type { MenuItemDTO, MenuTreeDTO, NavNodeDTO, NavTreeDTO } from "@gx/shared-types";
-
-let menuItems: MenuItemDTO[] = [];
-let treeItems: NavNodeDTO[] = [];
-
-vi.mock("./nav-hooks", () => ({
-  useNavMenu: () => ({
-    menu: { workspaceId: "ws", menuVersion: 1, items: menuItems } as MenuTreeDTO,
-    isLoading: false,
-    isError: false,
-  }),
-  useNavNodeIndex: () => ({ index: { byId: new Map(treeItems.map((n) => [n.id, n])), byResource: new Map() } }),
-  useNavTreeDeep: () => ({
-    tree: { workspaceId: "ws", navVersion: 1, items: treeItems, truncated: false } as NavTreeDTO,
-    isLoading: false,
-  }),
-  usePatchMenu: () => ({ mutate: vi.fn() }),
-  useMoveNode: () => ({ mutate: vi.fn(), isPending: false }),
-}));
 
 vi.mock("../../api/hooks", () => ({
   useGXMutations: () => ({ csvImport: { mutateAsync: vi.fn(async () => ({ createdRecords: 0 })) } }),
+  // 二级面板的数据源（第三批）：SSR 回归不跑 QueryClientProvider，直接给数据。
+  useTables: () => ({ data: [], isLoading: false, isError: false }),
+}));
+
+vi.mock("../kb/kb-hooks", () => ({
+  useKbDocs: () => ({ data: [], isLoading: false, isError: false }),
 }));
 
 import { PrimaryNav } from "./PrimaryNav";
 import { SecondaryNav } from "./SecondaryNav";
 import { TableActionRow } from "./TableActionRow";
 import { RowMoreMenu, SecondaryRow } from "./SecondaryNavSections";
-import type { CollectableEntry } from "./lib/collection";
+import type { SecondaryEntry } from "./SecondaryNavSections";
 import {
   L1_WIDTH_COLLAPSED,
   L1_WIDTH_EXPANDED,
@@ -52,10 +39,8 @@ import {
   readL1Collapsed,
   writeL1Collapsed,
 } from "./lib/l1-collapse";
-import { nearestContainerItem, resolveContainerItem, resolveRouteContainer } from "./lib/route-container";
-import { indexNavNodes } from "./lib/nav-links";
+import { deriveScopeContainer } from "./lib/route-container";
 
-const TS = "2026-09-16T00:00:00.000Z";
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 const read = (p: string) => readFileSync(here(p), "utf8");
 
@@ -70,29 +55,7 @@ const stripComments = (s: string) =>
 /** 读源码并去掉注释（只保留代码本体）用于「不该出现 X」类断言。 */
 const code = (p: string) => stripComments(read(p));
 
-function item(over: Partial<MenuItemDTO> & { id: string }): MenuItemDTO {
-  return {
-    parentId: null,
-    type: "shortcut",
-    nodeId: null,
-    label: null,
-    iconName: null,
-    ord: 0,
-    node: null,
-    createdAt: TS,
-    updatedAt: null,
-    deletedAt: null,
-    ...over,
-  };
-}
 
-function treeNode(id: string, kind: NavNodeDTO["kind"], resourceId: string, parentId: string | null): NavNodeDTO {
-  return {
-    workspaceId: "ws", id, parentId, resourceType: kind === "group" ? null : kind, resourceId,
-    name: id, ord: 0, path: `/${id}/`, depth: parentId ? 2 : 1, isSystem: false, iconName: null,
-    createdAt: TS, updatedAt: null, deletedAt: null, kind,
-  } as NavNodeDTO;
-}
 
 /** 带路由参数渲染（useParams 在布局壳里取不到参数，必须真实匹配一条 Route）。 */
 function renderNavAt(location: string, props: Record<string, unknown> = {}) {
@@ -106,27 +69,6 @@ function renderNavAt(location: string, props: Record<string, unknown> = {}) {
   );
 }
 
-const aliveTableShortcut = (): MenuItemDTO =>
-  item({
-    id: "m_t",
-    type: "shortcut",
-    nodeId: "nav_t",
-    label: "客户表",
-    node: {
-      id: "nav_t",
-      kind: "table",
-      name: "客户表",
-      iconName: null,
-      resourceType: "table",
-      resourceId: "tbl_1",
-      state: "alive",
-    },
-  });
-
-beforeEach(() => {
-  menuItems = [];
-  treeItems = [];
-});
 
 describe("阶段 1 骨架常量（UI-SPEC A.3）", () => {
   it("L1 展开 224 / 折叠 56；L2 常驻 240；顶栏 56；折叠键走 gx 前缀约定", () => {
@@ -143,47 +85,48 @@ describe("阶段 1 骨架常量（UI-SPEC A.3）", () => {
   });
 });
 
-describe("L2 容器反推（R-N-02 刷新还原）", () => {
-  it("container 直接引用库节点 → 命中该 container", () => {
-    const items = [
-      item({ id: "g", type: "container", nodeId: "nav_g" }),
-      item({ id: "c_base", type: "container", nodeId: "nav_base", label: "默认分组" }),
-    ];
-    expect(resolveContainerItem(items, "nav_base")?.id).toBe("c_base");
+describe("L2 容器派生（R-N-02 刷新还原：改由 URL + 实体列表直接得出）", () => {
+  const BASES = [{ id: "base_1", name: "客户主库" }];
+  const KBS = [{ id: "kb_1", name: "产品知识库" }];
+
+  it("停在 /base/:id（含子路由）→ 容器就是该库，且名字取自同一份列表", () => {
+    expect(deriveScopeContainer(BASES, KBS, { kind: "base", id: "base_1" })).toEqual({
+      kind: "base", id: "base_1", name: "客户主库",
+    });
+    // 子资源（表 / 视图）同样落在同一个容器上——这正是「刷新后二级仍停在原库」的根因保障
+    expect(deriveScopeContainer(BASES, KBS, { kind: "base", id: "base_1" })?.id).toBe("base_1");
   });
 
-  it("只有 shortcut 引用（表/文档）→ 上溯到最近的 container", () => {
-    const items = [
-      item({ id: "c_base", type: "container", nodeId: "nav_base" }),
-      item({ id: "s_t", type: "shortcut", nodeId: "nav_t", parentId: "c_base" }),
-    ];
-    expect(resolveContainerItem(items, "nav_t")?.id).toBe("c_base");
+  it("停在 /kb/:id → 容器就是该知识库", () => {
+    expect(deriveScopeContainer(BASES, KBS, { kind: "kb", id: "kb_1" })).toEqual({
+      kind: "kb", id: "kb_1", name: "产品知识库",
+    });
   });
 
-  it("父链成环不死循环；无归属返回 null（调用方据此把 L2 宽度归零）", () => {
-    const items = [
-      item({ id: "a", type: "shortcut", parentId: "b" }),
-      item({ id: "b", type: "shortcut", parentId: "a" }),
-    ];
-    expect(nearestContainerItem(items, "a")).toBeNull();
-    expect(resolveContainerItem(items, "nope")).toBeNull();
-    expect(resolveContainerItem(items, null)).toBeNull();
+  it("三种 null 情形：不在库路由 / 列表未就绪 / id 不在列表里 → 容器为 null（L2 收起不占位）", () => {
+    expect(deriveScopeContainer(BASES, KBS, null)).toBeNull();
+    expect(deriveScopeContainer(null, KBS, { kind: "base", id: "base_1" })).toBeNull();
+    expect(deriveScopeContainer([], [], { kind: "base", id: "base_x" })).toBeNull();
   });
 
-  it("由 base/kb 路由反推容器；索引里没有该资源时返回 null", () => {
-    const items = [item({ id: "c_base", type: "container", nodeId: "nav_base", label: "默认分组" })];
-    const index = indexNavNodes([treeNode("nav_base", "base", "base_1", null)]);
-    expect(resolveRouteContainer(items, index, { kind: "base", id: "base_1" })?.id).toBe("c_base");
-    expect(resolveRouteContainer(items, index, { kind: "base", id: "base_x" })).toBeNull();
-    expect(resolveRouteContainer(items, index, null)).toBeNull();
+  it("base / kb 各查各的列表，不串味", () => {
+    expect(deriveScopeContainer(BASES, KBS, { kind: "kb", id: "base_1" })).toBeNull();
+    expect(deriveScopeContainer(BASES, KBS, { kind: "base", id: "kb_1" })).toBeNull();
+  });
+
+  it("壳层源码：L2 容器走 deriveScopeContainer 单一真源，已不再读 menu_items", () => {
+    const src = code("./WorkspaceShell.tsx");
+    expect(src).toContain("deriveScopeContainer(");
+    expect(src).not.toContain("resolveRouteContainer(");
+    expect(src).not.toContain("useNavMenu");
   });
 });
 
 describe("R-N-09 选中态：白底卡片，无左侧色条", () => {
-  it("命中当前表的 shortcut 渲染为白底 + accent 字 + 600 + 圆角 8", () => {
-    menuItems = [aliveTableShortcut()];
-    treeItems = [treeNode("nav_t", "table", "tbl_1", "nav_b"), treeNode("nav_b", "base", "base_1", null)];
-    const html = renderNavAt("/base/base_1/table/tbl_1");
+  it("停在库的任意子资源上 → 该一级库行渲染为白底 + accent 字 + 600 + 圆角 8", () => {
+    const html = renderNavAt("/base/base_1/table/tbl_1", {
+      bases: [{ id: "base_1", name: "客户表", icon: null, iconColor: null }],
+    });
     expect(html).toContain("客户表");
     expect(html).toContain("bg-white");
     expect(html).toContain("font-semibold");
@@ -197,12 +140,13 @@ describe("R-N-09 选中态：白底卡片，无左侧色条", () => {
     expect(src).not.toContain("bg-gx-accent-bg");
   });
 
-  it("未命中时是 hover 态而非选中态", () => {
-    menuItems = [aliveTableShortcut()];
-    treeItems = [treeNode("nav_t", "table", "tbl_1", "nav_b"), treeNode("nav_b", "base", "base_1", null)];
-    const html = renderNavAt("/base/base_1/table/tbl_9");
+  it("未命中当前库时是 hover 态而非选中态", () => {
+    const html = renderNavAt("/base/other_base/table/tbl_9", {
+      bases: [{ id: "base_1", name: "客户表", icon: null, iconColor: null }],
+    });
     expect(html).toContain("客户表");
     expect(html).toContain("hover:bg-gx-row-hover");
+    expect(html).not.toContain('data-nav-row="item" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-13 transition-colors duration-150 ease-out bg-white');
   });
 
   it("当前资源走 useMatch 而非 useParams（布局壳里 useParams 恒为 {}，选中态会永远不亮）", () => {
@@ -214,9 +158,10 @@ describe("R-N-09 选中态：白底卡片，无左侧色条", () => {
 
 describe("R-N-07 L1 折叠档（56px 只留图标）", () => {
   it("折叠态不渲染文字标签，但保留 title tooltip 与可点按钮", () => {
-    menuItems = [aliveTableShortcut()];
-    treeItems = [treeNode("nav_t", "table", "tbl_1", "nav_b"), treeNode("nav_b", "base", "base_1", null)];
-    const html = renderNavAt("/base/base_1/table/tbl_1", { collapsed: true });
+    const html = renderNavAt("/base/base_1/table/tbl_1", {
+      collapsed: true,
+      bases: [{ id: "base_1", name: "客户表", icon: null, iconColor: null }],
+    });
     // 折叠档只留图标：标签文本节点不渲染（title 里的同名 tooltip 不算渲染文字）
     expect(html).not.toMatch(/>客户表</);
     expect(html).not.toContain('class="flex-1 truncate"');
@@ -225,9 +170,12 @@ describe("R-N-07 L1 折叠档（56px 只留图标）", () => {
   });
 
   it("展开态正常渲染文字标签", () => {
-    menuItems = [aliveTableShortcut()];
-    treeItems = [treeNode("nav_t", "table", "tbl_1", "nav_b"), treeNode("nav_b", "base", "base_1", null)];
-    expect(renderNavAt("/base/base_1/table/tbl_1", { collapsed: false })).toContain("客户表");
+    expect(
+      renderNavAt("/base/base_1/table/tbl_1", {
+        collapsed: false,
+        bases: [{ id: "base_1", name: "客户表", icon: null, iconColor: null }],
+      }),
+    ).toContain("客户表");
   });
 });
 
@@ -254,15 +202,11 @@ describe("R-N-17 规划入口：保留位置 + 「规划中」徽标 + 点击不
 
 describe("R-N-11/12 行尾竖向三点：四条护栏", () => {
   it("行尾三点容器恒为 20×20 占位，且挂 gx-row-more 护栏类", () => {
-    const entry: CollectableEntry = {
-      node: treeNode("nav_t", "table", "tbl_1", "nav_b"),
-      kind: "table",
-      shortcuts: [],
-      kbResourceId: null,
-      baseResourceId: "base_1",
-      isRootDoc: false,
-    };
-    const html = renderOneRow(entry);
+    // 二级行本体已不再挂三点菜单（「收纳到导航」与「移动到分组」随编排下线），
+    // RowMoreMenu 组件作为通用行菜单保留，护栏按组件直接渲染断言。
+    const html = renderToString(
+      <RowMoreMenu label="表操作菜单" items={[{ label: "移动到分组…", icon: "folderOpen", onClick: vi.fn() }]} />,
+    );
     expect(html).toContain("gx-row-more");
     expect(html).toContain("h-5 w-5");
     // P3-a11y 收尾：行尾三点必须有具体作用名（table 行 → 「表操作菜单」），不再是泛泛的「行操作」
@@ -273,16 +217,10 @@ describe("R-N-11/12 行尾竖向三点：四条护栏", () => {
   });
 
   it("行尾三点的可访问名称按行类型区分，且未指定时回落「行操作」", () => {
-    const entry: CollectableEntry = {
-      node: treeNode("nav_t", "table", "tbl_1", "nav_b"),
-      kind: "table",
-      shortcuts: [],
-      kbResourceId: null,
-      baseResourceId: "base_1",
-      isRootDoc: false,
-    };
-    expect(renderOneRow(entry, null, "doc")).toContain('aria-label="文档操作菜单"');
-    expect(renderOneRow(entry, null, "canvas")).toContain('aria-label="画布操作菜单"');
+    const menu = (label: string) =>
+      renderToString(<RowMoreMenu label={label} items={[{ label: "移动到分组…", icon: "folderOpen", onClick: vi.fn() }]} />);
+    expect(menu("文档操作菜单")).toContain('aria-label="文档操作菜单"');
+    expect(menu("画布操作菜单")).toContain('aria-label="画布操作菜单"');
     // 默认回落：不传 label 时仍念「行操作」，老调用点不被打断
     const fallback = renderToString(<RowMoreMenu items={[{ label: "移动到分组…", icon: "folderOpen", onClick: vi.fn() }]} />);
     expect(fallback).toContain('aria-label="行操作"');
@@ -298,6 +236,17 @@ describe("R-N-11/12 行尾竖向三点：四条护栏", () => {
   });
 
   it("二级行选中态为白底卡片，且不再有 3px 色条", () => {
+    const entry: SecondaryEntry = {
+      id: "t1", name: "客户表", kind: "table", parentId: null,
+      href: "/base/b1/table/t1", icon: null, iconColor: null,
+    };
+    const active = renderOneRow(entry, true);
+    expect(active).toContain("bg-white");
+    expect(active).toContain("font-semibold");
+    expect(active).toContain("text-gx-accent");
+    const idle = renderOneRow(entry, false);
+    expect(idle).toContain("hover:bg-gx-row-hover");
+    expect(idle).not.toContain("text-gx-accent");
     const src = read("./SecondaryNavSections.tsx");
     expect(src).not.toContain("w-[3px]");
     expect(src).toContain('"bg-white font-semibold text-gx-accent"');
@@ -342,11 +291,9 @@ describe("R-I-16 导入 / 导出 / 分享数据落在 L2 表级操作行", () =>
 
 describe("骨架 S-1：L2 常驻 240 / nav2 底；主壳无面包屑", () => {
   it("L2 面板宽 240、底为 gx-nav2、发丝线分隔", () => {
-    treeItems = [treeNode("nav_base", "base", "b1", null)];
-    menuItems = [item({ id: "c_base", type: "container", nodeId: "nav_base", label: "默认分组" })];
     const html = renderToString(
       <StaticRouter location="/">
-        <SecondaryNav containerMenuId="c_base" containerName="默认分组" onClose={vi.fn()} />
+        <SecondaryNav container={{ kind: "base", id: "b1", name: "默认分组" }} onClose={vi.fn()} />
       </StaticRouter>,
     );
     expect(html).toContain("width:240px");
@@ -373,10 +320,10 @@ describe("骨架 S-1：L2 常驻 240 / nav2 底；主壳无面包屑", () => {
   });
 });
 
-/** 只渲染单行二级行（绕过 SecondaryNav 的数据层），用于断言行尾三点与选中态。 */
+/** 只渲染单行二级行（绕过 SecondaryNav 的数据层），用于断言选中态。 */
 function renderOneRow(
-  entry: CollectableEntry,
-  currentResource: string | null = null,
+  entry: SecondaryEntry,
+  active: boolean = false,
   kind: "table" | "doc" | "canvas" = "table",
 ): string {
   return renderToString(
@@ -387,13 +334,9 @@ function renderOneRow(
         depth={0}
         hasDocKids={false}
         expanded={false}
-        currentResource={currentResource}
-        index={{ byId: new Map(), byResource: new Map() }}
-        tab="all"
+        active={active}
         onToggleDoc={vi.fn()}
         onNavigate={vi.fn()}
-        onCollect={vi.fn()}
-        onMove={vi.fn()}
       />
     </StaticRouter>,
   );

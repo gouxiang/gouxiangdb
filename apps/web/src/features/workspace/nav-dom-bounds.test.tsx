@@ -10,26 +10,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { renderToString } from "react-dom/server";
 import { StaticRouter } from "react-router-dom/server";
-import type { MenuItemDTO, MenuTreeDTO, NavNodeDTO } from "@gx/shared-types";
+import type { MenuItemDTO, NavNodeDTO } from "@gx/shared-types";
 
 const TOTAL = 1200;
 const TS = "2026-09-16T00:00:00.000Z";
-
-let menuItems: MenuItemDTO[] = [];
-let treeItems: NavNodeDTO[] = [];
-
-vi.mock("./nav-hooks", () => ({
-  useNavMenu: () => ({
-    menu: { workspaceId: "ws", menuVersion: 1, items: menuItems } as MenuTreeDTO,
-    isLoading: false,
-    isError: false,
-  }),
-  useNavNodeIndex: () => ({ index: { byId: new Map(treeItems.map((n) => [n.id, n])), byResource: new Map() } }),
-  useNavTreeDeep: () => ({ tree: { workspaceId: "ws", navVersion: 1, items: treeItems, truncated: false }, isLoading: false }),
-  usePatchMenu: () => ({ mutate: vi.fn() }),
-  useMoveNode: () => ({ mutate: vi.fn(), isPending: false }),
-  useCreateGroup: () => ({ mutate: vi.fn(), isPending: false }),
-}));
 
 // ui 组件里的 toast/Spinner 在 SSR 不被走到（composer 仅树部分）；忽略图标内部。
 import { PrimaryNav } from "./PrimaryNav";
@@ -57,20 +41,21 @@ function buildBigMenu() {
 }
 
 describe("S10 大菜单 DOM 有界（首屏不随项数线性膨胀）", () => {
-  it(`PrimaryNav：${TOTAL} 项活 shortcut，首帧渲染的菜单项按钮数有界（≈视口窗口，非全量）`, () => {
-    const big = buildBigMenu();
-    menuItems = big.items;
-    treeItems = big.tree;
+  it(`PrimaryNav：${TOTAL} 个库，首帧渲染的一级行数有界（≈视口窗口，非全量）`, () => {
+    // 第三批：一级导航的行直接来自 bases/kbs 实体列表，窗口化口径不变。
+    const big = Array.from({ length: TOTAL }, (_, i) => ({
+      id: `b${i}`, name: `表 ${i}`, icon: null, iconColor: null,
+    }));
 
     const t0 = performance.now();
     const html = renderToString(
       <StaticRouter location="/">
-        <PrimaryNav />
+        <PrimaryNav bases={big} />
       </StaticRouter>,
     );
     const ms = performance.now() - t0;
 
-    // 每个活 shortcut 行是一个 <button ...><span class=...>表 i</span>。统计按钮中含「表 」文本的行数。
+    // 每个库行是一个 <button ...><span class=...>表 i</span>。统计按钮中含「表 」文本的行数。
     const rowHits = (html.match(/表 \d+/g) ?? []).length;
     // 首帧窗口：viewportH=32*24=768px，可见 24 行 + overscan 12*2=24 → 上界 48；留余量取 120。
     expect(rowHits).toBeGreaterThan(0);
@@ -79,7 +64,7 @@ describe("S10 大菜单 DOM 有界（首屏不随项数线性膨胀）", () => {
     expect(rowHits).toBeLessThan(TOTAL / 5);
     // 总高仍按全量撑出（滚动条正确）：padBottom 占位使 scrollHeight≈TOTAL*32
     expect(html).toContain("表 0");
-    console.log(`[S10-metric] PrimaryNav SSR ${TOTAL} items: renderedRows=${rowHits}, render=${ms.toFixed(1)}ms`);
+    console.log(`[S10-metric] PrimaryNav SSR ${TOTAL} libraries: renderedRows=${rowHits}, render=${ms.toFixed(1)}ms`);
     expect(ms).toBeLessThan(1000); // SPEC 首屏 <1s；SSR 纯字符串渲染远低于此
   });
 

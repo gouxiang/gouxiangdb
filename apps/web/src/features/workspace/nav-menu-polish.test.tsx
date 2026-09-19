@@ -32,9 +32,8 @@ vi.mock("./nav-hooks", () => ({
   useMoveNode: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
-import { FlyoutPanel, PrimaryNav, containerIcon, navKindIcon } from "./PrimaryNav";
+import { PrimaryNav, navKindIcon } from "./PrimaryNav";
 import {
-  buildFlyoutRows,
   flattenMenuSections,
   navRowHeights,
   NAV_GROUP_ROW_H,
@@ -43,7 +42,6 @@ import {
 } from "./lib/menu-sections";
 import { virtualWindowByHeights } from "./lib/menu-window";
 import { FOOTER_NAV_ITEMS } from "./lib/nav-footer";
-import { indexNavNodes } from "./lib/nav-links";
 
 const TS = "2026-09-16T00:00:00.000Z";
 const here = (p: string) => new URL(p, import.meta.url);
@@ -70,24 +68,6 @@ function item(over: Partial<MenuItemDTO> & { id: string }): MenuItemDTO {
   };
 }
 
-const alive = (nodeId: string, kind: NavNodeDTO["kind"], resourceId: string, name: string) => ({
-  id: nodeId,
-  kind,
-  name,
-  iconName: null,
-  resourceType: kind,
-  resourceId,
-  state: "alive" as const,
-});
-
-function treeNode(id: string, kind: NavNodeDTO["kind"], resourceId: string, parentId: string | null): NavNodeDTO {
-  return {
-    workspaceId: "ws", id, parentId, resourceType: kind === "group" ? null : kind, resourceId,
-    name: id, ord: 0, path: `/${id}/`, depth: parentId ? 2 : 1, isSystem: false, iconName: null,
-    createdAt: TS, updatedAt: null, deletedAt: null, kind,
-  } as NavNodeDTO;
-}
-
 function renderNav(location = "/", props: Record<string, unknown> = {}) {
   return renderToString(
     <StaticRouter location={location}>
@@ -100,14 +80,6 @@ function renderNav(location = "/", props: Record<string, unknown> = {}) {
 }
 
 /** 两层树（container → shortcut）＋ 一个三层分支（container → container → shortcut）。 */
-function threeLevelMenu(): MenuItemDTO[] {
-  return [
-    item({ id: "c_ws", type: "container", nodeId: "nav_base", label: "工作区", ord: 0 }),
-    item({ id: "s_dash", type: "shortcut", nodeId: "nav_t1", parentId: "c_ws", ord: 1, node: alive("nav_t1", "table", "t1", "客户表") }),
-    item({ id: "c_prod", type: "container", nodeId: null, parentId: "c_ws", label: "产品中心", ord: 2 }),
-    item({ id: "s_req", type: "shortcut", nodeId: "nav_t2", parentId: "c_prod", ord: 3, node: alive("nav_t2", "table", "t2", "需求池") }),
-  ];
-}
 
 beforeEach(() => {
   menuItems = [];
@@ -148,95 +120,23 @@ describe("R-N-20 手风琴已下线", () => {
     expect(rows.every((r) => r.kind === "group" || r.nested.length === 0)).toBe(true);
   });
 
-  it("SSR：分组标题是独立小字行，子项直接可见（不靠展开才能看到）", () => {
-    menuItems = [
-      item({ id: "c_ws", type: "container", nodeId: "nav_base", label: "工作区", ord: 0 }),
-      item({ id: "s_a", type: "shortcut", nodeId: "nav_t1", parentId: "c_ws", ord: 1, node: alive("nav_t1", "table", "t1", "客户表") }),
-      item({ id: "s_b", type: "shortcut", nodeId: "nav_t2", parentId: "c_ws", ord: 2, node: alive("nav_t2", "table", "t2", "需求池") }),
-    ];
-    treeItems = [treeNode("nav_base", "base", "b1", null), treeNode("nav_t1", "table", "t1", "nav_base"), treeNode("nav_t2", "table", "t2", "nav_base")];
-    const html = renderNav();
+  it("SSR：一级只有「数据库 / 知识库」两个分组标题行，库项平铺直接可见", () => {
+    const html = renderNav("/", {
+      bases: [{ id: "b1", name: "客户库", icon: null, iconColor: null }],
+      kbs: [{ id: "k1", name: "产品知识库", icon: null, iconColor: null }],
+    });
     // 分组标题：11px + hint 色 + 独立行
     expect(html).toContain('data-nav-row="group"');
     expect(html).toContain("text-gx-text-hint");
-    // 两个子项都直接渲染出来（不必先展开）
-    expect(html).toContain("客户表");
-    expect(html).toContain("需求池");
-  });
-});
-
-describe("R-N-21 深层侧方浮出", () => {
-  it("关闭态：不渲染浮出面板，只留触发行", () => {
-    menuItems = threeLevelMenu();
-    treeItems = [treeNode("nav_base", "base", "b1", null), treeNode("nav_t1", "table", "t1", "nav_base"), treeNode("nav_t2", "table", "t2", "nav_base")];
-    const html = renderNav();
-    expect(html).toContain('data-flyout="closed"');
-    expect(html).not.toContain('data-flyout="open"');
-    expect(html).not.toContain("data-flyout-panel");
-    // 触发行仍带 popup 语义与折叠态无关的可点性
-    expect(html).toContain('aria-haspopup="menu"');
-    expect(html).toContain('aria-expanded="false"');
-  });
-
-  it("打开态：面板是 role=menu 的独立浮层，标题与子项用字重/字号/缩进区分", () => {
-    const rows = buildFlyoutRows([
-      {
-        item: item({ id: "c_sub", type: "container", label: "产品中心" }),
-        children: [{ item: item({ id: "s_req", type: "shortcut", node: alive("nav_t2", "table", "t2", "需求池"), nodeId: "nav_t2" }), children: [] }],
-      },
-    ]);
-    expect(rows.map((r) => [r.kind, r.depth])).toEqual([
-      ["title", 0],
-      ["item", 1],
-    ]);
-    const html = renderToString(
-      <FlyoutPanel
-        label="产品中心"
-        rows={rows}
-        side="right"
-        pos={{ top: 40, left: 232 }}
-        nodeIndex={indexNavNodes([treeNode("nav_t2", "table", "t2", "nav_base")])}
-      />,
-    );
-    expect(html).toContain('role="menu"');
-    expect(html).toContain('aria-label="产品中心 子菜单"');
-    expect(html).toContain('role="menuitem"');
-    // 面板头 + 一级标题（13/600）+ 二级子项（12/400，缩进档 pl-6）
-    expect(html).toContain("text-gx-11");
-    expect(html).toContain("font-semibold");
-    expect(html).toContain("pl-6");
-    expect(html).toContain("需求池");
-    // 定位与层级：fixed 逃出 L1 滚动容器裁剪 + token 层级 + 阴影 + 圆角 8
-    expect(html).toContain('class="fixed gx-z-popover');
-    expect(html).toContain("gx-z-popover");
-    expect(html).toContain("shadow-gx-lg");
-    expect(html).toContain("rounded-gx-lg");
-    // 入场动画类名按方向给出（150ms ease-out，见 index.css）
-    expect(html).toContain("gx-flyout-in-right");
-  });
-
-  it("浮出面板的入场动画落在 index.css：150ms ease-out + reduced-motion 兜底", () => {
-    const css = read("../../index.css");
-    expect(css).toContain("gx-flyout-in-right");
-    expect(css).toContain("gx-flyout-in-left");
-    expect(css).toContain("gx-flyout-in-right 150ms ease-out");
-    expect(css).toContain("prefers-reduced-motion");
-  });
-
-  it("翻转与键盘：源码里有贴右翻左判定、Esc 关闭、focus/blur 打开关闭", () => {
-    const src = code("./PrimaryNav.tsx");
-    expect(src).toContain("window.innerWidth");
-    expect(src).toContain('setSide(toRight ? "right" : "left")');
-    expect(src).toContain('e.key !== "Escape"');
-    expect(src).toContain("onFocus={openNow}");
-    expect(src).toContain("onBlur");
-    expect(src).toContain("FLYOUT_CLOSE_DELAY_MS");
-  });
-
-  it("移出后延时 150ms 关闭（防误关），且浮层用 fixed 逃出 L1 滚动容器的裁剪", () => {
-    const src = read("./PrimaryNav.tsx");
-    expect(src).toContain("FLYOUT_CLOSE_DELAY_MS = 150");
-    expect(src).toContain('className={`fixed gx-z-popover');
+    // 两个分组 + 平铺的库项都直接渲染出来（不必先展开）
+    expect(html).toContain("数据库");
+    expect(html).toContain("知识库");
+    expect(html).toContain("客户库");
+    expect(html).toContain("产品知识库");
+    // 红线：一级里不得出现任何二级内容（表/文档/画布）
+    expect(html).not.toContain('data-nav-entity="table"');
+    expect(html).not.toContain('data-nav-entity="doc"');
+    expect(html).not.toContain('data-nav-entity="canvas"');
   });
 });
 
@@ -288,16 +188,15 @@ describe("R-N-22 节奏统一", () => {
 
   it("分组标题与菜单项左内边距同一档（都 px-2，不缩进）", () => {
     const src = read("./PrimaryNav.tsx");
-    expect(src).toContain('"flex w-full items-center rounded-gx-lg px-2 text-gx-11 font-medium"');
+    expect(src).toContain("flex w-full items-center rounded-gx-lg px-2 text-gx-11 font-medium");
   });
 });
 
 describe("图标语义映射（L1 全站）", () => {
-  it("底部固定区四项：路径 / 图标 / 文案与 D-5 §2.2 一致（工作区设置 = settings）", () => {
+  it("底部固定区三项（导航编排已下线）：路径 / 图标 / 文案与 D-5 §2.2 一致（工作区设置 = settings）", () => {
     expect(FOOTER_NAV_ITEMS).toEqual([
       { path: "/workspace/contacts", icon: "building", label: "通讯录" },
       { path: "/workspace/authz", icon: "shield", label: "权限管理" },
-      { path: "/workspace/settings/nav", icon: "sitemap", label: "导航编排" },
       { path: "/workspace/settings/assets", icon: "settings", label: "工作区设置" },
     ]);
   });
@@ -308,15 +207,6 @@ describe("图标语义映射（L1 全站）", () => {
     expect(src).toContain('label: "工作台首页", icon: "home"');
     expect(src).toContain('label: "我的待办", icon: "checkSquare"');
     expect(src).toContain('label: "我的收藏", icon: "star"');
-  });
-
-  it("容器图标不再一律 folder：挂 base/kb 的容器按实体类型取图标", () => {
-    const index = indexNavNodes([treeNode("nav_base", "base", "b1", null), treeNode("nav_kb", "kb", "k1", null)]);
-    expect(containerIcon(item({ id: "c1", type: "container", nodeId: "nav_base" }), index)).toBe("database");
-    expect(containerIcon(item({ id: "c2", type: "container", nodeId: "nav_kb" }), index)).toBe("book");
-    // 无指向的容器才回退 folder；显式 iconName 优先
-    expect(containerIcon(item({ id: "c3", type: "container" }), index)).toBe("folder");
-    expect(containerIcon(item({ id: "c4", type: "container", nodeId: "nav_base", iconName: "star" }), index)).toBe("star");
   });
 
   it("实体类型默认图标映射齐全（base/kb/table/doc/canvas/view/group）", () => {
@@ -346,11 +236,9 @@ describe("图标语义映射（L1 全站）", () => {
 
 describe("阶段 1 交付不回退", () => {
   it("白底卡片选中态与「规划中」徽标仍在，左侧色条仍未回来", () => {
-    menuItems = [
-      item({ id: "s_a", type: "shortcut", nodeId: "nav_t1", node: alive("nav_t1", "table", "t1", "客户表") }),
-    ];
-    treeItems = [treeNode("nav_t1", "table", "t1", "nav_base"), treeNode("nav_base", "base", "b1", null)];
-    const html = renderNav("/base/b1/table/t1");
+    const html = renderNav("/base/b1/table/t1", {
+      bases: [{ id: "b1", name: "客户库", icon: null, iconColor: null }],
+    });
     expect(html).toContain("bg-white");
     expect(html).toContain("font-semibold");
     expect(html).toContain("text-gx-accent");
@@ -362,13 +250,12 @@ describe("阶段 1 交付不回退", () => {
   });
 
   it("折叠档（56px）只留图标：不渲染文字节点，保留 title 与可点按钮", () => {
-    menuItems = [
-      item({ id: "s_a", type: "shortcut", nodeId: "nav_t1", node: alive("nav_t1", "table", "t1", "客户表") }),
-    ];
-    treeItems = [treeNode("nav_t1", "table", "t1", "nav_base"), treeNode("nav_base", "base", "b1", null)];
-    const html = renderNav("/base/b1/table/t1", { collapsed: true });
-    expect(html).not.toMatch(/>客户表</);
-    expect(html).toContain('title="客户表"');
+    const html = renderNav("/base/b1/table/t1", {
+      collapsed: true,
+      bases: [{ id: "b1", name: "客户库", icon: null, iconColor: null }],
+    });
+    expect(html).not.toMatch(/>客户库</);
+    expect(html).toContain('title="客户库"');
     expect(html).toContain("justify-center");
     // 折叠档下分组标题行不渲染（只留图标行），但菜单项一个不少
     expect(html).not.toContain('data-nav-row="group"');

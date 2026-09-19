@@ -179,12 +179,18 @@ describe("N5 §1.3 旧链接生成点源码守卫（换壳/窗口化重构后仍
     expect(wys).not.toMatch(/`\/kb\/\$\{|`\/base\/\$\{/);
   });
 
-  it("新壳一级/二级导航自身只经 navNodeHref 产出 href，不出现手拼 /base /kb 模板串", () => {
+  it("新壳一级/二级导航的 href 仍是 /base /kb 旧形（第三批：改由资源 id 直接拼，不再经 navNodeHref）", () => {
+    // 第三批重构后 L1/L2 不再消费 nav 树（menu_items / navNodeHref 退为冷备），
+    // href 由资源 id 直接拼装 —— 但拼出来的必须是 §1.3 定稿的旧形，这条就是防改名的守卫。
     const primary = read("../../features/workspace/PrimaryNav.tsx");
-    const secondary = read("../../features/workspace/SecondaryNavSections.tsx");
-    expect(primary).toContain("navNodeHref(");
-    expect(secondary).toContain("navNodeHref(");
-    expect(primary).not.toMatch(/`\/kb\/\$\{|`\/base\/\$\{/);
-    expect(secondary).not.toMatch(/`\/kb\/\$\{|`\/base\/\$\{/);
+    const secondary = read("../../features/workspace/SecondaryNav.tsx");
+    expect(primary).toContain("`/base/${row.entityId}`");
+    expect(primary).toContain("`/kb/${row.entityId}`");
+    expect(secondary).toContain("`/base/${t.baseId}/table/${t.id}`");
+    expect(secondary).toContain("`/kb/${kbId}/doc/${d.id}`");
+    expect(secondary).toContain("`/kb/${kbId}/canvas/${d.id}`");
+    // 导航侧不走 internalHref（那是正文编辑器的单一真源），但也不许冒出新形前缀
+    expect(primary).not.toContain("/w/");
+    expect(secondary).not.toContain("/w/");
   });
 });

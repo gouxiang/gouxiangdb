@@ -37,7 +37,11 @@ export function canSeeContacts(actions: ReadonlySet<OrgAction>): boolean {
   return CONTACTS_ACTIONS.some((a) => actions.has(a));
 }
 
-/** 导航编排：同 WorkspaceSettingsPage.tsx:118 的 manage_menu 口径。 */
+/**
+ * manage_menu 动作：原「导航编排」入口的口径。第三批重构后该入口已下线
+ * （FOOTER_NAV_ITEMS 不再含 /workspace/settings/nav），只保留给
+ * canSeeWorkspaceSettings 作为「持任一枚组织管理动作」的兜底判定之一。
+ */
 export function canSeeNavComposer(actions: ReadonlySet<OrgAction>): boolean {
   return actions.has("manage_menu");
 }
@@ -71,8 +75,8 @@ export function isFooterNavVisible(path: string, caps: FooterNavCapabilities): b
       return canSeeContacts(actions);
     case "/workspace/authz":
       return canSeeAuthz(actions, authzManage);
-    case "/workspace/settings/nav":
-      return canSeeNavComposer(actions);
+    // /workspace/settings/nav（导航编排）第三批已下线：不再有入口需要判定，
+    // 未知/已下线路径默认 return false，不猜不放行。
     case "/workspace/settings/assets":
       return canSeeWorkspaceSettings(actions);
     default:

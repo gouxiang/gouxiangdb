@@ -48,7 +48,7 @@ const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 const pageSrc = read("./WorkspaceSettingsPage.tsx");
 
 /** 通用分区的锚点文案：右内容「有内容」的判据 */
-const GENERAL = "管理组织通讯录、导航编排与资产入口";
+const GENERAL = "管理组织通讯录与资产入口";
 
 function renderPage(location = "/workspace/settings"): string {
   // 资产/回收站/导航子页内部用 useQuery（SSR 不跑 queryFn），需要 QueryClient 上下文。
