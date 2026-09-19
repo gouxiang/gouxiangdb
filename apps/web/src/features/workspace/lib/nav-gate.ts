@@ -71,8 +71,18 @@ export function canSeeWorkspaceSettings(actions: ReadonlySet<OrgAction>): boolea
   return CONTACTS_ACTIONS.some((a) => actions.has(a)) || canSeeNavComposer(actions) || actions.has("manage_share");
 }
 
+/**
+ * 静态入口：内容型、无权限语义，任何角色都可见（帮助中心）。
+ * 为什么单独列而不是塞进 switch：它必须在 loading fail-closed 之前放行——
+ * 管理类入口「先闪后灭」是问题，静态入口「探针未回来就先藏起来、回来又跳出来」
+ * 才是问题。放进 switch 会被 loading 一起挡掉。
+ */
+const STATIC_FOOTER_PATHS: readonly string[] = ["/help"];
+
 /** 按 path 把单一入口映射到它自己那套判定（新增入口必须在此登记，否则默认不可见）。 */
 export function isFooterNavVisible(path: string, caps: FooterNavCapabilities): boolean {
+  // 静态入口不看能力信号、不看 loading（见 STATIC_FOOTER_PATHS 注释）。
+  if (STATIC_FOOTER_PATHS.includes(path)) return true;
   // authzManage 不再参与底部区判定（P2-B1：权限入口已迁入设置页分区），
   // 但 caps 仍然携带它——同一份能力信号还要喂给设置页的权限分区，接口字段不动。
   const { actions, loading } = caps;

@@ -36,6 +36,7 @@ import PublicSharePage from "./features/kb/PublicSharePage";
 import ErdPage from "./features/erd/ErdPage";
 import ContactsPage from "./features/contacts/ContactsPage";
 import InviteAcceptPage from "./features/contacts/InviteAcceptPage";
+import HelpCenterPage from "./features/help/HelpCenterPage";
 import { ShellGate } from "./features/workspace/ShellGate";
 import { WorkspaceSettingsPage } from "./features/workspace/WorkspaceSettingsPage";
 import PermPanel from "./features/authz/PermPanel";
@@ -185,6 +186,8 @@ export default function App() {
         <Route path="/workspace/contacts" element={<ContactsPage />} />
         <Route path="/workspace/authz" element={<PermPanel />} />
         <Route path="/workspace/settings/*" element={<WorkspaceSettingsPage />} />
+        {/* 帮助中心：与其它设置页同层（登录后可看），入口在新壳底部固定区/旧壳侧栏底部 */}
+        <Route path="/help" element={<HelpCenterPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

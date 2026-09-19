@@ -20,8 +20,13 @@ export interface FooterNavItem {
  * P2-B1：「权限管理」从 L1 底部区移出，改为工作区设置的一个分区（内嵌 PermPanel）——
  * 它和「通讯录」一样只是设置下的一个分区，占 L1 固定区一根位置不必要；路由
  * /workspace/authz 保留（直访不 404），只是不再有独立导航入口。故此处由三项降为两项。
+ *
+ * 帮助中心：内容型静态入口——任何角色都可见，**不参与能力门控**（门控表见
+ * lib/nav-gate.ts 的 STATIC_FOOTER_PATHS）。它跟管理类入口不同：读文档不需要任何
+ * 组织能力，按能力过滤反而会让普通成员找不到说明入口。
  */
 export const FOOTER_NAV_ITEMS: readonly FooterNavItem[] = [
   { path: "/workspace/contacts", icon: "building", label: "通讯录" },
   { path: "/workspace/settings/assets", icon: "settings", label: "工作区设置" },
+  { path: "/help", icon: "help", label: "帮助中心" },
 ];

@@ -284,6 +284,15 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           <Icon name="settings" size={14} />
           <span>设置</span>
         </button>
+        {/* 帮助中心：与新壳底部固定区同一入口（静态项，不看角色），旧壳回退态下同样可达 */}
+        <button
+          type="button"
+          onClick={() => navigate("/help")}
+          className="flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 text-gx-13 text-gx-text-primary hover:bg-gx-row-hover"
+        >
+          <Icon name="help" size={14} />
+          <span>帮助中心</span>
+        </button>
       </div>
 
       {/* 重命名 Modal */}
