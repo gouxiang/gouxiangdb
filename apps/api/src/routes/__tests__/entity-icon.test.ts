@@ -125,6 +125,58 @@ describe("Base 自定义图标", () => {
     expect(base.icon).toBe("star");
     expect(base.iconColor).toBe("#378ADD");
   });
+
+  // —— 恢复默认：iconColor 列 NOT NULL，null 语义 = 回到系统默认色 #378ADD ——
+
+  it("恢复默认 {icon:null, iconColor:null} → icon 回 NULL、颜色回 #378ADD", async () => {
+    const baseId = await h.makeBase("B-reset-all");
+    const set = await h.request("PATCH", `/bases/${baseId}`, { icon: "database", iconColor: "#123456" });
+    expect(set.status).toBe(200);
+
+    const res = await h.request("PATCH", `/bases/${baseId}`, { icon: null, iconColor: null });
+    expect(res.status).toBe(200);
+    const { base } = await json(res);
+    expect(base.icon).toBeNull();
+    expect(base.iconColor).toBe("#378ADD");
+    const row = await h.prisma.base.findUniqueOrThrow({ where: { id: baseId } });
+    expect(row.icon).toBeNull();
+    expect(row.iconColor).toBe("#378ADD");
+  });
+
+  it("只恢复颜色 {icon:'book', iconColor:null} → icon 保留、颜色回 #378ADD", async () => {
+    const baseId = await h.makeBase("B-reset-color");
+    await h.request("PATCH", `/bases/${baseId}`, { iconColor: "#123456" });
+
+    const res = await h.request("PATCH", `/bases/${baseId}`, { icon: "book", iconColor: null });
+    expect(res.status).toBe(200);
+    const { base } = await json(res);
+    expect(base.icon).toBe("book");
+    expect(base.iconColor).toBe("#378ADD");
+    const row = await h.prisma.base.findUniqueOrThrow({ where: { id: baseId } });
+    expect(row.icon).toBe("book");
+    expect(row.iconColor).toBe("#378ADD");
+  });
+
+  it("缺省=不改动：只传 iconColor 不清空已有 icon", async () => {
+    const baseId = await h.makeBase("B-partial-color");
+    await h.request("PATCH", `/bases/${baseId}`, { icon: "folderOpen", iconColor: "#112233" });
+
+    const res = await h.request("PATCH", `/bases/${baseId}`, { iconColor: "#AABBCC" });
+    expect(res.status).toBe(200);
+    expect((await json(res)).base).toMatchObject({ icon: "folderOpen", iconColor: "#AABBCC" });
+    const row = await h.prisma.base.findUniqueOrThrow({ where: { id: baseId } });
+    expect(row.icon).toBe("folderOpen");
+    expect(row.iconColor).toBe("#AABBCC");
+  });
+
+  it("非法 iconColor 仍是 400 且不落库（校验未被放宽过头）", async () => {
+    const baseId = await h.makeBase("B-bad-color");
+    const res = await h.request("PATCH", `/bases/${baseId}`, { iconColor: "#ABC" });
+    expect(res.status).toBe(400);
+    expect((await json(res)).error).toBe("参数不合法");
+    const row = await h.prisma.base.findUniqueOrThrow({ where: { id: baseId } });
+    expect(row.iconColor).toBe("#378ADD");
+  });
 });
 
 // ============ 3) Table ============
@@ -218,6 +270,58 @@ describe("KnowledgeBase 自定义图标", () => {
     const row = await h.prisma.knowledgeBase.findUniqueOrThrow({ where: { id: kbId } });
     expect(row.icon).toBe("folderOpen");
     expect(row.iconColor).toBe("#123456");
+  });
+
+  // —— 恢复默认：iconColor 列 NOT NULL，null 语义 = 回到系统默认色 #0F6E56 ——
+
+  it("恢复默认 {icon:null, iconColor:null} → icon 回 NULL、颜色回 #0F6E56", async () => {
+    const kbId = await h.makeKb("KB-reset-all");
+    const set = await h.request("PATCH", `/kb/${kbId}`, { icon: "book", iconColor: "#123456" });
+    expect(set.status).toBe(200);
+
+    const res = await h.request("PATCH", `/kb/${kbId}`, { icon: null, iconColor: null });
+    expect(res.status).toBe(200);
+    const { knowledgeBase } = await json(res);
+    expect(knowledgeBase.icon).toBeNull();
+    expect(knowledgeBase.iconColor).toBe("#0F6E56");
+    const row = await h.prisma.knowledgeBase.findUniqueOrThrow({ where: { id: kbId } });
+    expect(row.icon).toBeNull();
+    expect(row.iconColor).toBe("#0F6E56");
+  });
+
+  it("只恢复颜色 {icon:'book', iconColor:null} → icon 保留、颜色回 #0F6E56", async () => {
+    const kbId = await h.makeKb("KB-reset-color");
+    await h.request("PATCH", `/kb/${kbId}`, { iconColor: "#123456" });
+
+    const res = await h.request("PATCH", `/kb/${kbId}`, { icon: "book", iconColor: null });
+    expect(res.status).toBe(200);
+    const { knowledgeBase } = await json(res);
+    expect(knowledgeBase.icon).toBe("book");
+    expect(knowledgeBase.iconColor).toBe("#0F6E56");
+    const row = await h.prisma.knowledgeBase.findUniqueOrThrow({ where: { id: kbId } });
+    expect(row.icon).toBe("book");
+    expect(row.iconColor).toBe("#0F6E56");
+  });
+
+  it("缺省=不改动：只传 iconColor 不清空已有 icon", async () => {
+    const kbId = await h.makeKb("KB-partial-color");
+    await h.request("PATCH", `/kb/${kbId}`, { icon: "folderOpen", iconColor: "#112233" });
+
+    const res = await h.request("PATCH", `/kb/${kbId}`, { iconColor: "#AABBCC" });
+    expect(res.status).toBe(200);
+    expect((await json(res)).knowledgeBase).toMatchObject({ icon: "folderOpen", iconColor: "#AABBCC" });
+    const row = await h.prisma.knowledgeBase.findUniqueOrThrow({ where: { id: kbId } });
+    expect(row.icon).toBe("folderOpen");
+    expect(row.iconColor).toBe("#AABBCC");
+  });
+
+  it("非法 iconColor 仍是 400 且不落库（校验未被放宽过头）", async () => {
+    const kbId = await h.makeKb("KB-bad-color");
+    const res = await h.request("PATCH", `/kb/${kbId}`, { iconColor: "#ABC" });
+    expect(res.status).toBe(400);
+    expect((await json(res)).error).toBe("参数不合法");
+    const row = await h.prisma.knowledgeBase.findUniqueOrThrow({ where: { id: kbId } });
+    expect(row.iconColor).toBe("#0F6E56");
   });
 });
 

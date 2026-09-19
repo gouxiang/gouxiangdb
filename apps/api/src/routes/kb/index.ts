@@ -20,7 +20,10 @@ import {
 } from "../../domain/nav/sync.js";
 import { nodeId } from "../../domain/nav/backfill.js";
 import { enqueueChangeEventsTx } from "../../domain/search/outbox.js";
-import { entityIconSchema } from "../../validators/entity-icon.js";
+import {
+  entityIconSchema,
+  entityIconColorSchema,
+} from "../../validators/entity-icon.js";
 import { requireKb, shadowKbAction } from "./shared.js";
 import { membersRoutes } from "./members.js";
 import { docsRoutes } from "./docs.js";
@@ -30,6 +33,10 @@ import { aclRoutes } from "./acl.js";
 import { recycleRoutes } from "./recycle.js";
 
 export const kb = new Hono();
+
+// KnowledgeBase.iconColor 列 NOT NULL（schema.prisma @default("#0F6E56")）：null 语义 = 恢复默认色，
+// 不能直写 NULL（SQLite 会拒绝），故 PATCH 时映射为该系统默认色；缺省则不写这一列。
+const KB_DEFAULT_ICON_COLOR = "#0F6E56";
 
 // ============ 知识库容器 ============
 
@@ -129,7 +136,8 @@ kb.patch("/:kbId", async (c) => {
     await shadowKbAction("kb.rename", userId, kbId, "manage_share", true);
     const schema = z.object({
       name: z.string().min(1).max(80).optional(),
-      iconColor: z.string().optional(),
+      // 自定义颜色：#RRGGBB | null（恢复默认色）| 缺省（不改动）。
+      iconColor: entityIconColorSchema,
       icon: entityIconSchema,
     });
     const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
@@ -138,7 +146,15 @@ kb.patch("/:kbId", async (c) => {
     const updated = await withWriteTx("kb.rename", async (tx) => {
       const u = await tx.knowledgeBase.update({
         where: { id: kbId },
-        data: { name: parsed.data.name, iconColor: parsed.data.iconColor, icon: parsed.data.icon },
+        // 三态映射：缺省 → 不写列（保持原值）；#RRGGBB → 原样；null → 系统默认色。
+        data: {
+          name: parsed.data.name,
+          iconColor:
+            parsed.data.iconColor === undefined
+              ? undefined
+              : parsed.data.iconColor ?? KB_DEFAULT_ICON_COLOR,
+          icon: parsed.data.icon,
+        },
       });
       if (parsed.data.name !== undefined) await syncNavFromEntitiesTx(tx);
       return u;

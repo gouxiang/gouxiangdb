@@ -22,9 +22,13 @@ import {
   removeLegacyProjectionTx,
   LEGACY_REASONS,
 } from "../domain/authz/projection.js";
-import { entityIconSchema } from "../validators/entity-icon.js";
+import { entityIconSchema, entityIconColorSchema } from "../validators/entity-icon.js";
 
 export const bases = new Hono();
+
+// Base.iconColor 列 NOT NULL（schema.prisma @default("#378ADD")）：null 语义 = 恢复默认色，
+// 不能直写 NULL（SQLite 会拒绝），故 PATCH 时映射为该系统默认色；缺省则不写这一列。
+const BASE_DEFAULT_ICON_COLOR = "#378ADD";
 
 const createSchema = z.object({
   name: z.string().min(1).max(80),
@@ -35,7 +39,8 @@ const createSchema = z.object({
 
 const updateSchema = z.object({
   name: z.string().min(1).max(80).optional(),
-  iconColor: z.string().optional(),
+  // 自定义颜色：#RRGGBB | null（恢复默认色）| 缺省（不改动）。
+  iconColor: entityIconColorSchema,
   icon: entityIconSchema,
 });
 
@@ -231,7 +236,18 @@ bases.patch("/:baseId", async (c) => {
   // M3/S3 #2：改名同事务同步节点 name（iconColor / icon 都不影响节点——实体图标走读取时解析，
   // 不同步进 nav_nodes，故 syncNavFromEntitiesTx 语义不动）。
   const base = await withWriteTx("base.rename", async (tx) => {
-    const b = await tx.base.update({ where: { id: baseId }, data: parsed.data });
+    const b = await tx.base.update({
+      where: { id: baseId },
+      // 三态映射：缺省 → 不写列（保持原值）；#RRGGBB → 原样；null → 系统默认色。
+      data: {
+        name: parsed.data.name,
+        iconColor:
+          parsed.data.iconColor === undefined
+            ? undefined
+            : parsed.data.iconColor ?? BASE_DEFAULT_ICON_COLOR,
+        icon: parsed.data.icon,
+      },
+    });
     await syncNavFromEntitiesTx(tx);
     return b;
   });
