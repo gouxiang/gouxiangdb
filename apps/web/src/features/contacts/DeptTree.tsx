@@ -15,6 +15,7 @@ import {
 import { Icon } from "../../components/icons";
 import type { DeptDTO } from "@gx/shared-types";
 import { useDepartments, useOrgDeptMutations } from "./contacts-hooks";
+import { AddDeptMembersModal } from "./AddDeptMembersModal";
 import {
   buildDeptTree,
   flattenVisible,
@@ -28,9 +29,16 @@ interface DeptTreeProps {
   selectedDeptId: string | null;
   onSelectDept: (id: string | null) => void;
   canManage: boolean;
+  /** 组织动作 manage_members：部门菜单里的「添加已有成员」按此门控（写的是成员归属）。 */
+  canManageMembers?: boolean;
 }
 
-export function DeptTree({ selectedDeptId, onSelectDept, canManage }: DeptTreeProps) {
+export function DeptTree({
+  selectedDeptId,
+  onSelectDept,
+  canManage,
+  canManageMembers = false,
+}: DeptTreeProps) {
   const { data: flat, isLoading, isError, error } = useDepartments();
   const m = useOrgDeptMutations();
 
@@ -39,6 +47,7 @@ export function DeptTree({ selectedDeptId, onSelectDept, canManage }: DeptTreePr
   const [creatingParent, setCreatingParent] = useState<string | null | undefined>(undefined);
   const [renaming, setRenaming] = useState<DeptDTO | null>(null);
   const [moving, setMoving] = useState<DeptDTO | null>(null);
+  const [addingMembers, setAddingMembers] = useState<DeptDTO | null>(null);
 
   /** 删除部门：无撤销接口 → L4 不可恢复确认（R-D-23），主按钮用具体动词（R-D-24）。 */
   async function removeDept(dept: DeptDTO) {
@@ -164,6 +173,9 @@ export function DeptTree({ selectedDeptId, onSelectDept, canManage }: DeptTreePr
                   <Popover open={menuFor === dept.id} onClose={() => setMenuFor(null)} align="right" width={170}>
                     <Menu width={170}>
                       <MenuItem icon="plus" label="新建子部门" onClick={() => { setMenuFor(null); setCreatingParent(dept.id); }} />
+                      {canManageMembers && (
+                        <MenuItem icon="userPlus" label="添加已有成员" onClick={() => { setMenuFor(null); setAddingMembers(dept); }} />
+                      )}
                       <MenuItem icon="edit" label="重命名" onClick={() => { setMenuFor(null); setRenaming(dept); }} />
                       <MenuItem icon="swap" label="移动到…" onClick={() => { setMenuFor(null); setMoving(dept); }} />
                       <MenuItem icon="trash" label="删除部门" danger onClick={() => { setMenuFor(null); void removeDept(dept); }} />
@@ -235,6 +247,10 @@ export function DeptTree({ selectedDeptId, onSelectDept, canManage }: DeptTreePr
             }
           }}
         />
+      )}
+
+      {addingMembers && (
+        <AddDeptMembersModal dept={addingMembers} onClose={() => setAddingMembers(null)} />
       )}
 
     </div>

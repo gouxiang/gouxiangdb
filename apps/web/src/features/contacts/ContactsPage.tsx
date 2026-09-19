@@ -43,7 +43,12 @@ export default function ContactsPage() {
 
   const deptPanel = (
     <div className="h-full min-h-0 w-60 shrink-0 border-r border-gx-separator bg-gx-surface">
-      <DeptTree selectedDeptId={deptId} onSelectDept={setDeptId} canManage={canManageDepts} />
+      <DeptTree
+        selectedDeptId={deptId}
+        onSelectDept={setDeptId}
+        canManage={canManageDepts}
+        canManageMembers={canManageMembers}
+      />
     </div>
   );
 
