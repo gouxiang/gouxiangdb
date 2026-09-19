@@ -66,10 +66,6 @@ export interface GridToolbarProps {
   onCopyView: () => void;
   onClearTable: () => void;
   onEditField: (fieldId: string | null) => void;
-  /** 新建字段后是否直接显示编辑器（默认 true） */
-  onFieldCreated?: (fieldId: string) => void;
-  /** 字段集变更后回调（可选） */
-  onFieldsChanged?: () => void;
 }
 
 /**

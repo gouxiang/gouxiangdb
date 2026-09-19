@@ -104,12 +104,37 @@ describe("isDirty：编辑模式基线", () => {
     ).toBe(true);
   });
 
+  it("通用属性：改提示/必填/唯一/最大长度都算脏（表单设计器右栏可编辑这几项）", () => {
+    const withCommon = draftFromField(mkField({ description: "旧提示", maxLength: 10 } as never));
+    expect(isDirty({ ...withCommon, description: "新提示" }, withCommon)).toBe(true);
+    expect(isDirty({ ...withCommon, required: true }, withCommon)).toBe(true);
+    expect(isDirty({ ...withCommon, unique: true }, withCommon)).toBe(true);
+    expect(isDirty({ ...withCommon, maxLength: null }, withCommon)).toBe(true);
+    expect(isDirty({ ...withCommon }, withCommon)).toBe(false);
+  });
+
   it("defaultNow 后端有值但 FieldDTO 未声明 → 投影仍能读到，改勾选算脏", () => {
     const f = mkField() as FieldDTO & { defaultNow?: boolean };
     f.defaultNow = true;
     const baseline = draftFromField(f);
     expect(isDirty({ ...baseline, defaultNow: false }, baseline)).toBe(true);
     expect(isDirty({ ...baseline }, baseline)).toBe(false);
+  });
+  it("表单设计器右栏（FieldSettingsPanel）同源守卫：无修改也不发 no-op PATCH", () => {
+    const panel = readFileSync(join(__dirname, "../detail/FieldSettingsPanel.tsx"), "utf8");
+    const iGuard = panel.indexOf("没有修改，无需保存");
+    const iSave = panel.indexOf("const handleSave");
+    expect(iGuard).toBeGreaterThan(iSave);
+    expect(iGuard).toBeLessThan(panel.indexOf("try {", iSave));
+  });
+
+  it("半截链路已摘除：不再有 onFieldCreated/onFieldsChanged 的声明与调用点", () => {
+    const tb = readFileSync(join(__dirname, "../grid/GridToolbar.tsx"), "utf8");
+    const gv = readFileSync(join(__dirname, "../grid/GridView.tsx"), "utf8");
+    // 只取代码本体：注释里保留的「考古说明」不参与判定
+    const code = (s: string) => s.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(code(tb)).not.toMatch(/onFieldCreated|onFieldsChanged/);
+    expect(code(gv)).not.toMatch(/onFieldCreated|editingFieldId/);
   });
 });
 

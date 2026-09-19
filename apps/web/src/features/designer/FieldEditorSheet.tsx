@@ -293,6 +293,11 @@ function FieldEditorSheet({
     tabs,
     displayedFieldIds,
     visibleFieldIds,
+    // 通用属性（提示/必填/唯一/长度）本编辑器不可编辑，按原字段值回填即不参与脏判定
+    description: managedField?.description ?? "",
+    required: managedField?.required ?? false,
+    unique: managedField?.unique ?? false,
+    maxLength: (managedField as { maxLength?: number | null } | null)?.maxLength ?? null,
   });
   const isRelated = type === "links";
   const isSubtable = type === "subtable";

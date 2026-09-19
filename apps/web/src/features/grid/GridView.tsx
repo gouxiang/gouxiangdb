@@ -139,7 +139,10 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
   const [scrollTop, setScrollTop] = useState(0);
   const [containerH, setContainerH] = useState(600);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
-  const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
+  // 字段编辑器的目标字段由 editingFieldMeta 单向驱动（FieldEditorSheet 只收这个 prop）。
+  // 2026-09-20 清半截链路：原先还有一个只读不写的 editingFieldId state 与
+  // 从未被调用的 onFieldCreated 回调（「新建字段后自动再开编辑器」能力实际没接上），
+  // 两者全仓零读取，留着只会让人误以为有这条能力，故摘除。
   const [editingFieldMeta, setEditingFieldMeta] = useState<FieldDTO | null>(null);
   const [fieldEditorOpen, setFieldEditorOpen] = useState(false);
   const { data: tablesData } = useTables(baseId);
@@ -612,22 +615,12 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
         onClearTable={onClearTable}
         onEditField={(id) => {
           if (id == null) {
-            setEditingFieldId(null);
             setEditingFieldMeta(null);
           } else {
-            setEditingFieldId(id);
             const found = allSchemaFields.find((f) => f.id === id) ?? null;
             setEditingFieldMeta(found);
           }
           setFieldEditorOpen(true);
-        }}
-        onFieldCreated={(id) => {
-          const created = allSchemaFields.find((f) => f.id === id);
-          if (created) {
-            setEditingFieldId(id);
-            setEditingFieldMeta(created);
-            setFieldEditorOpen(true);
-          }
         }}
       />
 
@@ -731,7 +724,6 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
                     onSort={(d) => handleSort(f.id, d)}
                     onHide={() => hideField(f.id)}
                     onRename={() => {
-                      setEditingFieldId(f.id);
                       setEditingFieldMeta(f);
                       setFieldEditorOpen(true);
                     }}
@@ -858,7 +850,6 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
         permissions={permissions}
         onClose={() => {
           setFieldEditorOpen(false);
-          setEditingFieldId(null);
           setEditingFieldMeta(null);
         }}
       />

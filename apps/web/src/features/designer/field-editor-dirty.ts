@@ -41,6 +41,11 @@ export interface FieldDraft {
   tabs: TabConfig[];
   displayedFieldIds: FieldIdT[];
   visibleFieldIds: FieldIdT[];
+  /** 通用属性：FieldSettingsPanel 可编辑，FieldEditorSheet 不可（此时按原字段值填，不参与判定） */
+  description: string;
+  required: boolean;
+  unique: boolean;
+  maxLength: number | null;
 }
 
 /** 空串/undefined 归一为 null，与 buildPayload 的 idOrNull 同一口径。 */
@@ -79,6 +84,10 @@ export function emptyDraft(): FieldDraft {
     tabs: [],
     displayedFieldIds: [],
     visibleFieldIds: [],
+    description: "",
+    required: false,
+    unique: false,
+    maxLength: null,
   };
 }
 
@@ -105,6 +114,11 @@ export function draftFromField(field: FieldDTO | null | undefined): FieldDraft {
     tabs: field.tabsConfig ?? [],
     displayedFieldIds: field.displayedFieldIds ?? [],
     visibleFieldIds: field.visibleFieldIds ?? [],
+    description: field.description ?? "",
+    required: field.required ?? false,
+    unique: field.unique ?? false,
+    // maxLength 后端会返回但 FieldDTO 未声明（与 FieldSettingsPanel 的读取方式一致）
+    maxLength: (field as { maxLength?: number | null }).maxLength ?? null,
   };
 }
 
@@ -121,6 +135,10 @@ export function isDirty(current: FieldDraft, baseline: FieldDraft): boolean {
   if (normId(current.subFieldId) !== baseline.subFieldId) return true;
   if (current.rollupFn !== baseline.rollupFn) return true;
   if (current.formula !== baseline.formula) return true;
+  if (current.description !== baseline.description) return true;
+  if (current.required !== baseline.required) return true;
+  if (current.unique !== baseline.unique) return true;
+  if (current.maxLength !== baseline.maxLength) return true;
   const simple: (keyof FieldDraft)[] = [
     "options",
     "recordFilter",

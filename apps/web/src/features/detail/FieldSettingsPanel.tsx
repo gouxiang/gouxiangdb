@@ -22,6 +22,7 @@ import { FIELD_TYPE_LABEL, allowedDefaultSources, isFilterMatchSourceType, isNum
 import { Button, Checkbox, FieldIcon, Input, Select, toast } from "../../components/ui";
 import { COLOR_PALETTE } from "../../components/ui";
 import { Icon } from "../../components/icons";
+import { draftFromField, isDirty, type FieldDraft } from "../designer/field-editor-dirty";
 import { Form, FormActions, FormField, FormRow, FormSection } from "../../components/form";
 import { FilterRuleField } from "../designer/FilterRuleModal";
 import FormulaEditorModal from "../designer/FormulaEditorModal";
@@ -171,6 +172,31 @@ export function FieldSettingsPanel({
   const isLinkLocked = (isRelated || isSubtable) && !!field?.linkFieldId;
   const isLookupLike = type === "lookup" || type === "rollup" || type === "count";
   const canSave = permissions.canManageSchema && !!name.trim() && field != null;
+  // 与 FieldEditorSheet 同源的脏检查投影（F-01 收口）：本面板可额外编辑提示/必填/唯一/长度
+  const collectDraft = (): FieldDraft => ({
+    name,
+    type,
+    options,
+    precision,
+    defaultNow: dateDefaultNow,
+    relTableId: relTableId || null,
+    relKind,
+    displayFieldId: displayFieldId || null,
+    linkFieldId: linkFieldId || null,
+    subFieldId: subFieldId || null,
+    rollupFn,
+    formula,
+    recordFilter,
+    defaultConfig,
+    numberRule,
+    tabs,
+    displayedFieldIds,
+    visibleFieldIds,
+    description: helpText,
+    required,
+    unique,
+    maxLength,
+  });
 
   const buildPayload = (): Record<string, unknown> => {
     const data: Record<string, unknown> = { name: name.trim(), type };
@@ -221,6 +247,12 @@ export function FieldSettingsPanel({
 
   const handleSave = async () => {
     if (!canSave || !field) return;
+    // F-01 同源守卫：没做任何修改时不再发 no-op PATCH 并提示「已保存字段设置」。
+    // 与 FieldEditorSheet 同一口径（成功必须有可见变化），复用同一份脏判定。
+    if (!isDirty(collectDraft(), draftFromField(field))) {
+      toast("没有修改，无需保存", "info");
+      return;
+    }
     try {
       await m.updateField.mutateAsync({
         fieldId: field.id,
