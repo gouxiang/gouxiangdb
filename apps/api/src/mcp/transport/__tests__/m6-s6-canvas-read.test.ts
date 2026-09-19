@@ -19,7 +19,8 @@ let tmpDir: string;
 let prisma: PrismaClient;
 let app: { request: (u: string, i?: RequestInit) => Promise<Response> };
 let canvasToken = ""; // canvas:read
-let docToken = "";    // doc:read（看不到 canvas 工具）
+let docToken = "";    // doc:read（同为 u1 签发：用于证明 scope 不再影响注册集）
+let noCanvasToken = ""; // u2 签发：u2 无任何画布策略 -> canvas 族不可见
 let c1 = "";  // 正常画布（含未知键 + 箭头元素）
 let c2 = "";  // content ""
 let c3 = "";  // 坏 JSON
@@ -40,6 +41,10 @@ async function callTool(name: string, args: Record<string, unknown>, tok: string
   return { status: res.status, result: (await res.json() as { result: { isError?: boolean; content: Array<{ text: string }> } }).result };
 }
 const board = (docId: string, tok = canvasToken) => callTool("canvas.get_board", { docId }, tok);
+const toolsOf = async (tok: string): Promise<string[]> => {
+  const res = await call({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, tok);
+  return ((await res.json()) as { result: { tools: Array<{ name: string }> } }).result.tools.map((t) => t.name);
+};
 const payloadOf = (text: string) => JSON.parse(text) as { docId: string; elementCount: number; elements: Array<Record<string, unknown>>; viewport: unknown; parseError: boolean; contentVersion: number };
 
 beforeAll(async () => {
@@ -58,6 +63,8 @@ beforeAll(async () => {
   globalThis.__gx_prisma = prisma;
 
   await prisma.user.create({ data: { id: "u1", email: "u1@x.com", displayName: "u1", passwordHash: "x", status: "ACTIVE" } });
+  // u2：不授予任何画布策略——P3 起「某工具是否入册」的判据是签发者的实际授权，需要一个反例主体。
+  await prisma.user.create({ data: { id: "u2", email: "u2@x.com", displayName: "u2", passwordHash: "x", status: "ACTIVE" } });
   // creator 置外部用户，避免 creator 兜底 UNION 干扰策略驱动断言
   const kb = await prisma.knowledgeBase.create({ data: { id: "kb1", name: "库一", createdBy: "owner0" } });
   const mkCanvas = async (content: string, title: string) =>
@@ -92,6 +99,7 @@ beforeAll(async () => {
   const svc = await import("../../pat/patService.js");
   canvasToken = (await svc.createPat("u1", { name: "cv", scopes: ["canvas:read"], expiresInDays: 90 })).plaintext;
   docToken = (await svc.createPat("u1", { name: "dc", scopes: ["doc:read"], expiresInDays: 90 })).plaintext;
+  noCanvasToken = (await svc.createPat("u2", { name: "nc", scopes: ["canvas:read"], expiresInDays: 90 })).plaintext;
   app = (await import("../../../app.js")).createApp().app as unknown as typeof app;
 }, 120000);
 
@@ -102,20 +110,22 @@ afterAll(async () => {
 });
 
 describe("S6 canvas.get_board 注册与 scope 粗筛", () => {
-  it("canvas:read PAT 看得到 canvas.get_board", async () => {
-    const res = await call({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, canvasToken);
-    const names = ((await res.json()) as { result: { tools: Array<{ name: string }> } }).result.tools.map((t) => t.name);
-    expect(names).toContain("canvas.get_board");
+  // 语义适配（P3）：两枚令牌同为 u1 签发，scope 已不参与判定——故 docToken 也能看到 canvas 工具。
+  it("doc:read 的 PAT 与 canvas:read 的 PAT 注册集一致（同为 u1 签发，scope 不再粗筛）", async () => {
+    const a = (await toolsOf(canvasToken)).sort();
+    const b = (await toolsOf(docToken)).sort();
+    expect(a).toEqual(b);
+    expect(a).toContain("canvas.get_board");
   });
 
-  it("仅 doc:read 的 PAT 看不到 canvas.get_board（scope 粗筛）", async () => {
-    const res = await call({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, docToken);
-    const names = ((await res.json()) as { result: { tools: Array<{ name: string }> } }).result.tools.map((t) => t.name);
-    expect(names).not.toContain("canvas.get_board");
+  // 「未注册 -> UNKNOWN_TOOL」的不变量原样保留，判据换成"签发者对该画布无 r"：
+  // u2 无任何画布策略 -> canvas 族可见集为空 -> canvas.get_board 不入册。
+  it("签发者无画布读权限 -> 看不到 canvas.get_board（族可见集为空）", async () => {
+    expect(await toolsOf(noCanvasToken)).not.toContain("canvas.get_board");
   });
 
   it("未注册工具直调 -> UNKNOWN_TOOL（文本含 -32602）", async () => {
-    const r = await board(c1, docToken);
+    const r = await board(c1, noCanvasToken);
     expect(r.status).toBe(200);
     expect(r.result.isError).toBe(true);
     expect(r.result.content[0]!.text).toContain("-32602");

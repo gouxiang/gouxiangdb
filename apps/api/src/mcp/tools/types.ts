@@ -22,15 +22,21 @@ export interface ToolMeta extends Record<string, unknown> {
   name: string;
   title: string;
   description: string;
-  /** 需要的 PAT scope（任一命中即可见；空数组=连接性工具，恒注册）。 */
+  /**
+   * 历史字段：这件工具属于哪个 PAT scope（P3 起**不参与判定**，仅作目录可读性与老数据兼容）。
+   * 工具是否入册由运行期可用性门 + 族可见集（按签发者用户）决定。
+   */
   scopes: PatScope[];
   /** 资源族；null=不涉资源（连通性工具），不做闸门一。 */
   family: ResourceFamily | null;
   /** 该工具需要的 M4 动作集（闸门一口径；缺省 ["r"]）。 */
   actions?: McpAction[];
   readOnly: boolean;
-  /** 可选可用性门（如 record.search 仅在 GX_M5_SEARCH != off 时注册）。缺省恒可用。 */
-  available?: () => boolean;
+  /**
+   * 可选可用性门（如 record.search 仅在总门目标态非 off 时注册——db 覆盖优先于 env）。
+   * 允许异步（判定要读 app_settings）；缺省恒可用。
+   */
+  available?: () => boolean | Promise<boolean>;
 }
 
 export interface ToolSpec {

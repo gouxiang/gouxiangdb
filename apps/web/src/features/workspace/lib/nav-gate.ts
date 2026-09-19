@@ -63,10 +63,9 @@ export function canSeeAuthz(actions: ReadonlySet<OrgAction>, authzManage: boolea
 }
 
 /**
- * 工作区设置（资产入口）：没有专属能力信号的兜底口径。
- * WorkspaceSettingsPage 只对「语义检索」用 ownerOnly/assets 未加任何门控，
- * 因此这里按「是否持任一枚组织管理动作」判可见——持任一枚即参与组织管理，
- * 一枚都没有的成员（viewer/commenter）不该从这个位置进到任何工作区配置页。
+ * 工作区设置（资产入口）与「语义检索」分区共用的兜底口径：没有专属能力信号时，
+ * 按「是否持任一枚组织管理动作」判可见——持任一枚即参与组织管理，
+ * 一枚都没有的成员（viewer/commenter）不该从这个位置进到工作区配置页。
  */
 export function canSeeWorkspaceSettings(actions: ReadonlySet<OrgAction>): boolean {
   return CONTACTS_ACTIONS.some((a) => actions.has(a)) || canSeeNavComposer(actions) || actions.has("manage_share");

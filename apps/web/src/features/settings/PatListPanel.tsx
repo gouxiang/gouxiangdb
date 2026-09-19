@@ -3,28 +3,85 @@
 // 契约：apps/api/src/routes/v1/pats.ts（GET/POST/DELETE /api/v1/pats）。
 // 纪律：全部走 api/client.ts（禁裸 fetch）；图标仅 icons.tsx；gx-* token；无 emoji；写操作 toast。
 // 一次性明文：token 仅存组件 state（createdToken），关闭即置 null 焚毁，绝不写入浏览器本地存储或 URL。
+//
+// P3 语义：令牌只做「认证 + 有效期」，能力按签发者账号实时计算——故列表不再渲染六位 scope 徽标，
+// 改为只读说明；顶部补「接入方式」块（端点地址按当前站点动态生成，不写死域名/端口）。
 import { useState } from "react";
 import { Badge, Button, EmptyState, Modal, Spinner, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
+import { withBase } from "../../api/client";
 import type { CreatePatInput, PatMetadata } from "../../api/client";
 import { CreatePatForm } from "./CreatePatForm";
 import { PatTokenModal } from "./PatTokenModal";
 import { normalizePatError, useCreatePat, usePatList, useRevokePat } from "./pat-hooks";
 import {
   NEVER_EXPIRY_WARNING,
+  PAT_SCOPE_INHERIT_HINT,
+  PAT_SCOPE_INHERIT_TITLE,
   PAT_STATE_LABEL,
   REVOKE_WARNING,
   canRevoke,
   fmtPatTime,
-  orderScopes,
   patErrorText,
   patExpiryLabel,
   patTokenState,
   requiresNeverExpiryConfirm,
-  scopeLabel,
 } from "./pat-labels";
 
-/** 令牌列表行：名称/状态、前缀（前 14 字符）、权限范围中文标签、创建/最后使用/有效期、吊销按钮。 */
+/**
+ * MCP 端点地址：**按当前站点动态生成**，绝不写死 localhost/端口/域名——
+ * 子路径部署（如 /app/gouxiangdb）由 withBase 补前缀，与分享链接同一处口径（SharePanel）。
+ * SSR/测试环境没有 location：退回同源相对路径（页面上不会出现假域名）。
+ */
+export function mcpEndpoint(): string {
+  const p = withBase("/mcp");
+  if (typeof location === "undefined") return p;
+  return `${location.origin}${p}`;
+}
+
+/** 接入方式说明块：端点 + 认证头 + 一句示例（纯展示）。 */
+export function McpConnectBlock() {
+  const endpoint = mcpEndpoint();
+  const curl = `curl -sS ${endpoint} \\\n  -H "Authorization: Bearer <令牌>" \\\n  -H "Content-Type: application/json" \\\n  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'`;
+  return (
+    <section className="flex flex-col gap-2 rounded-gx-lg border border-gx-separator bg-gx-bg p-4">
+      <h3 className="flex items-center gap-1.5 text-gx-14 font-semibold text-gx-text-primary">
+        <Icon name="code" size={14} className="text-gx-text-hint" />
+        接入方式
+      </h3>
+      <div className="flex flex-col gap-1">
+        <span className="text-gx-12 text-gx-text-tertiary">MCP 端点</span>
+        <code className="select-all break-all rounded-gx-sm bg-gx-surface px-2 py-1 font-mono text-gx-12 text-gx-text-primary">
+          {endpoint}
+        </code>
+      </div>
+      <div className="flex flex-col gap-1">
+        <span className="text-gx-12 text-gx-text-tertiary">认证头（把令牌放在 Bearer 后面）</span>
+        <code className="select-all break-all rounded-gx-sm bg-gx-surface px-2 py-1 font-mono text-gx-12 text-gx-text-primary">
+          Authorization: Bearer &lt;令牌&gt;
+        </code>
+        <span className="text-gx-11 text-gx-text-hint">
+          在支持 MCP 的客户端里填上面的端点地址，认证方式选「HTTP 头」，头名称 Authorization、值 Bearer 加一枚空格再加令牌。
+        </span>
+      </div>
+      <div className="flex flex-col gap-1">
+        <span className="text-gx-12 text-gx-text-tertiary">示例（列出可用工具）</span>
+        <pre className="overflow-x-auto rounded-gx-sm bg-gx-surface px-2 py-1.5 font-mono text-gx-11 leading-relaxed text-gx-text-primary">
+          {curl}
+        </pre>
+      </div>
+      <span className="text-gx-11 text-gx-text-hint">{PAT_SCOPE_INHERIT_HINT}</span>
+    </section>
+  );
+}
+
+/**
+ * 令牌列表行：名称/状态、前缀（前 14 字符）、权限（只读说明：跟随签发者账号）、
+ * 创建/最后使用/有效期、吊销按钮。
+ *
+ * 权限列刻意不再渲染六位 scope 徽标——那些 scope 已不参与判定，渲染出来等于告诉用户
+ * 一个不生效的权限清单。
+ */
 export function PatRow({ pat, onRevoke }: { pat: PatMetadata; onRevoke: (p: PatMetadata) => void }) {
   const state = patTokenState(pat);
   const stateClass =
@@ -36,10 +93,8 @@ export function PatRow({ pat, onRevoke }: { pat: PatMetadata; onRevoke: (p: PatM
         <span className={["text-gx-11", stateClass].join(" ")}>{PAT_STATE_LABEL[state]}</span>
       </div>
       <span className="w-40 truncate font-mono text-gx-12 text-gx-text-tertiary">{pat.tokenPrefix}…</span>
-      <span className="flex w-56 flex-wrap gap-1">
-        {orderScopes(pat.scopes).map((s) => (
-          <Badge key={s}>{scopeLabel(s)}</Badge>
-        ))}
+      <span className="flex w-56">
+        <Badge>{PAT_SCOPE_INHERIT_TITLE}</Badge>
       </span>
       <span className="w-32 text-gx-12 text-gx-text-tertiary">{fmtPatTime(pat.createdAt)}</span>
       <span className="w-32 text-gx-12 text-gx-text-tertiary">
@@ -182,8 +237,10 @@ export function PatListPanel() {
   return (
     <div className="flex max-w-3xl flex-col gap-5">
       <p className="text-gx-13 text-gx-text-tertiary">
-        为 AI 客户端（本地脚本、桌面 AI 助手等）签发访问令牌。令牌代表你的身份，请按最小权限原则仅授予所需的权限范围。
+        为 AI 客户端（本地脚本、桌面 AI 助手等）签发访问令牌。令牌代表你的身份：它能做什么，等于你这个账号当下能做什么。
       </p>
+
+      <McpConnectBlock />
 
       <CreatePatForm onCreate={handleCreate} busy={create.isPending} />
 
@@ -200,7 +257,7 @@ export function PatListPanel() {
             <div className="flex items-center gap-3 border-b border-gx-separator bg-gx-table-header px-3 py-2 text-gx-12 font-medium text-gx-text-secondary">
               <span className="flex-1">名称</span>
               <span className="w-40">前缀</span>
-              <span className="w-56">权限范围</span>
+              <span className="w-56">权限</span>
               <span className="w-32">创建时间</span>
               <span className="w-32">最后使用</span>
               <span className="w-32">有效期</span>

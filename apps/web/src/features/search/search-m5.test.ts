@@ -193,7 +193,8 @@ describe("检索子面未启用判定（GX_M5_SEARCH off → admin 端点 404 NO
 
   it("未启用文案讲清功能没开而非稍后重试，且关键词检索照常", () => {
     expect(SEARCH_NOT_ENABLED.title).toContain("未启用");
-    expect(SEARCH_NOT_ENABLED.body).toContain("开启检索开关");
+    // 语义适配（P3）：总门已可在本页打开，文案改为指向「检索总门」而不是"去改环境变量"。
+    expect(SEARCH_NOT_ENABLED.body).toContain("检索总门");
     expect(SEARCH_NOT_ENABLED.body).toContain("关键词检索");
     for (const t of [SEARCH_NOT_ENABLED.title, SEARCH_NOT_ENABLED.body, SEARCH_NOT_ENABLED.reindexHint]) {
       expect(t).not.toContain("稍后重试");

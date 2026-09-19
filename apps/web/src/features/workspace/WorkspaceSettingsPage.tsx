@@ -6,7 +6,7 @@
 //      门控分区（search/mcp…）守卫回落后若仍按 section 判断，会与左栏的
 //      effectiveSection 判定双双落空 → 右内容区整块空白（既不是通用也不是目标分区）。
 //   2. effectiveSection 由 visibleSections 反查得出（单一真源）：
-//      新增 gated 分区只要在 SECTIONS 上打 ownerOnly/enterpriseOnly 标记就自动受约束，
+//      新增 gated 分区只要在 SECTIONS 上打 ownerOnly/manageOnly/enterpriseOnly 标记就自动受约束，
 //      不需要再记得改第二处三元判断——这正是「点左侧右侧空白」的根因修复。
 //   3. 可解析的 splat 集合同样由 SECTIONS 推导，未知 splat 一律落「通用」。
 import { useState } from "react";
@@ -15,7 +15,7 @@ import { Icon, type IconName } from "../../components/icons";
 import { useIsWorkspaceOwner, useMyOrgActions } from "../contacts/contacts-hooks";
 import { ContactsDirectory } from "../contacts/ContactsDirectory";
 import PermPanel from "../authz/PermPanel";
-import { canSeeAuthz } from "./lib/nav-gate";
+import { canSeeAuthz, canSeeWorkspaceSettings } from "./lib/nav-gate";
 import { useAuthzCapability } from "../authz/useAuthzCapability";
 import { AssetsSection, TrashSection } from "./WorkspaceSettingsSections";
 import { EmbeddingSearchPanel } from "../search/EmbeddingSearchPanel";
@@ -37,6 +37,12 @@ const SECTIONS: {
   icon: IconName;
   desc: string;
   ownerOnly?: boolean;
+  /**
+   * 管理动作口径（与 lib/nav-gate.canSeeWorkspaceSettings 同源）：
+   * 持任一 manage_* 组织动作即见，owner 亦见。用于「需要进得去配置，但不必是所有者」的分区
+   * （语义检索：非 owner 管理员也要能开/关总门）。
+   */
+  manageOnly?: boolean;
   /** M6 MCP 接入随 GX_ENTERPRISE_ORG 门控（off 即不挂载，fail-closed 隐入口）。 */
   enterpriseOnly?: boolean;
 }[] = [
@@ -45,7 +51,9 @@ const SECTIONS: {
   //   非 owner 连分区都不渲染——不做 disabled 假入口（P2-B3）。
   { key: "contacts", label: "通讯录", icon: "building", desc: "部门、成员与组织角色", ownerOnly: true },
   { key: "authz", label: "权限管理", icon: "shield", desc: "资源树授权与策略下发", ownerOnly: true },
-  { key: "search", label: "语义检索", icon: "sparkles", desc: "云端语义检索与索引覆盖度", ownerOnly: true },
+  // manageOnly：语义检索是「开关型」配置——非 owner 的管理员（持任一 manage_* 组织动作）也要能
+  //   开/关总门，ownerOnly 会把他们一起挡在外面。口径与 canSeeWorkspaceSettings 同一处，owner 恒可见。
+  { key: "search", label: "语义检索", icon: "sparkles", desc: "云端语义检索与索引覆盖度", manageOnly: true },
   { key: "mcp", label: "MCP 接入", icon: "keyRound", desc: "为 AI 客户端签发访问令牌", enterpriseOnly: true },
   { key: "assets", label: "资产", icon: "database", desc: "数据库与知识库入口" },
   { key: "trash", label: "回收站", icon: "trash", desc: "数据库与知识库回收站入口" },
@@ -121,10 +129,13 @@ export function WorkspaceSettingsPage() {
   const { actions, isLoading: actionsLoading } = useMyOrgActions();
   const { canManage } = useAuthzCapability();
   const canManageAuthz = !actionsLoading && canSeeAuthz(actions, canManage);
+  // 语义检索分区：持任一 manage_* 组织动作即可见（owner 亦可见）；探针未回来按不可见（fail-closed）。
+  const canSeeSearch = isOwner || (!actionsLoading && canSeeWorkspaceSettings(actions));
 
   const visibleSections = SECTIONS.filter(
     (s) =>
       (!s.ownerOnly || isOwner) &&
+      (!s.manageOnly || canSeeSearch) &&
       (!s.enterpriseOnly || enterpriseOn) &&
       (s.key !== "authz" || canManageAuthz),
   );
@@ -333,8 +344,8 @@ export function WorkspaceSettingsPage() {
         </div>
       </div>
 
-      {/* 覆盖度面板/语义面板共用的重建确认弹窗（owner 才挂载到这里） */}
-      {isOwner && (
+      {/* 覆盖度面板/语义面板共用的重建确认弹窗（与语义检索分区同口径挂载） */}
+      {canSeeSearch && (
         <ReindexModal open={reindexOpen} busy={reindex.isPending} onClose={() => setReindexOpen(false)} onConfirm={fireReindex} />
       )}
     </div>

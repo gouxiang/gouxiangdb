@@ -1,4 +1,4 @@
-// M6/S3 工具注册枢纽（闸门一）：按 PAT scope 粗筛 + 族可见集非空，决定"注册哪些工具"。
+// M6/S3 工具注册枢纽（闸门一）：按族可见集非空决定"注册哪些工具"（能力按签发者用户实时计算）。
 // M6/S7 追加**调用信封**（本文件是唯一包装点，不改各 handler）：
 //   ① 超时：Promise.race 30s（config.mcpToolTimeoutMs），超时返结构化 TIMEOUT 且响应正常返回（不挂死连接）；
 //   ② 幂等：**写工具**（meta.readOnly===false）且入参带 requestId 时，落库 mcp_idempotency 去重（24h 窗）；
@@ -33,11 +33,6 @@ export interface ToolDeps {
    * 用途：transport 层据此判定"直调的 tool 是否未注册"（UNKNOWN_TOOL 审计由 SDK 直接拒，信封拿不到控制权）。
    */
   onRegistered?: (names: string[]) => void;
-}
-
-/** PAT scope 是否覆盖该工具（空 scopes=连接性工具，恒过）。 */
-function scopeAllows(meta: ToolMeta, scopes: readonly string[]): boolean {
-  return meta.scopes.length === 0 || meta.scopes.some((s) => scopes.includes(s));
 }
 
 /** 求某族的可见集；抛错时返回 null（调用方据此跳过该族，不冒泡）。 */
@@ -188,14 +183,21 @@ async function invokeWithEnvelope(spec: ToolSpec, ctx: ToolCtx, args: Record<str
   return result;
 }
 
-/** 注册该主体可见的工具（异步：闸门一需查 M4 可见集）。 */
+/**
+ * 注册该主体可见的工具（异步：闸门一需查 M4 可见集）。
+ *
+ * 鉴权语义（P3 定稿）：令牌只做「认证 + 有效期」，能力一律按**签发者用户**实时计算
+ * （与 Web 端 X-GX-Token 会话同口径）——subject.scopes 仍带在上下文里（审计/老数据兼容），
+ * 但不再参与入册判定；真正的判据是 port.listAccessibleResources / 闸门二的 can()。
+ */
 export async function registerTools(server: McpServer, subject: { userId: string; patId: string; scopes: readonly string[] }, deps: ToolDeps): Promise<void> {
   const ctx: ToolCtx = { subject: { ...subject, scopes: [...subject.scopes] } as ToolCtx["subject"], port: deps.port ?? null };
   const registered: string[] = [];
 
   for (const spec of TOOL_CATALOG) {
-    if (spec.meta.available && !spec.meta.available()) continue; // 运行期可用性门（如 M5 未启用）
-    if (!scopeAllows(spec.meta, subject.scopes)) continue; // 闸门一前半：PAT scope 粗筛
+    if (spec.meta.available && !(await spec.meta.available())) continue; // 运行期可用性门（如总门未启用）
+    // P3 起不再用令牌自带的 scopes 粗筛（能力按签发者用户实时计算）：
+    // 前半只剩运行期可用性门，后半的族可见集才是"这个主体能干什么"的判据。
     if (spec.meta.family) {
       const vis = await familyVisible(deps.port ?? null, spec.meta.family, spec.meta, deps.onMetric);
       if (!vis.ok) continue; // 闸门一后半：族可见集为空/引擎故障 -> 不入册

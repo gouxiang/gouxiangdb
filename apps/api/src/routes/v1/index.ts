@@ -64,11 +64,13 @@ if (config.enterpriseNav) {
   v1.route("/nodes", inheritanceRoutes);
 }
 
-if (config.m5Search !== "off") {
-  // M5/S6 统一检索：仅 on/shadow 挂载；off 时 /api/v1/search 落 v1 自身 404。
-  // S6 骨架内一律 501（S7 接 domain/search/query.ts 与 shadow 对拍），不建库不出网。
-  v1.route("/search", searchRoutes);
-  // M5/S9 检索管理面（reindex/status/embedding config+apiKey，全部 role_owner），与 /search 同门：
-  // 仅 on/shadow 可达；off 时 /api/v1/admin/* 落 v1 自身 404，且不产生 search.db（gate 断言）。
-  v1.route("/admin", adminSearchRoutes);
-}
+// M5/S6 统一检索：恒挂载（不再按 env 静态摘挂）——否则后台 app_settings 的 search.enabled
+// 在 GX_M5_SEARCH=off 时永远救不回来，等于做个点了没反应的开关。是否可用改由请求期判定：
+//   /api/v1/search      -> search.ts 开头 loadSearchGateFlag（db 覆盖优先）；
+//   /api/v1/admin/*     -> adminSearch.ts 的同款闸门中间件。
+// 判定为 off 时仍落 404 NOT_FOUND，且**在任何 search.db 访问之前**短路（零建库断言不变）。
+v1.route("/search", searchRoutes);
+// M5/S9 检索管理面（reindex/status/embedding config+apiKey，全部 role_owner），与 /search 同门：
+//   运营/出网端点（reindex、search/status、test-connection）由总门判定，off 时 404 且不建库不出网；
+//   配置面端点（embedding config GET/PATCH、api-key）不受总门约束——search.enabled 要在那里被打开。
+v1.route("/admin", adminSearchRoutes);

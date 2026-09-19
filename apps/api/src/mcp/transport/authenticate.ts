@@ -11,6 +11,10 @@
 //   6) userId 对应用户非 ACTIVE -> account_disabled
 // 成功 -> subject{userId, patId, scopes}，并按 patId 节流记 lastUsedAt（fire-and-forget）。
 //
+// 鉴权语义（P3 定稿）：**令牌只做「认证 + 有效期」**，能力一律按签发者用户实时计算
+// （与 Web 端 X-GX-Token 会话同口径）。scopes 仍随 subject 带出仅供审计/老数据兼容，
+// 任何授权判定都不再读它（注册层与工具层均已改为按 userId 走 M4 权限端口）。
+//
 // 未来 OAuth：仅在此函数留 "Bearer PAT 或 Bearer JWT" 分支扩展点（C-9：本期不预埋端点/表）。
 
 import { findByTokenHash, isUserActive, touchLastUsed } from "../pat/patService.js";

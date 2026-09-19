@@ -122,6 +122,20 @@ describe("B. gated 分区只看 effectiveSection（不看 URL 原始 section）"
     expect(renderPage("/workspace/settings/search")).toContain("配置云端语义检索");
   });
 
+  // 门控放宽：语义检索从 ownerOnly 改为「持任一 manage_* 组织动作」（canSeeWorkspaceSettings 同口径）。
+  it("非 owner 但持任一 manage_* 动作：/search 进得去（放宽不是收紧）", () => {
+    isOwner = false;
+    manageMenu = true;
+    expect(renderPage("/workspace/settings/search")).toContain("配置云端语义检索");
+  });
+
+  it("非 owner 且无任一管理动作：左栏不出现语义检索分区（fail-closed，不做 disabled 假入口）", () => {
+    isOwner = false;
+    manageMenu = false;
+    const html = renderPage();
+    expect(html).not.toContain("云端语义检索与索引覆盖度");
+  });
+
   it("企业环境直戳 /mcp 仍然进得去", () => {
     enterpriseOn = true;
     expect(renderPage("/workspace/settings/mcp")).toContain("为 AI 客户端签发访问令牌");

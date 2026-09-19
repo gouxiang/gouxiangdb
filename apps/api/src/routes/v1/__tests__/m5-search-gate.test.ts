@@ -107,6 +107,15 @@ function listSearchDbFiles(): string[] {
   return fs.readdirSync(tmpDir).filter((f) => f === "search.db" || f.startsWith("search.db"));
 }
 
+/**
+ * 写总门覆盖键（app_settings 的 search.enabled）。
+ * 必须在 buildApp 之后调用：buildApp 会 vi.resetModules()，之后 import 的才是同一份模块视图。
+ */
+async function setSearchEnabled(v: "on" | "off" | "inherit"): Promise<void> {
+  const { EmbeddingConfigStore } = await import("../../../domain/search/embeddingConfig.js");
+  await new EmbeddingConfigStore(prisma, JWT_SECRET).setSearchEnabled(v);
+}
+
 describe("parseM5SearchFlag 纯函数（表驱动）", () => {
   const cases: Array<[string | undefined, ReturnType<typeof parseM5SearchFlag>]> = [
     [undefined, "off"],
@@ -145,19 +154,29 @@ describe("GX_M5_SEARCH=off（默认，含未设置）", () => {
       expect(listSearchDbFiles()).toEqual([]);
     });
 
-    it(`flag=${flag === undefined ? "未设置" : "off"}：admin 六端点全 404 且零建库/零出网（管理面同 /search 门）`, async () => {
+    // 语义适配（P3 权威顺序变更）：总门 off 时**只有运营/出网端点**落 404；配置面端点继续可达，
+    // 否则 search.enabled 永远无法在界面上被打开（先有鸡还是先有蛋）。配置面仍受 role_owner 门，
+    // 本夹具的 gate-user 非 owner，故表现为 403（证明端点已挂载，不是 404 未挂载）。
+    it(`flag=${flag === undefined ? "未设置" : "off"}：运营/出网端点 404 且零建库；配置面按 owner 门 403`, async () => {
       const { app } = await buildApp(flag);
-      const calls: Array<[string, RequestInit?]> = [
+      const gated: Array<[string, RequestInit?]> = [
         ["/api/v1/admin/search/status", { headers: authHeaders() }],
-        ["/api/v1/admin/embedding/config", { headers: authHeaders() }],
         ["/api/v1/admin/reindex", { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: "{}" }],
+        ["/api/v1/admin/embedding/test-connection", { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: "{}" }],
+      ];
+      for (const [url, init] of gated) {
+        const res = await app.request(url, init);
+        expect(res.status, url).toBe(404);
+      }
+      const configFace: Array<[string, RequestInit?]> = [
+        ["/api/v1/admin/embedding/config", { headers: authHeaders() }],
         ["/api/v1/admin/embedding/config", { method: "PATCH", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: "{}" }],
         ["/api/v1/admin/embedding/api-key/rotate", { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ apiKey: "x" }) }],
         ["/api/v1/admin/embedding/api-key", { method: "DELETE", headers: authHeaders() }],
       ];
-      for (const [url, init] of calls) {
+      for (const [url, init] of configFace) {
         const res = await app.request(url, init);
-        expect(res.status, url).toBe(404);
+        expect(res.status, url).toBe(403); // 非 owner：端点在，只是无权
       }
       expect(listSearchDbFiles()).toEqual([]);
     });
@@ -230,5 +249,55 @@ describe("边界：企业双 flag 全 off 时整个 /api/v1 不挂载", () => {
     expect(res.status).toBe(404);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe("NOT_FOUND");
+  });
+});
+
+// 权威顺序：app_settings.search.enabled 显式 on/off > env > 默认 off。
+// 旧实现里 env=off 会让 /search 与 /admin 根本不挂载，后台开关形同虚设；这里钉死"后台置 on 即开"。
+// 每组都先 buildApp（内部 vi.resetModules，顺带清掉总门的进程内 TTL 缓存），再写覆盖键。
+describe("总门权威顺序：db 覆盖 > env（env=off 也能被后台打开）", () => {
+  it("env=off + db=on：/api/v1/search 可用（空 q 回 §9 空壳，非 404）", async () => {
+    const { app } = await buildApp("off");
+    await setSearchEnabled("on");
+    const res = await app.request("/api/v1/search?q=", { headers: authHeaders() });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[]; total: number };
+    expect(body.items).toEqual([]);
+    expect(body.total).toBe(0);
+  });
+
+  it("env=off + db=on：运营面（search/status）随之打开（非 owner 落 403 而非 404）", async () => {
+    const { app } = await buildApp("off");
+    await setSearchEnabled("on");
+    const res = await app.request("/api/v1/admin/search/status", { headers: authHeaders() });
+    expect(res.status).toBe(403); // 端点已可达，只是本夹具用户非 owner
+    // 同一端点在 db=inherit 时仍是 404：证明 403 来自 owner 门而不是总门失效。
+    const off = await buildApp("off");
+    await setSearchEnabled("inherit");
+    expect((await off.app.request("/api/v1/admin/search/status", { headers: authHeaders() })).status).toBe(404);
+  });
+
+  it("env=off + db=off：显式停用压过一切，仍 404", async () => {
+    const { app } = await buildApp("off");
+    await setSearchEnabled("off");
+    const res = await app.request("/api/v1/search?q=", { headers: authHeaders() });
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { code: string }).code).toBe("NOT_FOUND");
+  });
+
+  it("env=off + db=inherit（默认）：零变化，仍 404", async () => {
+    const { app } = await buildApp("off");
+    await setSearchEnabled("inherit");
+    const res = await app.request("/api/v1/search?q=", { headers: authHeaders() });
+    expect(res.status).toBe(404);
+    // 说明：不在这里断言「无 search.db」——同文件的 GX_M5_SEARCH=on 用例会先建库（共用 tmpDir），
+    // 零建库证据由上一组 env=off 用例专门覆盖。
+  });
+
+  it("env=on + db=off：后台显式停用也能关掉（覆盖值双向生效）", async () => {
+    const { app } = await buildApp("on");
+    await setSearchEnabled("off");
+    const res = await app.request("/api/v1/search?q=", { headers: authHeaders() });
+    expect(res.status).toBe(404);
   });
 });

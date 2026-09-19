@@ -3,8 +3,10 @@
 // 权威依据：M6-implementation-plan §5.2（椭圆契约与错误码）、§6（错误码只增）、C-3（有效期/前缀）。
 //
 // 契约：
-//   POST   /api/v1/pats  body {name(≤60), scopes[六位子集,非空], expiresInDays?: 30|90|365|null}
+//   POST   /api/v1/pats  body {name(≤60), scopes?: [六位子集]，expiresInDays?: 30|90|365|null}
 //     -> 201 { id, name, scopes, token（**仅此一次**）, tokenPrefix, expiresAt, createdAt }
+//   scopes 语义（P3）：令牌只做「认证 + 有效期」，能力一律按签发者用户实时计算（与 Web 端
+//     X-GX-Token 会话同口径）。scopes 字段保留在库与响应里（老数据兼容、不做迁移），不参与判定。
 //   GET    /api/v1/pats -> 200 [PatMetadata]（绝无 token/tokenHash；tokenPrefix 仅前 14 字符）
 //   DELETE /api/v1/pats/:id -> 204（仅本人行；非本人/不存在统一 404 PAT_NOT_FOUND，不泄漏存在性）
 //
@@ -57,7 +59,9 @@ patRoutes.post("/", async (c) => {
   const raw = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   try {
     const name = validateName(raw.name);
-    const scopes = validateScopes(raw.scopes);
+    // scopes 已不再是授权依据（能力按签发者用户实时计算）：**不传**即写入全集；
+    // 老客户端显式传了仍照旧校验（空/未知 -> 400 PAT_SCOPE_INVALID），不做破坏性变更。
+    const scopes = Object.prototype.hasOwnProperty.call(raw, "scopes") ? validateScopes(raw.scopes) : undefined;
     // C-3：缺省 90 天；显式 null = 永不过期（用 hasOwnProperty 区分"未携带"与"显式 null"）。
     const expiresInDays = Object.prototype.hasOwnProperty.call(raw, "expiresInDays")
       ? validateExpiry(raw.expiresInDays)

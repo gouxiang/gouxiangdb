@@ -1277,6 +1277,8 @@ export const EmbeddingAdminApi = {
 //   GET    /api/v1/pats        -> 200 PatMetadata[]（绝无 token/tokenHash；tokenPrefix 仅前 14 字符）
 //   DELETE /api/v1/pats/:id    -> 204（非本人/不存在统一 404 PAT_NOT_FOUND；超限 429 MCP_RATE_LIMITED + Retry-After）
 // 门控纪律：/api/v1/pats 与 /mcp 同受 GX_ENTERPRISE_ORG；off 即 404，调用方按 fail-closed 隐入口。
+// 鉴权语义（P3）：令牌只做「认证 + 有效期」，**能力按签发者账号实时计算**（与 Web 端 X-GX-Token
+//   会话同口径）；scopes 仍随令牌返回（老数据兼容），但界面既不勾选也不据此说明权限。
 // 类型位置：M6-FE 片只在 apps/web 工作，故 DTO 定义为前端本地契约；后端 openapi 冻结后如需可上提 @gx/shared-types。
 
 /** scope 六位（C-2 定稿）。 */
@@ -1315,7 +1317,11 @@ export interface CreatedPat {
 /** 创建入参：expiresInDays 为 30/90/365 或 null（永不过期）。 */
 export interface CreatePatInput {
   name: string;
-  scopes: PatScope[];
+  /**
+   * 可选：P3 起令牌只做「认证 + 有效期」，能力按签发者账号实时计算，界面不再勾选权限范围。
+   * 保留该字段只为老客户端兼容（显式传了后端仍按原规则校验）；缺省即不传。
+   */
+  scopes?: PatScope[];
   expiresInDays: 30 | 90 | 365 | null;
 }
 

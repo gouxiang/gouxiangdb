@@ -1,7 +1,9 @@
 // M5/S9 /api/v1/admin/search + embedding 管理面六端点（M5-implementation-plan §9、§5.4）。
 //
-// 挂载纪律：与 /search 同门，仅 config.m5Search !== "off" 时由 routes/v1/index.ts 条件挂载；
-// off 时六端点全部落 v1 自身 404（gate 有"零建库"文件系统断言）。
+// 挂载纪律：与 /search 同门——**恒挂载**，是否可用在请求期按总门判定（db 覆盖优先于 env）：
+// 目标态 off 时六端点全部 404 NOT_FOUND，且在任何 search.db 访问之前短路（零建库断言不变）。
+// 之所以改成请求期闸门：后台 app_settings 的 search.enabled=on 必须在 GX_M5_SEARCH=off 时也能
+// 打开管理面，否则配置页本身就是个点了没反应的开关。
 //
 // 授权：六端点全部限工作区 role_owner，照 routes/v1/scope.ts 的 resolveSubject 范式，
 // 不新增 manage_search 动作（§9）。业务在 domain/search/{reindex,adminStatus,adminEmbedding}，
@@ -15,6 +17,7 @@ import { HttpError } from "../../guards.js";
 import { resolveSubject } from "../../domain/authz/subjects.js";
 import { resolveSearchDbPath } from "../../domain/search/searchStore.js";
 import { startReindex, ReindexInProgressError } from "../../domain/search/reindex.js";
+import { loadSearchGateFlag } from "../../domain/search/searchGate.js";
 import { buildSearchStatus } from "../../domain/search/adminStatus.js";
 import {
   getEmbeddingConfig,
@@ -29,6 +32,22 @@ import { writeAudit, type AuditEventName } from "../../audit/audit.js";
 import { sourceIp } from "../../utils/client-ip.js";
 
 export const adminSearchRoutes = new Hono();
+
+/**
+ * 总门闸门（请求期，db 覆盖优先于 env）：目标态 off 一律 404 NOT_FOUND。
+ *
+ * 只加在【运营面与出网面】（reindex / status / test-connection）：它们会打开或触碰 search.db、
+ * 或向外部服务发请求，总门关着就不该发生（零建库、零出网断言的前提）。
+ *
+ * 配置面（embedding config GET/PATCH、api-key rotate/clear）**故意不加这道门**：它们只读写
+ * app_settings，而 search.enabled 本身正是要在这里被打开的——若连配置面也被总门挡在门外，
+ * env=off 时管理员就永远无法在界面上把检索打开，开关成了死结（先有鸡还是先有蛋）。
+ * 这些端点仍受 role_owner 硬门（assertOwner），并未放开任何权限。
+ */
+async function assertSearchGate(): Promise<void> {
+  const gateFlag = await loadSearchGateFlag(prisma, config.jwtSecret, process.env, config.m5Search);
+  if (gateFlag === "off") throw new HttpError(404, "统一检索未启用", "NOT_FOUND");
+}
 
 const REINDEX_TYPES = new Set(["record", "doc", "canvas"]);
 
@@ -57,6 +76,8 @@ function recordAudit(
 // 1) POST /admin/reindex（异步 202；进行中 409）。
 adminSearchRoutes.post("/reindex", async (c) => {
   const userId = c.get("auth").userId;
+  // 总门判定先于 owner 判定：off 时对任何人都是 404（与"端点未挂载"同口径，不区分身份）。
+  await assertSearchGate();
   await assertOwner(userId);
 
   let body: { type?: string; entityId?: string } = {};
@@ -112,6 +133,8 @@ adminSearchRoutes.post("/reindex", async (c) => {
 // 2) GET /admin/search/status。
 adminSearchRoutes.get("/search/status", async (c) => {
   const userId = c.get("auth").userId;
+  // 状态面要读 search.db：总门 off 时不碰库，直接 404（先于 owner 判定）
+  await assertSearchGate();
   await assertOwner(userId);
   const status = await buildSearchStatus({
     prisma, env: process.env, dataDir: config.dataDir, appDir: config.appDir,
@@ -193,6 +216,8 @@ adminSearchRoutes.post("/embedding/api-key/rotate", async (c) => {
 // 7) POST /admin/embedding/test-connection（只探活，不落库、不回凭据）。
 adminSearchRoutes.post("/embedding/test-connection", async (c) => {
   const userId = c.get("auth").userId;
+  // 出网探活：总门 off 时零出网（与既有 zero-egress 断言同口径），同样先于 owner 判定
+  await assertSearchGate();
   await assertOwner(userId);
   const result = await testEmbeddingConnection({
     prisma, env: process.env, jwtSecret: config.jwtSecret,

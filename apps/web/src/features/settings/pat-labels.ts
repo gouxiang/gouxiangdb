@@ -3,6 +3,10 @@
 //
 // 依据：M6-implementation-plan §8（M6-FE 输入清单）、C-2（scope 六位）、C-3（有效期 30/90/365/null、前缀 14）；
 // 后端契约见 apps/api/src/mcp/pat/tokens.ts + routes/v1/pats.ts。
+//
+// P3：scope 六位【降级为库内历史字段】——鉴权不再读它（能力按签发者账号实时计算）。
+// 下面的标签/顺序映射保留：令牌响应仍带 scopes（老数据兼容），这些映射是它的只读词典，
+// 但界面已不再用它做权限说明（唯一口径是 PAT_SCOPE_INHERIT_*）。
 import type { PatScope } from "../../api/client";
 
 /** scope 分组标题（数据表 / 文档 / 画布）。 */
@@ -79,10 +83,23 @@ export function requiresNeverExpiryConfirm(days: PatExpiryDays): boolean {
   return days === null;
 }
 
-/** 提交前校验：名称 1–60 字符（后端上限 60）且至少勾选一个 scope。 */
-export function canSubmitCreate(name: string, scopes: readonly PatScope[]): boolean {
+/**
+ * P3 权限继承说明：令牌只做「认证 + 有效期」，能力一律按签发者账号实时计算
+ * （与 Web 端 X-GX-Token 会话同口径）。这两句是界面上唯一允许出现的"权限"表述，
+ * 取代原先的六位 scope 勾选与列表徽标——那些控件在新语义下点了不改变任何实际能力。
+ */
+export const PAT_SCOPE_INHERIT_TITLE = "权限跟随签发者账号";
+export const PAT_SCOPE_INHERIT_HINT =
+  "令牌不再单独设置权限范围：它能做什么，等于签发它的这个账号当下能做什么（与网页端登录会话同口径）。账号权限被调整、或令牌被吊销/到期，即刻生效。";
+
+/**
+ * 提交前校验：名称 1–60 字符（后端上限 60）。
+ * 语义变更（P3）：原"至少一个 scope"条件随勾选区一并下线——权限由签发者账号决定，
+ * 用户在表单里选什么都不会改变能力，留着只会造成"选了才让提交"的假约束。
+ */
+export function canSubmitCreate(name: string): boolean {
   const n = name.trim();
-  return n.length > 0 && n.length <= 60 && scopes.length > 0;
+  return n.length > 0 && n.length <= 60;
 }
 
 export type PatTokenState = "active" | "expired" | "revoked";

@@ -34,10 +34,12 @@ let auditFile: string;
 let prisma: PrismaClient;
 let app: { request: (u: string, i?: RequestInit) => Promise<Response> };
 let d1 = "";
-let rwToken = "";        // doc:read + doc:write
-let roToken = "";        // doc:read only
+let rwToken = "";        // doc:read + doc:write（u1 签发：u1 有 r,u）
+let roToken = "";        // doc:read only（u1 签发，与 rw 同能力）
 let rwPatId = "";
 let roPatId = "";
+let noWriteToken = "";   // u2 签发：u2 对该文档只有 r -> 写工具不入册
+let noWritePatId = "";
 
 const H = { "content-type": "application/json", accept: "application/json, text/event-stream" };
 const call = (body: unknown, tok: string, a = app): Promise<Response> =>
@@ -88,6 +90,8 @@ beforeAll(async () => {
   ]);
   await createPolicies(prisma, [
     { id: "p_d1", nodeId: nodeId("doc", d1), subjectType: "user", subjectId: "u1", actions: "r,u" },
+    // u2：只有 r（无 u）——P3 起「写工具是否入册」按签发者实时计算，需要一个拿不到写工具的主体。
+    { id: "p_d1_ro", nodeId: nodeId("doc", d1), subjectType: "user", subjectId: "u2", actions: "r" },
   ]);
 
   const svc = await import("../../pat/patService.js");
@@ -95,6 +99,10 @@ beforeAll(async () => {
   const ro = await svc.createPat("u1", { name: "ro", scopes: ["doc:read"], expiresInDays: 90 });
   rwToken = rw.plaintext; rwPatId = rw.pat.id;
   roToken = ro.plaintext; roPatId = ro.pat.id;
+  await prisma.user.create({ data: { id: "u2", email: "u2@x.com", displayName: "u2", passwordHash: "x", status: "ACTIVE" } });
+  // noWriteToken：签发者 u2 对该文档无 u -> 写工具不入册（UNKNOWN_TOOL 用例的主体）。
+  const nw = await svc.createPat("u2", { name: "nw", scopes: ["doc:read"], expiresInDays: 90 });
+  noWriteToken = nw.plaintext; noWritePatId = nw.pat.id;
   app = (await import("../../../app.js")).createApp().app as unknown as typeof app;
 }, 120000);
 
@@ -132,8 +140,10 @@ describe("S7 审计：mcp_tool_call（成功）字段白名单", () => {
 });
 
 describe("S7 审计：UNKNOWN_TOOL 直调（SDK 直接拒，信封拿不到控制权）", () => {
-  it("只读 PAT 直调未注册写工具 -> -32602，但审计仍记下 tool 名与 patId", async () => {
-    const r = await callTool("doc.append_blocks", { docId: d1, ops: [{ type: "p", text: "x" }] }, roToken);
+  // 语义适配（P3）：原用 roToken（u1 签发，u1 有 u）-> 新口径下它能写，不再是 UNKNOWN_TOOL。
+  // 换 noWriteToken（签发者 u2 只有 r），"未注册 -> -32602 且审计仍补记" 的不变量原样保留。
+  it("签发者无写权限的令牌直调写工具 -> -32602，但审计仍记下 tool 名与 patId", async () => {
+    const r = await callTool("doc.append_blocks", { docId: d1, ops: [{ type: "p", text: "x" }] }, noWriteToken);
     expect(r.status).toBe(200);
     expect(r.result.isError).toBe(true);
     expect(r.result.content[0]!.text).toContain("-32602");
@@ -141,7 +151,7 @@ describe("S7 审计：UNKNOWN_TOOL 直调（SDK 直接拒，信封拿不到控�
     const rec = auditOf("mcp_tool_call").filter((x) => detailOf(x).resultCode === "UNKNOWN_TOOL").pop();
     expect(rec, "UNKNOWN_TOOL 必须补记审计").toBeTruthy();
     expect(detailOf(rec!).tool).toBe("doc.append_blocks");
-    expect(detailOf(rec!).patId).toBe(roPatId);
+    expect(detailOf(rec!).patId).toBe(noWritePatId);
     expect(rec!.status).toBe(404);
   });
 });

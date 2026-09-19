@@ -2,7 +2,7 @@
 //
 // 只做渲染与转发：状态与请求全在父面板。
 // 检索总门刻意【不假装热切换】——检索接口请求期读覆盖值即时生效，索引 worker 在启动期决定是否运行，
-// 覆盖值对它必须重启 API 服务；env=off 时路由根本没挂载，覆盖键此刻救不回来。三态如实写在分区里。
+// 覆盖值对它必须重启应用。env=off 只是「未显式设置时的默认态」，覆盖值置「启用」即可打开；三态如实写在分区里。
 
 import { Button, Input, Modal, Select } from "../../components/ui";
 import { Icon } from "../../components/icons";
@@ -12,7 +12,10 @@ import { Field } from "./EmbeddingRemoteSection";
 
 /**
  * 检索总门分区：db 覆盖键 search.enabled（on/off/inherit）+ 各生效面的如实标注。
- * env 为 off 时额外给出"必须先改 GX_M5_SEARCH 并重启"的红色提示，避免做了个点了没反应的开关。
+ *
+ * 权威顺序：本覆盖值显式 on/off > 环境变量 > 默认 off——故 env=off 时把覆盖值设为「启用」
+ * 也能打开检索（不必改环境变量）；inherit 才跟随环境变量。
+ * 热切换口径如实写死三行：检索接口即时生效 / 索引 worker 需重启 / env=off 时怎么开。
  */
 export function SearchGateSection({
   gate,
@@ -23,6 +26,11 @@ export function SearchGateSection({
   value: SearchEnabledOverride;
   onChange: (next: SearchEnabledOverride) => void;
 }) {
+  // env=off 只是「未显式设置时的默认态」：本行必须讲清楚"当前由环境变量关闭，可在上方开启"。
+  const envOffLine =
+    value === "on"
+      ? "环境变量当前为 off，但已按后台设置启用：检索接口现在可用；索引 worker 仍需重启应用后才会运行。"
+      : "当前由环境变量关闭，可在上方将覆盖值设为「启用」打开（索引 worker 仍需重启应用后才会运行）。";
   return (
     <section className="flex flex-col gap-3 rounded-gx-lg border border-gx-separator p-4">
       <div className="flex items-start gap-1.5">
@@ -31,7 +39,7 @@ export function SearchGateSection({
           <h3 className="text-gx-14 font-semibold text-gx-text-primary">检索总门</h3>
           <p className="mt-0.5 text-gx-12 text-gx-text-tertiary">
             环境变量 GX_M5_SEARCH 当前为 <span className="font-mono">{gate.envValue}</span>；
-            此处覆盖值写入工作区设置（无需改环境变量）。
+            此处覆盖值写入工作区设置，显式的「启用 / 停用」优先于环境变量（无需改环境变量或重启）。
           </p>
         </div>
       </div>
@@ -48,13 +56,13 @@ export function SearchGateSection({
       </Field>
       <div className="flex flex-col gap-1 text-gx-11 text-gx-text-hint">
         {gate.envGateOff && (
-          <span className="flex items-center gap-1.5 text-gx-danger">
+          <span className={["flex items-center gap-1.5", value === "on" ? "text-gx-warning" : "text-gx-danger"].join(" ")}>
             <Icon name="alertCircle" size={12} />
-            环境变量为 off 时检索路由未挂载：需先改 GX_M5_SEARCH 并重启 API 服务，覆盖值才可能生效。
+            {envOffLine}
           </span>
         )}
-        <span>· 检索接口：覆盖值即时生效。</span>
-        <span>· 索引 worker：启动期决定是否运行，改此值需重启 API 服务后生效。</span>
+        <span>· 检索接口：覆盖值即时生效（保存后下一次检索即按新值走）。</span>
+        <span>· 索引 worker：启动期决定是否运行，改此值需重启应用后生效。</span>
       </div>
     </section>
   );

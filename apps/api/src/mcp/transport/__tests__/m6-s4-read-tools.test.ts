@@ -92,10 +92,16 @@ afterAll(async () => {
 });
 
 describe("S4 读工具注册与可见性", () => {
-  it("tools/list 含 4 读工具；M5 off 时 record.search 缺席（运行期可用性门）", async () => {
-    expect(await toolNames()).toEqual([
-      "ping_echo", "record.list_records", "record.query_records", "table.get_schema", "table.list_bases",
-    ]);
+  // 语义适配（P3）：写工具是否入册改由【签发者的实际动作】决定——u1 是 b1/表一的创建者，
+  // 创建者兜底带出 c/u/d，故写工具也在册。原断言（"只读身份只有 4 件读工具"）的判据是令牌 scope，
+  // 已随新口径失效；这里改盯"读工具齐备 + record.search 仍被总门挡住"。
+  it("tools/list 含 4 读工具（写工具按签发者动作入册）；M5 off 时 record.search 缺席（运行期可用性门）", async () => {
+    const names = await toolNames();
+    for (const t of ["record.list_records", "record.query_records", "table.get_schema", "table.list_bases"]) {
+      expect(names).toContain(t);
+    }
+    expect(names).not.toContain("record.search");
+    expect(names).toContain("ping_echo");
   });
 });
 

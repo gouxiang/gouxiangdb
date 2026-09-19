@@ -90,9 +90,12 @@ afterAll(async () => {
 });
 
 describe("S4 record.delete_record", () => {
-  it("scope 粗筛：仅 record:read 的 PAT 无 delete_record（写工具不入册）", async () => {
-    expect(await names(roToken)).not.toContain("record.delete_record");
+  // 语义适配（P3）：判据从"令牌是否带 record:write"换成"签发者是否真有 d"。
+  // u1 有 d（表级 r,c,u,d）-> ro/rw 同集且都含 delete_record；u3 无 d（r,c,u）-> 不含。
+  it("注册集由签发者能力决定：同人签发的 ro/rw 一致且含 delete_record；签发者无 d 则不含", async () => {
+    expect(await names(roToken)).toEqual(await names(rwToken));
     expect(await names(rwToken)).toContain("record.delete_record");
+    expect(await names(maskedWToken)).not.toContain("record.delete_record");
   });
 
   it("无 confirm / confirm=false -> -32602（zod4 literal 强制，破坏性操作必须显式确认）", async () => {
@@ -106,8 +109,10 @@ describe("S4 record.delete_record", () => {
     expect((await prisma.record.findUniqueOrThrow({ where: { id: recordIds[0]! } })).deletedAt).toBeNull();
   });
 
-  it("只读 PAT 直调 delete_record -> UNKNOWN_TOOL（未注册，不泄漏存在性）", async () => {
-    const r = await callTool("record.delete_record", { tableId, recordId: recordIds[0]!, confirm: true }, roToken);
+  // 语义适配（P3）：原用例用 roToken（u1 签发、u1 有 d）——新口径下它已能删，不该是 UNKNOWN_TOOL。
+  // 换成"签发者无 d"的令牌（u3：r,c,u），UNKNOWN_TOOL / 不泄漏存在性 的不变量原样保留。
+  it("签发者无 d 的令牌直调 delete_record -> UNKNOWN_TOOL（未注册，不泄漏存在性）", async () => {
+    const r = await callTool("record.delete_record", { tableId, recordId: recordIds[0]!, confirm: true }, maskedWToken);
     expect(r.result.isError).toBe(true);
     expect(r.result.content[0]!.text).toContain("-32602");
     expect((await prisma.record.findUniqueOrThrow({ where: { id: recordIds[0]! } })).deletedAt).toBeNull();

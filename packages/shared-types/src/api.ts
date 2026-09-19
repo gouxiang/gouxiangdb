@@ -548,7 +548,11 @@ export function providerAllowsManualDim(p: EmbeddingProviderKind): boolean {
   return EMBEDDING_PROVIDER_PRESETS.find((x) => x.id === p)?.dimEditable === true;
 }
 
-/** 检索总门在 app_settings 的覆盖值；inherit=跟随环境变量 GX_M5_SEARCH。 */
+/**
+ * 检索总门在 app_settings 的覆盖值。
+ * 权威顺序：显式 on/off > 环境变量 GX_M5_SEARCH > 默认 off；inherit=跟随环境变量。
+ * 即后台显式设置后，env=off 也压不住它（只有 inherit 才回落 env）。
+ */
 export type SearchEnabledOverride = "on" | "off" | "inherit";
 
 /** 检索总门三态（与服务端 GX_M5_SEARCH 同款取值）。 */
@@ -562,9 +566,9 @@ export interface SearchGateDTO {
   override: SearchEnabledOverride;
   /** 覆盖后解析出的目标态。 */
   effective: SearchGateFlag;
-  /** 检索接口当前是否真的对外可用（路由已挂载 且 目标态非 off）。 */
+  /** 检索接口当前是否真的对外可用（目标态非 off；接口恒挂载，故与 env 是否 off 无关）。 */
   queryAvailable: boolean;
-  /** env=off 时路由根本没挂载：此时覆盖键无法启用检索，必须先改 GX_M5_SEARCH 并重启。 */
+  /** env=off：只是未显式设置时的默认态；后台覆盖值置 on 即可打开，不必改环境变量。 */
   envGateOff: boolean;
   /** 索引 worker 在启动期决定是否起，覆盖值需重启 API 服务才对它生效。 */
   workerNeedsRestart: boolean;

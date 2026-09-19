@@ -12,12 +12,17 @@
 import { prisma, runWrite } from "../../db.js";
 import {
   expiresAtFromDays, generateToken, hashToken, parseScopes, serializeScopes,
-  type PatScope,
+  PAT_SCOPES, type PatScope,
 } from "./tokens.js";
 
 export interface CreatePatInput {
   name: string;
-  scopes: PatScope[];
+  /**
+   * 令牌身上那份「权限范围」——**仅作老数据兼容，不参与任何鉴权判定**（P3 起能力一律按签发者
+   * 用户实时计算，与 Web 端 X-GX-Token 会话同口径）。
+   * 缺省写全集（表达"令牌自身不再额外收窄"）；显式传入仍按原规则校验（老客户端零破坏）。
+   */
+  scopes?: PatScope[];
   /** 30/90/365/null（null=永不过期）；路由层已把缺省补成默认 90。 */
   expiresInDays: 30 | 90 | 365 | null;
 }
@@ -62,6 +67,8 @@ export async function createPat(
 ): Promise<{ pat: PatMetadata; plaintext: string }> {
   const { token, tokenPrefix, tokenHash } = generateToken();
   const expiresAt = expiresAtFromDays(input.expiresInDays, now);
+  // scopes 缺省 -> 全集：令牌不再自行收窄能力（判定按签发者用户走），存全集如实表达这一点。
+  const scopes = input.scopes ?? [...PAT_SCOPES];
   const row = await runWrite("mcp.pat.create", () =>
     prisma.personalAccessToken.create({
       data: {
@@ -69,7 +76,7 @@ export async function createPat(
         name: input.name,
         tokenPrefix,
         tokenHash,
-        scopes: serializeScopes(input.scopes),
+        scopes: serializeScopes(scopes),
         expiresAt,
       },
     }),

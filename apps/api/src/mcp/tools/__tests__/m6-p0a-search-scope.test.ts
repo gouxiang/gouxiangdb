@@ -1,13 +1,15 @@
-// P0-A 对抗单测：record.search 必须按 PAT 六位 scope 收窄检索实体族。
+// P3 鉴权语义变更后的对抗单测：record.search **不再按令牌 scopes 收窄实体族**。
 //
-// 缺陷（已坐实）：M5 的 scope 收敛只认「登录用户 r 授权」，不知道 PAT 的 scope；旧桥硬编码
-// type:"all"，一枚仅持 record:read（无 doc:read/canvas:read）的 PAT 在 GX_M5_SEARCH≠off 时
-// 能读到其在 M4 有 r、但 PAT 未授权的 doc/canvas 正文片段（snippet 命中正文）。
+// 新口径（与 Web 端 X-GX-Token 会话同口径）：令牌只做「认证 + 有效期」，能力一律按签发者用户
+// 实时计算。实体族由 M5 的 scope 收敛按【签发者用户的 r 授权】在召回前收窄（不传 scopeKinds）。
 //
-// 本文件不连库、不 migrate、不建 search.db：vi.mock 拦截 queryRuntime/query，钉死两道闸——
-//   1) scope 安全闸：允许族必须映射成 nav kind 透传 buildQueryRuntime 的 scopeKinds；
-//   2) 输出纵深闸：即使 executeUnifiedSearch 回吐混合族，结果也只保留允许族（且 total 同步收窄）。
-// 对照组（带 doc:read 的 PAT 能出 doc）防「全挡死」假绿。
+// 历史背景（原 P0-A 缺陷，已坐实过）：M5 的 scope 收敛只认「登录用户 r 授权」，不知道 PAT 的
+// scope；旧实现在 MCP 层用 PAT scope 再收窄一次。P3 起这层收窄整体下线——越权基准改为签发者本人，
+// 等价于本人用 Web 端检索，不新增越权面。
+//
+// 本文件不连库、不 migrate、不建 search.db：vi.mock 拦截 queryRuntime/query，钉死两件事——
+//   1) 令牌级收窄已下线：任何 scopes 组合都走同一条不收窄的桥调用；
+//   2) 桥自身的 allowedEntityTypes 纵深闸仍在（非 MCP 语义传入时照旧收窄，不被本次改动波及）。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -41,23 +43,36 @@ vi.mock("../../../domain/search/query.js", () => ({
 }));
 
 import { runMcpUnifiedSearch } from "../../../domain/mcpSearchBridge.js";
-import { recordSearch, searchEntityTypesForScopes } from "../record.tools.js";
+import { recordSearch } from "../record.tools.js";
 
 beforeEach(() => {
   runtimeCapture.mockClear();
 });
 
-describe("P0-A-1 searchEntityTypesForScopes：PAT scope -> 检索实体族", () => {
-  it("仅 record:read -> 只映射 record；三族全无 -> 空（fail-closed 依据）", () => {
-    expect(searchEntityTypesForScopes(["record:read"])).toEqual(["record"]);
-    expect(searchEntityTypesForScopes(["record:write"])).toEqual([]); // write 不等于 read
-    expect(searchEntityTypesForScopes(["doc:write", "canvas:write"])).toEqual([]);
+/** 令牌上下文：scopes 仍带在主体上（老数据兼容），但不再是本文件的判定依据。 */
+const ctxOf = (scopes: string[]) => ({
+  subject: { userId: "u1", patId: "pat1", scopes: scopes as never },
+  port: null,
+});
+
+// 语义适配（P3）：原两组「PAT scope -> 检索实体族」的纯函数断言随鉴权语义下线而失效——
+// searchEntityTypesForScopes 已删除。改为钉死**新口径**：令牌 scopes 无论取何值，
+// record.search 都走同一条「不按令牌收窄」的桥调用（判据换成签发者用户，见 P0-A-3）。
+describe("P0-A-1 令牌 scopes 不再参与检索实体族判定", () => {
+  it("空 scope 与全 scope 的 PAT：桥调用参数逐字节一致（未传 allowedEntityTypes）", async () => {
+    await recordSearch(ctxOf([]), { q: "关键词" });
+    const withNone = runtimeCapture.mock.calls.at(-1)![0].opts as { scopeKinds?: string[] };
+    await recordSearch(ctxOf(["record:read", "doc:read", "canvas:read"]), { q: "关键词" });
+    const withAll = runtimeCapture.mock.calls.at(-1)![0].opts as { scopeKinds?: string[] };
+    expect(withNone.scopeKinds).toBeUndefined();
+    expect(withAll.scopeKinds).toBeUndefined();
+    expect(withNone).toEqual(withAll);
   });
-  it("多族映射（顺序固定 record/doc/canvas）；write 不旁路 read 闸", () => {
-    expect(searchEntityTypesForScopes(["record:read", "doc:read"])).toEqual(["record", "doc"]);
-    expect(searchEntityTypesForScopes(["doc:read", "canvas:read", "record:read"]))
-      .toEqual(["record", "doc", "canvas"]);
-    expect(searchEntityTypesForScopes([])).toEqual([]);
+
+  it("仅带写位（无读位）也不再 fail-closed：桥照常被调用（老语义会直接拒绝）", async () => {
+    const before = runtimeCapture.mock.calls.length;
+    await recordSearch(ctxOf(["record:write", "doc:write"]), { q: "x" });
+    expect(runtimeCapture.mock.calls.length).toBe(before + 1);
   });
 });
 
@@ -104,36 +119,29 @@ describe("P0-A-2 runMcpUnifiedSearch：scope 闸 + 输出纵深闸", () => {
   });
 });
 
-describe("P0-A-3 recordSearch 工具层：scope 推导 + fail-closed", () => {
-  const ctx = (scopes: string[]) => ({
-    subject: { userId: "u1", patId: "pat1", scopes: scopes as never },
-    port: null,
-  });
-
-  it("仅 record:read 的 PAT 调 record.search：桥只收到 [record]", async () => {
-    const r = await recordSearch(ctx(["record:read"]), { q: "关键词" });
+// 语义适配（P3）：三例的判据从「令牌 scope」换成「签发者用户」——subject.userId 恒为 u1，
+// 故任何 scope 组合都返回三族（由 M5 按 u1 的 r 授权收敛，本层不再额外收窄）。
+describe("P0-A-3 recordSearch 工具层：能力按签发者计算", () => {
+  it("仅 record:read 的 PAT 调 record.search：不再收窄成 [record]，三族全出（按签发者 u1 的授权）", async () => {
+    const r = await recordSearch(ctxOf(["record:read"]), { q: "关键词" });
     const payload = JSON.parse((r.content as Array<{ text: string }>)[0]!.text) as {
       items: Array<{ type: string }>;
     };
-    expect(payload.items.map((i) => i.type)).toEqual(["record"]);
+    expect(payload.items.map((i) => i.type).sort()).toEqual(["canvas", "doc", "record"]);
   });
 
-  it("带 doc:read 的 PAT：结果可含 doc（对照组）", async () => {
-    const r = await recordSearch(ctx(["record:read", "doc:read"]), { q: "关键词" });
+  it("带 doc:read 的 PAT：结果与上例一致（scope 不再改变结果集）", async () => {
+    const r = await recordSearch(ctxOf(["record:read", "doc:read"]), { q: "关键词" });
     const payload = JSON.parse((r.content as Array<{ text: string }>)[0]!.text) as {
       items: Array<{ type: string }>;
     };
-    expect(payload.items.map((i) => i.type).sort()).toEqual(["doc", "record"]);
+    expect(payload.items.map((i) => i.type).sort()).toEqual(["canvas", "doc", "record"]);
   });
 
-  it("无任何读族（注册层理论上已挡）：fail-closed FORBIDDEN_RESOURCE，不调桥/不回落全族", async () => {
+  it("无任何读 scope：不再 fail-closed FORBIDDEN_RESOURCE，仍走桥（能力与签发者一致）", async () => {
     const before = runtimeCapture.mock.calls.length;
-    const r = await recordSearch(ctx(["record:write", "doc:write"]), { q: "x" });
-    expect(r.isError).toBe(true);
-    const payload = JSON.parse((r.content as Array<{ text: string }>)[0]!.text) as {
-      code: string;
-    };
-    expect(payload.code).toBe("FORBIDDEN_RESOURCE");
-    expect(runtimeCapture.mock.calls.length).toBe(before); // 桥未被调用
+    const r = await recordSearch(ctxOf(["record:write", "doc:write"]), { q: "x" });
+    expect(r.isError ?? false).toBe(false);
+    expect(runtimeCapture.mock.calls.length).toBe(before + 1); // 桥被调用
   });
 });

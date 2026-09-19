@@ -63,7 +63,8 @@ searchRoutes.get("/", async (c) => {
   const userId = c.get("auth").userId;
 
   // 总门 db 覆盖（app_settings 的 search.enabled）：请求期解析，改了立即生效。
-  // env 仍决定路由是否挂载（off 时本文件根本不挂，落 v1 自身 404），覆盖键只在已挂载时收窄。
+  // 权威顺序：覆盖值显式 on/off > 环境变量 > 默认 off——故 env=off 时后台置 on 也能在这里打开检索
+  // （路由恒挂载，见 routes/v1/index.ts）。判定为 off 一律 404，且在任何 search.db 访问前短路。
   const gateFlag = await loadSearchGateFlag(prisma, config.jwtSecret, process.env, config.m5Search);
   if (gateFlag === "off") {
     throw new HttpError(404, "统一检索未启用", "NOT_FOUND");

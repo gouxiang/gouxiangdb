@@ -4,6 +4,8 @@ import { describe, it, expect } from "vitest";
 import {
   DEFAULT_READ_SCOPES,
   PAT_EXPIRY_OPTIONS,
+  PAT_SCOPE_INHERIT_HINT,
+  PAT_SCOPE_INHERIT_TITLE,
   PAT_STATE_LABEL,
   canRevoke,
   canSubmitCreate,
@@ -77,11 +79,19 @@ describe("有效期选项（C-3）", () => {
 });
 
 describe("提交校验", () => {
-  it("名称 1–60 且至少一个 scope 才可提交", () => {
-    expect(canSubmitCreate("脚本", ["record:read"])).toBe(true);
-    expect(canSubmitCreate("   ", ["record:read"])).toBe(false);
-    expect(canSubmitCreate("x".repeat(61), ["record:read"])).toBe(false);
-    expect(canSubmitCreate("脚本", [])).toBe(false);
+  // 语义适配（P3）：权限范围勾选区已下线，"至少选一个 scope"这条随之下线——
+  // 能力按签发者账号实时计算，表单里选什么都不改变实际能力。只剩名称 1–60 的硬门。
+  it("名称 1–60 才可提交（权限不再由表单决定）", () => {
+    expect(canSubmitCreate("脚本")).toBe(true);
+    expect(canSubmitCreate("x".repeat(60))).toBe(true);
+    expect(canSubmitCreate("   ")).toBe(false);
+    expect(canSubmitCreate("")).toBe(false);
+    expect(canSubmitCreate("x".repeat(61))).toBe(false);
+  });
+
+  it("权限继承说明是界面唯一口径（不再有勾选默认值）", () => {
+    expect(PAT_SCOPE_INHERIT_TITLE).toBe("权限跟随签发者账号");
+    expect(PAT_SCOPE_INHERIT_HINT).toContain("签发");
   });
 });
 

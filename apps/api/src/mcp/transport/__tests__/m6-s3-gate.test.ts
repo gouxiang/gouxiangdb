@@ -92,27 +92,33 @@ afterAll(async () => {
 });
 
 describe("S3 四身份 tools/list 快照", () => {
-  it("① 无权（族为空）-> 仅连接性工具", async () => {
+  // 语义适配（P3）：原 4 条快照的区分轴是"令牌 scope 宽不宽"，该轴已下线；现在的区分轴是
+  // 【签发者的实际能力】。uFull 是 b1/库一的创建者（创建者兜底带出 c/u/d），故它签发的令牌
+  // 无论 scope 如何，注册集都一样且含写工具。
+  const FULL_SET = [
+    "ping_echo", "record.create_record", "record.delete_record", "record.list_records",
+    "record.query_records", "record.update_record", "table.get_schema", "table.list_bases",
+  ];
+
+  it("① 无权（族为空）-> 仅连接性工具（族可见集闸门，与令牌 scope 无关）", async () => {
     expect(await toolNames(tokens.none!)).toEqual(["ping_echo"]);
   });
 
-  it("② 只读（有可见 base）-> 出现该族全部读工具", async () => {
-    expect(await toolNames(tokens.readonly!)).toEqual(["ping_echo", "record.list_records", "record.query_records", "table.get_schema", "table.list_bases"]);
+  it("② 只读身份（有可见 base）-> 注册集由签发者动作决定（创建者兜底故含写工具）", async () => {
+    expect(await toolNames(tokens.readonly!)).toEqual(FULL_SET);
   });
 
-  it("③ 读写（scope 更宽）-> 多出写工具 create/update/delete（S4 写片）", async () => {
-    expect(await toolNames(tokens.readwrite!)).toEqual([
-      "ping_echo", "record.create_record", "record.delete_record", "record.list_records",
-      "record.query_records", "record.update_record", "table.get_schema", "table.list_bases",
-    ]);
+  it("③ 读写身份 -> 与只读身份同集（scope 不再造成差异，判据是签发者）", async () => {
+    expect(await toolNames(tokens.readwrite!)).toEqual(FULL_SET);
+    expect(await toolNames(tokens.readwrite!)).toEqual(await toolNames(tokens.readonly!));
   });
 
   it("④ 字段受限 -> 集合与只读同（字段级收窄体现在 schema/出参，见 m6-s4-read-tools）", async () => {
-    expect(await toolNames(tokens.masked!)).toEqual(["ping_echo", "record.list_records", "record.query_records", "table.get_schema", "table.list_bases"]);
+    expect(await toolNames(tokens.masked!)).toEqual(FULL_SET);
   });
 
-  it("scope 粗筛：仅 doc:read 的 PAT 不见 record 族工具", async () => {
-    expect(await toolNames(tokens.noScope!)).toEqual(["ping_echo"]);
+  it("令牌 scope 不再粗筛：仅 doc:read 的 PAT 与 record:read 的 PAT 注册集一致", async () => {
+    expect(await toolNames(tokens.noScope!)).toEqual(await toolNames(tokens.readonly!));
   });
 });
 

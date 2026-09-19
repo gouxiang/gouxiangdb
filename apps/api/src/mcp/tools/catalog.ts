@@ -1,9 +1,11 @@
-// M6/S3 工具目录（唯一真源）：元数据（名称/scope/资源族/只读）+ zod4 入参 shape + handler。
+// M6/S3 工具目录（唯一真源）：元数据（名称/资源族/只读）+ zod4 入参 shape + handler。
 //
-// 闸门一在 registry 依本目录过滤：PAT scope 粗筛（无 record:write 则写工具不入册）+ 族可见集非空。
+// 闸门一在 registry 依本目录过滤：运行期可用性门（available）+ 族可见集非空。
+// meta.scopes 是 P3 前的历史字段（PAT scope 粗筛），**已不参与判定**——能力按签发者用户实时计算；
+// 保留它是为了让目录仍可读地描述"这件工具历史上属于哪个族"，且老数据/审计口径不受影响。
 // S3 目录仅两件：连接性自检 ping_echo、最小资源工具 table.list_bases；S4 起按 §4.5 增补。
 
-import { config } from "../../config.js";
+import { isUnifiedSearchEnabled } from "../../domain/search/searchGateRuntime.js";
 import { tableGetSchema, tableListBases } from "./table.tools.js";
 import { recordCreateRecord, recordDeleteRecord, recordUpdateRecord, recordListRecords, recordQueryRecords, recordSearch } from "./record.tools.js";
 import { canvasGetBoard } from "./canvas.tools.js";
@@ -99,8 +101,10 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     meta: {
       name: "record.search", title: "统一检索",
       description: "薄封装 M5 统一检索（关键词/向量混合；scope 先收敛由 M5 保证）。",
+      // 可用性门走总门判定（db 覆盖优先于 env），不再硬编码 config.m5Search。
+      // 委托 domain 封装层：本目录不碰 prisma，判定真源仍是 searchGate.resolveSearchGate。
       scopes: ["record:read"], family: null, readOnly: true,
-      available: () => config.m5Search !== "off",
+      available: () => isUnifiedSearchEnabled(),
     },
     inputShape: recordSearchShape,
     run: recordSearch,

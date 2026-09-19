@@ -14,6 +14,10 @@ import type { PatScope } from "../pat/tokens.js";
 export interface McpSubject {
   userId: string;
   patId: string;
+  /**
+   * 令牌自带的 scopes（P3 起**仅作老数据兼容**）：保留在库与协议里，不参与任何授权判定。
+   * 能力一律按 userId（签发者）经本文件的端口实时计算。
+   */
   scopes: PatScope[];
 }
 

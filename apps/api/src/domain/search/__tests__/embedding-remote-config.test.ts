@@ -124,7 +124,7 @@ describe("远端嵌入配置项（provider / dim / 并发 / 重试 / 总门）",
     ).rejects.toBeInstanceOf(EmbeddingConfigInvalid);
   }, 30_000);
 
-  it("env=off 时如实标注：路由未挂载，覆盖键此刻无法启用检索", async () => {
+  it("env=off 时如实标注：默认由环境变量关闭，但覆盖值置 on 即可打开（不需改环境变量）", async () => {
     h = await makeIndexerHarness("gx-remote-gate-envoff-");
     const cfg = await getEmbeddingConfig(deps()); // env 空 -> off
     expect(cfg.searchGate.envValue).toBe("off");
@@ -133,10 +133,11 @@ describe("远端嵌入配置项（provider / dim / 并发 / 重试 / 总门）",
     expect(cfg.searchGate.workerNeedsRestart).toBe(true);
   }, 30_000);
 
-  it("resolveSearchGate 纯函数：inherit 跟随 env、on/off 覆盖，未知覆盖值回落 inherit", () => {
+  it("resolveSearchGate 纯函数：inherit 跟随 env、on/off 覆盖（覆盖值显式时 env 说了不算）", () => {
     expect(resolveSearchGate("shadow", "inherit").effective).toBe("shadow");
     expect(resolveSearchGate("on", "off")).toMatchObject({ effective: "off", queryAvailable: false });
-    expect(resolveSearchGate("off", "on")).toMatchObject({ effective: "on", envGateOff: true, queryAvailable: false });
+    // 权威顺序回归：env=off 也压不住后台的显式 on（旧实现 queryAvailable 恒 false）。
+    expect(resolveSearchGate("off", "on")).toMatchObject({ effective: "on", envGateOff: true, queryAvailable: true });
     expect(parseSearchEnabledOverride("ON")).toBe("on");
     expect(parseSearchEnabledOverride("whatever")).toBe("inherit");
   });

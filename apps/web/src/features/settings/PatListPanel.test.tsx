@@ -31,13 +31,21 @@ vi.mock("../../api/client", () => ({
   },
   fetchEnterpriseMeta: vi.fn().mockResolvedValue(null),
   PatsApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), revoke: vi.fn() },
+  // 接入方式块要用它拼 MCP 端点；这里按根部署返回原样路径（SSR 下无 location.origin）。
+  withBase: (p: string) => p,
 }));
 
 import { PAT_QK } from "./pat-hooks";
 import { PatListPanel, PatRow, RevokeConfirmModal, NeverExpiryConfirmModal } from "./PatListPanel";
 import { PatTokenModal } from "./PatTokenModal";
 import { CreatePatForm } from "./CreatePatForm";
-import { NEVER_EXPIRY_WARNING, REVOKE_WARNING, TOKEN_ONCE_WARNING } from "./pat-labels";
+import {
+  NEVER_EXPIRY_WARNING,
+  PAT_SCOPE_INHERIT_HINT,
+  PAT_SCOPE_INHERIT_TITLE,
+  REVOKE_WARNING,
+  TOKEN_ONCE_WARNING,
+} from "./pat-labels";
 
 function render(node: ReactElement, seed?: { pats?: PatMetadata[] }): string {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: Infinity } } });
@@ -66,18 +74,20 @@ describe("PatListPanel 列表渲染", () => {
     const html = render(<PatListPanel />, { pats: [] });
     expect(html).toContain("还没有令牌");
     // 表头独有列名（新建表单不含），确认无数据时不渲染表格
-    expect(html).not.toContain("前缀");
     expect(html).not.toContain("从未使用");
   });
 
-  it("有数据：渲染名称/前缀/权限范围中文标签/状态/从未使用", () => {
+  // 语义适配（P3）：权限范围徽标下线，改只读说明「权限跟随签发者账号」——
+  // 断言从"出现中文 scope 标签"换成"出现继承说明且不出现原始 scope 串"。
+  it("有数据：渲染名称/前缀/权限继承说明/状态/从未使用", () => {
     const html = render(<PatListPanel />, { pats: [pat()] });
     expect(html).toContain("数据同步脚本");
     expect(html).toContain("gxpat_abcd1234");
-    expect(html).toContain("读取数据表");
+    expect(html).toContain(PAT_SCOPE_INHERIT_TITLE);
     expect(html).toContain("有效");
     expect(html).toContain("从未使用");
-    // 权限范围渲染为中文标签，不出现原始 scope 串
+    // 不再渲染权限范围：库里那份 scopes 既不展示中文标签也不出现原始串
+    expect(html).not.toContain("读取数据表");
     expect(html).not.toContain("record:read");
     expect(html).not.toContain("canvas:read");
   });
@@ -95,20 +105,37 @@ describe("PatListPanel 列表渲染", () => {
   });
 });
 
-describe("新建表单默认勾选（C-2 最小权限）", () => {
-  it("默认仅勾选只读三档，写三档不勾；默认有效期为 90 天", () => {
+// 语义适配（P3）：六位 scope 勾选区已移除（能力按签发者账号实时计算，勾选不再改变任何能力）。
+// 断言从"默认勾选哪几档"换成"没有任何 scope 勾选框 + 有效期默认 90 + 权限继承说明在位"。
+describe("新建表单：无权限勾选区（C-2 六位 scope 下线）", () => {
+  it("不存在任何权限范围勾选框；默认有效期为 90 天；权限改为继承说明", () => {
     const html = render(<CreatePatForm onCreate={() => undefined} />);
     const boxes = html.match(/<input[^>]*type="checkbox"[^>]*>/g) ?? [];
-    expect(boxes.length).toBe(6);
-    // 顺序：record:read/write、doc:read/write、canvas:read/write
-    expect(boxes[0]).toContain("checked");
-    expect(boxes[1]).not.toContain("checked");
-    expect(boxes[2]).toContain("checked");
-    expect(boxes[3]).not.toContain("checked");
-    expect(boxes[4]).toContain("checked");
-    expect(boxes[5]).not.toContain("checked");
+    expect(boxes.length).toBe(0);
     // 有效期 select 默认 90
     expect(html).toMatch(/<option[^>]*value="90"[^>]*selected/);
+    // 权限口径只剩"跟随签发者账号"，不再出现六位标签
+    expect(html).toContain(PAT_SCOPE_INHERIT_TITLE);
+    expect(html).not.toContain("读取数据表");
+    expect(html).not.toContain("写入画布");
+  });
+});
+
+describe("接入方式块：端点地址按当前站点动态生成", () => {
+  it("SSR 无 location 时退回同源相对路径，绝不写死 localhost/域名", () => {
+    const html = render(<PatListPanel />, { pats: [] });
+    expect(html).toContain("/mcp");
+    expect(html).not.toContain("localhost");
+    expect(html).not.toContain("http://");
+    expect(html).toContain("Authorization");
+    expect(html).toContain("Bearer");
+  });
+
+  it("源码层面：端点由 location.origin + withBase(\"/mcp\") 拼出（子路径部署不写死）", () => {
+    const src = readFileSync(fileURLToPath(new URL("./PatListPanel.tsx", import.meta.url)), "utf8");
+    expect(src).toContain("withBase(\"/mcp\")");
+    expect(src).toContain("location.origin");
+    expect(src).not.toMatch(/https?:\/\/(localhost|127\.0\.0\.1)/);
   });
 });
 

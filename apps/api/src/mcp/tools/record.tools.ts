@@ -8,7 +8,7 @@
 
 import { loadTableFields, parseViewConfig, queryRecords } from "../../domain/recordService.js";
 import { runMcpUnifiedSearch } from "../../domain/mcpSearchBridge.js";
-import type { SearchEntityType } from "../../domain/search/queryPlan.js";
+import { isUnifiedSearchEnabled } from "../../domain/search/searchGateRuntime.js";
 import {
   assertWriteOnlyFields,
   AuthzFieldError,
@@ -169,33 +169,25 @@ export async function recordQueryRecords(ctx: ToolCtx, args: Record<string, unkn
 }
 
 /**
- * 按 PAT 六位 scope 推导 record.search 允许检索的实体族（P0-A）：
- * record:read→record(nav kind=table)、doc:read→doc、canvas:read→canvas。
- * M5 的 scope 收敛只认登录用户 r 授权、不知道 PAT scope，故必须由 MCP 层按 scope 收窄实体族。
- * 返回空数组 = 该 PAT 无任何读族（注册层本已不发此工具，这里 fail-closed 兜底）。
+ * record.search：薄封装 M5 统一检索。
+ *
+ * 鉴权语义（P3 定稿）：**不再按令牌 scopes 收窄实体族**——令牌只做「认证 + 有效期」，能力一律
+ * 按签发者用户实时计算（与 Web 端 X-GX-Token 会话同口径）。实体族的可见性由 M5 的 scope 收敛
+ * 按【签发者用户的 r 授权】在召回前收窄（scopeKinds 不传即全族、由用户授权决定），
+ * 这与历史 P0-A 修复并不冲突：那次修的是"M5 不知道 PAT scope 会越权"，现在越权的基准改成
+ * 签发者本人，等价于本人用 Web 端检索，不产生新的越权面。
  */
-export function searchEntityTypesForScopes(scopes: readonly string[]): SearchEntityType[] {
-  const set = new Set(scopes);
-  const types: SearchEntityType[] = [];
-  if (set.has("record:read")) types.push("record");
-  if (set.has("doc:read")) types.push("doc");
-  if (set.has("canvas:read")) types.push("canvas");
-  return types;
-}
-
-/** record.search：薄封装 M5 统一检索；按 PAT scope 收窄实体族（P0-A），M5 scope 只认用户 r。 */
 export async function recordSearch(ctx: ToolCtx, args: Record<string, unknown>): Promise<ToolResult> {
-  if (config.m5Search === "off") return deny("INVALID_PARAMS", "统一检索未启用（GX_M5_SEARCH=off）");
-  const allowedTypes = searchEntityTypesForScopes(ctx.subject.scopes);
-  if (allowedTypes.length === 0) {
-    // fail-closed：注册层（catalog 要求 record:read）理论上已挡住，这里纵深兜底，绝不回落全族。
-    return deny("FORBIDDEN_RESOURCE", "该令牌无权检索任何实体");
+  // 总门判定（db 覆盖优先于 env）：注册层已据此决定入册，这里纵深兜底，口径同一处。
+  if (!(await isUnifiedSearchEnabled())) {
+    return deny("INVALID_PARAMS", "统一检索未启用（可在工作区设置 → 语义检索开启）");
   }
   const q = String(args.q ?? "");
   const limit = typeof args.limit === "number" ? args.limit : 20;
   const mode = (args.mode as "auto" | "fts" | "vector" | undefined) ?? "auto";
   try {
-    const res = await runMcpUnifiedSearch(ctx.subject.userId, q, mode, limit, allowedTypes);
+    // 不传 allowedEntityTypes：不做令牌级收窄，实体族由签发者用户的 r 授权在 M5 侧收敛。
+    const res = await runMcpUnifiedSearch(ctx.subject.userId, q, mode, limit);
     return text(JSON.stringify(res));
   } catch (err) {
     // 检索不可用（search.db 缺失/损坏、provider 故障）：结构化错误，**不 500 不挂死**。

@@ -1,5 +1,8 @@
-// M6/S3 闸门一（注册期）单测：PAT scope 粗筛 + 族可见集非空 + 引擎故障不冒泡。
+// M6/S3 闸门一（注册期）单测：族可见集非空 + 引擎故障不冒泡 + 令牌 scope 不再参与判定。
 // 用最小 server 替身收集「实际注册了哪些工具」（测试替身仅限 __tests__；生产接真 M4）。
+//
+// P3 语义：**令牌只做认证 + 有效期**，能力按签发者用户实时计算——故本文件不再有"scope 粗筛"用例，
+// 注册集的唯一判据是 port.listAccessibleResources（族可见集）与运行期可用性门。
 
 import { describe, expect, it, vi } from "vitest";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -36,10 +39,15 @@ function collector(): { server: McpServer; names: () => string[] } {
 const SUBJ = (scopes: string[]) => ({ userId: "u", patId: "p", scopes });
 
 describe("S3 闸门一：注册决策", () => {
-  it("scope 粗筛：无 record:read -> table.list_bases 不注册（只剩连接性 ping_echo）", async () => {
-    const { server, names } = collector();
-    await registerTools(server, SUBJ(["doc:read"]), { port: fakePort({ table: { byKind: { base: ["b1"] }, truncated: false } }) });
-    expect(names()).toEqual(["ping_echo"]);
+  // 语义适配（P3）：原用例断言"无 record:read -> 只剩 ping_echo"，判据是令牌 scope（已下线）。
+  // 改为锁定新不变量：scope 不参与注册判定——doc:read 与 record:read 主体的注册集完全一致。
+  it("令牌 scope 不参与注册判定：doc:read 与 record:read 主体注册集一致", async () => {
+    const a = collector();
+    await registerTools(a.server, SUBJ(["doc:read"]), { port: fakePort({ table: { byKind: { base: ["b1"] }, truncated: false } }) });
+    const b = collector();
+    await registerTools(b.server, SUBJ(["record:read"]), { port: fakePort({ table: { byKind: { base: ["b1"] }, truncated: false } }) });
+    expect(a.names()).toEqual(b.names());
+    expect(a.names().length).toBeGreaterThan(1); // 族非空 -> 确有工具入册（不是全挡死的假绿）
   });
 
   it("族可见集为空 -> 该族工具不注册", async () => {
@@ -48,11 +56,14 @@ describe("S3 闸门一：注册决策", () => {
     expect(names()).toEqual(["ping_echo"]);
   });
 
-  it("scope 通过且族非空 -> 注册该族全部可用工具（含 S4 读工具）", async () => {
+  it("族非空 -> 注册该族全部可用工具（写工具同入册：能力按签发者，替身端口对任意动作均可见）", async () => {
     const { server, names } = collector();
     await registerTools(server, SUBJ(["record:read"]), { port: fakePort({ table: { byKind: { base: ["b1"] }, truncated: false } }) });
     // M5 off（测试环境默认）-> record.search 不注册（运行期可用性门）
-    expect(names()).toEqual(["ping_echo", "record.list_records", "record.query_records", "table.get_schema", "table.list_bases"]);
+    expect(names()).toEqual([
+      "ping_echo", "record.create_record", "record.delete_record", "record.list_records",
+      "record.query_records", "record.update_record", "table.get_schema", "table.list_bases",
+    ]);
   });
 
   it("引擎抛错：不冒泡（不 500）+ 该族工具缺席 + 记 metric", async () => {
