@@ -13,6 +13,7 @@ import { confirmSoftDelete, confirmClearTable } from "../../components/feedback"
 import { toastDeleted } from "../../components/interaction";
 import { VIEW_TYPES, VIEW_TYPE_LABEL, type ViewType } from "@gx/shared-types";
 import { ViewTabs } from "./ViewTabs";
+import { ViewSettingsModal } from "./ViewSettingsModal";
 
 export function TopBar() {
   const navigate = useNavigate();
@@ -143,7 +144,12 @@ export function TopBar() {
           disabled={!canManageSchema}
           onClick={() => setShowNewView(true)}
         />
-        <IconButton icon="settings" label="视图设置" onClick={() => setShowSettings(true)} />
+        <IconButton
+          icon="settings"
+          label={viewId ? "视图设置" : "视图设置（未选中视图）"}
+          disabled={!viewId}
+          onClick={() => setShowSettings(true)}
+        />
         <IconButton
           icon="expand"
           label="扩展记录"
@@ -217,12 +223,17 @@ export function TopBar() {
         </div>
       </Modal>
 
-      {/* 视图设置占位 Modal（designer/ViewSettingsPanel 尚未实现，集成时替换） */}
-      <Modal open={showSettings} title="视图设置" onClose={() => setShowSettings(false)}>
-        <div className="py-4 text-center text-gx-13 text-gx-text-tertiary">
-          视图设置面板将在 designer 模块接入（ViewSettingsPanel）
-        </div>
-      </Modal>
+      {/* 视图设置：真正的 ViewSettingsPanel（表单视图含表单字段配置）。
+          之前这里是占位文案，导致设置入口形同不存在。 */}
+      {tableId && viewId && (
+        <ViewSettingsModal
+          open={showSettings}
+          tableId={tableId}
+          viewId={viewId}
+          permissions={perms}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
 
       {/* 导入 CSV Modal */}
       <Modal

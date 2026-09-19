@@ -1,5 +1,5 @@
 // apps/web/src/features/designer/ViewSettingsPanel.tsx
-// 视图设置面板：重命名、锁定模式、复制/删除视图
+// 视图设置面板：重命名、锁定模式、表单视图的表单配置、复制/删除视图
 
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
@@ -7,12 +7,18 @@ import { useViews, useGXMutations } from "../../api/hooks";
 import type { LockMode, PermissionSet, ViewDTO } from "@gx/shared-types";
 import { Button, Input, SegmentedControl, toast } from "../../components/ui";
 import { confirmIrreversible } from "../../components/feedback";
+import FormConfigSection from "../views/FormConfigSection";
 
 export interface ViewSettingsPanelProps {
   view: ViewDTO;
   tableId: string;
   permissions: PermissionSet;
   onClose: () => void;
+  /**
+   * true = 已由外层容器（Modal）提供卡片外观，本面板不再自带边框/阴影/定宽，
+   * 避免「卡片里再套一张卡片」。
+   */
+  embedded?: boolean;
 }
 
 const LOCK_OPTIONS: { value: LockMode; label: string; desc: string }[] = [
@@ -21,7 +27,7 @@ const LOCK_OPTIONS: { value: LockMode; label: string; desc: string }[] = [
   { value: "personal", label: "个人", desc: "每人独立配置，互不影响。" },
 ];
 
-export default function ViewSettingsPanel({ view, tableId, permissions, onClose }: ViewSettingsPanelProps) {
+export default function ViewSettingsPanel({ view, tableId, permissions, onClose, embedded = false }: ViewSettingsPanelProps) {
   const { baseId } = useParams();
   const navigate = useNavigate();
   const { data: views } = useViews(tableId);
@@ -75,7 +81,13 @@ export default function ViewSettingsPanel({ view, tableId, permissions, onClose 
   };
 
   return (
-    <div className="flex w-72 flex-col gap-4 rounded-gx-xl border border-gx-border bg-gx-surface p-4 shadow-lg">
+    <div
+      className={
+        embedded
+          ? "flex flex-col gap-4"
+          : "flex w-72 flex-col gap-4 rounded-gx-xl border border-gx-border bg-gx-surface p-4 shadow-lg"
+      }
+    >
       <div className="text-gx-14 font-semibold text-gx-text-primary">视图设置</div>
 
       {/* 名称 */}
@@ -105,6 +117,13 @@ export default function ViewSettingsPanel({ view, tableId, permissions, onClose 
           {LOCK_OPTIONS.find((o) => o.value === lockMode)?.desc}
         </div>
       </div>
+
+      {/* 表单视图专属：表单标题/描述 + 字段显隐/顺序/必填。
+          之前 formFields/formTitle/formDescription 全仓只有读取没有写入入口，
+          表单视图的提示却让用户「在视图设置中调整」—— 这里补上真正的写入口。 */}
+      {view.type === "form" && (
+        <FormConfigSection view={view} tableId={tableId} canEdit={canSchema} />
+      )}
 
       {/* 操作 */}
       <div className="flex flex-col gap-2 border-t border-gx-separator pt-3">
