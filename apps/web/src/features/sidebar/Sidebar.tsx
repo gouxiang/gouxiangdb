@@ -10,8 +10,6 @@ import {
   useTables,
   useGXMutations,
 } from "../../api/hooks";
-import { AVATAR_PALETTE } from "@gx/design-tokens";
-import { useAuthStore } from "../../store/auth";
 import { Badge, Input, Menu, MenuDivider, MenuItem, Modal, Popover, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 // 阶段 4：删除统一走 L2 确认 + 撤销 toast（R-D-23 / R-I-08 / R-D-22）
@@ -19,20 +17,11 @@ import { confirmSoftDelete } from "../../components/feedback";
 import { toastDeleted } from "../../components/interaction";
 import { LibrarySwitcher } from "../../components/LibrarySwitcher";
 import { EntityIconPicker, resolvedEntityColor, resolveEntityIcon } from "../../components/EntityIconPicker";
-import { PersonalCenterDrawer } from "../settings/PersonalCenterDrawer";
 import { DetailLayoutEditor } from "../detail/DetailLayout";
-
-function avatarColor(seed: string): string {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return AVATAR_PALETTE[h % AVATAR_PALETTE.length]!;
-}
 
 export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const navigate = useNavigate();
   const { baseId, tableId } = useParams();
-  const user = useAuthStore((s) => s.user);
-  const logout = useAuthStore((s) => s.logout);
 
   const { data: tables } = useTables(baseId ?? null);
   const baseQ = useBase(baseId ?? null);
@@ -45,7 +34,6 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const [showNew, setShowNew] = useState(false);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [personalCenterOpen, setPersonalCenterOpen] = useState(false);
 
   /**
    * 打开「编辑表单」：导航到目标表并带 ?design=1，由 ViewRouter 挂载全屏表单设计器。
@@ -269,7 +257,8 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         </div>
       </div>
 
-      {/* 底部：回收站 / 设置 / 用户 */}
+      {/* 底部：回收站 / 通讯录 / 设置
+          （交互治理第一批：原先右下角的「个人信息」入口已下线，个人信息与登出统一走顶栏个人中心抽屉） */}
       <div className="border-t border-gx-separator p-1.5">
         <button
           type="button"
@@ -295,27 +284,6 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           <Icon name="settings" size={14} />
           <span>设置</span>
         </button>
-
-        <div className="relative mt-1 border-t border-gx-separator pt-1.5">
-          <button
-            type="button"
-            onClick={() => setPersonalCenterOpen(true)}
-            className="flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 hover:bg-gx-row-hover"
-            title="打开个人中心"
-            aria-label="打开个人中心"
-          >
-            <span
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-gx-11 font-semibold text-white"
-              style={{ backgroundColor: avatarColor(user?.displayName ?? user?.email ?? "?") }}
-            >
-              {(user?.displayName ?? user?.email ?? "?").charAt(0).toUpperCase()}
-            </span>
-            <span className="flex-1 truncate text-left text-gx-12 text-gx-text-primary">
-              {user?.displayName ?? user?.email}
-            </span>
-            <Icon name="settings" size={14} className="text-gx-text-tertiary" />
-          </button>
-        </div>
       </div>
 
       {/* 重命名 Modal */}
@@ -363,10 +331,6 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           </span>
         </div>
       </Modal>
-
-      {/* 个人中心 Drawer（点击左下角头像或设置图标打开） */}
-      <PersonalCenterDrawer open={personalCenterOpen} onClose={() => setPersonalCenterOpen(false)} />
-
     </aside>
   );
 }

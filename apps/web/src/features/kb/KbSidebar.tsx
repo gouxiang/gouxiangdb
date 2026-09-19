@@ -1,29 +1,17 @@
 // apps/web/src/features/kb/KbSidebar.tsx
 // 知识库侧栏：统一库切换（数据库 + 知识库）+ 全局搜索 + 当前知识库导航（内容/回收站/成员权限）
-// + 文档树 + 底部个人信息。与数据表 Sidebar 共用 LibrarySwitcher，视觉/交互一致。
+// + 文档树。与数据表 Sidebar 共用 LibrarySwitcher，视觉/交互一致。
 // 颜色全走 gx-* token，图标全用自建 SVG（无 emoji）。
 
-import { useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { LibrarySwitcher } from "../../components/LibrarySwitcher";
-import { useAuthStore } from "../../store/auth";
-import { PersonalCenterDrawer } from "../settings/PersonalCenterDrawer";
 import { KbTree } from "./KbTree";
-import { AVATAR_PALETTE } from "@gx/design-tokens";
-
-function avatarColor(seed: string): string {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return AVATAR_PALETTE[h % AVATAR_PALETTE.length]!;
-}
 
 export function KbSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const navigate = useNavigate();
   const { kbId } = useParams();
   const location = useLocation();
-  const user = useAuthStore((s) => s.user);
-  const [personalCenterOpen, setPersonalCenterOpen] = useState(false);
 
   const loc = location.pathname;
   const inKb = !!kbId;
@@ -116,31 +104,9 @@ export function KbSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
             </button>
           </>
         )}
-
-        <div className="relative mt-1 border-t border-gx-separator pt-1.5">
-          <button
-            type="button"
-            onClick={() => setPersonalCenterOpen(true)}
-            className="flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 hover:bg-gx-row-hover"
-            title="打开个人中心"
-            aria-label="打开个人中心"
-          >
-            <span
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-gx-11 font-semibold text-white"
-              style={{ backgroundColor: avatarColor(user?.displayName ?? user?.email ?? "?") }}
-            >
-              {(user?.displayName ?? user?.email ?? "?").charAt(0).toUpperCase()}
-            </span>
-            <span className="flex-1 truncate text-left text-gx-12 text-gx-text-primary">
-              {user?.displayName ?? user?.email}
-            </span>
-            <Icon name="settings" size={14} className="text-gx-text-tertiary" />
-          </button>
-        </div>
+        {/* 交互治理第一批：原先底部「个人信息 + 登出」入口已下线，
+            个人信息统一走顶栏 WorkspaceTopBar 的个人中心抽屉（与新壳一致）。 */}
       </div>
-
-      {/* 个人中心 Drawer（点击左下角头像/名字打开） */}
-      <PersonalCenterDrawer open={personalCenterOpen} onClose={() => setPersonalCenterOpen(false)} />
     </aside>
   );
 }

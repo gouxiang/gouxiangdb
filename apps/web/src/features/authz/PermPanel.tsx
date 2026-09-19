@@ -1,17 +1,41 @@
 // M4 统一授权管理面板：左资源树（M3 tree，后端剪枝）+ 右节点策略编辑。
 // 写入口经 useAuthzCapability 门控（默认 fail-closed）；只读解释（effective/面包屑）随面板可见。
+//
+// 页面级门控（交互治理第一批）：直访 /workspace/authz 必须先过与 FooterNav 同一判定
+// （features/workspace/lib/nav-gate.ts 的 canSeeAuthz）——不具备相应能力时只出「无权限」态，
+// 一棵策略树都不渲染。原先门控只下沉到面板内部写入口，导致无权账号直访仍能看到完整策略树。
 import { useState } from "react";
 import type { NavNodeDTO } from "@gx/shared-types";
 import { Icon } from "../../components/icons";
-import { Button } from "../../components/ui";
+import { Button, EmptyState } from "../../components/ui";
 import { PermNodeTree } from "./PermNodeTree";
 import { PermNodeEditor } from "./PermNodeEditor";
 import { EffectiveDrawer } from "./EffectiveDrawer";
 import { NodeBreadcrumb } from "./NodeBreadcrumb";
+import { useAuthzCapability } from "./useAuthzCapability";
+import { useMyOrgActions } from "../contacts/contacts-hooks";
+import { canSeeAuthz } from "../workspace/lib/nav-gate";
 
 export default function PermPanel() {
   const [selected, setSelected] = useState<NavNodeDTO | null>(null);
   const [showEffective, setShowEffective] = useState(false);
+  const { canManage } = useAuthzCapability();
+  const { actions, isLoading: actionsLoading } = useMyOrgActions();
+  // 探针未回来先按不可见处理（fail-closed）：先出树再改成无权限态等于把策略树闪给无权账号。
+  const canView = !actionsLoading && canSeeAuthz(actions, canManage);
+
+  // 无权限：整页替换为无权限态（不渲染 PermNodeTree / PermNodeEditor）。
+  if (!canView) {
+    return (
+      <div className="flex h-full items-center justify-center bg-gx-bg">
+        <EmptyState
+          icon="shield"
+          title="无权限查看权限管理"
+          description="权限管理仅向工作区所有者或持「授权管理」动作的成员开放。"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col bg-gx-bg">

@@ -20,17 +20,18 @@
 //
 // 阶段 6 菜单精细化：底部固定区与 L1 主区共用同一套行规格（高 32 / 图标 14 / 文字 13 /
 // 圆角 8 / 左右 padding 8 / 150ms ease-out），图标按语义重排（工作区设置 = settings）；
-// 最底补用户卡片（头像 + 名字，点击开个人中心）——参考图 L1 的最后一项。
+// 底部固定区四项 + 折叠开关（原先最底的「用户卡片」已于交互治理阶段下线：
+//   个人信息/登出入口统一收口到右上角 WorkspaceTopBar 的个人中心抽屉，避免同一入口两处并存）。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
 import { Icon, type IconName } from "../../components/icons";
 import { buildEntityIconIndex, type EntityIconIndex } from "../../components/EntityIconPicker";
-import { AVATAR_PALETTE } from "@gx/design-tokens";
-import { useAuthStore } from "../../store/auth";
 import { useBases } from "../../api/hooks";
 import { useKbList } from "../kb/kb-hooks";
-import { PersonalCenterDrawer } from "../settings/PersonalCenterDrawer";
 import { SearchDialog } from "../search/SearchDialog";
+import { useAuthzCapability } from "../authz/useAuthzCapability";
+import { visibleFooterNav } from "./lib/nav-gate";
+import { useMyOrgActions } from "../contacts/contacts-hooks";
 import { WorkspaceTopBar } from "./WorkspaceTopBar";
 import { L1_ROW_IDLE, L1_ROW_SELECTED, NAV_ROW_TRANSITION, PrimaryNav } from "./PrimaryNav";
 import { SecondaryNav } from "./SecondaryNav";
@@ -64,10 +65,16 @@ const L2_FLOATING_TOP_PX = 48;
  * 底部固定区四项（D-5 §2.2 定稿顺序不变，单一真源在 lib/nav-footer.ts）。
  * 图标按语义重排：工作区设置由 database 改为 settings（database 已用于「数据库」类实体，
  * 挂在设置入口上语义错配）。行规格与 L1 主区共用 L1_ROW_* 与 NAV_ROW_TRANSITION。
+ *
+ * 门控（交互治理第一批）：四项各按自己那套能力判定渲染 —— 无能力即**不渲染该行**
+ * （不是 disabled 假装禁用）。判定与 loading 语义全部下沉到 lib/nav-gate.ts 的纯函数，
+ * 这里只装配 hook 信号，便于对同一套判定写单测而不必渲染整壳。
  */
 function FooterNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const { actions, isLoading: actionsLoading } = useMyOrgActions();
+  const { canManage: authzManage } = useAuthzCapability();
 
   const go = (path: string) => {
     navigate(path);
@@ -96,56 +103,24 @@ function FooterNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?:
     );
   };
 
+  const visible = visibleFooterNav(FOOTER_NAV_ITEMS, {
+    actions,
+    authzManage,
+    // 能力探针未回来一律按无能力（fail-closed），否则会先闪出管理入口再消失。
+    loading: actionsLoading,
+  });
+  // 一项都不可见时不渲染容器：空壳会在 L1 底部留下一条突兀的发丝线 + 内边距。
+  if (visible.length === 0) return null;
+
   return (
     <div className="flex shrink-0 flex-col gap-0.5 border-t border-gx-hairline p-1.5">
-      {FOOTER_NAV_ITEMS.map((it) => (
+      {visible.map((it) => (
         <div key={it.path}>{item(it)}</div>
       ))}
     </div>
   );
 }
 
-/** 头像底色：与顶栏同一取色口径（按昵称稳定哈希，避免一片蓝）。 */
-function avatarColor(seed: string): string {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return AVATAR_PALETTE[h % AVATAR_PALETTE.length]!;
-}
-
-/**
- * L1 最底用户卡片（参考图末项）：头像 + 名字。
- * 点击开个人中心抽屉——与顶栏同一真实入口，不做成无反应的装饰块。
- */
-function UserCard({ collapsed }: { collapsed: boolean }) {
-  const user = useAuthStore((s) => s.user);
-  const [open, setOpen] = useState(false);
-  const name = user?.displayName ?? user?.email ?? "未登录";
-  return (
-    <div className="shrink-0 border-t border-gx-hairline p-1.5">
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        title={`${name} · 个人中心`}
-        aria-label="打开个人中心"
-        className={[
-          "flex h-8 w-full items-center rounded-gx-lg",
-          NAV_ROW_TRANSITION,
-          L1_ROW_IDLE,
-          collapsed ? "justify-center px-0" : "gap-2 px-2",
-        ].join(" ")}
-      >
-        <span
-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-gx-11 font-semibold text-white"
-          style={{ backgroundColor: avatarColor(name) }}
-        >
-          {name.charAt(0).toUpperCase()}
-        </span>
-        {collapsed ? null : <span className="min-w-0 flex-1 truncate text-left text-gx-13">{name}</span>}
-      </button>
-      <PersonalCenterDrawer open={open} onClose={() => setOpen(false)} />
-    </div>
-  );
-}
 
 /** R-N-07 折叠开关：折叠档下也必须可点（只留图标 + tooltip），否则用户无法还原。 */
 function CollapseToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
@@ -230,8 +205,6 @@ function SideRail({
       {showCollapseToggle && (
         <CollapseToggle collapsed={collapsed} onToggle={onToggleCollapsed} />
       )}
-      {/* 参考图：用户卡片是 L1 的最后一项（头像 + 名字），始终贴底 */}
-      <UserCard collapsed={collapsed} />
     </aside>
   );
 }
