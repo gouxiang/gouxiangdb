@@ -20,6 +20,7 @@ import {
 } from "../../domain/nav/sync.js";
 import { nodeId } from "../../domain/nav/backfill.js";
 import { enqueueChangeEventsTx } from "../../domain/search/outbox.js";
+import { entityIconSchema } from "../../validators/entity-icon.js";
 import { requireKb, shadowKbAction } from "./shared.js";
 import { membersRoutes } from "./members.js";
 import { docsRoutes } from "./docs.js";
@@ -52,6 +53,7 @@ kb.get("/", async (c) => {
         id: m.kb!.id,
         name: m.kb!.name,
         iconColor: m.kb!.iconColor,
+        icon: m.kb!.icon,
         role: m.role,
         docCount: m.kb!._count.docs,
         createdAt: m.kb!.createdAt,
@@ -99,7 +101,16 @@ kb.get("/:kbId", async (c) => {
     const { role } = await requireKb(userId, kbId);
     const full = await prisma.knowledgeBase.findUnique({ where: { id: kbId } });
     if (!full) throw new HttpError(404, "知识库不存在");
-    return c.json({ knowledgeBase: { id: full.id, name: full.name, iconColor: full.iconColor, role, createdAt: full.createdAt } });
+    return c.json({
+      knowledgeBase: {
+        id: full.id,
+        name: full.name,
+        iconColor: full.iconColor,
+        icon: full.icon,
+        role,
+        createdAt: full.createdAt,
+      },
+    });
   } catch (e) {
     return errorResponse(c, e);
   }
@@ -116,19 +127,30 @@ kb.patch("/:kbId", async (c) => {
       throw new HttpError(403, "只有所有者可修改知识库");
     }
     await shadowKbAction("kb.rename", userId, kbId, "manage_share", true);
-    const schema = z.object({ name: z.string().min(1).max(80).optional(), iconColor: z.string().optional() });
+    const schema = z.object({
+      name: z.string().min(1).max(80).optional(),
+      iconColor: z.string().optional(),
+      icon: entityIconSchema,
+    });
     const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
-    // M3/S3 #12a：改名收紧进事务同步 kb 节点 name（iconColor 不进树，也一并同事务）。
+    // M3/S3 #12a：改名收紧进事务同步 kb 节点 name（iconColor / icon 不进树，也一并同事务）。
     const updated = await withWriteTx("kb.rename", async (tx) => {
       const u = await tx.knowledgeBase.update({
         where: { id: kbId },
-        data: { name: parsed.data.name, iconColor: parsed.data.iconColor },
+        data: { name: parsed.data.name, iconColor: parsed.data.iconColor, icon: parsed.data.icon },
       });
       if (parsed.data.name !== undefined) await syncNavFromEntitiesTx(tx);
       return u;
     });
-    return c.json({ knowledgeBase: { id: updated.id, name: updated.name, iconColor: updated.iconColor } });
+    return c.json({
+      knowledgeBase: {
+        id: updated.id,
+        name: updated.name,
+        iconColor: updated.iconColor,
+        icon: updated.icon,
+      },
+    });
   } catch (e) {
     return errorResponse(c, e);
   }

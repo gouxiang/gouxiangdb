@@ -22,10 +22,19 @@ export interface Harness {
   /** 新建一个 Base 并把固定身份 u1 加为 owner（权限守卫查 members 行）。 */
   makeBase: (name?: string) => Promise<string>;
   makeTable: (baseId: string, name: string) => Promise<{ id: string; primaryFieldId: string }>;
+  /** 新建一个知识库并把固定身份 u1 加为 owner（kb 守卫查 kb_members 行）。 */
+  makeKb: (name?: string) => Promise<string>;
   teardown: () => Promise<void>;
 }
 
-export async function setupHarness(prefix: string): Promise<Harness> {
+/**
+ * 挂载哪一组路由：
+ *   "records"（默认）—— records + fields，供 RC-09/RC-12/RC-35 复用；
+ *   "entities"        —— bases + tables + kb，供实体自定义图标（icon/iconColor）契约测试用。
+ */
+export type HarnessRoutes = "records" | "entities";
+
+export async function setupHarness(prefix: string, routes: HarnessRoutes = "records"): Promise<Harness> {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   process.env.DATABASE_URL = `file:${path.join(tmpDir, "p.db")}`;
   process.env.NODE_ENV = "test";
@@ -46,16 +55,26 @@ export async function setupHarness(prefix: string): Promise<Harness> {
     data: { id: OWNER_ID, email: "u1@example.com", displayName: "U1", passwordHash: "x" },
   });
 
-  // 动态 import：records/guards 此刻才解析 db.ts 单例（= 上面注入的 prisma）。
-  const [recordsMod, guardsMod, fieldsMod] = await Promise.all([
-    import("../records.js"),
-    import("../../guards.js"),
-    import("../fields.js"),
-  ]);
-
+  // 动态 import：各路由此刻才解析 db.ts 单例（= 上面注入的 prisma）。
+  const guardsMod = await import("../../guards.js");
   const app = new Hono();
-  app.route("/records", recordsMod.records);
-  app.route("/fields", fieldsMod.fields);
+  if (routes === "entities") {
+    const [basesMod, tablesMod, kbMod] = await Promise.all([
+      import("../bases.js"),
+      import("../tables.js"),
+      import("../kb/index.js"),
+    ]);
+    app.route("/bases", basesMod.bases);
+    app.route("/tables", tablesMod.tables);
+    app.route("/kb", kbMod.kb);
+  } else {
+    const [recordsMod, fieldsMod] = await Promise.all([
+      import("../records.js"),
+      import("../fields.js"),
+    ]);
+    app.route("/records", recordsMod.records);
+    app.route("/fields", fieldsMod.fields);
+  }
   app.onError((err, c) => guardsMod.errorResponse(c, err));
 
   const request: Harness["request"] = (method, url, body) => {
@@ -87,12 +106,19 @@ export async function setupHarness(prefix: string): Promise<Harness> {
     return { id: table.id, primaryFieldId: primary.id };
   }
 
+  async function makeKb(name = "kb"): Promise<string> {
+    const kb = await prisma.knowledgeBase.create({ data: { name, createdBy: OWNER_ID } });
+    await prisma.kbMember.create({ data: { kbId: kb.id, userId: OWNER_ID, role: "owner" } });
+    return kb.id;
+  }
+
   return {
     tmpDir,
     prisma,
     request,
     makeBase,
     makeTable,
+    makeKb,
     teardown: async () => {
       await prisma.$disconnect();
       fs.rmSync(tmpDir, { recursive: true, force: true });

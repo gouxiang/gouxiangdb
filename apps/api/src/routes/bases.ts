@@ -22,17 +22,21 @@ import {
   removeLegacyProjectionTx,
   LEGACY_REASONS,
 } from "../domain/authz/projection.js";
+import { entityIconSchema } from "../validators/entity-icon.js";
 
 export const bases = new Hono();
 
 const createSchema = z.object({
   name: z.string().min(1).max(80),
   iconColor: z.string().optional(),
+  // 自定义图标：白名单内图标名；null = 清除回默认（新建一般不带，与 iconColor 对齐开放）。
+  icon: entityIconSchema,
 });
 
 const updateSchema = z.object({
   name: z.string().min(1).max(80).optional(),
   iconColor: z.string().optional(),
+  icon: entityIconSchema,
 });
 
 const inviteSchema = z.object({
@@ -133,6 +137,7 @@ bases.get("/", async (c) => {
         id: m.base.id,
         name: m.base.name,
         iconColor: m.base.iconColor,
+        icon: m.base.icon,
         createdAt: m.base.createdAt.toISOString(),
         createdBy: m.base.createdBy,
         role: m.role as Role,
@@ -157,6 +162,7 @@ bases.post("/", async (c) => {
       data: {
         name: parsed.data.name,
         iconColor: parsed.data.iconColor ?? "#378ADD",
+        icon: parsed.data.icon ?? null,
         createdBy: userId,
       },
     });
@@ -173,6 +179,7 @@ bases.post("/", async (c) => {
       id: base.id,
       name: base.name,
       iconColor: base.iconColor,
+      icon: base.icon,
       createdAt: base.createdAt.toISOString(),
       createdBy: base.createdBy,
       role: "owner" as Role,
@@ -206,6 +213,7 @@ bases.get("/:baseId", async (c) => {
       id: base.id,
       name: base.name,
       iconColor: base.iconColor,
+      icon: base.icon,
       createdAt: base.createdAt.toISOString(),
       createdBy: base.createdBy,
       role,
@@ -220,13 +228,16 @@ bases.patch("/:baseId", async (c) => {
   await requireCanManageBase(c, baseId);
   const parsed = updateSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
-  // M3/S3 #2：改名同事务同步节点 name（iconColor 不影响节点）。
+  // M3/S3 #2：改名同事务同步节点 name（iconColor / icon 都不影响节点——实体图标走读取时解析，
+  // 不同步进 nav_nodes，故 syncNavFromEntitiesTx 语义不动）。
   const base = await withWriteTx("base.rename", async (tx) => {
     const b = await tx.base.update({ where: { id: baseId }, data: parsed.data });
     await syncNavFromEntitiesTx(tx);
     return b;
   });
-  return c.json({ base: { id: base.id, name: base.name, iconColor: base.iconColor } });
+  return c.json({
+    base: { id: base.id, name: base.name, iconColor: base.iconColor, icon: base.icon },
+  });
 });
 
 bases.delete("/:baseId", async (c) => {

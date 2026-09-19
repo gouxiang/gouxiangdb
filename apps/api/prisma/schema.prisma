@@ -20,6 +20,8 @@ model Base {
   id          String   @id @default(cuid())
   name        String
   iconColor   String   @default("#378ADD")
+  // 自定义图标名（ENTITY_ICONS 白名单之一）；null = 未自定义，前端按类型渲染默认图标。
+  icon        String?
   createdAt   DateTime @default(now())
   createdBy   String
   deletedAt   DateTime?
@@ -38,6 +40,10 @@ model Table {
   baseId         String
   name           String
   primaryFieldId String   // 主显示字段（决定 record 标题）
+  // 自定义图标名（ENTITY_ICONS 白名单之一）；null = 未自定义，前端按类型渲染默认图标。
+  icon           String?
+  // 自定义图标颜色 #RRGGBB；null = 未自定义，前端按类型取默认色。
+  iconColor      String?
   createdAt      DateTime @default(now())
   createdBy      String
   deletedAt      DateTime?
@@ -281,6 +287,8 @@ model KnowledgeBase {
   id        String   @id @default(cuid())
   name      String
   iconColor String   @default("#0F6E56")
+  // 自定义图标名（ENTITY_ICONS 白名单之一）；null = 未自定义，前端按类型渲染默认图标。
+  icon      String?
   createdBy String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -318,6 +326,10 @@ model KbDoc {
   searchText  String   @default("") // 冗余纯文本：md 去标记 / 画布节点文本，供 LIKE 全文检索
   // 乐观锁：PUT content 携带 baseVersion 条件更新，冲突返回 409（防多窗口/多人 lost update）
   contentVersion Int   @default(0)
+  // 自定义图标名（ENTITY_ICONS 白名单之一）；null = 未自定义，前端按 kind 渲染默认图标。
+  icon        String?
+  // 自定义图标颜色 #RRGGBB；null = 未自定义，前端按 kind 取默认色。
+  iconColor   String?
   createdBy   String
   updatedBy   String
   createdAt   DateTime @default(now())

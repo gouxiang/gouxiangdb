@@ -64,6 +64,8 @@ export interface BaseDTO {
   id: BaseIdT;
   name: string;
   iconColor: string;
+  /** 自定义图标名（ENTITY_ICONS 之一）；null = 未自定义，前端渲染默认图标。 */
+  icon: string | null;
   createdAt: string;
   createdBy: string;
   role: Role; // 当前用户在此 Base 的角色
@@ -88,6 +90,10 @@ export interface TableDTO {
   baseId: BaseIdT;
   name: string;
   primaryFieldId: FieldIdT;
+  /** 自定义图标名（ENTITY_ICONS 之一）；null = 未自定义，前端渲染默认图标。 */
+  icon: string | null;
+  /** 自定义图标颜色 #RRGGBB；null = 未自定义，前端取默认色。 */
+  iconColor: string | null;
   createdAt: string;
   createdBy: string;
   recordCount: number;

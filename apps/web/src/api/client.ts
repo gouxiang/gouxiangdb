@@ -343,10 +343,11 @@ export function fetchBootstrapStatus(): Promise<BootstrapStatus> {
 
 export const Bases = {
   list: () => apiFetch<{ bases: BaseDTO[] }>("/api/bases"),
-  create: (data: { name: string; iconColor?: string }) =>
+  create: (data: { name: string; iconColor?: string; icon?: string | null }) =>
     apiFetch<{ base: BaseDTO }>("/api/bases", { method: "POST", body: JSON.stringify(data) }),
   get: (baseId: string) => apiFetch<{ base: BaseDTO }>(`/api/bases/${baseId}`),
-  update: (baseId: string, data: { name?: string; iconColor?: string }) =>
+  // icon 为 ENTITY_ICONS 白名单之一；null = 清除回默认图标。
+  update: (baseId: string, data: { name?: string; iconColor?: string; icon?: string | null }) =>
     apiFetch<{ base: BaseDTO }>(`/api/bases/${baseId}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -409,7 +410,8 @@ export const Tables = {
       body: JSON.stringify(data),
     }),
   get: (tableId: string) => apiFetch<{ table: TableDTO }>(`/api/tables/${tableId}`),
-  update: (tableId: string, data: { name?: string; primaryFieldId?: string }) =>
+  // icon 为 ENTITY_ICONS 白名单之一；iconColor 为 #RRGGBB；两者传 null = 清除回默认。
+  update: (tableId: string, data: { name?: string; primaryFieldId?: string; icon?: string | null; iconColor?: string | null }) =>
     apiFetch<{ table: TableDTO }>(`/api/tables/${tableId}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -659,6 +661,8 @@ export interface KbDTO {
   id: string;
   name: string;
   iconColor: string;
+  /** 自定义图标名（ENTITY_ICONS 之一）；null/undefined = 未自定义，前端渲染默认图标。 */
+  icon?: string | null;
   role?: string;
   docCount?: number;
   createdAt?: string;
@@ -674,6 +678,10 @@ export interface KbDocDTO {
   title: string;
   content?: string;
   parentId?: string | null;
+  /** 自定义图标名（ENTITY_ICONS 之一）；null/undefined = 未自定义，前端按 kind 渲染默认图标。 */
+  icon?: string | null;
+  /** 自定义图标颜色 #RRGGBB；null/undefined = 未自定义，前端取默认色。 */
+  iconColor?: string | null;
   /** 乐观锁版本号：保存时回传 baseVersion，409 表示他人已修改 */
   contentVersion?: number;
   myRole?: string;
@@ -733,7 +741,8 @@ export const KbApi = {
   get: (kbId: string) => apiFetch<{ knowledgeBase: KbDTO }>(`/api/kb/${kbId}`),
   create: (data: { name: string; iconColor?: string }) =>
     apiFetch<{ knowledgeBase: KbDTO }>("/api/kb", { method: "POST", body: JSON.stringify(data) }),
-  update: (kbId: string, data: { name?: string; iconColor?: string }) =>
+  // icon 为 ENTITY_ICONS 白名单之一；null = 清除回默认图标。
+  update: (kbId: string, data: { name?: string; iconColor?: string; icon?: string | null }) =>
     apiFetch<{ knowledgeBase: KbDTO }>(`/api/kb/${kbId}`, { method: "PATCH", body: JSON.stringify(data) }),
   remove: (kbId: string) =>
     apiFetch<{ ok: true }>(`/api/kb/${kbId}`, { method: "DELETE", timeoutMs: WRITE_TIMEOUT_MS }),
@@ -778,8 +787,19 @@ export const KbApi = {
       method: "POST",
       body: JSON.stringify({ role }),
     }),
-  renameDoc: (docId: string, title: string) =>
-    apiFetch<{ ok: true }>(`/api/kb/docs/${docId}`, { method: "PATCH", body: JSON.stringify({ title }) }),
+  /**
+   * PATCH /api/kb/docs/:docId。
+   * 传字符串 = 仅改标题（旧签名，保持不变）；传对象 = 改标题 / 图标 / 图标颜色，
+   * 其中 icon 与 iconColor 传 null 表示清除回默认。
+   */
+  renameDoc: (
+    docId: string,
+    patch: string | { title?: string; icon?: string | null; iconColor?: string | null },
+  ) =>
+    apiFetch<{ ok: true }>(`/api/kb/docs/${docId}`, {
+      method: "PATCH",
+      body: JSON.stringify(typeof patch === "string" ? { title: patch } : patch),
+    }),
   saveContent: (docId: string, data: { content: string; title?: string; baseVersion?: number }) =>
     apiFetch<{ ok: true; snapshotted: boolean; savedAt: string; contentVersion: number | null }>(`/api/kb/docs/${docId}/content`, {
       method: "PUT",

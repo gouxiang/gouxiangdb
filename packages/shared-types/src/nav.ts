@@ -41,6 +41,71 @@ export const NAV_ICONS: readonly string[] = [
   "group",
 ];
 
+// ============ 实体自定义图标白名单（与 NAV_ICONS 完全独立） ============
+//
+// 边界（总监裁决，勿混淆两套白名单）：
+//   - NAV_ICONS 服务于【导航编排】：menu_items.iconName / nav_nodes.iconName 的后端校验集，
+//     由 domain/nav/menu.ts assertIcon 消费。实体图标改动【不涉及】它，也【不进 nav_nodes】。
+//   - ENTITY_ICONS 服务于【五类实体自身展示】：Base / KnowledgeBase / Table /
+//     KbDoc(kind=doc) / KbDoc(kind=canvas) 的 icon 字段取值白名单，由四个 PATCH 端点校验。
+//   - 两者同名条目（database/book/table/doc/canvas/group）语义相同但集合互不依赖：
+//     NAV_ICONS 只增不删的历史约束不适用于本集合的裁剪，反之亦然。
+//   - 每个名称必须在 apps/web components/icons.tsx 的 IconName 中真实存在（前端按名渲染）。
+//   - 未自定义 = icon 字段为 null，前端按实体类型渲染默认图标与默认色，DB 不落默认色。
+
+/** 实体自定义图标白名单（五类实体 icon 字段允许的取值；与导航编排 NAV_ICONS 独立）。 */
+export const ENTITY_ICONS = [
+  // 实体本征
+  "database",
+  "book",
+  "table",
+  "doc",
+  "canvas",
+  "grid",
+  "group",
+  "folder",
+  "folderOpen",
+  "file",
+  "layers",
+  "image",
+  // 语义标记
+  "star",
+  "home",
+  "checkSquare",
+  "users",
+  "user",
+  "building",
+  "shield",
+  "sitemap",
+  "keyRound",
+  "link",
+  "sparkles",
+  // 通用补充
+  "clock",
+  "calendar",
+  "tags",
+  "hash",
+  "globe",
+  "bell",
+  "eye",
+] as const;
+
+/** 实体图标名联合类型（由 ENTITY_ICONS 推导，新增图标只需改数组）。 */
+export type EntityIcon = (typeof ENTITY_ICONS)[number];
+
+/** 实体图标颜色格式：#RRGGBB 六位十六进制（大小写均可）。 */
+export const ENTITY_ICON_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+/** 实体图标名的运行时类型守卫（后端 zod refine / 前端渲染兜底共用）。 */
+export function isEntityIcon(v: unknown): v is EntityIcon {
+  return typeof v === "string" && (ENTITY_ICONS as readonly string[]).includes(v);
+}
+
+/** 实体图标颜色校验：null 表示清除回默认；非 null 必须匹配 #RRGGBB。 */
+export function isEntityIconColor(v: unknown): boolean {
+  return typeof v === "string" && ENTITY_ICON_COLOR_RE.test(v);
+}
+
 // ============ tree（权威实体树，平铺 + parentId，前端组树） ============
 
 export interface NavNodeDTO {

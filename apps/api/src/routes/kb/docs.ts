@@ -23,6 +23,7 @@ import {
 } from "./shared.js";
 import { enqueueChangeEventTx } from "../../domain/search/outbox.js";
 import type { ChangeEntityType } from "../../domain/search/outbox.js";
+import { entityIconSchema, entityIconColorSchema } from "../../validators/entity-icon.js";
 
 /** kb_docs.kind 到检索实体类型（doc/canvas 分别建索引）。 */
 
@@ -49,6 +50,8 @@ docsRoutes.get("/:kbId/docs", async (c) => {
       select: {
         id: true, kind: true, title: true, parentId: true, createdAt: true, updatedAt: true,
         createdBy: true, updatedBy: true,
+        // 自定义图标（doc 与 canvas 共用 kb_docs，按 kind 由前端取默认）。
+        icon: true, iconColor: true,
       },
     });
     return c.json({ docs });
@@ -128,6 +131,7 @@ docsRoutes.get("/docs/:docId", async (c) => {
       doc: {
         id: doc.id, kbId: doc.kbId, kind: doc.kind, title: doc.title, content: doc.content,
         parentId: doc.parentId, contentVersion: doc.contentVersion,
+        icon: doc.icon, iconColor: doc.iconColor,
         createdAt: doc.createdAt, updatedAt: doc.updatedAt, createdBy: doc.createdBy, updatedBy: doc.updatedBy,
         myRole: role, canEdit,
       },
@@ -142,21 +146,37 @@ docsRoutes.patch("/docs/:docId", async (c) => {
     const userId = await requireUserId(c);
     const docId = c.req.param("docId");
     const { doc } = await requireDocAccess(userId, docId, true);
-    const schema = z.object({ title: z.string().min(1).max(120).optional() });
+    const schema = z.object({
+      title: z.string().min(1).max(120).optional(),
+      // 自定义图标（白名单）与图标颜色（#RRGGBB）；null = 清除回默认，缺省 = 不改动。
+      // icon / iconColor 不进 nav_nodes（实体图标走读取时解析），也不影响检索正文，
+      // 故只有改名才触发 outbox upsert 与 nav 同步。
+      icon: entityIconSchema,
+      iconColor: entityIconColorSchema,
+    });
     const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "标题不合法" }, 400);
-    if (parsed.data.title !== undefined) {
-      // M3/S3 #13b：改名收紧进事务同步节点 name。
+    if (!parsed.success) return c.json({ error: "参数不合法（标题 / icon / iconColor）" }, 400);
+    const { title, icon, iconColor } = parsed.data;
+    const iconTouched = icon !== undefined || iconColor !== undefined;
+    if (title !== undefined || iconTouched) {
+      // M3/S3 #13b：改名收紧进事务同步节点 name；图标变更同事务但不触发 nav 同步。
       await withWriteTx("doc.rename", async (tx) => {
         await tx.kbDoc.update({
           where: { id: doc.id },
-          data: { title: parsed.data.title!.trim(), updatedBy: userId },
+          data: {
+            ...(title !== undefined ? { title: title.trim() } : {}),
+            ...(icon !== undefined ? { icon } : {}),
+            ...(iconColor !== undefined ? { iconColor } : {}),
+            updatedBy: userId,
+          },
         });
-        // M5/S1：改名改标题文本（检索内容），发 upsert；version 用提交时刻（doc 无版本递增）。
-        await enqueueChangeEventTx(tx, {
-          entityType: changeEntityOfKind(doc.kind), entityId: doc.id, op: "upsert", version: BigInt(Date.now()),
-        });
-        await syncNavFromEntitiesTx(tx);
+        if (title !== undefined) {
+          // M5/S1：改名改标题文本（检索内容），发 upsert；version 用提交时刻（doc 无版本递增）。
+          await enqueueChangeEventTx(tx, {
+            entityType: changeEntityOfKind(doc.kind), entityId: doc.id, op: "upsert", version: BigInt(Date.now()),
+          });
+          await syncNavFromEntitiesTx(tx);
+        }
       });
     }
     return c.json({ ok: true });

@@ -23,6 +23,7 @@ import {
   softDeleteSubtreeTx,
 } from "../domain/nav/sync.js";
 import { nodeId } from "../domain/nav/backfill.js";
+import { entityIconSchema, entityIconColorSchema } from "../validators/entity-icon.js";
 
 export const tables = new Hono();
 
@@ -34,6 +35,10 @@ const createSchema = z.object({
 const updateSchema = z.object({
   name: z.string().min(1).max(80).optional(),
   primaryFieldId: z.string().optional(),
+  // 自定义图标（白名单）与图标颜色（#RRGGBB）；null = 清除回默认，缺省 = 不改动。
+  // create 不开放，保持建表轻量。
+  icon: entityIconSchema,
+  iconColor: entityIconColorSchema,
 });
 
 async function baseIdOf(tableId: string): Promise<string> {
@@ -60,6 +65,8 @@ tables.get("/", async (c) => {
       baseId: t.baseId,
       name: t.name,
       primaryFieldId: t.primaryFieldId,
+      icon: t.icon,
+      iconColor: t.iconColor,
       createdAt: t.createdAt.toISOString(),
       createdBy: t.createdBy,
       recordCount: t._count.records,
@@ -141,6 +148,9 @@ tables.post("/", async (c) => {
       baseId,
       name: table.name,
       primaryFieldId,
+      // create 不接受自定义图标（保持轻量），新表恒为未自定义，由前端渲染默认。
+      icon: null,
+      iconColor: null,
       createdAt: table.createdAt.toISOString(),
       createdBy: userId,
       recordCount: 0,
@@ -167,6 +177,8 @@ tables.get("/:tableId", async (c) => {
       baseId: t.baseId,
       name: t.name,
       primaryFieldId: t.primaryFieldId,
+      icon: t.icon,
+      iconColor: t.iconColor,
       createdAt: t.createdAt.toISOString(),
       createdBy: t.createdBy,
       recordCount: t._count.records,
@@ -183,12 +195,21 @@ tables.patch("/:tableId", async (c) => {
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
 
   // M3/S3 #5：改名收紧进事务（原 runWrite 非事务），同事务同步节点 name。
+  // icon / iconColor 不进 nav_nodes（实体图标走读取时解析），故只有改名才触发 nav 同步。
   const t = await withWriteTx("table.update", async (tx) => {
     const updated = await tx.table.update({ where: { id: tableId }, data: parsed.data });
     if (parsed.data.name !== undefined) await syncNavFromEntitiesTx(tx);
     return updated;
   });
-  return c.json({ table: { id: t.id, name: t.name, primaryFieldId: t.primaryFieldId } });
+  return c.json({
+    table: {
+      id: t.id,
+      name: t.name,
+      primaryFieldId: t.primaryFieldId,
+      icon: t.icon,
+      iconColor: t.iconColor,
+    },
+  });
 });
 
 tables.delete("/:tableId", async (c) => {
@@ -239,7 +260,8 @@ tables.post("/:tableId/duplicate", async (c) => {
   // 计划 §4.4-7：复制产生的新表【不自动加菜单 shortcut】，以"未收纳"态等用户编排（菜单层不动）。
   const { copy, primary } = await withWriteTx("table.duplicate", async (tx) => {
   const copy = await tx.table.create({
-    data: { baseId, name, primaryFieldId: "", createdBy: userId },
+    // 视觉标识（自定义图标/颜色）随副本继承，避免复制后莫名回退到默认图标。
+    data: { baseId, name, primaryFieldId: "", createdBy: userId, icon: src.icon, iconColor: src.iconColor },
   });
 
   // 字段 id 映射（tabsConfig 内部引用的字段 id 需要重映射）
@@ -373,7 +395,9 @@ tables.post("/:tableId/duplicate", async (c) => {
   return { copy, primary };
   });
 
-  return c.json({ table: { id: copy.id, name: copy.name, primaryFieldId: primary } }, 201);
+  return c.json({
+    table: { id: copy.id, name: copy.name, primaryFieldId: primary, icon: copy.icon, iconColor: copy.iconColor },
+  }, 201);
 });
 
 // ============ CSV 导出 ============
