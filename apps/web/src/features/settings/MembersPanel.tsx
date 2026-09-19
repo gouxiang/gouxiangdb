@@ -121,22 +121,26 @@ export function MembersPanel({ baseId, canManageBase }: { baseId: string; canMan
               </div>
 
               <div className="w-[140px]" title={ROLE_DESCRIPTION[mem.role]}>
-                <Select
-                  value={mem.role}
-                  options={ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] }))}
-                  disabled={!canManageBase || isOwner}
-                  onChange={(e) => changeRole(mem.id, e.target.value as Role)}
-                />
+                {/* 权限治理第二批：改成员角色属管理类操作，无权限（或对所有者行）不给灰掉的下拉，
+                    改为只读文本展示当前角色。 */}
+                {canManageBase && !isOwner ? (
+                  <Select
+                    value={mem.role}
+                    options={ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] }))}
+                    onChange={(e) => changeRole(mem.id, e.target.value as Role)}
+                  />
+                ) : (
+                  <span className="select-text text-gx-13 text-gx-text-primary">{ROLE_LABEL[mem.role]}</span>
+                )}
               </div>
 
-              {canManageBase && (
+              {canManageBase && !isOwner && (
                 <div className="w-16 text-right">
                   <button
                     type="button"
-                    disabled={isOwner}
-                    title={isOwner ? "不能修改所有者" : "移除成员"}
+                    title="移除成员"
                     onClick={() => void remove(mem.id, mem.email || "该成员")}
-                    className="text-gx-12 text-gx-danger hover:underline disabled:cursor-not-allowed disabled:text-gx-text-hint disabled:no-underline"
+                    className="text-gx-12 text-gx-danger hover:underline"
                   >
                     移除
                   </button>

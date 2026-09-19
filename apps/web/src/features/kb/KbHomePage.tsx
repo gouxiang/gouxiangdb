@@ -149,26 +149,28 @@ export default function KbHomePage() {
             <h1 className="text-gx-16 font-semibold text-gx-text-primary">{kb?.name ?? "知识库"}</h1>
             {kb?.role && <Badge variant="soft">{roleLabel(kb.role)}</Badge>}
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={!canCreate}
-              onClick={() => create("doc")}
-              className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg border border-gx-border bg-gx-surface px-3 text-gx-13 text-gx-text-primary hover:bg-gx-bg disabled:opacity-40"
-            >
-              <Icon name="doc" size={15} className="text-gx-accent" />
-              新建文档
-            </button>
-            <button
-              type="button"
-              disabled={!canCreate}
-              onClick={() => create("canvas")}
-              className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg bg-gx-accent px-3 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-40"
-            >
-              <Icon name="canvas" size={15} />
-              新建画布
-            </button>
-          </div>
+          {/* 权限治理第二批：新建文档/画布是内容创建的管理类入口，无权限即不渲染
+              （不是 disabled 假装禁用——看不到入口才不会误以为功能坏了）。 */}
+          {canCreate && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => create("doc")}
+                className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg border border-gx-border bg-gx-surface px-3 text-gx-13 text-gx-text-primary hover:bg-gx-bg"
+              >
+                <Icon name="doc" size={15} className="text-gx-accent" />
+                新建文档
+              </button>
+              <button
+                type="button"
+                onClick={() => create("canvas")}
+                className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg bg-gx-accent px-3 text-gx-13 font-medium text-white hover:brightness-95"
+              >
+                <Icon name="canvas" size={15} />
+                新建画布
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="mt-3 flex items-center gap-3">

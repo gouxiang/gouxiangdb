@@ -32,8 +32,6 @@ export interface ViewSwitcherProps {
   canManageSchema: boolean;
 }
 
-const NO_PERMISSION_HINT = "需要表结构管理权限";
-
 export function ViewSwitcher({ baseId, tableId, viewId, canManageSchema }: ViewSwitcherProps) {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -169,36 +167,25 @@ export function ViewSwitcher({ baseId, tableId, viewId, canManageSchema }: ViewS
             <div className="px-3 py-2 text-gx-12 text-gx-text-hint">暂无视图</div>
           )}
 
-          <MenuDivider />
+          {/* 权限治理第二批：视图的新建/重命名/删除属配置类管理操作，无权限即不渲染
+              （不是 disabled 假装禁用）。divider 一起收掉，否则菜单底部留一条孤线。 */}
+          {canManageSchema && (
+            <>
+              <MenuDivider />
 
-          <MenuItem
-            icon="plus"
-            label="新建视图"
-            disabled={!canManageSchema}
-            description={canManageSchema ? undefined : NO_PERMISSION_HINT}
-            onClick={openNew}
-          />
-          <MenuItem
-            icon="edit"
-            label="重命名当前视图"
-            disabled={!canManageSchema}
-            description={canManageSchema ? undefined : NO_PERMISSION_HINT}
-            onClick={openRename}
-          />
-          <MenuItem
-            icon="trash"
-            label="删除当前视图"
-            danger
-            disabled={!canManageSchema || onlyOne}
-            description={
-              !canManageSchema
-                ? NO_PERMISSION_HINT
-                : onlyOne
-                  ? "至少保留一个视图"
-                  : undefined
-            }
-            onClick={() => void removeCurrent()}
-          />
+              <MenuItem icon="plus" label="新建视图" onClick={openNew} />
+              <MenuItem icon="edit" label="重命名当前视图" onClick={openRename} />
+              <MenuItem
+                icon="trash"
+                label="删除当前视图"
+                danger
+                // onlyOne 是业务规则（至少保留一个视图）不是权限，保留 disabled + 原因。
+                disabled={onlyOne}
+                description={onlyOne ? "至少保留一个视图" : undefined}
+                onClick={() => void removeCurrent()}
+              />
+            </>
+          )}
         </Menu>
       </Popover>
 

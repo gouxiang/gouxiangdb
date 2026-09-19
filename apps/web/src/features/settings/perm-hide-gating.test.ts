@@ -1,0 +1,68 @@
+// 权限治理第二批回归（node 环境，纯源码断言，无 jsdom、无新增依赖）。
+//
+// 锁的是同一条口径：判断标准是「这个操作属于哪一类」，不是「有没有权限」。
+//   · 管理类 / 配置类 / 破坏性操作（删库、改库名、新建文档画布、改成员角色、删视图）
+//     → 无权限**不渲染**，用户根本看不到入口存在；
+//   · 数据编辑类（表格工具栏新建记录、回收站恢复）→ **保留 disabled + 原因**，
+//     用户需要知道「我能看但不能改」，藏掉会让人以为功能丢了。
+// 这套断言防止后续改回「可见不可改」的旧写法，也防止把数据编辑类误藏。
+
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+
+const read = (rel: string) =>
+  readFileSync(new URL(rel, import.meta.url), "utf8");
+
+describe("权限治理第二批：管理类隐藏 / 数据编辑类保留禁用", () => {
+  it("KB 首页：新建文档 / 新建画布由 canCreate 门控，不再 disabled", () => {
+    const src = read("../kb/KbHomePage.tsx");
+    expect(src).toContain("{canCreate && (");
+    expect(src).toContain("新建文档");
+    expect(src).toContain("新建画布");
+    expect(src).not.toContain("disabled={!canCreate}");
+  });
+
+  it("库设置：名称无权限走只读文本；危险操作区（删库）整块不渲染", () => {
+    const src = read("./SettingsPage.tsx");
+    // 只读文本，不是灰掉的 input
+    expect(src).toContain("canManageBase ? (\n                        <Input");
+    expect(src).not.toContain("disabled={!canManageBase}");
+    // 删库属破坏性操作：整块 + 左侧导航项一起收掉
+    expect(src).toContain("{canManageBase && tab === \"danger\" && (");
+    expect(src).toContain("TABS.filter((t) => canManageBase || t.key !== \"danger\")");
+  });
+
+  it("视图切换器：新建 / 重命名 / 删除视图由 canManageSchema 门控，不再 disabled", () => {
+    const src = read("../grid/ViewSwitcher.tsx");
+    expect(src).toContain("{canManageSchema && (");
+    expect(src).not.toContain("disabled={!canManageSchema}");
+    expect(src).not.toContain("NO_PERMISSION_HINT");
+    // onlyOne 是业务规则而非权限，仍保留 disabled + 原因
+    expect(src).toContain("disabled={onlyOne}");
+    expect(src).toContain("至少保留一个视图");
+  });
+
+  it("回收站：彻底删除（不可逆）不渲染；恢复（数据编辑类）保留 disabled", () => {
+    const src = read("./TrashPage.tsx");
+    expect(src).toContain("{canManageBase && (");
+    expect(src).not.toContain("disabled={!canManageBase}");
+    // 恢复 = 写回数据，属数据编辑类，必须保持可见且说明原因
+    expect(src).toContain("disabled={!canEditData}");
+    expect(src).toContain("无编辑权限");
+  });
+
+  it("成员与权限：角色下拉 / 移除对无权限与所有者行不渲染", () => {
+    const src = read("./MembersPanel.tsx");
+    expect(src).toContain("canManageBase && !isOwner ? (");
+    expect(src).toContain("canManageBase && !isOwner && (");
+    expect(src).not.toContain("disabled={!canManageBase || isOwner}");
+    expect(src).not.toContain("disabled={isOwner}");
+  });
+
+  it("红线：表格工具栏「新建记录」仍是 disabled + 原因，不许改成隐藏", () => {
+    const src = read("../grid/GridToolbar.tsx");
+    expect(src).toContain("disabled={!permissions.canEditData}");
+    expect(src).toContain("无编辑权限");
+    expect(src).toContain("新建记录");
+  });
+});

@@ -147,6 +147,13 @@ export default function SettingsPage() {
     }
   }, [baseQ.data]);
 
+  // 权限治理第二批：无 canManageBase 时左侧导航里就不该出现「危险操作」，
+  // 否则点进去是一块空白（内容区已被隐藏）。已停在该 tab 上的要主动回退到概览。
+  const visibleTabs = TABS.filter((t) => canManageBase || t.key !== "danger");
+  useEffect(() => {
+    if (!canManageBase && tab === "danger") setTab("overview");
+  }, [canManageBase, tab]);
+
   async function saveBase() {
     if (!baseId || !canManageBase) return;
     try {
@@ -183,7 +190,7 @@ export default function SettingsPage() {
     <div className="flex h-full bg-gx-surface">
       {/* 左侧二级导航 */}
       <div className="w-[180px] shrink-0 border-r border-gx-separator bg-gx-bg p-2">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t.key}
             type="button"
@@ -279,7 +286,15 @@ export default function SettingsPage() {
                   <div className="flex items-end gap-2">
                     <div className="flex-1">
                       <div className="mb-1 text-gx-12 text-gx-text-tertiary">名称</div>
-                      <Input value={name} disabled={!canManageBase} onChange={(e) => setName(e.target.value)} />
+                      {/* 权限治理第二批：改库名属管理类操作，无权限时不给灰掉的 input
+                          —— 按 R-D-11 约定走「只读可复制」而非 disabled（disabled 无法选中复制）。 */}
+                      {canManageBase ? (
+                        <Input value={name} onChange={(e) => setName(e.target.value)} />
+                      ) : (
+                        <div className="flex h-8 items-center">
+                          <span className="select-text text-gx-13 text-gx-text-primary">{name}</span>
+                        </div>
+                      )}
                     </div>
                     {canManageBase && (
                       <Button variant="primary" onClick={saveBase}>
@@ -318,19 +333,18 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {tab === "danger" && (
+          {/* 权限治理第二批：删库是不可逆破坏性操作，无权限时整个危险操作区都不渲染
+              （连同「仅所有者可执行此操作」一起消失——入口不存在了，提示没有意义）。 */}
+          {canManageBase && tab === "danger" && (
             <div className="rounded-gx-lg border border-gx-danger bg-gx-danger-bg p-4">
               <div className="text-gx-14 font-medium text-gx-danger">删除 Base</div>
               <div className="mt-1 text-gx-12 text-gx-text-secondary">
                 删除后所有数据表、记录与分享链接将被移入回收站，操作不可逆。
               </div>
               <div className="mt-3">
-                <Button variant="danger" disabled={!canManageBase} onClick={() => void deleteBase()}>
+                <Button variant="danger" onClick={() => void deleteBase()}>
                   删除整个 Base
                 </Button>
-                {!canManageBase && (
-                  <span className="ml-2 text-gx-12 text-gx-text-hint">仅所有者可执行此操作</span>
-                )}
               </div>
             </div>
           )}

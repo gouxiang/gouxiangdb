@@ -153,16 +153,18 @@ export default function TrashPage() {
                   >
                     恢复
                   </button>
-                  <button
-                    type="button"
-                    disabled={!canManageBase}
-                    onClick={() => void askPurge(it)}
-                    className="rounded-gx-lg px-2 py-1 text-gx-12 text-gx-danger hover:bg-gx-danger-bg disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
-                    // R-D-09 禁用必须说明原因
-                    title={canManageBase ? "彻底删除" : "仅库管理者可彻底删除"}
-                  >
-                    彻底删除
-                  </button>
+                  {/* 权限治理第二批：「彻底删除」不可逆，无权限即不渲染。
+                      左侧「恢复」是写回数据（数据编辑类），保留 disabled + 原因，不跟着藏。 */}
+                  {canManageBase && (
+                    <button
+                      type="button"
+                      onClick={() => void askPurge(it)}
+                      className="rounded-gx-lg px-2 py-1 text-gx-12 text-gx-danger hover:bg-gx-danger-bg"
+                      title="彻底删除"
+                    >
+                      彻底删除
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
