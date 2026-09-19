@@ -62,6 +62,17 @@ export const FORMULA_FUNCTIONS: FormulaFnDef[] = [
     arity: { min: 1, max: null },
   },
   {
+    name: "CONCATENATE", category: "common",
+    signature: "CONCATENATE(文本1, 文本2, ...)",
+    description: "CONCAT 的等价别名：将多个文本/字段值拼接成一个字符串，字符串之间不加分隔符。列表参数会先展开再逐项拼接。",
+    params: [
+      { name: "文本", type: "文本/列表", desc: "待拼接的值，可多个；列表参数会逐项拼接" },
+    ],
+    example: 'CONCATENATE({省}, {市}, "区") 或 CONCATENATE({订单明细.商品名})',
+    returns: "文本",
+    arity: { min: 1, max: null },
+  },
+  {
     name: "SUM", category: "common",
     signature: "SUM(数值1, 数值2, ...)",
     description: "求和。可传多个数值，也可直接对子表格/关联字段的点引用做跨表求和：多条记录自动聚合成列表后求和。",
@@ -117,6 +128,15 @@ export const FORMULA_FUNCTIONS: FormulaFnDef[] = [
     description: "任一条件为真即返回真。多个条件也可直接用 || 连接。",
     params: [{ name: "条件", type: "布尔", desc: "待判断的条件，可多个" }],
     example: 'OR({类型} = "VIP", {金额} > 1000)',
+    returns: "布尔",
+    arity: { min: 1, max: null },
+  },
+  {
+    name: "OR_F", category: "logic",
+    signature: "OR_F(条件1, 条件2, ...)",
+    description: "OR 的等价别名：任一条件为真即返回真。多个条件也可直接用 || 连接。",
+    params: [{ name: "条件", type: "布尔", desc: "待判断的条件，可多个" }],
+    example: 'OR_F({类型} = "VIP", {金额} > 1000)',
     returns: "布尔",
     arity: { min: 1, max: null },
   },
