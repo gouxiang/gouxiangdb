@@ -14,6 +14,7 @@ import type {
 } from "@gx/shared-types";
 import { FieldIcon } from "../../components/ui";
 import { Icon } from "../../components/icons";
+import { AttachmentLinks } from "../cells/AttachmentLinks";
 
 /** 所有非网格视图统一的 props（由 ViewRouter 注入） */
 export interface ViewProps {
@@ -165,16 +166,10 @@ export function FieldValue({
     case "attachment": {
       const files = Array.isArray(value) ? (value as Array<{ url: string; name: string }>) : [];
       if (files.length === 0) return <span className="text-gx-13 text-gx-text-hint">{emptyText}</span>;
-      return (
-        <div className="flex flex-wrap gap-1">
-          {files.slice(0, 4).map((f, i) => (
-            <a key={i} href={f.url} target="_blank" rel="noreferrer" className="text-gx-12 text-gx-accent underline">
-              {f.name || "附件"}
-            </a>
-          ))}
-          {files.length > 4 && <span className="text-gx-12 text-gx-text-hint">+{files.length - 4}</span>}
-        </div>
-      );
+      // 单一真源 AttachmentLinks：与网格/详情同一份实现（同款视觉 + 同款下载属性）。
+      // 相比原实现新增 download——附件是 dataURL，没有 download 时现代浏览器会因
+      // 「禁止顶层导航到 data: URL」而点不开。
+      return <AttachmentLinks value={value} />;
     }
     case "links": {
       const refs = Array.isArray(value) ? (value as LinkRefDTO[]) : [];

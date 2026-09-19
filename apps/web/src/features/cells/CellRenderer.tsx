@@ -6,6 +6,7 @@ import type { CellValue, FieldDTO, LinkRefDTO, RecordDTO, PermissionSet } from "
 import { Icon } from "../../components/icons";
 import { StatusPill } from "../../components/interaction";
 import { MdContent } from "../../components/MdContent";
+import { AttachmentLinks } from "./AttachmentLinks";
 import { sanitizeHtml } from "../../lib/sanitize-html";
 import {
   formatCell,
@@ -153,18 +154,13 @@ export function CellRenderer({
       );
     }
 
-    // ---------- 附件 ----------
+    // ---------- 附件：可点击下载链接 ----------
+    // 单一真源 AttachmentLinks：视觉与看板/画廊一致（最多 4 个 + "+N"，同款强调色下划线），
+    // 链接自带 stopPropagation（click/dblclick），避免被单元格「双击进入编辑」吞掉。
+    // 点击单元格空白处仍走既有行为（GridRow 的 td onClick/onDoubleClick 未被截断）。
     case "attachment": {
       if (empty) return wrap(emptyCell);
-      const files = Array.isArray(value) ? (value as { name?: string }[]) : [];
-      return wrap(
-        <span className="flex items-center gap-1 truncate">
-          <Icon name="paperclip" size={12} className="shrink-0 text-gx-text-hint" />
-          <span className="truncate">
-            {files.map((f) => f.name ?? "").filter(Boolean).join("、 ")}
-          </span>
-        </span>,
-      );
+      return wrap(<AttachmentLinks value={value} />);
     }
 
     // ---------- 富文本 ----------
