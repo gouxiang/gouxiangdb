@@ -14,7 +14,7 @@
 //          键盘聚焦时向侧方浮出独立子菜单面板（贴边自动翻转、Esc 关闭、150ms 移入间隙）。
 //   R-N-22 节奏统一：菜单项行 32 / 分组标题行 24 / 图标 14 / 文字 13 / 圆角 8 /
 //          图标与文字 gap-8 / 行内左右 padding 8；hover 与浮出统一 150ms ease-out。
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMatch, useNavigate } from "react-router-dom";
 import { Spinner, toast } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
@@ -215,6 +215,7 @@ export function PrimaryNav({
   collapsed = false,
   activeContainerId = null,
   entityIcons,
+  header,
 }: {
   onOpenSecondary?: (container: MenuTreeNode) => void;
   /** R-N-07 折叠档（56px）：只留图标 + title tooltip。 */
@@ -223,6 +224,12 @@ export function PrimaryNav({
   activeContainerId?: string | null;
   /** base/kb 实体自定义图标索引（按 node.resourceId 查）；不传则容器行退回实体类型图标。 */
   entityIcons?: EntityIconIndex;
+  /**
+   * 顶部插槽（库切换器 + 新建入口）：由壳层传入。
+   * 本组件不直接 useBases/useKbList —— 多份 SSR 回归不带 QueryClientProvider，
+   * 需要 QueryClient 的区块一律经这个插槽从壳层进来，不传时渲染与改动前完全一致。
+   */
+  header?: ReactNode;
 }) {
   const { menu, isLoading, isError } = useNavMenu();
   const { index } = useNavNodeIndex();
@@ -315,6 +322,8 @@ export function PrimaryNav({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {/* 库区块插槽（切换器 + 新建入口）：常驻顶部，不随菜单滚动 */}
+      {header ? <div className="shrink-0 px-1.5 pt-2">{header}</div> : null}
       {/* 个人区分组：规划入口常驻顶部，不随菜单滚动（与参考图「个人用户」段一致） */}
       <div className="shrink-0 px-1.5 pt-2">
         <GroupHeaderRow label="个人用户" active={false} iconOnly={collapsed} />

@@ -17,6 +17,7 @@ import { permissionsForRole, type Role, type ViewConfig } from "@gx/shared-types
 import { makeOptions } from "../domain/fieldService.js";
 import { syncNavFromEntitiesTx, softDeleteSubtreeTx } from "../domain/nav/sync.js";
 import { nodeId } from "../domain/nav/backfill.js";
+import { ensureEntityShortcutTx } from "../domain/nav/menu.js";
 import {
   syncBaseMemberTx,
   removeLegacyProjectionTx,
@@ -176,6 +177,9 @@ bases.post("/", async (c) => {
     await syncBaseMemberTx(tx, { oldRowId: ownerMember.id, baseId: b.id, userId, role: "owner" });
     await createStarterTableTx(tx, b.id, userId);
     await syncNavFromEntitiesTx(tx);
+    // 建库即入左侧导航：一级导航读的是 menu_items，而 syncNavFromEntitiesTx 只写 nav_nodes。
+    // 同事务内补一条根级 shortcut（已在则跳过），nav/menu 任一写失败整体回滚。
+    await ensureEntityShortcutTx(tx, nodeId("base", b.id));
     return b;
   });
 

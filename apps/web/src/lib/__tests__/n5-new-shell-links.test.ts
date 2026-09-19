@@ -155,11 +155,18 @@ describe("N5 §1.3 旧链接生成点源码守卫（换壳/窗口化重构后仍
 
   it("LibrarySwitcher 四个跳转点（base/kb 各两处）仍为旧形", () => {
     const s = read("../../components/LibrarySwitcher.tsx");
+    // 建库弹窗抽成 CreateLibraryModal（一级导航「新建数据库/新建知识库」与切换器「新建库」
+    // 共用同一份建库逻辑），建库后的两个跳转点随之搬到新文件；四个跳转点都还在，只是分处两处。
+    const modal = read("../../components/CreateLibraryModal.tsx");
     expect(s).toContain("navigate(`/base/${b.id}`)");
-    expect(s).toContain("navigate(`/kb/${r.knowledgeBase.id}`)");
     expect(s).toContain("navigate(`/kb/${k.id}`)");
-    // base 出现至少两次（快捷入口 + 列表行）
-    expect(s.match(/navigate\(`\/base\/\$\{b\.id\}`\)/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(modal).toContain("navigate(`/base/${b.id}`)");
+    expect(modal).toContain("navigate(`/kb/${r.knowledgeBase.id}`)");
+    // base 出现至少两次（建库跳转 + 列表行）
+    const baseHits =
+      (s.match(/navigate\(`\/base\/\$\{b\.id\}`\)/g)?.length ?? 0) +
+      (modal.match(/navigate\(`\/base\/\$\{b\.id\}`\)/g)?.length ?? 0);
+    expect(baseHits).toBeGreaterThanOrEqual(2);
   });
 
   it("正文两个编辑器仍以 internalHref 为内部链接单一真源（防重构时绕过协议手写 href）", () => {

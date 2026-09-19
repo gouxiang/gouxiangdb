@@ -117,6 +117,79 @@ async function bumpMenuVersionTx(tx: DbTx): Promise<number> {
 }
 
 /**
+ * shortcut 行写入的唯一真源：活节点守卫 → label/icon/ord 白名单断言 → 单行 create。
+ *
+ * 供两处共用（禁止在别处再写一份 tx.menuItem.create 的 shortcut 插入）：
+ *   - applyMenuChangesTx 的 insert 分支（用户在二级面板点「收纳到导航」）；
+ *   - ensureEntityShortcutTx（建库/建知识库自动入导航）。
+ * 刻意不 bump menuVersion：由调用方在其事务边界内决定，避免同事务重复自增。
+ */
+export async function createShortcutRowTx(
+  tx: DbTx,
+  input: {
+    id: string;
+    parentId: string | null;
+    nodeId: string;
+    label?: string | null;
+    iconName?: string | null;
+    ord?: number;
+  },
+): Promise<MenuRowLite> {
+  // 守卫先于断言：坏 nodeId 必须报 409，不能被 label/icon 的 400 抢先。
+  await assertLiveNode(tx, input.nodeId);
+  const label = assertLabel(input.label);
+  const iconName = assertIcon(input.iconName);
+  const ord = assertOrd(input.ord);
+  const created = await tx.menuItem.create({
+    data: {
+      id: input.id, workspaceId: WS_ID, parentId: input.parentId, type: "shortcut",
+      nodeId: input.nodeId, label, iconName, ord,
+    },
+  });
+  return {
+    id: created.id, parentId: created.parentId, type: created.type, nodeId: created.nodeId,
+    label: created.label, iconName: created.iconName, ord: created.ord, deletedAt: null,
+  };
+}
+
+/**
+ * 建库/建知识库「自动入导航」：在实体创建的同一写事务内，为该实体节点补一条根级 shortcut。
+ *
+ * 修的是用户可见缺陷——此前 syncNavFromEntitiesTx 只写 nav_nodes 不写 menu_items
+ * （见 sync.ts 文件头铁律），而一级导航读的正是 menu_items，导致新建的库必须手动
+ * 「收纳到导航」才会出现在左侧。
+ *
+ * 幂等：已存在指向该 nodeId 的【活】shortcut 就原样返回——用户此前手动收纳过的老库
+ * 不会再多出第二条。
+ * 边界（刻意选这一种，不选「软删过就永不再自动加回」）：判定口径只认活行。
+ * 软删行（deletedAt 非空，即用户主动从导航移除过）保持软删、其 id 不被复用，
+ * 需要出现时另起一条新行。因为本函数只在实体创建时调用一次（不挂在改名/同步路径上），
+ * 用户移除后不会被反复加回；而新建实体的 nodeId 是全新的，必然命中创建分支，
+ * 故「新建即出现」恒真。
+ *
+ * label/iconName 传 null：一级导航回退显示节点真名（PrimaryNav 的 `label ?? summary.name`），
+ * 之后改名自动跟随，不留过期别名。
+ */
+export async function ensureEntityShortcutTx(tx: DbTx, targetNodeId: string): Promise<void> {
+  const existing = await tx.menuItem.findFirst({
+    where: { workspaceId: WS_ID, type: "shortcut", nodeId: targetNodeId, deletedAt: null },
+    select: { id: true },
+  });
+  if (existing) return;
+  // 根级追加：ord = 现有根级活行最大 ord + 1，保证多库之间顺序稳定（读侧按 ord asc, id asc）。
+  const agg = await tx.menuItem.aggregate({
+    where: { workspaceId: WS_ID, parentId: null, deletedAt: null },
+    _max: { ord: true },
+  });
+  const id = `menu_${crypto.randomBytes(12).toString("hex")}`;
+  await createShortcutRowTx(tx, {
+    id, parentId: null, nodeId: targetNodeId, label: null, iconName: null,
+    ord: (agg._max.ord ?? -1) + 1,
+  });
+  await bumpMenuVersionTx(tx);
+}
+
+/**
  * 批量应用菜单操作。返回新 menuVersion 与各项 id（与 ops 顺序对齐，非 insert 回原 id）。
  * 顺序执行各 op 的校验与写，任何一步抛错整事务回滚（调用方包 withWriteTx）。
  */
@@ -145,21 +218,30 @@ export async function applyMenuChangesTx(
       }
       const parentDepth = containerDepth(parentId, byId);
       const nodeId = op.nodeId ?? null;
-      if (type === "shortcut") {
-        if (!nodeId) throw bad("shortcut 必须带 nodeId");
-        await assertLiveNode(tx, nodeId);
-      } else if (nodeId !== null) {
-        throw bad("container 不能带 nodeId");
-      }
+      // 仅 shortcut 带 nodeId；这里先取一份收窄值，供下面走 shortcut 写入真源时用。
+      const shortcutNodeId = type === "shortcut" ? nodeId : null;
+      if (type === "shortcut" && !shortcutNodeId) throw bad("shortcut 必须带 nodeId");
+      if (type !== "shortcut" && nodeId !== null) throw bad("container 不能带 nodeId");
       // 容器自身将落在 parentDepth+1 层；shortcut 不占容器层级但仍须父为容器。
       if (type === "container" && parentDepth + 1 > MENU_MAX_DEPTH) {
         throw bad(`容器嵌套不能超过 ${MENU_MAX_DEPTH} 层`, "NAV_MENU_DEPTH");
       }
       const id = op.id && /^[A-Za-z0-9_-]{1,64}$/.test(op.id) ? op.id : `menu_${crypto.randomBytes(12).toString("hex")}`;
       if (byId.has(id)) throw bad(`菜单项 id 已存在: ${id}`);
+      if (shortcutNodeId) {
+        // 活节点守卫（409）与 label/icon/ord 白名单断言都在 createShortcutRowTx 内，
+        // 与「建库自动入导航」共用同一条写入路径，此处不再另写插入。
+        const row = await createShortcutRowTx(tx, {
+          id, parentId, nodeId: shortcutNodeId,
+          label: op.label, iconName: op.iconName, ord: op.ord,
+        });
+        byId.set(row.id, row);
+        itemIds.push(row.id);
+        continue;
+      }
       const created = await tx.menuItem.create({
         data: {
-          id, workspaceId: WS_ID, parentId, type, nodeId: type === "shortcut" ? nodeId : null,
+          id, workspaceId: WS_ID, parentId, type, nodeId: null,
           label: assertLabel(op.label), iconName: assertIcon(op.iconName), ord: assertOrd(op.ord),
         },
       });

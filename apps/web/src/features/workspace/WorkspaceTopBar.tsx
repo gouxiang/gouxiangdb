@@ -1,9 +1,8 @@
-// M3/S8 新工作区外壳顶栏：左品牌 + 工作区切换（LibrarySwitcher 收入下拉）、
-// 中部全局搜索（提权现有 SearchDialog，⌘K 不变）、右侧个人中心。
-// 旧两壳的侧栏内搜索按钮/库切换器在新壳由此处统一承接；组件本身不删（flag off 仍用）。
+// M3/S8 新工作区外壳顶栏：左品牌、中部全局搜索（提权现有 SearchDialog，⌘K 不变）、右侧个人中心。
+// 库切换器与新建库入口已下移到左侧一级导航 NavLibraryBlock（建库/切库都发生在导航里）；
+// LibrarySwitcher 组件本身不删（旧两壳 Sidebar/KbSidebar 仍在用）。
 import { useState } from "react";
-import { useMatch, useNavigate, useParams } from "react-router-dom";
-import { LibrarySwitcher } from "../../components/LibrarySwitcher";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { useAuthStore } from "../../store/auth";
 import { AVATAR_PALETTE } from "@gx/design-tokens";
@@ -17,13 +16,6 @@ function avatarColor(seed: string): string {
 
 export function WorkspaceTopBar({ onOpenSearch }: { onOpenSearch: () => void }) {
   const navigate = useNavigate();
-  const { baseId: pBaseId, kbId: pKbId } = useParams();
-  // 同 PrimaryNav：本组件挂在无 path 的壳层布局路由下，useParams 恒为 {}，
-  // 故库切换器的「当前库」改由 useMatch 对 pathname 取参，否则永远显示「选择库」。
-  const baseMatch = useMatch("/base/:baseId/*");
-  const kbMatch = useMatch("/kb/:kbId/*");
-  const baseId = baseMatch?.params.baseId ?? pBaseId ?? null;
-  const kbId = kbMatch?.params.kbId ?? pKbId ?? null;
   const user = useAuthStore((s) => s.user);
   const [personalCenterOpen, setPersonalCenterOpen] = useState(false);
 
@@ -40,10 +32,12 @@ export function WorkspaceTopBar({ onOpenSearch }: { onOpenSearch: () => void }) 
         <Icon name="database" size={16} className="text-gx-accent" />
         <span className="hidden text-gx-13 font-semibold text-gx-text-primary lg:inline">构想工作台</span>
       </button>
-      <div className="w-44 shrink-0">
-        <LibrarySwitcher active={kbId ? { kind: "kb", id: kbId } : { kind: "base", id: baseId ?? null }} />
-      </div>
 
+      {/*
+        库切换器与「新建数据库 / 新建知识库」入口已下移到左侧一级导航（NavLibraryBlock）：
+        建库/切库都发生在导航里，顶栏只留品牌 / 全局搜索 / 个人中心。
+        搜索按钮自带 mx-auto，撤下切换器后剩余空间由它吃掉，不留空位。
+      */}
       {/*
         全局搜索（提权顶栏；⌘K 由 Shell 绑定，此处点击同样打开）。
         R-D-33（<768）：折叠为 32×32 图标按钮。原实现是 `w-full max-w-md` 的长文案按钮，

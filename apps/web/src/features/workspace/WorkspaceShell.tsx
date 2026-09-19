@@ -22,9 +22,10 @@
 // 圆角 8 / 左右 padding 8 / 150ms ease-out），图标按语义重排（工作区设置 = settings）；
 // 底部固定区四项 + 折叠开关（原先最底的「用户卡片」已于交互治理阶段下线：
 //   个人信息/登出入口统一收口到右上角 WorkspaceTopBar 的个人中心抽屉，避免同一入口两处并存）。
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
 import { Icon, type IconName } from "../../components/icons";
+import type { ActiveLibrary } from "../../components/LibrarySwitcher";
 import { buildEntityIconIndex, type EntityIconIndex } from "../../components/EntityIconPicker";
 import { useBases } from "../../api/hooks";
 import { useKbList } from "../kb/kb-hooks";
@@ -33,6 +34,7 @@ import { useAuthzCapability } from "../authz/useAuthzCapability";
 import { visibleFooterNav } from "./lib/nav-gate";
 import { useMyOrgActions } from "../contacts/contacts-hooks";
 import { WorkspaceTopBar } from "./WorkspaceTopBar";
+import { NavLibraryBlock } from "./NavLibraryBlock";
 import { L1_ROW_IDLE, L1_ROW_SELECTED, NAV_ROW_TRANSITION, PrimaryNav } from "./PrimaryNav";
 import { SecondaryNav } from "./SecondaryNav";
 import { useNavMenu, useNavNodeIndex } from "./nav-hooks";
@@ -160,6 +162,8 @@ function SideRail({
   secondaryToggle = null,
   /** base/kb 实体自定义图标索引（由 WorkspaceShell 装配）。 */
   entityIcons,
+  /** 一级导航顶部插槽：库切换器 + 新建数据库/新建知识库入口。 */
+  header,
 }: {
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -168,6 +172,7 @@ function SideRail({
   showCollapseToggle?: boolean;
   secondaryToggle?: { label: string; onOpen: () => void } | null;
   entityIcons?: EntityIconIndex;
+  header?: ReactNode;
 }) {
   return (
     <aside
@@ -182,6 +187,7 @@ function SideRail({
           collapsed={collapsed}
           activeContainerId={activeContainerId}
           entityIcons={entityIcons}
+          header={header}
         />
       </div>
       <FooterNav collapsed={collapsed} />
@@ -238,6 +244,11 @@ export function WorkspaceShell() {
    * QueryClientProvider 的 SSR 回归里，不能在它们内部直接 useQuery。
    * 两份列表都是既有缓存（库切换器 / 资产页同源），这里不新增请求。
    */
+  // 库区块（切换器 + 新建入口）的「当前库」同样由 pathname 反推：
+  // 壳层挂在无 path 的布局路由下，useParams 恒为 {}（同上面 L2 归属的反推）。
+  const activeLibrary: ActiveLibrary =
+    scopeKind === "kb" ? { kind: "kb", id: scopeId } : { kind: "base", id: scopeId };
+
   const { data: basesForIcons } = useBases();
   const { data: kbsForIcons } = useKbList();
   const entityIcons = useMemo(
@@ -360,6 +371,7 @@ export function WorkspaceShell() {
                   activeContainerId={activeContainer?.containerId ?? null}
                   onOpenSecondary={openSecondary}
                   entityIcons={entityIcons}
+                  header={<NavLibraryBlock active={activeLibrary} collapsed={collapsed} />}
                 />
                 {showL2 && secondary && (
                   <div className="absolute left-0 top-0 bottom-0 gx-z-drawer shadow-gx-lg">
@@ -377,6 +389,7 @@ export function WorkspaceShell() {
             onOpenSecondary={openSecondary}
             showCollapseToggle={tier !== "md"}
             entityIcons={entityIcons}
+            header={<NavLibraryBlock active={activeLibrary} collapsed={l1Collapsed} />}
             secondaryToggle={
               floatingL2 && !showL2 && activeContainer
                 ? {
