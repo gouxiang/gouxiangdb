@@ -36,6 +36,8 @@ import { FilterRuleField } from "./FilterRuleModal";
 import FormulaEditorModal from "./FormulaEditorModal";
 import { DefaultValueEditor, sanitizeDefaultConfig } from "./DefaultValueEditor";
 import { NumberRuleEditor } from "./NumberRuleEditor";
+import { confirmDiscardChanges } from "../../components/feedback";
+import { draftFromField, isDirty, emptyDraft, type FieldDraft } from "./field-editor-dirty";
 
 export interface FieldEditorSheetProps {
   open: boolean;
@@ -271,6 +273,27 @@ function FieldEditorSheet({
 
   const canSave = permissions.canManageSchema && !!name.trim();
   const isSystem = ["createdTime", "lastModifiedTime", "createdBy", "lastModifiedBy"].includes(type);
+  // F-01 守卫：把当前表单状态投影成可比较的草稿（与 buildPayload 读取的状态一一对应）
+  const collectDraft = (): FieldDraft => ({
+    name,
+    type,
+    options,
+    precision,
+    defaultNow: dateDefaultNow,
+    relTableId: relTableId || null,
+    relKind,
+    displayFieldId: displayFieldId || null,
+    linkFieldId: linkFieldId || null,
+    subFieldId: subFieldId || null,
+    rollupFn,
+    formula,
+    recordFilter,
+    defaultConfig,
+    numberRule,
+    tabs,
+    displayedFieldIds,
+    visibleFieldIds,
+  });
   const isRelated = type === "links";
   const isSubtable = type === "subtable";
   // 已建立双向配对后锁定关联表/关系类型（改表会断链），与 FieldSettingsPanel 一致
@@ -335,6 +358,13 @@ function FieldEditorSheet({
 
   const handleSave = async () => {
     if (!canSave || isSystem) return;
+    // F-01 守卫：编辑模式下没有任何修改时不再假装保存成功（此前会发一条 no-op PATCH、
+    // 提示「已保存字段」并关闭弹窗——走查中用户把「编辑关联字段」误当「新建查阅」保存，
+    // 网络里只有一条打到 link 字段的 PATCH，与「新建成功」从外部完全无法区分）。
+    if (!isNew && managedField && !isDirty(collectDraft(), draftFromField(managedField))) {
+      toast("没有修改，无需保存", "info");
+      return;
+    }
     try {
       if (isNew) {
         await m.createField.mutateAsync({ tableId, data: buildPayload(), viewId: undefined });
@@ -350,6 +380,21 @@ function FieldEditorSheet({
     } catch (err) {
       toast((err as Error).message || "保存失败", "error");
     }
+  };
+
+  // F-01 守卫：在弹窗内切换目标字段（新建 ↔ 编辑任意现有字段）会丢弃正在输入的表单。
+  // 有未保存修改时先确认，用户取消则不切换（Select 受控于 managedFieldId，不改 state 即回弹）。
+  const handleSwitchTarget = async (nextId: string | null) => {
+    if (nextId === managedFieldId) return;
+    const baseline = managedField ? draftFromField(managedField) : emptyDraft();
+    if (isDirty(collectDraft(), baseline)) {
+      const ok = await confirmDiscardChanges({
+        description: "切换后当前未保存的字段配置会被丢弃。",
+        confirmText: "放弃改动",
+      });
+      if (!ok) return;
+    }
+    setManagedFieldId(nextId);
   };
 
   return (
@@ -392,7 +437,7 @@ function FieldEditorSheet({
                 value={managedFieldId ?? ""}
                 onChange={(e) => {
                   const v = e.target.value;
-                  setManagedFieldId(v === "" ? null : v);
+                  void handleSwitchTarget(v === "" ? null : v);
                 }}
                 groups={[
                   { label: "操作", options: [{ value: "", label: "+ 新建字段" }] },
