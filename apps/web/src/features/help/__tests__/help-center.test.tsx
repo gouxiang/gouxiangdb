@@ -30,18 +30,24 @@ const MD_WITH_IMAGE = [
 ].join("\n");
 
 describe("帮助中心：骨架渲染与目录锚点", () => {
-  it("① 渲染骨架 md：H1 与 ≥5 个二级标题都出现在正文里", () => {
+  it("① 渲染拼接后的正文：分片真源（00-index / 10-database）的内容都进了页面", () => {
     const html = renderToString(<HelpCenterPage />);
     expect(html).toContain("帮助中心");
-    expect(html).toContain("快速开始");
-    expect(html).toContain("常见问题");
+    // 00-index.md（前言与导读）
+    expect(html).toContain("如何使用本文档");
+    // 10-database.md（数据库正文）：证明「分片拼接 → ?raw → 渲染」整条链路通
+    expect(html).toContain("界面结构速览");
     // renderMarkdown 对 `##` 输出 <h2 ...>（node 分支无 sanitize，属性为 data-heading-id + id）
-    expect((html.match(/<h2[ >]/g) ?? []).length).toBeGreaterThanOrEqual(5);
+    expect((html.match(/<h2[ >]/g) ?? []).length).toBeGreaterThanOrEqual(10);
   });
 
   it("② 目录锚点与正文标题 id 一致：每个 heading.id 都能在正文 HTML 里找到 id=\"...\"", () => {
-    const { html, headings } = buildHelpHtml(read("../../../../../../docs/help-center/HELP-CENTER.md"), "");
-    expect(headings.length).toBeGreaterThanOrEqual(6);
+    // 用分片真源（入库文件，不依赖生成物）验证「同一份 slugify 算法」这一契约
+    const { html, headings } = buildHelpHtml(
+      read("../../../../../../docs/help-center/_parts/00-index.md"),
+      "",
+    );
+    expect(headings.length).toBeGreaterThanOrEqual(3);
     for (const h of headings) {
       expect(html).toContain(`id="${h.id}"`);
     }
@@ -124,5 +130,18 @@ describe("帮助中心：样式与依赖约束（源码断言）", () => {
     expect(pkg.scripts.typecheck).toContain("sync-help-center.mjs");
     expect(pkg.scripts.dev).toContain("sync-help-center.mjs");
     expect(pkg.scripts.build).toContain("sync-help-center.mjs");
+    // 生成物（HELP-CENTER.md / generated/）已不入库，单测也必须先同步再跑
+    expect(pkg.scripts.test).toContain("sync-help-center.mjs");
+  });
+
+  it("⑥ 分片真源约定（脚本源码断言）：只并数字前缀、空目录报错、非首片 H1 降级", () => {
+    const s = read("../../../../../../scripts/sync-help-center.mjs");
+    // 只合并 ^\d+.*\.md$（bugfix-candidates.md 之类 bug 登记不得并进正文）
+    expect(s).toContain("PART_FILE_RE = /^\\d+.*\\.md$/");
+    expect(s).toContain("_parts");
+    // 一个分片都没有时必须报错，不许静默产空文档
+    expect(s).toContain("没有找到任何正文分片");
+    // 非首片的顶层 H1 降级为 H2，避免文档里多个 H1 打乱目录
+    expect(s).toContain("已降级为 H2");
   });
 });

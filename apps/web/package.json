@@ -10,8 +10,8 @@
     "preview": "vite preview",
     "typecheck": "node ../../scripts/sync-help-center.mjs && tsc --noEmit",
     "lint": "eslint . --max-warnings 114",
-    "test": "vitest run --passWithNoTests",
-    "test:unit": "vitest run",
+    "test": "node ../../scripts/sync-help-center.mjs && vitest run --passWithNoTests",
+    "test:unit": "node ../../scripts/sync-help-center.mjs && vitest run",
     "test:e2e": "playwright test"
   },
   "dependencies": {

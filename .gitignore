@@ -56,8 +56,11 @@ screenshots/
 # ============ S8 裸机发布物（构建机本地产物，由 deploy/bin/package-release.mjs 生成）============
 /release/
 
-# ============ 帮助中心同步产物（真源 docs/help-center/，scripts/sync-help-center.mjs 生成）============
-# generated/ 是 md 副本、public/help/ 是截图副本；两者都是派生物，改内容请改 docs/ 真源。
-# 注意：docs/help-center/assets/ 是截图专用资源目录（含 .gitkeep），任何清理脚本都不得清它。
+# ============ 帮助中心同步产物（真源 docs/help-center/_parts/*.md，scripts/sync-help-center.mjs 生成）============
+# HELP-CENTER.md 是分片拼接产物、generated/ 是 md 副本、public/help/ 是截图副本；
+# 三者都是派生物，改内容请改 _parts/ 真源。
+# 注意：docs/help-center/assets/ 是截图专用资源目录（含 .gitkeep），
+#       docs/help-center/_parts/ 是正文真源 —— 任何清理脚本都不得清这两个目录。
+docs/help-center/HELP-CENTER.md
 apps/web/src/features/help/generated/
 apps/web/public/help/
