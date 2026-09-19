@@ -140,10 +140,16 @@ describe("M5/S9 GET status / embedding config", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(Object.keys(body).sort()).toEqual(
-      ["apiKey", "baseURL", "batchSize", "dim", "fieldChunkCap", "mode", "model", "timeoutMs"].sort(),
+      [
+        "apiKey", "baseURL", "batchSize", "concurrency", "dim", "dimEditable", "dimOverride",
+        "fieldChunkCap", "mode", "model", "provider", "retryBaseMs", "retryMaxAttempts",
+        "searchGate", "timeoutMs",
+      ].sort(),
     );
     expect(body.mode).toBe("off");
     expect(body.dim).toBe(0);
+    // 向后兼容：老库没有 embedding.provider 键时按 cloud 处理，绝不读不出配置。
+    expect(body.provider).toBe("cloud");
     expect(body.apiKey).toEqual({ configured: false, source: "none", maskedLast4: null });
   });
 });

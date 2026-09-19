@@ -2,6 +2,8 @@
 //
 // 权威依据：M5-implementation-plan §4.4（接口与配置表）、§1.7（cloud 单一 OpenAI 兼容契约）。
 // 本文件只放接口/类型/纯常量/纯解析：不触网、不读库、不做加解密（加解密在 embeddingConfig.ts）。
+
+import type { EmbeddingProviderKind } from "@gx/shared-types";
 //
 // 形态纪律（§0.3 C-EMB-1 已裁决：回归 cloud/off，取消 local）：
 //   - 本期只实现 offProvider 与 cloudProvider；不引本地推理/transformers/onnx/模型权重。
@@ -19,6 +21,15 @@ export const DEFAULT_TIMEOUT_MS = 15000;
 export const MAX_TEXT_CHARS = 8000;
 /** cloud 网络错/5xx/超时的最大尝试次数（首次 + 2 次重试 = 3，§4.4）。 */
 export const MAX_ATTEMPTS = 3;
+/** 单批在飞远端请求并发默认上限（真消费：喂 provider 信号量）。 */
+export const DEFAULT_CONCURRENCY = 4;
+/** 并发上限：再高只会压垮自建服务与本机，不给无界值。 */
+export const CONCURRENCY_MAX = 64;
+/** 手动指定的维度允许区间（越界即拒绝，避免写坏 vec 表）。 */
+export const DIM_MIN = 1;
+export const DIM_MAX = 4096;
+/** 重试次数上限（首次 + 退避重试）。 */
+export const RETRY_MAX_ATTEMPTS = 10;
 /** cloud 重试指数退避基数（毫秒）；1s -> 2s（受上限钳制）。测试可注入更小值。 */
 export const DEFAULT_RETRY_BASE_MS = 1000;
 /** 退避上限（毫秒），避免长退避堆积。 */
@@ -32,6 +43,17 @@ export const AUTH_FAILURE_MARK = "unauthorized";
  */
 export function parseEmbeddingMode(raw: string | undefined): EmbeddingMode {
   return raw?.trim().toLowerCase() === "cloud" ? "cloud" : "off";
+}
+
+/**
+ * 解析远端服务形态（本次新增）。向后兼容是硬要求：老库根本没有 embedding.provider 键，
+ * undefined/空串/未知值一律回 "cloud"（与既有 cloud 行为完全一致），绝不因缺字段报错。
+ * 已知值解析大小写不敏感（"Self-Hosted" 认作 self-hosted）。
+ */
+export function parseEmbeddingProvider(raw: string | undefined): EmbeddingProviderKind {
+  const v = raw?.trim().toLowerCase();
+  if (v === "openai-compatible" || v === "self-hosted") return v;
+  return "cloud";
 }
 
 /** 健康探测结果（health() 不抛，失败也返回结构化结论供 status 端点用）。 */
@@ -64,6 +86,12 @@ export interface CloudProviderConfig {
   model: string;
   batchSize: number;
   timeoutMs: number;
+  /** 并发上限（缺省回 DEFAULT_CONCURRENCY）；CloudDeps 同名注入优先，便于测试覆盖。 */
+  concurrency?: number;
+  /** 最大尝试次数（缺省回 MAX_ATTEMPTS）。 */
+  retryMaxAttempts?: number;
+  /** 退避基数毫秒（缺省回 DEFAULT_RETRY_BASE_MS）。 */
+  retryBaseMs?: number;
 }
 
 /** cloud 提供者是否具备启用条件：mode=cloud 且 baseURL/apiKey/model 三者非空白。 */

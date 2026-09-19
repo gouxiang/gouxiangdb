@@ -69,6 +69,11 @@ export function useRotateApiKey() {
   });
 }
 
+/** 连通性自检：按已保存配置探活，不落库；失败也是 200，结论在本体 ok 字段里。 */
+export function useTestConnection() {
+  return useMutation({ mutationFn: () => EmbeddingAdminApi.testConnection() });
+}
+
 /** 清除 db apiKey（204 无体）。 */
 export function useClearApiKey() {
   const qc = useQueryClient();

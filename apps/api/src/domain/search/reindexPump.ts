@@ -74,6 +74,9 @@ export async function buildContext(
       model: view.model,
       batchSize: view.batchSize,
       timeoutMs: view.timeoutMs,
+      concurrency: view.concurrency,
+      retryMaxAttempts: view.retryMaxAttempts,
+      retryBaseMs: view.retryBaseMs,
     });
     // createEmbeddingProvider 在配置不齐时回落 off provider；只在确为 cloud 时采用。
     if (candidate.mode === "cloud") { mode = "cloud"; provider = candidate; }

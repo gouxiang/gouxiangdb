@@ -1,12 +1,13 @@
 // M5 语义检索设置面板（role_owner 可见，工作区设置 → 语义检索）：
 //   - off（默认，仅本机关键词检索，零外网）/ 云端 单选；无本地模型选项
 //   - off->cloud 先弹数据出域二次确认，PATCH 带 confirmCloud:true；409 NEED_CLOUD_CONFIRM 接住
-//   - cloud 表单 baseURL/model/batchSize/timeoutMs；dim 只读（无 dim 输入项）
+//   - cloud 表单 baseURL/model/batchSize/timeoutMs/并发/重试；dim 仅自建与兼容档可手填
 //   - apiKey 密码框只写：GET 只回 configured/source/maskedLast4，轮换/清除两按钮，绝不显示明文
 //   - 重建索引二次确认 + 范围选择；409 REINDEX_IN_PROGRESS 中性提示
+//   - 检索总门 db 覆盖（search.enabled）：检索接口即时生效，索引 worker 需重启（界面如实标注）
 // 非 owner 由父级不挂载本面板；403 在各 hook 静默（不刷错误）。
-import { useEffect, useState } from "react";
-import { Button, Input, Modal, Spinner, toast } from "../../components/ui";
+import { useEffect, useRef, useState } from "react";
+import { Button, Spinner, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import {
   errorCode,
@@ -16,38 +17,83 @@ import {
   useEmbeddingConfig,
   usePatchEmbeddingConfig,
   useRotateApiKey,
+  useTestConnection,
 } from "./search-admin-hooks";
-import { adminErrorMessage, CLOUD_CONSENT_TEXT, SEARCH_NOT_ENABLED } from "./search-admin-copy";
+import { adminErrorMessage, SEARCH_NOT_ENABLED } from "./search-admin-copy";
 import { SearchEnableGuide } from "./SearchEnableGuide";
-import { buildConfigPatch } from "./search-config";
-import type { EmbeddingMode } from "@gx/shared-types";
+import { buildConfigPatch, validateConfigForm, type ConfigForm } from "./search-config";
+import type { EmbeddingMode, EmbeddingProviderKind, SearchEnabledOverride } from "@gx/shared-types";
+import { RemoteServiceSection, type RemoteFormValues } from "./EmbeddingRemoteSection";
+import {
+  ApiKeySection,
+  ClearKeyModal,
+  CloudConsentModal,
+  ReindexSection,
+  SearchGateSection,
+  SearchModeSection,
+} from "./EmbeddingAdminSections";
+
+/** 远端表单初值（配置到达前先渲染空表单，随后由 effect 整体回灌）。 */
+const EMPTY_REMOTE_FORM: RemoteFormValues = {
+  provider: "cloud",
+  baseURL: "",
+  model: "",
+  batchSize: "",
+  timeoutMs: "",
+  fieldChunkCap: "",
+  dim: "",
+  concurrency: "",
+  retryMaxAttempts: "",
+  retryBaseMs: "",
+};
 
 export function EmbeddingSearchPanel({ onReindex }: { onReindex?: () => void }) {
   const configQ = useEmbeddingConfig(true);
   const patch = usePatchEmbeddingConfig();
   const rotate = useRotateApiKey();
   const clearKey = useClearApiKey();
+  const testConn = useTestConnection();
 
   const [mode, setMode] = useState<EmbeddingMode>("off");
-  const [baseURL, setBaseURL] = useState("");
-  const [model, setModel] = useState("");
-  const [batchSize, setBatchSize] = useState("");
-  const [timeoutMs, setTimeoutMs] = useState("");
-  const [fieldChunkCap, setFieldChunkCap] = useState("");
+  // 远端服务配置表单收敛成一个对象：单一 setForm 入口，避免十一个散装 state 各自同步、
+  // 也让"有未保存编辑"只需在一处打标记。
+  const [form, setForm] = useState<RemoteFormValues>(EMPTY_REMOTE_FORM);
+  const [searchEnabled, setSearchEnabled] = useState<SearchEnabledOverride>("inherit");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [consentOpen, setConsentOpen] = useState(false);
   const [clearConfirm, setClearConfirm] = useState(false);
 
+  // 用户有未保存编辑时，服务端数据的任何一次重取（保存成功后的失效重取、后台轮询、
+  // 改总门触发的重取）都【不许】覆盖表单——否则刚填的并发/维度会被静默打回原值，
+  // 表现为"改了没生效"。保存成功后才清标记，让表单与服务端真值重新对齐。
+  const dirtyRef = useRef(false);
+  /** 任何一次手改都要打标记：从此刻起，服务端数据只能在我主动保存后覆盖我。 */
+  function markDirty(): void {
+    dirtyRef.current = true;
+  }
+  /** 保存成功后清标记：允许下一次服务端数据回灌，把归一化后的真值显示出来。 */
+  function markSynced(): void {
+    dirtyRef.current = false;
+  }
+
   // 配置加载后同步本地表单（apiKey 不回填，只写）
   useEffect(() => {
     const c = configQ.data;
-    if (!c) return;
+    if (!c || dirtyRef.current) return;
     setMode(c.mode);
-    setBaseURL(c.baseURL);
-    setModel(c.model);
-    setBatchSize(String(c.batchSize));
-    setTimeoutMs(String(c.timeoutMs));
-    setFieldChunkCap(String(c.fieldChunkCap));
+    setForm({
+      provider: c.provider,
+      baseURL: c.baseURL,
+      model: c.model,
+      batchSize: String(c.batchSize),
+      timeoutMs: String(c.timeoutMs),
+      fieldChunkCap: String(c.fieldChunkCap),
+      dim: c.dimOverride > 0 ? String(c.dimOverride) : "",
+      concurrency: String(c.concurrency),
+      retryMaxAttempts: String(c.retryMaxAttempts),
+      retryBaseMs: String(c.retryBaseMs),
+    });
+    setSearchEnabled(c.searchGate.override);
   }, [configQ.data]);
 
   if (configQ.isLoading) {
@@ -76,11 +122,23 @@ export function EmbeddingSearchPanel({ onReindex }: { onReindex?: () => void }) 
   }
 
   /** 收集表单为 patch（apiKey 仅在填了新值时随请求发送，缺省=保持）。 */
+  function currentForm(): ConfigForm {
+    return { mode, ...form, searchEnabled, apiKey: apiKeyInput };
+  }
+
+  /** 提交前显式校验：非法值直接拦下并说清哪一项错，绝不静默丢字段让人以为改了没生效。 */
+  function guard(): boolean {
+    const err = validateConfigForm(currentForm());
+    if (err) {
+      toast(err, "error");
+      return false;
+    }
+    return true;
+  }
+
   function buildPatch(nextMode: EmbeddingMode, confirmCloud: boolean) {
-    return buildConfigPatch(
-      { mode: nextMode, baseURL, model, batchSize, timeoutMs, fieldChunkCap, apiKey: apiKeyInput },
-      confirmCloud,
-    );
+    // 必须显式带上目标 mode：本地 state 此刻还是旧值（成功回调里才翻转）。
+    return buildConfigPatch({ ...currentForm(), mode: nextMode }, confirmCloud);
   }
 
   function onError(e: unknown) {
@@ -99,7 +157,10 @@ export function EmbeddingSearchPanel({ onReindex }: { onReindex?: () => void }) 
     }
     setMode("off");
     patch.mutate(buildPatch("off", false), {
-      onSuccess: (r) => toast(r.reindexRequired ? "已关闭，旧索引将在下次重建后更新" : "已保存", "success"),
+      onSuccess: (r) => {
+        markSynced();
+        toast(r.reindexRequired ? "已关闭，旧索引将在下次重建后更新" : "已保存", "success");
+      },
       onError,
     });
   }
@@ -109,6 +170,7 @@ export function EmbeddingSearchPanel({ onReindex }: { onReindex?: () => void }) 
     setConsentOpen(false);
     patch.mutate(buildPatch("cloud", true), {
       onSuccess: (r) => {
+        markSynced();
         setApiKeyInput("");
         setMode("cloud");
         toast(
@@ -128,12 +190,34 @@ export function EmbeddingSearchPanel({ onReindex }: { onReindex?: () => void }) 
   }
 
   function saveCloudForm() {
+    if (!guard()) return;
     patch.mutate(buildPatch("cloud", true), {
       onSuccess: (r) => {
+        markSynced();
         setApiKeyInput("");
         toast(r.reindexRequired ? "已保存，建议随后重建索引" : "已保存", "success");
       },
       onError,
+    });
+  }
+
+  /** 只提交总门覆盖，避免误带上未确认的云配置。 */
+  function saveGate(next: SearchEnabledOverride) {
+    const prev = searchEnabled;
+    setSearchEnabled(next);
+    patch.mutate({ searchEnabled: next }, {
+      onSuccess: () => {
+        toast(
+          next === "inherit"
+            ? "已恢复跟随环境变量（索引 worker 需重启生效）"
+            : "已保存：检索接口即时生效，索引 worker 需重启 API 服务后生效",
+          "success",
+        );
+      },
+      onError: (e) => {
+        setSearchEnabled(prev);
+        onError(e);
+      },
     });
   }
 
@@ -166,191 +250,71 @@ export function EmbeddingSearchPanel({ onReindex }: { onReindex?: () => void }) 
 
   return (
     <div className="flex max-w-2xl flex-col gap-5">
-      <section className="rounded-gx-lg border border-gx-separator p-4">
-        <h3 className="text-gx-14 font-semibold text-gx-text-primary">检索方式</h3>
-        <p className="mt-1 text-gx-12 text-gx-text-tertiary">选择关键词检索或云端语义检索。</p>
-        <div className="mt-3 flex flex-col gap-2">
-          <ModeOption
-            active={mode === "off"}
-            title="仅本机关键词检索"
-            subtitle="只在本工作区数据库内匹配关键词，不向外部发送任何内容（默认）"
-            onClick={() => chooseMode("off")}
-          />
-          <ModeOption
-            active={mode === "cloud"}
-            title="云端语义检索"
-            subtitle="在关键词之外，按语义理解匹配内容；需要配置外部服务，检索文本会发送到该服务"
-            onClick={() => chooseMode("cloud")}
-          />
-        </div>
-      </section>
+      <SearchModeSection mode={mode} onChoose={chooseMode} />
 
       {mode === "cloud" && cfg && (
-        <section className="flex flex-col gap-3 rounded-gx-lg border border-gx-separator p-4">
-          <h3 className="text-gx-14 font-semibold text-gx-text-primary">云端服务配置</h3>
-          <Field label="服务地址">
-            <Input value={baseURL} onChange={(e) => setBaseURL(e.target.value)} placeholder="https://…" />
-          </Field>
-          <Field label="模型名称">
-            <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="例如文本向量模型名" />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="批量大小">
-              <Input type="number" min={1} value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
-            </Field>
-            <Field label="超时（毫秒）">
-              <Input type="number" min={1} value={timeoutMs} onChange={(e) => setTimeoutMs(e.target.value)} />
-            </Field>
-          </div>
-          <Field label="单条记录字段索引上限">
-            <Input type="number" min={1} max={1000} value={fieldChunkCap} onChange={(e) => setFieldChunkCap(e.target.value)} />
-          </Field>
-          {/* dim 只读：维度由所选模型决定，不提供编辑入口 */}
-          <div className="flex items-center gap-2 text-gx-12 text-gx-text-hint">
-            <Icon name="alertCircle" size={13} />
-            当前向量维度 {cfg.dim}（由模型决定，重建后生效）
-          </div>
-          <div className="flex justify-end">
-            <Button variant="primary" size="sm" loading={patch.isPending} disabled={busy} onClick={saveCloudForm}>
-              保存配置
-            </Button>
-          </div>
-        </section>
+        <RemoteServiceSection
+          values={form}
+          onPatch={(p) => {
+            // 任一字段变动都算"有未保存编辑"：从此刻起后台重取不许覆盖表单。
+            setForm((f) => ({ ...f, ...p }));
+            markDirty();
+          }}
+          liveDim={cfg.dim}
+          probe={{
+            result: testConn.data,
+            pending: testConn.isPending,
+            failed: testConn.isError,
+            run: () =>
+              testConn.mutate(undefined, {
+                onSuccess: (r) =>
+                  toast(r.ok ? `连接正常${r.dim ? `，维度 ${r.dim}` : ""}` : r.detail, r.ok ? "success" : "error"),
+                onError,
+              }),
+          }}
+          busy={busy}
+          saving={patch.isPending}
+          onSave={saveCloudForm}
+        />
       )}
 
-      <section className="flex flex-col gap-3 rounded-gx-lg border border-gx-separator p-4">
-        <h3 className="text-gx-14 font-semibold text-gx-text-primary">服务密钥</h3>
-        {cfg && (
-          <div className="flex items-center gap-2 text-gx-12 text-gx-text-secondary">
-            <KeyStatusDot configured={cfg.apiKey.configured} source={cfg.apiKey.source} />
-            {cfg.apiKey.configured
-              ? <>已配置{cfg.apiKey.maskedLast4 ? <>（末 4 位：<span className="font-mono">{cfg.apiKey.maskedLast4}</span>）</> : null}，来源：{sourceLabel(cfg.apiKey.source)}</>
-              : "尚未配置密钥（当前来源：无）"}
-          </div>
-        )}
-        <Field label="设置 / 轮换密钥（仅写入，不会回显已有内容）">
-          <Input
-            type="password"
-            value={apiKeyInput}
-            autoComplete="new-password"
-            onChange={(e) => setApiKeyInput(e.target.value)}
-            placeholder="粘贴新密钥后点轮换保存"
-          />
-        </Field>
-        <div className="flex gap-2">
-          <Button variant="secondary" size="sm" loading={rotate.isPending} disabled={busy} onClick={submitRotate}>
-            轮换为新密钥
-          </Button>
-          <Button variant="ghost" size="sm" className="text-gx-danger" disabled={busy} onClick={() => setClearConfirm(true)}>
-            清除已保存的密钥
-          </Button>
-        </div>
-      </section>
+      {cfg && (
+        <SearchGateSection gate={cfg.searchGate} value={searchEnabled} onChange={saveGate} />
+      )}
 
-      <section className="flex items-center justify-between rounded-gx-lg border border-gx-separator p-4">
-        <div>
-          <h3 className="text-gx-14 font-semibold text-gx-text-primary">检索索引</h3>
-          <p className="mt-0.5 text-gx-12 text-gx-text-tertiary">修改配置或大量变更内容后，可手动重建索引。</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {notEnabled && <span className="text-gx-11 text-gx-text-hint">{SEARCH_NOT_ENABLED.reindexHint}</span>}
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={notEnabled}
-            title={notEnabled ? SEARCH_NOT_ENABLED.reindexHint : undefined}
-            onClick={() => onReindex?.()}
-          >
-            重建索引
-          </Button>
-        </div>
-      </section>
+      <ApiKeySection
+        status={cfg?.apiKey}
+        input={apiKeyInput}
+        onInput={setApiKeyInput}
+        onRotate={submitRotate}
+        onClear={() => setClearConfirm(true)}
+        busy={busy}
+        rotating={rotate.isPending}
+      />
+
+      <ReindexSection
+        disabled={notEnabled}
+        hint={notEnabled ? SEARCH_NOT_ENABLED.reindexHint : undefined}
+        onReindex={() => onReindex?.()}
+      />
 
       {/* off->cloud 数据出域二次确认 */}
-      <Modal
+      <CloudConsentModal
         open={consentOpen}
-        title="启用云端语义检索"
-        onClose={() => {
-          setConsentOpen(false);
-         
-        }}
-        width={480}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => { setConsentOpen(false); }} disabled={patch.isPending}>
-              取消
-            </Button>
-            <Button variant="primary" loading={patch.isPending} onClick={confirmCloudPatch}>
-              我已了解，启用
-            </Button>
-          </>
-        }
-      >
-        <p className="text-gx-13 text-gx-text-secondary">{CLOUD_CONSENT_TEXT}</p>
-      </Modal>
+        busy={patch.isPending}
+        onClose={() => setConsentOpen(false)}
+        onConfirm={confirmCloudPatch}
+      />
 
       {/* 清除密钥确认 */}
-      <Modal
+      <ClearKeyModal
         open={clearConfirm}
-        title="清除已保存的密钥"
+        busy={clearKey.isPending}
         onClose={() => setClearConfirm(false)}
-        width={420}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setClearConfirm(false)} disabled={clearKey.isPending}>
-              取消
-            </Button>
-            <Button variant="danger" loading={clearKey.isPending} onClick={submitClear}>
-              清除
-            </Button>
-          </>
-        }
-      >
-        <p className="text-gx-13 text-gx-text-secondary">
-          清除后将不再使用已保存的云端密钥；若环境变量中提供了密钥会回落到它，否则云端语义检索暂不可用。
-        </p>
-      </Modal>
+        onConfirm={submitClear}
+      />
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-gx-12 text-gx-text-tertiary">{label}</span>
-      {children}
-    </label>
-  );
-}
 
-function ModeOption({ active, title, subtitle, onClick }: { active: boolean; title: string; subtitle: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "flex items-start gap-2.5 rounded-gx-lg border p-3 text-left",
-        active ? "border-gx-accent bg-gx-accent-bg" : "border-gx-separator hover:bg-gx-bg",
-      ].join(" ")}
-    >
-      <span className={["mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border", active ? "border-gx-accent" : "border-gx-border-strong"].join(" ")}>
-        {active && <span className="h-2 w-2 rounded-full bg-gx-accent" />}
-      </span>
-      <span>
-        <span className="block text-gx-13 font-medium text-gx-text-primary">{title}</span>
-        <span className="mt-0.5 block text-gx-12 text-gx-text-tertiary">{subtitle}</span>
-      </span>
-    </button>
-  );
-}
-
-function KeyStatusDot({ configured, source }: { configured: boolean; source: string }) {
-  void source;
-  return <span className={["h-2 w-2 rounded-full", configured ? "bg-gx-success" : "bg-gx-text-hint"].join(" ")} />;
-}
-
-function sourceLabel(source: string): string {
-  if (source === "db") return "本工作区保存";
-  if (source === "env") return "环境变量";
-  return "无";
-}

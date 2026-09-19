@@ -42,6 +42,8 @@ export type AuditEventName =
   | "embedding_config_changed"
   | "embedding_api_key_rotated"
   | "embedding_api_key_cleared"
+  // 嵌入连通性自检（只探活不落库；detail 只带 ok/耗时/失败类别，绝不落密钥）
+  | "embedding_connection_tested"
   // S12 状态降级跳变采样（S9 仅预留常量，不打点）
   | "search_degraded"
   // M6/S1 鉴权 MCP 服务：PAT 生命周期（S1 起接线；S7 补 mcp_* 工具调用/认证失败两枚）

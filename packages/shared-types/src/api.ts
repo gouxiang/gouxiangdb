@@ -500,31 +500,135 @@ export interface EmbeddingApiKeyStatus {
 
 export type EmbeddingMode = "off" | "cloud";
 
+/**
+ * 远端嵌入服务形态（本次新增）。旧数据没有该字段时一律按 "cloud" 处理（向后兼容），
+ * 绝不因字段缺失读不出配置。
+ *   cloud             = 官方云端嵌入服务，维度由 model 元数据决定；
+ *   openai-compatible = 任何 OpenAI /v1/embeddings 兼容端点，维度可手填；
+ *   self-hosted       = 自建服务，维度可手填。
+ */
+export type EmbeddingProviderKind = "cloud" | "openai-compatible" | "self-hosted";
+
+/** 服务形态预设：baseURL 占位与"维度能否手填"的前后端单一真源。 */
+export interface EmbeddingProviderPreset {
+  id: EmbeddingProviderKind;
+  label: string;
+  defaultBaseURL: string;
+  /** 该形态是否允许手动指定维度（cloud 由 model 元数据决定，手填会写坏索引）。 */
+  dimEditable: boolean;
+  hint: string;
+}
+
+export const EMBEDDING_PROVIDER_PRESETS: readonly EmbeddingProviderPreset[] = [
+  {
+    id: "cloud",
+    label: "云端服务",
+    defaultBaseURL: "https://api.openai.com/v1",
+    dimEditable: false,
+    hint: "维度由所选模型决定，不可手填；填错维度会写坏索引。",
+  },
+  {
+    id: "openai-compatible",
+    label: "OpenAI 兼容端点",
+    defaultBaseURL: "https://your-gateway.example.com/v1",
+    dimEditable: true,
+    hint: "任何实现 /v1/embeddings 的网关；维度须与服务端实际输出一致。",
+  },
+  {
+    id: "self-hosted",
+    label: "自建服务",
+    defaultBaseURL: "http://127.0.0.1:11434/v1",
+    dimEditable: true,
+    hint: "自建推理服务；维度须与服务端实际输出一致。",
+  },
+];
+
+/** 该服务形态是否允许手动指定维度（后端据同一真源放行，前端据它决定输入框是否可编辑）。 */
+export function providerAllowsManualDim(p: EmbeddingProviderKind): boolean {
+  return EMBEDDING_PROVIDER_PRESETS.find((x) => x.id === p)?.dimEditable === true;
+}
+
+/** 检索总门在 app_settings 的覆盖值；inherit=跟随环境变量 GX_M5_SEARCH。 */
+export type SearchEnabledOverride = "on" | "off" | "inherit";
+
+/** 检索总门三态（与服务端 GX_M5_SEARCH 同款取值）。 */
+export type SearchGateFlag = "off" | "shadow" | "on";
+
+/** 检索总门状态（GET /admin/embedding/config 附带，供前端如实标注生效方式，不做假开关）。 */
+export interface SearchGateDTO {
+  /** 进程启动时由环境变量解析出的总门——决定路由是否挂载，运行期不可改。 */
+  envValue: SearchGateFlag;
+  /** app_settings 覆盖值（search.enabled）。 */
+  override: SearchEnabledOverride;
+  /** 覆盖后解析出的目标态。 */
+  effective: SearchGateFlag;
+  /** 检索接口当前是否真的对外可用（路由已挂载 且 目标态非 off）。 */
+  queryAvailable: boolean;
+  /** env=off 时路由根本没挂载：此时覆盖键无法启用检索，必须先改 GX_M5_SEARCH 并重启。 */
+  envGateOff: boolean;
+  /** 索引 worker 在启动期决定是否起，覆盖值需重启 API 服务才对它生效。 */
+  workerNeedsRestart: boolean;
+}
+
 /** GET /admin/embedding/config。 */
 export interface EmbeddingConfigDTO {
   mode: EmbeddingMode;
+  /** 远端服务形态；旧库无该键时回 "cloud"。 */
+  provider: EmbeddingProviderKind;
   baseURL: string;
   model: string;
-  /** 现役向量维度；未建库/未向量化为 0（只读，dim 不允许出现在 PATCH）。 */
+  /** 现役向量维度（只读，来自 search.db 索引元数据）。 */
   dim: number;
+  /** 手动指定的维度（0=未指定，沿用 model 元数据）；仅自建/兼容档可写。 */
+  dimOverride: number;
+  /** 当前服务形态是否允许手动指定维度。 */
+  dimEditable: boolean;
   batchSize: number;
   timeoutMs: number;
   fieldChunkCap: number;
+  /** 单个重建批次内在飞的远端请求数上限（真的喂给 provider 信号量）。 */
+  concurrency: number;
+  /** 单次远端请求的最大尝试次数（首次 + 重试）。 */
+  retryMaxAttempts: number;
+  /** 重试指数退避基数（毫秒）。 */
+  retryBaseMs: number;
   apiKey: EmbeddingApiKeyStatus;
+  /** 检索总门（环境变量基础态 + db 覆盖 + 是否需重启）。 */
+  searchGate: SearchGateDTO;
 }
 
-/** PATCH /admin/embedding/config 请求体（dim/reindex 出现即 400）。 */
+/** PATCH /admin/embedding/config 请求体（reindex 出现即 400；dim 仅自建/兼容档接受）。 */
 export interface EmbeddingConfigPatch {
   mode?: EmbeddingMode;
+  provider?: EmbeddingProviderKind;
   baseURL?: string;
   model?: string;
+  /** 仅 openai-compatible / self-hosted 接受；cloud 档出现即 400。 */
+  dim?: number;
   batchSize?: number;
   timeoutMs?: number;
   fieldChunkCap?: number;
+  concurrency?: number;
+  retryMaxAttempts?: number;
+  retryBaseMs?: number;
+  /** 检索总门 db 覆盖；写入 app_settings，索引 worker 需重启生效。 */
+  searchEnabled?: SearchEnabledOverride;
   /** off->cloud 必须显式 true，否则 409 NEED_CLOUD_CONFIRM。 */
   confirmCloud?: boolean;
   /** 字符串=覆盖落库；字段缺省=保持；显式 null=清 db key。 */
   apiKey?: string | null;
+}
+
+/** POST /admin/embedding/test-connection 结果：只探活，不落库、不回凭据。 */
+export interface EmbeddingConnectionTestResult {
+  ok: boolean;
+  latencyMs: number;
+  /** 探测到的向量维度；未成功为 null。 */
+  dim: number | null;
+  /** 中性结论（含失败类别的中文说明，绝不回显密钥）。 */
+  detail: string;
+  /** 失败类别：auth/server/timeout/network/client/config；成功为 null。 */
+  errorKind: string | null;
 }
 
 /** PATCH 成功响应：配置 + 是否需要显式重建。 */

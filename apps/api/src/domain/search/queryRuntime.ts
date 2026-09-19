@@ -120,6 +120,9 @@ export async function buildQueryRuntime(
         model: view.model,
         batchSize: view.batchSize,
         timeoutMs: view.timeoutMs,
+        concurrency: view.concurrency,
+        retryMaxAttempts: view.retryMaxAttempts,
+        retryBaseMs: view.retryBaseMs,
       });
       cachedProvider = provider;
     } else {

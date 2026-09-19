@@ -864,16 +864,42 @@ components:
         maskedLast4: { type: string, nullable: true, description: 仅末 4 位；无 key 为 null，绝不回明文 }
     EmbeddingConfig:
       type: object
-      required: [mode, baseURL, model, dim, batchSize, timeoutMs, fieldChunkCap, apiKey]
+      required: [mode, provider, baseURL, model, dim, dimOverride, dimEditable, batchSize, timeoutMs, fieldChunkCap, concurrency, retryMaxAttempts, retryBaseMs, apiKey, searchGate]
       properties:
         mode: { type: string, enum: [off, cloud] }
+        provider: { type: string, enum: [cloud, openai-compatible, self-hosted], description: 远端服务形态；旧库无此键按 cloud 处理 }
         baseURL: { type: string }
         model: { type: string }
         dim: { type: integer, description: 现役 search.db vec_chunks 建表维度；未建库/未向量化为 0 }
+        dimOverride: { type: integer, description: 手动指定维度；0=未指定（沿用 model 元数据）。仅自建/兼容档可写 }
+        dimEditable: { type: boolean, description: 当前服务形态是否允许手动指定维度 }
         batchSize: { type: integer }
         timeoutMs: { type: integer }
         fieldChunkCap: { type: integer, minimum: 1, maximum: 1000 }
+        concurrency: { type: integer, minimum: 1, maximum: 64, description: 单批在飞远端请求并发上限，真的喂给 provider 信号量 }
+        retryMaxAttempts: { type: integer, minimum: 1, maximum: 10, description: 单请求最大尝试次数（首次+退避重试） }
+        retryBaseMs: { type: integer, minimum: 1, maximum: 600000, description: 重试指数退避基数（毫秒） }
         apiKey: { $ref: '#/components/schemas/SearchApiKeyStatus' }
+        searchGate: { $ref: '#/components/schemas/SearchGate' }
+    SearchGate:
+      type: object
+      required: [envValue, override, effective, queryAvailable, envGateOff, workerNeedsRestart]
+      properties:
+        envValue: { type: string, enum: [off, shadow, on], description: 启动期由 GX_M5_SEARCH 解析，决定路由是否挂载，运行期不可改 }
+        override: { type: string, enum: [on, off, inherit], description: app_settings 的 search.enabled 覆盖值 }
+        effective: { type: string, enum: [off, shadow, on], description: 覆盖后解析出的目标态 }
+        queryAvailable: { type: boolean, description: 检索接口当前是否真的对外可用（已挂载且目标态非 off） }
+        envGateOff: { type: boolean, description: env=off 时路由未挂载，覆盖键此时无法启用检索，须改 env 并重启 }
+        workerNeedsRestart: { type: boolean, description: 索引 worker 启动期决定是否起，覆盖值恒需重启生效 }
+    EmbeddingConnectionTestResult:
+      type: object
+      required: [ok, latencyMs, dim, detail, errorKind]
+      properties:
+        ok: { type: boolean }
+        latencyMs: { type: integer }
+        dim: { type: integer, nullable: true, description: 探测到的向量维度；未成功为 null }
+        detail: { type: string, description: 中性结论（含失败类别的中文说明，绝不回显密钥） }
+        errorKind: { type: string, nullable: true, description: "auth/server/timeout/network/client/config；成功为 null" }
     EmbeddingConfigPatchResult:
       allOf:
         - $ref: '#/components/schemas/EmbeddingConfig'
@@ -954,18 +980,25 @@ components:
       type: object
       properties:
         mode: { type: string, enum: [off, cloud] }
+        provider: { type: string, enum: [cloud, openai-compatible, self-hosted] }
         baseURL: { type: string, description: 必须是 http(s) URL }
         model: { type: string }
+        dim: { type: integer, minimum: 1, maximum: 4096, description: 仅 openai-compatible / self-hosted 接受；cloud 档出现即 400 }
         batchSize: { type: integer, minimum: 1 }
         timeoutMs: { type: integer, minimum: 1 }
         fieldChunkCap: { type: integer, minimum: 1, maximum: 1000 }
+        concurrency: { type: integer, minimum: 1, maximum: 64 }
+        retryMaxAttempts: { type: integer, minimum: 1, maximum: 10 }
+        retryBaseMs: { type: integer, minimum: 1, maximum: 600000 }
+        searchEnabled: { type: string, enum: [on, off, inherit], description: 检索总门 db 覆盖；索引 worker 需重启生效 }
         confirmCloud: { type: boolean, description: off->cloud 必须显式 true，否则 409 NEED_CLOUD_CONFIRM }
         apiKey:
           type: string
           nullable: true
           description: 字符串=AES-GCM 覆盖落库；字段缺省=保持；显式 null=清除 db key
       description: >-
-        禁止出现 dim/dimensions（维度由 model 决定）与 reindex 字段，出现即 400 EMBEDDING_CONFIG_INVALID。
+        禁止出现 reindex 字段（出现即 400 EMBEDDING_CONFIG_INVALID）。dim 仅在服务形态为
+        openai-compatible / self-hosted 时接受，cloud 档维度由 model 元数据决定、出现即 400。
         apiKey 不会在任何响应回明文。
     ApiKeyRotateRequest:
       type: object
@@ -1860,6 +1893,21 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+  /admin/embedding/test-connection:
+    post:
+      tags: [search-admin]
+      summary: 嵌入服务连通性自检（按已保存配置探活，不落库、不回凭据，role_owner）
+      description: |
+        只发一次真实请求（并发 1、不重试、超时钳到 8s），绝不写任何配置、绝不回显密钥。
+        未启用/配置不完整直接回 ok:false（errorKind=config），不触网。
+      responses:
+        '200':
+          description: OK（失败也是 200：结论写在本体 ok 字段里）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmbeddingConnectionTestResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /admin/embedding/api-key/rotate:
     post:
       tags: [search-admin]

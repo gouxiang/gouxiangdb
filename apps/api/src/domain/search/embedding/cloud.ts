@@ -21,6 +21,10 @@ import {
   retryDelayMs,
   clampText,
   cloudConfigUsable,
+  DEFAULT_RETRY_BASE_MS,
+  DEFAULT_CONCURRENCY,
+  CONCURRENCY_MAX,
+  RETRY_MAX_ATTEMPTS,
   MAX_ATTEMPTS,
   MAX_TEXT_CHARS,
 } from "./types.js";
@@ -31,8 +35,17 @@ export interface CloudDeps {
   fetchImpl?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   retryBaseMs?: number;
-  /** 单批 HTTP 的最大并发（信号量），默认 4。 */
+  /** 单批 HTTP 的最大并发（信号量），默认取配置值，再缺省 4。 */
   concurrency?: number;
+  /** 最大尝试次数（首次 + 重试）；缺省取配置值，再缺省 MAX_ATTEMPTS=3。 */
+  maxAttempts?: number;
+}
+
+/** 钳到 [1, max] 的整数；NaN/非整数一律回 fallback，绝不让无界值进信号量或重试循环。 */
+function clampInt(raw: unknown, fallback: number, max: number): number {
+  const n = typeof raw === "number" && Number.isFinite(raw) ? Math.floor(raw) : fallback;
+  if (!Number.isInteger(n) || n < 1) return fallback;
+  return Math.min(n, max);
 }
 
 interface RemoteItem {
@@ -70,8 +83,12 @@ export interface CloudProvider extends EmbeddingProvider {
 export function createCloudProvider(cfg: CloudProviderConfig, deps: CloudDeps = {}): CloudProvider {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
-  const retryBase = deps.retryBaseMs ?? 1000;
-  const sem = new Semaphore(Math.max(1, deps.concurrency ?? 4));
+  const retryBase = deps.retryBaseMs ?? cfg.retryBaseMs ?? DEFAULT_RETRY_BASE_MS;
+  // 并发/重试真的消费配置：注入（测试）> 配置（app_settings/env）> 内置默认。
+  const sem = new Semaphore(
+    clampInt(deps.concurrency ?? cfg.concurrency, DEFAULT_CONCURRENCY, CONCURRENCY_MAX),
+  );
+  const maxAttempts = clampInt(deps.maxAttempts ?? cfg.retryMaxAttempts, MAX_ATTEMPTS, RETRY_MAX_ATTEMPTS);
   const endpoint = buildEmbeddingsEndpoint(cfg.baseURL);
 
   let dim = 0;
@@ -83,7 +100,7 @@ export function createCloudProvider(cfg: CloudProviderConfig, deps: CloudDeps = 
     const body = JSON.stringify({ model: cfg.model, input: batchTexts, encoding_format: "float" });
     let lastErr: EmbeddingError | null = null;
 
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
       try {
@@ -116,9 +133,9 @@ export function createCloudProvider(cfg: CloudProviderConfig, deps: CloudDeps = 
         const kind = err instanceof EmbeddingError ? err.kind : mapFetchError(err);
         lastErr = err instanceof EmbeddingError ? err : new EmbeddingError(kind, errorMessage(err));
         lastErrorKind = lastErr.kind;
-        if (lastErr.kind === "auth" || !isRetryableKind(lastErr.kind) || attempt === MAX_ATTEMPTS) {
+        if (lastErr.kind === "auth" || !isRetryableKind(lastErr.kind) || attempt === maxAttempts) {
           // 401/403 立即 unhealthy；server/timeout/network 重试耗尽（连续失败）同样 unhealthy（§4.9）。
-          if (lastErr.kind === "auth" || (isRetryableKind(lastErr.kind) && attempt === MAX_ATTEMPTS)) {
+          if (lastErr.kind === "auth" || (isRetryableKind(lastErr.kind) && attempt === maxAttempts)) {
             unhealthy = true;
           }
           throw lastErr;

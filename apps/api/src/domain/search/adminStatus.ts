@@ -153,6 +153,9 @@ export async function buildSearchStatus(d: StatusDeps): Promise<SearchStatus> {
       model: view.model,
       batchSize: view.batchSize,
       timeoutMs: view.timeoutMs,
+      concurrency: view.concurrency,
+      retryMaxAttempts: view.retryMaxAttempts,
+      retryBaseMs: view.retryBaseMs,
     });
     if (provider.mode !== "cloud") provider = null; // 配置不齐回落 off
   }

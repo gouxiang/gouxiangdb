@@ -19,6 +19,7 @@ import { sourceIp } from "../../utils/client-ip.js";
 import { executeUnifiedSearch } from "../../domain/search/query.js";
 import { buildQueryRuntime } from "../../domain/search/queryRuntime.js";
 import { resolveSearchDbPath } from "../../domain/search/searchStore.js";
+import { loadSearchGateFlag } from "../../domain/search/searchGate.js";
 import { isCorruptionError } from "../../domain/search/searchCorruption.js";
 import {
   recoverCorruptSearchStore,
@@ -60,6 +61,14 @@ function parseParams(q: string | undefined, typeRaw: string, modeRaw: string, li
 
 searchRoutes.get("/", async (c) => {
   const userId = c.get("auth").userId;
+
+  // 总门 db 覆盖（app_settings 的 search.enabled）：请求期解析，改了立即生效。
+  // env 仍决定路由是否挂载（off 时本文件根本不挂，落 v1 自身 404），覆盖键只在已挂载时收窄。
+  const gateFlag = await loadSearchGateFlag(prisma, config.jwtSecret, process.env, config.m5Search);
+  if (gateFlag === "off") {
+    throw new HttpError(404, "统一检索未启用", "NOT_FOUND");
+  }
+
   const { rawQ, type, mode, limit } = parseParams(
     c.req.query("q"),
     c.req.query("type") ?? "all",
@@ -71,7 +80,7 @@ searchRoutes.get("/", async (c) => {
   // 空 q：两态都回空结果（on 回 §9 空壳；shadow 旧链本来也是 {records:[],docs:[]}），
   // 且在打开 search.db 之前短路（默认形态零建库）。
   if (!hadQuery) {
-    if (config.m5Search === "shadow") return c.json({ records: [], docs: [] });
+    if (gateFlag === "shadow") return c.json({ records: [], docs: [] });
     return c.json(emptySearchResponse(limit));
   }
 
@@ -97,7 +106,7 @@ searchRoutes.get("/", async (c) => {
 
   let unified: Awaited<ReturnType<typeof executeUnifiedSearch>>;
 
-  if (config.m5Search === "shadow") {
+  if (gateFlag === "shadow") {
     // shadow 态：旧链结果始终是响应真源（先算，保证新链任何异常都不污染响应）。
     const legacy = await runLegacyGlobalSearch(prisma, userId, rawQ);
     let newChainError: unknown = null;

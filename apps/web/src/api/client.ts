@@ -128,6 +128,7 @@ import type {
   EmbeddingConfigPatch,
   EmbeddingConfigPatchResult,
   EmbeddingApiKeyStatus,
+  EmbeddingConnectionTestResult,
   ApiKeyRotateRequest,
   ReindexRequest,
   ReindexStarted,
@@ -1253,6 +1254,12 @@ export const EmbeddingAdminApi = {
       throw new ApiError(res.status, body);
     }
   },
+  /** 连通性自检：按已保存配置探活，不落库、不回凭据（200 本体带 ok 字段）。 */
+  testConnection: () =>
+    apiFetch<EmbeddingConnectionTestResult>("/api/v1/admin/embedding/test-connection", {
+      method: "POST",
+      body: "{}",
+    }),
   /** 触发重建索引（异步，202）；进行中再调 409 REINDEX_IN_PROGRESS。 */
   reindex: (body: ReindexRequest = {}) =>
     apiFetch<ReindexStarted>("/api/v1/admin/reindex", {

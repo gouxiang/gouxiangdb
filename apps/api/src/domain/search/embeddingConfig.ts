@@ -10,33 +10,45 @@
 //     派生（绝不把 jwtSecret 当 AES key 裸用）；每密文随机 IV + GCM authTag；存储版本化 v1。
 //   - JWT_SECRET 变更导致解密失败：回落到 configured:false，绝不 500（§4.4 验收）。
 
-import crypto from "node:crypto";
+import type { EmbeddingProviderKind, SearchEnabledOverride } from "@gx/shared-types";
 import type { EmbeddingMode } from "./embedding/types.js";
 import {
   parseEmbeddingMode,
+  parseEmbeddingProvider,
   DEFAULT_BATCH_SIZE,
   DEFAULT_TIMEOUT_MS,
+  DEFAULT_CONCURRENCY,
+  DEFAULT_RETRY_BASE_MS,
+  DIM_MAX,
+  CONCURRENCY_MAX,
+  RETRY_MAX_ATTEMPTS,
+  MAX_ATTEMPTS,
 } from "./embedding/types.js";
 
 // ---- app_settings 键（命名空间前缀，避免与未来 KV 混用）----
 export const SETTING_KEYS = {
   mode: "embedding.mode",
+  provider: "embedding.provider",
   baseUrl: "embedding.base_url",
   apiKeyCipher: "embedding.api_key_cipher",
   model: "embedding.model",
   batchSize: "embedding.batch_size",
   timeoutMs: "embedding.timeout_ms",
+  /** 手动指定维度（0/缺省=沿用 model 元数据）；仅自建/兼容档可写。 */
+  dim: "embedding.dim",
+  /** 单批在飞远端请求并发上限。 */
+  concurrency: "embedding.concurrency",
+  /** 单请求最大尝试次数（首次 + 退避重试）。 */
+  retryMaxAttempts: "embedding.retry_max_attempts",
+  /** 退避基数（毫秒）。 */
+  retryBaseMs: "embedding.retry_base_ms",
   fieldChunkCap: "search.field_chunk_cap",
   /** model/mode/fieldChunkCap 变更后标记需要显式 reindex（两步纪律，§5.4）。 */
   reindexRequired: "search.reindex_required",
+  /** 检索总门 db 覆盖：on/off/inherit（inherit=跟随 GX_M5_SEARCH，缺省即 inherit）。 */
+  searchEnabled: "search.enabled",
 } as const;
 
-export const DEFAULT_FIELD_CHUNK_CAP = 50;
-const FIELD_CAP_MAX = 1000;
-const CIPHER_VERSION = "v1";
-/** HKDF 域分隔：固定 salt + info，绑定用途，防同一主密钥派生被跨场景复用。 */
-const HKDF_SALT = "gouxiangdb/embedding";
-const HKDF_INFO = "embedding-api-key/v1";
 
 /**
  * Prisma AppSetting 访问面（最小结构；只声明本片实际用到的三个方法）。
@@ -58,11 +70,16 @@ export interface AppSettingClient {
 
 export interface EnvEmbeddingSeed {
   mode: EmbeddingMode;
+  provider: EmbeddingProviderKind;
   baseURL: string;
   apiKey: string;
   model: string;
   batchSize: number;
   timeoutMs: number;
+  dim: number;
+  concurrency: number;
+  retryMaxAttempts: number;
+  retryBaseMs: number;
   fieldChunkCap: number;
 }
 
@@ -73,99 +90,62 @@ function positiveInt(raw: string | undefined, fallback: number, max: number): nu
   return n;
 }
 
-/** 从 process.env 形状的对象读首启种子（只读、不写库）。未知 mode 回 off。 */
+/** 读 env 种子（只读、不写库）。未知 mode 回 off、未知 provider 回 cloud（向后兼容同款保守口径）。 */
 export function readEnvEmbeddingSeed(env: NodeJS.ProcessEnv): EnvEmbeddingSeed {
   return {
     mode: parseEmbeddingMode(env.GX_EMBEDDING_MODE),
+    provider: parseEmbeddingProvider(env.GX_EMBEDDING_PROVIDER),
     baseURL: env.GX_EMBEDDING_BASE_URL?.trim() ?? "",
     apiKey: env.GX_EMBEDDING_API_KEY?.trim() ?? "",
     model: env.GX_EMBEDDING_MODEL?.trim() ?? "",
     batchSize: positiveInt(env.GX_EMBEDDING_BATCH_SIZE, DEFAULT_BATCH_SIZE, 10000),
     timeoutMs: positiveInt(env.GX_EMBEDDING_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, 600000),
+    dim: positiveInt(env.GX_EMBEDDING_DIM, 0, DIM_MAX),
+    concurrency: positiveInt(env.GX_EMBEDDING_CONCURRENCY, DEFAULT_CONCURRENCY, CONCURRENCY_MAX),
+    retryMaxAttempts: positiveInt(env.GX_EMBEDDING_RETRY_MAX, MAX_ATTEMPTS, RETRY_MAX_ATTEMPTS),
+    retryBaseMs: positiveInt(env.GX_EMBEDDING_RETRY_BASE_MS, DEFAULT_RETRY_BASE_MS, 600000),
     fieldChunkCap: positiveInt(env.GX_SEARCH_FIELD_CHUNK_CAP, DEFAULT_FIELD_CHUNK_CAP, FIELD_CAP_MAX),
   };
 }
 
-// ======================= 纯函数：AES-256-GCM 加解密 =======================
-
-/** 从主密钥（jwtSecret）HKDF-SHA256 派生 32 字节 AES-256 数据密钥。 */
-export function deriveDataKey(masterSecret: string): Buffer {
-  if (!masterSecret) throw new Error("cannot derive embedding data key from empty master secret");
-  return Buffer.from(crypto.hkdfSync("sha256", masterSecret, HKDF_SALT, HKDF_INFO, 32));
-}
-
-/** 加密：随机 12 字节 IV + GCM authTag，输出版本化字符串 v1:ivB64:tagB64:ctB64。 */
-export function encryptSecret(plaintext: string, masterSecret: string): string {
-  const key = deriveDataKey(masterSecret);
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return [CIPHER_VERSION, iv.toString("base64"), tag.toString("base64"), ct.toString("base64")].join(":");
-}
-
-/** 解密：校验版本与 GCM authTag；任何篡改/密钥不符/格式错都抛错（调用方决定回落，不吞成空串）。 */
-export function decryptSecret(stored: string, masterSecret: string): string {
-  const parts = stored.split(":");
-  if (parts.length !== 4 || parts[0] !== CIPHER_VERSION) {
-    throw new Error("unsupported or malformed embedding ciphertext");
-  }
-  const [, ivB64, tagB64, ctB64] = parts;
-  const key = deriveDataKey(masterSecret);
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivB64, "base64"));
-  decipher.setAuthTag(Buffer.from(tagB64, "base64"));
-  const plain = Buffer.concat([decipher.update(Buffer.from(ctB64, "base64")), decipher.final()]);
-  return plain.toString("utf8");
-}
-
-/** 脱敏：仅回末 4 字符，其余固定掩码；过短串不泄露任何原文。 */
-export function maskApiKey(plaintext: string): string {
-  const t = plaintext.trim();
-  if (t.length < 4) return "****";
-  return `****${t.slice(-4)}`;
-}
-
-/** fieldChunkCap 正整数门（1..1000）；非法抛错由配置写入层转 400（S9）。 */
-export function validateFieldChunkCap(n: number): number {
-  if (!Number.isInteger(n) || n < 1 || n > FIELD_CAP_MAX) {
-    throw new Error(`fieldChunkCap must be an integer in [1, ${FIELD_CAP_MAX}], got ${String(n)}`);
-  }
-  return n;
-}
-
-/** 正整数门（batchSize/timeoutMs 等）；非法抛错由配置写入层转 400（S9）。 */
-export function validatePositiveInt(n: number, max: number, field: string): number {
-  if (!Number.isInteger(n) || n < 1 || n > max) {
-    throw new Error(`${field} must be a positive integer in [1, ${max}], got ${String(n)}`);
-  }
-  return n;
-}
-
-/**
- * S9 PATCH 校验：http(s) URL 合法且非空白。只校验形态，不做可达性探测（健康由 health() 另算）。
- */
-export function validateHttpUrl(raw: string): string {
-  const v = raw.trim();
-  let url: URL;
-  try {
-    url = new URL(v);
-  } catch {
-    throw new Error("baseURL must be a valid http(s) URL");
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("baseURL must use http or https protocol");
-  }
-  return v;
-}
+// 加解密与字段校验见 ./embeddingSecret.js（按子功能拆文件）；此处原样再导出，
+// 既有调用方/测试的导入路径不变。
+import {
+  encryptSecret,
+  decryptSecret,
+  maskApiKey,
+  validateFieldChunkCap,
+  validateDimOverride,
+  validatePositiveInt,
+  DEFAULT_FIELD_CHUNK_CAP,
+  FIELD_CAP_MAX,
+} from "./embeddingSecret.js";
+export {
+  deriveDataKey,
+  encryptSecret,
+  decryptSecret,
+  maskApiKey,
+  validateFieldChunkCap,
+  validateDimOverride,
+  validatePositiveInt,
+  validateHttpUrl,
+  DEFAULT_FIELD_CHUNK_CAP,
+} from "./embeddingSecret.js";
 
 // ===================== app_settings 持久化（主库 Prisma） =======================
 
 export interface EmbeddingConfigView {
   mode: EmbeddingMode;
+  provider: EmbeddingProviderKind;
   baseURL: string;
   model: string;
   batchSize: number;
   timeoutMs: number;
+  /** 手填维度（0=未指定）。 */
+  dim: number;
+  concurrency: number;
+  retryMaxAttempts: number;
+  retryBaseMs: number;
   fieldChunkCap: number;
   /** key 是否可用：db 密文可解或 env 提供了非空 key。 */
   hasKey: boolean;
@@ -192,12 +172,47 @@ export class EmbeddingConfigStore {
   }
 
   async setMode(mode: EmbeddingMode): Promise<void> { await this.setRaw(SETTING_KEYS.mode, mode); }
+  async setProvider(v: EmbeddingProviderKind): Promise<void> {
+    await this.setRaw(SETTING_KEYS.provider, v.trim());
+  }
   async setBaseUrl(v: string): Promise<void> { await this.setRaw(SETTING_KEYS.baseUrl, v.trim()); }
   async setModel(v: string): Promise<void> { await this.setRaw(SETTING_KEYS.model, v.trim()); }
   async setBatchSize(n: number): Promise<void> { await this.setRaw(SETTING_KEYS.batchSize, String(n)); }
   async setTimeoutMs(n: number): Promise<void> { await this.setRaw(SETTING_KEYS.timeoutMs, String(n)); }
+  /** 手填维度；0 表示清除（沿用 model 元数据）。 */
+  async setDim(n: number): Promise<void> {
+    await this.setRaw(SETTING_KEYS.dim, String(validateDimOverride(n)));
+  }
+  async setConcurrency(n: number): Promise<void> {
+    await this.setRaw(SETTING_KEYS.concurrency, String(validatePositiveInt(n, CONCURRENCY_MAX, "concurrency")));
+  }
+  async setRetryMaxAttempts(n: number): Promise<void> {
+    await this.setRaw(
+      SETTING_KEYS.retryMaxAttempts,
+      String(validatePositiveInt(n, RETRY_MAX_ATTEMPTS, "retryMaxAttempts")),
+    );
+  }
+  async setRetryBaseMs(n: number): Promise<void> {
+    await this.setRaw(SETTING_KEYS.retryBaseMs, String(validatePositiveInt(n, 600000, "retryBaseMs")));
+  }
   async setFieldChunkCap(n: number): Promise<void> {
     await this.setRaw(SETTING_KEYS.fieldChunkCap, String(validateFieldChunkCap(n)));
+  }
+
+  /** 检索总门 db 覆盖；写 "inherit" 等价于删除该键（跟随环境变量）。 */
+  async setSearchEnabled(v: SearchEnabledOverride): Promise<void> {
+    if (v === "inherit") {
+      await this.client.appSetting.delete({ where: { k: SETTING_KEYS.searchEnabled } }).catch(() => undefined);
+      return;
+    }
+    await this.setRaw(SETTING_KEYS.searchEnabled, v);
+  }
+
+  /** 读总门覆盖；键不存在/未知值一律 inherit（老库升级首态，绝不因此报错）。 */
+  async getSearchEnabledOverride(): Promise<SearchEnabledOverride> {
+    const raw = await this.getRaw(SETTING_KEYS.searchEnabled);
+    const v = raw?.trim().toLowerCase();
+    return v === "on" || v === "off" ? v : "inherit";
   }
 
   /** 标记/清除"配置已变、需显式重建"（§5.4 两步：PATCH 只标记，不自动重建）。 */
@@ -236,10 +251,20 @@ export class EmbeddingConfigStore {
     const seed = readEnvEmbeddingSeed(env);
     const dbMode = await this.getRaw(SETTING_KEYS.mode) as EmbeddingMode | undefined;
     const mode = dbMode === "cloud" || dbMode === "off" ? dbMode : seed.mode;
+    // provider 向后兼容：老库无 embedding.provider 键 -> 回 env 种子（未设则 "cloud"），
+    // 与既有 cloud 行为完全一致，绝不因字段缺失读不出配置。
+    const dbProvider = await this.getRaw(SETTING_KEYS.provider);
+    const provider = dbProvider === undefined ? seed.provider : parseEmbeddingProvider(dbProvider);
     const baseURL = (await this.getRaw(SETTING_KEYS.baseUrl)) ?? seed.baseURL;
     const model = (await this.getRaw(SETTING_KEYS.model)) ?? seed.model;
     const batchSize = positiveInt(await this.getRaw(SETTING_KEYS.batchSize), seed.batchSize, 10000);
     const timeoutMs = positiveInt(await this.getRaw(SETTING_KEYS.timeoutMs), seed.timeoutMs, 600000);
+    const dim = positiveInt(await this.getRaw(SETTING_KEYS.dim), seed.dim, DIM_MAX);
+    const concurrency = positiveInt(await this.getRaw(SETTING_KEYS.concurrency), seed.concurrency, CONCURRENCY_MAX);
+    const retryMaxAttempts = positiveInt(
+      await this.getRaw(SETTING_KEYS.retryMaxAttempts), seed.retryMaxAttempts, RETRY_MAX_ATTEMPTS,
+    );
+    const retryBaseMs = positiveInt(await this.getRaw(SETTING_KEYS.retryBaseMs), seed.retryBaseMs, 600000);
     const fieldChunkCap = positiveInt(await this.getRaw(SETTING_KEYS.fieldChunkCap), seed.fieldChunkCap, FIELD_CAP_MAX);
 
     const cipher = await this.getRaw(SETTING_KEYS.apiKeyCipher);
@@ -262,6 +287,10 @@ export class EmbeddingConfigStore {
       keySource = "env";
       maskedKey = maskApiKey(seed.apiKey);
     }
-    return { mode, baseURL, model, batchSize, timeoutMs, fieldChunkCap, hasKey, keySource, maskedKey, dbKeyUndecryptable };
+    return {
+      mode, provider, baseURL, model, batchSize, timeoutMs, dim,
+      concurrency, retryMaxAttempts, retryBaseMs, fieldChunkCap,
+      hasKey, keySource, maskedKey, dbKeyUndecryptable,
+    };
   }
 }

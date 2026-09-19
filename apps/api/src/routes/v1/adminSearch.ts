@@ -24,6 +24,7 @@ import {
   EmbeddingConfigInvalid,
   NeedCloudConfirm,
 } from "../../domain/search/adminEmbedding.js";
+import { testEmbeddingConnection } from "../../domain/search/embeddingProbe.js";
 import { writeAudit, type AuditEventName } from "../../audit/audit.js";
 import { sourceIp } from "../../utils/client-ip.js";
 
@@ -187,6 +188,20 @@ adminSearchRoutes.post("/embedding/api-key/rotate", async (c) => {
     configured: status!.configured, source: status!.source,
   });
   return c.json(status);
+});
+
+// 7) POST /admin/embedding/test-connection（只探活，不落库、不回凭据）。
+adminSearchRoutes.post("/embedding/test-connection", async (c) => {
+  const userId = c.get("auth").userId;
+  await assertOwner(userId);
+  const result = await testEmbeddingConnection({
+    prisma, env: process.env, jwtSecret: config.jwtSecret,
+  });
+  recordAudit("embedding_connection_tested", 200, userId, sourceIp(c), "POST", c.req.path, {
+    ok: result.ok, latencyMs: result.latencyMs, errorKind: result.errorKind,
+  });
+  // 探活结论一律 200：失败是"没通"这一事实，不是服务端故障，别把配置页刷成红色错误。
+  return c.json(result);
 });
 
 // 6) DELETE /admin/embedding/api-key。

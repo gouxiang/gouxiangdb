@@ -19,6 +19,7 @@ import { META_KEYS, getMeta, setMeta } from "./schema.js";
 import { lockOwnedBy } from "./indexerSchedule.js";
 import { getSearchStore, resolveSearchDbPath, type SearchStore } from "./searchStore.js";
 import { buildContext } from "./reindexPump.js";
+import { EmbeddingConfigStore } from "./embeddingConfig.js";
 import type { EmbeddingMode, EmbeddingProvider } from "./embedding/types.js";
 import type { ReindexDeps } from "./reindexTypes.js";
 import { parseM5SearchFlag, parseSearchWorkerFlag, type M5SearchFlag } from "../../configM5Search.js";
@@ -102,6 +103,17 @@ function releaseLock(s: WorkerState): void {
  */
 export async function startSearchWorker(d: SearchWorkerDeps): Promise<boolean> {
   if (!searchWorkerAllowed(d)) return false;
+  // 总门 db 覆盖（app_settings 的 search.enabled）：worker 只在启动期 spawn，故覆盖值对它
+  // 【需重启 API 服务】才生效——界面已如实标注，不假装热切换。读不出配置按 env 口径继续。
+  try {
+    const override = await new EmbeddingConfigStore(d.prisma, d.jwtSecret).getSearchEnabledOverride();
+    if (override === "off") {
+      console.log("[search-worker] 总门覆盖 search.enabled=off，不起 worker（如需恢复请改回并重启）");
+      return false;
+    }
+  } catch {
+    // 配置读不出：不阻断既有 env 口径。
+  }
   if (state) return true;
   try {
     const store = resolveStore(d);
