@@ -14,6 +14,8 @@
 //
 // 阶段 1 壳层重构（UI-SPEC v1.0 骨架 S-1）：
 //   R-N-07/08   L1 两档 224/56，折叠态写 localStorage（不写 URL），刷新保持
+//   R-N-07/08'  L2 同构：收起/展开态写 gx.l2.collapsed，刷新保持；收起后常驻档留 56 窄条唤回。
+//               三级优先级：用户显式意图 > 响应式档位默认（浮出档收起 / 常驻档展开）。
 //   R-N-09/10   L1/L2 选中态 = 白底卡片 + 圆角 8 + accent 字 600（左侧色条已删）
 //   R-N-02      L2 归属由 URL 反推（useMatch 取参），刷新/直访完整还原
 //   R-N-19      主壳内不渲染面包屑（本壳本来就没有，保持为零）
@@ -37,6 +39,7 @@ import { WorkspaceTopBar } from "./WorkspaceTopBar";
 import { NavLibraryBlock } from "./NavLibraryBlock";
 import { L1_ROW_IDLE, L1_ROW_SELECTED, NAV_ROW_TRANSITION, PrimaryNav } from "./PrimaryNav";
 import { SecondaryNav } from "./SecondaryNav";
+import { SecondaryNavRail } from "./SecondaryNavRail";
 import { useNavMenu, useNavNodeIndex } from "./nav-hooks";
 import { resolveRouteContainer } from "./lib/route-container";
 import { FOOTER_NAV_ITEMS } from "./lib/nav-footer";
@@ -49,6 +52,7 @@ import {
   readL1Collapsed,
   writeL1Collapsed,
 } from "./lib/l1-collapse";
+import { readL2Collapsed, resolveL2Collapsed, writeL2Collapsed } from "./lib/l2-collapse";
 import type { MenuTreeNode } from "./lib/menu-tree";
 
 interface SecondaryState {
@@ -222,12 +226,15 @@ export function WorkspaceShell() {
   // 手动点 L1 容器打开的 L2；路由变化即清空（URL 是 L2 归属的唯一真源，R-N-02）
   const [picked, setPicked] = useState<SecondaryState | null>(null);
   /**
-   * L2 收起态。
-   * 浮出档（768–1279）默认**收起**：该档 L2 不再是常驻列，而是按需浮出的覆盖面板
-   * （否则 240 的浮层会长期压住内容与卡片区，等于没给内容腾出宽度）。
-   * 非浮出档（≥1280）默认常驻，与改动前一致。
+   * L2 收起态拆成两份，根因是「响应式档位」原先冒充了「用户意图」：
+   *   l2Intent —— 用户显式点过收起/展开，写 localStorage（gx.l2.collapsed），刷新保持。
+   *               null = 从未操作过，此时才跟随档位默认（浮出档收起 / 常驻档展开）。
+   *   l2Peeked —— 会话内临时展开（点一级容器唤出），不写盘、换路由即失效：
+   *               「我要看这个容器的二级」是一次性动作，不该升级成永久偏好。
+   * 优先级（单一真源 l2-collapse.resolveL2Collapsed）：l2Peeked > l2Intent > 档位默认。
    */
-  const [l2Hidden, setL2Hidden] = useState(() => isFloatingL2Tier(tier));
+  const [l2Intent, setL2Intent] = useState<boolean | null>(() => readL2Collapsed());
+  const [l2Peeked, setL2Peeked] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => readL1Collapsed());
   const location = useLocation();
 
@@ -269,8 +276,21 @@ export function WorkspaceShell() {
 
   const openSecondary = (c: MenuTreeNode) => {
     setPicked({ containerId: c.item.id, name: c.item.label ?? c.item.node?.name ?? "容器" });
-    setL2Hidden(false);
+    setL2Peeked(true);
   };
+
+  /** 显式收起：落盘（刷新保持），并清掉会话内 peek，否则 peek 会盖掉这次收起。 */
+  const collapseL2 = useCallback(() => {
+    setL2Peeked(false);
+    setL2Intent(true);
+    writeL2Collapsed(true);
+  }, []);
+
+  /** 显式展开：落盘（刷新保持）。窄条与 L1 底部唤回入口都走这里。 */
+  const expandL2 = useCallback(() => {
+    setL2Intent(false);
+    writeL2Collapsed(false);
+  }, []);
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
@@ -292,23 +312,20 @@ export function WorkspaceShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // 跨档位切换（如 1000 → 1200）时按该档默认态复位：浮出档收起、常驻档展开。
-  // 否则会出现「面板在某档被收起、换档后既无列也无入口」的死角（功能必须始终可达）。
-  useEffect(() => {
-    setL2Hidden(isFloatingL2Tier(tier));
-  }, [tier]);
+  // 跨档位切换（如 1000 → 1200）与路由变化都不再复位 L2：l2Hidden 是纯派生值，
+  // 用户显式收起/展开由 l2Intent 承载（跨刷新），档位默认只在「从未操作」时生效。
+  // 原先每次换档/换路由都按档位硬复位，正是「用户选择被档位锁死」的根因。
   useEffect(() => {
     setDrawerOpen(false);
     setPicked(null);
-    setL2Hidden(isFloatingL2Tier(tier));
-    // 仅路由变化时复位；tier 变化由上一个 effect 负责
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setL2Peeked(false);
   }, [location.pathname]);
 
   // 工作区级路由（/workspace/*）没有库上下文 → L2 收起为 0 宽、不占位
   const activeContainer = location.pathname.startsWith("/workspace")
     ? null
     : (picked ?? routeContainer);
+  const l2Hidden = l2Peeked ? false : resolveL2Collapsed(l2Intent, isFloatingL2Tier(tier));
   const showL2 = !!activeContainer && !l2Hidden;
 
   // R-D-33：<768 单栏，L1/L2 全部进抽屉（由汉堡「导航」唤出）
@@ -330,7 +347,7 @@ export function WorkspaceShell() {
       variant={floatingL2 || drawer ? "floating" : "static"}
       width={l2Width}
       entityIcons={entityIcons}
-      onClose={() => setL2Hidden(true)}
+      onClose={collapseL2}
     />
   ) : null;
 
@@ -394,27 +411,39 @@ export function WorkspaceShell() {
               floatingL2 && !showL2 && activeContainer
                 ? {
                     label: `展开「${activeContainer.name}」二级面板`,
-                    onOpen: () => setL2Hidden(false),
+                    onOpen: expandL2,
                   }
                 : null
             }
           />
         )}
 
-        {!drawer && showL2 && secondary && (
-          floatingL2 ? (
-            // R-D-31 / R-D-32：浮出面板——绝对定位贴内容区左侧，覆盖内容但不挤压内容宽度。
-            // top 从「内容区首行工具带」下沿起算（工具栏高 48，见附录 C.1）：面板只覆盖内容，
-            // 不盖住「新建记录 / 筛选 / 搜索」这一行——一号原则是功能始终可达。
-            <div
-              className="absolute bottom-0 gx-z-drawer"
-              style={{ left: l1Width, top: L2_FLOATING_TOP_PX }}
-              data-l2="floating"
-            >
-              {secondary}
-            </div>
+        {!drawer && activeContainer && (
+          showL2 ? (
+            floatingL2 ? (
+              // R-D-31 / R-D-32：浮出面板——绝对定位贴内容区左侧，覆盖内容但不挤压内容宽度。
+              // top 从「内容区首行工具带」下沿起算（工具栏高 48，见附录 C.1）：面板只覆盖内容，
+              // 不盖住「新建记录 / 筛选 / 搜索」这一行——一号原则是功能始终可达。
+              <div
+                className="absolute bottom-0 gx-z-drawer"
+                style={{ left: l1Width, top: L2_FLOATING_TOP_PX }}
+                data-l2="floating"
+              >
+                {secondary}
+              </div>
+            ) : (
+              secondary
+            )
           ) : (
-            secondary
+            // 收起态：常驻档留 56 窄条唤回（否则收起＝二级导航永久消失）；
+            // 浮出档不给窄条（会占掉内容宽度，违反 R-D-31/32），唤回入口在 L1 底部固定区。
+            !floatingL2 && (
+              <SecondaryNavRail
+                key={`rail-${activeContainer.containerId}`}
+                containerName={activeContainer.name}
+                onExpand={expandL2}
+              />
+            )
           )
         )}
 

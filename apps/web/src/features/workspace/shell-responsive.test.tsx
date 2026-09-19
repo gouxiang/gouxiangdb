@@ -11,6 +11,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { L2_WIDTH, L2_WIDTH_COMPACT } from "./lib/l1-collapse";
+import { L2_WIDTH_COLLAPSED } from "./lib/l2-collapse";
 import { isDrawerTier, isFloatingL2Tier } from "../../lib/breakpoint";
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
@@ -46,9 +47,22 @@ describe("R-D-30/31/32/33 壳层断点接线", () => {
   });
 
   it("浮出档默认收起 + L1 底部固定区留「展开面板」唤回入口（功能不失联）", () => {
-    expect(shell).toContain("useState(() => isFloatingL2Tier(tier))");
+    // 档位默认只在「用户从未操作」时生效，不得再有「档位值直接当状态初值」的写法
+    // （那样窄屏被动收起一次会被落盘成用户意图，回宽屏再也展开不回来）。
+    expect(shell).not.toContain("useState(() => isFloatingL2Tier(tier))");
+    expect(shell).toContain("resolveL2Collapsed(l2Intent, isFloatingL2Tier(tier))");
     expect(shell).toContain("secondaryToggle");
     expect(shell).toContain("展开面板");
+  });
+
+  it("L2 收起态持久化：意图写 localStorage，收起后常驻档留 56 窄条唤回", () => {
+    expect(shell).toContain("readL2Collapsed()");
+    expect(shell).toContain("writeL2Collapsed(");
+    expect(L2_WIDTH_COLLAPSED).toBe(56);
+    // 窄条只在非浮出档渲染：浮出档插常驻竖栏会反向挤压内容宽度（R-D-31/32）
+    expect(shell).toContain("<SecondaryNavRail");
+    expect(shell).toContain("!floatingL2 && (");
+    expect(read("./SecondaryNavRail.tsx")).toContain('data-l2="collapsed"');
   });
 
   it("SecondaryNav 支持浮出变体：浮层带阴影，宽度由壳层按档传入", () => {

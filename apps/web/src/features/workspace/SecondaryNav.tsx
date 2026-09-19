@@ -242,6 +242,7 @@ export function SecondaryNav({ containerMenuId, containerName, onClose, variant 
           type="button"
           aria-label="收起二级面板"
           title="收起二级面板"
+          aria-expanded
           onClick={onClose}
           className="rounded-gx-sm p-1 text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary"
         >
