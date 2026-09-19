@@ -17,15 +17,23 @@
 //   R-N-09/10   L1/L2 选中态 = 白底卡片 + 圆角 8 + accent 字 600（左侧色条已删）
 //   R-N-02      L2 归属由 URL 反推（useMatch 取参），刷新/直访完整还原
 //   R-N-19      主壳内不渲染面包屑（本壳本来就没有，保持为零）
+//
+// 阶段 6 菜单精细化：底部固定区与 L1 主区共用同一套行规格（高 32 / 图标 14 / 文字 13 /
+// 圆角 8 / 左右 padding 8 / 150ms ease-out），图标按语义重排（工作区设置 = settings）；
+// 最底补用户卡片（头像 + 名字，点击开个人中心）——参考图 L1 的最后一项。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
-import { Icon } from "../../components/icons";
+import { Icon, type IconName } from "../../components/icons";
+import { AVATAR_PALETTE } from "@gx/design-tokens";
+import { useAuthStore } from "../../store/auth";
+import { PersonalCenterDrawer } from "../settings/PersonalCenterDrawer";
 import { SearchDialog } from "../search/SearchDialog";
 import { WorkspaceTopBar } from "./WorkspaceTopBar";
-import { PrimaryNav } from "./PrimaryNav";
+import { L1_ROW_IDLE, L1_ROW_SELECTED, NAV_ROW_TRANSITION, PrimaryNav } from "./PrimaryNav";
 import { SecondaryNav } from "./SecondaryNav";
 import { useNavMenu, useNavNodeIndex } from "./nav-hooks";
 import { resolveRouteContainer } from "./lib/route-container";
+import { FOOTER_NAV_ITEMS } from "./lib/nav-footer";
 import { useBreakpointTier, isDrawerTier, isFloatingL2Tier } from "../../lib/breakpoint";
 import {
   L1_WIDTH_COLLAPSED,
@@ -49,10 +57,11 @@ interface SecondaryState {
  */
 const L2_FLOATING_TOP_PX = 48;
 
-/** R-N-09 选中态：白底 + 圆角 8 + accent 字 600；未选中 hover 换 gx-row-hover。 */
-const FOOTER_SELECTED = "bg-white font-semibold text-gx-accent";
-const FOOTER_IDLE = "text-gx-text-primary hover:bg-gx-row-hover";
-
+/**
+ * 底部固定区四项（D-5 §2.2 定稿顺序不变，单一真源在 lib/nav-footer.ts）。
+ * 图标按语义重排：工作区设置由 database 改为 settings（database 已用于「数据库」类实体，
+ * 挂在设置入口上语义错配）。行规格与 L1 主区共用 L1_ROW_* 与 NAV_ROW_TRANSITION。
+ */
 function FooterNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -62,7 +71,7 @@ function FooterNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?:
     onNavigate?.();
   };
 
-  const item = (path: string, icon: Parameters<typeof Icon>[0]["name"], label: string) => {
+  const item = ({ path, icon, label }: { path: string; icon: IconName; label: string }) => {
     const active = pathname === path || pathname.startsWith(`${path}/`);
     return (
       <button
@@ -71,9 +80,11 @@ function FooterNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?:
         title={collapsed ? label : undefined}
         aria-label={label}
         className={[
-          "flex w-full items-center rounded-gx-lg text-gx-13 transition-colors",
-          collapsed ? "h-8 justify-center px-0" : "h-8 gap-2 px-2",
-          active ? FOOTER_SELECTED : FOOTER_IDLE,
+          "flex h-8 w-full items-center rounded-gx-lg text-gx-13",
+          NAV_ROW_TRANSITION,
+          collapsed ? "justify-center px-0" : "gap-2 px-2",
+          // R-N-09/10：与 L1 主区同一真源，选中 = 白底卡片 + accent 字 600
+          active ? L1_ROW_SELECTED : L1_ROW_IDLE,
         ].join(" ")}
       >
         <Icon name={icon} size={14} className={`shrink-0 ${active ? "text-gx-accent" : "opacity-80"}`} />
@@ -84,10 +95,51 @@ function FooterNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?:
 
   return (
     <div className="flex shrink-0 flex-col gap-0.5 border-t border-gx-hairline p-1.5">
-      {item("/workspace/contacts", "building", "通讯录")}
-      {item("/workspace/authz", "shield", "权限管理")}
-      {item("/workspace/settings/nav", "sitemap", "导航编排")}
-      {item("/workspace/settings/assets", "database", "工作区设置")}
+      {FOOTER_NAV_ITEMS.map((it) => (
+        <div key={it.path}>{item(it)}</div>
+      ))}
+    </div>
+  );
+}
+
+/** 头像底色：与顶栏同一取色口径（按昵称稳定哈希，避免一片蓝）。 */
+function avatarColor(seed: string): string {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[h % AVATAR_PALETTE.length]!;
+}
+
+/**
+ * L1 最底用户卡片（参考图末项）：头像 + 名字。
+ * 点击开个人中心抽屉——与顶栏同一真实入口，不做成无反应的装饰块。
+ */
+function UserCard({ collapsed }: { collapsed: boolean }) {
+  const user = useAuthStore((s) => s.user);
+  const [open, setOpen] = useState(false);
+  const name = user?.displayName ?? user?.email ?? "未登录";
+  return (
+    <div className="shrink-0 border-t border-gx-hairline p-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title={`${name} · 个人中心`}
+        aria-label="打开个人中心"
+        className={[
+          "flex h-8 w-full items-center rounded-gx-lg",
+          NAV_ROW_TRANSITION,
+          L1_ROW_IDLE,
+          collapsed ? "justify-center px-0" : "gap-2 px-2",
+        ].join(" ")}
+      >
+        <span
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-gx-11 font-semibold text-white"
+          style={{ backgroundColor: avatarColor(name) }}
+        >
+          {name.charAt(0).toUpperCase()}
+        </span>
+        {collapsed ? null : <span className="min-w-0 flex-1 truncate text-left text-gx-13">{name}</span>}
+      </button>
+      <PersonalCenterDrawer open={open} onClose={() => setOpen(false)} />
     </div>
   );
 }
@@ -171,6 +223,8 @@ function SideRail({
       {showCollapseToggle && (
         <CollapseToggle collapsed={collapsed} onToggle={onToggleCollapsed} />
       )}
+      {/* 参考图：用户卡片是 L1 的最后一项（头像 + 名字），始终贴底 */}
+      <UserCard collapsed={collapsed} />
     </aside>
   );
 }

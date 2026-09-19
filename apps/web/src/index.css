@@ -45,6 +45,24 @@
   }
 }
 
+/* ============ 菜单精细化 · L1 深层子菜单浮出面板入场（R-N-22 节奏统一）============ */
+/* 时长 150ms、缓动 ease-out，与菜单行 hover/选中过渡同一档（不引任何动效库）。
+   只动 opacity + transform，且只作用于浮层本身，不给布局容器加 transform。 */
+@keyframes gx-flyout-in-right {
+  from { opacity: 0; transform: translateX(-4px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes gx-flyout-in-left {
+  from { opacity: 0; transform: translateX(4px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.gx-flyout-in-right { animation: gx-flyout-in-right 150ms ease-out; }
+.gx-flyout-in-left { animation: gx-flyout-in-left 150ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .gx-flyout-in-right,
+  .gx-flyout-in-left { animation: none; }
+}
+
 /* ============ R-D-25 骨架屏微光动画 ============ */
 /* 底色由 Tailwind bg-gx-row-hover(#F1F5FB) 给出，这里只叠一层 1.2s 横向微光。
    只写 #fff / rgba(255,255,255,…)——不引入规范外的新色值。 */

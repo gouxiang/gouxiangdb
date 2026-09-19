@@ -118,7 +118,10 @@ export type IconName =
   | "unlock"
   | "inherit"
   | "cutoff"
-  | "linkExternal";
+  | "linkExternal"
+  // 菜单精细化（L1 个人区）：首页 / 待办
+  | "home"
+  | "checkSquare";
 
 const PATHS: Record<IconName, string[]> = {
   chevronDown: ["M6 9l6 6 6-6"],
@@ -325,6 +328,10 @@ const PATHS: Record<IconName, string[]> = {
   ],
   // M4 权限：继承边界/截断（链路中间断开打叉）
   cutoff: ["M4 12h5.5", "M14.5 12H20", "M10.8 9.6l2.4 4.8", "M13.2 9.6l-2.4 4.8"],
+  // 首页（L1 个人区「工作台首页」）：屋顶 + 墙体 + 门洞
+  home: ["M3 10.5L12 3l9 7.5", "M5.5 9.6V20h13V9.6", "M9.5 20v-5.5h5V20"],
+  // 待办（L1 个人区「我的待办」）：方框 + 对勾
+  checkSquare: ["M4 5h16v14H4z", "M8 12.5l2.6 2.6L16.5 9"],
 };
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {
