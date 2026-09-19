@@ -33,6 +33,7 @@ import {
 } from "../../components/interaction";
 import { ResultNotice, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
 import { useBreakpointTier } from "../../lib/breakpoint";
+import { EntityIconPicker } from "../../components/EntityIconPicker";
 import { GridToolbar } from "./GridToolbar";
 import { RecordCardList } from "./RecordCardList";
 import { ViewSwitcher } from "./ViewSwitcher";
@@ -139,6 +140,9 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
   const [editingFieldMeta, setEditingFieldMeta] = useState<FieldDTO | null>(null);
   const [fieldEditorOpen, setFieldEditorOpen] = useState(false);
   const { data: tablesData } = useTables(baseId);
+  // 当前表的自定义图标（DTO 已带 icon/iconColor）。本表页的图标入口 + 展示位就挂在工具栏最左侧：
+  // 旧壳 Sidebar 的那份入口只在重命名弹窗里、且旧壳默认不挂载，等于数据表改不了图标。
+  const currentTable = (tablesData ?? []).find((t) => t.id === tableId) ?? null;
   // R-I-26 写操作在途守卫（新建记录 / 批量删除）
   const newRecordGuard = useWriteGuard();
   // R-D-15：骨架屏 ≥300ms 才显示，避免「空白 → 骨架 → 内容」闪烁
@@ -537,14 +541,35 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
   return (
     <div className="flex h-full flex-col bg-gx-surface">
       <GridToolbar
-        leading={
-          <ViewSwitcher
-            baseId={baseId}
-            tableId={tableId}
-            viewId={viewId}
-            canManageSchema={permissions.canManageSchema}
-          />
-        }
+          leading={
+            <div className="flex min-w-0 items-center gap-1">
+              {/* 数据表「图标与颜色」入口（五类实体收口的一部分）：
+                  只有 GridView 有工具栏，kanban/calendar/gallery/form/detail 各自没有表页工具栏，
+                  故入口落在网格工具栏最左侧的视图切换区。无表结构管理权限即不渲染（不 disabled 假装禁用）。
+                  触发器自带 resolved 图标预览，因此它同时也是本表页的图标展示位。 */}
+              {currentTable && permissions.canManageSchema ? (
+                <EntityIconPicker
+                  icon={currentTable.icon}
+                  iconColor={currentTable.iconColor}
+                  defaultIcon="table"
+                  ariaLabel="数据表图标与颜色"
+                  triggerSize={20}
+                  onChange={(next) =>
+                    m.updateTable.mutateAsync({
+                      tableId,
+                      data: { icon: next.icon, iconColor: next.iconColor },
+                    })
+                  }
+                />
+              ) : null}
+              <ViewSwitcher
+                baseId={baseId}
+                tableId={tableId}
+                viewId={viewId}
+                canManageSchema={permissions.canManageSchema}
+              />
+            </div>
+          }
         config={cfg}
         allFields={gridManageableFields}
         degradedCodes={infiniteData.degraded ?? []}

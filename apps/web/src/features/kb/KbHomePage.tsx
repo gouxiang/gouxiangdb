@@ -1,7 +1,7 @@
 // apps/web/src/features/kb/KbHomePage.tsx
 // /kb/:kbId —— 文档与画布混合列表：类型筛选 + 全文搜索 + 新建 + 行菜单（重命名/权限/删除）。
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import {
@@ -39,6 +39,19 @@ export default function KbHomePage() {
   const [renaming, setRenaming] = useState<KbDocDTO | null>(null);
   const [renameVal, setRenameVal] = useState("");
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  // 行尾「…」菜单：弹层走 Popover 的 fixed（portal 到 body）模式，逃出列表卡片与滚动容器的双重裁剪。
+  // ① 卡片本身 overflow-hidden（:197）；② 外层列表又是 overflow-y-auto 滚动容器 —— 只去掉卡片的
+  //    overflow-hidden 不够（照样被滚动容器裁），还会让行 hover 背景把卡片圆角切成直角，
+  //    所以选 portal 而不是把圆角下沉到首末行。
+  // fixed 模式的锚点必须指向触发按钮，否则回退到弹层父元素、坐标会偏。
+  const rowMenuRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  // 触发按钮在浮层之外：mousedown 先经 Popover 的外部点击把菜单关掉，紧随的 click 再切换就会
+  // 立刻重新打开（表现为"点了关不掉"）。记时间做抑制，与 ViewSwitcher 同一套写法。
+  const menuClosedAtRef = useRef(0);
+  const closeRowMenu = () => {
+    menuClosedAtRef.current = Date.now();
+    setMenuFor(null);
+  };
   const [aclFor, setAclFor] = useState<KbDocDTO | null>(null);
   // 文档/画布「图标与颜色」入口的下标：存 id 而非快照，改完 invalidation 回来即时跟着变
   const [iconFor, setIconFor] = useState<string | null>(null);
@@ -219,12 +232,26 @@ export default function KbHomePage() {
                     aria-haspopup="menu"
                     aria-expanded={menuFor === d.id}
                     title={d.kind === "canvas" ? "画布操作菜单" : "文档操作菜单"}
-                    onClick={() => setMenuFor(menuFor === d.id ? null : d.id)}
+                    ref={(el) => {
+                      rowMenuRefs.current[d.id] = el;
+                    }}
+                    onClick={() => {
+                      // 抑制「mousedown 关闭 → click 又打开」导致的点了关不掉
+                      if (Date.now() - menuClosedAtRef.current < 250) return;
+                      setMenuFor(menuFor === d.id ? null : d.id);
+                    }}
                     className="rounded p-1 text-gx-text-tertiary hover:bg-gx-bg hover:text-gx-text-primary"
                   >
                     <Icon name="more" size={15} />
                   </button>
-                  <Popover open={menuFor === d.id} onClose={() => setMenuFor(null)} align="right" width={190}>
+                  <Popover
+                    open={menuFor === d.id}
+                    onClose={closeRowMenu}
+                    align="right"
+                    width={190}
+                    fixed
+                    anchorEl={rowMenuRefs.current[d.id] ?? null}
+                  >
                     <Menu width={190}>
                       <MenuItem icon="edit" label="重命名" onClick={() => openRename(d)} />
                       {canCreate && (
