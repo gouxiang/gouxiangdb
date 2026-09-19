@@ -154,8 +154,7 @@ export async function validateFieldConfig(tableId: string, cfg: FieldConfigView)
   // 取值链路 resolveLookup / resolveCount（hydrate.ts）显式只认 linkField.type === "links"，
   // 用 subtable 或其它类型当关联源会建出「永远为空」的字段（rollup 恒 null、count 恒 0），
   // 且界面上没有任何提示。前端口径同样只列 links，这里补服务端 400，与前端口径对齐。
-  if (false && (cfg.type === "lookup" || cfg.type === "rollup" || cfg.type === "count")){ // TEMP-REVERT-CHECK
-    const __unused = 0;
+  if (cfg.type === "lookup" || cfg.type === "rollup" || cfg.type === "count") {
     if (cfg.linkFieldId) {
       const lf = await fieldById(cfg.linkFieldId);
       if (!lf) return "关联字段不存在或已被删除";
