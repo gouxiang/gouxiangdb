@@ -10,7 +10,7 @@
 // 视觉：圆角 8（rounded-gx-lg）、浮层 shadow-gx-lg + gx-z-popover、150ms ease-out，
 //       颜色一律 gx-* 令牌（用户自定义色属于数据，不是硬编码）。
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { ENTITY_ICONS, isEntityIcon, isEntityIconColor } from "@gx/shared-types";
 import { Icon, type IconName } from "./icons";
 import { COLOR_PALETTE, Popover, toast } from "./ui";
@@ -204,6 +204,8 @@ export function EntityIconPicker({
   triggerSize = 32,
 }: EntityIconPickerProps) {
   const [open, setOpen] = useState(false);
+  // 触发器锚点：fixed 模式按它的视口矩形定位（不传 anchorEl 会回退到弹层父元素，坐标不准）
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const resolved = resolveEntityIcon({ icon, iconColor }, { name: defaultIcon, color: defaultColor });
   const isDefault = isEntityIconDefault({ icon });
 
@@ -239,6 +241,7 @@ export function EntityIconPicker({
   return (
     <div className="relative inline-flex shrink-0 align-middle">
       <button
+        ref={triggerRef}
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -255,7 +258,9 @@ export function EntityIconPicker({
       >
         {children ?? preview}
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} width={panelWidth}>
+      {/* fixed 模式：portal 到 body（ui.tsx Popover），逃出 Modal 的 overflow-hidden / transform 裁剪，
+          并按触发按钮视口坐标定位 + 自动上下翻转 / 限高滚动；层级 gx-z-popover(900) > gx-z-modal(800)。 */}
+      <Popover open={open} onClose={() => setOpen(false)} width={panelWidth} fixed anchorEl={triggerRef.current}>
         <EntityIconPanel
           icon={icon}
           iconColor={iconColor}
@@ -264,7 +269,10 @@ export function EntityIconPicker({
           isDefault={isDefault}
           current={resolved}
           onPickIcon={(name) => void commit({ icon: name, iconColor })}
-          onPickColor={(c) => void commit({ icon: icon ?? defaultIcon, iconColor: c })}
+          // 选「默认颜色」时不要把 icon 顺带写成 defaultIcon：Base/KB 的 iconColor 列 NOT NULL，
+          // 后端把 null 映射回系统默认色后 icon 若被写成默认值，isEntityIconDefault 会翻假，
+          // 图标反而被着色 —— 与「未自定义零变化」相悖。只有选了具体颜色才需要连带落图标名。
+          onPickColor={(c) => void commit({ icon: c === null ? icon ?? null : icon ?? defaultIcon, iconColor: c })}
           onReset={() => void commit({ icon: null, iconColor: null })}
         />
       </Popover>

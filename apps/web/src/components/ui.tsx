@@ -665,6 +665,9 @@ export function Modal({
   );
 }
 
+/** fixed 模式限高时的最小面板高度：视口极端小（两侧剩余都不足）也不把面板压成一条缝 */
+const POPOVER_MIN_H = 160;
+
 /** 下拉面板：点击外部自动关闭 */
 export function Popover({
   open,
@@ -692,7 +695,9 @@ export function Popover({
   anchorEl?: HTMLElement | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [maxHeight, setMaxHeight] = useState<number | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -724,17 +729,22 @@ export function Popover({
       if (!anchor) return;
       const r = anchor.getBoundingClientRect();
       const w = width ?? el.offsetWidth ?? 160;
-      const estH = el.offsetHeight || 0;
+      // 自然高度取内容区 scrollHeight：限高后 offsetHeight 会变小，若用它做二次计算，
+      // 滚动/resize 重算时会误判「下方放得下」而把限高又放开 → 面板反复抖动。
+      const estH = contentRef.current?.scrollHeight || el.offsetHeight || 0;
       let left = align === "right" ? r.right - w : r.left;
       const margin = 8;
+      const gap = 4;
       // 水平防溢出
       left = Math.max(margin, Math.min(left, window.innerWidth - w - margin));
-      let top = r.bottom + 4;
-      // 下方放不下则翻到锚点上方
-      if (estH && top + estH > window.innerHeight - margin) {
-        const upTop = r.top - estH - 4;
-        if (upTop >= margin) top = upTop;
-      }
+      // 竖向：首选下方；下方放不下且上方更宽裕 → 翻到锚点上方
+      const below = window.innerHeight - r.bottom - gap - margin;
+      const above = r.top - gap - margin;
+      const flip = estH > below && above > below;
+      const top = flip ? Math.max(margin, r.top - gap - Math.min(estH, above)) : r.bottom + gap;
+      const avail = flip ? above : below;
+      // 上下都不够：限高 + 内容区滚动（面板本身不压扁，保底 POPOVER_MIN_H）
+      setMaxHeight(estH > avail ? Math.max(POPOVER_MIN_H, Math.floor(avail)) : null);
       setPos({ top, left });
     };
     compute();
@@ -748,10 +758,14 @@ export function Popover({
 
   if (!open) return null;
 
+  // 只有真的需要限高时才切成 flex 列 + 内层滚动容器，避免影响既有 fixed 调用点的 DOM 结构
+  const clamped = fixed && maxHeight !== null;
+
   const cls = clsx(
     "overflow-hidden rounded-gx-lg border border-gx-border bg-gx-surface shadow-gx-lg",
     // fixed 模式 portal 到 body，归应用浮层 popover(900)；absolute 模式保持容器内局部 z-40
     fixed ? "fixed gx-z-popover" : "absolute top-full z-40 mt-1",
+    clamped && "flex flex-col",
     !fixed && (align === "right" ? "right-0" : "left-0"),
     className,
   );
@@ -763,9 +777,16 @@ export function Popover({
       style={{
         width,
         ...(fixed && pos ? { top: pos.top, left: pos.left } : {}),
+        ...(clamped ? { maxHeight } : {}),
       }}
     >
-      {children}
+      {clamped ? (
+        <div ref={contentRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {children}
+        </div>
+      ) : (
+        children
+      )}
     </div>
   );
 
