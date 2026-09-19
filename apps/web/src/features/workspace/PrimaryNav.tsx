@@ -78,47 +78,11 @@ export const L1_ROW_IDLE = "text-gx-text-primary hover:bg-gx-row-hover";
 const ITEM_SHELL = `flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-13 ${NAV_ROW_TRANSITION}`;
 
 /**
- * L1 顶部「个人用户」分组（UI-SPEC §1.1 / R-N-17 / D-11）：
- * 三项规划入口平铺在分组标题下，行规格与其它菜单项完全一致（不置灰），
- * 行尾挂「规划中」徽标，点击 toast 明说，不做静默失败。
+ * 本阶段不启用的「个人用户」规划入口（个人门户 / 工作台首页 / 我的待办 / 我的收藏）：
+ * 原实现是点了只弹一个「规划中」toast 的假入口，属不符合用户直觉的操作路径，
+ * 已按主理人要求从界面移除、转入需求池（与侧栏底部个人信息栏同一处置口径）。
+ * 需要恢复时从 commit 720e09c 之前取回 PERSONAL_PLANNED 与 PlannedPersonalRow。
  */
-const PERSONAL_PLANNED: readonly { id: string; label: string; icon: IconName; hint: string }[] = [
-  { id: "portal", label: "个人门户", icon: "user", hint: plannedHint("个人门户") },
-  { id: "home", label: "工作台首页", icon: "home", hint: plannedHint("工作台首页") },
-  { id: "todo", label: "我的待办", icon: "checkSquare", hint: plannedHint("我的待办") },
-  { id: "favorites", label: "我的收藏", icon: "star", hint: plannedHint("我的收藏") },
-];
-
-function PlannedPersonalRow({
-  label,
-  icon,
-  hint,
-  collapsed,
-}: {
-  label: string;
-  icon: IconName;
-  hint: string;
-  collapsed?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => toast(hint, "info")}
-      title={hint}
-      aria-disabled="true"
-      className={cx(ITEM_SHELL, L1_ROW_IDLE, collapsed && "justify-center px-0")}
-      data-nav-row="planned"
-    >
-      <Icon name={icon} size={14} className="shrink-0 opacity-80" />
-      {collapsed ? null : (
-        <>
-          <span className="flex-1 truncate text-left">{label}</span>
-          <PlannedBadge />
-        </>
-      )}
-    </button>
-  );
-}
 
 /**
  * 分组标题行：小字、hint 色、独立行、不缩进、不可点（「数据库」「知识库」只是分组标签，
@@ -245,15 +209,7 @@ export function PrimaryNav({
     <div className="flex h-full min-h-0 flex-col">
       {/* 库区块插槽（切换器 + 新建入口）：常驻顶部，不随菜单滚动 */}
       {header ? <div className="shrink-0 px-1.5 pt-2">{header}</div> : null}
-      {/* 个人区分组：规划入口常驻顶部，不随菜单滚动（与参考图「个人用户」段一致） */}
-      <div className="shrink-0 px-1.5 pt-2">
-        <GroupHeaderRow label="个人用户" iconOnly={collapsed} />
-        {PERSONAL_PLANNED.map((p) => (
-          <div key={p.id} style={{ marginBottom: NAV_ROW_GAP }}>
-            <PlannedPersonalRow label={p.label} icon={p.icon} hint={p.hint} collapsed={collapsed} />
-          </div>
-        ))}
-      </div>
+      {/* 「个人用户」规划入口已按本阶段范围下线（见文件顶部注释），此处不再渲染。 */}
       {body()}
     </div>
   );

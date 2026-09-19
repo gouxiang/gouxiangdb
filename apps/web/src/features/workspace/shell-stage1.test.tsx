@@ -179,14 +179,20 @@ describe("R-N-07 L1 折叠档（56px 只留图标）", () => {
   });
 });
 
-describe("R-N-17 规划入口：保留位置 + 「规划中」徽标 + 点击不静默", () => {
-  it("L1 上区「个人门户」渲染徽标与 title，点击走 toast 反馈", () => {
+describe("R-N-17 规划入口：本阶段从界面下线（点了只弹 toast 的假入口属非直觉路径）", () => {
+  it("L1 不再渲染「个人门户」等规划项，也不再出现「规划中」徽标", () => {
     const html = renderNavAt("/base/base_1/table/tbl_1");
-    expect(html).toContain("个人门户");
-    expect(html).toContain("规划中");
-    expect(html).toContain("个人门户 · 规划中，尚未开放");
+    expect(html).not.toContain("个人门户");
+    expect(html).not.toContain("工作台首页");
+    expect(html).not.toContain("我的待办");
+    expect(html).not.toContain("我的收藏");
+    expect(html).not.toContain("个人用户");
+    // 徽标组件本身仍在（表格操作行 / 导出弹窗还在用），只是 L1 不再挂这些入口。
     const src = read("./PrimaryNav.tsx");
-    expect(src).toContain("plannedHint(\"个人门户\")");
+    // 断言锁定的是「声明」而非字面量：注释里仍会提到它（说明如何取回），不能误伤。
+    expect(src).not.toContain("const PERSONAL_PLANNED");
+    expect(src).not.toContain("function PlannedPersonalRow");
+    expect(src).toContain("本阶段不启用");
   });
 
   it("徽标只用 gx-* 类，不写死 hex、不用任意值色（圆角 4 / 字色 hint）", () => {

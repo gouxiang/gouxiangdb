@@ -201,12 +201,15 @@ describe("图标语义映射（L1 全站）", () => {
     ]);
   });
 
-  it("个人区四项图标语义：门户=user / 首页=home / 待办=checkSquare / 收藏=star", () => {
+  it("个人区四项规划入口本阶段下线（点了只弹 toast 的假入口，不留在 L1）", () => {
     const src = read("./PrimaryNav.tsx");
-    expect(src).toContain('label: "个人门户", icon: "user"');
-    expect(src).toContain('label: "工作台首页", icon: "home"');
-    expect(src).toContain('label: "我的待办", icon: "checkSquare"');
-    expect(src).toContain('label: "我的收藏", icon: "star"');
+    // 锁定的是「声明」而非字面量：注释里仍会提到它们（说明如何取回），不能误伤。
+    expect(src).not.toContain("const PERSONAL_PLANNED");
+    expect(src).not.toContain("function PlannedPersonalRow");
+    expect(src).not.toContain('label: "个人门户", icon: "user"');
+    expect(src).not.toContain('label: "工作台首页", icon: "home"');
+    expect(src).not.toContain('label: "我的待办", icon: "checkSquare"');
+    expect(src).not.toContain('label: "我的收藏", icon: "star"');
   });
 
   it("实体类型默认图标映射齐全（base/kb/table/doc/canvas/view/group）", () => {
@@ -243,7 +246,8 @@ describe("阶段 1 交付不回退", () => {
     expect(html).toContain("font-semibold");
     expect(html).toContain("text-gx-accent");
     expect(html).toContain("rounded-gx-lg");
-    expect(html).toContain("规划中");
+    // 「规划中」徽标在 L1 随规划入口一并下线（徽标组件本身仍在别处使用）。
+    expect(html).not.toContain("规划中");
     const src = read("./PrimaryNav.tsx");
     expect(src).not.toContain("w-[3px]");
     expect(src).not.toContain("bg-gx-accent-bg");
@@ -259,7 +263,8 @@ describe("阶段 1 交付不回退", () => {
     expect(html).toContain("justify-center");
     // 折叠档下分组标题行不渲染（只留图标行），但菜单项一个不少
     expect(html).not.toContain('data-nav-row="group"');
-    expect(html).toContain('data-nav-row="planned"');
+    // 规划入口已下线，折叠档也不该再有 planned 行。
+    expect(html).not.toContain('data-nav-row="planned"');
   });
 
   it("颜色仍全部走 gx-* 令牌：PrimaryNav / WorkspaceShell 不写死 hex", () => {
