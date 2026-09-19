@@ -433,7 +433,10 @@ function evalAST(ast: FormulaAST, src: FieldValueSource): FormulaValue {
           }
           const a = asNum(lv);
           const b = asNum(rv);
-          if (a !== null && b !== null) return fnum(a + b);
+          // 有限性守卫：asNum 对非空非数字文本返回 NaN（如 Number("O1")），而 NaN !== null，
+          // 会把「本应走文本拼接兜底」的场景误判为数值加法、产出 {t:"num",v:NaN}，
+          // 序列化到接口/存储后落为 null（表现为单元格空白）。故非有限数一律退回拼接兜底。
+          if (a !== null && b !== null && Number.isFinite(a) && Number.isFinite(b)) return fnum(a + b);
           return fstr(asString(lv) + asString(rv));
         }
         case "-": {
