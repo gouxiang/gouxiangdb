@@ -40,7 +40,8 @@ export function useCreateKb() {
 export function useUpdateKb(kbId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name?: string; iconColor?: string; icon?: string | null }) => KbApi.update(kbId, data),
+    // 同 updateBase：iconColor 的 null = 恢复默认色，undefined = 不改动。
+    mutationFn: (data: { name?: string; iconColor?: string | null; icon?: string | null }) => KbApi.update(kbId, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: QK.kb(kbId) });
       qc.invalidateQueries({ queryKey: QK.kbList });

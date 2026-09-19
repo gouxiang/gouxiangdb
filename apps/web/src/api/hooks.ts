@@ -351,7 +351,9 @@ export function useGXMutations() {
     updateBase: useMutation({
       mutationFn: async (p: {
         baseId: string;
-        data: { name?: string; iconColor?: string; icon?: string | null };
+        // iconColor 允许 null：语义为「恢复默认色」（后端对 NOT NULL 的 Base.iconColor 列做三态映射），
+        // 缺省 undefined 才是「不改动这一列」。
+        data: { name?: string; iconColor?: string | null; icon?: string | null };
       }) => (await Bases.update(p.baseId, p.data)).base,
       onSuccess: (_d, v) => invalidateAll(v.baseId),
     }),

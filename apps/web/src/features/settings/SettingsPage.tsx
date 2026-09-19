@@ -260,7 +260,9 @@ export default function SettingsPage() {
                         if (!baseId) return;
                         const updated = await m.updateBase.mutateAsync({
                           baseId,
-                          data: { iconColor: next.iconColor ?? iconColor, icon: next.icon },
+                          // iconColor 必须原样透传（含 null = 恢复默认色）：此前写的是 `?? iconColor`，
+                          // 等于把旧色又发回去，后端永远收不到 null，「恢复默认」清不掉颜色。
+                          data: { iconColor: next.iconColor, icon: next.icon },
                         });
                         setIconColor(updated.iconColor);
                         setIcon(updated.icon);

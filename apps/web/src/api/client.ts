@@ -347,7 +347,9 @@ export const Bases = {
     apiFetch<{ base: BaseDTO }>("/api/bases", { method: "POST", body: JSON.stringify(data) }),
   get: (baseId: string) => apiFetch<{ base: BaseDTO }>(`/api/bases/${baseId}`),
   // icon 为 ENTITY_ICONS 白名单之一；null = 清除回默认图标。
-  update: (baseId: string, data: { name?: string; iconColor?: string; icon?: string | null }) =>
+  // update 的 iconColor 允许 null：语义「恢复默认色」。后端 Base.iconColor 列 NOT NULL，
+  // 会把 null 映射回系统默认色 #378ADD（见 routes/bases.ts 三态映射）；undefined = 不改动。
+  update: (baseId: string, data: { name?: string; iconColor?: string | null; icon?: string | null }) =>
     apiFetch<{ base: BaseDTO }>(`/api/bases/${baseId}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -742,7 +744,8 @@ export const KbApi = {
   create: (data: { name: string; iconColor?: string }) =>
     apiFetch<{ knowledgeBase: KbDTO }>("/api/kb", { method: "POST", body: JSON.stringify(data) }),
   // icon 为 ENTITY_ICONS 白名单之一；null = 清除回默认图标。
-  update: (kbId: string, data: { name?: string; iconColor?: string; icon?: string | null }) =>
+  // 同 Bases.update：null = 恢复默认色（后端知识库列 NOT NULL，映射回 #0F6E56）。
+  update: (kbId: string, data: { name?: string; iconColor?: string | null; icon?: string | null }) =>
     apiFetch<{ knowledgeBase: KbDTO }>(`/api/kb/${kbId}`, { method: "PATCH", body: JSON.stringify(data) }),
   remove: (kbId: string) =>
     apiFetch<{ ok: true }>(`/api/kb/${kbId}`, { method: "DELETE", timeoutMs: WRITE_TIMEOUT_MS }),

@@ -106,8 +106,10 @@ export default function KbSettingsPage() {
               ariaLabel="知识库图标与颜色"
               readOnly={!isOwner}
               onChange={(next) =>
-                // knowledge_bases.iconColor 非空：null 保留当前底色（后端 z.string().optional()）
-                updateKb.mutateAsync({ icon: next.icon, iconColor: next.iconColor ?? kb?.iconColor })
+                // iconColor 原样透传（含 null = 恢复默认色）。旧注释「后端 z.string().optional()」
+                // 已过时：后端改 entityIconColorSchema 后接受 null，并对 NOT NULL 的
+                // knowledge_bases.iconColor 列映射成系统默认色 #0F6E56。
+                updateKb.mutateAsync({ icon: next.icon, iconColor: next.iconColor })
               }
             />
             <Input

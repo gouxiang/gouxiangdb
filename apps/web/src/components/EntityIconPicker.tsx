@@ -308,7 +308,10 @@ export function EntityIconPanel({
 }) {
   const preview = current ?? resolveEntityIcon({ icon, iconColor }, { name: defaultIcon, color: defaultColor });
   const isDef = isDefault ?? isEntityIconDefault({ icon });
-  const colorValue = isEntityIconColor(iconColor) ? iconColor : null;
+  // Base / 知识库的 iconColor 列是 NOT NULL（库一建就有历史底色），不可能真的是 null，
+  // 因此「默认颜色」是否选中不能只看 iconColor —— 只要实体还处于未自定义图标状态，
+  // 就应当把「默认颜色」标为选中，否则这两类实体的色板永远没有任何一项高亮。
+  const colorValue = isDef ? null : isEntityIconColor(iconColor) ? iconColor : null;
   return (
     <div className="flex flex-col gap-1.5 p-3">
       <div className="flex items-center gap-2 pb-1">
