@@ -66,7 +66,8 @@ export function AggregationBar({
   return (
     <tr className="bg-gx-bg">
       <td
-        className="sticky left-0 z-20 border-b border-r border-gx-separator bg-gx-bg"
+        // 行首固定列：发丝线 + 冻结边界（与数据行同一口径）
+        className="sticky left-0 z-20 border-b border-r border-gx-hairline bg-gx-bg"
         style={{ width: rowHeaderWidth, minWidth: rowHeaderWidth }}
       >
         <div className="flex h-8 items-center px-2 text-gx-11 text-gx-text-hint">
@@ -82,8 +83,8 @@ export function AggregationBar({
           <td
             key={field.id}
             className={clsx(
-              "relative border-b border-r border-gx-separator",
-              isPrimary && "sticky z-10 bg-gx-bg",
+              "relative border-b border-gx-hairline",
+              isPrimary && "sticky z-10 border-r border-gx-hairline bg-gx-bg",
             )}
             style={{
               width: widthOf(field),
@@ -93,7 +94,7 @@ export function AggregationBar({
           >
             <button
               type="button"
-              className="flex h-8 w-full items-center justify-end gap-1 px-2.5 text-right text-gx-12 tabular-nums text-gx-text-secondary hover:bg-gx-row-hover"
+              className="flex h-8 w-full items-center justify-end gap-1 px-3 text-right text-gx-12 tabular-nums text-gx-text-secondary hover:bg-gx-row-hover"
               onClick={() => setOpenField((v) => (v === field.id ? null : field.id))}
             >
               {func ? (

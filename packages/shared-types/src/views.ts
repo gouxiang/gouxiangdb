@@ -42,11 +42,15 @@ export interface SortSpec {
 
 export type RowHeight = "short" | "medium" | "tall";
 
+// 行高档位与参考图「数据表主界面」实测值对齐：紧凑 36 / 常规 44 / 宽松 64。
+// 三档机制原样保留（行高下拉仍可切），只校准前两档的实际渲染高度。
 export const ROW_HEIGHT_PX: Record<RowHeight, number> = {
-  short: 32,
+  short: 36,
   medium: 44,
   tall: 64,
 };
+/** 表头行高（参考图实测 36）：与行高配置无关，固定一档。 */
+export const HEADER_HEIGHT_PX = 36;
 
 export type AggFunc = "sum" | "avg" | "min" | "max" | "count" | "countEmpty" | "countFilled" | "percentEmpty" | "percentFilled";
 

@@ -23,7 +23,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { clsx } from "clsx";
-import { Button, FOCUS_RING, toast } from "./ui";
+import { Button, FOCUS_RING, toast, darkenForText } from "./ui";
 import { Icon, type IconName } from "./icons";
 
 // ============================================================
@@ -246,12 +246,16 @@ export function StatusPill({
   color?: string;
   className?: string;
 }) {
-  // 语义色底 + 深一档字：底色取原色 18%、边框取原色 50%，文字走主文本色（对比度安全）。
+  // 语义色底 + 语义色深字（参考图四态：进行中蓝 / 待评审橙 / 已完成绿 / 待开始灰）：
+  // 底色取原色 18%、边框取原色 50%，文字取原色**压暗一档**（与 Badge 同一取色函数
+  // darkenForText），既保留"同色系"语义，又满足浅底上的 4.5:1 对比度。
+  // 非 hex（rgb()/命名色）无法可靠压暗 → 整体降级走 gx-* token，不拼非法色值。
   const rgb = color ? parseHexColor(color) : null;
   const style: React.CSSProperties | undefined = rgb
     ? {
         backgroundColor: `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.18)`,
         borderColor: `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.5)`,
+        color: darkenForText(rgb),
       }
     : undefined;
   return (
@@ -260,7 +264,7 @@ export function StatusPill({
       title={label}
       className={clsx(
         "inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-gx-11 font-medium leading-none",
-        rgb ? "text-gx-text-primary" : "border-gx-border bg-gx-row-hover text-gx-text-secondary",
+        rgb ? "" : "border-gx-border bg-gx-row-hover text-gx-text-secondary",
         className,
       )}
       style={style}

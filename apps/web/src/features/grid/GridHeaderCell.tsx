@@ -3,11 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
 import type { FieldDTO, SortDirection } from "@gx/shared-types";
+import { HEADER_HEIGHT_PX } from "@gx/shared-types";
 import { Icon } from "../../components/icons";
 import { FieldIcon } from "../../components/ui";
 import { Popover, MenuItem, MenuDivider } from "../../components/ui";
 // 阶段 4：R-I-29 截断带 title
 import { TruncatedText } from "../../components/interaction";
+import { cellTextAlign } from "../cells/format";
 
 export interface GridHeaderCellProps {
   field: FieldDTO;
@@ -58,18 +60,30 @@ export function GridHeaderCell({
     };
   }, [resizing, onResize]);
 
+  // 表头与数据列同侧：数值/工时/金额列右对齐，其余左对齐（与 CellRenderer 共用 cellTextAlign）
+  const right = cellTextAlign(field) === "right";
+
   return (
     <th
       className={clsx(
-        "relative border-b border-r border-gx-separator bg-gx-table-header px-2 text-left",
-        stickyLeft != null && "sticky",
+        // 表头样式（参考图）：底 gx-surface-alt(#F9FAFC) / 12px / 中性弱色 / 无粗体
+        // 列间不画竖线，表头与数据区之间用发丝线（gx-hairline）分隔
+        "relative border-b border-gx-hairline bg-gx-table-header px-3",
+        right ? "text-right" : "text-left",
+        // 冻结列（主字段）保留右侧发丝线，与数据行的冻结列口径一致；其余列间不画竖线
+        stickyLeft != null && "sticky border-r border-gx-hairline",
       )}
-      style={{ width, minWidth: width, ...(stickyLeft != null ? { left: stickyLeft, zIndex: z } : {}) }}
+      style={{
+        width,
+        minWidth: width,
+        height: HEADER_HEIGHT_PX,
+        ...(stickyLeft != null ? { left: stickyLeft, zIndex: z } : {}),
+      }}
     >
-      <div className="flex h-8 items-center gap-1">
+      <div className={clsx("flex h-full items-center gap-1", right && "justify-end")}>
         <FieldIcon type={field.type} size={14} />
         {/* R-I-29：长字段名截断必须带 title 全文 */}
-        <TruncatedText text={field.name} className="flex-1 text-gx-12 font-medium text-gx-text-secondary" />
+        <TruncatedText text={field.name} className="flex-1 text-gx-12 font-medium text-gx-text-tertiary" />
         {sortDirection && (
           <Icon name={sortDirection === "asc" ? "sortAsc" : "sortDesc"} size={13} className="text-gx-accent" />
         )}

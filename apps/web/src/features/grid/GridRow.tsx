@@ -18,7 +18,11 @@ export interface GridRowProps {
   fields: FieldDTO[];
   widthOf: (field: FieldDTO) => number;
   rowHeight: number;
-  zebra: boolean;
+  /**
+   * 斑马纹（v1 遗留口径）。参考图数据行是「白底 + 行间发丝线」，故主表格不再传该档；
+   * 属性保留（默认 false）以便随时回退，不删能力。
+   */
+  zebra?: boolean;
   selected: boolean;
   /** 行颜色（左侧色条），null/缺省表示不着色 */
   rowColor?: string | null;
@@ -68,7 +72,14 @@ export function GridRow(props: GridRowProps) {
 
   return (
     <tr
-      className={clsx(zebra && "bg-gx-zebra", selected && "bg-gx-accent-bg", "hover:bg-gx-row-hover cursor-pointer")}
+      className={clsx(
+        // 行底只出一个 bg 类（三选一），避免同权重类名互相覆盖导致 hover/选中丢色；
+        // 固定列用 bg-inherit 继承这里的底色，hover / 选中才能整行一致（含行首复选框列）。
+        zebra ? "bg-gx-zebra" : selected ? "bg-gx-accent-bg" : "bg-gx-surface",
+        // 选中态优先于 hover：选中行恒为 gx-accent-bg(#EAF2FC)，不被 hover 覆盖
+        selected ? "" : "hover:bg-gx-row-hover",
+        "cursor-pointer",
+      )}
       onClick={(e) => {
         // 行任意空白点击 = 打开抽屉
         // 但不要在选中/编辑/点单元格/点展开按钮时触发
@@ -79,7 +90,8 @@ export function GridRow(props: GridRowProps) {
     >
       {/* 行首固定列：复选框 + 行号 + 展开 */}
       <td
-        className="sticky left-0 z-20 border-b border-r border-gx-separator bg-gx-surface"
+        // 行首固定列保留右侧发丝线：它是冻结列与横向滚动内容的层级边界，去掉会出现"文字被切断"的错觉
+        className="sticky left-0 z-20 border-b border-r border-gx-hairline bg-inherit"
         style={{
           width: rowHeaderWidth,
           minWidth: rowHeaderWidth,
@@ -115,8 +127,10 @@ export function GridRow(props: GridRowProps) {
           <td
             key={field.id}
             className={clsx(
-              "relative border-b border-r border-gx-separator align-middle",
-              isPrimary && "sticky z-10 bg-gx-surface",
+              // 行间发丝线（gx-hairline）：列与列之间不画竖线，靠 12px 列间距分隔
+              "relative border-b border-gx-hairline align-middle",
+              // 只有冻结列（首列文本）保留右侧发丝线，与行首固定列同一口径
+              isPrimary && "sticky z-10 border-r border-gx-hairline bg-inherit",
               active && "ring-2 ring-inset ring-gx-accent",
             )}
             style={{
@@ -124,7 +138,6 @@ export function GridRow(props: GridRowProps) {
               minWidth: widthOf(field),
               height: rowHeight,
               ...(isPrimary ? { left: rowHeaderWidth } : {}),
-              ...(selected ? { backgroundColor: "var(--gx-accent-bg)" } : {}),
             }}
             onClick={() => onCellClick(record.id, field.id)}
             onDoubleClick={() => onCellDoubleClick(record.id, field.id)}
@@ -132,7 +145,11 @@ export function GridRow(props: GridRowProps) {
           >
             {editHere ? (
               <div
-                className="absolute inset-0 z-30 bg-gx-surface"
+                className={clsx(
+                  "absolute inset-0 z-30 bg-gx-surface",
+                  // 编辑态与只读态同侧对齐（数值列编辑框也右对齐）
+                  align === "right" && "text-right",
+                )}
                 onClick={(e) => e.stopPropagation()}
               >
                 <CellEditor
@@ -151,10 +168,10 @@ export function GridRow(props: GridRowProps) {
                 record={record}
                 permissions={permissions}
                 onOpenRecord={onOpenRecord}
+                // 主键列（首列文本）比其余列重一档，建立层级
+                emphasis={isPrimary}
               />
             )}
-            {/* 对齐辅助：仅用于非编辑器时的容器对齐由 CellRenderer 内部处理 */}
-            {!editHere && align === "right" ? null : null}
           </td>
         );
       })}

@@ -13,7 +13,7 @@ import type {
   LinkRefDTO,
   CellValue,
 } from "@gx/shared-types";
-import { ROW_HEIGHT_PX } from "@gx/shared-types";
+import { ROW_HEIGHT_PX, HEADER_HEIGHT_PX } from "@gx/shared-types";
 import { useFields, useTables, useGXMutations } from "../../api/hooks";
 import { useRecordsInfinite } from "../../api/records-paging-hooks";
 import { isComputedInMem } from "../../api/records-paging";
@@ -448,7 +448,7 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
         return (
           <tbody key={g.key}>
             <tr className="bg-gx-bg">
-              <td className="sticky left-0 z-20 border-b border-r border-gx-separator bg-gx-bg" style={{ width: ROW_HEADER_W, minWidth: ROW_HEADER_W }}>
+              <td className="sticky left-0 z-20 border-b border-r border-gx-hairline bg-gx-bg" style={{ width: ROW_HEADER_W, minWidth: ROW_HEADER_W }}>
                 <button
                   type="button"
                   className="p-1 text-gx-text-hint hover:text-gx-text-primary"
@@ -461,7 +461,7 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
                   </span>
                 </button>
               </td>
-              <td className="border-b border-gx-separator px-2 py-1.5" colSpan={visibleFields.length} style={{ height: 36 }}>
+              <td className="border-b border-gx-hairline px-2 py-1.5" colSpan={visibleFields.length} style={{ height: 36 }}>
                 <div className="flex items-center gap-2 text-gx-13">
                   {g.color && <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: g.color }} />}
                   <span className="font-semibold text-gx-text-primary">{g.label}</span>
@@ -487,14 +487,13 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
               g.recordIds
                 .map((id) => recMap.get(id))
                 .filter((r): r is RecordDTO => !!r)
-                .map((rec, i) => (
+                .map((rec) => (
                   <GridRow
                     key={rec.id}
                     record={rec}
                     fields={visibleFields}
                     widthOf={widthOf}
                     rowHeight={ROW_HEIGHT_PX[cfg.rowHeight]}
-                    zebra={i % 2 === 1}
                     selected={selection.isSelected(rec.id)}
                     rowColor={rowColorOf(rec)}
                     activeFieldId={active?.recordId === rec.id ? active.fieldId : null}
@@ -652,8 +651,8 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
             <thead className="sticky top-0 z-10">
               <tr>
                 <th
-                  className="sticky left-0 z-30 border-b border-r border-gx-separator bg-gx-table-header"
-                  style={{ width: ROW_HEADER_W, minWidth: ROW_HEADER_W, height: 32 }}
+                  className="sticky left-0 z-30 border-b border-r border-gx-hairline bg-gx-table-header"
+                  style={{ width: ROW_HEADER_W, minWidth: ROW_HEADER_W, height: HEADER_HEIGHT_PX }}
                 >
                   {/* R-I-13 表头复选框三态：未选 / 部分选（横线）/ 全选，只作用于当前页 */}
                   <div className="flex h-full items-center justify-center">
@@ -696,8 +695,7 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
                     <td colSpan={visibleFields.length + 1} />
                   </tr>
                 )}
-                {records.slice(start, end).map((rec, i) => {
-                  const realIdx = start + i;
+                {records.slice(start, end).map((rec) => {
                   const color = rowColorOf(rec);
                   return (
                     <GridRow
@@ -706,7 +704,6 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
                       fields={visibleFields}
                       widthOf={widthOf}
                       rowHeight={rowH}
-                      zebra={realIdx % 2 === 1}
                       selected={selection.isSelected(rec.id)}
                       activeFieldId={active?.recordId === rec.id ? active.fieldId : null}
                       editing={editing}

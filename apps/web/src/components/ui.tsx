@@ -421,7 +421,7 @@ function hexToRgb(c: string): [number, number, number] | null {
   return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
 }
 /** 把单色加深 25% 用于文字（高对比） */
-function darkenForText(rgb: [number, number, number]): string {
+export function darkenForText(rgb: [number, number, number]): string {
   const [r, g, b] = rgb;
   // HSL 亮度降到 35%
   const max = Math.max(r, g, b) / 255;

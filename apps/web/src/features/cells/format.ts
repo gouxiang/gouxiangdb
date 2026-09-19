@@ -22,15 +22,19 @@ export const COMPUTED_TYPES = new Set([
   "lastModifiedBy",
 ]);
 
-// 右对齐 + 等宽数字的字段类型
+// 右对齐 + 等宽数字的字段类型（参考图：数值/工时/金额类列右对齐，表头同侧）
 export const RIGHT_ALIGN_TYPES = new Set([
   "number",
   "currency",
   "percent",
+  "duration", // 工时（参考图「预估工时」16h/8h/40h 右对齐）
   "count",
   "rollup",
   "autoNumber",
 ]);
+
+/** 空单元格统一占位（弱色），参考图口径：不显示空白、不显示 raw 值。 */
+export const EMPTY_CELL_TEXT = "—";
 
 /** 判断单元格值是否为空（null / 空串 / 空数组 都算空） */
 export function isEmptyValue(value: CellValue | undefined): boolean {
@@ -43,6 +47,37 @@ export function isEmptyValue(value: CellValue | undefined): boolean {
 /** 单元格文本对齐方向 */
 export function cellTextAlign(field: FieldDTO): "left" | "right" {
   return RIGHT_ALIGN_TYPES.has(field.type) ? "right" : "left";
+}
+
+/**
+ * 优先级列识别（参考图：优先级是**纯文字带色**，状态才是胶囊）。
+ * 判定走两条路，避免只认字段名漏掉用户改名过的列：
+ *   ① 字段名命中「优先级 / priority / prio」；
+ *   ② 选项集整体落在优先级词表内（别名列也能命中）。
+ */
+const PRIORITY_FIELD_NAME = /优先级|priority|prio/i;
+/** 高（红 / danger） */
+const PRIORITY_HIGH = new Set(["高", "最高", "紧急", "很急", "p0"]);
+/** 中（橙 / warning） */
+const PRIORITY_MID = new Set(["中", "普通", "正常", "常规", "p1", "p2"]);
+/** 低（灰 / hint） */
+const PRIORITY_LOW = new Set(["低", "最低", "较低", "次要", "p3"]);
+const PRIORITY_VOCAB = new Set([...PRIORITY_HIGH, ...PRIORITY_MID, ...PRIORITY_LOW]);
+
+export function isPriorityField(field: FieldDTO): boolean {
+  if (PRIORITY_FIELD_NAME.test(field.name ?? "")) return true;
+  const opts = field.options ?? [];
+  if (opts.length === 0) return false;
+  return opts.every((o) => PRIORITY_VOCAB.has(String(o.name ?? "").trim().toLowerCase()));
+}
+
+/** 优先级文字色（gx-* 令牌，不新造色）：高=红 / 中=橙 / 低=灰，未命中走主文本色。 */
+export function priorityTextClass(name: string): string {
+  const key = String(name ?? "").trim().toLowerCase();
+  if (PRIORITY_HIGH.has(key)) return "text-gx-danger";
+  if (PRIORITY_MID.has(key)) return "text-gx-warning";
+  if (PRIORITY_LOW.has(key)) return "text-gx-text-hint";
+  return "text-gx-text-primary";
 }
 
 /** 字段是否只读（计算字段 / 系统字段不可由用户编辑） */
