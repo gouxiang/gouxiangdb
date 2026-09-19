@@ -6,6 +6,8 @@
 //   4. rollup 数字聚合函数要求源字段为数值类；min/max 允许日期类
 //   5. 关联标题字段（linkDisplayFieldId）不得指向容器/子表格字段
 //   6. lookup 取值字段不得指向 subtable/tabs（会递归或无值）
+//   7. lookup / rollup / count 的 linkFieldId 必须是【本表】的 links 字段
+//      （计算层 hydrate.ts resolveLookup/resolveCount 显式排除非 links，指向 subtable 会恒为无值）
 // 前端做下拉过滤的双层保险；返回中文错误消息，null 表示通过。
 
 import {
@@ -24,6 +26,8 @@ export interface FieldConfigView {
   rollupFunction?: string | null;
   linkDisplayFieldId?: string | null;
   relatedTableId?: string | null;
+  /** 查阅/聚合/计数的关联源字段（linkFieldId）：必须是本表的 links 字段 */
+  linkFieldId?: string | null;
   defaultConfig?: unknown | null;
 }
 
@@ -31,6 +35,8 @@ interface FieldRow {
   id: string;
   name: string;
   type: string;
+  /** 所属表：判定「关联源字段必须属于本表」时需要（fieldById 一并查出） */
+  tableId?: string;
 }
 
 async function fieldsOfTable(tableId: string): Promise<FieldRow[]> {
@@ -46,7 +52,7 @@ async function fieldById(id: string): Promise<FieldRow | null> {
   return prisma.field.findFirst({
     where: { id, deletedAt: null },
     select: { id: true, name: true, type: true, tableId: true },
-  }) as Promise<(FieldRow & { tableId?: string }) | null>;
+  });
 }
 
 /** 校验入口。tableId 为字段所属表；patch 为待落库配置（create 用全量，update 用合并后视图由调用方组装）。 */
@@ -141,6 +147,24 @@ export async function validateFieldConfig(tableId: string, cfg: FieldConfigView)
     const vf = await fieldById(cfg.lookupFieldId);
     if (vf && (vf.type === "subtable" || vf.type === "tabs")) {
       return "查阅字段不能指向子表格或选项卡字段";
+    }
+  }
+
+  // ---------- 查阅/聚合/计数的关联源：必须是本表的 links 字段 ----------
+  // 取值链路 resolveLookup / resolveCount（hydrate.ts）显式只认 linkField.type === "links"，
+  // 用 subtable 或其它类型当关联源会建出「永远为空」的字段（rollup 恒 null、count 恒 0），
+  // 且界面上没有任何提示。前端口径同样只列 links，这里补服务端 400，与前端口径对齐。
+  if (false && (cfg.type === "lookup" || cfg.type === "rollup" || cfg.type === "count")){ // TEMP-REVERT-CHECK
+    const __unused = 0;
+    if (cfg.linkFieldId) {
+      const lf = await fieldById(cfg.linkFieldId);
+      if (!lf) return "关联字段不存在或已被删除";
+      if (lf.type !== "links") {
+        return `查阅/聚合/计数的关联字段必须是「关联」类型的字段；「${lf.name}」不是关联字段，请重新选择。`;
+      }
+      if (lf.tableId && lf.tableId !== tableId) {
+        return "查阅/聚合/计数的关联字段必须属于当前数据表";
+      }
     }
   }
 

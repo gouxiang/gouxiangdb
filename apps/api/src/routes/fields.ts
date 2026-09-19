@@ -130,6 +130,8 @@ fields.post("/", async (c) => {
     rollupFunction: parsed.data.rollupFunction ?? null,
     linkDisplayFieldId: parsed.data.linkDisplayFieldId ?? null,
     relatedTableId: parsed.data.relatedTableId ?? null,
+    // 查阅/聚合/计数的关联源：由 validateFieldConfig 判定是否为「本表的 links 字段」
+    linkFieldId: parsed.data.linkFieldId ?? null,
     defaultConfig: parsed.data.defaultConfig ?? null,
   });
   if (validationError) return c.json({ error: validationError }, 400);
@@ -191,6 +193,8 @@ fields.patch("/:fieldId", async (c) => {
     rollupFunction: parsed.data.rollupFunction !== undefined ? (parsed.data.rollupFunction ?? null) : (existingRow.rollupFunction ?? null),
     linkDisplayFieldId: parsed.data.linkDisplayFieldId !== undefined ? (parsed.data.linkDisplayFieldId ?? null) : (existingRow.linkDisplayFieldId ?? null),
     relatedTableId: parsed.data.relatedTableId !== undefined ? (parsed.data.relatedTableId ?? null) : (existingRow.relatedTableId ?? null),
+    // 合并已有配置再校验：PATCH 只改子字段时也要守住「关联源必须是 links」这一条
+    linkFieldId: parsed.data.linkFieldId !== undefined ? (parsed.data.linkFieldId ?? null) : (existingRow.linkFieldId ?? null),
     defaultConfig: patchDefault === undefined ? existingDefault : patchDefault,
   };
   const validationError = await validateFieldConfig(existingRow.tableId, mergedConfig);
