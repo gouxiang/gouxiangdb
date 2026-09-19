@@ -14,12 +14,17 @@ const read = (rel: string) =>
   readFileSync(new URL(rel, import.meta.url), "utf8");
 
 describe("权限治理第二批：管理类隐藏 / 数据编辑类保留禁用", () => {
-  it("KB 首页：新建文档 / 新建画布由 canCreate 门控，不再 disabled", () => {
-    const src = read("../kb/KbHomePage.tsx");
-    expect(src).toContain("{canCreate && (");
-    expect(src).toContain("新建文档");
-    expect(src).toContain("新建画布");
-    expect(src).not.toContain("disabled={!canCreate}");
+  it("KB 新建文档 / 画布由 canCreate 门控，不再 disabled（第四批：入口从 KB 首页移到 L2）", () => {
+    // 改断言原因：第四批入口收敛——「新建文档 / 新建画布」从 KbHomePage 移到二级导航
+    // （SecondaryNavKbOps，选项卡行右侧，按当前 tab 建对应类型），同一能力不留两处入口。
+    // 门控口径不变：canCreate 为假时**不渲染**，不是 disabled 假装禁用。
+    const ops = read("../workspace/SecondaryNavKbOps.tsx");
+    expect(ops).toContain("canCreate");
+    expect(ops).toContain("新建文档");
+    expect(ops).toContain("新建画布");
+    expect(ops).not.toContain("disabled={!canCreate}");
+    // 原入口确已下线：KbHomePage 不再持有 useCreateDoc（否则又是双入口）
+    expect(read("../kb/KbHomePage.tsx")).not.toContain("useCreateDoc");
   });
 
   it("库设置：名称无权限走只读文本；危险操作区（删库）整块不渲染", () => {

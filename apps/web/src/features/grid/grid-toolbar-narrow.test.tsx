@@ -59,10 +59,25 @@ function renderToolbar() {
 }
 
 describe("P1-A 根因：按钮不再被压到内容宽度以下", () => {
-  it("每个工具按钮都带 shrink-0 + whitespace-nowrap（7 个：行高/字段/筛选/分组/排序/行颜色/更多）", () => {
+  it("每个工具按钮都带 shrink-0 + whitespace-nowrap（9 个：导入/导出/行高/字段/筛选/分组/排序/行颜色/更多）", () => {
+    // 改断言原因：第四批导入导出收敛——「导入 / 导出」从「更多」菜单提升为常驻按钮
+    // （放在搜索框左侧），故 7 → 9。两者同样要满足「不被压到内容宽度以下」的根因约束。
     const html = renderToolbar();
-    expect(countOf(html, "whitespace-nowrap rounded-gx-lg")).toBe(7);
-    expect(countOf(html, "inline-flex h-8 shrink-0 items-center")).toBe(7);
+    expect(countOf(html, "whitespace-nowrap rounded-gx-lg")).toBe(9);
+    expect(countOf(html, "inline-flex h-8 shrink-0 items-center")).toBe(9);
+  });
+
+  it("导入 / 导出是常驻按钮且落在搜索框左侧（入口收敛后唯一入口）", () => {
+    const html = renderToolbar();
+    expect(html).toContain("导入");
+    expect(html).toContain("导出");
+    // 位置：两个按钮都排在搜索框（placeholder 搜索此视图…）之前
+    expect(html.indexOf("导入")).toBeLessThan(html.indexOf("搜索此视图"));
+    expect(html.indexOf("导出")).toBeLessThan(html.indexOf("搜索此视图"));
+    // 「更多」菜单里不再重复挂这两项（同一能力不留两处入口）
+    const src = read("./GridToolbar.tsx");
+    expect(src).not.toContain('label="CSV 导入"');
+    expect(src).not.toContain('label="CSV 导出"');
   });
 });
 

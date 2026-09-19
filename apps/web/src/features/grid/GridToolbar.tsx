@@ -392,6 +392,12 @@ export function GridToolbar(props: GridToolbarProps) {
         )}
       </div>
 
+      {/* 导入 / 导出：第四批入口收敛后由这里独家承载（L2 表级操作行的导入导出格已下线）。
+          位置在搜索框**左侧**、常驻可见——表级导入导出是全站唯一的写入/导出口，
+          藏在「更多」里等于让新用户找不到；窄屏同样不收起（<768 再和更多菜单一起挤会断行）。 */}
+      <ToolButton icon="upload" label="导入" onClick={onImport} />
+      <ToolButton icon="download" label="导出" onClick={onExport} />
+
       {/* 右段：搜索（R-I-03 宽 170 / 高 32 / 防抖 300ms / 搜索中置灰保留旧结果）
           <768 主轴撑满（不换行、不挤掉其它按钮），≥768 严格回到 170 定宽 */}
       <div className="ml-auto flex min-w-0 flex-1 md:flex-none">
@@ -405,7 +411,8 @@ export function GridToolbar(props: GridToolbarProps) {
         />
       </div>
 
-      {/* 溢出菜单：桌面只装导入导出等表级操作；窄屏额外装载被收起的按钮（功能一一等价） */}
+      {/* 溢出菜单：桌面装复制视图 / 清空表等表级操作；窄屏额外装载被收起的按钮（功能一一等价）。
+          导入 / 导出已改为常驻按钮，不再出现在菜单里。 */}
       <div className="relative">
         <ToolButton
           icon="download"
@@ -457,9 +464,8 @@ export function GridToolbar(props: GridToolbarProps) {
                   />
                   <MenuDivider />
                 </div>
-                <MenuItem icon="upload" label="CSV 导入" onClick={() => { onImport(); closeAll(); }} />
-                <MenuItem icon="download" label="CSV 导出" onClick={() => { onExport(); closeAll(); }} />
-                <MenuDivider />
+                {/* 导入 / 导出已从菜单摘掉：提升为工具栏常驻按钮（见上方 ToolButton），
+                    避免同一能力两个入口。菜单里不再留重复项。 */}
                 <MenuItem icon="copy" label="复制视图" onClick={() => { onCopyView(); closeAll(); }} />
                 <MenuItem icon="trash" label="清空表" danger onClick={() => { onClearTable(); closeAll(); }} />
               </Menu>

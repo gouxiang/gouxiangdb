@@ -15,6 +15,7 @@ import type {
 } from "@gx/shared-types";
 import { ROW_HEIGHT_PX, HEADER_HEIGHT_PX } from "@gx/shared-types";
 import { useFields, useTables, useGXMutations } from "../../api/hooks";
+import { Tables } from "../../api/client";
 import { useRecordsInfinite } from "../../api/records-paging-hooks";
 import { isComputedInMem } from "../../api/records-paging";
 import { EmptyState, IconButton, Modal, Select, Input, Button, toast, COLOR_PALETTE } from "../../components/ui";
@@ -35,6 +36,8 @@ import { ResultNotice, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
 import { useBreakpointTier } from "../../lib/breakpoint";
 import { EntityIconPicker } from "../../components/EntityIconPicker";
 import { GridToolbar } from "./GridToolbar";
+import { ImportWizard } from "./ImportWizard";
+import { ExportDialog, type ExportScope } from "./ExportDialog";
 import { RecordCardList } from "./RecordCardList";
 import { ViewSwitcher } from "./ViewSwitcher";
 import { GridHeaderCell } from "./GridHeaderCell";
@@ -143,15 +146,18 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
   // 当前表的自定义图标（DTO 已带 icon/iconColor）。本表页的图标入口 + 展示位就挂在工具栏最左侧：
   // 旧壳 Sidebar 的那份入口只在重命名弹窗里、且旧壳默认不挂载，等于数据表改不了图标。
   const currentTable = (tablesData ?? []).find((t) => t.id === tableId) ?? null;
-  // R-I-26 写操作在途守卫（新建记录 / 批量删除）
+  // R-I-26 写操作在途守卫（新建记录 / 批量删除 / 导出）
   const newRecordGuard = useWriteGuard();
+  const exportGuard = useWriteGuard();
+  // 导入 / 导出向导（第四批：与 L2 表级操作行同一套，入口收敛到工具栏常驻按钮）
+  const [importOpen, setImportOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   // R-D-15：骨架屏 ≥300ms 才显示，避免「空白 → 骨架 → 内容」闪烁
   const showSkeleton = useDelayedFlag(isLoading);
   // R-D-27：局部刷新（续翻 / 筛选）保留旧内容 + 降透明度，不用骨架屏
   const locallyRefreshing = isFetchingNextPage;
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const importRef = useRef<HTMLInputElement>(null);
   const selection = useGridSelection();
   // R-D-32 / R-D-33：<1024 表格转卡片列表（表格在窄屏必然横向溢出；卡片单栏不横滚）。
   // 档位走 JS 是因为「表格 → 卡片」是结构替换，不是同一元素换 class。
@@ -409,8 +415,31 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
     }
   };
   const onClearSelection = () => selection.clear();
-  const onExport = () => exportCsv(visibleFields, records);
-  const onImport = () => importRef.current?.click();
+  /**
+   * 导入 / 导出：第四批收敛后与 L2 表级操作行同一套向导（ImportWizard / ExportDialog），
+   * 不重写、不并行第二套实现。导出走服务端 Tables.exportCsvText（按视图/整表），
+   * 不受前端已加载行数限制；原先「客户端按当前可见字段拼 CSV」的实现随之移除。
+   */
+  const onExport = () => setExportOpen(true);
+  const onImport = () => setImportOpen(true);
+  const runExport = async (scope: ExportScope) => {
+    await exportGuard.run("export", async () => {
+      try {
+        const csv = await Tables.exportCsvText(tableId, scope === "view" ? viewId : undefined);
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `table-${tableId}${scope === "view" ? `-${viewId}` : ""}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast(scope === "view" ? "已导出当前视图" : "已导出整表", "success");
+        setExportOpen(false);
+      } catch (e) {
+        toast(e instanceof Error ? e.message : "导出失败", "error");
+      }
+    });
+  };
   const onCopyView = () => void m.duplicateView.mutateAsync({ viewId, tableId });
   // R-D-23 L4（不可恢复）+ R-D-24（主按钮用具体动词，不用「确定」）
   const onClearTable = () => {
@@ -426,17 +455,6 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
         .catch((e: unknown) => toast((e as Error)?.message ?? "清空失败", "error"));
     });
   };
-  const onImportFile = async (file: File | undefined) => {
-    if (!file) return;
-    const csv = await file.text();
-    try {
-      const res = await m.csvImport.mutateAsync({ tableId, csv, hasHeader: true, viewId });
-      toast(`导入成功：新增 ${res.createdRecords} 条`, "success");
-    } catch (e) {
-      toast((e as Error).message ?? "导入失败", "error");
-    }
-  };
-
   // 记录映射（分组用）
   const recMap = useMemo(() => {
     const map = new Map<string, RecordDTO>();
@@ -608,12 +626,22 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
         }}
       />
 
-      <input
-        ref={importRef}
-        type="file"
-        accept=".csv"
-        className="hidden"
-        onChange={(e) => void onImportFile(e.target.files?.[0])}
+      {/* 导入 / 导出向导（复用 L2 表级操作行同一套组件，不重写）。
+          未打开时不挂载数据 hook（ImportWizard 的门面已保证），首屏无额外请求。 */}
+      <ImportWizard
+        open={importOpen}
+        tableId={tableId}
+        viewId={viewId}
+        baseId={baseId}
+        onClose={() => setImportOpen(false)}
+      />
+      <ExportDialog
+        open={exportOpen}
+        viewId={viewId}
+        viewName={view?.name}
+        busy={exportGuard.isBusy("export")}
+        onExport={runExport}
+        onClose={() => setExportOpen(false)}
       />
 
       {degraded && (
@@ -895,35 +923,6 @@ function BulkEditModal({
       </div>
     </Modal>
   );
-}
-
-// 客户端导出 CSV（避免绕过 API 直接请求）
-function exportCsv(fields: FieldDTO[], records: RecordDTO[]) {
-  // CSV 公式注入防护：=、+、-、@、制表符开头的单元格前导单引号强制为文本
-  const esc = (raw: string) => {
-    const s = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
-    return `"${s.replace(/"/g, '""')}"`;
-  };
-  const header = fields.map((f) => esc(f.name));
-  const rows = records.map((r) =>
-    fields.map((f) => {
-      const v = r.fields[f.id];
-      if (v == null) return esc("");
-      // 统一走单元格格式化器：选择类字段导出选项名而非 optionId，日期/货币/百分比按显示口径
-      const text = formatCell(v, f);
-      if (text !== "") return esc(text);
-      // 格式化器无输出时（空数组 / 未识别的对象数组）回退到可机读原文
-      return esc(Array.isArray(v) ? JSON.stringify(v) : String(v));
-    }),
-  );
-  const csv = [header, ...rows].map((row) => row.join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "export.csv";
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 export { GridView };

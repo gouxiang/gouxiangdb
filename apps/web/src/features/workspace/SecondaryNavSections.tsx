@@ -138,6 +138,8 @@ export function RowMoreMenu({ items, label = "行操作" }: { items: RowMoreItem
                 key={it.label}
                 icon={it.icon}
                 label={it.label}
+                description={it.description}
+                danger={it.danger}
                 onClick={() => {
                   setOpen(false);
                   it.onClick();
@@ -155,15 +157,35 @@ export interface RowMoreItem {
   label: string;
   icon: IconName;
   onClick: () => void;
+  /** 危险动作（删除 / 清空）：菜单项走 danger 红字，与站内既有菜单口径一致。 */
+  danger?: boolean;
+  /** 次行说明（如「进入表单设计器」）。 */
+  description?: string;
 }
 
 /**
- * 二级实体行（第三批）：纯导航行——点整行进对应的表 / 文档 / 画布。
+ * 文档行的拖拽状态（KB 文档改层级）。画布行不参与——服务端 moveDoc 的层级语义
+ * 只用在文档树上（旧 KbTree 同样把画布排除在级联之外），不造后端没有的语义。
+ */
+export interface SecondaryRowDrag {
+  draggable: boolean;
+  /** 该行正在被拖（半透明） */
+  dragging: boolean;
+  /** 该行是当前落点（成为其子级） */
+  dropInto: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDragOver: (e: { preventDefault: () => void }) => void;
+  onDrop: (e: { preventDefault: () => void }) => void;
+}
+
+/**
+ * 二级实体行（第三批）：点整行进对应的表 / 文档 / 画布。
  *
- * 行尾的「竖向三点」行菜单已随「收纳到导航」一并下线：它的两个动作分别是
- *  ① 收纳到导航（menu_items，本批整体下线）；
- *  ② 移动到分组…（依赖 CollectableEntry + nav group 树，属分组编排流）。
- * RowMoreMenu 组件本体保留导出（它是与语义无关的通用行菜单，另有单测直接渲染）。
+ * 行尾「竖向三点」行菜单在第四批按行类型回挂：
+ *   表行   → 重命名 / 编辑表单 / 复制表×2 / 清空数据 / 删除表（见 SecondaryNavTableOps）；
+ *   文档行 → 拖拽改层级（见 SecondaryNavKbOps），菜单仍不挂（后端无文档级其它行操作）。
+ * 菜单由调用点给出；不给时不渲染（列表保持纯导航形态，行宽行高不变）。
  */
 export function SecondaryRow({
   kind,
@@ -174,6 +196,9 @@ export function SecondaryRow({
   active,
   onToggleDoc,
   onNavigate,
+  menu,
+  menuLabel,
+  drag = null,
 }: {
   kind: SectionKind;
   entry: SecondaryEntry;
@@ -183,15 +208,34 @@ export function SecondaryRow({
   active: boolean;
   onToggleDoc: (id: string) => void;
   onNavigate: (href: string) => void;
+  /** 行尾菜单项；空数组 / 不给 = 不渲染三点（无权限即不渲染，不做禁用假入口）。 */
+  menu?: RowMoreItem[];
+  /** 行尾菜单的可访问名称（按行类型给具体作用名）。 */
+  menuLabel?: string;
+  /** 拖拽状态；只有文档行给。 */
+  drag?: SecondaryRowDrag | null;
 }) {
   const resolved = resolveEntityIcon(e, { name: navKindIcon(kind) });
   const color = resolvedEntityColor(e);
   // R-N-10 选中态：白底 + 圆角 8 + accent 字 600；hover 底 #F1F5FB。左侧色条已按规范移除。
+  // 落点态（dropInto）与选中态互斥取一：两个 bg-* 同权重会互相覆盖，不能并列写进 class。
   return (
     <div
+      draggable={drag?.draggable ?? false}
+      onDragStart={drag?.onDragStart}
+      onDragEnd={drag?.onDragEnd}
+      onDragOver={drag?.onDragOver}
+      onDrop={drag?.onDrop}
+      data-drag={drag?.dragging ? "source" : undefined}
+      data-drop-into={drag?.dropInto ? "into" : undefined}
       className={[
         "group relative flex items-center gap-1 rounded-gx-lg py-1.5 pr-1 transition-colors",
-        active ? "bg-white font-semibold text-gx-accent" : "text-gx-text-primary hover:bg-gx-row-hover",
+        active
+          ? "bg-white font-semibold text-gx-accent"
+          : drag?.dropInto
+            ? "bg-gx-accent-bg text-gx-accent"
+            : "text-gx-text-primary hover:bg-gx-row-hover",
+        drag?.dragging ? "opacity-40" : "",
       ].join(" ")}
       style={{ height: SECONDARY_ROW_H, paddingLeft: 6 + depth * 13 }}
     >
@@ -223,6 +267,7 @@ export function SecondaryRow({
       >
         {e.name}
       </button>
+      {menu && menu.length > 0 ? <RowMoreMenu items={menu} label={menuLabel ?? "行操作"} /> : null}
     </div>
   );
 }

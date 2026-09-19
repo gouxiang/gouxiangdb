@@ -19,7 +19,7 @@ import {
 } from "../../components/ui";
 import { EntityIconPicker, resolvedEntityColor, resolveEntityIcon } from "../../components/EntityIconPicker";
 import type { KbDocDTO, KbDocKind } from "../../api/client";
-import { useKb, useKbDocs, useCreateDoc, useRenameDoc, useDeleteDoc, useRestoreDoc } from "./kb-hooks";
+import { useKb, useKbDocs, useRenameDoc, useDeleteDoc, useRestoreDoc } from "./kb-hooks";
 import { DocKindIcon, formatTime, roleLabel } from "./kb-ui";
 import { colors } from "@gx/design-tokens";
 // 阶段 4：删除统一走 L2 确认 + 撤销 toast（R-D-23 / R-I-08 / R-D-22）
@@ -57,7 +57,6 @@ export default function KbHomePage() {
   const [iconFor, setIconFor] = useState<string | null>(null);
 
   const { data: docs, isLoading } = useKbDocs(kbId, filter, debouncedQ);
-  const createDoc = useCreateDoc(kbId!);
   const deleteDoc = useDeleteDoc(kbId!);
   const restoreDoc = useRestoreDoc(kbId!);
   // 重命名目标变化时，mutation 闭包跟随最新 docId（hook 始终调用，仅参数变化）
@@ -79,17 +78,6 @@ export default function KbHomePage() {
     const r = kb?.role ?? "owner";
     return r === "owner" || r === "editor";
   }, [kb?.role]);
-
-  async function create(kind: KbDocKind) {
-    if (!kbId || createDoc.isPending) return;
-    try {
-      const r = await createDoc.mutateAsync({ kind, title: kind === "canvas" ? "未命名画布" : "未命名文档" });
-      const d = r.doc;
-      navigate(kind === "canvas" ? `/kb/${kbId}/canvas/${d.id}` : `/kb/${kbId}/doc/${d.id}`);
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "新建失败", "error");
-    }
-  }
 
   function openRename(d: KbDocDTO) {
     setMenuFor(null);
@@ -149,28 +137,9 @@ export default function KbHomePage() {
             <h1 className="text-gx-16 font-semibold text-gx-text-primary">{kb?.name ?? "知识库"}</h1>
             {kb?.role && <Badge variant="soft">{roleLabel(kb.role)}</Badge>}
           </div>
-          {/* 权限治理第二批：新建文档/画布是内容创建的管理类入口，无权限即不渲染
-              （不是 disabled 假装禁用——看不到入口才不会误以为功能坏了）。 */}
-          {canCreate && (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => create("doc")}
-                className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg border border-gx-border bg-gx-surface px-3 text-gx-13 text-gx-text-primary hover:bg-gx-bg"
-              >
-                <Icon name="doc" size={15} className="text-gx-accent" />
-                新建文档
-              </button>
-              <button
-                type="button"
-                onClick={() => create("canvas")}
-                className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg bg-gx-accent px-3 text-gx-13 font-medium text-white hover:brightness-95"
-              >
-                <Icon name="canvas" size={15} />
-                新建画布
-              </button>
-            </div>
-          )}
+          {/* 权限治理第二批 + 第四批入口收敛：新建文档/画布已移到二级导航（L2）选项卡行右侧，
+              按当前 tab 建对应类型（见 SecondaryNavKbOps）。这里不再保留第二处入口——
+              同一能力两个入口会各自漂移，且 L2 在库内任何页面都常驻，覆盖面更大。 */}
         </div>
 
         <div className="mt-3 flex items-center gap-3">

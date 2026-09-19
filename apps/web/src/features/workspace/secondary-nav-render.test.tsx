@@ -22,6 +22,18 @@ vi.mock("../../api/hooks", () => ({
     isLoading: false,
     isError: false,
   }),
+  // 第四批：L2 回挂了表操作（新建 / 重命名 / 编辑表单 / 复制 / 清空 / 删除），
+  // 需要 useBase 取 canManageSchema、useGXMutations 取那批 mutation。
+  // SSR 回归不跑 QueryClientProvider，直接给桩（只断言渲染，不断言取数）。
+  useBase: () => ({ data: { permissions: { canManageSchema: true } } }),
+  useGXMutations: () => ({
+    createTable: { mutateAsync: vi.fn() },
+    updateTable: { mutateAsync: vi.fn() },
+    duplicateTable: { mutateAsync: vi.fn() },
+    clearTable: { mutateAsync: vi.fn() },
+    deleteTable: { mutateAsync: vi.fn() },
+    restoreTrash: { mutateAsync: vi.fn() },
+  }),
 }));
 
 vi.mock("../kb/kb-hooks", () => ({
@@ -29,6 +41,10 @@ vi.mock("../kb/kb-hooks", () => ({
     docsKindSeen = kind;
     return { data: kbId ? docs : undefined, isLoading: false, isError: false };
   },
+  // 第四批：L2 回挂了 KB 新建文档/画布（canCreate）与文档拖拽改层级（moveDoc）
+  useKb: () => ({ data: { role: "owner" } }),
+  useCreateDoc: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useMoveDoc: () => ({ mutateAsync: vi.fn() }),
 }));
 
 import { SecondaryNav, type SecondaryContainer } from "./SecondaryNav";
@@ -157,10 +173,14 @@ describe("SecondaryNav：选中容器的子项（第三批语义）", () => {
     const html = renderSecondary(BASE);
     const ms = performance.now() - t0;
 
-    const rendered = (html.match(/数据表 \d+/g) ?? []).length;
+    // 改断言原因：原先按「表名出现次数」计数，第四批给表行回挂了行菜单后，
+    // 同一行的表名会多出现在 title / aria-label / 菜单可访问名里（一行 4 处），
+    // 计数被放大 4 倍 —— 但那不是 DOM 变多。窗口化要锁的是「渲染了几行」，
+    // 故改为数行元素本身（SecondaryRow 的定高 style，SECONDARY_ROW_H=31）。
+    const rendered = (html.match(/height:31px/g) ?? []).length;
     expect(rendered).toBeGreaterThan(0);
-    // 窗口：viewport≈31*24=744，可见 24 + overscan 24 → ≤48，留余量 ≤120
-    expect(rendered).toBeLessThanOrEqual(120);
+    // 窗口：viewport≈31*24=744，可见 24 + overscan 24 → ≤48，留余量 ≤120（+1 个段头行）
+    expect(rendered).toBeLessThanOrEqual(121);
     expect(rendered).toBeLessThan(1200 / 5);
     console.log(`[S10-metric] SecondaryNav SSR 1200 tables: renderedRows=${rendered}, render=${ms.toFixed(1)}ms`);
     expect(ms).toBeLessThan(1000);

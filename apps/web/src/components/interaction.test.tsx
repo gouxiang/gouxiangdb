@@ -258,7 +258,10 @@ describe("阶段4 调用点护栏（hook 无法在 node 下跑副作用，改锁
     expect(read("../features/grid/GridView.tsx")).toContain("useWriteGuard()");
     expect(read("../features/drawer/RecordDrawer.tsx")).toContain("useWriteGuard()");
     expect(read("../features/grid/ImportWizard.tsx")).toContain("useWriteGuard()");
-    expect(read("../features/workspace/TableActionRow.tsx")).toContain("useWriteGuard()");
+    // 改断言原因：第四批导入导出收敛——L2 表级操作行的导入导出格下线，执行侧随向导
+    // 一并落到 GridView（exportGuard 守着导出），故守卫的落点从 TableActionRow 改为 GridView。
+    expect(read("../features/grid/GridView.tsx")).toContain("exportGuard.run(");
+    expect(read("../features/workspace/TableActionRow.tsx")).not.toContain("ImportWizard");
     expect(read("../features/kb/KbTrashPage.tsx")).toContain("useWriteGuard()");
   });
 

@@ -385,7 +385,15 @@ export function useGXMutations() {
     duplicateTable: useMutation({
       mutationFn: async (p: { tableId: string; name?: string; withData?: boolean }) =>
         (await Tables.duplicate(p.tableId, { name: p.name, withData: p.withData })).table,
-      onSuccess: () => invalidateAll(),
+      // 改：补失效 ["tables"]（与 updateTable 同一口径）。此前只有 invalidateAll() 不带
+      // baseId，实际只失效了 ["bases"]，而库下表列表的 queryKey 是 ["tables", baseId] ——
+      // 表现为「服务端已复制成功，但列表不出现副本，刷新才有」。复制表回挂到 L2 行菜单后，
+      // 这个缓存洞在真机上直接可见，故补齐。（服务端 duplicate 只回部分字段、不含 baseId，
+      // 拿不到 baseId，按表列表前缀失效即可。）
+      onSuccess: () => {
+        invalidateAll();
+        void qc.invalidateQueries({ queryKey: ["tables"] });
+      },
     }),
     clearTable: useMutation({
       mutationFn: async (p: { tableId: string; viewId?: string }) => {

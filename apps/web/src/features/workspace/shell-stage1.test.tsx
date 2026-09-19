@@ -16,13 +16,28 @@ import { Route, Routes } from "react-router-dom";
 import { StaticRouter } from "react-router-dom/server";
 
 vi.mock("../../api/hooks", () => ({
-  useGXMutations: () => ({ csvImport: { mutateAsync: vi.fn(async () => ({ createdRecords: 0 })) } }),
+  useGXMutations: () => ({
+    csvImport: { mutateAsync: vi.fn(async () => ({ createdRecords: 0 })) },
+    // 第四批：L2 回挂了表操作（新建 / 重命名 / 复制 / 清空 / 删除），SSR 直接给桩。
+    createTable: { mutateAsync: vi.fn() },
+    updateTable: { mutateAsync: vi.fn() },
+    duplicateTable: { mutateAsync: vi.fn() },
+    clearTable: { mutateAsync: vi.fn() },
+    deleteTable: { mutateAsync: vi.fn() },
+    restoreTrash: { mutateAsync: vi.fn() },
+  }),
   // 二级面板的数据源（第三批）：SSR 回归不跑 QueryClientProvider，直接给数据。
   useTables: () => ({ data: [], isLoading: false, isError: false }),
+  // 第四批：取 canManageSchema 判定表操作入口是否渲染
+  useBase: () => ({ data: { permissions: { canManageSchema: true } } }),
 }));
 
 vi.mock("../kb/kb-hooks", () => ({
   useKbDocs: () => ({ data: [], isLoading: false, isError: false }),
+  // 第四批：L2 回挂了 KB 新建文档/画布与文档拖拽改层级
+  useKb: () => ({ data: { role: "owner" } }),
+  useCreateDoc: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useMoveDoc: () => ({ mutateAsync: vi.fn() }),
 }));
 
 import { PrimaryNav } from "./PrimaryNav";
@@ -259,18 +274,21 @@ describe("R-N-11/12 行尾竖向三点：四条护栏", () => {
   });
 });
 
-describe("R-I-16 导入 / 导出 / 分享数据落在 L2 表级操作行", () => {
-  it("有表上下文时渲染三格（分享数据挂「规划中」，点击 toast 非静默）", () => {
+describe("R-I-16 表级操作行（第四批：导入 / 导出已收敛到网格工具栏）", () => {
+  it("有表上下文时渲染分享数据格（挂「规划中」，点击 toast 非静默）", () => {
+    // 改断言原因：第四批导入导出收敛——「导入 / 导出」提升为 GridToolbar 常驻按钮
+    // （搜索框左侧），L2 操作行不再重复挂同一套向导的两个入口，只剩「分享数据」。
     const html = renderToString(
       <StaticRouter location="/base/b1/table/t1">
         <TableActionRow tableId="t1" viewId="v1" />
       </StaticRouter>,
     );
-    expect(html).toContain("导入");
-    expect(html).toContain("导出");
     expect(html).toContain("分享数据");
     expect(html).toContain("规划中");
     expect(html).toContain("text-gx-accent");
+    // 整行不空 → 不下线；但导入导出确已不在这一行
+    expect(html).not.toContain(">导入<");
+    expect(html).not.toContain(">导出<");
   });
 
   it("无表上下文（库首页 / 知识库 / 工作区）→ 整行不渲染、不占位", () => {
@@ -282,15 +300,19 @@ describe("R-I-16 导入 / 导出 / 分享数据落在 L2 表级操作行", () =>
     expect(html).toBe("");
   });
 
-  it("L2 装配了表级操作行；导入导出走 client.ts 不裸 fetch、不带凭据的 window.open 已禁用", () => {
+  it("L2 装配了表级操作行；导出仍走 client.ts 不裸 fetch、不带凭据的 window.open 已禁用", () => {
+    // 改断言原因：同上——导出执行侧随向导落到 GridView，端点仍是 Tables.exportCsvText，
+    // 「不裸 fetch / 不用无凭据的 window.open」这条红线跟着执行侧一起断言，不放松。
     const nav = read("./SecondaryNav.tsx");
     expect(nav).toContain("<TableActionRow");
     const row = code("./TableActionRow.tsx");
-    expect(row).toContain('from "../../api/client"');
     expect(row).not.toContain("fetch(");
     // 服务端只认 Authorization / X-GX-Token 请求头，window.open(exportUrl) 无头 → 401
     expect(row).not.toContain("window.open");
-    expect(row).toContain("Tables.exportCsvText");
+    const grid = code("../grid/GridView.tsx");
+    expect(grid).toContain("Tables.exportCsvText");
+    expect(grid).not.toContain("fetch(");
+    expect(grid).not.toContain("window.open");
     expect(read("../../api/client.ts")).toContain("exportCsvText");
   });
 });

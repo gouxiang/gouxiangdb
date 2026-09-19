@@ -31,6 +31,10 @@ import {
   type SecondaryEntry,
   type SectionKind,
 } from "./SecondaryNavSections";
+// 第四批：把旧壳失联的表操作与 KB 文档层级能力接回 L2（各自带自己的 hooks 与弹窗，
+// 本文件只装配，避免把数据层、操作层、弹窗状态全塞进一个文件）。
+import { useSecondaryTableOps } from "./SecondaryNavTableOps";
+import { useSecondaryKbOps } from "./SecondaryNavKbOps";
 import { TableActionRow } from "./TableActionRow";
 import { L2_WIDTH } from "./lib/l1-collapse";
 
@@ -142,6 +146,24 @@ export function SecondaryNav({
     return filterByName(docs, query).map((d) => toDocEntry(d, container.id));
   }, [container.kind, container.id, tablesQ.data, docsQ.data, query]);
 
+  /**
+   * 第四批：行操作 / 新建能力（旧壳失联的那批入口）。
+   * 两个 hook 都常驻调用（base 容器下 KB 那条也不取数，参数为空即 enabled:false）；
+   * 数据源是上面同一份 entries，不新增请求。
+   */
+  const tableOps = useSecondaryTableOps({
+    baseId,
+    activeTableId: tableMatch?.params.tableId ?? null,
+    navigate,
+  });
+  // tab 只在文档/画布两档之间（base 容器下不会有 kb 行，取 doc 只是类型兜底）
+  const kbOps = useSecondaryKbOps({
+    kbId,
+    tab: kbTab === "canvas" ? "canvas" : "doc",
+    navigate,
+    docs: entries,
+  });
+
   /** kb 才有的 doc 层级：子文档折叠由 expandedDocs 控制。 */
   const docChildren = useMemo(() => {
     const m = new Map<string, SecondaryEntry[]>();
@@ -226,27 +248,34 @@ export function SecondaryNav({
             className="min-w-0 flex-1 bg-transparent text-gx-12 text-gx-text-primary outline-none placeholder:text-gx-text-hint"
           />
         </div>
-        {/* 知识库专有：文档 / 画布 两个选项卡。数据库没有第二种子内容，不渲染 tab。 */}
-        {container.kind === "kb" && (
-          <div className="mt-2 flex items-center gap-1" role="tablist" aria-label="知识库内容类型">
-            {KB_TABS.map((t) => (
-              <button
-                key={t.kind}
-                type="button"
-                role="tab"
-                aria-selected={kbTab === t.kind}
-                onClick={() => setManualTab({ key: routeKey, tab: t.kind })}
-                className={[
-                  "rounded-full px-2 py-0.5 text-gx-12 transition-colors",
-                  kbTab === t.kind
-                    ? "bg-white font-semibold text-gx-accent"
-                    : "text-gx-text-secondary hover:bg-gx-row-hover",
-                ].join(" ")}
-              >
-                {t.label}
-              </button>
-            ))}
+        {/* 知识库专有：文档 / 画布 两个选项卡 + 按 tab 的「新建」入口。
+            数据库没有第二种子内容，改为渲染「+ 新建数据表」（同一位置、同一规格）。
+            tablist 只包住两个 tab，新建按钮是它的兄弟节点——它不是选项卡，不该进 tablist。 */}
+        {container.kind === "kb" ? (
+          <div className="mt-2 flex items-center gap-1">
+            <div className="flex items-center gap-1" role="tablist" aria-label="知识库内容类型">
+              {KB_TABS.map((t) => (
+                <button
+                  key={t.kind}
+                  type="button"
+                  role="tab"
+                  aria-selected={kbTab === t.kind}
+                  onClick={() => setManualTab({ key: routeKey, tab: t.kind })}
+                  className={[
+                    "rounded-full px-2 py-0.5 text-gx-12 transition-colors",
+                    kbTab === t.kind
+                      ? "bg-white font-semibold text-gx-accent"
+                      : "text-gx-text-secondary hover:bg-gx-row-hover",
+                  ].join(" ")}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="ml-auto flex shrink-0 items-center">{kbOps.createNode}</div>
           </div>
+        ) : (
+          tableOps.panelNode
         )}
       </div>
 
@@ -265,6 +294,23 @@ export function SecondaryNav({
           <div className="px-4 py-8 text-center text-gx-12 text-gx-text-hint">内容加载失败，请重试</div>
         ) : (
           <>
+            {/* 文档段的「回到顶级」落区（KB + 文档 tab 才有；无写权限不渲染）。
+                与旧 KbTree 同一套落区样式思路，颜色走 gx-* 令牌。 */}
+            {container.kind === "kb" && kbTab === "doc" && kbOps.canCreate && (
+              <div
+                onDragOver={kbOps.rootZone.onDragOver}
+                onDrop={kbOps.rootZone.onDrop}
+                data-drop-root={kbOps.rootZone.active ? "true" : undefined}
+                className={[
+                  "mx-1.5 mb-1 rounded-gx-sm border border-dashed px-2 py-1 text-center text-gx-11 transition-colors",
+                  kbOps.rootZone.active
+                    ? "border-gx-accent bg-gx-accent-bg text-gx-accent"
+                    : "border-transparent text-transparent",
+                ].join(" ")}
+              >
+                拖到此处移到顶级
+              </div>
+            )}
             <div className="px-1.5" style={{ paddingTop: virt.padTop, paddingBottom: virt.padBottom }}>
               {virt.windowed.map((row) =>
                 row.type === "header" ? (
@@ -280,6 +326,15 @@ export function SecondaryNav({
                     active={currentResource === row.entry.id}
                     onToggleDoc={toggleDoc}
                     onNavigate={(href) => navigate(href)}
+                    // 表行：五项菜单（无 canManageSchema 时 rowMenuItems 返回 [] → 不渲染三点）
+                    menu={
+                      row.kind === "table"
+                        ? tableOps.rowMenuItems({ id: row.entry.id, name: row.entry.name })
+                        : undefined
+                    }
+                    menuLabel={row.kind === "table" ? `${row.entry.name} 表操作菜单` : undefined}
+                    // 文档行：拖拽改层级（画布行不给）
+                    drag={row.kind === "doc" ? kbOps.rowDrag(row.entry.id) : undefined}
                   />
                 ),
               )}
@@ -287,6 +342,27 @@ export function SecondaryNav({
             {empty && <div className="px-4 py-8 text-center text-gx-12 text-gx-text-hint">{emptyText}</div>}
           </>
         )}
+
+        {/* 列表末尾：当前容器的回收站（base → /base/:id/trash，kb → /kb/:id/trash）。
+            两页都已存在，按容器 id 直跳；行规格与列表行一致。 */}
+        <div className="px-1.5 pt-1">
+          <button
+            type="button"
+            onClick={() =>
+              navigate(
+                container.kind === "base"
+                  ? `/base/${container.id}/trash`
+                  : `/kb/${container.id}/trash`,
+              )
+            }
+            title="回收站"
+            data-l2-trash={container.kind}
+            className="flex w-full items-center gap-1 rounded-gx-lg px-1.5 py-1.5 text-gx-13 text-gx-text-primary transition-colors hover:bg-gx-row-hover"
+          >
+            <Icon name="trash" size={13} className="shrink-0 text-gx-text-tertiary" />
+            <span className="truncate">回收站</span>
+          </button>
+        </div>
       </div>
     </aside>
   );
