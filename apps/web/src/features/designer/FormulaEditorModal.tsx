@@ -338,10 +338,57 @@ function splitTopArgs(args: string): string[] {
   return parts;
 }
 
-function validateFormula(formula: string, fields: FieldDTO[]): string[] {
+/**
+ * 非法字符扫描：与后端 Tokenizer（apps/api/src/domain/formula.ts）可接受字符集对齐。
+ * 后端对无法识别的字符直接抛「公式错误：意外字符 'x' 位置 n」，但那是保存时才报的技术文案，
+ * 用户在编辑器里看不到任何提示，会以为已保存。这里在输入期就拦住。
+ * 跳过规则：字符串字面量（'…' / "…"）与字段引用 {…} 内部不做字符判定（字段名可为任意文字）。
+ * 竖线特殊：`||`（或）合法，单个 `|` 非法。
+ */
+function findIllegalChars(formula: string): { ch: string; pos: number }[] {
+  const bad: { ch: string; pos: number }[] = [];
+  const allowed = new Set("0123456789_.+-*/%=!<>&|(){},'\" ".split(""));
+  let i = 0;
+  while (i < formula.length) {
+    const c = formula[i]!;
+    // 字符串字面量：整段跳过
+    if (c === "'" || c === '"') {
+      const end = formula.indexOf(c, i + 1);
+      i = end === -1 ? formula.length : end + 1;
+      continue;
+    }
+    // 字段引用：整段跳过
+    if (c === "{") {
+      const end = formula.indexOf("}", i + 1);
+      i = end === -1 ? formula.length : end + 1;
+      continue;
+    }
+    if (c === "|") {
+      if (formula[i + 1] === "|") { i += 2; continue; }
+      bad.push({ ch: c, pos: i });
+      i += 1;
+      continue;
+    }
+    if (!allowed.has(c) && !/[\p{L}]/u.test(c)) bad.push({ ch: c, pos: i });
+    i += 1;
+  }
+  return bad;
+}
+
+/** 导出供单测（纯函数：只依赖传入的公式串与字段名清单） */
+export function validateFormula(formula: string, fields: FieldDTO[]): string[] {
   const errors: string[] = [];
   const f = formula.trim();
   if (!f) return errors;
+
+  // 非法字符 / 非法竖线（后端 tokenizer 会直接报「意外字符」，保存才失败，故前置拦截）
+  for (const b of findIllegalChars(f)) {
+    errors.push(
+      b.ch === "|"
+        ? `公式含不支持的写法「|」（位置 ${b.pos + 1}）：「或」运算请写成 ||`
+        : `公式含不支持的字符「${b.ch}」（位置 ${b.pos + 1}）：只支持 + - * / % & || = != < > ( ) 等运算符与 {字段名} 字段引用`,
+    );
+  }
 
   // 括号配平
   const openB = (f.match(/\{/g) ?? []).length;
