@@ -15,7 +15,7 @@ import { Button, EmptyState, Input, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { EntityIconPicker } from "../../components/EntityIconPicker";
 // 阶段 4：危险操作统一走 feedback.tsx 的 L1~L5 分级（R-D-23 / R-D-24）
-import { confirmAction, confirmSoftDelete, confirmClearTable } from "../../components/feedback";
+import { confirmIrreversible, confirmSoftDelete, confirmClearTable } from "../../components/feedback";
 import { toastDeleted } from "../../components/interaction";
 import { colors } from "@gx/design-tokens";
 import { MembersPanel } from "./MembersPanel";
@@ -136,7 +136,7 @@ export default function SettingsPage() {
   const [name, setName] = useState(baseQ.data?.name ?? "");
   const [iconColor, setIconColor] = useState(baseQ.data?.iconColor ?? colors.accent);
   const [icon, setIcon] = useState<string | null>(baseQ.data?.icon ?? null);
-  // 阶段 4：删除库的确认已改走 feedback.tsx 的 L3 分级弹窗，不再需要页内 Modal 的开关与输入框状态
+  // 阶段 4：删除库的确认已改走 feedback.tsx 的分级弹窗（现为 L4），不再需要页内 Modal 的开关与输入框状态
 
   // base 加载后同步名称
   useEffect(() => {
@@ -164,17 +164,22 @@ export default function SettingsPage() {
     }
   }
 
-  // 阶段 4：删除库 = L3（需原样输入库名确认）。原先是页内自建 Modal，
-  // 与回收站 / 数据表删除走的是两套文案与按钮，现统一到 feedback.tsx 的分级确认。
+  // R-D-23 L4（不可恢复）+ R-D-24（主按钮用具体动词，不用「确定」）
+  //
+  // 回收站（apps/api/src/routes/records.ts:214 /trash）只列 record / table / field 三类，
+  // **不含 base**；且其候选表只查 `deletedAt: null`（records.ts:220）——`DELETE /bases/:baseId`
+  // （apps/api/src/routes/bases.ts:267）软删库的同时把它下面的 table 也标了 deletedAt，
+  // 于是这些表与记录同样不再出现在回收站里。删库后 UI 无任何恢复入口，实质等同不可恢复 → L4。
+  // 保留 confirmName：L4 仍要求原样输入库名，只是在此之上叠加红色主按钮（confirmGateFor L4）。
   async function deleteBase() {
     if (!baseId) return;
     const baseName = baseQ.data?.name ?? "";
-    const ok = await confirmAction({
-      level: 3,
+    const ok = await confirmIrreversible({
       confirmName: baseName,
       title: `删除数据库「${baseName}」`,
       confirmText: "删除数据库",
-      description: "库内所有数据表、记录与视图都会被删除，且不进回收站、不可恢复。",
+      description:
+        "库内所有数据表、记录与视图都会被删除，分享链接也随之失效。回收站不收数据库，因此无法从回收站恢复，也没有撤销入口。",
     });
     if (!ok) return;
     try {
@@ -339,7 +344,7 @@ export default function SettingsPage() {
             <div className="rounded-gx-lg border border-gx-danger bg-gx-danger-bg p-4">
               <div className="text-gx-14 font-medium text-gx-danger">删除 Base</div>
               <div className="mt-1 text-gx-12 text-gx-text-secondary">
-                删除后所有数据表、记录与分享链接将被移入回收站，操作不可逆。
+                删除后该库及其下所有数据表与记录都会被删除，分享链接也随之失效。回收站只收记录、数据表和字段，不含数据库，因此删除后无法从回收站恢复，也没有撤销入口。
               </div>
               <div className="mt-3">
                 <Button variant="danger" onClick={() => void deleteBase()}>

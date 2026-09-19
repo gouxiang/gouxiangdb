@@ -20,7 +20,7 @@ import { useRecordsInfinite } from "../../api/records-paging-hooks";
 import { isComputedInMem } from "../../api/records-paging";
 import { EmptyState, IconButton, Modal, Select, Input, Button, toast, COLOR_PALETTE } from "../../components/ui";
 import { SkeletonTable } from "../../components/states";
-import { confirmIrreversible, confirmSoftDelete } from "../../components/feedback";
+import { confirmClearTable, confirmSoftDelete } from "../../components/feedback";
 // 阶段 4：R-D-15 延迟加载态 / R-I-26 防重复提交 / R-I-02 已加载 N 条 / R-I-05 列宽下限
 import {
   MIN_COL_WIDTH,
@@ -441,17 +441,22 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
     });
   };
   const onCopyView = () => void m.duplicateView.mutateAsync({ viewId, tableId });
-  // R-D-23 L4（不可恢复）+ R-D-24（主按钮用具体动词，不用「确定」）
+  // R-D-23 L3（可恢复的破坏性操作）+ R-D-24（主按钮用具体动词，见 confirmClearTable 内部「清空数据」）
+  //
+  // 后端真相：`POST /tables/:id/clear`（apps/api/src/routes/tables.ts:458）对记录做的是
+  // `updateMany({ data: { deletedAt: clearNow } })`，是**软删**；而回收站
+  // （apps/api/src/routes/records.ts:214 /trash）正是按 `deletedAt != null` 收 record 的。
+  // 所以原文案「不进回收站、不可撤销」是错的，用 L4 也是错级别——L4 留给真正没有退路的操作。
+  // 与顶栏 / 表设置行（TopBar.tsx、SettingsPage.tsx、SecondaryNavTableOps.tsx）共用同一个
+  // confirmClearTable 助手，避免同一个动作在不同入口出现两套文案与两套强度。
+  // 不传 scopedToView：清空接口本身不看视图（hooks.ts:398 只发 tableId），实际总是清整张表。
   const onClearTable = () => {
-    void confirmIrreversible({
-      title: "清空表中所有记录",
-      confirmText: "清空记录",
-      description: "表中全部记录会被立即清除，不进回收站、不可撤销。",
-    }).then((ok) => {
+    const tableName = currentTable?.name ?? "该数据表";
+    void confirmClearTable({ tableName }).then((ok) => {
       if (!ok) return;
       void m.clearTable
         .mutateAsync({ tableId, viewId })
-        .then(() => toast("已清空表中所有记录", "success"))
+        .then(() => toast("已清空数据，记录已移入回收站", "success"))
         .catch((e: unknown) => toast((e as Error)?.message ?? "清空失败", "error"));
     });
   };

@@ -61,8 +61,13 @@ describe("阶段3 · 危险操作分级（R-D-23）", () => {
 
 describe("阶段3 · 确认弹窗主按钮用具体动词（R-D-24）", () => {
   it("本次改造的调用点都给了具体动词，不再用「确定」", () => {
+    // 清空表：后端是软删进回收站（tables.ts:458 updateMany deletedAt；records.ts:214 /trash
+    // 按 deletedAt 收 record），属**可恢复**破坏性操作 → 必须复用共享的 confirmClearTable（L3），
+    // 不得再用 L4 的 confirmIrreversible，也不得保留「不进回收站 / 不可撤销」的错误口径。
     const grid = read("../features/grid/GridView.tsx");
-    expect(grid).toContain('confirmText: "清空记录"');
+    expect(grid).toContain("confirmClearTable({");
+    expect(grid).not.toContain("confirmIrreversible({");
+    expect(grid).not.toContain("不进回收站、不可撤销。");
     expect(grid).not.toContain("确定清空表中所有记录？此操作不可撤销。");
 
     const trash = read("../features/settings/TrashPage.tsx");
@@ -77,5 +82,27 @@ describe("阶段3 · 确认弹窗主按钮用具体动词（R-D-24）", () => {
     const tree = read("../features/kb/KbTree.tsx");
     expect(tree).toContain('confirmText: "删除并移入回收站"');
     expect(tree).not.toContain("确定删除「");
+  });
+});
+
+// 新增回归护栏：清空表与删库的可恢复性相反，曾有两处文案把两者的回收站口径写反。
+describe("阶段3 · 文案不得与后端恢复能力相悖", () => {
+  it("清空表：走共享 L3 助手，并如实提示记录已进回收站", () => {
+    // 后端软删 → 可从回收站恢复 → 调用点复用 L3 的 confirmClearTable，
+    // 且操作完成后的 toast 必须如实说明记录的去向。
+    const grid = read("../features/grid/GridView.tsx");
+    expect(grid).toContain("confirmClearTable({");
+    expect(grid).toContain("记录已移入回收站");
+  });
+
+  it("删库：如实说明无法从回收站恢复，且走 L4 不可恢复确认", () => {
+    // 回收站（records.ts:214 /trash）只收 record / table / field，不含 base；
+    // DELETE /bases/:baseId（bases.ts:267）还会把它下面的 table 一起标 deletedAt，
+    // 使其连带从回收站列表消失 → 删库无恢复入口，必须是「不可恢复」口径 + L4。
+    const settings = read("../features/settings/SettingsPage.tsx");
+    expect(settings).toContain("无法从回收站恢复");
+    expect(settings).toContain("confirmIrreversible({");
+    expect(settings).not.toContain("confirmAction({");
+    expect(settings).not.toContain("将被移入回收站");
   });
 });
