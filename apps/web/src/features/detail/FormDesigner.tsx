@@ -24,6 +24,7 @@ import { TYPE_GROUPS } from "../designer/FieldEditorSheet";
 import { FieldInput } from "../views/field-controls";
 import { useFields, useGXMutations } from "../../api/hooks";
 import { FieldSettingsPanel } from "./FieldSettingsPanel";
+import { runSaveLayout, errorMessageOf, SAVE_OK_TEXT } from "./save-layout";
 
 export type TopTab = "design" | "flow" | "settings" | "publish";
 export type PreviewDevice = "desktop" | "mobile";
@@ -38,7 +39,12 @@ interface FormDesignerProps {
   tables: TableDTO[];
   permissions: PermissionSet;
   onClose: () => void;
-  onSave: (next: DetailLayout) => void;
+  /**
+   * 保存布局。**必须返回 Promise 且失败时 reject**（调用方统一用 mutateAsync）。
+   * 旧契约是同步 void —— 无论请求成功失败都会 toast「已保存布局」并关闭面板，
+   * 断网/409/500 时造成静默数据丢失（P1）。现在只有 await 成功才提示成功并关闭。
+   */
+  onSave: (next: DetailLayout) => Promise<void>;
 }
 
 const TABS: { key: TopTab; label: string }[] = [
@@ -855,13 +861,20 @@ export function FormDesigner({
   };
 
   const savingRef = useRef(false);
+  // 保存失败的真实原因（后端 message 优先，兜底「保存失败，请重试」）。
+  // 非空时面板内常驻错误条 + 已弹 toast，**面板保持打开**，用户改完可以直接重试。
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
   const handleSave = async () => {
     if (savingRef.current) return; // 防重复提交（快速连点）
     savingRef.current = true;
+    setSaving(true);
     try {
       await doSave();
     } finally {
       savingRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -882,12 +895,26 @@ export function FormDesigner({
         }),
       );
     } catch (err) {
-      toast((err as Error).message || "保存选项卡配置失败", "error");
+      // 选项卡配置落库失败：同样保持面板打开，不谎报成功
+      const msg = errorMessageOf(err, "保存选项卡配置失败");
+      setSaveError(msg);
+      toast(msg, "error");
       return;
     }
-    onSave(toSaved(rows));
-    toast("已保存布局", "success");
-    onClose();
+    // 只有 await 成功才提示成功并关闭；失败保持面板打开（P1 静默数据丢失修复）
+    const ok = await runSaveLayout(toSaved(rows), {
+      persist: (layout) => onSave(layout),
+      onSuccess: () => {
+        setSaveError(null);
+        toast(SAVE_OK_TEXT, "success");
+        onClose();
+      },
+      onError: (message) => {
+        setSaveError(message);
+        toast(message, "error");
+      },
+    });
+    if (!ok) return; // 面板保持打开，等待用户重试
   };
 
   const gapActive = (rowIndex: number) => dragActive && dropTarget?.kind === "line" && dropTarget.rowIndex === rowIndex;
@@ -913,6 +940,8 @@ export function FormDesigner({
         onDeviceChange={setPreviewDevice}
         onClose={onClose}
         onSave={handleSave}
+        saving={saving}
+        saveError={saveError}
       />
       <div className="flex flex-1 overflow-hidden">
         {/* 移动端：字段库与设置面板收起为底部/抽屉，画布单列堆叠 */}
@@ -1187,48 +1216,80 @@ interface FormDesignerToolbarProps {
   onDeviceChange: (d: PreviewDevice) => void;
   onClose: () => void;
   onSave: () => void;
+  /** 保存中：按钮转 loading 且禁用，避免连点重复提交 */
+  saving?: boolean;
+  /**
+   * 上一次保存的真实失败原因（后端 message 优先，兜底「保存失败，请重试」）。
+   * 非空时常驻在工具栏下方：面板此时**没有关闭**，用户改完可直接重试。
+   */
+  saveError?: string | null;
 }
 
-function FormDesignerToolbar({ activeTab, onTabChange, device, onDeviceChange, onClose, onSave }: FormDesignerToolbarProps) {
+export function FormDesignerToolbar({
+  activeTab,
+  onTabChange,
+  device,
+  onDeviceChange,
+  onClose,
+  onSave,
+  saving = false,
+  saveError = null,
+}: FormDesignerToolbarProps) {
   return (
-    <div className="flex items-center gap-4 border-b border-gx-separator bg-gx-surface px-4 py-2">
-      <div className="flex items-center gap-1">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => onTabChange(t.key)}
-            className={clsx(
-              "rounded-gx-sm px-3 py-1.5 text-gx-13 transition-colors",
-              activeTab === t.key ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-secondary hover:bg-gx-bg",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <div className="ml-auto flex items-center gap-2">
-        <div className="flex items-center rounded-gx-lg border border-gx-border p-0.5">
-          <button
-            type="button"
-            onClick={() => onDeviceChange("desktop")}
-            className={clsx("flex items-center gap-1 rounded-gx-sm px-2 py-1 text-gx-12 transition-colors", device === "desktop" ? "bg-gx-accent-bg text-gx-accent" : "text-gx-text-secondary hover:bg-gx-bg")}
-          >
-            <Icon name="table" size={13} />
-            <span>桌面端</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onDeviceChange("mobile")}
-            className={clsx("flex items-center gap-1 rounded-gx-sm px-2 py-1 text-gx-12 transition-colors", device === "mobile" ? "bg-gx-accent-bg text-gx-accent" : "text-gx-text-secondary hover:bg-gx-bg")}
-          >
-            <Icon name="form" size={13} />
-            <span>移动端</span>
-          </button>
+    <div className="shrink-0 border-b border-gx-separator bg-gx-surface">
+      <div className="flex items-center gap-4 px-4 py-2">
+        <div className="flex items-center gap-1">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => onTabChange(t.key)}
+              className={clsx(
+                "rounded-gx-sm px-3 py-1.5 text-gx-13 transition-colors",
+                activeTab === t.key ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-secondary hover:bg-gx-bg",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
-        <Button size="sm" variant="ghost" onClick={onClose}>取消</Button>
-        <Button size="sm" variant="primary" onClick={onSave}>保存布局</Button>
+        <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center rounded-gx-lg border border-gx-border p-0.5">
+            <button
+              type="button"
+              onClick={() => onDeviceChange("desktop")}
+              className={clsx("flex items-center gap-1 rounded-gx-sm px-2 py-1 text-gx-12 transition-colors", device === "desktop" ? "bg-gx-accent-bg text-gx-accent" : "text-gx-text-secondary hover:bg-gx-bg")}
+            >
+              <Icon name="table" size={13} />
+              <span>桌面端</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onDeviceChange("mobile")}
+              className={clsx("flex items-center gap-1 rounded-gx-sm px-2 py-1 text-gx-12 transition-colors", device === "mobile" ? "bg-gx-accent-bg text-gx-accent" : "text-gx-text-secondary hover:bg-gx-bg")}
+            >
+              <Icon name="form" size={13} />
+              <span>移动端</span>
+            </button>
+          </div>
+          <Button size="sm" variant="ghost" onClick={onClose}>取消</Button>
+          <Button size="sm" variant="primary" onClick={onSave} loading={saving} disabled={saving}>
+            {saving ? "保存中" : "保存布局"}
+          </Button>
+        </div>
       </div>
+      {/* 保存失败：面板保持打开，这里常驻真实原因（role=alert 让读屏立即播报） */}
+      {saveError && (
+        <div
+          data-save-error=""
+          role="alert"
+          className="flex items-start gap-2 border-t border-gx-danger-bg bg-gx-danger-bg px-4 py-2 text-gx-12 text-gx-danger"
+        >
+          <Icon name="alertCircle" size={13} className="mt-0.5 shrink-0" />
+          <span className="min-w-0 break-words">{saveError}</span>
+          <span className="shrink-0 text-gx-text-hint">布局未保存，可修改后重试</span>
+        </div>
+      )}
     </div>
   );
 }

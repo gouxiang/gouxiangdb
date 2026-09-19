@@ -72,8 +72,10 @@ function TableFormDesignerHost({
       tables={tables ?? []}
       permissions={permissions}
       onClose={onClose}
-      onSave={(next) => {
-        m.updateView.mutate({
+      // 必须是 mutateAsync：mutate 不返回 Promise 也不抛错，会让设计器在断网/409/500
+      // 时照样提示「已保存布局」并关闭面板（P1 静默数据丢失）。
+      onSave={async (next) => {
+        await m.updateView.mutateAsync({
           viewId: targetView.id,
           tableId,
           data: { config: { ...targetView.config, detailLayout: next } },

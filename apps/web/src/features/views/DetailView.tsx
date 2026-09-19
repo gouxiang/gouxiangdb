@@ -121,9 +121,10 @@ export default function DetailView({
           tables={tables ?? []}
           permissions={permissions}
           onClose={() => setEditingLayout(false)}
-          onSave={(next) => {
-            m.updateView.mutate({ viewId, tableId, data: { config: { detailLayout: next } } });
-            setEditingLayout(false);
+          // 必须是 mutateAsync 并让 reject 冒泡：失败时 FormDesigner 会保持面板打开
+          // 并展示真实错误；这里不能再无条件 setEditingLayout(false)（P1 静默数据丢失）。
+          onSave={async (next) => {
+            await m.updateView.mutateAsync({ viewId, tableId, data: { config: { detailLayout: next } } });
           }}
         />
       </div>
@@ -164,14 +165,20 @@ export default function DetailView({
                   icon="refresh"
                   label="重置为默认布局"
                   description="清空 detailLayout"
-                  onClick={() => {
+                  onClick={async () => {
                     setGearOpen(false);
                     if (!permissions.canManageSchema) {
                       toast("需要表结构管理权限", "error");
                       return;
                     }
-                    m.updateView.mutate({ viewId, tableId, data: { config: { detailLayout: null } } });
-                    toast("已重置布局", "success");
+                    // 同 P1 缺陷形态：mutate 不抛错，失败也会 toast「已重置布局」。
+                    // 改 mutateAsync，只有 await 成功才提示成功。
+                    try {
+                      await m.updateView.mutateAsync({ viewId, tableId, data: { config: { detailLayout: null } } });
+                      toast("已重置布局", "success");
+                    } catch (err) {
+                      toast((err as Error).message || "重置布局失败，请重试", "error");
+                    }
                   }}
                 />
               </Menu>

@@ -10,6 +10,7 @@ import { clsx } from "clsx";
 import { Button, FieldIcon, Modal, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { MdContent } from "../../components/MdContent";
+import { AttachmentLinks } from "../cells/AttachmentLinks";
 import { useFields, useGXMutations, useRecords } from "../../api/hooks";
 import { useLinkCandidates } from "../../api/records-paging-hooks";
 import { ResultNotice, LINK_NARROW_TEXT } from "../common/ResultNotice";
@@ -31,17 +32,19 @@ interface DetailLayoutEditorProps {
   tables: TableDTO[];
   permissions: PermissionSet;
   onClose: () => void;
-  onSave: (next: DetailLayout) => void;
+  /**
+   * 保存布局。**必须返回 Promise，失败必须 reject**（三个调用方统一改用 mutateAsync）。
+   * 成功/失败的 toast 与「是否关闭面板」由 FormDesigner 判定，这里只做透传 —— 避免
+   * 两层各弹一次 toast、且其中一层拿不到失败信号（P1 静默数据丢失）。
+   */
+  onSave: (next: DetailLayout) => Promise<void>;
   /** inline=true：作为页面主体渲染，不包 Modal */
   inline?: boolean;
 }
 
 export function DetailLayoutEditor({ open, fields, layout, tableId, baseId, tables, permissions, onClose, onSave, inline }: DetailLayoutEditorProps) {
-  const handleSave = (next: DetailLayout) => {
-    onSave(next);
-    toast("已保存布局", "success");
-    onClose();
-  };
+  // 只透传 Promise：成功 toast + 关闭面板交给 FormDesigner（它 await 得到结果）。
+  const handleSave = (next: DetailLayout): Promise<void> => onSave(next);
 
   return (
     <FormDesigner
@@ -895,6 +898,12 @@ function ReadValue({ field, value }: { field: FieldDTO; value: CellValue | undef
         })}
       </span>
     );
+  }
+  // 附件：要在进入编辑之前拦掉——下方 Array 兜底会把整个数组 join("、 ") 成死文本，
+  // 用户看得见文件名却拿不到文件。AttachmentLinks 自带 stopPropagation，点链接不会
+  // 冒泡到外层「进入编辑」按钮；点这行空白处仍然是进入编辑（既有行为不变）。
+  if (field.type === "attachment") {
+    return <AttachmentLinks value={value} />;
   }
   if (Array.isArray(value)) return <span className="text-gx-13">{(value as unknown[]).map(String).join("、 ")}</span>;
   if (typeof value === "boolean") return <span>{value ? "是" : "否"}</span>;

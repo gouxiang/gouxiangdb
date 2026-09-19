@@ -304,13 +304,14 @@ function RecordDrawer({
                 tables={tables ?? []}
                 permissions={permissions}
                 onClose={() => setLayoutEditing(false)}
-                onSave={(next) => {
-                  m.updateView.mutate({
+                // 必须是 mutateAsync 并让 reject 冒泡：保存失败时面板保持打开
+                // 并展示真实错误，不再无条件退出编辑态（P1 静默数据丢失）。
+                onSave={async (next) => {
+                  await m.updateView.mutateAsync({
                     viewId: currentView.id,
                     tableId,
                     data: { config: { detailLayout: next } },
                   });
-                  setLayoutEditing(false);
                 }}
               />
             </div>
