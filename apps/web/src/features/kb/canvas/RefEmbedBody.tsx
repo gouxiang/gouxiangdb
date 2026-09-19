@@ -9,6 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "../../../components/icons";
 import { Spinner } from "../../../components/ui";
 import { renderMarkdown } from "@gx/blocks";
+import { useEmbedChain } from "../embed-depth";
 import { DrawnixCanvas } from "../DrawnixCanvas";
 import { enhanceCanvasEmbeds } from "../enhanceEmbeds";
 import type { UseResolvedDocResult } from "../hooks/useResolvedDoc";
@@ -51,6 +52,12 @@ export function RefEmbedBody({ resolved, refKind, reloadKey, publicToken, kbId }
   // C-2：被关联 markdown 文档内的 canvas-embed 占位（renderMarkdown 产出 .md-canvas-embed）
   // 之前没有任何调用方对这条 innerHTML 路径跑 enhance → 预览卡里是一块空白。
   // 这里补跑；嵌套预览一律只读（canEdit=false），避免编辑弹窗无限嵌套。
+  // 环/超限拦截不在这里（ enhanceCanvasEmbeds 内部按传入的 chain 逐个占位问 planEmbed）。
+  // P2-A：本组件渲染的是「某个文档的内容」，这条内容里的 canvas-embed 属于下一层。
+  // 链继承自由 RefEmbedCard 提供的 context（其中已含本实体 id——它在放行前就并进了祖先），
+  // 顶层主画布没有 Provider 时落到根链，语义仍是「宿主第 0 层」。
+  const chain = useEmbedChain();
+
   useEffect(() => {
     const host = mdHostRef.current;
     if (!host || !mdHtml) return;
@@ -59,8 +66,9 @@ export function RefEmbedBody({ resolved, refKind, reloadKey, publicToken, kbId }
       canEdit: false,
       publicToken,
       onNavigate: (p) => navigate(p),
+      chain,
     });
-  }, [mdHtml, kbId, publicToken, navigate]);
+  }, [mdHtml, kbId, publicToken, navigate, chain]);
 
   return (
     <div className="relative min-h-0 flex-1 bg-gx-surface">

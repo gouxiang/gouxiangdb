@@ -193,10 +193,11 @@ describe("R-N-22 节奏统一", () => {
 });
 
 describe("图标语义映射（L1 全站）", () => {
-  it("底部固定区三项（导航编排已下线）：路径 / 图标 / 文案与 D-5 §2.2 一致（工作区设置 = settings）", () => {
+  it("底部固定区两项（导航编排、权限管理均已下线）：路径 / 图标 / 文案与 D-5 §2.2 一致（工作区设置 = settings）", () => {
+    // P2-B1：权限管理不再是底部固定区的一项——它现在是工作区设置里的一个分区
+    //（内嵌 PermPanel），路由 /workspace/authz 保留但不占 L1 固定位。
     expect(FOOTER_NAV_ITEMS).toEqual([
       { path: "/workspace/contacts", icon: "building", label: "通讯录" },
-      { path: "/workspace/authz", icon: "shield", label: "权限管理" },
       { path: "/workspace/settings/assets", icon: "settings", label: "工作区设置" },
     ]);
   });

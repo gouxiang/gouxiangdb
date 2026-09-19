@@ -2,15 +2,45 @@
 // 预览/分享页增强：renderMarkdown 输出的 <div class="md-canvas-embed" data-canvas-doc>
 // 占位节点，挂载为可交互的 <CanvasEmbed />（只读预览 + 跳转 + 弹窗编辑）。
 // 用独立 React root 挂载，卸载时清理，避免与 dangerouslySetInnerHTML 的静态 HTML 冲突。
-// 注意：独立 root 不在主应用 Provider 树内，必须自行包 QueryClientProvider；
-// 导航不能用 useNavigate（无 Router context），通过 onNavigate 回调由调用方注入。
+// 注意①：独立 root 不在主应用 Provider 树内，必须自行包 QueryClientProvider；
+// 注意②（P2-A）：同一原因，root 内的子树过去也拿不到 Router context——而增强层
+//   （GxLinkBlockView / DocRefCard / RefEmbedBody 等）直用 useNavigate，
+//   于是「文档里嵌的画布点开编辑 → 弹窗里出现关联块」这条链路会直接抛
+//   "useNavigate() may be used only in the context of a <Router>"（改 P2 之前就存在）。
+//   这里用一个隔离的 MemoryRouter 提供 context，并用 NavBridge 把发生在
+//   memory history 里的导航转发给调用方注入的 onNavigate——真实跳转仍由外层 router 完成。
 
 import { createRoot } from "react-dom/client";
-import { createElement } from "react";
+import { createElement, Fragment, useEffect, useRef, type ReactNode } from "react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CanvasEmbed } from "./CanvasEmbed";
+import { EmbedDepthFallback } from "./EmbedDepthFallback";
+import { EmbedChainContext, planEmbed, ROOT_EMBED_CHAIN, type EmbedChain } from "./embed-depth";
 
 const roots = new WeakMap<HTMLElement, ReturnType<typeof createRoot>>();
+
+/**
+ * 把独立 root 内发生的导航导出来。
+ * MemoryRouter 只解决「useNavigate 有 context」；它内部的跳转不会真的改浏览器地址，
+ * 因此监听 location.key 的变化（同址重复 push 也会换 key），把目标转交给外层真实 router。
+ */
+function NavBridge({
+  onNavigate,
+  children,
+}: {
+  onNavigate?: (path: string) => void;
+  children?: ReactNode;
+}) {
+  const location = useLocation();
+  const lastKey = useRef(location.key);
+  useEffect(() => {
+    if (location.key === lastKey.current) return;
+    lastKey.current = location.key;
+    onNavigate?.(`${location.pathname}${location.search}${location.hash}`);
+  }, [location, onNavigate]);
+  return createElement(Fragment, null, children);
+}
 
 // 独立 root 专用 QueryClient（与主应用配置保持一致：不做窗口聚焦刷新）
 const embedQueryClient = new QueryClient({
@@ -28,13 +58,23 @@ export interface EnhanceEmbedOpts {
   canEdit: boolean;
   /** 公开分享页：传入分享 token，嵌入画布走匿名 PublicApi；内部页不传 */
   publicToken?: string;
-  /** 跳转导航回调（独立 root 无 Router context，须由调用方注入） */
+  /**
+   * 跳转导航回调。独立 root 现在自带 MemoryRouter（子树可用 useNavigate），
+   * 但 memory 内的跳转不会真的改地址，仍由本回调交给外层真实 router 落地；
+   * 公开分享页不注入 → 站内目标一律不出跳转入口。
+   */
   onNavigate?: (path: string) => void;
+  /**
+   * 渲染这段 markdown 的实体所处的嵌入链（P2-A）。调用方负责把「宿主自己」并进祖先
+   * （用 chainWithSelf），本函数不再重复推导宿主身份。缺省即根链——顶层文档预览。
+   */
+  chain?: EmbedChain;
 }
 
 export function enhanceCanvasEmbeds(container: HTMLElement, opts: EnhanceEmbedOpts): () => void {
   const placeholders = container.querySelectorAll<HTMLElement>(".md-canvas-embed[data-canvas-doc]");
   const mounted: Array<[HTMLElement, ReturnType<typeof createRoot>]> = [];
+  const chain = opts.chain ?? ROOT_EMBED_CHAIN;
   placeholders.forEach((ph) => {
     const docId = ph.dataset.canvasDoc ?? "";
     if (!docId) return;
@@ -42,17 +82,41 @@ export function enhanceCanvasEmbeds(container: HTMLElement, opts: EnhanceEmbedOp
     const root = createRoot(ph);
     roots.set(ph, root);
     mounted.push([ph, root]);
+
+    // P2-A：问 planEmbed 要放行意见。成环 / 超限一律挂载降级卡——它不取数也不再有子节点，
+    // 渲染链在此终止；放行则把「已含 target 自身」的新链交给 CanvasEmbed 的子树，
+    // 使画布内的关联卡走到 RefEmbedCard 时能继承到完整祖先集合。
+    const plan = planEmbed(docId, chain);
+    const inner =
+      plan.kind === "render" ? (
+        createElement(
+          QueryClientProvider,
+          { client: embedQueryClient },
+          createElement(
+            EmbedChainContext.Provider,
+            { value: plan.chain },
+            createElement(CanvasEmbed, {
+              docId,
+              kbId: opts.kbId,
+              canEdit: opts.canEdit,
+              publicToken: opts.publicToken,
+              onNavigate: opts.onNavigate,
+            }),
+          ),
+        )
+      ) : (
+        createElement(EmbedDepthFallback, {
+          docId,
+          kind: plan.kind,
+          kbId: opts.kbId,
+          onNavigate: opts.onNavigate,
+        })
+      );
     root.render(
       createElement(
-        QueryClientProvider,
-        { client: embedQueryClient },
-        createElement(CanvasEmbed, {
-          docId,
-          kbId: opts.kbId,
-          canEdit: opts.canEdit,
-          publicToken: opts.publicToken,
-          onNavigate: opts.onNavigate,
-        }),
+        MemoryRouter,
+        null,
+        createElement(NavBridge, { onNavigate: opts.onNavigate }, inner),
       ),
     );
   });

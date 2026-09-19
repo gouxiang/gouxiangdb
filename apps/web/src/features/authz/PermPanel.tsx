@@ -16,7 +16,7 @@ import { useAuthzCapability } from "./useAuthzCapability";
 import { useMyOrgActions } from "../contacts/contacts-hooks";
 import { canSeeAuthz } from "../workspace/lib/nav-gate";
 
-export default function PermPanel() {
+export default function PermPanel({ embedded }: { embedded?: boolean } = {}) {
   const [selected, setSelected] = useState<NavNodeDTO | null>(null);
   const [showEffective, setShowEffective] = useState(false);
   const { canManage } = useAuthzCapability();
@@ -40,8 +40,13 @@ export default function PermPanel() {
   return (
     <div className="flex h-full flex-col bg-gx-bg">
       <header className="flex items-center gap-2 border-b border-gx-separator px-4 py-2.5">
-        <Icon name="shield" size={16} className="text-gx-text-secondary" />
-        <h1 className="text-gx-15 font-semibold text-gx-text-primary">权限管理</h1>
+        {/* embedded：由宿主（工作区设置分区）提供标题，这里只留面包屑/来源按钮，不重复一个大标题 */}
+        {!embedded && (
+          <>
+            <Icon name="shield" size={16} className="text-gx-text-secondary" />
+            <h1 className="text-gx-15 font-semibold text-gx-text-primary">权限管理</h1>
+          </>
+        )}
         <div className="min-w-0 flex-1 px-2">
           {selected && <NodeBreadcrumb nodeId={selected.id} />}
         </div>

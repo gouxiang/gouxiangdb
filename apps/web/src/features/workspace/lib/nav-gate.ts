@@ -51,6 +51,12 @@ export function canSeeNavComposer(actions: ReadonlySet<OrgAction>): boolean {
  *   ① authzManage（权限引擎能力位，后端下发后才生效）；
  *   ② manage_share（组织面「授权策略/分享管理」动作，PermNodeEditor 写权限用的同一枚）。
  * 用 OR 而不是二选一：任一信号到位都能看见入口，将来补 /meta 下发或给自定义角色勾选都零返工。
+ *
+ * P2-B1：为什么入口从 FooterNav 移除但函数保留——
+ *   /workspace/authz 的 L1 入口已并入工作区设置（见 nav-footer.ts），但同一个判定仍被两处
+ *   真实使用：① PermPanel.tsx 直访 /workspace/authz 时的页面级门控；② 设置页「权限管理」
+ *   分区所需的「有无授权管理能力」口径（见 WorkspaceSettingsPage 的 authz 分区）。删它会
+ *   让这两处各自重写一遍条件，等于把单一的口径真源拆成三份。
  */
 export function canSeeAuthz(actions: ReadonlySet<OrgAction>, authzManage: boolean): boolean {
   return authzManage === true || actions.has("manage_share");
@@ -68,15 +74,17 @@ export function canSeeWorkspaceSettings(actions: ReadonlySet<OrgAction>): boolea
 
 /** 按 path 把单一入口映射到它自己那套判定（新增入口必须在此登记，否则默认不可见）。 */
 export function isFooterNavVisible(path: string, caps: FooterNavCapabilities): boolean {
-  const { actions, authzManage, loading } = caps;
+  // authzManage 不再参与底部区判定（P2-B1：权限入口已迁入设置页分区），
+  // 但 caps 仍然携带它——同一份能力信号还要喂给设置页的权限分区，接口字段不动。
+  const { actions, loading } = caps;
   if (loading) return false;
   switch (path) {
     case "/workspace/contacts":
       return canSeeContacts(actions);
-    case "/workspace/authz":
-      return canSeeAuthz(actions, authzManage);
-    // /workspace/settings/nav（导航编排）第三批已下线：不再有入口需要判定，
-    // 未知/已下线路径默认 return false，不猜不放行。
+    // P2-B1：/workspace/authz 的 case 已删除——该入口不再是底部区的一项，
+    // 未知路径一律落 default return false，不猜不放行。它的可见性判定搬到
+    // canSeeAuthz 的两处真实调用方（PermPanel 直访门控、设置页权限分区）。
+    // /workspace/settings/nav（导航编排）第三批已下线，同样落默认分支。
     case "/workspace/settings/assets":
       return canSeeWorkspaceSettings(actions);
     default:

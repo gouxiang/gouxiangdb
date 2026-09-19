@@ -6,6 +6,8 @@
 import { useState, type CSSProperties, type ReactNode, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useResolvedDoc } from "../hooks/useResolvedDoc";
+import { EmbedChainContext, planEmbed, useEmbedChain } from "../embed-depth";
+import { EmbedDepthFallback } from "../EmbedDepthFallback";
 import type { GxDocRef } from "./types";
 import { LinkBlockPreview } from "./LinkBlockPreview";
 import { RefEmbedBody } from "./RefEmbedBody";
@@ -80,10 +82,26 @@ export function RefEmbedCard({
     void r.refetch();
   };
 
-  const body = (
-    <RefEmbedBody resolved={r} refKind={gxRef.kind} reloadKey={reloadKey} publicToken={publicToken} kbId={kbId} />
-  );
-
+  // P2-A：canvas→doc/doc→canvas 这条互嵌链的判定下沉到统一入口。
+  // 链由外层画布所在的嵌入链继承（context），测试用例与主画布（顶层）都落在根链上。
+  const chain = useEmbedChain();
+  const plan = planEmbed(gxRef.docId, chain);
+  // 降级卡复用外层注入的跳转行为（onJump），不额外引入 react-router 依赖。
+  const body =
+    plan.kind === "render" ? (
+      <EmbedChainContext.Provider value={plan.chain}>
+        <RefEmbedBody resolved={r} refKind={gxRef.kind} reloadKey={reloadKey} publicToken={publicToken} kbId={kbId} />
+      </EmbedChainContext.Provider>
+    ) : (
+      <EmbedDepthFallback
+        docId={gxRef.docId}
+        kind={plan.kind}
+        kbId={kbId}
+        title={title}
+        targetKind={gxRef.kind}
+        onNavigate={onJump}
+      />
+    );
   return (
     <>
       <LinkBlockPreview

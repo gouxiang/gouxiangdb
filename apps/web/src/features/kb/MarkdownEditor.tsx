@@ -18,6 +18,7 @@ import { makeLinkClickHandler } from "../../lib/internal-links";
 import { WysiwygEditor } from "./WysiwygEditor";
 import { MentionPicker } from "./MentionPicker";
 import { enhanceCanvasEmbeds } from "./enhanceEmbeds";
+import { chainWithSelf } from "./embed-depth";
 import "./kb.css";
 
 /* ---------------- 文件 → data URL ---------------- */
@@ -127,8 +128,10 @@ export function MarkdownEditor({
       canEdit: !readOnly,
       publicToken,
       onNavigate: (p) => navigate(p),
+      // P2-A：预览的就是本文档，把 docId 并进祖先集合，本文档再被外层嵌套回来时判环。
+      chain: chainWithSelf(docId),
     });
-  }, [mode, md, kbId, readOnly, publicToken, navigate]);
+  }, [mode, md, kbId, readOnly, publicToken, navigate, docId]);
 
   const emit = useCallback((v: string) => { setMd(v); onChange(v); }, [onChange]);
 

@@ -11,6 +11,8 @@ import { formatTime } from "./kb-ui";
 import { renderMarkdown } from "@gx/blocks";
 import { DrawnixCanvas, type DrawnixCanvasHandle } from "./DrawnixCanvas";
 import { CanvasPreviewToolbar } from "./canvas/CanvasPreviewToolbar";
+import { enhanceCanvasEmbeds } from "./enhanceEmbeds";
+import { chainWithSelf } from "./embed-depth";
 
 const ZOOM_MIN = 0.3;
 const ZOOM_MAX = 2.5;
@@ -91,6 +93,20 @@ export function VersionHistoryDrawer({
     setDocZoom(1);
     setCanvasZoom(1);
   }, [selected]);
+
+  // P2-A：历史预览也在这条互嵌链上——快照内容是「当前文档自己的旧版本」，
+  // 因此宿主身份仍记 doc.id（与新版本无关，环检测看的是实体身份而不是版本号）：
+  // 快照里嵌的画布若再嵌回本文档，同样必须降级而不是无限展开。
+  const versionContent = versionDetail?.content ?? "";
+  useEffect(() => {
+    const host = docBodyRef.current;
+    if (!host || doc.kind !== "doc" || !versionContent) return;
+    return enhanceCanvasEmbeds(host, {
+      kbId: doc.kbId,
+      canEdit: false,
+      chain: chainWithSelf(doc.id),
+    });
+  }, [versionContent, doc.kind, doc.id, doc.kbId]);
 
   function fitDocWidth() {
     const scroller = docScrollRef.current;

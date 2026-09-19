@@ -12,7 +12,11 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon, type IconName } from "../../components/icons";
-import { useIsWorkspaceOwner } from "../contacts/contacts-hooks";
+import { useIsWorkspaceOwner, useMyOrgActions } from "../contacts/contacts-hooks";
+import { ContactsDirectory } from "../contacts/ContactsDirectory";
+import PermPanel from "../authz/PermPanel";
+import { canSeeAuthz } from "./lib/nav-gate";
+import { useAuthzCapability } from "../authz/useAuthzCapability";
 import { AssetsSection, TrashSection } from "./WorkspaceSettingsSections";
 import { EmbeddingSearchPanel } from "../search/EmbeddingSearchPanel";
 import { SearchCoveragePanel } from "../search/SearchCoveragePanel";
@@ -25,7 +29,7 @@ import { useEnterpriseOrgFlag } from "../settings/pat-hooks";
 import { UploadLimitsPanel } from "../kb/UploadLimitsPanel";
 import { toast } from "../../components/ui";
 
-type Section = "general" | "contacts" | "search" | "mcp" | "assets" | "trash";
+type Section = "general" | "contacts" | "authz" | "search" | "mcp" | "assets" | "trash";
 
 const SECTIONS: {
   key: Section;
@@ -37,7 +41,10 @@ const SECTIONS: {
   enterpriseOnly?: boolean;
 }[] = [
   { key: "general", label: "通用", icon: "settings", desc: "工作区设置中心" },
-  { key: "contacts", label: "通讯录", icon: "building", desc: "部门、成员与组织角色" },
+  // ownerOnly：分区涉及全组织成员/授权数据，沿用 SEARCH 分区既有的 owner 口径（见下 visibleSections），
+  //   非 owner 连分区都不渲染——不做 disabled 假入口（P2-B3）。
+  { key: "contacts", label: "通讯录", icon: "building", desc: "部门、成员与组织角色", ownerOnly: true },
+  { key: "authz", label: "权限管理", icon: "shield", desc: "资源树授权与策略下发", ownerOnly: true },
   { key: "search", label: "语义检索", icon: "sparkles", desc: "云端语义检索与索引覆盖度", ownerOnly: true },
   { key: "mcp", label: "MCP 接入", icon: "keyRound", desc: "为 AI 客户端签发访问令牌", enterpriseOnly: true },
   { key: "assets", label: "资产", icon: "database", desc: "数据库与知识库入口" },
@@ -109,8 +116,17 @@ export function WorkspaceSettingsPage() {
   const section: Section = SECTION_KEYS.includes(splat ?? "") ? (splat as Section) : "general";
   const goSection = (s: Section) => navigate(`/workspace/settings/${s}`);
 
+  // P2-B3：权限管理分区沿用 nav-gate 的 canSeeAuthz 口径（与 PermPanel 直访门控同源），
+  // 探针未回来按不可见（fail-closed），避免先出分区再消失。
+  const { actions, isLoading: actionsLoading } = useMyOrgActions();
+  const { canManage } = useAuthzCapability();
+  const canManageAuthz = !actionsLoading && canSeeAuthz(actions, canManage);
+
   const visibleSections = SECTIONS.filter(
-    (s) => (!s.ownerOnly || isOwner) && (!s.enterpriseOnly || enterpriseOn),
+    (s) =>
+      (!s.ownerOnly || isOwner) &&
+      (!s.enterpriseOnly || enterpriseOn) &&
+      (s.key !== "authz" || canManageAuthz),
   );
 
   // 单一口径：分区不在 visibleSections 里（非 owner 直戳 search、非企业直戳 mcp、
@@ -213,19 +229,23 @@ export function WorkspaceSettingsPage() {
               <p className="text-gx-13 text-gx-text-tertiary">
                 管理组织通讯录与资产入口。更多工作区能力将随对应版本在此增列。
               </p>
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <button
-                  type="button"
-                  onClick={() => goSection("contacts")}
-                  className="flex items-start gap-3 rounded-gx-lg border border-gx-separator p-4 text-left hover:bg-gx-row-hover"
-                >
-                  <Icon name="building" size={18} className="mt-0.5 text-gx-accent" />
-                  <span>
-                    <span className="block text-gx-13 font-medium text-gx-text-primary">通讯录</span>
-                    <span className="mt-0.5 block text-gx-12 text-gx-text-hint">部门、成员与组织角色</span>
-                  </span>
-                </button>
-              </div>
+              {/* P2-B3：通讯录分区已 ownerOnly，这张跳转卡片对非 owner 就是点了没反应的假入口，
+                  与分区同口径渲染（非 owner 不出现）。 */}
+              {isOwner && (
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => goSection("contacts")}
+                    className="flex items-start gap-3 rounded-gx-lg border border-gx-separator p-4 text-left hover:bg-gx-row-hover"
+                  >
+                    <Icon name="building" size={18} className="mt-0.5 text-gx-accent" />
+                    <span>
+                      <span className="block text-gx-13 font-medium text-gx-text-primary">通讯录</span>
+                      <span className="mt-0.5 block text-gx-12 text-gx-text-hint">部门、成员与组织角色</span>
+                    </span>
+                  </button>
+                </div>
+              )}
 
               {/* 上传限制（原挂知识库设置页）：本机浏览器生效、跨全部知识库 → 归全局层 */}
               <div className="mt-6 flex flex-col gap-2">
@@ -238,23 +258,33 @@ export function WorkspaceSettingsPage() {
           )}
 
           {effectiveSection === "contacts" && (
-            <div className="flex flex-col gap-3">
+            <div className="flex min-w-0 flex-col gap-3">
               <h2 className="text-gx-18 font-semibold text-gx-text-primary">通讯录</h2>
               <p className="text-gx-13 text-gx-text-tertiary">
-                组织部门、成员与组织角色统一在「通讯录」工作区维护。这里只做入口，不提供第二套编辑能力，
-                避免与通讯录的口径分裂。
+                成员、部门与组织角色在此统一管理，改动即时生效。
               </p>
               <p className="text-gx-12 text-gx-text-hint">
                 单个数据库 / 知识库的成员与角色是另一层切面，请到各自资产的「设置」页管理。
               </p>
-              <button
-                type="button"
-                onClick={() => navigate("/workspace/contacts")}
-                className="inline-flex w-fit items-center gap-2 rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
-              >
-                <Icon name="building" size={14} />
-                打开通讯录
-              </button>
+              {/* P2-B2：不再是「说明 + 跳转按钮」，直接内嵌 ContactsDirectory
+                  （与 /workspace/contacts 同一个组件），口径只有一处。 */}
+              <div className="h-[560px] overflow-hidden rounded-gx-lg border border-gx-separator">
+                <ContactsDirectory />
+              </div>
+            </div>
+          )}
+
+          {effectiveSection === "authz" && (
+            <div className="flex min-w-0 flex-col gap-3">
+              <h2 className="text-gx-18 font-semibold text-gx-text-primary">权限管理</h2>
+              <p className="text-gx-13 text-gx-text-tertiary">
+                按资源树查看与下发授权策略；这里的操作与「权限管理」页完全同源。
+              </p>
+              {/* PermPanel 自带 canSeeAuthz 门控（无能力出无权限态），
+                  这里再叠一层分区级判定：非 owner / 无能力时连分区都不渲染（P2-B3）。 */}
+              <div className="h-[560px] overflow-hidden rounded-gx-lg border border-gx-separator">
+                <PermPanel embedded />
+              </div>
             </div>
           )}
 

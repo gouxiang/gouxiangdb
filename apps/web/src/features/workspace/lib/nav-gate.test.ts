@@ -61,13 +61,20 @@ describe("能力判定：四项各自一套口径", () => {
 });
 
 describe("visibleFooterNav：过滤即剔除，且保持定稿顺序", () => {
-  it("owner（五枚动作齐全）：三项全可见，顺序不变", () => {
+  it("owner（五枚动作齐全）：两项全可见，顺序不变", () => {
     const visible = visibleFooterNav(FOOTER_NAV_ITEMS, { actions: OWNER, authzManage: false });
     expect(visible.map((i) => i.path)).toEqual([
       "/workspace/contacts",
-      "/workspace/authz",
       "/workspace/settings/assets",
     ]);
+  });
+
+  it("权限管理已下线为设置分区：持有能力与 authzManage 都不再出现在底部区（P2-B1）", () => {
+    // 入口迁出后该项不再由 FOOTER_NAV_ITEMS 承载，落到 isFooterNavVisible 的默认分支；
+    // 判定本身没删——它被 PermPanel（直访门控）与设置页权限分区共用。
+    expect(isFooterNavVisible("/workspace/authz", { actions: OWNER, authzManage: true })).toBe(false);
+    expect(FOOTER_NAV_ITEMS.map((i) => i.path)).not.toContain("/workspace/authz");
+    expect(canSeeAuthz(OWNER, false)).toBe(true);
   });
 
   it("已下线的导航编排入口：即使持有 manage_menu 也永不可见（第三批）", () => {
@@ -81,9 +88,9 @@ describe("visibleFooterNav：过滤即剔除，且保持定稿顺序", () => {
     expect(visibleFooterNav(FOOTER_NAV_ITEMS, { actions: setOf(), authzManage: false })).toEqual([]);
   });
 
-  it("只有权限引擎能力位（authzManage）时只出「权限管理」一项", () => {
+  it("只有权限引擎能力位（authzManage）时：底部区一项都不出（权限入口已迁入设置页，P2-B1）", () => {
     const visible = visibleFooterNav(FOOTER_NAV_ITEMS, { actions: setOf(), authzManage: true });
-    expect(visible.map((i) => i.path)).toEqual(["/workspace/authz"]);
+    expect(visible.map((i) => i.path)).toEqual([]);
   });
 
   it("部分能力的混合账号按逐条判定，不做全有全无", () => {
