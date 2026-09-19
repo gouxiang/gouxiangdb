@@ -576,6 +576,7 @@ export function Modal({
   footer,
   width = 480,
   ariaLabel,
+  zClass = "gx-z-modal",
 }: {
   open: boolean;
   title?: ReactNode;
@@ -588,6 +589,12 @@ export function Modal({
    * 阶段 4 收尾（P3-a11y）：模态必须有可访问名称，否则读屏与自动化脚本都定位不到。
    */
   ariaLabel?: string;
+  /**
+   * 浮层层级工具类，缺省 "gx-z-modal"(800)。
+   * 「弹窗之上再弹窗」的场景（如二次确认要盖住画布/文档编辑弹窗 820）传
+   * "gx-z-modal-nested"(860)；裸数字一律禁止，必须走 layout.ts 的 z 令牌。
+   */
+  zClass?: string;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   // useId 稳定跨渲染；去掉 React 自带的冒号，避免 querySelector / CSS 选择器踩坑
@@ -631,7 +638,7 @@ export function Modal({
   // 应用浮层一律 createPortal 到 document.body（z-index §2.5），脱离组件树内的画布堆叠上下文，
   // 避免被 .kb-canvas-wrap 内 z-60~80 的画布浮层遮挡（如 ShareModal 被嵌入编辑窗盖住）。
   return createPortal(
-    <div className="fixed inset-0 gx-z-modal flex items-center justify-center p-6">
+    <div className={clsx("fixed inset-0 flex items-center justify-center p-6", zClass)}>
       <div className="absolute inset-0 bg-black/25" onClick={onClose} />
       <div
         ref={panelRef}

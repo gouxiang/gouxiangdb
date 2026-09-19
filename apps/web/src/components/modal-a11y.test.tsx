@@ -227,7 +227,28 @@ describe("P3-a11y · 依赖 Modal 的阶段 3/4 调用点未被破坏", () => {
     // 功能优先：主按钮必须是具体动词（R-D-24），弹窗里不该出现「确定 / OK」
     expect(html).not.toContain(">确定<");
     // 源码护栏：确认宿主确实走的是统一 Modal，没有另起一套浮层
-    expect(read("./feedback.tsx")).toMatch(/<Modal\n\s+open\n\s+onClose/);
+    // （原断言 /<Modal\n\s+open\n\s+onClose/ 因 ④a 在 open 与 onClose 之间插入了
+    //  zClass 而不再成立，故收紧为「open 紧跟 <Modal」——语义等价且不再依赖属性顺序）
+    const fb = read("./feedback.tsx");
+    expect(fb).toMatch(/<Modal\n\s+open\n/);
+    expect(fb).toContain('onClose={() => close(false)}');
+  });
+
+  // P0-④a：二次确认弹窗此前用 gx-z-modal(800)，被画布/文档编辑弹窗 gx-z-canvas-modal(820)
+  // 整个盖住 —— 关编辑弹窗时的「放弃改动」确认看不见也点不到。修法是抬确认层，不降 canvas-modal。
+  it("P0-④a：确认弹窗走 gx-z-modal-nested，且层级真的高于画布编辑弹窗", async () => {
+    const { zIndex } = await import("@gx/design-tokens");
+    expect(zIndex.modalNested).toBeGreaterThan(zIndex.canvasModal);
+    expect(zIndex.canvasModal).toBeGreaterThan(zIndex.modal);
+    expect(zIndex.modalNested).toBeLessThan(zIndex.popover);
+    // 确认宿主用的是这一档，且没有裸数字
+    const fb = read("./feedback.tsx");
+    expect(fb).toContain('zClass="gx-z-modal-nested"');
+    expect(fb).not.toMatch(/zClass="[^"]*\d{3,}"/);
+    // Modal 默认仍是 gx-z-modal（其余调用点不受影响）
+    const ui = read("./ui.tsx");
+    expect(ui).toContain('zClass = "gx-z-modal"');
+    expect(ui).toContain("fixed inset-0 flex items-center justify-center p-6");
   });
 });
 

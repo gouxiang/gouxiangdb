@@ -608,11 +608,13 @@ h2.kb-block, h3.kb-block, h4.kb-block { width: 100%; }
   border-radius: 1px;
   transition: background-color .12s;
 }
+/* 颜色一律走 gx 令牌（P0-① 复用了同一批热区）：底色取 accent-bg，提示线取 accent + 透明度 */
 .kb-wy-prev-zone:hover, .kb-wy-next-zone:hover {
-  background: rgba(55, 138, 221, 0.06);
+  background: var(--gx-accent-bg, #eaf2fc);
 }
 .kb-wy-prev-zone:hover::before, .kb-wy-next-zone:hover::after {
-  background: rgba(55, 138, 221, 0.45);
+  background: var(--gx-accent, #3a6df0);
+  opacity: 0.45;
 }
 
 /* 上传占位层（进度 / 失败重试） */

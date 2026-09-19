@@ -37,6 +37,7 @@ import { shiftTableSpans, tableOccupancy } from "@gx/blocks";
 import { slugify } from "@gx/blocks";
 import { loadUploadLimits, validateUpload } from "./upload-limits";
 import { createEditorHistory } from "./editor-history";
+import { ATOMIC_TYPES, needsEmptyPair, zoneFlags } from "./wy-zones";
 import "./kb.css";
 
 /* ---------------- 文件 -> data URL ---------------- */
@@ -128,30 +129,7 @@ const CMDS: WCmd[] = [
   { id: "link", title: "链接", desc: "[文字](网址)", icon: "link", keywords: "link 链接 lianjie", kind: "wrap", wrap: ["[", "](https://)"] },
 ];
 
-/**
- * 原子块：渲染为不可编辑的预览（图片/视频/音频/PDF/附件/分割线/分页符）。
- * 这类块无法容纳光标，统一走"点击选中 → Delete/Backspace 删除 / 回车在下方插入空段落"交互，
- * 与 Notion / NocoDB 文档的媒体块行为一致。
- */
-const ATOMIC_TYPES: ReadonlySet<BlockType> = new Set([
-  "image", "video", "audio", "pdf", "attachment", "hr", "pagebreak",
-]);
-
-/**
- * 占用型块：在编辑器中**不能承载光标**但本身可含可编辑子区
- * （callout/toggle 的 body/code/math/table），仍需要"前/后自动空段"保证光标自由进出。
- * 与纯原子块区别：占用型块有可编辑子区，原子块完全没有。
- */
-const OCCUPY_TYPES: ReadonlySet<BlockType> = new Set([
-  "callout", "toggle", "code", "math", "table",
-  ...ATOMIC_TYPES,
-]);
-
-/** 是否需要"自动补空段 + 上下点击热区"：所有占用型 + 原子型 */
-function needsEmptyPair(type: BlockType): boolean {
-  return OCCUPY_TYPES.has(type);
-}
-
+// 原子块 / 占用型块 / 热区判定的定义已抽到 ./wy-zones（纯函数层，见该文件头注释的 P0-① 说明）。
 interface SlashState {
   blockId: string;
   query: string;
@@ -2297,22 +2275,28 @@ export function WysiwygEditor({
    * 设计要点：
    *  - 热区是一个细高（~6px）的 div，hover 出现淡蓝色横线作为视觉提示（与拖放手柄风格统一）
    *  - onMouseDown + preventDefault：避免点热区时把当前焦点状态搞乱
-   *  - 已在两个块之间有可编辑段时**不**重复包热区（避免视觉噪音）
+   *  - 只在**占用型/原子型块的紧邻侧**出现，两个普通段落之间永不出现（不成"全屏误触"）
+   *  - 邻块是可编辑且为空的段落（等价于已经有一个空行）时不重复包热区（避免视觉噪音）
+   *    除此之外（邻块有内容、或邻块也是占用型、或没有邻块）一律保留热区 —— P0-①
    */
   const renderBlockWithZones = (b: Block, i: number) => {
     const node = renderBlock(b, i);
     if (!needsEmptyPair(b.type)) return node;
     const prev = blocks[i - 1];
     const next = blocks[i + 1];
-    // 紧邻的块已经可编辑（p/h*/list...）则不需要在那一侧补热区
-    const showPrevZone = !!prev && needsEmptyPair(prev.type);
-    const showNextZone = !!next && needsEmptyPair(next.type);
-    // 始终在文档末尾的占用型块后补一个 next zone，便于继续输入
-    const isLast = i === blocks.length - 1;
-    const isFirst = i === 0;
+    // P0-①：判据是「邻块是否已经给了可输入的空位」而不是「邻块是不是占用型」。
+    // 邻块是有内容的普通段落时那一侧仍要热区（否则嵌块紧贴正文就插不进段落）；
+    // 邻块是可编辑且为空的段落（已经等于有一个空行）才省掉，避免热区噪音。
+    const { showPrev: showPrevZone, showNext: showNextZone } = zoneFlags({
+      prev,
+      next,
+      // 始终在文档首/末的占用型块外侧补热区，便于继续输入
+      isFirst: i === 0,
+      isLast: i === blocks.length - 1,
+    });
     return (
       <Fragment key={`zone-${b.id}`}>
-        {(showPrevZone || isFirst) && (
+        {showPrevZone && (
           <div
             className="kb-wy-prev-zone"
             data-zone-before={b.id}
@@ -2321,7 +2305,7 @@ export function WysiwygEditor({
           />
         )}
         {node}
-        {(showNextZone || isLast) && (
+        {showNextZone && (
           <div
             className="kb-wy-next-zone"
             data-zone-after={b.id}

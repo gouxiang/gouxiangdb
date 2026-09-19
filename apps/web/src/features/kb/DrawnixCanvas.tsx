@@ -22,6 +22,7 @@ import {
   type CanvasRuntimeHandles,
 } from "./canvas/canvas-context";
 import { CanvasEnhanceOverlay } from "./canvas/CanvasEnhanceOverlay";
+import { installLinkBoardGuards, installPreviewBoardGuards } from "./canvas/board-guards";
 
 // 顺序很重要：核心布局 → 文字编辑 → drawnix 皮肤
 import "./vendor/plait-board.css";
@@ -70,44 +71,11 @@ function safeParse(json: string | undefined): PlaitElement[] {
 }
 
 /**
- * 关联块卡片已通过 foreignObject 注入到 plait svg 内（统一层级，见 LinkBlockForeignObject），
- * 卡片因此成为 plait 容器的事件后代。包装板级事件方法：当事件目标落在本画布的关联卡
- * （[data-gx-link-fo]）内部时，跳过【外层板】处理，避免：
- *  - 点按卡片被当成框选/拖拽绘制/选中清空；
- *  - 双击卡片进入 plait 文字编辑（卡片双击语义是"跳转"）；
- *  - 在卡片重命名输入框或内嵌只读子画布中按键，误触发外层板删除/方向键移动/快捷键。
- * 只短路板方法本身，不做 DOM stopPropagation —— React18 合成事件委托在根容器，原生阻断会
- * 连卡片按钮的 React 事件一起杀死。滚轮缩放/平移是 viewport-container 上的原生监听，由
- * LinkBlockForeignObject 在卡片根单独阻断冒泡。
- * 守卫按 wrap 限定：内嵌子画布（其 DOM 在卡片内）自身的监听在更内层、先于这里照常处理。
+ * 板级事件守卫（编辑态的关联卡守卫 / 只读预览的整体短路）已抽到 ./canvas/board-guards：
+ *   - 编辑态  installLinkBoardGuards：只跳过落在关联卡 [data-gx-link-fo] 内的板手势；
+ *   - 只读预览 installPreviewBoardGuards：跳过全部板手势，杜绝选区/拖拽态残留成"残影"（P0-②）。
+ * 两者都是纯函数，单测见 board-guards.test.ts。
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-function installLinkBoardGuards(board: any, wrap: HTMLElement | null) {
-  if (!board || (board as any).__gxLinkGuardsInstalled) return;
-  (board as any).__gxLinkGuardsInstalled = true;
-
-  const inLinkCard = (target: EventTarget | null): boolean => {
-    if (!(target instanceof Element)) return false;
-    // 限定在当前 wrap 内命中关联卡，避免误伤其它画布实例
-    const fo = target.closest?.("[data-gx-link-fo]");
-    return !!fo && (wrap === null || wrap.contains(fo));
-  };
-
-  const guardMethod = (name: string) => {
-    const original = board[name];
-    if (typeof original !== "function") return;
-    board[name] = (event: any, ...rest: unknown[]) => {
-      if (inLinkCard(event?.target)) return; // 吞掉外层板处理
-      return original.call(board, event, ...rest);
-    };
-  };
-
-  // pointerDown 是一切框选/拖拽/绘制手势的起点，短路它即可从源头阻止板手势（之后的
-  // pointerMove/pointerUp 因没有起始态而空转无害，保留板的全局悬停/光标逻辑）；dblClick 防
-  // 双击卡片进入 plait 文字编辑；globalKeyDown/keyDown 防在卡片输入框/内嵌体按键时误删/移动。
-  ["pointerDown", "dblClick", "globalKeyDown", "keyDown"].forEach(guardMethod);
-}
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /** 外部命令式控制句柄：供版本预览等只读场景的工具条驱动缩放/适配，无需自行操作 board */
 export interface DrawnixCanvasHandle {
@@ -322,6 +290,12 @@ export const DrawnixCanvas = forwardRef<DrawnixCanvasHandle, DrawnixCanvasProps>
       // 关键点：只短路板方法本身，不做 DOM stopPropagation —— React18 合成事件委托在根容器，
       // 原生阻断会连卡片按钮的 React 事件一起杀死。板方法跳过了，事件仍正常冒泡到 React 根。
       installLinkBoardGuards(board, wrapRef.current);
+    } else if (readonly) {
+      // P0-② 残影：只读预览（文档内嵌画布 / 版本快照 / 内嵌子画布）此前没有任何板守卫，
+      // 落在关联卡里的 pointerdown 会起手 plait 的框选/拖拽/绘制，而预览是非受控的
+      // （value 只在挂载时读一次、选区不回灌），这些瞬时状态就永久留在画面上。
+      // 这里整体短路板手势，预览只保留 wheel 缩放平移与命令式 fit/zoom（都不经板方法）。
+      installPreviewBoardGuards(board);
     }
     // Plait board 只读设置（不同版本 API 名略有差异，做容错）
     try {

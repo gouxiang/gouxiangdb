@@ -216,6 +216,8 @@ export function SecondaryRow({
         type="button"
         disabled={!e.href}
         onClick={() => e.href && onNavigate(e.href)}
+        // P3-a11y + 回归可断言：当前所在的二级项要给读屏「当前页」语义（aria-current="page"）
+        aria-current={active ? "page" : undefined}
         title={e.name}
         className={`min-w-0 flex-1 truncate text-left text-gx-13 ${e.href ? "" : "cursor-not-allowed opacity-50"} ${active ? "font-medium text-gx-text-primary" : "text-gx-text-primary"}`}
       >

@@ -12,14 +12,13 @@
 //   （geom g 重排时补偿 g 由 MutationObserver 守持跟随）。补偿 g 的 transform 抵消 viewBox
 //   负原点，是 Safari/WebKit 下 foreignObject 复杂 HTML 正常栅格化的必要条件。
 
-import { useState } from "react";
-import type { PlaitBoard } from "@plait/core";
+import { useRef, useState } from "react";
+import type { PlaitBoard, Point } from "@plait/core";
 import { useNavigate } from "react-router-dom";
 import { toast } from "../../../components/ui";
 import { useLinkResolve } from "../hooks/useLinkResolve";
 import type { GxLinkBlock } from "./types";
 import {
-  moveLinkBlock,
   removeLinkBlock,
   resizeLinkBlock,
   screenDeltaToViewBox,
@@ -27,6 +26,7 @@ import {
 } from "./canvas-ops";
 import { RefEmbedCard } from "./RefEmbedCard";
 import { LinkBlockForeignObject } from "./LinkBlockForeignObject";
+import { syncLinkDragPoints, translateLinkPoints, type LinkDragPhase } from "./link-drag";
 
 /** 拖拽判定阈值（px）：低于该位移视为点击，不进入拖动态、不写历史 */
 const DRAG_THRESHOLD = 4;
@@ -52,18 +52,21 @@ function getElementBox(el: GxLinkBlock): { x: number; y: number; w: number; h: n
 export function GxLinkBlockView({ board, element, kbId, publicToken, canEdit }: GxLinkBlockViewProps) {
   // resize 中的 viewBox 尺寸（松手落库后回归 element 尺寸）
   const [liveVb, setLiveVb] = useState<{ w: number; h: number } | null>(null);
-  // 拖拽中的 viewBox 位移（不写 plait，仅驱动 foreignObject 视觉跟随；松手一次性落库）
-  const [dragVb, setDragVb] = useState<{ x: number; y: number } | null>(null);
+  // 拖拽态（仅用于视觉高亮）。P0-②：位移不再走本地 dragVb —— 拖拽期逐帧写进 plait，
+  // 卡片与连线同由 board.children 驱动，实时同步；松手时补写最后一帧收尾。
+  const [dragging, setDragging] = useState(false);
   const navigate = useNavigate();
   const resolveLink = useLinkResolve();
+  // 拖拽期每帧都要按 id 取「当前挂在 board 上的元素」（setNode 后旧对象即失效，见 link-drag 注释）
+  const elementRef = useRef(element);
+  elementRef.current = element;
 
   const box = getElementBox(element);
   // 非 resize 时尺寸以最新 element 为准（撤销/重做/外部写入即时跟随）；resize 中用未落库的 liveVb。
   const w = liveVb ? liveVb.w : box.w;
   const h = liveVb ? liveVb.h : box.h;
-  const x = box.x + (dragVb?.x ?? 0);
-  const y = box.y + (dragVb?.y ?? 0);
-  const dragging = dragVb !== null;
+  const x = box.x;
+  const y = box.y;
 
   const target = `/kb/${kbId ?? ""}/${element.gxLinkRef.kind}/${element.gxLinkRef.docId}`;
 
@@ -133,8 +136,9 @@ export function GxLinkBlockView({ board, element, kbId, publicToken, canEdit }: 
    * 按住 header 拖拽移动整个关联块。
    * - 命中按钮 / 输入框 / 链接 / resize 手柄时直接放行，不进入拖拽
    * - 移动 < DRAG_THRESHOLD 视为点击（不打断双击跳转、按钮点击）
-   * - 拖拽中把屏幕位移换算为 viewBox 位移驱动 foreignObject 跟随（不逐帧写 plait），
-   *   松手一次性 moveLinkBlock —— 一次拖拽只产生一个撤销历史项
+   * - 拖拽中把屏幕位移换算为 viewBox 位移，并**逐帧写进 plait**（P0-②）：连线与卡片
+   *   都由同一份 element.points 驱动，拖拽过程中不再脱开；整段拖拽合并为一个撤销批次，
+   *   松手时用 pointerup 坐标补写最后一帧 —— 一次拖拽仍只产生一个撤销历史项
    * 说明：卡片已在 svg 内，pointerdown 会被 DrawnixCanvas 的板级守卫跳过外层板处理，
    *   但不影响本组件 React 事件，故这里无需再依赖"事件不经 plait 容器"的旧前提。
    */
@@ -154,21 +158,31 @@ export function GxLinkBlockView({ board, element, kbId, publicToken, canEdit }: 
 
     const startX = e.clientX;
     const startY = e.clientY;
+    // 起始点快照：目标点恒等于 startPoints + 本次总位移，逐帧重算不累积误差
+    const startPoints = element.points.map((p) => [p[0], p[1]] as Point);
     let armed = false;
-    let last = { x: 0, y: 0 };
+    let phase: LinkDragPhase = "start";
 
     const onMove = (ev: PointerEvent) => {
       const dx = ev.clientX - startX;
       const dy = ev.clientY - startY;
       if (!armed && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
-      if (!armed) armed = true;
+      if (!armed) {
+        armed = true;
+        setDragging(true);
+      }
       const vb = screenDeltaToViewBox(
         board,
         { x: startX, y: startY },
         { x: ev.clientX, y: ev.clientY },
       );
-      last = { x: vb.dx, y: vb.dy };
-      setDragVb(last);
+      syncLinkDragPoints(
+        board,
+        elementRef.current ?? element,
+        translateLinkPoints(startPoints, vb.dx, vb.dy),
+        phase,
+      );
+      phase = "move";
     };
     const onUp = (ev: PointerEvent) => {
       headerEl.removeEventListener("pointermove", onMove);
@@ -178,8 +192,22 @@ export function GxLinkBlockView({ board, element, kbId, publicToken, canEdit }: 
       } catch {
         /* noop */
       }
-      if (armed) moveLinkBlock(board, element, last.x, last.y);
-      setDragVb(null);
+      // 收尾：用 pointerup 的坐标补写最后一帧（并入同一撤销批次），保证落点就是松手的位置。
+      // 没 arm 过（点击/未越过阈值）不写 plait，避免把单击变成一次历史项。
+      if (armed) {
+        const vb = screenDeltaToViewBox(
+          board,
+          { x: startX, y: startY },
+          { x: ev.clientX, y: ev.clientY },
+        );
+        syncLinkDragPoints(
+          board,
+          elementRef.current ?? element,
+          translateLinkPoints(startPoints, vb.dx, vb.dy),
+          "move",
+        );
+      }
+      setDragging(false);
     };
     headerEl.addEventListener("pointermove", onMove);
     headerEl.addEventListener("pointerup", onUp);

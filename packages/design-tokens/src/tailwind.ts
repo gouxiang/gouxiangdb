@@ -106,6 +106,7 @@ export const gxTailwindConfig: Partial<Config> = {
         "gx-z-drawer": String(zIndex.drawer),
         "gx-z-modal": String(zIndex.modal),
         "gx-z-canvas-modal": String(zIndex.canvasModal),
+        "gx-z-modal-nested": String(zIndex.modalNested),
         "gx-z-popover": String(zIndex.popover),
         "gx-z-toast": String(zIndex.toast),
       },
@@ -124,6 +125,7 @@ export const gxTailwindConfig: Partial<Config> = {
         ".gx-z-drawer": { zIndex: String(zIndex.drawer) },
         ".gx-z-modal": { zIndex: String(zIndex.modal) },
         ".gx-z-canvas-modal": { zIndex: String(zIndex.canvasModal) },
+        ".gx-z-modal-nested": { zIndex: String(zIndex.modalNested) },
         ".gx-z-popover": { zIndex: String(zIndex.popover) },
         ".gx-z-toast": { zIndex: String(zIndex.toast) },
       });

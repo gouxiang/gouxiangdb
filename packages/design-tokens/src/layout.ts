@@ -78,6 +78,10 @@ export const zIndex = {
   drawer: 400,
   modal: 800,
   canvasModal: 820,
+  // 「弹窗之上再弹窗」：确认弹窗（confirmAction 宿主）必须盖在画布/文档编辑弹窗
+  // （canvasModal 820）之上 —— 否则关编辑弹窗时的二次确认被编辑弹窗整个挡住（P0-④a）。
+  // 修法是抬高确认层，不调低 canvas-modal（画布编辑窗本来就该压住页面内容）。
+  modalNested: 860,
   popover: 900,
   toast: 1000,
 

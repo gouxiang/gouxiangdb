@@ -2,6 +2,7 @@
 // 版本历史抽屉：版本列表 + 历史预览（文档渲染 Markdown / 画布只读 Drawnix）+ 手动存版本 + 一键回滚。
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "../../components/icons";
 import { Modal, Spinner, toast } from "../../components/ui";
 import type { KbDocDTO, KbDocVersionDTO } from "../../api/client";
@@ -125,8 +126,12 @@ export function VersionHistoryDrawer({
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+  // P0-④b：原来是裸 `z-50`，画布常驻 chrome（顶部主工具条 / 缩放条）在 kb.css 里是固定的
+  // 75 —— 50 < 75，版本历史抽屉被画布工具条压住。改走 z 令牌 gx-z-drawer(400) 并
+  // createPortal 到 document.body（应用浮层统一口径，见 @gx/design-tokens layout.ts），
+  // 脱离页面内的堆叠上下文，画布内部层（恒 <800）再也压不到它。
+  const drawer = (
+    <div className="fixed inset-0 gx-z-drawer flex justify-end">
       <div className="absolute inset-0 bg-black/25" onClick={onClose} />
       <div className="relative flex h-full w-full max-w-3xl flex-col bg-gx-surface shadow-xl">
         {/* 头部 */}
@@ -304,4 +309,8 @@ export function VersionHistoryDrawer({
       </Modal>
     </div>
   );
+
+  // 应用浮层一律 createPortal 到 document.body（z 体系约定）；SSR（无 document）下就地返回，
+  // 保持本组件可被服务端渲染（与 Modal 的行为口径一致）。
+  return typeof document === "undefined" ? drawer : createPortal(drawer, document.body);
 }

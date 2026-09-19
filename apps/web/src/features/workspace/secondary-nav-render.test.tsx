@@ -71,7 +71,7 @@ describe("SecondaryNav：选中容器的子项（第三批语义）", () => {
     expect(html).not.toContain("画布");
   });
 
-  it("选中知识库 → 出现「文档 / 画布」两个选项卡，默认落在文档并按 kind 取数", () => {
+  it("选中知识库 → 出现「文档 / 画布」两个选项卡，默认落在文档并拉全量（tab 只做本地过滤）", () => {
     docs = [
       { id: "d1", kind: "doc", title: "上线手册", parentId: null },
       { id: "d2", kind: "doc", title: "迭代记录", parentId: "d1" },
@@ -81,11 +81,64 @@ describe("SecondaryNav：选中容器的子项（第三批语义）", () => {
     expect(html).toContain("产品知识库");
     expect(html).toContain("文档");
     expect(html).toContain("画布");
-    expect(docsKindSeen).toBe("doc");
+    // 改为断言 "all"（原断言 "doc"）：数据源改成拉全量，tab 切换不再换 queryKey 重取 ——
+    // 否则「路由反推到画布 tab」会触发一次重新取数，L2 先空一下再出画布行，选中态仍会闪丢。
+    expect(docsKindSeen).toBe("all");
     expect(html).toContain("上线手册");
     // 子文档折叠：有子节点时给出展开按钮，默认不摊开子级
     expect(html).toContain("展开");
     expect(html).not.toContain("迭代记录");
+  });
+
+  // P0-⑤ 真回归：此前 kbTab 是纯本地 state、从不与路由同步，进画布路由时 L2 停在「文档」tab，
+  // 画布行既不在数据源过滤结果里也不在列表里 → 表现为「跳回文档列表、选中态丢失」。
+  it("画布路由下 L2 停在画布 tab：画布行在列表里且带当前项语义", () => {
+    docs = [
+      { id: "d1", kind: "doc", title: "上线手册", parentId: null },
+      { id: "c9", kind: "canvas", title: "架构草图", parentId: null },
+    ];
+    const html = renderSecondary(KB, "/kb/k1/canvas/c9");
+
+    expect(html).toContain("架构草图");
+    // 路由反推：画布 tab 被选中（文档 tab 未选中）
+    expect(html).toContain('aria-selected="true"');
+    expect((html.match(/aria-selected="true"/g) ?? []).length).toBe(1);
+    // 选中态：当前画布行带 aria-current="page"
+    expect(html).toContain('aria-current="page"');
+    // 段头只出现「画布 1」这一段，不出现文档段
+    expect(html).not.toContain("文档 1");
+    expect(html).not.toContain("上线手册");
+  });
+
+  it("文档路由下 L2 停在文档 tab：文档行在列表里且当前项有 aria-current", () => {
+    docs = [
+      { id: "d1", kind: "doc", title: "上线手册", parentId: null },
+      { id: "c9", kind: "canvas", title: "架构草图", parentId: null },
+    ];
+    const html = renderSecondary(KB, "/kb/k1/doc/d1");
+
+    expect(html).toContain("上线手册");
+    expect(html).not.toContain("架构草图");
+    expect(html).toContain('aria-current="page"');
+  });
+
+  it("数据源拉全量后，画布子项不污染文档段的层级折叠", () => {
+    // d1 只有一个画布子项 → 展开按钮必须是 invisible（无子节点），否则点了没反应
+    docs = [
+      { id: "d1", kind: "doc", title: "上线手册", parentId: null },
+      { id: "c9", kind: "canvas", title: "架构草图", parentId: "d1" },
+    ];
+    const onlyCanvasKid = renderSecondary(KB, "/kb/k1/doc/d1");
+    expect(onlyCanvasKid).toContain("上线手册");
+    expect(onlyCanvasKid).toMatch(/rounded p-0\.5 invisible/);
+
+    // 有真文档子项 → 展开按钮可见可点（对照组，防止上面写成「永远 invisible」的假通过）
+    docs = [
+      { id: "d1", kind: "doc", title: "上线手册", parentId: null },
+      { id: "d2", kind: "doc", title: "迭代记录", parentId: "d1" },
+    ];
+    const withDocKid = renderSecondary(KB, "/kb/k1/doc/d1");
+    expect(withDocKid).not.toMatch(/rounded p-0\.5 invisible/);
   });
 
   it("选中知识库且为空 → 空态给具体文案，不写泛泛的「暂无数据」", () => {

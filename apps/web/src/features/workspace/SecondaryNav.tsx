@@ -80,7 +80,6 @@ export function SecondaryNav({
 }) {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
-  const [kbTab, setKbTab] = useState<SectionKind>("doc");
   const [expandedDocs, setExpandedDocs] = useState<Set<string>>(new Set());
 
   // 路由作用域用 useMatch 而非 useParams：本组件挂在无 path 的壳层路由下，
@@ -92,12 +91,33 @@ export function SecondaryNav({
   const currentResource =
     tableMatch?.params.tableId ?? docMatch?.params.docId ?? canvasMatch?.params.docId ?? null;
 
+  /**
+   * 知识库选项卡：路由即真源（R-N-02），由 canvas/doc 路由反推。
+   *
+   * 修 P0-⑤：此前 kbTab 是纯本地 state（默认 "doc"）且从不与路由同步，打开
+   * /kb/:kbId/canvas/:docId 时 L2 停在「文档」tab —— 画布行既不在数据源里也不在
+   * 列表里，表现为「进画布编辑 L2 跳回文档列表、选中态丢失」。
+   *
+   * 两个刻意的选择：
+   *  ① 渲染期派生而不是 useEffect —— SSR 首帧与路由切换同帧即为正确 tab，
+   *     不会出现「先渲染文档列表、effect 后再跳到画布」的闪动；
+   *  ② 手动点 tab 只在当前路由内有效（记住 routeKey），路由一变即回归路由真源，
+   *     用户手动翻 tab 的自由不丢，也不会把下一次进画布带偏。
+   */
+  const routeTab: SectionKind | null = canvasMatch ? "canvas" : docMatch ? "doc" : null;
+  const routeKey = canvasMatch?.params.docId ?? docMatch?.params.docId ?? "";
+  const [manualTab, setManualTab] = useState<{ key: string; tab: SectionKind } | null>(null);
+  const kbTab: SectionKind =
+    manualTab && manualTab.key === routeKey ? manualTab.tab : (routeTab ?? "doc");
+
   const baseId = container.kind === "base" ? container.id : null;
   const kbId = container.kind === "kb" ? container.id : null;
 
   // 两个查询都按 enabled 互斥：选中 base 时不会去拉 kb 的文档，反之亦然。
   const tablesQ = useTables(baseId);
-  const docsQ = useKbDocs(kbId ?? undefined, kbId ? (kbTab === "canvas" ? "canvas" : "doc") : undefined);
+  // kb 拉全量（"all"）：tab 只做本地过滤。配合上面「路由反推 tab」，从文档页进画布页时
+  // 不会换 queryKey 重取一次（无 loading 闪烁），且当前画布行一定在数据里 —— 选中态不会丢。
+  const docsQ = useKbDocs(kbId ?? undefined, kbId ? "all" : undefined);
 
   const loading = container.kind === "base" ? tablesQ.isLoading : docsQ.isLoading;
   const error = container.kind === "base" ? tablesQ.isError : docsQ.isError;
@@ -127,6 +147,8 @@ export function SecondaryNav({
     const m = new Map<string, SecondaryEntry[]>();
     if (container.kind !== "kb" || kbTab !== "doc") return m;
     for (const e of entries) {
+      // 数据源是全量（doc + canvas），层级只按文档算：画布不参与 doc 段的父子折叠
+      if (e.kind !== "doc") continue;
       const pid = e.parentId;
       if (!pid) continue;
       const arr = m.get(pid) ?? [];
@@ -213,7 +235,7 @@ export function SecondaryNav({
                 type="button"
                 role="tab"
                 aria-selected={kbTab === t.kind}
-                onClick={() => setKbTab(t.kind)}
+                onClick={() => setManualTab({ key: routeKey, tab: t.kind })}
                 className={[
                   "rounded-full px-2 py-0.5 text-gx-12 transition-colors",
                   kbTab === t.kind

@@ -279,6 +279,10 @@ export function ConfirmHost() {
   return (
     <Modal
       open
+      // P0-④a：确认弹窗要能盖在画布/文档编辑弹窗（gx-z-canvas-modal 820）之上，
+      // 否则「关闭编辑弹窗时的二次确认」整个被编辑弹窗挡住（看不见也点不到）。
+      // 抬高确认层而不是调低 canvas-modal —— 后者本就该压住页面内容。
+      zClass="gx-z-modal-nested"
       onClose={() => close(false)}
       title={
         <span className="flex items-center gap-2">
