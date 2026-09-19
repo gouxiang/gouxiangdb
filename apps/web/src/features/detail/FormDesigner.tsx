@@ -73,13 +73,13 @@ interface TabInternal {
   rows: LayoutRow[];
 }
 
-// 拖放目标：插到某行（card）、在 rowIndex 处新建一行（gap）、
-// 或放进某选项卡的某行（tab）/ 在选项卡内新建一行（tabLine）
-type DropTarget =
-  | { kind: "row"; rowIndex: number; beforeIndex: number }
-  | { kind: "line"; rowIndex: number }
-  | { kind: "tab"; containerFieldId: FieldIdT; tabId: string; rowIndex: number; beforeIndex: number }
-  | { kind: "tabLine"; containerFieldId: FieldIdT; tabId: string; rowIndex: number };
+// 拖放目标类型与落点判定（allowed / rejected）统一在 ./drop-target，
+// 高亮渲染与松手处理消费同一份结论，避免「高亮在这、落到那」。
+import type { DropTarget } from "./drop-target";
+import { TABS_NEST_MESSAGE, evaluateDrop, isTabDrop, targetKey } from "./drop-target";
+
+/** 落点槽位的三种视觉状态：未命中 / 可放（高亮）/ 禁放（红色禁止） */
+export type DropSlotState = "none" | "allowed" | "rejected";
 
 // 宽字段：独占一行（内容长 / 容器）
 const WIDE_TYPES: ReadonlySet<FieldType> = new Set<FieldType>(["longText", "richText", "attachment", "links", "tabs", "subtable"]);
@@ -353,6 +353,8 @@ export function FormDesigner({
   const [dragFieldId, setDragFieldId] = useState<FieldIdT | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  /** 当前落点是否为禁放区（null=可放）；禁放时渲染禁止样式且松手不移动 */
+  const [dropReject, setDropReject] = useState<string | null>(null);
   const [previewDevice, setPreviewDevice] = useState<PreviewDevice>("desktop");
   const [topTab, setTopTab] = useState<TopTab>("design");
   const [creating, setCreating] = useState(false);
@@ -366,6 +368,11 @@ export function FormDesigner({
   tabsRef.current = tabsConfigMap;
   const dropTargetRef = useRef<DropTarget | null>(null);
   dropTargetRef.current = dropTarget;
+  const dropRejectRef = useRef<string | null>(null);
+  dropRejectRef.current = dropReject;
+  /** 正在被拖动的字段类型（字段库新字段=目标类型；画布内拖动=该字段类型）。
+      落点判定必须在**计算落点**那一层就知道它，才能提前产出 allowed/rejected。 */
+  const dragTypeRef = useRef<FieldType | null>(null);
   // dragover 高频触发：用 rAF 合帧 + 落点浅比较，相同落点不重复 setState（消除闪烁）
   const dragRafRef = useRef<number | null>(null);
   const lastTargetKeyRef = useRef<string>("");
@@ -685,6 +692,13 @@ export function FormDesigner({
       return;
     }
     const label = TYPE_GROUPS.flatMap((g) => g.items).find((it) => it.type === type)?.label ?? "新字段";
+    // 禁放区在**创建字段之前**就拒绝：否则会先落库一个字段再把它塞到别处，
+    // 用户看到的是「字段莫名出现在表单末尾」。
+    const verdict = evaluateDrop(type, target);
+    if (!verdict.allowed) {
+      toast(verdict.reason ?? TABS_NEST_MESSAGE, "error");
+      return;
+    }
     setCreating(true);
     try {
       const data: Record<string, unknown> = { name: `${label}${Date.now().toString().slice(-4)}`, type };
@@ -698,9 +712,8 @@ export function FormDesigner({
       if (!created?.id) throw new Error("创建字段失败");
       if (type === "tabs" && defaultTab) {
         const tab0 = { ...defaultTab, id: `tab_${created.id}_0` };
-        // 容器字段只能落顶层行
-        const safeTarget: DropTarget = target.kind === "tab" || target.kind === "tabLine" ? { kind: "line", rowIndex: rows.length } : target;
-        placeField(created.id, safeTarget, true, 100, { containerId: created.id, tabs: [tab0], activeTabId: tab0.id });
+        // 落点已在入口判定为可放（选项卡不能套选项卡已提前拒绝），这里直接用原落点
+        placeField(created.id, target, true, 100, { containerId: created.id, tabs: [tab0], activeTabId: tab0.id });
       } else {
         placeField(created.id, target, true, defaultW(type));
       }
@@ -771,15 +784,8 @@ export function FormDesigner({
     return { kind: "line", rowIndex: rowsRef.current.length };
   };
 
-  const targetKey = (t: DropTarget | null): string => {
-    if (!t) return "";
-    if (t.kind === "line") return `line:${t.rowIndex}`;
-    if (t.kind === "row") return `row:${t.rowIndex}:${t.beforeIndex}`;
-    if (t.kind === "tabLine") return `tabLine:${t.containerFieldId}:${t.tabId}:${t.rowIndex}`;
-    return `tab:${t.containerFieldId}:${t.tabId}:${t.rowIndex}:${t.beforeIndex}`;
-  };
-
-  /** rAF 合帧 + 浅比较更新落点：同一帧多次 dragover 只算一次，落点不变不重渲染 */
+  /** rAF 合帧 + 浅比较更新落点：同一帧多次 dragover 只算一次，落点不变不重渲染。
+   *  同时在这里产出 allowed/rejected，让高亮与松手处理消费同一份结论。 */
   const scheduleDropTarget = (compute: () => DropTarget) => {
     if (dragRafRef.current != null) return; // 本帧已排队
     dragRafRef.current = requestAnimationFrame(() => {
@@ -791,7 +797,20 @@ export function FormDesigner({
         dropTargetRef.current = t;
         setDropTarget(t);
       }
+      // 落点不变也要刷新判定：拖动类型变化时（换了个字段拖到同一处）结论可能不同
+      const verdict = evaluateDrop(dragTypeRef.current, t);
+      dropRejectRef.current = verdict.reason;
+      setDropReject(verdict.reason);
     });
+  };
+
+  /** 禁放区光标：dropEffect=none 让浏览器显示「禁止」而非「复制/移动」 */
+  const applyDropEffect = (e: React.DragEvent, source: "row" | "palette" | null) => {
+    e.dataTransfer.dropEffect = dropRejectRef.current
+      ? "none"
+      : source === "palette"
+        ? "copy"
+        : "move";
   };
 
   const readDrag = (e: React.DragEvent): { fieldId: FieldIdT | null; source: "row" | "palette" | null; type: FieldType | null } => {
@@ -803,7 +822,7 @@ export function FormDesigner({
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     const { source } = readDrag(e);
-    e.dataTransfer.dropEffect = source === "palette" ? "copy" : "move";
+    applyDropEffect(e, source);
     const { clientX, clientY } = e;
     scheduleDropTarget(() => computeDropTarget(clientX, clientY));
   };
@@ -812,7 +831,7 @@ export function FormDesigner({
     e.preventDefault();
     e.stopPropagation();
     const { source } = readDrag(e);
-    e.dataTransfer.dropEffect = source === "palette" ? "copy" : "move";
+    applyDropEffect(e, source);
     scheduleDropTarget(() => ({ kind: "line", rowIndex }));
   };
 
@@ -822,16 +841,17 @@ export function FormDesigner({
     const { fieldId, source, type } = readDrag(e);
     // 复用 dragover 阶段已确定的落点（与高亮一致），避免在 drop 时重算导致「显示插这、落到那」
     const target = dropTargetRef.current ?? computeDropTarget(e.clientX, e.clientY);
-    if (source === "palette" && type) void createFieldFromPalette(type, target);
-    else if (source === "row" && fieldId) {
-      // 仅 tabs 容器字段不能嵌套进选项卡（选项卡不能套选项卡）；
-      // subtable 是普通宽字段，允许放进选项卡内容区（②）。
-      const f = fieldById.get(fieldId);
-      const isTabTarget = target.kind === "tab" || target.kind === "tabLine";
-      const safeTarget: DropTarget = isTabTarget && f && f.type === "tabs"
-        ? { kind: "line", rowIndex: rowsRef.current.length }
-        : target;
-      placeField(fieldId, safeTarget, false);
+    if (source === "palette" && type) {
+      void createFieldFromPalette(type, target);
+    } else if (source === "row" && fieldId) {
+      // 禁放区：不移动 + 明确告知原因（原来是静默改落到顶层末尾，落点与高亮不一致）
+      const verdict = evaluateDrop(dragTypeRef.current ?? fieldById.get(fieldId)?.type, target);
+      if (!verdict.allowed) {
+        toast(verdict.reason ?? TABS_NEST_MESSAGE, "error");
+        endDrag();
+        return;
+      }
+      placeField(fieldId, target, false);
     }
     endDrag();
   };
@@ -840,15 +860,20 @@ export function FormDesigner({
     if (dragRafRef.current != null) { cancelAnimationFrame(dragRafRef.current); dragRafRef.current = null; }
     lastTargetKeyRef.current = "";
     dropTargetRef.current = null;
+    dropRejectRef.current = null;
+    dragTypeRef.current = null;
     setDragFieldId(null);
     setDragActive(false);
     setDropTarget(null);
+    setDropReject(null);
   };
 
   const beginDragFromRow = (id: FieldIdT, e: React.DragEvent) => {
     e.dataTransfer.setData("text/plain", id);
     e.dataTransfer.setData(DT_SOURCE, "row");
     e.dataTransfer.effectAllowed = "move";
+    // 记下拖动类型：落点判定在 dragover 阶段就要用它产出 allowed/rejected
+    dragTypeRef.current = fieldById.get(id)?.type ?? null;
     setDragFieldId(id);
     setDragActive(true);
   };
@@ -857,6 +882,7 @@ export function FormDesigner({
     e.dataTransfer.setData("text/plain", `palette:${type}`);
     e.dataTransfer.setData(DT_SOURCE, "palette");
     e.dataTransfer.effectAllowed = "copy";
+    dragTypeRef.current = type;
     setDragActive(true);
   };
 
@@ -917,11 +943,28 @@ export function FormDesigner({
     if (!ok) return; // 面板保持打开，等待用户重试
   };
 
-  const gapActive = (rowIndex: number) => dragActive && dropTarget?.kind === "line" && dropTarget.rowIndex === rowIndex;
-  const dropInTab = (c: FieldIdT, tabId: string) =>
-    !!dropTarget && (dropTarget.kind === "tab" || dropTarget.kind === "tabLine") && dropTarget.containerFieldId === c && dropTarget.tabId === tabId;
+  /** 顶层行间带：命中即高亮，并带出该落点是「可放」还是「禁放」 */
+  const gapState = (rowIndex: number): DropSlotState => {
+    if (!dragActive || dropTarget?.kind !== "line" || dropTarget.rowIndex !== rowIndex) return "none";
+    return dropReject ? "rejected" : "allowed";
+  };
+  /** 选项卡内容区：命中即高亮 + 禁放态（如拖来的是 tabs 容器） */
+  const dropInTab = (c: FieldIdT, tabId: string): DropSlotState => {
+    const hit =
+      !!dropTarget &&
+      isTabDrop(dropTarget) &&
+      dropTarget.containerFieldId === c &&
+      dropTarget.tabId === tabId;
+    if (!hit) return "none";
+    return dropReject ? "rejected" : "allowed";
+  };
   const tabGapActive = (c: FieldIdT, tabId: string, ri: number) =>
     !!dropTarget && dropTarget.kind === "tabLine" && dropTarget.containerFieldId === c && dropTarget.tabId === tabId && dropTarget.rowIndex === ri;
+  /** 选项卡内行间带的落点状态（禁放时渲染红叉而不是「放到此处新建一行」） */
+  const tabGapState = (c: FieldIdT, tabId: string, ri: number): DropSlotState => {
+    if (!tabGapActive(c, tabId, ri)) return "none";
+    return dropReject ? "rejected" : "allowed";
+  };
 
   // Esc 关闭（全屏容器自身管理，不依赖 Modal）
   useEffect(() => {
@@ -957,7 +1000,10 @@ export function FormDesigner({
                 onDrop={handleDrop}
                 className={clsx(
                   "relative rounded-gx-lg border bg-gx-surface shadow-sm transition-colors",
-                  dragActive ? "border-gx-accent ring-1 ring-gx-accent/30" : "border-gx-border",
+                  dragActive && !dropReject && "border-gx-accent ring-1 ring-gx-accent/30",
+                  // 当前落点是禁放区：整块画布转红，用户松手前就知道放不进去
+                  dragActive && dropReject && "border-gx-danger ring-1 ring-gx-danger/30",
+                  !dragActive && "border-gx-border",
                 )}
               >
                 <div className="flex items-center justify-between gap-2 border-b border-gx-separator px-4 py-2.5">
@@ -980,7 +1026,7 @@ export function FormDesigner({
                   <div className="p-3">
                     {rows.map((row, ri) => (
                       <div key={ri}>
-                        <RowGap rowIndex={ri} active={gapActive(ri)} onDragOver={handleGapDragOver(ri)} />
+                        <RowGap rowIndex={ri} state={gapState(ri)} rejectReason={dropReject} onDragOver={handleGapDragOver(ri)} />
                         {/* 移动端：所有字段强制单列堆叠（忽略桌面行内多列宽度） */}
                         <div className={clsx("flex", previewDevice === "mobile" ? "flex-col" : "flex-wrap")}>
                           {row.items.map((item, ii) => {
@@ -1002,8 +1048,9 @@ export function FormDesigner({
                                     selectedFieldId={selectedFieldId}
                                     isSelected={selectedFieldId === f.id}
                                     device={previewDevice}
-                                    bodyDragOver={!!activeTab && dropInTab(f.id, activeTab.id)}
-                                    gapActive={(gri) => !!activeTab && tabGapActive(f.id, activeTab.id, gri)}
+                                    bodyState={activeTab ? dropInTab(f.id, activeTab.id) : "none"}
+                                    gapState={(gri) => (activeTab ? tabGapState(f.id, activeTab.id, gri) : "none")}
+                                    dropRejectReason={dropReject}
                                     fieldById={fieldById}
                                     dragFieldId={dragFieldId}
                                     onSelectContainer={() => setSelectedFieldId(f.id)}
@@ -1051,7 +1098,7 @@ export function FormDesigner({
                         </div>
                       </div>
                     ))}
-                    <RowGap rowIndex={rows.length} active={gapActive(rows.length)} onDragOver={handleGapDragOver(rows.length)} />
+                    <RowGap rowIndex={rows.length} state={gapState(rows.length)} rejectReason={dropReject} onDragOver={handleGapDragOver(rows.length)} />
                   </div>
                 )}
               </div>
@@ -1169,14 +1216,18 @@ function MobilePaletteSheet({
  * 命中区固定高度（激活不改变盒尺寸 → 不推挤内容、不引起落点抖动）；
  * 激活时用绝对定位的插入线高亮，drop 统一冒泡到画布根处理。
  */
-function RowGap({
+export function RowGap({
   rowIndex,
-  active,
+  state = "none",
+  rejectReason = null,
   onDragOver,
   tabDrop,
 }: {
   rowIndex: number;
-  active: boolean;
+  /** 落点状态：none=未命中；allowed=可放（高亮插入线）；rejected=禁放（红色禁止条） */
+  state?: DropSlotState;
+  /** 禁放原因文案（rejected 时展示，让用户知道为什么放不进去） */
+  rejectReason?: string | null;
   /** 顶层行间带用它强制 line 落点；选项卡内带不传（dragover 冒泡到根，按 data-tab-gap 算 tabLine） */
   onDragOver?: (e: React.DragEvent) => void;
   /** 落在选项卡内时提供：挂 data-tab-gap 等属性 */
@@ -1194,13 +1245,23 @@ function RowGap({
       {...dropData}
       onDragOver={onDragOver}
       data-gap-hit=""
+      data-drop-state={state}
       className="relative flex h-4 items-center justify-center"
     >
-      {active && (
+      {state === "allowed" && (
         <div className="pointer-events-none absolute inset-x-1 top-1/2 z-10 flex h-9 -translate-y-1/2 items-center justify-center rounded-gx-sm border-2 border-dashed border-gx-accent bg-gx-accent-bg/40">
           <span className="flex items-center gap-1 text-gx-11 font-medium text-gx-accent">
             <Icon name="plus" size={12} /> 放到此处新建一行
           </span>
+        </div>
+      )}
+      {state === "rejected" && (
+        <div
+          data-drop-rejected=""
+          className="pointer-events-none absolute inset-x-1 top-1/2 z-10 flex h-9 -translate-y-1/2 items-center justify-center gap-1 rounded-gx-sm border-2 border-dashed border-gx-danger bg-gx-danger-bg text-gx-11 font-medium text-gx-danger"
+        >
+          <Icon name="alertCircle" size={12} />
+          {rejectReason ?? "此处不可放置"}
         </div>
       )}
     </div>
@@ -1575,8 +1636,11 @@ interface TabsDesignerCardProps {
   selectedFieldId: FieldIdT | null;
   isSelected: boolean;
   device?: PreviewDevice;
-  bodyDragOver: boolean;
-  gapActive: (rowIndex: number) => boolean;
+  /** 选项卡内容区整体的落点状态：可放高亮 / 禁放红色禁止 */
+  bodyState: DropSlotState;
+  /** 禁放原因文案（同步展示在内容区与行间带上） */
+  dropRejectReason?: string | null;
+  gapState: (rowIndex: number) => DropSlotState;
   fieldById: Map<FieldIdT, FieldDTO>;
   dragFieldId: FieldIdT | null;
   onSelectContainer: () => void;
@@ -1604,8 +1668,9 @@ function TabsDesignerCard({
   selectedFieldId,
   isSelected,
   device,
-  bodyDragOver,
-  gapActive,
+  bodyState,
+  dropRejectReason = null,
+  gapState,
   fieldById,
   dragFieldId,
   onSelectContainer,
@@ -1706,11 +1771,20 @@ function TabsDesignerCard({
         data-tab-body=""
         data-tab-container={field.id}
         data-tab-id={active?.id ?? ""}
+        data-drop-state={bodyState}
         className={clsx(
           "min-h-[96px] rounded-b-gx-lg p-2 transition-colors",
-          bodyDragOver ? "bg-gx-accent-bg/40 ring-1 ring-inset ring-gx-accent/40" : "",
+          bodyState === "allowed" && "bg-gx-accent-bg/40 ring-1 ring-inset ring-gx-accent/40",
+          // 禁放：置红 + 禁止光标，让用户在松手前就知道放不进去
+          bodyState === "rejected" && "cursor-not-allowed bg-gx-danger-bg ring-1 ring-inset ring-gx-danger",
         )}
       >
+        {bodyState === "rejected" && (
+          <div className="mb-1 flex items-center gap-1 text-gx-11 font-medium text-gx-danger">
+            <Icon name="alertCircle" size={12} />
+            {dropRejectReason ?? "此处不可放置"}
+          </div>
+        )}
         {!active || activeRows.length === 0 ? (
           <div className="flex h-20 flex-col items-center justify-center gap-1 rounded-gx-lg border border-dashed border-gx-border text-center">
             <Icon name="form" size={18} className="text-gx-text-hint" />
@@ -1721,7 +1795,7 @@ function TabsDesignerCard({
           <div>
             {activeRows.map((row, ri) => (
               <div key={ri}>
-                <RowGap rowIndex={ri} active={gapActive(ri)} tabDrop={{ containerFieldId: field.id, tabId: active.id }} />
+                <RowGap rowIndex={ri} state={gapState(ri)} rejectReason={dropRejectReason} tabDrop={{ containerFieldId: field.id, tabId: active.id }} />
                 <div className={clsx("flex", mobile ? "flex-col" : "flex-wrap")}>
                   {row.items.map((item, ii) => {
                     const cf = fieldById.get(item.fieldId);
@@ -1752,7 +1826,7 @@ function TabsDesignerCard({
                 </div>
               </div>
             ))}
-            <RowGap rowIndex={activeRows.length} active={gapActive(activeRows.length)} tabDrop={{ containerFieldId: field.id, tabId: active.id }} />
+            <RowGap rowIndex={activeRows.length} state={gapState(activeRows.length)} rejectReason={dropRejectReason} tabDrop={{ containerFieldId: field.id, tabId: active.id }} />
           </div>
         )}
       </div>
