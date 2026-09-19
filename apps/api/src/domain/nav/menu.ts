@@ -119,9 +119,10 @@ async function bumpMenuVersionTx(tx: DbTx): Promise<number> {
 /**
  * shortcut 行写入的唯一真源：活节点守卫 → label/icon/ord 白名单断言 → 单行 create。
  *
- * 供两处共用（禁止在别处再写一份 tx.menuItem.create 的 shortcut 插入）：
- *   - applyMenuChangesTx 的 insert 分支（用户在二级面板点「收纳到导航」）；
- *   - ensureEntityShortcutTx（建库/建知识库自动入导航）。
+ * 两处共用入口（禁止在别处再写一份 tx.menuItem.create 的 shortcut 插入）：
+ *   - applyMenuChangesTx 的 insert 分支（PATCH menu 的批量操作）；
+ *   - 建库/建知识库「自动入导航」（第三批导航重构已下线——一级导航改为直接读实体列表，
+ *     原 ensureEntityShortcutTx 随之删除，此处不再有第二个调用点）。
  * 刻意不 bump menuVersion：由调用方在其事务边界内决定，避免同事务重复自增。
  */
 export async function createShortcutRowTx(
@@ -150,43 +151,6 @@ export async function createShortcutRowTx(
     id: created.id, parentId: created.parentId, type: created.type, nodeId: created.nodeId,
     label: created.label, iconName: created.iconName, ord: created.ord, deletedAt: null,
   };
-}
-
-/**
- * 建库/建知识库「自动入导航」：在实体创建的同一写事务内，为该实体节点补一条根级 shortcut。
- *
- * 修的是用户可见缺陷——此前 syncNavFromEntitiesTx 只写 nav_nodes 不写 menu_items
- * （见 sync.ts 文件头铁律），而一级导航读的正是 menu_items，导致新建的库必须手动
- * 「收纳到导航」才会出现在左侧。
- *
- * 幂等：已存在指向该 nodeId 的【活】shortcut 就原样返回——用户此前手动收纳过的老库
- * 不会再多出第二条。
- * 边界（刻意选这一种，不选「软删过就永不再自动加回」）：判定口径只认活行。
- * 软删行（deletedAt 非空，即用户主动从导航移除过）保持软删、其 id 不被复用，
- * 需要出现时另起一条新行。因为本函数只在实体创建时调用一次（不挂在改名/同步路径上），
- * 用户移除后不会被反复加回；而新建实体的 nodeId 是全新的，必然命中创建分支，
- * 故「新建即出现」恒真。
- *
- * label/iconName 传 null：一级导航回退显示节点真名（PrimaryNav 的 `label ?? summary.name`），
- * 之后改名自动跟随，不留过期别名。
- */
-export async function ensureEntityShortcutTx(tx: DbTx, targetNodeId: string): Promise<void> {
-  const existing = await tx.menuItem.findFirst({
-    where: { workspaceId: WS_ID, type: "shortcut", nodeId: targetNodeId, deletedAt: null },
-    select: { id: true },
-  });
-  if (existing) return;
-  // 根级追加：ord = 现有根级活行最大 ord + 1，保证多库之间顺序稳定（读侧按 ord asc, id asc）。
-  const agg = await tx.menuItem.aggregate({
-    where: { workspaceId: WS_ID, parentId: null, deletedAt: null },
-    _max: { ord: true },
-  });
-  const id = `menu_${crypto.randomBytes(12).toString("hex")}`;
-  await createShortcutRowTx(tx, {
-    id, parentId: null, nodeId: targetNodeId, label: null, iconName: null,
-    ord: (agg._max.ord ?? -1) + 1,
-  });
-  await bumpMenuVersionTx(tx);
 }
 
 /**

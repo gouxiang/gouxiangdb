@@ -19,7 +19,6 @@ import {
   softDeleteSubtreeTx,
 } from "../../domain/nav/sync.js";
 import { nodeId } from "../../domain/nav/backfill.js";
-import { ensureEntityShortcutTx } from "../../domain/nav/menu.js";
 import { enqueueChangeEventsTx } from "../../domain/search/outbox.js";
 import {
   entityIconSchema,
@@ -94,9 +93,8 @@ kb.post("/", async (c) => {
         },
       });
       await syncNavFromEntitiesTx(tx);
-      // 与建库同理：一级导航读 menu_items，syncNavFromEntitiesTx 只写 nav_nodes，
-      // 故同事务内补一条根级 shortcut（已在则跳过），否则新建知识库左侧导航不出现。
-      await ensureEntityShortcutTx(tx, nodeId("kb", k.id));
+      // 与建库同理：一级导航已改为直接读 knowledge_bases，不再靠 menu_items shortcut，
+      // 自动写入随「导航编排」一并下线（ensureEntityShortcutTx 已从 domain/nav/menu.ts 摘除）。
       return k;
     });
     return c.json({ knowledgeBase: { id: created.id, name: created.name, iconColor: created.iconColor, role: "owner" } }, 201);
