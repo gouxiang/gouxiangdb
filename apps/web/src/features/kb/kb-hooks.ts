@@ -40,7 +40,7 @@ export function useCreateKb() {
 export function useUpdateKb(kbId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name?: string; iconColor?: string }) => KbApi.update(kbId, data),
+    mutationFn: (data: { name?: string; iconColor?: string; icon?: string | null }) => KbApi.update(kbId, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: QK.kb(kbId) });
       qc.invalidateQueries({ queryKey: QK.kbList });
@@ -120,8 +120,10 @@ export function useDoc(docId: string | undefined) {
 
 export function useRenameDoc(docId: string, kbId: string) {
   const qc = useQueryClient();
+  // patch 支持对象形态：只改 icon/iconColor 时不必带 title（后端对两者都容忍缺省）。
   return useMutation({
-    mutationFn: (title: string) => KbApi.renameDoc(docId, title),
+    mutationFn: (patch: string | { title?: string; icon?: string | null; iconColor?: string | null }) =>
+      KbApi.renameDoc(docId, patch),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: QK.doc(docId) });
       qc.invalidateQueries({ queryKey: ["kb", kbId, "docs"] });

@@ -11,8 +11,9 @@ import {
   useFields,
   useGXMutations,
 } from "../../api/hooks";
-import { Button, ColorPicker, EmptyState, Input, toast } from "../../components/ui";
+import { Button, EmptyState, Input, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
+import { EntityIconPicker } from "../../components/EntityIconPicker";
 // 阶段 4：危险操作统一走 feedback.tsx 的 L1~L5 分级（R-D-23 / R-D-24）
 import { confirmAction, confirmSoftDelete, confirmClearTable } from "../../components/feedback";
 import { toastDeleted } from "../../components/interaction";
@@ -134,6 +135,7 @@ export default function SettingsPage() {
 
   const [name, setName] = useState(baseQ.data?.name ?? "");
   const [iconColor, setIconColor] = useState(baseQ.data?.iconColor ?? colors.accent);
+  const [icon, setIcon] = useState<string | null>(baseQ.data?.icon ?? null);
   // 阶段 4：删除库的确认已改走 feedback.tsx 的 L3 分级弹窗，不再需要页内 Modal 的开关与输入框状态
 
   // base 加载后同步名称
@@ -141,13 +143,14 @@ export default function SettingsPage() {
     if (baseQ.data) {
       setName(baseQ.data.name);
       setIconColor(baseQ.data.iconColor);
+      setIcon(baseQ.data.icon);
     }
   }, [baseQ.data]);
 
   async function saveBase() {
     if (!baseId || !canManageBase) return;
     try {
-      await m.updateBase.mutateAsync({ baseId, data: { name, iconColor } });
+      await m.updateBase.mutateAsync({ baseId, data: { name, iconColor, icon } });
       toast("已保存", "success");
     } catch (e) {
       toast(e instanceof Error ? e.message : "保存失败", "error");
@@ -244,9 +247,29 @@ export default function SettingsPage() {
                 <div className="mb-3 text-gx-14 font-medium text-gx-text-primary">Base 信息</div>
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center gap-3">
-                    <span className="h-8 w-8 rounded-lg" style={{ backgroundColor: iconColor }} />
+                    {/* 原「色块 + 12 色板」升级为统一「图标 + 颜色」选择器：
+                        选中即时写库（走 updateBase），失败由 EntityIconPicker 统一 toast。 */}
+                    <EntityIconPicker
+                      icon={icon}
+                      iconColor={iconColor}
+                      defaultIcon="database"
+                      defaultColor={colors.accent}
+                      readOnly={!canManageBase}
+                      ariaLabel="数据库图标与颜色"
+                      onChange={async (next) => {
+                        if (!baseId) return;
+                        const updated = await m.updateBase.mutateAsync({
+                          baseId,
+                          data: { iconColor: next.iconColor ?? iconColor, icon: next.icon },
+                        });
+                        setIconColor(updated.iconColor);
+                        setIcon(updated.icon);
+                      }}
+                    />
                     {canManageBase ? (
-                      <ColorPicker value={iconColor} onChange={setIconColor} />
+                      <span className="text-gx-12 text-gx-text-hint">
+                        选择后立即生效；名称仍需点「保存」。
+                      </span>
                     ) : (
                       <span className="text-gx-12 text-gx-text-hint">仅所有者可修改</span>
                     )}

@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMatch, useNavigate } from "react-router-dom";
 import { Spinner, toast } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
+import { resolveEntityIcon, resolvedEntityColor, type EntityIconIndex, type EntityIconValue } from "../../components/EntityIconPicker";
 import { PlannedBadge, plannedHint } from "../../components/PlannedBadge";
 import type { MenuItemDTO, MenuNodeSummaryDTO } from "@gx/shared-types";
 import { useNavMenu, useNavNodeIndex } from "./nav-hooks";
@@ -74,15 +75,36 @@ export function navKindIcon(kind: MenuNodeSummaryDTO["kind"]): IconName {
 }
 
 /**
- * 容器图标：iconName 白名单 → nodeId 指向的实体类型图标 → folder。
+ * 容器图标：iconName 白名单 → 挂载实体的自定义图标 → nodeId 指向的实体类型图标 → folder。
  * 修掉原来「所有容器一律 folder」的语义错配：挂 base 的容器显示 database、挂 kb 显示 book。
+ *
+ * entityIcons：母实体（base/kb）的图标索引，由壳层按下述来源装配后传入——
+ * 本组件不直接 useBases/useKbList，是因为一级导航在多份 SSR 回归里不带 QueryClientProvider。
+ * 未自定义（icon 为 null）时走 navKindIcon 原路径，渲染与改动前一致。
  */
-export function containerIcon(item: MenuItemDTO, index: NodeIndex): IconName {
+export function containerIcon(
+  item: MenuItemDTO,
+  index: NodeIndex,
+  entityIcons?: EntityIconIndex,
+): IconName {
   const explicit = item.iconName as IconName | null;
   if (explicit) return explicit;
   const node = item.nodeId ? index.byId.get(item.nodeId) : undefined;
-  if (node) return navKindIcon(node.kind as MenuNodeSummaryDTO["kind"]);
-  return "folder";
+  if (!node) return "folder";
+  const kindIcon = navKindIcon(node.kind as MenuNodeSummaryDTO["kind"]);
+  const entity = containerEntity(item, index, entityIcons);
+  return entity ? resolveEntityIcon(entity, { name: kindIcon }).name : kindIcon;
+}
+
+/** 容器挂载到的母实体（base/kb）图标索引项；取不到返回 null。 */
+export function containerEntity(
+  item: MenuItemDTO,
+  index: NodeIndex,
+  entityIcons?: EntityIconIndex,
+): EntityIconValue | null {
+  const node = item.nodeId ? index.byId.get(item.nodeId) : undefined;
+  if (!node?.resourceId) return null;
+  return entityIcons?.get(node.resourceId) ?? null;
 }
 
 /**
@@ -192,12 +214,15 @@ export function PrimaryNav({
   onOpenSecondary,
   collapsed = false,
   activeContainerId = null,
+  entityIcons,
 }: {
   onOpenSecondary?: (container: MenuTreeNode) => void;
   /** R-N-07 折叠档（56px）：只留图标 + title tooltip。 */
   collapsed?: boolean;
   /** 当前 L2 展开的容器 id：分组标题行据此落到选中色。 */
   activeContainerId?: string | null;
+  /** base/kb 实体自定义图标索引（按 node.resourceId 查）；不传则容器行退回实体类型图标。 */
+  entityIcons?: EntityIconIndex;
 }) {
   const { menu, isLoading, isError } = useNavMenu();
   const { index } = useNavNodeIndex();
@@ -279,6 +304,7 @@ export function PrimaryNav({
               onLocate={locate}
               onOpenSecondary={onOpenSecondary}
               nodeIndex={index}
+              entityIcons={entityIcons}
               containerActive={row.node.item.type === "container" && activeContainerId === row.node.item.id}
             />
           ))}
@@ -311,6 +337,7 @@ function NavRow({
   onLocate,
   onOpenSecondary,
   nodeIndex,
+  entityIcons,
   containerActive,
 }: {
   row: NavSectionRow;
@@ -320,6 +347,7 @@ function NavRow({
   onLocate: (parentMenuId: string | null) => void;
   onOpenSecondary?: (container: MenuTreeNode) => void;
   nodeIndex: NodeIndex;
+  entityIcons?: EntityIconIndex;
   containerActive?: boolean;
 }) {
   const { node } = row;
@@ -348,6 +376,7 @@ function NavRow({
         onLocate={onLocate}
         onOpenSecondary={onOpenSecondary}
         nodeIndex={nodeIndex}
+        entityIcons={entityIcons}
       />
     );
   }
@@ -406,6 +435,7 @@ function NestedContainerRow({
   onLocate,
   onOpenSecondary,
   nodeIndex,
+  entityIcons,
 }: {
   node: MenuTreeNode;
   nested: readonly MenuTreeNode[];
@@ -415,6 +445,7 @@ function NestedContainerRow({
   onLocate: (parentMenuId: string | null) => void;
   onOpenSecondary?: (container: MenuTreeNode) => void;
   nodeIndex: NodeIndex;
+  entityIcons?: EntityIconIndex;
 }) {
   const [open, setOpen] = useState(false);
   const [side, setSide] = useState<"right" | "left">("right");
@@ -425,7 +456,9 @@ function NestedContainerRow({
 
   const flyoutRows = useMemo(() => buildFlyoutRows(nested), [nested]);
   const label = node.item.label ?? "未命名分组";
-  const icon: IconName = containerIcon(node.item, nodeIndex);
+  const icon: IconName = containerIcon(node.item, nodeIndex, entityIcons);
+  // 只有母实体自定义了图标才带色（未自定义沿用行前景色 / accent，逐像素保持不变）
+  const iconColor = resolvedEntityColor(containerEntity(node.item, nodeIndex, entityIcons));
 
   const clearTimer = () => {
     if (closeTimer.current) {
@@ -502,7 +535,12 @@ function NestedContainerRow({
         data-nav-row="item"
         className={cx(ITEM_SHELL, iconOnly && "justify-center px-0", active ? L1_ROW_SELECTED : L1_ROW_IDLE)}
       >
-        <Icon name={icon} size={14} className={`shrink-0 ${active ? "text-gx-accent" : "opacity-80"}`} />
+        <Icon
+          name={icon}
+          size={14}
+          className={`shrink-0 ${active ? "text-gx-accent" : "opacity-80"}`}
+          style={iconColor ? { color: iconColor } : undefined}
+        />
         {iconOnly ? null : (
           <>
             <span className="flex-1 truncate text-left">{label}</span>
@@ -519,6 +557,7 @@ function NestedContainerRow({
           side={side}
           pos={pos}
           nodeIndex={nodeIndex}
+          entityIcons={entityIcons}
           onNavigate={onNavigate}
           onLocate={onLocate}
           onMouseEnter={clearTimer}
@@ -542,6 +581,7 @@ export function FlyoutPanel({
   side = "right",
   pos = null,
   nodeIndex,
+  entityIcons,
   onNavigate,
   onLocate,
   onMouseEnter,
@@ -552,6 +592,7 @@ export function FlyoutPanel({
   side?: "right" | "left";
   pos?: { top: number; left: number } | null;
   nodeIndex: NodeIndex;
+  entityIcons?: EntityIconIndex;
   onNavigate?: (href: string) => void;
   onLocate?: (parentMenuId: string | null) => void;
   onMouseEnter?: () => void;
@@ -577,7 +618,8 @@ export function FlyoutPanel({
       {rows.map((r) => {
         const item = r.node.item;
         if (r.kind === "title") {
-          const titleIcon = containerIcon(item, nodeIndex);
+          const titleIcon = containerIcon(item, nodeIndex, entityIcons);
+          const titleIconColor = resolvedEntityColor(containerEntity(item, nodeIndex, entityIcons));
           const title = item.label ?? "未命名分组";
           return (
             <div
@@ -585,7 +627,12 @@ export function FlyoutPanel({
               className={cx("flex items-center gap-2 text-gx-13 font-semibold text-gx-text-primary", FLYOUT_PAD[r.depth] ?? FLYOUT_PAD[0])}
               style={{ height: FLYOUT_ROW_H }}
             >
-              <Icon name={titleIcon} size={14} className="shrink-0 opacity-80" />
+              <Icon
+                name={titleIcon}
+                size={14}
+                className="shrink-0 opacity-80"
+                style={titleIconColor ? { color: titleIconColor } : undefined}
+              />
               <span className="min-w-0 flex-1 truncate">{title}</span>
             </div>
           );

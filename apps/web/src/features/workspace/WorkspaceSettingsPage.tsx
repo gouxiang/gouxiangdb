@@ -6,6 +6,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useBases } from "../../api/hooks";
 import { useKbList } from "../kb/kb-hooks";
 import { EmptyState, Spinner } from "../../components/ui";
+import { resolvedEntityColor, resolveEntityIcon } from "../../components/EntityIconPicker";
 import { Icon, type IconName } from "../../components/icons";
 import { useMyOrgActions, useIsWorkspaceOwner } from "../contacts/contacts-hooks";
 import { NavComposer } from "./NavComposer";
@@ -61,7 +62,13 @@ function AssetsSection() {
                   onClick={() => navigate(`/base/${b.id}/settings`)}
                   className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-gx-13 hover:bg-gx-row-hover"
                 >
-                  <Icon name="database" size={15} className="shrink-0 text-gx-text-tertiary" />
+                  // 资产页行图标：读实体自定义图标（未自定义时仍是 database + tertiary 色）
+                  <Icon
+                    name={resolveEntityIcon(b, { name: "database" }).name}
+                    size={15}
+                    className="shrink-0 text-gx-text-tertiary"
+                    style={resolvedEntityColor(b) ? { color: resolvedEntityColor(b) } : undefined}
+                  />
                   <span className="flex-1 truncate text-gx-text-primary">{b.name}</span>
                   <Icon name="chevronRight" size={14} className="text-gx-text-hint" />
                 </button>
@@ -86,7 +93,12 @@ function AssetsSection() {
                   onClick={() => navigate(`/kb/${k.id}/settings`)}
                   className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-gx-13 hover:bg-gx-row-hover"
                 >
-                  <Icon name="book" size={15} className="shrink-0 text-gx-text-tertiary" />
+                  <Icon
+                    name={resolveEntityIcon(k, { name: "book" }).name}
+                    size={15}
+                    className="shrink-0 text-gx-text-tertiary"
+                    style={resolvedEntityColor(k) ? { color: resolvedEntityColor(k) } : undefined}
+                  />
                   <span className="flex-1 truncate text-gx-text-primary">{k.name}</span>
                   <Icon name="chevronRight" size={14} className="text-gx-text-hint" />
                 </button>

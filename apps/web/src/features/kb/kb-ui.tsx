@@ -2,14 +2,40 @@
 // 知识库共享小件：类型图标、角色文案、时间格式化。全部走 gx-* token 与自建 SVG 图标。
 
 import { Icon, type IconName } from "../../components/icons";
+import { resolveEntityIcon } from "../../components/EntityIconPicker";
 import type { KbDocKind } from "../../api/client";
 import { colors } from "@gx/design-tokens";
 
-/** 文档/画布类型图标（不用 emoji） */
-export function DocKindIcon({ kind, size = 15, className }: { kind: KbDocKind; size?: number; className?: string }) {
-  const name: IconName = kind === "canvas" ? "canvas" : "doc";
-  const color = kind === "canvas" ? colors.secondaryAlt : colors.accent;
-  return <Icon name={name} size={size} className={className} style={{ color }} />;
+/**
+ * 文档/画布类型图标（不用 emoji）。
+ *
+ * icon / iconColor 为实体自定义值（ENTITY_ICONS 白名单之一 / #RRGGBB）；
+ * 两者都不传时，resolveEntityIcon 原样返回 kind 对应的默认图标与默认色
+ * ——渲染结果与改动前逐字节一致（样式的 style color 也一致）。
+ */
+export function DocKindIcon({
+  kind,
+  size = 15,
+  className,
+  icon,
+  iconColor,
+}: {
+  kind: KbDocKind;
+  size?: number;
+  className?: string;
+  /** 实体自定义图标名；null/undefined = 未自定义，按 kind 渲染默认图标。 */
+  icon?: string | null;
+  /** 实体自定义色；null/undefined = 用 kind 默认色。 */
+  iconColor?: string | null;
+}) {
+  const resolved = resolveEntityIcon(
+    { icon, iconColor },
+    {
+      name: kind === "canvas" ? "canvas" : ("doc" as IconName),
+      color: kind === "canvas" ? colors.secondaryAlt : colors.accent,
+    },
+  );
+  return <Icon name={resolved.name} size={size} className={className} style={{ color: resolved.color }} />;
 }
 
 export const KB_ROLE_LABEL: Record<string, string> = {

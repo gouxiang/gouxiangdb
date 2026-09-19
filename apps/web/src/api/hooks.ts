@@ -349,8 +349,10 @@ export function useGXMutations() {
       onSuccess: () => invalidateAll(),
     }),
     updateBase: useMutation({
-      mutationFn: async (p: { baseId: string; data: { name?: string; iconColor?: string } }) =>
-        (await Bases.update(p.baseId, p.data)).base,
+      mutationFn: async (p: {
+        baseId: string;
+        data: { name?: string; iconColor?: string; icon?: string | null };
+      }) => (await Bases.update(p.baseId, p.data)).base,
       onSuccess: (_d, v) => invalidateAll(v.baseId),
     }),
     deleteBase: useMutation({
@@ -365,8 +367,10 @@ export function useGXMutations() {
       onSuccess: (_d, v) => invalidateAll(v.baseId),
     }),
     updateTable: useMutation({
-      mutationFn: async (p: { tableId: string; data: { name?: string; primaryFieldId?: string } }) =>
-        (await Tables.update(p.tableId, p.data)).table,
+      mutationFn: async (p: {
+        tableId: string;
+        data: { name?: string; primaryFieldId?: string; icon?: string | null; iconColor?: string | null };
+      }) => (await Tables.update(p.tableId, p.data)).table,
       onSuccess: () => void qc.invalidateQueries({ queryKey: ["tables"] }),
     }),
     deleteTable: useMutation({

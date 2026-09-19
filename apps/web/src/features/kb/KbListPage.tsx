@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { Input, Modal, Spinner, toast } from "../../components/ui";
+import { resolveEntityIcon } from "../../components/EntityIconPicker";
 import { useKbList, useCreateKb } from "./kb-hooks";
 import { formatTime, roleLabel } from "./kb-ui";
 import { AVATAR_PALETTE } from "@gx/design-tokens";
@@ -67,7 +68,8 @@ export default function KbListPage() {
                   className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-gx-lg text-white"
                   style={{ backgroundColor: k.iconColor || dotColor(k.name) }}
                 >
-                  <Icon name="book" size={18} />
+                  {/* 未自定义时仍是白「book」；自定义后按实体图标渲染（背景色逻辑不变） */}
+                  <Icon name={resolveEntityIcon(k, { name: "book" }).name} size={18} />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-gx-14 font-medium text-gx-text-primary">{k.name}</span>

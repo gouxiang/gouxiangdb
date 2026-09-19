@@ -10,6 +10,7 @@ import { useBases, useGXMutations } from "../api/hooks";
 import { useKbList, useCreateKb } from "../features/kb/kb-hooks";
 import { Input, Menu, MenuItem, MenuDivider, Modal, Popover, toast } from "./ui";
 import { Icon, type IconName } from "./icons";
+import { entityIconColor, isEntityIconDefault, resolveEntityIcon } from "./EntityIconPicker";
 import { AVATAR_PALETTE, colors } from "@gx/design-tokens";
 
 export type ActiveLibrary =
@@ -57,6 +58,20 @@ export function LibrarySwitcher({ active }: { active: ActiveLibrary }) {
       ? bases?.find((b) => b.id === active.id)?.iconColor ?? colors.textTertiary
       : kbs?.find((k) => k.id === active.id)?.iconColor ?? colors.accent;
 
+  /**
+   * 切换器头部：默认仍是「圆点」（未自定义时逐像素保持原样）；
+   * 实体自定义了【图标】才换成图标渲染，颜色取自定义色（未设色时用各类型的既有默认色）。
+   */
+  const currentEntity =
+    active.kind === "base"
+      ? bases?.find((b) => b.id === active.id) ?? null
+      : kbs?.find((k) => k.id === active.id) ?? null;
+  const currentCustomized = !isEntityIconDefault(currentEntity);
+  const currentResolved = resolveEntityIcon(currentEntity, {
+    name: active.kind === "base" ? "database" : "book",
+    color: currentColor,
+  });
+
   async function create() {
     const name = newName.trim();
     if (!name || creating) return;
@@ -89,10 +104,19 @@ export function LibrarySwitcher({ active }: { active: ActiveLibrary }) {
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-2 rounded-gx-lg px-2 py-1.5 text-left hover:bg-gx-row-hover"
       >
-        <span
-          className="h-4 w-4 shrink-0 rounded-full"
-          style={{ backgroundColor: currentColor }}
-        />
+        {currentCustomized ? (
+          <Icon
+            name={currentResolved.name}
+            size={14}
+            className="shrink-0"
+            style={currentResolved.color ? { color: currentResolved.color } : undefined}
+          />
+        ) : (
+          <span
+            className="h-4 w-4 shrink-0 rounded-full"
+            style={{ backgroundColor: currentColor }}
+          />
+        )}
         <span className="flex-1 truncate text-gx-13 font-medium text-gx-text-primary">
           {currentName ?? "选择库"}
         </span>
@@ -116,7 +140,9 @@ export function LibrarySwitcher({ active }: { active: ActiveLibrary }) {
                 {filteredBases.map((b) => (
                   <MenuItem
                     key={`b-${b.id}`}
-                    icon={"database" as IconName}
+                    // 库切换器下拉：读实体自定义图标 + 自定义色（修掉原来写死 database 且丢色）
+                    icon={resolveEntityIcon(b, { name: "database" }).name}
+                    iconColor={entityIconColor(b)}
                     label={b.name}
                     active={active.kind === "base" && b.id === active.id}
                     onClick={() => {
@@ -134,7 +160,8 @@ export function LibrarySwitcher({ active }: { active: ActiveLibrary }) {
                 {filteredKbs.map((k) => (
                   <MenuItem
                     key={`k-${k.id}`}
-                    icon={"book" as IconName}
+                    icon={resolveEntityIcon(k, { name: "book" }).name}
+                    iconColor={entityIconColor(k)}
                     label={k.name}
                     active={active.kind === "kb" && k.id === active.id}
                     onClick={() => {

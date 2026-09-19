@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../../components/icons";
-import { Button, Menu, MenuItem, Popover, EmptyState, toast } from "../../components/ui";
+import { Button, Menu, MenuItem, Modal, Popover, EmptyState, toast } from "../../components/ui";
 import { confirmSoftDelete } from "../../components/feedback";
 // 阶段 4：统一撤销 toast（R-D-22）+ 长标题截断带 title（R-I-29）
 import { TruncatedText, toastDeleted } from "../../components/interaction";
@@ -23,6 +23,8 @@ import {
   useRestoreDoc,
 } from "./kb-hooks";
 import { DocKindIcon } from "./kb-ui";
+import { EntityIconPicker } from "../../components/EntityIconPicker";
+import { colors } from "@gx/design-tokens";
 
 interface TreeNode extends KbDocDTO {
   children: TreeNode[];
@@ -62,6 +64,8 @@ export function KbTree({ kbId }: { kbId: string }) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState("");
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  // 「图标与颜色」入口：树里行内改名输入框很窄塞不下选择器，故走行尾菜单 → 独立弹窗
+  const [iconFor, setIconFor] = useState<string | null>(null);
   // 「更多操作」弹层的定位锚点：深层级节点缩进后按钮贴近右缘，absolute 弹层会被
   // .kb-tree(overflow:auto) 裁剪，故用 fixed portal 弹层并按触发按钮视口坐标定位。
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
@@ -69,6 +73,7 @@ export function KbTree({ kbId }: { kbId: string }) {
   const [dropTarget, setDropTarget] = useState<{ id: string | null; zone: "into" | "root" } | null>(null);
 
   const renameDoc = useRenameDoc(renamingId ?? "__none__", kbId);
+  const renameIconDoc = useRenameDoc(iconFor ?? "__none__", kbId);
 
   useEffect(() => {
     localStorage.setItem(`gx-kb-tab-${kbId}`, tab);
@@ -83,6 +88,8 @@ export function KbTree({ kbId }: { kbId: string }) {
   }, [kb?.role]);
 
   const docsList = useMemo(() => (docs ?? []).filter((d) => !d.deletedAt), [docs]);
+  // 图标弹窗绑定的实体：按 id 从列表取，改完 invalidation 回来即跟随更新
+  const iconEntity = docsList.find((d) => d.id === iconFor) ?? null;
   const docTree = useMemo(() => buildDocTree(docsList.filter((d) => d.kind === "doc")), [docsList]);
   const canvases = useMemo(() => docsList.filter((d) => d.kind === "canvas"), [docsList]);
 
@@ -250,7 +257,7 @@ export function KbTree({ kbId }: { kbId: string }) {
             className="flex min-w-0 flex-1 items-center gap-1.5 bg-transparent text-left"
             style={{ border: "none", padding: 0, color: "inherit", font: "inherit", cursor: "pointer" }}
           >
-            <DocKindIcon kind={node.kind} size={14} />
+            <DocKindIcon kind={node.kind} size={14} icon={node.icon} iconColor={node.iconColor} />
             {renaming ? (
               <input
                 autoFocus
@@ -287,6 +294,14 @@ export function KbTree({ kbId }: { kbId: string }) {
                 <Menu width={160}>
                   <MenuItem icon="plus" label="新建子文档" onClick={() => create("doc", node.id)} />
                   <MenuItem icon="edit" label="重命名" onClick={() => startRename(node)} />
+                  <MenuItem
+                    icon="palette"
+                    label="图标与颜色"
+                    onClick={() => {
+                      setMenuFor(null);
+                      setIconFor(node.id);
+                    }}
+                  />
                   <MenuItem icon="trash" label="删除" danger onClick={() => doDelete(node)} />
                 </Menu>
               </Popover>
@@ -309,7 +324,7 @@ export function KbTree({ kbId }: { kbId: string }) {
           className="flex min-w-0 flex-1 items-center gap-1.5 bg-transparent text-left"
           style={{ border: "none", padding: 0, color: "inherit", font: "inherit", cursor: "pointer" }}
         >
-          <DocKindIcon kind={d.kind} size={14} />
+          <DocKindIcon kind={d.kind} size={14} icon={d.icon} iconColor={d.iconColor} />
           {renaming ? (
             <input
               autoFocus
@@ -344,6 +359,14 @@ export function KbTree({ kbId }: { kbId: string }) {
             <Popover open={menuFor === d.id} onClose={() => setMenuFor(null)} align="left" width={150} fixed anchorEl={menuAnchor}>
               <Menu width={150}>
                 <MenuItem icon="edit" label="重命名" onClick={() => startRename(d)} />
+                <MenuItem
+                  icon="palette"
+                  label="图标与颜色"
+                  onClick={() => {
+                    setMenuFor(null);
+                    setIconFor(d.id);
+                  }}
+                />
                 <MenuItem icon="trash" label="删除" danger onClick={() => doDelete(d)} />
               </Menu>
             </Popover>
@@ -450,6 +473,37 @@ export function KbTree({ kbId }: { kbId: string }) {
           )}
         </>
       )}
+
+      {/* 图标与颜色（文档 / 画布）：选完即时生效，不走「保存」。
+          入口在行尾菜单（canEdit 才有），此处只负责渲染；实体不存在时不挂载。 */}
+      <Modal
+        open={!!iconEntity}
+        title={`${iconEntity?.kind === "canvas" ? "画布" : "文档"}图标与颜色`}
+        onClose={() => setIconFor(null)}
+        footer={
+          <button
+            className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
+            onClick={() => setIconFor(null)}
+          >
+            完成
+          </button>
+        }
+      >
+        {iconEntity && (
+          <div className="flex items-center gap-3">
+            <EntityIconPicker
+              icon={iconEntity.icon ?? null}
+              iconColor={iconEntity.iconColor ?? null}
+              defaultIcon={iconEntity.kind === "canvas" ? "canvas" : "doc"}
+              defaultColor={iconEntity.kind === "canvas" ? colors.secondaryAlt : colors.accent}
+              onChange={(next) => renameIconDoc.mutateAsync({ icon: next.icon, iconColor: next.iconColor })}
+            />
+            <span className="text-gx-12 text-gx-text-hint">
+              选择后立即生效；「恢复默认」清除自定义图标与颜色。
+            </span>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -18,6 +18,7 @@ import { Icon } from "../../components/icons";
 import { confirmSoftDelete } from "../../components/feedback";
 import { toastDeleted } from "../../components/interaction";
 import { LibrarySwitcher } from "../../components/LibrarySwitcher";
+import { EntityIconPicker, resolvedEntityColor, resolveEntityIcon } from "../../components/EntityIconPicker";
 import { PersonalCenterDrawer } from "../settings/PersonalCenterDrawer";
 import { DetailLayoutEditor } from "../detail/DetailLayout";
 
@@ -79,6 +80,12 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       toast(e instanceof Error ? e.message : "重命名失败", "error");
     }
   }
+
+  /**
+   * 数据表「图标与颜色」：挂在既有的行内重命名弹窗里（入口已由 canManageSchema 把住），
+   * 不再新增一套菜单/弹窗开关。选图标或选色即写库，失败由 EntityIconPicker 统一 toast。
+   */
+  const renamingTable = (tables ?? []).find((t) => t.id === renaming?.id) ?? null;
 
   async function duplicateTable(id: string, withData: boolean) {
     try {
@@ -148,6 +155,9 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         )}
         {(tables ?? []).map((t) => {
           const active = t.id === tableId;
+          // 表列表行图标：未自定义时仍是 table + 既有前景色（active accent / 常态 opacity-70）
+          const rowIcon = resolveEntityIcon(t, { name: "table" });
+          const rowIconColor = resolvedEntityColor(t);
           return (
             <div key={t.id} className="relative">
               <button
@@ -160,9 +170,10 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                 ].join(" ")}
               >
                 <Icon
-                  name="table"
+                  name={rowIcon.name}
                   size={14}
                   className={`shrink-0 ${active ? "text-gx-accent" : "opacity-70"}`}
+                  style={rowIconColor ? { color: rowIconColor } : undefined}
                 />
                 <span className="flex-1 truncate">{t.name}</span>
                 {t.recordCount > 0 && <Badge>{t.recordCount}</Badge>}
@@ -332,6 +343,25 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           onChange={(e) => setRenaming((r) => (r ? { ...r, name: e.target.value } : r))}
           onKeyDown={(e) => e.key === "Enter" && renameTable()}
         />
+        <div className="mt-3 flex items-center gap-2 border-t border-gx-separator pt-3">
+          {renamingTable && canManageSchema ? (
+            <EntityIconPicker
+              icon={renamingTable.icon}
+              iconColor={renamingTable.iconColor}
+              defaultIcon="table"
+              ariaLabel="数据表图标与颜色"
+              onChange={(next) =>
+                m.updateTable.mutateAsync({
+                  tableId: renamingTable.id,
+                  data: { icon: next.icon, iconColor: next.iconColor },
+                })
+              }
+            />
+          ) : null}
+          <span className="text-gx-12 text-gx-text-hint">
+            图标与颜色即时生效；名称仍需点「保存」。
+          </span>
+        </div>
       </Modal>
 
       {/* 个人中心 Drawer（点击左下角头像或设置图标打开） */}

@@ -17,9 +17,11 @@ import {
   Spinner,
   toast,
 } from "../../components/ui";
+import { EntityIconPicker, resolvedEntityColor, resolveEntityIcon } from "../../components/EntityIconPicker";
 import type { KbDocDTO, KbDocKind } from "../../api/client";
 import { useKb, useKbDocs, useCreateDoc, useRenameDoc, useDeleteDoc, useRestoreDoc } from "./kb-hooks";
 import { DocKindIcon, formatTime, roleLabel } from "./kb-ui";
+import { colors } from "@gx/design-tokens";
 // 阶段 4：删除统一走 L2 确认 + 撤销 toast（R-D-23 / R-I-08 / R-D-22）
 import { confirmSoftDelete } from "../../components/feedback";
 import { toastDeleted } from "../../components/interaction";
@@ -38,6 +40,8 @@ export default function KbHomePage() {
   const [renameVal, setRenameVal] = useState("");
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [aclFor, setAclFor] = useState<KbDocDTO | null>(null);
+  // 文档/画布「图标与颜色」入口的下标：存 id 而非快照，改完 invalidation 回来即时跟着变
+  const [iconFor, setIconFor] = useState<string | null>(null);
 
   const { data: docs, isLoading } = useKbDocs(kbId, filter, debouncedQ);
   const createDoc = useCreateDoc(kbId!);
@@ -45,6 +49,9 @@ export default function KbHomePage() {
   const restoreDoc = useRestoreDoc(kbId!);
   // 重命名目标变化时，mutation 闭包跟随最新 docId（hook 始终调用，仅参数变化）
   const renameDoc = useRenameDoc(renaming?.id ?? "__none__", kbId ?? "__none__");
+  const renameIconDoc = useRenameDoc(iconFor ?? "__none__", kbId ?? "__none__");
+  // 图标面板绑定的文档：从列表按 id 取，避免快照过期
+  const iconDocEntity = (docs ?? []).find((d) => d.id === iconFor) ?? null;
 
 
   // 搜索输入防抖
@@ -119,7 +126,13 @@ export default function KbHomePage() {
       <div className="border-b border-gx-separator bg-gx-surface px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Icon name="book" size={18} className="text-gx-accent" />
+            {/* 库头图标：未自定义（icon 为空）时仍是 accent 色 book，与改动前一致 */}
+            <Icon
+              name={resolveEntityIcon(kb, { name: "book" }).name}
+              size={18}
+              className="text-gx-accent"
+              style={resolvedEntityColor(kb) ? { color: resolvedEntityColor(kb) } : undefined}
+            />
             <h1 className="text-gx-16 font-semibold text-gx-text-primary">{kb?.name ?? "知识库"}</h1>
             {kb?.role && <Badge variant="soft">{roleLabel(kb.role)}</Badge>}
           </div>
@@ -191,7 +204,7 @@ export default function KbHomePage() {
                 ].join(" ")}
               >
                 <button type="button" onClick={() => openDoc(d)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
-                  <DocKindIcon kind={d.kind} size={16} />
+                  <DocKindIcon kind={d.kind} size={16} icon={d.icon} iconColor={d.iconColor} />
                   <span className="truncate text-gx-13 text-gx-text-primary">{d.title || "未命名"}</span>
                 </button>
                 <span className="hidden text-gx-11 text-gx-text-hint sm:block">
@@ -214,6 +227,16 @@ export default function KbHomePage() {
                   <Popover open={menuFor === d.id} onClose={() => setMenuFor(null)} align="right" width={190}>
                     <Menu width={190}>
                       <MenuItem icon="edit" label="重命名" onClick={() => openRename(d)} />
+                      {canCreate && (
+                        <MenuItem
+                          icon="palette"
+                          label="图标与颜色"
+                          onClick={() => {
+                            setMenuFor(null);
+                            setIconFor(d.id);
+                          }}
+                        />
+                      )}
                       <MenuItem icon="lock" label="独立权限" onClick={() => { setMenuFor(null); setAclFor(d); }} />
                       <MenuDivider />
                       <MenuItem icon="trash" label="删除" danger onClick={() => { setMenuFor(null); void doDelete(d); }} />
@@ -247,6 +270,36 @@ export default function KbHomePage() {
         }
       >
         <Input autoFocus value={renameVal} onChange={(e) => setRenameVal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitRename()} />
+      </Modal>
+
+      {/* 图标与颜色（文档/画布）：选完即时生效，不走「保存」 */}
+      <Modal
+        open={!!iconDocEntity}
+        title={`${iconDocEntity?.kind === "canvas" ? "画布" : "文档"}图标与颜色`}
+        onClose={() => setIconFor(null)}
+        footer={
+          <button
+            className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95"
+            onClick={() => setIconFor(null)}
+          >
+            完成
+          </button>
+        }
+      >
+        {iconDocEntity && (
+          <div className="flex items-center gap-3">
+            <EntityIconPicker
+              icon={iconDocEntity.icon ?? null}
+              iconColor={iconDocEntity.iconColor ?? null}
+              defaultIcon={iconDocEntity.kind === "canvas" ? "canvas" : "doc"}
+              defaultColor={iconDocEntity.kind === "canvas" ? colors.secondaryAlt : colors.accent}
+              onChange={(next) => renameIconDoc.mutateAsync({ icon: next.icon, iconColor: next.iconColor })}
+            />
+            <span className="text-gx-12 text-gx-text-hint">
+              选择后立即生效；「恢复默认」清除自定义图标与颜色。
+            </span>
+          </div>
+        )}
       </Modal>
 
       {/* 独立权限 */}

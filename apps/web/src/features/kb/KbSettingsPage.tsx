@@ -2,11 +2,12 @@
 // /kb/:kbId/settings —— 知识库成员管理：添加成员（邮箱+角色）、移除成员、角色展示。
 // 单文档/画布的独立权限在内容列表与编辑器中按条目管理。
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { EmptyState, Input, Select, Spinner, toast } from "../../components/ui";
-import { useKb, useKbMembers, useAddKbMember, useRemoveKbMember } from "./kb-hooks";
+import { EntityIconPicker } from "../../components/EntityIconPicker";
+import { useKb, useKbMembers, useAddKbMember, useRemoveKbMember, useUpdateKb } from "./kb-hooks";
 import { roleLabel, KB_ROLE_RANK } from "./kb-ui";
 import { UploadLimitsPanel } from "./UploadLimitsPanel";
 import { confirmAction } from "../../components/feedback";
@@ -25,12 +26,29 @@ export default function KbSettingsPage() {
   const { data: members, isLoading } = useKbMembers(kbId);
   const addMember = useAddKbMember(kbId!);
   const removeMember = useRemoveKbMember(kbId!);
+  const updateKb = useUpdateKb(kbId!);
 
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"editor" | "commenter" | "viewer">("editor");
+  const [name, setName] = useState(kb?.name ?? "");
 
   const myRole = kb?.role ?? "owner";
   const isOwner = myRole === "owner";
+
+  // 知识库加载 / 切库 / 他人改名后同步名称输入
+  useEffect(() => {
+    if (kb) setName(kb.name);
+  }, [kb]);
+
+  async function saveKb() {
+    if (!kbId || !isOwner || !name.trim()) return;
+    try {
+      await updateKb.mutateAsync({ name: name.trim() });
+      toast("已保存", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "保存失败", "error");
+    }
+  }
 
   async function add() {
     const e = email.trim();
@@ -75,6 +93,45 @@ export default function KbSettingsPage() {
         {/* 上传限制（本机浏览器生效，跨全部知识库） */}
         <div className="mb-4">
           <UploadLimitsPanel />
+        </div>
+
+        {/* 基本信息：名称 + 实体图标与颜色（图标/选色即时写库，失败由 EntityIconPicker toast） */}
+        <div className="mb-4 rounded-gx-lg border border-gx-border bg-gx-surface px-4 py-3">
+          <div className="mb-2 text-gx-13 font-medium text-gx-text-primary">基本信息</div>
+          <div className="flex items-center gap-3">
+            <EntityIconPicker
+              icon={kb?.icon ?? null}
+              iconColor={kb?.iconColor ?? null}
+              defaultIcon="book"
+              ariaLabel="知识库图标与颜色"
+              readOnly={!isOwner}
+              onChange={(next) =>
+                // knowledge_bases.iconColor 非空：null 保留当前底色（后端 z.string().optional()）
+                updateKb.mutateAsync({ icon: next.icon, iconColor: next.iconColor ?? kb?.iconColor })
+              }
+            />
+            <Input
+              value={name}
+              disabled={!isOwner}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && saveKb()}
+              className="flex-1"
+              aria-label="知识库名称"
+            />
+            {isOwner && (
+              <button
+                type="button"
+                disabled={!name.trim() || name.trim() === kb?.name}
+                onClick={saveKb}
+                className="inline-flex h-8 items-center rounded-gx-lg bg-gx-accent px-3 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-40"
+              >
+                保存
+              </button>
+            )}
+          </div>
+          <p className="mt-2 text-gx-11 text-gx-text-hint">
+            图标与颜色选择后立即生效，名称需点「保存」；「恢复默认」清除自定义图标。
+          </p>
         </div>
 
         <div className="rounded-gx-lg border border-gx-border bg-gx-surface">

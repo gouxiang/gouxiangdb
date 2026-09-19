@@ -8,8 +8,9 @@
 import { useMemo, useState } from "react";
 import { clsx } from "clsx";
 import { useMatch, useNavigate } from "react-router-dom";
-import { Icon } from "../../components/icons";
+import { Icon, type IconName } from "../../components/icons";
 import { Spinner, toast } from "../../components/ui";
+import { resolvedEntityColor, type EntityIconIndex } from "../../components/EntityIconPicker";
 import { useNavMenu, useNavNodeIndex, useNavTreeDeep, usePatchMenu, useMoveNode } from "./nav-hooks";
 import { extractMoveImpact } from "./nav-hooks";
 import {
@@ -42,7 +43,7 @@ const TABS: { key: CollectionView; label: string }[] = [
   { key: "collected", label: "已收纳" },
 ];
 
-export function SecondaryNav({ containerMenuId, containerName, onClose, variant = "static", width = L2_WIDTH }: {
+export function SecondaryNav({ containerMenuId, containerName, onClose, variant = "static", width = L2_WIDTH, entityIcons }: {
   containerMenuId: string;
   containerName: string;
   onClose: () => void;
@@ -54,6 +55,12 @@ export function SecondaryNav({ containerMenuId, containerName, onClose, variant 
   variant?: "static" | "floating";
   /** 面板宽度；R-D-30 档由壳层传 208，缺省仍是规范 240。 */
   width?: number;
+  /**
+   * base/kb 实体自定义图标索引（壳层装配后传入，理由同 PrimaryNav：
+   * 本组件的多份 SSR 回归不带 QueryClientProvider，不能在组件内直接 useQuery）。
+   * 未自定义时不传色，面板头维持原来的纯文本形态。
+   */
+  entityIcons?: EntityIconIndex;
 }) {
   const { menu } = useNavMenu();
   const { tree, isLoading } = useNavTreeDeep();
@@ -96,6 +103,21 @@ export function SecondaryNav({ containerMenuId, containerName, onClose, variant 
     () => (containerNodeId && tree ? navSubtreeIds(tree.items, containerNodeId) : null),
     [tree, containerNodeId],
   );
+
+  /**
+   * 面板头的实体图标：容器挂在 base/kb 且该实体自定义了图标时才显示。
+   * 未自定义（icon 为 null）→ headerEntity 为 null → 头仍是纯文本一行，与改动前一致。
+   */
+  const headerEntity = useMemo(() => {
+    if (!entityIcons || !containerNodeId) return null;
+    const node = index.byId.get(containerNodeId);
+    if (!node?.resourceId) return null;
+    return entityIcons.get(node.resourceId) ?? null;
+  }, [entityIcons, containerNodeId, index]);
+  const headerIcon =
+    headerEntity && headerEntity.icon
+      ? { name: headerEntity.icon as IconName, color: resolvedEntityColor(headerEntity) }
+      : null;
 
   const sections = useMemo(() => {
     if (tab === "collected") {
@@ -205,6 +227,14 @@ export function SecondaryNav({ containerMenuId, containerName, onClose, variant 
       style={{ width }}
     >
       <div className="flex h-[52px] shrink-0 items-center gap-2 border-b border-gx-hairline px-3.5">
+        {headerIcon && (
+          <Icon
+            name={headerIcon.name}
+            size={15}
+            className="shrink-0"
+            style={headerIcon.color ? { color: headerIcon.color } : undefined}
+          />
+        )}
         <span className="flex-1 truncate text-gx-14 font-semibold text-gx-text-primary" title={containerName}>
           {containerName}
         </span>

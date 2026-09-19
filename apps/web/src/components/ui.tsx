@@ -774,6 +774,11 @@ export function Popover({
 
 export interface MenuItemProps {
   icon?: IconName;
+  /**
+   * 菜单项图标着色（实体自定义色；null/undefined = 沿用行文本前景色）。
+   * 仅给定制色的调用点传，未传时渲染与改动前逐字节一致。
+   */
+  iconColor?: string | null;
   label: ReactNode;
   description?: string;
   onClick?: () => void;
@@ -787,6 +792,7 @@ export interface MenuItemProps {
 
 export function MenuItem({
   icon,
+  iconColor,
   label,
   description,
   onClick,
@@ -815,7 +821,14 @@ export function MenuItem({
         active && "bg-gx-accent-bg text-gx-accent",
       )}
     >
-      {icon && <Icon name={icon} size={14} className="mt-0.5 flex-shrink-0" />}
+      {icon && (
+        <Icon
+          name={icon}
+          size={14}
+          className="mt-0.5 flex-shrink-0"
+          style={iconColor ? { color: iconColor } : undefined}
+        />
+      )}
       <span className="flex-1">
         <span className="block truncate">{label}</span>
         {description && <span className="block text-gx-11 text-gx-text-hint">{description}</span>}

@@ -24,8 +24,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
 import { Icon, type IconName } from "../../components/icons";
+import { buildEntityIconIndex, type EntityIconIndex } from "../../components/EntityIconPicker";
 import { AVATAR_PALETTE } from "@gx/design-tokens";
 import { useAuthStore } from "../../store/auth";
+import { useBases } from "../../api/hooks";
+import { useKbList } from "../kb/kb-hooks";
 import { PersonalCenterDrawer } from "../settings/PersonalCenterDrawer";
 import { SearchDialog } from "../search/SearchDialog";
 import { WorkspaceTopBar } from "./WorkspaceTopBar";
@@ -180,6 +183,8 @@ function SideRail({
    * （第一张卡片的标题就在那个位置）。折叠档下只留图标 + tooltip，符合 R-N-07。
    */
   secondaryToggle = null,
+  /** base/kb 实体自定义图标索引（由 WorkspaceShell 装配）。 */
+  entityIcons,
 }: {
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -187,6 +192,7 @@ function SideRail({
   onOpenSecondary: (c: MenuTreeNode) => void;
   showCollapseToggle?: boolean;
   secondaryToggle?: { label: string; onOpen: () => void } | null;
+  entityIcons?: EntityIconIndex;
 }) {
   return (
     <aside
@@ -200,6 +206,7 @@ function SideRail({
           onOpenSecondary={onOpenSecondary}
           collapsed={collapsed}
           activeContainerId={activeContainerId}
+          entityIcons={entityIcons}
         />
       </div>
       <FooterNav collapsed={collapsed} />
@@ -251,6 +258,19 @@ export function WorkspaceShell() {
   const kbMatch = useMatch("/kb/:kbId/*");
   const scopeKind: "base" | "kb" | null = baseMatch ? "base" : kbMatch ? "kb" : null;
   const scopeId = baseMatch?.params.baseId ?? kbMatch?.params.kbId ?? null;
+
+  /**
+   * 五类实体「自定义图标 + 颜色」索引：按实体资源 id 索引，L1 容器行与 L2 面板头按
+   * nav node.resourceId 取值。放在壳层装配是因为一级/二级导航都跑在多份不带
+   * QueryClientProvider 的 SSR 回归里，不能在它们内部直接 useQuery。
+   * 两份列表都是既有缓存（库切换器 / 资产页同源），这里不新增请求。
+   */
+  const { data: basesForIcons } = useBases();
+  const { data: kbsForIcons } = useKbList();
+  const entityIcons = useMemo(
+    () => buildEntityIconIndex(basesForIcons ?? [], kbsForIcons ?? []),
+    [basesForIcons, kbsForIcons],
+  );
 
   // 由当前库（base/kb）反推 L2 容器：刷新与直访都能还原同一个二级面板
   const routeContainer = useMemo(() => {
@@ -325,6 +345,7 @@ export function WorkspaceShell() {
       containerName={activeContainer.name}
       variant={floatingL2 || drawer ? "floating" : "static"}
       width={l2Width}
+      entityIcons={entityIcons}
       onClose={() => setL2Hidden(true)}
     />
   ) : null;
@@ -365,6 +386,7 @@ export function WorkspaceShell() {
                   onToggleCollapsed={toggleCollapsed}
                   activeContainerId={activeContainer?.containerId ?? null}
                   onOpenSecondary={openSecondary}
+                  entityIcons={entityIcons}
                 />
                 {showL2 && secondary && (
                   <div className="absolute left-0 top-0 bottom-0 gx-z-drawer shadow-gx-lg">
@@ -381,6 +403,7 @@ export function WorkspaceShell() {
             activeContainerId={activeContainer?.containerId ?? null}
             onOpenSecondary={openSecondary}
             showCollapseToggle={tier !== "md"}
+            entityIcons={entityIcons}
             secondaryToggle={
               floatingL2 && !showL2 && activeContainer
                 ? {
