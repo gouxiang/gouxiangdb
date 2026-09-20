@@ -25,6 +25,15 @@ export interface FormulaFnDef {
   returns: string;
   /** 参数个数约束：min~max（max=null 表示可变参数） */
   arity: { min: number; max: number | null };
+  /**
+   * 别名标记：本条是 `aliasOf` 所指函数的等价别名（后端共用同一份实现）。
+   * 用途边界（H-149）：引擎求值链路保留别名——历史公式里可能已经写过 OR_F，
+   * 删它要动 case 分支，风险大于收益；但 UI 的函数选择器不得把它当独立函数展示，
+   * 否则用户会以为是两个不同的函数。
+   * 因此：本字段只影响「选择器展示」的过滤，不影响 getFormulaFn / arity 校验
+   * ——手写的 OR_F 公式仍要能被接受。
+   */
+  aliasOf?: string;
 }
 
 export const FORMULA_CATEGORY_LABEL: Record<FormulaCategory, string> = {
@@ -139,6 +148,9 @@ export const FORMULA_FUNCTIONS: FormulaFnDef[] = [
     example: 'OR_F({类型} = "VIP", {金额} > 1000)',
     returns: "布尔",
     arity: { min: 1, max: null },
+    // 与 OR 共用同一份实现（见 apps/api/src/domain/formula.ts 的 OR 分支）：
+    // 求值链路保留，但不在函数选择器里单独展示。
+    aliasOf: "OR",
   },
   {
     name: "NOT", category: "logic",

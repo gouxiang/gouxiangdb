@@ -31,6 +31,23 @@ export interface FormulaEditorModalProps {
 
 const CATEGORY_ORDER: FormulaCategory[] = ["common", "logic", "text", "math", "date"];
 
+/**
+ * 函数选择器的可见集合：按分类 + 关键词过滤，并排除别名条目（`aliasOf`）。
+ * 别名（当前只有 OR_F → OR）在后端与 OR 共用同一份实现，列表里两朵并排会让用户
+ * 以为是不同函数，故只展示规范名 OR。注意这里纯做「展示过滤」，不动
+ * FORMULA_FUNCTIONS / getFormulaFn，因此手写的 OR_F 公式校验结果不变。
+ * 导出供单测。
+ */
+export function pickableFns(cat: FormulaCategory, query: string): FormulaFnDef[] {
+  const q = query.trim().toLowerCase();
+  return FORMULA_FUNCTIONS.filter(
+    (f) =>
+      !f.aliasOf &&
+      f.category === cat &&
+      (!q || f.name.toLowerCase().includes(q) || f.description.includes(query.trim())),
+  );
+}
+
 export function FormulaEditorModal({ value, fields, onClose, onConfirm }: FormulaEditorModalProps) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [draft, setDraft] = useState(value);
@@ -66,13 +83,10 @@ export function FormulaEditorModal({ value, fields, onClose, onConfirm }: Formul
     insertAtCursor(`${fn.name}( )`);
   };
 
-  // 过滤
-  const fns = useMemo(() => {
-    const q = fnQuery.trim().toLowerCase();
-    return FORMULA_FUNCTIONS.filter(
-      (f) => f.category === activeCat && (!q || f.name.toLowerCase().includes(q) || f.description.includes(fnQuery.trim())),
-    );
-  }, [fnQuery, activeCat]);
+  // 过滤（H-149）：别名条目（如 OR_F，与 OR 共用同一份实现）不在选择器里单独展示，
+  // 否则用户会以为是两个不同的函数。它仍留在 FORMULA_FUNCTIONS 中，下方
+  // validateFormula 走 getFormulaFn 校验，手写的 OR_F 公式照旧被接受。
+  const fns = useMemo(() => pickableFns(activeCat, fnQuery), [fnQuery, activeCat]);
 
   const visibleLocalFields = useMemo(() => {
     const q = fieldQuery.trim().toLowerCase();
@@ -113,7 +127,7 @@ export function FormulaEditorModal({ value, fields, onClose, onConfirm }: Formul
             </div>
             <div className="flex-1 overflow-y-auto p-1.5">
               {CATEGORY_ORDER.map((cat) => {
-                const catFns = FORMULA_FUNCTIONS.filter((f) => f.category === cat);
+                const catFns = pickableFns(cat, "");
                 const active = activeCat === cat;
                 return (
                   <div key={cat}>

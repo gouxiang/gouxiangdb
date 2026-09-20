@@ -9,7 +9,8 @@
 
 import { describe, it, expect } from "vitest";
 import type { FieldDTO } from "@gx/shared-types";
-import { validateFormula } from "./FormulaEditorModal";
+import { getFormulaFn } from "@gx/shared-types";
+import { pickableFns, validateFormula } from "./FormulaEditorModal";
 
 const fields = [
   { id: "f1", name: "订单号", type: "singleLineText" },
@@ -59,5 +60,28 @@ describe("公式编辑器 · 合法写法不得误判", () => {
     expect(errs("SUM({金额}").length).toBeGreaterThan(0);
     expect(errs("{不存在的字段}")).toContain("未知字段引用：{不存在的字段}");
     expect(errs("NOPE(1)").join("\n")).toContain("未知函数");
+  });
+});
+
+describe("公式编辑器 · 函数选择器隐藏别名 OR_F（H-149）", () => {
+  it("OR_F 带 aliasOf 标记指向 OR", () => {
+    expect(getFormulaFn("OR_F")!.aliasOf).toBe("OR");
+    expect(getFormulaFn("OR")!.aliasOf).toBeUndefined();
+  });
+
+  it("逻辑分类的可见列表里不出现 OR_F，OR 仍在", () => {
+    const names = pickableFns("logic", "").map((f) => f.name);
+    expect(names).toContain("OR");
+    expect(names).not.toContain("OR_F");
+  });
+
+  it("按关键词搜索同样命中不到别名", () => {
+    expect(pickableFns("logic", "or").map((f) => f.name)).not.toContain("OR_F");
+    expect(pickableFns("logic", "OR_F")).toEqual([]);
+  });
+
+  it("不过滤用户手写的历史公式：OR_F(...) 校验仍通过", () => {
+    expect(errs("OR_F({金额} > 1, {金额} < 0)")).toEqual([]);
+    expect(errs('IF(OR_F({金额} > 1000, {订单号} = "VIP"), "大", "小")')).toEqual([]);
   });
 });
