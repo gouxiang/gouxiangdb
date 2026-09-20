@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（依据 PLAN-ADJUST-nas-min-hardware §4，2026-09-12，记录主理人原话「向量暂不考虑本地模型、仅远端 API」；M5 计划 §11 第 4 条 :710、§15 Q1/Q3/Q5/Q6 定稿；2026-09-17 M5 出口归档）
 **作者**：架构师 高见远（M5-S14 归档；实现由后端 贝洛奇 落地）
-**上游依据**：M5-implementation-plan.md §4.4（:351-386）、§11（:710）、§15 Q1/Q3/Q5/Q6（:748-753）；PLAN-ADJUST-nas-min-hardware.md §4
+**上游依据**：docs/_archive/originals/planning-phase2-M5-implementation-plan.md §4.4（:351-386）、§11（:710）、§15 Q1/Q3/Q5/Q6（:748-753）；PLAN-ADJUST-nas-min-hardware.md §4
 **关联**：ADR-0044（vec0 唯一原生面与降级）；ADR-0050（cloud 凭据与供应链边界）；ADR-0042（独立 search.db）
 
 ---

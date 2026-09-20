@@ -1,7 +1,7 @@
 # 首次部署：创建超级管理员（init-admin）
 
 > 适用范围：飞牛 fnOS 原生（`.fpk`）、Docker、裸机 systemd 三套部署，以及本地开发验证。
-> 相关文档：[`README.md`](./README.md) §2.6、[`docker.md`](./docker.md)、[`fnos-native.md`](./fnos-native.md)。
+> 相关文档：[`README.md`](./README.md) §2.7、[`docker.md`](./docker.md)、[`fnos-native.md`](./fnos-native.md)。
 
 ## 1. 它做什么，什么时候做
 

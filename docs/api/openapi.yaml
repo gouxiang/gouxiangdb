@@ -2015,7 +2015,7 @@ x-mcp:
     没有路径变量、成功也是 HTTP 200 承载业务失败、错误信封是 JSON-RPC 而不是 {error, code}。
     硬写成 paths 条目会伪造 REST 语义，故以扩展键表达；REST 部分（PAT 管理）仍在上方 /pats 正常表达。
   spec-ref: >-
-    docs/planning/phase2/M6-implementation-plan.md（§4.1 中间件序、§4.3 认证口径、
+    docs/_archive/originals/planning-phase2-M6-implementation-plan.md（§4.1 中间件序、§4.3 认证口径、
     §4.5 工具契约、§5.3 限流双键、§6 错误码只增）。
     出口证据见 docs/baseline/m6-connectivity.md；运维处置见 docs/runbooks/mcp.md；
     接入说明见 docs/guides/mcp-client-onboarding.md。

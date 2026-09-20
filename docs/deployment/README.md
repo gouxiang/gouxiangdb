@@ -70,20 +70,38 @@ GouXiangDB 含两个**平台相关**的原生组件：
 
 - **不能打"一份到处跑"的包**。飞牛 `.fpk` 的 `manifest.platform` **不能写 `all`**（官方 `all` 仅用于不含架构二进制的包），必须按 `x86` / `arm` 分别构建两份。
 - **Docker 镜像**要按目标架构构建（`docker buildx --platform linux/amd64,linux/arm64`），在目标架构阶段装原生依赖 + `prisma generate`，不能在 amd64 装好原生模块再塞进 arm 镜像。
-- Node 版本统一 **v22**（飞牛运行时 `nodejs_v22`；Docker 基础镜像 `node:22`；本地要求 Node ≥ 20，推荐 22）。
+- Node 版本统一 **v22**（飞牛运行时 `nodejs_v22`；Docker 基础镜像 `node:22`；本地要求 Node ≥ 20，推荐 22）——**硬约束与故障现象见 §2.4**，换 Node 大版本前必读。
 
-### 2.4 数据库迁移只增、不回滚
+### 2.4 Node 版本硬约束（换 Node 大版本必读）
+
+**必须 Node 22。** 飞牛运行时 `nodejs_v22`、Docker 基础镜像 `node:22-bookworm`；本机开发可 ≥20，但**任何部署目标一律 22**。
+
+**已实证的故障现象（排查时极易误判）**：在 **Node 20** 下启动不是报普通模块错误（如 `ERR_DLOPEN_FAILED` / `Module did not self-register`），而是进程直接 **SIGSEGV 崩溃**——没有任何可读堆栈指向 better-sqlite3，很容易被误判为内存问题、磁盘问题或 SQLite 文件损坏而查错方向。换到 Node 22 后立即正常。
+
+**底层原因**：better-sqlite3 是原生模块，其 Linux prebuild 按 **NAPI 版本档位**发布，Node 20 与 Node 22 对应的 NAPI 档位不同；ABI 不匹配时加载期直接段错误，而非抛出可捕获的异常。
+
+**因此**：
+
+- 更换 Node **大版本**（20↔22、22→24 等）后，**必须重新安装依赖**（`rm -rf node_modules && pnpm install`）让 prebuild 按新 ABI 重新落地，**并复验** `node -e "require('better-sqlite3')"` 与服务 `/readyz`。
+- 构建机与运行机的 **Node 大版本必须一致**（Docker 多阶段尤其注意：build 阶段与 runtime 阶段别用不同基础镜像）。
+- 只升 Node **小版本/补丁版本**（22.x → 22.y）通常无需重装，但若启动出现 SIGSEGV，按上面流程重装依赖后再判。
+
+> **本条来源说明**：本条来自 2026-09 的 Linux 部署**实证**（Node 20 → SIGSEGV，Node 22 → 正常），
+> **仓内此前无任何文档记载，本次（2026-09-20）为首次落盘**。在此之前它属于口头传承。
+> 若后续有更精确的 NAPI 档位号或官方发布矩阵依据，请回填本节的「底层原因」段。
+
+### 2.5 数据库迁移只增、不回滚
 
 - 所有形态启动前/发布时统一执行 **`prisma migrate deploy`**（只应用未执行的迁移，已应用则跳过），**禁止** `migrate dev/reset/db push`（裸机 `deploy.sh` 有白名单守卫）。
 - 升级 = 换应用代码/镜像 + `migrate deploy`；**回应不回数据**，回滚应用版本不会自动撤销已落地的迁移。升级前先做本地在线快照。
 
-### 2.5 健康探针（验证通用）
+### 2.6 健康探针（验证通用）
 
 - `GET /healthz`：存活（liveness）。
 - `GET /readyz`：就绪（readiness），串行五探针 `dbPing/dbWritable/migrations/uploadsWritable/disk`；全过返回 `200 {"status":"ready",...}`，任一失败 `503`。
 - 兼容别名 `GET /api/health`。
 
-### 2.6 首次部署：创建超级管理员
+### 2.7 首次部署：创建超级管理员
 
 三套部署都在「`prisma migrate deploy` + nav-reconcile 之后、服务启动之前」执行一次 `node dist/init-admin.js`，用 `GX_INIT_ADMIN_EMAIL` / `GX_INIT_ADMIN_PASSWORD` 创建第一个 ACTIVE 用户、授予系统 owner、标记首次登录强制改密。脚本**幂等**（`users` 表已有任何用户即跳过），两个变量任一为空则打印一行提示并**正常继续、不失败**（首个通过 `/api/auth/signup` 注册的用户会自动成为所有者）。生产必须由部署者注入真实凭据，初始化完成后建议从 env 删除这三行。完整顺序、验证 SQL、重试与回滚见 [`first-admin-init.md`](./first-admin-init.md)。
 

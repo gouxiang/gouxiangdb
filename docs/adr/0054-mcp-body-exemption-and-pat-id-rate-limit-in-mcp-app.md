@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（M6 计划 §10 第 4 条、§0-2、§5.2/§5.3 定稿；C-1 终审批准三档默认值；S2 已过传输门、S8 已过 §460 三项与 401 六态；401 语义由项目负责人于 2026-09-17 M6 出口前拍定，保持现状；2026-09-18 M6 出口归档）
 **作者**：架构师 高见远（M6-S9 归档；实现由后端 贝洛奇 落地）
-**上游依据**：M6-implementation-plan.md §0-2（:18）、§5.2（:288-299）、§5.3（:301-304）、§11 C-1（:441）、§6（:315-317）、§10（:429）；spike-mcp-transport.md §0-5（:20-22，实测复现 413）；docs/baseline/m6-connectivity.md §6/§7/§8-4
+**上游依据**：docs/_archive/originals/planning-phase2-M6-implementation-plan.md §0-2（:18）、§5.2（:288-299）、§5.3（:301-304）、§11 C-1（:441）、§6（:315-317）、§10（:429）；docs/_archive/originals/planning-phase2-spike-mcp-transport.md §0-5（:20-22，实测复现 413）；docs/baseline/m6-connectivity.md §6/§7/§8-4
 **关联**：ADR-0051（/mcp 直桥）；ADR-0052（PAT 与认证顺序）；ADR-0053（双闸门）；ADR-0003（裸机部署与反代）
 
 ---

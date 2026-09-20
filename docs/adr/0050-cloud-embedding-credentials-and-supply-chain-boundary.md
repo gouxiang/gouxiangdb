@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（M5 计划 §11 第 9 条、§4.4 凭据存储/§9 管理端点/§12 原生供应链定稿；S4/S9/S12 已过加密、轮换回落与零外网门；2026-09-17 M5 出口归档）
 **作者**：架构师 高见远（M5-S14 归档；实现由后端 贝洛奇 落地）
-**上游依据**：M5-implementation-plan.md §4.4（凭据 :386）、§9（管理端/审计 :690-691）、§12（供应链/CI :719-725）、§11（:715）、§15 Q5/Q6
+**上游依据**：docs/_archive/originals/planning-phase2-M5-implementation-plan.md §4.4（凭据 :386）、§9（管理端/审计 :690-691）、§12（供应链/CI :719-725）、§11（:715）、§15 Q5/Q6
 **关联**：ADR-0045（cloud/off 两态、OpenAI 兼容单一契约）；ADR-0044（sqlite-vec 唯一原生面、glibc/非 musl）；ADR-0041（组织动作清单、不新增动作位）；ADR-0010（主库离线 age 加密的密钥边界区分）
 
 ---
@@ -114,6 +114,6 @@ cloud 出网必须管理员显式配置 + 二次确认（`confirmCloud:true`，�
 - 零外网：M5-S12 AC-M5-5（fail-closed fetch 拦截用例 A/C + 人工 mitm/抓包：
   off 零出站 SYN、无 confirmCloud 改 cloud 得 409 且零连接、启用后仅 baseURL
   host 的 POST /v1/embeddings）；docs/runbooks/m5-search.md §2。
-- 原生供应链：spike-sqlite-vec.md §5（平台子包/vec0 文件名 dlsym 坑）；
+- 原生供应链：docs/_archive/originals/planning-phase2-spike-sqlite-vec.md §5（平台子包/vec0 文件名 dlsym 坑）；
   M5 计划 §12（bookworm/非 musl/CI 矩阵/fpk 权限）。
 - 角色边界：ADR-0041（不新增动作位的复用义务）；M5 计划 §9（:690 role_owner）。

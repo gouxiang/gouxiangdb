@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（项目总监裁决 A-7 体系随 M4 计划 r2 终审通过，2026-09-18；2026-09-16 M4 出口归档）
 **作者**：后端 贝洛奇
-**上游依据**：`docs/planning/phase2/M4-implementation-plan.md` §0-1（纯 allow 判定序）、§2.1-1、§8（ADR-0032 候选）；ARCH-enterprise §5.1-5.2；SPEC-enterprise-v1.0 §5
+**上游依据**：`docs/_archive/originals/planning-phase2-M4-implementation-plan.md` §0-1（纯 allow 判定序）、§2.1-1、§8（ADR-0032 候选）；ARCH-enterprise §5.1-5.2；SPEC-enterprise-v1.0 §5
 **关联**：ADR-0024（组织角色与资源角色物理分层）；ADR-0033（旧三表回填为 allow 投影）；ADR-0035（fieldMask 是 allow 之上的收窄，不是 deny）；ADR-0036（cutoff 收集边界）
 
 ---

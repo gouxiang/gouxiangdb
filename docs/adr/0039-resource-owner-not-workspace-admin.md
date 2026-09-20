@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（裁决 A-2 2026-09-18 定稿；2026-09-16 M4 出口归档）
 **作者**：后端 贝洛奇
-**上游依据**：M4-implementation-plan.md §0-9 裁决 A-2、§5.2-5、§8（ADR-0039）；ADR-0024 组织角色/资源角色分层
+**上游依据**：docs/_archive/originals/planning-phase2-M4-implementation-plan.md §0-9 裁决 A-2、§5.2-5、§8（ADR-0039）；ADR-0024 组织角色/资源角色分层
 **关联**：ADR-0024（M2/M4 词汇线隔离的前置决策）；ADR-0032（两类 fallback 在判定序中的位置）；ADR-0041（manage_share 双重身份）
 
 ---

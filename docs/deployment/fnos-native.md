@@ -99,9 +99,13 @@ app/server/
 
 ### 3.1 `manifest`（无扩展名，INI）
 
+> **版本不用手改**：`version` 与 `platform` 两行由 `deploy/fnos/build-fpk.mjs` 从**根 `package.json` 的 `version`**
+> 统一重写（脚本内注释原话：「version 必须和 platform 一样由 rootPkg 统一重写，不能留在 manifest 里手改」）。
+> 下文示例写 `0.1.7` 只是当前值示意；发新版本时**改根 `package.json` 即可**，不要编辑 manifest。
+
 ```ini
 appname=gouxiangdb
-version=0.1.0
+version=0.1.7
 display_name=构想工作台
 desc=面向个人与小团队的智能多维表格（SQLite，本地优先）
 source=thirdparty
@@ -395,8 +399,8 @@ fnpack --help
 
 ```bash
 # 在与目标同架构的 Linux 机/容器内
-node deploy/fnos/build-fpk.mjs --arch x86     # 产 gouxiangdb-0.1.0-x86.fpk
-node deploy/fnos/build-fpk.mjs --arch arm     # 产 gouxiangdb-0.1.0-arm.fpk
+node deploy/fnos/build-fpk.mjs --arch x86     # 产 gouxiangdb-0.1.7-x86.fpk
+node deploy/fnos/build-fpk.mjs --arch arm     # 产 gouxiangdb-0.1.7-arm.fpk
 ```
 
 ### 6.3 按架构构建（关键）
@@ -415,8 +419,8 @@ node deploy/fnos/build-fpk.mjs --arch arm     # 产 gouxiangdb-0.1.0-arm.fpk
 - **设备命令行**：
 
   ```bash
-  appcenter-cli install-fpk gouxiangdb-0.1.0-x86.fpk
-  # 带向导/配置：appcenter-cli install-fpk gouxiangdb-0.1.0-x86.fpk --env config.env
+  appcenter-cli install-fpk gouxiangdb-0.1.7-x86.fpk
+  # 带向导/配置：appcenter-cli install-fpk gouxiangdb-0.1.7-x86.fpk --env config.env
   ```
 
 - **（可选，推荐）预置初始管理员凭据**：`install_callback` 只在 `GX_INIT_ADMIN_EMAIL` 与 `GX_INIT_ADMIN_PASSWORD` **两个都非空**时创建超级管理员，两者读自 `${TRIM_PKGETC}/gouxiangdb.env`（首装由 `install_callback` 生成，可事后编辑并在应用中心重启补跑）。任一为空则跳过——**不阻断安装**，首个通过 `/api/auth/signup` 注册的用户会自动成为所有者。凭据只在 `install_callback`（首次安装）里被消费，`upgrade_callback`（升级）不做初始化。初始化完成后建议把这三行从 env 删除（脚本幂等，删了不会重复创建）。详见 [`first-admin-init.md`](./first-admin-init.md)。

@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（M5 计划 §11 第 6 条、§4.5 步骤 5 定稿；S11 boost 标定与三路 EXPLAIN 已取证；**shadow strict 判据经 2026-09-17 项目总监裁决修订**；2026-09-17 M5 出口归档）
 **作者**：架构师 高见远（M5-S14 归档；实现/标定由后端 贝洛奇 落地，shadow 裁决由项目总监下、后端实施）
-**上游依据**：M5-implementation-plan.md §4.5 步骤 5（:439）、§6（:594、:597-598）、§11（:712）；spike-sqlite-vec §3（trigram 门槛）；docs/baseline/2026-09-17-m5-gate.md §3.5
+**上游依据**：docs/_archive/originals/planning-phase2-M5-implementation-plan.md §4.5 步骤 5（:439）、§6（:594、:597-598）、§11（:712）；docs/_archive/originals/planning-phase2-spike-sqlite-vec.md §3（trigram 门槛）；docs/baseline/2026-09-17-m5-gate.md §3.5
 **关联**：ADR-0046（先收敛后召回与 RRF）；ADR-0005（LIKE 有界口径）；ADR-0044（vec 路与降级）；ADR-0038（scope 契约）
 
 ---
@@ -139,7 +139,7 @@ boost 是**设计内**的排序改进，FTS 路 bm25 vs 旧链 createdAt 本就�
 
 ## 5. 验证证据
 
-- trigram 门槛：spike-sqlite-vec.md §3（≥3 字符命中、2 字命中 0）。
+- trigram 门槛：docs/_archive/originals/planning-phase2-spike-sqlite-vec.md §3（≥3 字符命中、2 字命中 0）。
 - boost 标定：docs/baseline/2026-09-17-m5-gate.md §3.1–3.4（常量/单位关系/
   小样表/接线/旧链零 diff）；rrf-title-boost.test.ts（15 例）、
   query-title-boost.test.ts（3 例端到端）。
@@ -147,5 +147,5 @@ boost 是**设计内**的排序改进，FTS 路 bm25 vs 旧链 createdAt 本就�
   确定性证据 + setDriftCount=0）、queryShadow.test.ts（12 例，overDeny/
   overAllow->setDriftCount>0；纯 ORDER->orderDiffer=true,setDriftCount=0,
   driftCount=1）、query-v1-route.test.ts（6 例，集合漂移 STRICT 下仍 500）。
-- 计划注记：M5-implementation-plan.md §6 :598（2026-09-17 裁决注，原句
+- 计划注记：docs/_archive/originals/planning-phase2-M5-implementation-plan.md §6 :598（2026-09-17 裁决注，原句
   :594 未改写）。

@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（M6 计划 §10 第 2 条、§4.3（数据模型/校验顺序）、§5.1/§5.2 定稿；C-3/C-4 终审批准；S1 已过 PAT 基座门、S8 已过吊销即时门；2026-09-18 M6 出口归档）
 **作者**：架构师 高见远（M6-S9 归档；实现由后端 贝洛奇 落地）
-**上游依据**：M6-implementation-plan.md §4.3（:172-196）、§5.1（:281-286）、§5.2（:288-299）、§11 C-3/C-4（:443-444）、§10（:427）；SPEC-enterprise §6（:88 `personal_access_tokens`）、§5（:74 `/api/v1/pats`）
+**上游依据**：docs/_archive/originals/planning-phase2-M6-implementation-plan.md §4.3（:172-196）、§5.1（:281-286）、§5.2（:288-299）、§11 C-3/C-4（:443-444）、§10（:427）；SPEC-enterprise §6（:88 `personal_access_tokens`）、§5（:74 `/api/v1/pats`）
 **关联**：ADR-0022（org tokenVersion 吊销——PAT 是独立凭据，不比对 tv）；ADR-0051（无状态 => 吊销即时生效）；ADR-0053（PAT scope 是闸门一粗筛，资源授权归 M4）；ADR-0037（authz 三态门）
 
 ---

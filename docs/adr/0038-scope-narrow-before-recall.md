@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（M4 计划 §0-7/§4.7 定稿；scope 接口本身已随 M4-S4 落地并过规模门，召回侧约定移交 M5；2026-09-16 M4 出口归档）
 **作者**：后端 贝洛奇
-**上游依据**：M4-implementation-plan.md §0-7、§4.7（接口契约与消费纪律）；AC-M5-2（零泄漏的工程定义）；spike-sqlite-vec 结论
+**上游依据**：docs/_archive/originals/planning-phase2-M4-implementation-plan.md §0-7、§4.7（接口契约与消费纪律）；AC-M5-2（零泄漏的工程定义）；spike-sqlite-vec 结论
 **关联**：ADR-0032（scope 与 decide 共用 evaluateChainDecision）；ADR-0035（maskedTableFields 供 M5 字段剔除）；ADR-0037（visible-scope 端点不经三态 flag）
 
 ---

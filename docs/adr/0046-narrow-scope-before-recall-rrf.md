@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（M5 计划 §11 第 5 条、§4.5 实现细则定稿；S7/S8/S11 已过 AC-M5-2 与 EXPLAIN 门；2026-09-17 M5 出口归档）
 **作者**：架构师 高见远（M5-S14 归档；实现由后端 贝洛奇 落地）
-**上游依据**：M5-implementation-plan.md §4.5（:388-449）、§11（:711）、§13 AC-M5-2（:731）；ADR-0038（M4 scope 两形态契约）
+**上游依据**：docs/_archive/originals/planning-phase2-M5-implementation-plan.md §4.5（:388-449）、§11（:711）、§13 AC-M5-2（:731）；ADR-0038（M4 scope 两形态契约）
 **关联**：ADR-0038（scope 契约与 >499 临时表纪律）；ADR-0035（field mask 表策略行）；ADR-0048（字段 chunk 召回前排除模型）；ADR-0047（FTS/trigram/RRF 与 shadow 裁决）
 
 ---

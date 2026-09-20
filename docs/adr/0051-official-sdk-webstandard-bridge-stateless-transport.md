@@ -1,8 +1,8 @@
 # ADR-0051：官方 SDK WebStandard 直桥 + 每请求无状态 transport
 
-**状态（Status）**：Accepted（M6 计划 §10 第 1 条、§0-1、§4.1/§4.2 定稿；spike-mcp-transport §0/§1 实测通过；S2 已过传输骨架门、S8 已过三客户端连通门；2026-09-18 M6 出口归档）
+**状态（Status）**：Accepted（M6 计划 §10 第 1 条、§0-1、§4.1/§4.2 定稿；docs/_archive/originals/planning-phase2-spike-mcp-transport.md §0/§1 实测通过；S2 已过传输骨架门、S8 已过三客户端连通门；2026-09-18 M6 出口归档）
 **作者**：架构师 高见远（M6-S9 归档；实现由后端 贝洛奇 落地）
-**上游依据**：M6-implementation-plan.md §0-1、§4.1（:129-163）、§4.2（:165-170）、§4.7、§10（:426）；spike-mcp-transport.md §0（TL;DR）、§1（传输选型与实测陷阱）、§2（子路径/unix socket/反代）；ARCH-enterprise §8.1（:749）
+**上游依据**：docs/_archive/originals/planning-phase2-M6-implementation-plan.md §0-1、§4.1（:129-163）、§4.2（:165-170）、§4.7、§10（:426）；docs/_archive/originals/planning-phase2-spike-mcp-transport.md §0（TL;DR）、§1（传输选型与实测陷阱）、§2（子路径/unix socket/反代）；ARCH-enterprise §8.1（:749）
 **关联**：ADR-0019（协议无关标准 MCP server 总纲，ARCH-enterprise :941——本 ADR 是其实施细化，不重复立项）；ADR-0052（PAT 无会话缓存 => 吊销即时）；ADR-0053（双闸门）；ADR-0054（/mcp body 豁免与独立限流）
 
 ---
@@ -80,7 +80,7 @@ MCP Inspector、Claude Desktop-stdio）都能接入。落地前有两处必须�
 
 ## 5. 验证证据
 
-- 传输选型实测：spike-mcp-transport.md §0/§1（initialize -> notifications/initialized -> tools/list ->
+- 传输选型实测：docs/_archive/originals/planning-phase2-spike-mcp-transport.md §0/§1（initialize -> notifications/initialized -> tools/list ->
   tools/call 全通；curl / 官方 SDK client / Inspector 三客户端；JSON 与 SSE 两模式）。
 - 实测踩坑留证：spike §1.2（漏 connect 挂死；handleRequest 后立即 close 截断；无状态 transport 不可复用）。
 - 实现：`apps/api/src/mcp/transport/streamableHttp.ts`（每请求 new + `await connect` + `queueMicrotask` 清理）、

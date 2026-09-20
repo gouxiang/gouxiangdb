@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（项目总监补充裁决，M3 manage_menu 首用、M4 manage_share 复用；2026-09-16 M4 出口归档）
 **作者**：后端 贝洛奇
-**上游依据**：M4-implementation-plan.md §0-9、§4.10（八项清单两次复用）、§1.4（白名单真源写死结论）；M3-S6（15ac5fe）；M4-S5（2663cc0）
+**上游依据**：docs/_archive/originals/planning-phase2-M4-implementation-plan.md §0-9、§4.10（八项清单两次复用）、§1.4（白名单真源写死结论）；M3-S6（15ac5fe）；M4-S5（2663cc0）
 **关联**：ADR-0024（组织角色 vs 资源角色分层）；ADR-0039（资源 owner 不抬升 role_owner）；ADR-0032（资源动作串词汇）
 
 ---

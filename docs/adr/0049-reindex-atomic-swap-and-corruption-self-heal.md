@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（M5 计划 §11 第 8 条、§4.9/§5.4 定稿；S9 双库切换真机演练与 S12 AC-M5-1 损坏自愈对抗已过；2026-09-17 M5 出口归档）
 **作者**：架构师 高见远（M5-S14 归档；实现由后端 贝洛奇 落地）
-**上游依据**：M5-implementation-plan.md §5.4（reindex 两步 :575-579）、§4.9（降级矩阵 :505-507）、§11（:714）；docs/runbooks/m5-search.md §4（损坏自愈程序）
+**上游依据**：docs/_archive/originals/planning-phase2-M5-implementation-plan.md §5.4（reindex 两步 :575-579）、§4.9（降级矩阵 :505-507）、§11（:714）；docs/runbooks/m5-search.md §4（损坏自愈程序）
 **关联**：ADR-0042（独立 search.db，rename/rm 的物理前提）；ADR-0043（reindex 扫表不依赖事件史）；ADR-0048（可重建派生产物、不进备份）；ADR-0005（LIKE 有界应急）
 
 ---

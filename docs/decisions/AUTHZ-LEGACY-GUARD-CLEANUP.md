@@ -3,7 +3,7 @@
 - 日期：2026-09-16
 - 作者：后端 贝洛奇
 - 状态：**Accepted（仅登记清理清单与触发条件；M4 不删任何旧分支/旧表/旧写点）**
-- 上游依据：M4-implementation-plan.md §4.8（on 后反向 shadow 一迭代、旧分支再保两迭代）、§4.6 写路径切换点表（on+2 迭代停旧表写评估）、§S11"旧守卫分支清理裁决文档"
+- 上游依据：docs/_archive/originals/planning-phase2-M4-implementation-plan.md §4.8（on 后反向 shadow 一迭代、旧分支再保两迭代）、§4.6 写路径切换点表（on+2 迭代停旧表写评估）、§S11"旧守卫分支清理裁决文档"
 - 关联：ADR-0037（三态翻转门与时间线）、ADR-0033（旧表投影地位与退役路径）、ADR-0032（引擎判定唯一内核）；runbook authz-engine-flip-on.md、authz-policy-dual-write.md
 
 ---

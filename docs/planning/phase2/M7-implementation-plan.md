@@ -107,7 +107,7 @@
 | M4-7 | v0.1.0 风格库升级后随机 20 主体×20 节点新旧判定全同；旧分享 /s/* 可开 | M4-S2/S10 回填对拍 | 自动 |
 | M4-8 | 11（计划口径）旧表写点投影双写共生死：注入策略写失败→成员写整体回滚；可映射档双向同步；不可映射授权旧表不动且有提示 | M4-S5 真库双向证明，S10 抽全复跑 | 自动 |
 | M4-9 | shadow 翻转演练：off→shadow 旧测试全绿；连续一迭代 DRIFT_OVERALLOW=0 且 DRIFT_OVERDENY=0；on 后反向 shadow 一迭代；回 off 旧行为恢复 | M4-S3/S10 + drift 计数证据（报告中必须有时间窗证据，不能只有测试夹具） | 自动+留证 |
-| M4-10 | 500 用户/万节点 decide/scope P95 与定数 SQL 计数 | M4-S10 规模门 → docs/baseline/2026-09-17-m4-gate.md | 自动 |
+| M4-10 | 500 用户/万节点 decide/scope P95 与定数 SQL 计数 | M4-S10 规模门 → docs/baseline/2026-09-16-m4-gate.md | 自动 |
 
 ### 2.4 M5 检索（AC-M5-1 崩溃降级 FTS-only 主应用不受影响 + reindex 幂等；AC-M5-2 召回前剔除零泄漏 + 不索引字段物理缺席）
 
@@ -120,7 +120,7 @@
 | M5-5 | 调岗/收权/继承中断/move 后下次搜索即变，无 reindex/缓存等待 | M5-S8 | 自动 |
 | M5-6 | outbox 同事务共生死（每写点）、主写 P95 无回退；覆盖度对账 A-E=0 可复跑 | M5-S1/S11 | 自动 |
 | M5-7 | cloud key 零泄漏：只回 configured/maskedLast4；轮换/清除；JWT_SECRET 变更解密失败优雅回落未配置不 500（B-2）；off 默认零外网连接抓包留证 | M5-S3/S7/S11 | 自动+留证 |
-| M5-8 | Tier-L 双真机 10 万 chunk P95<500ms 十轮（或门不过的降级结论与降杠杆证据） | M5-S10 → docs/baseline/m5-gate.md | 真机（外部依赖） |
+| M5-8 | Tier-L 双真机 10 万 chunk P95<500ms 十轮（或门不过的降级结论与降杠杆证据） | M5-S10 → docs/baseline/2026-09-17-m5-gate-tierL.md | 真机（外部依赖） |
 | M5-9 | 旧 /api/search/ 字节零 diff；MCP record.search 薄封装不重复鉴权（联 M6） | M5-S0 golden；M6-S4 | 自动 |
 
 ### 2.5 M6 MCP（AC-M6-1~4；AC-M6-3 按 C-2 最小集口径）
@@ -311,8 +311,8 @@ curl -fsS http://127.0.0.1:3001/readyz
 |---|---|---|---|---|
 | 通讯录三接口 | 500 成员（宽松门，非 SPEC 硬指标） | s8-members-perf：median 3.27 / p95 8.82ms，三接口并行 6.43ms（45784f4 已留证，目标 P95<150） | **已实测（开发机）** | 宽松门，留证即可 |
 | 组织求值定数 SQL | 6 层×10 兼岗 | s8-query-count：effectiveRoleRows ≤3、listMembers 恒定 4 | 已实测 | — |
-| 导航首屏 | **成员 500、资源 10 万节点首屏导航 <1s（SPEC:134）** | M3-S10：造 10 万实体节点，GET menu P95 + 前端首屏渲染 <1s（后端 ms + DOM 有界断言），tree maxDepth=2 P95，EXPLAIN 无全表 SCAN → docs/baseline/2026-09-16-m3-gate.md | **门时必填**；开发机数字可留证，**对客户承诺以目标机复测为准** | 不达：虚拟滚动/分页展开兜底已在方案内；仍不达阻断"10 万节点"承诺口径，报告标限定值 |
-| 权限判定 | 500 用户/万节点 decide/scope P95、无 N+1、变更秒级 | M4-S10 → 2026-09-17-m4-gate.md | 门时必填 | 不达：缓存快照策略已备；阻断 on 翻转（可停 shadow 发布） |
+| 导航首屏 | **成员 500、资源 10 万节点首屏导航 <1s（SPEC:134）** | M3-S10：造 10 万实体节点，GET menu P95 + 前端首屏渲染 <1s（后端 ms + DOM 有界断言），tree maxDepth=2 P95，EXPLAIN 无全表 SCAN → docs/baseline/2026-09-16-m3-gate.md【待产出：该文件尚不存在，见 2026-09-18-m7-gate-ledger.md C-7】 | **门时必填**；开发机数字可留证，**对客户承诺以目标机复测为准** | 不达：虚拟滚动/分页展开兜底已在方案内；仍不达阻断"10 万节点"承诺口径，报告标限定值 |
+| 权限判定 | 500 用户/万节点 decide/scope P95、无 N+1、变更秒级 | M4-S10 → docs/baseline/2026-09-16-m4-gate.md | 门时必填 | 不达：缓存快照策略已备；阻断 on 翻转（可停 shadow 发布） |
 | M1 容量 | 50 万行 P95<800ms；百万证伪门 | 2026-09-13-m1-s10-gate/t0-closure（已留证）；ADR-0008 三形态 | 已实测（按当时规格机口径） | 阈值触 ADR-0008/PG 评估，非 M7 重跑项 |
 | 检索 | **10 万 chunk 混合检索 P95<500ms** | M5-S10 Tier-L **双真机**（飞牛 x86 + arm，2C4G 本地盘）十轮；灌库时长/主写影响/RSS/库体积；Tier-S 1-10 万流畅 | **只在 Tier-L 真机确认**；spike M5/113ms 与开发机数字仅参考 | **门不过 = GX_EMBEDDING_MODE=off + FTS trigram 默认发布，cloud 为高配能力，不阻塞 M7（B-5 定稿）；对外材料禁写该承诺** |
 | MCP | 工具 30s 返回（SPEC:135）；单批 op≤100/文本≤100KB/10MB | M6-S7 慢夹具 TIMEOUT；限流档不拦正常 agent 流（120/60s） | 门时必填 | 30s 不达：返 jobId 是二期，首版超时即 TIMEOUT 引导重读，不改门限 |

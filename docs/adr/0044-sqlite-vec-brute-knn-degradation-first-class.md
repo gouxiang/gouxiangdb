@@ -1,8 +1,8 @@
 # ADR-0044：sqlite-vec 暴力 KNN 与"降级一等公民"
 
-**状态（Status）**：Accepted（M5 计划 §11 第 3 条、§4.2/§4.9 定稿；spike-sqlite-vec §1/§2/§8 实测；S13 Tier-L 真机门已取证；2026-09-17 M5 出口归档）
+**状态（Status）**：Accepted（M5 计划 §11 第 3 条、§4.2/§4.9 定稿；docs/_archive/originals/planning-phase2-spike-sqlite-vec.md §1/§2/§8 实测；S13 Tier-L 真机门已取证；2026-09-17 M5 出口归档）
 **作者**：架构师 高见远（M5-S14 归档；真机数据由项目总监亲跑、后端 贝洛奇 归档）
-**上游依据**：M5-implementation-plan.md §4.2（BigInt 铁律 :315-321）、§4.9（降级矩阵 :495-509）、§13（规模门 :734）、§11（:709）；spike-sqlite-vec.md §1/§2/§5/§8
+**上游依据**：docs/_archive/originals/planning-phase2-M5-implementation-plan.md §4.2（BigInt 铁律 :315-321）、§4.9（降级矩阵 :495-509）、§13（规模门 :734）、§11（:709）；docs/_archive/originals/planning-phase2-spike-sqlite-vec.md §1/§2/§5/§8
 **关联**：ADR-0042（独立 search.db 连接）；ADR-0045（embedding 仅远端）；ADR-0047（FTS/trigram 与降级路）；ADR-0008（容量证伪门方法论）
 
 ---
@@ -154,7 +154,7 @@ ADR"。本次 S13 **已命中"真机 P95 持续超标"分支**（hybrid 路 10 �
 
 ## 6. 验证证据
 
-- 绑定/加载/打包：spike-sqlite-vec.md §1（loadExtension）、§2（BigInt）、
+- 绑定/加载/打包：docs/_archive/originals/planning-phase2-spike-sqlite-vec.md §1（loadExtension）、§2（BigInt）、
   §5（平台子包/改名 dlsym）、§8（容量与连接）。
 - 真机规模：docs/baseline/2026-09-17-m5-gate-tierL.md（§1 画像、§2 矩阵、
   §3 归因、§4 杠杆、§6 发布结论、§7 arm64 缺口）。

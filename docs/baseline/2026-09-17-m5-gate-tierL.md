@@ -4,7 +4,7 @@
 - 里程碑：M5（向量库与统一检索）S13「规模与真机门」
 - 作者：后端 贝洛奇（真机数据由项目总监在用户提供的 VM 上亲跑；本机 arm64 复现对照由后端补）
 - 性质：**证据文档 + 压测器能力补全**。不改任何生产语义（处置为文档/指引，非改代码）。
-- 实施依据：`docs/planning/phase2/M5-implementation-plan.md` §13（规模门，Q2 参考画像口径）、§0.4（超档发布姿态）、
+- 实施依据：`docs/_archive/originals/planning-phase2-M5-implementation-plan.md` §13（规模门，Q2 参考画像口径）、§0.4（超档发布姿态）、
   §7 S13 行；`PLAN-ADJUST-nas-min-hardware.md` §5.1/§5.2（Tier-L 定义与放行准则）。
 - 复现入口：`apps/api/scripts/bench/m5-gate.ts`（本片新增 `--mode/--k/--scope-caps` 三个杠杆参数）。
 - 相关：§4.9 降级矩阵、`docs/baseline/2026-09-17-m5-gate.md`（S11 EXPLAIN/SQL 计数）

@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（裁决 A-5 2026-09-18 定稿；2026-09-16 M4 出口归档）
 **作者**：后端 贝洛奇
-**上游依据**：M4-implementation-plan.md §0 裁决 A-5、§4.6 写路径切换点表（200+标记+开关往返）、§8（ADR-0040）；SPEC :71-73 policies 写端点
+**上游依据**：docs/_archive/originals/planning-phase2-M4-implementation-plan.md §0 裁决 A-5、§4.6 写路径切换点表（200+标记+开关往返）、§8（ADR-0040）；SPEC :71-73 policies 写端点
 **关联**：ADR-0033（双写方向与旧表投影地位）；ADR-0037（off/shadow 期授权不生效但行保留）；ADR-0035（fieldMask 是主要不可映射类之一）
 
 ---

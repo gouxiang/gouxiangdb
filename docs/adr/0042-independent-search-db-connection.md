@@ -1,8 +1,8 @@
 # ADR-0042：独立 search.db 分库连接（非 ATTACH、非主库虚表）
 
-**状态（Status）**：Accepted（M5 计划 §11 第 1 条、§4.1 三连接拓扑定稿；spike-sqlite-vec §4/§8.1 实测通过；2026-09-17 M5 出口归档）
+**状态（Status）**：Accepted（M5 计划 §11 第 1 条、§4.1 三连接拓扑定稿；docs/_archive/originals/planning-phase2-spike-sqlite-vec.md §4/§8.1 实测通过；2026-09-17 M5 出口归档）
 **作者**：架构师 高见远（M5-S14 归档；实现由后端 贝洛奇 落地）
-**上游依据**：M5-implementation-plan.md §4.1（:213-262）、§11（:707）；spike-sqlite-vec.md §4（多库并存实测）、§8.1（SearchStore 单例）
+**上游依据**：docs/_archive/originals/planning-phase2-M5-implementation-plan.md §4.1（:213-262）、§11（:707）；docs/_archive/originals/planning-phase2-spike-sqlite-vec.md §4（多库并存实测）、§8.1（SearchStore 单例）
 **关联**：ADR-0002（SQLite 单库基线）；ADR-0004（EAV sidecar 只增索引）；ADR-0007（主库在线备份边界）；ADR-0044（vec0 暴力 KNN 与降级）；ADR-0049（双库原子切换与损坏自愈）
 
 ---
@@ -78,7 +78,7 @@ Prisma 的 better-sqlite3 `SearchStore` 单例打开：
 
 ## 5. 验证证据
 
-- 拓扑实测：spike-sqlite-vec.md §4（Prisma 主库与独立 search.db 同进程并存、
+- 拓扑实测：docs/_archive/originals/planning-phase2-spike-sqlite-vec.md §4（Prisma 主库与独立 search.db 同进程并存、
   主库连接 vec_version NOT loaded、search.db 可整文件删重建）。
 - 实现：domain/search/searchStore.ts（单例打开/PRAGMA/loadExtension/双库
   切换）、schema.ts（DDL 自举）、vecLoader.ts。

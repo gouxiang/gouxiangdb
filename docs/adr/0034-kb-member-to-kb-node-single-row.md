@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（裁决 A-1 由项目总监 2026-09-16 批准，覆盖 ARCH-enterprise §6.2 逐 doc 物化草案；2026-09-16 M4 出口归档）
 **作者**：后端 贝洛奇
-**上游依据**：M4-implementation-plan.md §0-3、§5.2-2、§5.3、§10 裁决 A-1；ARCH-enterprise §6.2（被覆盖草案，:600 附近）
+**上游依据**：docs/_archive/originals/planning-phase2-M4-implementation-plan.md §0-3、§5.2-2、§5.3、§10 裁决 A-1；ARCH-enterprise §6.2（被覆盖草案，:600 附近）
 **关联**：ADR-0033（旧表投影总策略）；ADR-0032（祖树继承是纯 allow 并集）；ADR-0036（cutoff 边界下 kb 授予不下 restricted 子树）
 
 ---

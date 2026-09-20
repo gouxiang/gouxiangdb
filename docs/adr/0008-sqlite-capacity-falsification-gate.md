@@ -3,7 +3,7 @@
 **状态**：Accepted（2026-09-13 项目总监终检 `b119697`：§3 选择性三形态分层经总监独立实测数字逐项复核采纳；同次终检发现 §5/§6/附录 仍把已闭环的 #84 当 E4「待实现 undici Agent」、审计脚本路径陈旧（`.py`，实际入库 `.mjs`）、闭环轮 19 场景证据未回填，由总监本人在终检提交中更正这些事实后置 Accepted。**本 Accepted 仅覆盖物理索引层与 T0 连接层结论；端到端 T3 亚秒与 100 万行终验仍 INCONCLUSIVE（见 §6.2），不被本状态覆盖。** 作者不得自行置为 Accepted。）
 **作者**：架构师 高见远
 **评审**：项目总监 大湾区靓仔（三审：机制根因切分、PG 切换阈值、证据分级规则 pass；第 5 节失败轮数字经其对 `5000-c8-on.json` 独立重算 3201/625/2576、对 `*.read.server.log` 独立 FIFO 配对得 540/540/0 与 82/74/8 而采纳，非采信作者口径。四审（2026-09-13）：#84 闭环轮 `t0-rerun-on-c8-full` 19 场景/3,601 采样与读/写两日志 FIFO 账目（home 501/501、view-search 3,500/3,500、write home 120/120、POST 350/350，全 0 尾挂）由总监独立跑 `audit-server-log.mjs` 对账采纳，并据此把连接雪崩根因从"undici 池不足"更正为"高命中慢查询同步阻塞事件循环"，§5 随之回填。）
-**上游依据**：`docs/planning/phase2/M1-implementation-plan.md` §S10（493–516 行）、§8（561–579 行）；`docs/planning/phase1/ARCH-production.md` §3.4；S10 留证 `docs/baseline/2026-09-13-m1-s10-gate.md`（commit `413f4a2`）
+**上游依据**：`docs/_archive/originals/planning-phase2-M1-implementation-plan.md` §S10（493–516 行）、§8（561–579 行）；`docs/planning/phase1/ARCH-production.md` §3.4；S10 留证 `docs/baseline/2026-09-13-m1-s10-gate.md`（commit `413f4a2`）
 **关联 ADR**：ADR-0002（SQLite 选型）、ADR-0003（裸机拓扑）
 
 ---

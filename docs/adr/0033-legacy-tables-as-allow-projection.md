@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（M4 计划 §0-2/§4.6 定稿，2026-09-18 终审；2026-09-16 M4 出口归档）
 **作者**：后端 贝洛奇
-**上游依据**：M4-implementation-plan.md §0-2、§4.6（七维对比与写路径切换点表）、§5（回填与对账）；M3 裁决 9（nav 同事务强一致）
+**上游依据**：docs/_archive/originals/planning-phase2-M4-implementation-plan.md §0-2、§4.6（七维对比与写路径切换点表）、§5（回填与对账）；M3 裁决 9（nav 同事务强一致）
 **关联**：ADR-0032（纯 allow 模型是投影可等价的前提）；ADR-0034（kb_members 投影到 kb 单行）；ADR-0037（三态翻转门与 on+2 迭代退役路径）；ADR-0040（不可映射授权不阻断）
 
 ---

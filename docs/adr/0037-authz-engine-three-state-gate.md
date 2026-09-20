@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（裁决 A-3 2026-09-18 定稿，仿 M1 三态先例；2026-09-16 M4 出口归档）
 **作者**：后端 贝洛奇
-**上游依据**：M4-implementation-plan.md §0-6、§4.8（drift 分类与翻门五条件）、§0-8 裁决 A-6；M1 flags.ts 三态先例
+**上游依据**：docs/_archive/originals/planning-phase2-M4-implementation-plan.md §0-6、§4.8（drift 分类与翻门五条件）、§0-8 裁决 A-6；M1 flags.ts 三态先例
 **关联**：ADR-0033（双写保证 off 回滚物理可行）；ADR-0040（开关往返语义）；runbook authz-engine-flip-on.md；旧守卫清理裁决 AUTHZ-LEGACY-GUARD-CLEANUP.md
 
 ---

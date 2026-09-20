@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（M3 ADR-0031 不建 field 节点的下游定稿；裁决 A-4 最小泄漏两档 2026-09-18 批准；2026-09-16 M4 出口归档）
 **作者**：后端 贝洛奇
-**上游依据**：M4-implementation-plan.md §0-4、§1.3（五出口）、§4.3/§4.4；M3 裁决 3（field 不建 nav 节点）；裁决 A-4
+**上游依据**：docs/_archive/originals/planning-phase2-M4-implementation-plan.md §0-4、§1.3（五出口）、§4.3/§4.4；M3 裁决 3（field 不建 nav 节点）；裁决 A-4
 **关联**：ADR-0032（fieldMask 是命中 allow 之上的能力收窄，不是 deny）；ADR-0033（v1 mask 策略不可映射回旧表）；ADR-0040（legacyUnmappable）
 
 ---

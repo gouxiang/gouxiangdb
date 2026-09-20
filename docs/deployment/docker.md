@@ -62,7 +62,7 @@ VOLUME ["/data"]
 
 ```bash
 cd <仓库根>
-docker build -f deploy/docker/Dockerfile -t gouxiangdb:0.1.0 .
+docker build -f deploy/docker/Dockerfile -t gouxiangdb:0.1.7 .
 ```
 
 ### 2.3 跨架构构建（x86 + arm，发布到多架构）
@@ -72,7 +72,7 @@ docker buildx create --use --name gxbuilder 2>/dev/null || true
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -f deploy/docker/Dockerfile \
-  -t gouxiangdb:0.1.0 --push .
+  -t gouxiangdb:0.1.7 --push .
 ```
 
 - 必须在**目标平台阶段**装原生依赖 + `prisma generate`（Dockerfile 已如此设计）；切勿在 amd64 装好 `node_modules` 再复制进 arm 镜像。
@@ -131,7 +131,7 @@ services:
     build:
       context: ../..            # 仓库根
       dockerfile: deploy/docker/Dockerfile
-    image: gouxiangdb:0.1.0
+    image: gouxiangdb:0.1.7
     container_name: gouxiangdb
     restart: unless-stopped
     ports:

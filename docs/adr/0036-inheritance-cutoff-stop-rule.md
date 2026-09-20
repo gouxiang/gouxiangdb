@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（裁决 A-6 体系与 §4.5 EARS 随 M4 计划终审通过；2026-09-16 M4 出口归档）
 **作者**：后端 贝洛奇
-**上游依据**：M4-implementation-plan.md §0-5、§4.5（cutoff 公式与 EARS）、§7-S7；PRD O6；AC-M4-2
+**上游依据**：docs/_archive/originals/planning-phase2-M4-implementation-plan.md §0-5、§4.5（cutoff 公式与 EARS）、§7-S7；PRD O6；AC-M4-2
 **关联**：ADR-0032（cutoff 内纯 allow 收集）；ADR-0038（私密子树在 scope 中的应用层裁剪）；ADR-0035（面包屑与树剪枝同读就绪门）
 
 ---

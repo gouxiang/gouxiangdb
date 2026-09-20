@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（M2 落地，S5 契约冻结 / S0 特征锁定，2026-09-14）
 **作者**：后端（mvp-dev-expert-team-backend）
-**上游依据**：`docs/planning/phase2/M2-implementation-plan.md` §5-C（角色与求值）、§5-A（M4 衔接）；`docs/planning/phase2/M4-implementation-plan.md` §1（auth_policies 主体三源）
+**上游依据**：`docs/_archive/originals/planning-phase2-M2-implementation-plan.md` §5-C（角色与求值）、§5-A（M4 衔接）；`docs/_archive/originals/planning-phase2-M4-implementation-plan.md` §1（auth_policies 主体三源）
 **关联**：ADR-0023（部门树祖先展开）；旧资源 RBAC 真源 `packages/shared-types/src/permissions.ts`、`apps/api/src/guards.ts`
 
 ---

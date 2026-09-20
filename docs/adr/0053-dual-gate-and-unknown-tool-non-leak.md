@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（M6 计划 §10 第 3 条、§4.4 定稿；R-MCP-1 强制架构；S3 已过双闸门门、S8 已过 AC-M6-1/2 与 IDOR 对抗；UNKNOWN_TOOL 措辞按 S8 实测修正；2026-09-18 M6 出口归档）
 **作者**：架构师 高见远（M6-S9 归档；实现由后端 贝洛奇 落地）
-**上游依据**：M6-implementation-plan.md §4.4（:198-218）、§3-3/§3-5（:114,116）、§10（:428）；spike-mcp-transport.md §4（:261-325，实测）；ARCH-enterprise §8.2（:779）；PRD-enterprise MC2/MC6
+**上游依据**：docs/_archive/originals/planning-phase2-M6-implementation-plan.md §4.4（:198-218）、§3-3/§3-5（:114,116）、§10（:428）；docs/_archive/originals/planning-phase2-spike-mcp-transport.md §4（:261-325，实测）；ARCH-enterprise §8.2（:779）；PRD-enterprise MC2/MC6
 **关联**：ADR-0019（总纲：tools/list 按账号动态过滤 + 执行期强制鉴权双闸门）；ADR-0037（authz 三态门）；ADR-0038/ADR-0046（先收敛后召回，record.search 复用）；ADR-0052（PAT scope 粗筛）；ADR-0054（401 语义）
 
 ---

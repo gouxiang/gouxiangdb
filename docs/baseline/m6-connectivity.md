@@ -4,7 +4,7 @@
 - 里程碑：M6（鉴权 MCP 服务）S8「三客户端 + 四对抗」
 - 作者：后端 贝洛奇
 - 性质：**纯新增测试设施 + 本文件**（零生产码改动、零迁移、零产品语义变更）。
-- 实施依据：`docs/planning/phase2/M6-implementation-plan.md` §S8（§414-417）、§460（11MB 豁免 / 独立限流 / 30s 超时不挂连接）、§317（错误码词汇）、§455-460（AC-M6-1~4 口径）、§12 DoD。
+- 实施依据：`docs/_archive/originals/planning-phase2-M6-implementation-plan.md` §S8（§414-417）、§460（11MB 豁免 / 独立限流 / 30s 超时不挂连接）、§317（错误码词汇）、§455-460（AC-M6-1~4 口径）、§12 DoD。
 - 前置切片：S6b（`d1a7a72`/`3bf7691`）、S7（`b4d51b2`/`4b06af8`）均已过闸。
 - 回滚：删 `apps/api/vitest.e2e.config.ts` + `apps/api/src/e2e/` + 本文件即可（零生产码）。
 

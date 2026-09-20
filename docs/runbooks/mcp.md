@@ -6,7 +6,7 @@
 
 事实真源：
 
-- 实施计划 [`../planning/phase2/M6-implementation-plan.md`](../planning/phase2/M6-implementation-plan.md)
+- 实施计划 [`../_archive/originals/planning-phase2-M6-implementation-plan.md`](../_archive/originals/planning-phase2-M6-implementation-plan.md)
   §4.1 中间件序、§4.3 认证口径、§4.5 工具契约、§5.1 停用联动、§5.3 限流双键、§5.4 可观测、§6 契约纲要；
 - 接口契约 [`../api/openapi.yaml`](../api/openapi.yaml) 的 `/pats` 段与文末 `x-mcp` 扩展节（协议面非 REST）；
 - 出口证据 [`../baseline/m6-connectivity.md`](../baseline/m6-connectivity.md)（三客户端 / 四对抗 / IDOR / 401 五态 / §460 三项）；

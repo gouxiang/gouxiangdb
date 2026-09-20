@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（M6 计划 §10 第 5 条、§0-7/11、S5/S6b 定稿；C-2 终审判定"画布写入必须进 M6、保 AC-M6-3 P0"；S5 已过块移动门、S6b 已过校验器门、S6b-FE 已过浏览器 golden、S8 已过写入面对抗；2026-09-18 M6 出口归档）
 **作者**：架构师 高见远（M6-S9 归档；实现由后端 贝洛奇 与前端 协作落地）
-**上游依据**：M6-implementation-plan.md §0-7（:23）/§0-11（:27）、§4.5（:220-243）、S5（:388-392）、S6b（:399-407）、§11 C-2（:442）、§12-3（:457）、§10（:430）；SPEC-enterprise §9 AC-M6-3（:127）、§10（:135）；ARCH-enterprise §1.4（Plait 六不变量）、§8.5；docs/baseline/m6-connectivity.md §4.3/§10
+**上游依据**：docs/_archive/originals/planning-phase2-M6-implementation-plan.md §0-7（:23）/§0-11（:27）、§4.5（:220-243）、S5（:388-392）、S6b（:399-407）、§11 C-2（:442）、§12-3（:457）、§10（:430）；SPEC-enterprise §9 AC-M6-3（:127）、§10（:135）；ARCH-enterprise §1.4（Plait 六不变量）、§8.5；docs/baseline/m6-connectivity.md §4.3/§10
 **关联**：ADR-0019（总纲三语言与能力说明书）；ADR-0053（画布写走引擎 u 判定）；ADR-0046（record.search 复用 M5——同属"薄封装既有服务"模式）
 
 ---

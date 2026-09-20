@@ -55,7 +55,7 @@ GouXiangDB-v2/
 │   └── test-fixtures/ # 测试数据集（用于深度对比测试）
 ├── docs/
 │   ├── adr/           # 架构决策记录
-│   ├── test-matrix.md # 功能对比测试矩阵（回归基线）
+│   ├── test-matrix.md # 功能对比测试矩阵（回归基线；2026-09-20 已归档为 docs/_archive/originals/test-matrix-v1-v2-regression.md）
 │   └── migration/     # v1 → v2 数据迁移脚本
 ├── scripts/
 │   └── compare-test.sh # 深度对比测试脚本（v1 vs v2）

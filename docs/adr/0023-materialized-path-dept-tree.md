@@ -2,7 +2,7 @@
 
 **状态（Status）**：Accepted（M2 落地，S3 实现 / S8 对抗验证，2026-09-14）
 **作者**：后端（mvp-dev-expert-team-backend）
-**上游依据**：`docs/planning/phase2/M2-implementation-plan.md` §5-B（部门树）、§7-S3/S8
+**上游依据**：`docs/_archive/originals/planning-phase2-M2-implementation-plan.md` §5-B（部门树）、§7-S3/S8
 **关联**：ADR-0002（SQLite 选型）；有效角色求值的祖先展开见 ADR-0024；PostgreSQL 平移通道见 ADR-0008
 
 ---

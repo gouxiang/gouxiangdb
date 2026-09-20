@@ -3,7 +3,7 @@
 **状态（Status）**：Accepted（M2 落地，S2 机制 / S6 闭环，2026-09-14）
 **作者**：后端（mvp-dev-expert-team-backend）
 **编号说明**：0011-0020 由企业版架构 §10.4 分配、0021 已用于 esbuild 扁平构建；M2 三份组织决策顺延使用 0022/0023/0024。
-**上游依据**：`docs/planning/phase2/M2-implementation-plan.md` §5-D（鉴权收口）、§7-S2/S6、§9 DoD-1
+**上游依据**：`docs/_archive/originals/planning-phase2-M2-implementation-plan.md` §5-D（鉴权收口）、§7-S2/S6、§9 DoD-1
 **关联**：ADR-0003（裸机单实例拓扑）、ADR-0008（容量与多实例升级阈值）；M6 个人访问令牌（PAT）为独立凭据，不归属本机制
 
 ---

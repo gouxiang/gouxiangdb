@@ -6,7 +6,7 @@
 - search.db 物理损坏自愈（AC-M5-1 Gap A）与降级跳变审计（Gap B）的现场判读；
 - vec0 原生扩展、musl 禁令、search.db 可重建资产边界、reindex、NFS、model/dim 切换。
 
-事实真源：[`../planning/phase2/M5-implementation-plan.md`](../planning/phase2/M5-implementation-plan.md) §4.9 降级矩阵、§6 flag 纪律、§12 供应链；ADR-0042/0044/0045/0046/0048/0049/0050。
+事实真源：[`../_archive/originals/planning-phase2-M5-implementation-plan.md`](../_archive/originals/planning-phase2-M5-implementation-plan.md) §4.9 降级矩阵、§6 flag 纪律、§12 供应链；ADR-0042/0044/0045/0046/0048/0049/0050。
 
 ---
 
