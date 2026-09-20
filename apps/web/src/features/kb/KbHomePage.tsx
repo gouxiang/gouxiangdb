@@ -21,6 +21,7 @@ import { EntityIconPicker, resolvedEntityColor, resolveEntityIcon } from "../../
 import type { KbDocDTO, KbDocKind } from "../../api/client";
 import { useKb, useKbDocs, useRenameDoc, useDeleteDoc, useRestoreDoc } from "./kb-hooks";
 import { DocKindIcon, formatTime, roleLabel } from "./kb-ui";
+import { KbListFailure } from "./KbListFailure";
 import { colors } from "@gx/design-tokens";
 // 阶段 4：删除统一走 L2 确认 + 撤销 toast（R-D-23 / R-I-08 / R-D-22）
 import { confirmSoftDelete } from "../../components/feedback";
@@ -56,7 +57,13 @@ export default function KbHomePage() {
   // 文档/画布「图标与颜色」入口的下标：存 id 而非快照，改完 invalidation 回来即时跟着变
   const [iconFor, setIconFor] = useState<string | null>(null);
 
-  const { data: docs, isLoading } = useKbDocs(kbId, filter, debouncedQ);
+  const {
+    data: docs,
+    isLoading,
+    isError: docsError,
+    error: docsErr,
+    refetch: refetchDocs,
+  } = useKbDocs(kbId, filter, debouncedQ);
   const deleteDoc = useDeleteDoc(kbId!);
   const restoreDoc = useRestoreDoc(kbId!);
   // 重命名目标变化时，mutation 闭包跟随最新 docId（hook 始终调用，仅参数变化）
@@ -168,6 +175,17 @@ export default function KbHomePage() {
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {isLoading ? (
           <div className="flex justify-center py-20"><Spinner size={22} /></div>
+        ) : docsError ? (
+          // PERM-05（WALK-权限组合-2026-09-20）：原先失败态不存在，`length === 0` 直接判空。
+          // 局外人手输 `/kb/:kbId` 时 `GET /api/kb/:kbId/docs`（docs.ts:34 requireKb →
+          // 403「无权访问该知识库」）是真的失败、docs 恒 undefined，于是被渲染成
+          // 「还没有内容 / 新建一篇 Markdown 文档…」的假空态 —— 而手输**文档** URL
+          // 却是正确的「没有访问权限」。失败判定必须排在空态之前。
+          <KbListFailure
+            error={docsErr}
+            onRetry={() => void refetchDocs()}
+            onBack={() => navigate("/")}
+          />
         ) : (docs ?? []).length === 0 ? (
           // R-D-13/14：搜索无结果走「筛选空态」（带清除筛选），首次为空走「首次空态」
           <EmptyState
