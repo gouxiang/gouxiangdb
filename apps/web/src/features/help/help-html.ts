@@ -27,10 +27,15 @@ const FENCE_LINE = /^\s*(```|~~~)/;
 
 /**
  * 抽取标题生成目录（跳过围栏代码块内的 `#`，那不是标题而是示例语法）。
- * id 与 renderMarkdown 内建的 `h-${slugify(text)}` 完全同算法，保证 TOC 与正文对得上。
+ *
+ * H-04（2026-09-20 帮助中心验收）：合并文档中同名标题（如两处 `## 全局搜索`）会算出同一个
+ * slug → 同一个锚点 id。后果是（a）第二个永远跳不过去、（b）目录 React key 重复导致过滤后
+ * 残留无关项、（c）滚动高亮串台。故在生成 id 时对重复 slug 追加 `-2` / `-3` 序号，
+ * 文本与层级保持不变（读者看到的仍是两个同名章节）。
  */
 export function extractHelpHeadings(md: string): HelpHeading[] {
   const out: HelpHeading[] = [];
+  const seen = new Map<string, number>();
   let inFence = false;
   for (const raw of md.replace(/\r\n/g, "\n").split("\n")) {
     if (FENCE_LINE.test(raw)) {
@@ -41,9 +46,22 @@ export function extractHelpHeadings(md: string): HelpHeading[] {
     const m = HEADING_LINE.exec(raw);
     if (!m) continue;
     const text = m[2]!;
-    out.push({ id: `h-${slugify(text)}`, level: m[1]!.length, text });
+    const base = `h-${slugify(text)}`;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    out.push({ id: n === 1 ? base : `${base}-${n}`, level: m[1]!.length, text });
   }
   return out;
+}
+
+/** 目录检索：按关键词过滤标题，命中项全量返回（id 唯一，过滤后不会残留无关项）。 */
+export function filterHelpHeadings(
+  headings: readonly HelpHeading[],
+  query: string,
+): HelpHeading[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [...headings];
+  return headings.filter((h) => h.text.toLowerCase().includes(q));
 }
 
 /**

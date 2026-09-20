@@ -8,7 +8,7 @@ import { useMemo, useState } from "react";
 
 import { Icon } from "../../components/icons";
 import { Input } from "../../components/ui";
-import type { HelpHeading } from "./help-html";
+import { filterHelpHeadings, type HelpHeading } from "./help-html";
 
 export interface HelpCenterTocProps {
   headings: readonly HelpHeading[];
@@ -33,11 +33,9 @@ export function HelpCenterToc({ headings, activeId, onSelect, compact = false }:
   const [query, setQuery] = useState("");
 
   // 过滤只看标题文本（中文按子串匹配即可，不做分词）；空串返回全量。
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return headings;
-    return headings.filter((h) => h.text.toLowerCase().includes(q));
-  }, [headings, query]);
+  // 抽到 help-html.filterHelpHeadings：与目录/锚点同一模块，便于 node 环境直接单测
+  // （H-04：重复标题曾导致 id 撞车、key 重复，过滤结果里会残留无关项）。
+  const visible = useMemo(() => filterHelpHeadings(headings, query), [headings, query]);
 
   return (
     <nav
