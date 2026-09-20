@@ -23,7 +23,7 @@ import {
   hydrateRecordById,
 } from "../domain/recordService.js";
 import { isComputedFieldType, isSystemFieldType } from "../domain/types.js";
-import { parseCSV, inferFieldType, coerceCellValue } from "../domain/csv.js";
+import { parseCSV, inferFieldType, coerceCellValueWithIssue } from "../domain/csv.js";
 import { resolveFieldRestoreName, resolveTableRestoreName } from "../domain/restoreName.js";
 import { createField } from "../domain/fieldService.js";
 import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
@@ -659,7 +659,8 @@ records.post("/csv-import", async (c) => {
   const allFields = await loadTableFields(tableId);
   const fieldById = new Map(allFields.map((f) => [f.id, f]));
 
-  for (const row of dataRows) {
+  for (let ri = 0; ri < dataRows.length; ri++) {
+    const row = dataRows[ri]!;
     if (row.every((cell) => cell.trim() === "")) continue;
     const payload: Record<string, unknown> = {};
     for (let ci = 0; ci < columnFieldIds.length; ci++) {
@@ -667,7 +668,11 @@ records.post("/csv-import", async (c) => {
       if (!fid) continue;
       const f = fieldById.get(fid);
       if (!f || isComputedFieldType(f.type) || isSystemFieldType(f.type)) continue;
-      payload[fid] = coerceCellValue(row[ci] ?? "", f.type as never);
+      // I-1：改用带诊断版本——非法值不再静默置空，记一条 errors 让「问题行」可见；
+      // 但不中断导入：该行其余列照常落库（沿用既有的部分导入语义）。
+      const { value, issue } = coerceCellValueWithIssue(row[ci] ?? "", f.type as never);
+      if (issue) errors.push(`第 ${ri + 1} 行「${f.name}」的${issue}`);
+      payload[fid] = value;
     }
     try {
       // U-4：单行「建记录 + 写字段」事务化——中途失败整行回滚，

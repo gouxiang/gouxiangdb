@@ -172,10 +172,25 @@ export function inferFieldType(values: string[]): FieldMeta["type"] {
   return "singleLineText";
 }
 
-/** 把 CSV 单元格文本转成对应字段类型的强类型值 */
-export function coerceCellValue(raw: string, type: FieldMeta["type"]): FieldValue {
+/** 勾选列的真值原文（与 `coerceCellValue` 历史语义一致）。 */
+const CHECKBOX_TRUE = new Set(["true", "1", "是", "TRUE"]);
+/** 勾选列的假值原文。这些是合法写法（不是被吞掉的脏数据），不产生 issue。 */
+const CHECKBOX_FALSE = new Set(["false", "0", "否", "FALSE"]);
+
+/** 单元格强转结果。`issue` 非空 = 原文不合法、已被降级（按空值 / 按「否」导入）。 */
+export interface CellCoerceResult {
+  value: FieldValue;
+  /** 面向用户的降级说明（不含行列信息，由调用方补「第 N 行「列名」的」前缀）。 */
+  issue?: string;
+}
+
+/**
+ * 带诊断的单元格强转：与 `coerceCellValue` 的取值语义完全一致，
+ * 额外返回「原文是否被静默降级」的说明，供导入方把问题行计入结果而不是无声吞掉（I-1）。
+ */
+export function coerceCellValueWithIssue(raw: string, type: FieldMeta["type"]): CellCoerceResult {
   const v = raw.trim();
-  if (v === "") return null;
+  if (v === "") return { value: null }; // 空串本来就是合法空值，不算问题
   switch (type) {
     case "number":
     case "currency":
@@ -184,22 +199,28 @@ export function coerceCellValue(raw: string, type: FieldMeta["type"]): FieldValu
     case "duration":
     case "autoNumber": {
       const n = Number(v);
-      return Number.isFinite(n) ? n : null;
+      return Number.isFinite(n)
+        ? { value: n }
+        : { value: null, issue: `值「${v}」不是合法的数字，已按空值导入` };
     }
     case "checkbox":
-      return v === "true" || v === "1" || v === "是" || v === "TRUE";
+      if (CHECKBOX_TRUE.has(v)) return { value: true };
+      if (CHECKBOX_FALSE.has(v)) return { value: false };
+      return { value: false, issue: `值「${v}」不是合法的勾选值（true / false / 1 / 0 / 是 / 否），已按「否」导入` };
     case "multiSelect":
-      return v
-        .split(";")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      return { value: v.split(";").map((s) => s.trim()).filter(Boolean) };
     case "json":
       try {
-        return JSON.parse(v) as Record<string, unknown>;
+        return { value: JSON.parse(v) as Record<string, unknown> };
       } catch {
-        return null;
+        return { value: null, issue: `值「${v}」不是合法的 JSON，已按空值导入` };
       }
     default:
-      return v;
+      return { value: v };
   }
+}
+
+/** 把 CSV 单元格文本转成对应字段类型的强类型值（无诊断版本，取值语义与历史一致）。 */
+export function coerceCellValue(raw: string, type: FieldMeta["type"]): FieldValue {
+  return coerceCellValueWithIssue(raw, type).value;
 }
