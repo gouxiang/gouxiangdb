@@ -27,9 +27,6 @@
 .env
 apps/*/.env
 
-# 桌面壳构建产物与目标平台二进制（镜像只构建 web+api，不碰 tauri）
-apps/desktop/src-tauri/target
-
 # 临时与系统文件
 **/.DS_Store
 **/coverage

@@ -20,7 +20,7 @@
 |---|---|
 | 后端 | Node.js + **Hono 4** + **Prisma 5** + **SQLite**（WAL 单写者）；esbuild 扁平生产打包 |
 | 前端 | React 18 + Vite + Tailwind + TanStack Query；图标单一 `icons.tsx`，色板走 `@gx/design-tokens` |
-| 桌面壳 | Tauri（`apps/desktop`） |
+| 桌面端 | 不在本期范围（Tauri 路线已砍；未来若重启会另起项目基于已有核心封壳） |
 | 共享 | `@gx/shared-types`（类型 + 筛选/关系/权限语义）、`@gx/design-tokens`、`@gx/blocks`、`@gx/canvas` |
 | 检索 | 独立 `search.db` + **sqlite-vec（vec0）** + FTS5 trigram；embedding 出厂默认 `off`，仅远端 OpenAI 兼容 API |
 | AI 接入 | **MCP**（`@modelcontextprotocol/sdk` 官方 Streamable HTTP 传输 + PAT 凭据 + 双闸门）——M6 后为唯一 AI 接入核心 |
@@ -36,8 +36,7 @@ GouXiangDB/
 │   │   ├── prisma/{schema.prisma,migrations/}   # 手写 SQL 迁移，生产用 migrate deploy
 │   │   ├── scripts/                              # build / backup / init-admin / nav-reconcile
 │   │   └── src/
-│   ├── web/              # React + Vite 前端
-│   └── desktop/          # Tauri 桌面壳
+│   └── web/              # React + Vite 前端
 ├── packages/
 │   ├── shared-types/     # 前后端共享 TS 类型与语义（权限/筛选/关系/策略 DTO）
 │   ├── design-tokens/    # 跨端设计 token（自 v1 GXTheme 移植）
@@ -54,7 +53,7 @@ GouXiangDB/
 
 ## 本地开发
 
-前置：Node ≥ 20（**部署侧统一 v22**）、pnpm ≥ 9（`packageManager` 锁定 `pnpm@9.0.0`）。纯 Web + API 开发不需要 Rust；仅 Tauri 桌面壳需要 Rust + Cargo。无需外部数据库。
+前置：Node ≥ 20（**部署侧统一 v22**）、pnpm ≥ 9（`packageManager` 锁定 `pnpm@9.0.0`）。桌面端不在本期范围，无需 Rust/Cargo。无需外部数据库。
 
 ```bash
 # 安装
