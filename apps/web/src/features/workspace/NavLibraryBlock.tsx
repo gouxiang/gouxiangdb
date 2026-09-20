@@ -13,6 +13,7 @@
 
 import { useState } from "react";
 import { Icon } from "../../components/icons";
+import { useCanCreateLibrary } from "../../api/hooks";
 import { LibrarySwitcher, type ActiveLibrary } from "../../components/LibrarySwitcher";
 import { CreateLibraryModal } from "../../components/CreateLibraryModal";
 
@@ -33,27 +34,33 @@ export function NavLibraryBlock({
   collapsed?: boolean;
 }) {
   const [creating, setCreating] = useState(false);
+  // 权限门：无 create_library 的用户整个入口不渲染（不是 disabled）——加载中一律按无权限处理。
+  const canCreate = useCanCreateLibrary();
 
   return (
     <div className="flex flex-col">
       <LibrarySwitcher active={active} collapsed={collapsed} />
-      <button
-        type="button"
-        onClick={() => setCreating(true)}
-        title={collapsed ? CREATE_LABEL : undefined}
-        aria-label={CREATE_LABEL}
-        data-nav-row="library-create"
-        className={collapsed ? `${BLOCK_ROW} justify-center px-0` : BLOCK_ROW}
-      >
-        <Icon name="plus" size={14} className="shrink-0 text-gx-accent" />
-        {collapsed ? null : <span className="flex-1 truncate text-left">{CREATE_LABEL}</span>}
-      </button>
-      {/* 不传 fixedType：弹窗内渲染「智能数据库 / 知识库」二选一，两条创建流程共用一份 */}
-      <CreateLibraryModal
-        open={creating}
-        title={CREATE_LABEL}
-        onClose={() => setCreating(false)}
-      />
+      {canCreate && (
+        <>
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            title={collapsed ? CREATE_LABEL : undefined}
+            aria-label={CREATE_LABEL}
+            data-nav-row="library-create"
+            className={collapsed ? `${BLOCK_ROW} justify-center px-0` : BLOCK_ROW}
+          >
+            <Icon name="plus" size={14} className="shrink-0 text-gx-accent" />
+            {collapsed ? null : <span className="flex-1 truncate text-left">{CREATE_LABEL}</span>}
+          </button>
+          {/* 不传 fixedType：弹窗内渲染「智能数据库 / 知识库」二选一，两条创建流程共用一份 */}
+          <CreateLibraryModal
+            open={creating}
+            title={CREATE_LABEL}
+            onClose={() => setCreating(false)}
+          />
+        </>
+      )}
     </div>
   );
 }

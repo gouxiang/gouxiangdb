@@ -7,7 +7,7 @@
 
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useBases } from "../api/hooks";
+import { useBases, useCanCreateLibrary } from "../api/hooks";
 import { useKbList } from "../features/kb/kb-hooks";
 import { Input, Menu, MenuItem, MenuDivider, Popover } from "./ui";
 import { Icon } from "./icons";
@@ -28,6 +28,8 @@ export function LibrarySwitcher({ active, collapsed = false }: { active: ActiveL
   const navigate = useNavigate();
   const { data: bases } = useBases();
   const { data: kbs } = useKbList();
+  // 权限门：无 create_library 的用户不渲染底部「新建库」菜单项（连同分割线一并去掉）。
+  const canCreate = useCanCreateLibrary();
 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -155,12 +157,16 @@ export function LibrarySwitcher({ active, collapsed = false }: { active: ActiveL
               <div className="px-3 py-2 text-gx-12 text-gx-text-hint">没有匹配的库</div>
             )}
           </div>
-          <MenuDivider />
-          <MenuItem icon="plus" label="新建库" onClick={() => { setOpen(false); setShowNew(true); }} />
+          {canCreate && (
+            <>
+              <MenuDivider />
+              <MenuItem icon="plus" label="新建库" onClick={() => { setOpen(false); setShowNew(true); }} />
+            </>
+          )}
         </Menu>
       </Popover>
 
-      <CreateLibraryModal open={showNew} onClose={() => setShowNew(false)} />
+      {canCreate && <CreateLibraryModal open={showNew} onClose={() => setShowNew(false)} />}
     </div>
   );
 }

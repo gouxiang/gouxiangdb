@@ -15,7 +15,7 @@ import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from
 
 import { useAuthStore } from "./store/auth";
 import { CHANGE_PASSWORD_PATH, shouldForceChangePassword } from "./features/auth/force-change-guard";
-import { useBases, useTables, useViews } from "./api/hooks";
+import { useBases, useTables, useViews, useCanCreateLibrary } from "./api/hooks";
 import { Spinner } from "./components/ui";
 import { OfflineBanner } from "./components/states";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -71,13 +71,19 @@ function RequireAuth({ children }: { children: ReactNode }) {
 /** / → 第一个 Base */
 function RootRedirect() {
   const { data: bases, isLoading } = useBases();
+  // 建库权限门：无 create_library 时不指引用户去点一个他看不到的「新建库」入口。
+  const canCreate = useCanCreateLibrary();
   if (isLoading) return <Loading />;
   if (!bases || bases.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-gx-13 text-gx-text-tertiary">
         <div>还没有任何 Base</div>
-        {/* 新建入口在顶栏库名（无库时显示「选择库」）下拉里，不在侧栏；文案指向真实入口。 */}
-        <div className="text-gx-12 text-gx-text-hint">点击顶栏的库名（或「选择库」），选择「新建库」开始使用</div>
+        {/* 有权限时指向真实入口（一级导航「新建库」）；无权限时提示找管理员，不误导。 */}
+        <div className="text-gx-12 text-gx-text-hint">
+          {canCreate
+            ? "点击顶栏的库名（或「选择库」），选择「新建库」开始使用"
+            : "还没有可用的库，请联系管理员为你开通"}
+        </div>
       </div>
     );
   }

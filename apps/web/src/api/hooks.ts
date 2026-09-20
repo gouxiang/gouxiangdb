@@ -10,7 +10,7 @@ import {
   useQueryClient,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { Auth, Bases, Tables, Fields, Records, Views, SearchApi } from "./client";
+import { Auth, Bases, Tables, Fields, Records, Views, SearchApi, OrgMembers } from "./client";
 import { useAuthStore } from "../store/auth";
 import type {
   BaseDTO,
@@ -83,6 +83,27 @@ export function useMe() {
     queryFn: async () => (await Auth.me()).user,
     retry: false,
   });
+}
+
+/**
+ * 建库 / 建知识库权限门：当前登录者是否持有 create_library 动作。
+ *
+ * queryKey 用字面量 ["org","me","effective-roles"]，与 features/contacts/contacts-hooks.ts
+ * 的 ORG_QK.myEffectiveRoles 同键——两处共享同一份缓存，不新增请求。
+ * 这里不 import contacts-hooks：api 层不反向依赖 features 层。
+ *
+ * 默认拒绝：加载中 / 请求失败 / 数据缺失一律 false。宁可暂时不渲染建库入口，
+ * 也不能让无权限用户看见按钮（后端 assertCanCreateLibrary 同步门控 403）。
+ */
+export function useCanCreateLibrary(): boolean {
+  const query = useQuery({
+    queryKey: ["org", "me", "effective-roles"],
+    queryFn: async () => (await OrgMembers.myEffectiveRoles()).roles,
+    staleTime: 60_000,
+    retry: false,
+  });
+  if (query.isLoading || query.isError || !query.data) return false;
+  return query.data.some((r) => r.actions.includes("create_library"));
 }
 
 /** 个人中心 — 更新昵称/用户名/手机/简介 */

@@ -7,6 +7,7 @@ import { Icon } from "../../components/icons";
 import { Input, Modal, Spinner, toast } from "../../components/ui";
 import { resolveEntityIcon } from "../../components/EntityIconPicker";
 import { useKbList, useCreateKb } from "./kb-hooks";
+import { useCanCreateLibrary } from "../../api/hooks";
 import { formatTime, roleLabel } from "./kb-ui";
 import { AVATAR_PALETTE } from "@gx/design-tokens";
 
@@ -22,6 +23,8 @@ export default function KbListPage() {
   const createKb = useCreateKb();
   const [showNew, setShowNew] = useState(false);
   const [name, setName] = useState("");
+  // 权限门：无 create_library 的用户两个新建入口都不渲染（右上角按钮 + 列表末尾虚线卡片）。
+  const canCreate = useCanCreateLibrary();
 
   async function create() {
     if (!name.trim() || createKb.isPending) return;
@@ -43,14 +46,16 @@ export default function KbListPage() {
             <h1 className="text-gx-18 font-semibold text-gx-text-primary">知识库</h1>
             <p className="mt-1 text-gx-12 text-gx-text-tertiary">文档与画布的团队知识空间，与数据表相互独立。</p>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowNew(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg bg-gx-accent px-3 text-gx-13 font-medium text-white hover:brightness-95"
-          >
-            <Icon name="plus" size={15} />
-            新建知识库
-          </button>
+          {canCreate && (
+            <button
+              type="button"
+              onClick={() => setShowNew(true)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg bg-gx-accent px-3 text-gx-13 font-medium text-white hover:brightness-95"
+            >
+              <Icon name="plus" size={15} />
+              新建知识库
+            </button>
+          )}
         </div>
 
         {isLoading ? (
@@ -84,45 +89,50 @@ export default function KbListPage() {
             ))}
 
             {/* 新建卡片 */}
-            <button
-              type="button"
-              onClick={() => setShowNew(true)}
-              className="flex items-center justify-center gap-2 rounded-gx-lg border border-dashed border-gx-border-strong bg-gx-surface/50 p-4 text-gx-13 text-gx-text-tertiary hover:border-gx-accent hover:text-gx-accent"
-            >
-              <Icon name="plus" size={16} />
-              新建知识库
-            </button>
+            {canCreate && (
+              <button
+                type="button"
+                onClick={() => setShowNew(true)}
+                className="flex items-center justify-center gap-2 rounded-gx-lg border border-dashed border-gx-border-strong bg-gx-surface/50 p-4 text-gx-13 text-gx-text-tertiary hover:border-gx-accent hover:text-gx-accent"
+              >
+                <Icon name="plus" size={16} />
+                新建知识库
+              </button>
+            )}
           </div>
         )}
       </div>
 
-      <Modal
-        open={showNew}
-        title="新建知识库"
-        onClose={() => setShowNew(false)}
-        footer={
-          <>
-            <button className="text-gx-13 text-gx-text-tertiary hover:text-gx-text-primary" onClick={() => setShowNew(false)}>
-              取消
-            </button>
-            <button
-              className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
-              disabled={!name.trim() || createKb.isPending}
-              onClick={create}
-            >
-              创建
-            </button>
-          </>
-        }
-      >
-        <Input
-          autoFocus
-          placeholder="知识库名称，如：产品资料库"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && create()}
-        />
-      </Modal>
+      {/* 弹窗随权限门一并收起：无权限时不存在任何可提交的建库表单 */}
+      {canCreate && (
+        <Modal
+          open={showNew}
+          title="新建知识库"
+          onClose={() => setShowNew(false)}
+          footer={
+            <>
+              <button className="text-gx-13 text-gx-text-tertiary hover:text-gx-text-primary" onClick={() => setShowNew(false)}>
+                取消
+              </button>
+              <button
+                className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
+                disabled={!name.trim() || createKb.isPending}
+                onClick={create}
+              >
+                创建
+              </button>
+            </>
+          }
+        >
+          <Input
+            autoFocus
+            placeholder="知识库名称，如：产品资料库"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && create()}
+          />
+        </Modal>
+      )}
     </div>
   );
 }
