@@ -136,6 +136,42 @@ function syncAssets() {
   return n;
 }
 
+/**
+ * 配图引用完整性校验（H-159，2026-09-20）。
+ *
+ * 为什么必须加这道闸门：部署机的 nginx 对不存在的 `.png` 会走 SPA 回退，返回
+ * `200 + text/html + 773 字节的 index.html`。浏览器拿到 HTML 无法解码图片，
+ * 表现为**裂图且不报 404**——服务端日志、CI、健康探针全都看不出来，只能靠
+ * DOM 里 `naturalWidth === 0` 才能发现。上一版就是这样静默漏了 9 张素材。
+ *
+ * 故在同步期直接把「正文引用了但仓库里没有」的图列出来并失败（exit≠0）。
+ * 确需临时放行（例如素材尚未产出但要先进构建）时设 GX_HELP_ALLOW_MISSING_IMAGES=1。
+ */
+function checkImageRefs(md) {
+  const refs = new Set();
+  for (const m of md.matchAll(/!\[[^\]]*\]\(\s*assets\/([^)\s]+)\s*\)/g)) {
+    refs.add(m[1]);
+  }
+  const missing = [...refs].filter((name) => {
+    try {
+      return !statSync(join(SRC_ASSETS, name)).isFile();
+    } catch {
+      return true;
+    }
+  });
+  if (missing.length === 0) return { total: refs.size, missing };
+  const allow = process.env.GX_HELP_ALLOW_MISSING_IMAGES === "1";
+  const detail = `\n  - ${missing.join("\n  - ")}`;
+  const msg =
+    `[sync-help-center] ${allow ? "警告" : "错误"}：正文引用了 ${refs.size} 张配图，` +
+    `其中 ${missing.length} 张在 ${SRC_ASSETS} 下不存在：${detail}`;
+  if (allow) {
+    console.log(msg + "\n[sync-help-center] 已按 GX_HELP_ALLOW_MISSING_IMAGES=1 放行，页面上会是裂图。");
+    return { total: refs.size, missing };
+  }
+  throw new Error(msg + "\n[sync-help-center] 请补齐素材，或设 GX_HELP_ALLOW_MISSING_IMAGES=1 临时放行。");
+}
+
 function main() {
   const names = listParts();
   const merged = mergeParts(names);
@@ -145,11 +181,13 @@ function main() {
   writeFileSync(OUT_WEB_MD, merged);
 
   const images = syncAssets();
+  const { total, missing } = checkImageRefs(merged);
   const bytes = Buffer.byteLength(merged, "utf8");
   if (bytes === 0) throw new Error("拼接结果为空（不应发生）：请检查 _parts/ 分片内容");
   console.log(
     `[sync-help-center] ${names.length} 片 → ${OUT_MERGED}（${bytes} 字节）；` +
-      `副本 → ${OUT_WEB_MD}；截图 ${images} 个 → ${OUT_ASSETS}`,
+      `副本 → ${OUT_WEB_MD}；截图 ${images} 个 → ${OUT_ASSETS}；` +
+      `配图引用 ${total} 处（缺失 ${missing.length}）`,
   );
 }
 

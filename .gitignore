@@ -64,3 +64,8 @@ screenshots/
 docs/help-center/HELP-CENTER.md
 apps/web/src/features/help/generated/
 apps/web/public/help/
+
+# ============ 走查/验收的过程产物（playwright 控制台 dump、错误快照等，非结论文档）============
+# 结论一律落在 docs/acceptance/<日期>-<主题>.md；控制台日志与 locator 错误快照不入仓。
+docs/acceptance/acceptance-error.json
+docs/acceptance/acceptance-logs.json
