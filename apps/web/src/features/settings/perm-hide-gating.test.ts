@@ -65,7 +65,10 @@ describe("权限治理第二批：管理类隐藏 / 数据编辑类保留禁用"
   });
 
   it("红线：表格工具栏「新建记录」仍是 disabled + 原因，不许改成隐藏", () => {
-    const src = read("../grid/GridToolbar.tsx");
+    // 改断言原因：设置项下移成工具栏第二行后，「新建记录」的实现搬到了
+    // GridToolbarSettingsRow.tsx（单文件 ≤300 行公约），口径一字未动，仍是
+    // disabled + 原因 + 外层 span 承接 title（PERM-A2）。故断言对两个文件一起生效。
+    const src = read("../grid/GridToolbar.tsx") + "\n" + read("../grid/GridToolbarSettingsRow.tsx");
     expect(src).toContain("disabled={!permissions.canEditData}");
     expect(src).toContain("无编辑权限");
     expect(src).toContain("新建记录");

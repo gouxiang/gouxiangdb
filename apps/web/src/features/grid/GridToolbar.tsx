@@ -1,44 +1,29 @@
-// 网格工具栏：新建 / 行高 / 字段显隐 / 筛选 / 分组 / 排序 / 行颜色 / 搜索 / 导入导出 / 批量操作。
+// apps/web/src/features/grid/GridToolbar.tsx
+// 网格工具栏：第一行承载视图切换器（宿主传入）/ 搜索 / 导入 / 导出 / 更多（表级操作）；
+// 第二行（GridToolbarSettingsRow）承载七个视图呈现配置项。
 //
-// 窄屏（R-D-31/R-D-32/R-D-33）口径：按钮**不删功能、只收入口**。
-//   <1440：行高 / 字段 / 行颜色 收进右端「更多」溢出菜单（drill-down 打开同一份面板）
-//          （PERM-08：原阈值 <1024 挡不住 1280 档溢出，提到 1440；见组件内 wideLayout 注释）
-//   <768 ：筛选 / 分组 / 排序 也收进同一个溢出菜单，搜索框改为自适应宽度
-//   ≥1024：与改动前完全一致（全部按钮常驻、文案不变）
-// 收起的每一个按钮在溢出菜单里都有可点的等价项（功能优先，禁止为布局删按钮）。
-// 断行根因：ToolButton 原来既没有 shrink-0 也没有 whitespace-nowrap，窄屏下 flex 子项被压到
-// 小于内容宽度，中文按字断行 → 每个字一行。现在 nowrap + shrink-0 保证任何档位都单行。
+// 两行的职责切分见 GridToolbarSettingsRow 文件头注释：原先七项设置与搜索、导入导出同处一行，
+// 1280 档撑不下只能大量收进「更多」；下移成独立一行后宽屏七项全部常驻。
+//
+// 其余口径不变：
+//   ① 导入 / 导出是常驻按钮（第四批入口收敛后全站唯一入口），落在搜索框右侧
+//   ② 「更多」菜单只在窄屏额外装载被收起的设置项——**收的是入口不是功能**，
+//      每个被收起的按钮在菜单里都有打开同一份面板的可点等价项
+//   ③ 批量选择条替换整个工具栏（R-I-12）
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { clsx } from "clsx";
-import type { FieldDTO, TableDTO, ViewConfig, SortSpec, SortDirection } from "@gx/shared-types";
+import { useState, type ReactNode } from "react";
+import type { FieldDTO, ViewConfig } from "@gx/shared-types";
 import { Icon } from "../../components/icons";
-import {
-  Button,
-  IconButton,
-  Input,
-  Popover,
-  Checkbox,
-  Select,
-  Menu,
-  MenuItem,
-  MenuDivider,
-  toast,
-} from "../../components/ui";
+import { Button, Popover, Menu, MenuItem, MenuDivider } from "../../components/ui";
 import { useBreakpointTier } from "../../lib/breakpoint";
-import { FilterPanel } from "./FilterPanel";
-import { GroupPanel } from "./GroupPanel";
-import { RowColorPanel } from "./RowColorPanel";
-import FieldEditorSheet from "../designer/FieldEditorSheet";
-import { isSortGroupRestricted } from "../../api/records-paging";
-// 阶段 4：批量条（R-I-12/13/14）、搜索框 170×32 与防抖 300ms（R-I-03）、「筛选中」徽标（R-I-04）
 import {
   BulkActionBar,
-  FilterActiveBadge,
   ListSearchBox,
   bulkDeleteText,
   useDebouncedCommit,
 } from "../../components/interaction";
+import { ToolButton, buildGridPanels, countConditions } from "./GridToolbarParts";
+import GridToolbarSettingsRow from "./GridToolbarSettingsRow";
 
 export interface GridToolbarProps {
   config: ViewConfig;
@@ -85,47 +70,6 @@ const MORE_VIEW_TITLE: Record<Exclude<MoreView, "root">, string> = {
   color: "行颜色",
 };
 
-/**
- * 工具栏按钮。
- * - `shrink-0` + `whitespace-nowrap`：窄屏不再被压到内容宽度以下，中文不会逐字断行。
- * - `className` 用于给宿主套响应式显隐（收进溢出菜单时隐藏按钮本体，功能走菜单项）。
- */
-function ToolButton({
-  icon,
-  label,
-  active,
-  badge,
-  onClick,
-  className,
-}: {
-  icon: Parameters<typeof Icon>[0]["name"];
-  label: string;
-  active?: boolean;
-  badge?: number;
-  onClick: () => void;
-  className?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={clsx(
-        "inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-gx-lg px-2.5 text-gx-13 transition-colors",
-        active ? "bg-gx-accent-bg text-gx-accent" : "text-gx-text-secondary hover:bg-gx-bg",
-        className,
-      )}
-    >
-      <Icon name={icon} size={15} />
-      <span>{label}</span>
-      {badge ? (
-        <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-gx-accent px-1 text-gx-11 text-white">
-          {badge}
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
 export function GridToolbar(props: GridToolbarProps) {
   const {
     config,
@@ -149,8 +93,8 @@ export function GridToolbar(props: GridToolbarProps) {
     onEditField,
   } = props;
 
+  /** 第二行内联按钮的浮层由第二行自己管；这里是「更多」菜单的状态 */
   const [open, setOpen] = useState<string | null>(null);
-  /** 溢出菜单的二级视图（窄屏 drill-down） */
   const [moreView, setMoreView] = useState<MoreView>("root");
   // R-I-03：搜索输入防抖 300ms（此前是各列表各写一份 setTimeout，口径统一到 hook）
   const search = useDebouncedCommit(config.search, (v) => onUpdateConfig({ search: v }));
@@ -158,122 +102,29 @@ export function GridToolbar(props: GridToolbarProps) {
   const filterActive = config.filters != null;
   const filterCount = filterActive ? countConditions(config.filters) : 0;
 
-  // PERM-08（工具栏 1280~1440 溢出）：既有 Tailwind 断点（<1024 收起 行高/字段/行颜色）挡不住
-  // 1280 档——实测内容区只有 848（L1 224 + L2 208，见 WorkspaceShell R-D-30），工具栏实宽 893，
-  // 「更多」按钮 right=1325 被 `<main overflow-hidden>` 右缘裁掉一半。
-  // 这里把同一批「视觉配置类」按钮的常驻阈值从 1024 提到 1440（项目既有 2xl 档下界，
-  // 即「完整桌面布局」分界）：<1440 收进「更多」菜单，≥1440 与改动前逐字一致。
-  // SSR / 无 window 环境 useBreakpointTier 回落 "2xl"，故单测拿到的仍是全部常驻的桌面表现。
+  // PERM-08（工具栏 1280~1440 溢出）：<1440 时第二行的「行高 / 字段 / 行颜色」收进「更多」，
+  // ≥1440 与改动前逐字一致。这里必须与 GridToolbarSettingsRow 的 wideLayout 严格互补，
+  // 保证任何档位下这三项都恰好出现一次。SSR 回落 "2xl"，单测拿到的是桌面表现。
   const wideLayout = useBreakpointTier() === "2xl";
-
-  // PERM-08（粘滞 tooltip）：「新建记录」的提示文案。原生 title 不能挂在会变 disabled 的元素上，
-  // 见下方按钮处的注释——锁定期（无权限 / 在途）改由外层永不 disabled 的 span 承载。
-  const newRecordTitle = !permissions.canEditData ? "无编辑权限" : "新建记录";
-  const newRecordLocked = !permissions.canEditData || !!newRecordBusy;
 
   const closeAll = () => {
     setOpen(null);
     setMoreView("root");
   };
 
-  // —— 面板内容：内联按钮与溢出菜单共用一份，改一处即同步，避免功能漂移 ——
-  const rowHeightPanel = (
-    <Menu>
-      {(["short", "medium", "tall"] as const).map((h) => (
-        <MenuItem
-          key={h}
-          label={h === "short" ? "紧凑" : h === "medium" ? "常规" : "宽松"}
-          active={config.rowHeight === h}
-          onClick={() => {
-            onUpdateConfig({ rowHeight: h });
-            closeAll();
-          }}
-        />
-      ))}
-    </Menu>
-  );
+  const { rowHeightPanel, fieldsPanel, filterPanel, groupPanel, sortPanel, colorPanel } =
+    buildGridPanels({
+      config,
+      allFields,
+      degradedCodes,
+      filteredTotal,
+      permissions,
+      onUpdateConfig,
+      onEditField,
+      onClose: closeAll,
+    });
 
-  const fieldsPanel = (
-    <div className="p-2">
-      {permissions.canManageSchema && (
-        <button
-          type="button"
-          onClick={() => { closeAll(); onEditField(null); }}
-          className="mb-1 flex w-full items-center gap-1.5 rounded-gx-sm bg-gx-accent-bg px-2 py-1 text-left text-gx-13 font-medium text-gx-accent hover:brightness-95"
-        >
-          <Icon name="plus" size={13} />
-          <span>新建字段</span>
-        </button>
-      )}
-      <div className="mb-1 mt-1 text-gx-12 font-medium text-gx-text-secondary">显示字段</div>
-      <div className="max-h-64 overflow-y-auto">
-        {allFields.map((f) => (
-          <label key={f.id} className="group flex items-center gap-2 rounded-gx-sm px-1 py-1 hover:bg-gx-bg">
-            <Checkbox
-              checked={!config.hiddenFieldIds.includes(f.id)}
-              onChange={() => {
-                const hidden = config.hiddenFieldIds.includes(f.id)
-                  ? config.hiddenFieldIds.filter((id) => id !== f.id)
-                  : [...config.hiddenFieldIds, f.id];
-                onUpdateConfig({ hiddenFieldIds: hidden });
-              }}
-            />
-            <span className="flex-1 truncate text-gx-13 text-gx-text-primary">{f.name}</span>
-            {permissions.canManageSchema && (
-              <button
-                type="button"
-                aria-label={`编辑字段 ${f.name}`}
-                title="编辑字段"
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); closeAll(); onEditField(f.id); }}
-                className="rounded p-0.5 text-gx-text-hint opacity-0 hover:bg-gx-surface hover:text-gx-text-primary group-hover:opacity-100"
-              >
-                <Icon name="settings" size={12} />
-              </button>
-            )}
-          </label>
-        ))}
-      </div>
-    </div>
-  );
-
-  const filterPanel = (
-    <FilterPanel
-      fields={allFields}
-      value={config.filters}
-      filteredTotal={filteredTotal}
-      onChange={(next) => onUpdateConfig({ filters: next })}
-    />
-  );
-
-  const groupPanel = (
-    <GroupPanel
-      fields={allFields}
-      groupByFieldId={config.groupByFieldId}
-      degradedCodes={degradedCodes}
-      onChange={(id) => onUpdateConfig({ groupByFieldId: id })}
-    />
-  );
-
-  const sortPanel = (
-    <div className="p-2">
-      <SortPanel
-        fields={allFields}
-        sorts={config.sorts}
-        degradedCodes={degradedCodes}
-        onChange={(sorts) => onUpdateConfig({ sorts })}
-      />
-    </div>
-  );
-
-  const colorPanel = (
-    <RowColorPanel
-      fields={allFields}
-      value={config.rowColor}
-      onChange={(rc) => onUpdateConfig({ rowColor: rc })}
-    />
-  );
-
-  // R-I-12 批量条：勾选后**替换**原工具栏，显示「已选 N 条」+ 操作 + 取消选择
+  // R-I-12 批量条：勾选后**替换**整个工具栏（两行一起），显示「已选 N 条」+ 操作 + 取消选择
   if (selectionCount > 0) {
     return (
       <BulkActionBar
@@ -297,347 +148,143 @@ export function GridToolbar(props: GridToolbarProps) {
   }
 
   return (
-    <div className="flex h-12 items-center gap-1 border-b border-gx-separator bg-gx-surface px-2">
-      {/* 左段：视图切换器 */}
-      {leading}
-      {leading && <div className="h-5 w-px shrink-0 bg-gx-separator" />}
+    <div className="shrink-0 border-b border-gx-separator bg-gx-surface">
+      {/* 第一行：视图切换器 / 搜索 / 导入 / 导出 / 更多 */}
+      <div className="flex h-12 items-center gap-1 px-2">
+        {leading}
+        {leading && <div className="h-5 w-px shrink-0 bg-gx-separator" />}
 
-      {/* PERM-08 粘滞 tooltip 根因：提示是**原生 title**（全站 UI 组件没有自建 tooltip，
-          components/ui.tsx 一律把提示落到 DOM title 属性），而浏览器**不对 disabled 表单控件
-          派发任何鼠标事件**（mouseover/mousemove/mouseout/mouseleave）。于是：
-          hover「新建记录」→ 原生 tooltip 出现 → 点击 → newRecordBusy 置真 →
-          Button 内部 `isDisabled = !!disabled || !!loading`（ui.tsx:109/113）让按钮进入 disabled
-          → mouseleave 永远不再到达 → tooltip 冻结在屏幕上，恢复可用也不会补发。
-          按钮紧邻视图切换器，走查记录里就写成「『网格视图』旁有粘滞 tooltip『新建记录』不消失」。
-          修法：锁定期把 title 交给外层**永不 disabled** 的 span，并给按钮 pointer-events-none
-          让 hover 命中穿透到 span；span 从不 disabled，mouseleave 正常派发，tooltip 正常消失。
-          按钮自身的 disabled 口径与两段文案一字未动（perm-hide-gating 锁的是这个口径）。 */}
-      <span className="inline-flex shrink-0" title={newRecordLocked ? newRecordTitle : undefined}>
-        <Button
-          size="sm"
-          variant="primary"
-          icon="plus"
-          disabled={!permissions.canEditData}
-          loading={newRecordBusy}
-          onClick={onNewRecord}
-          title={newRecordLocked ? undefined : newRecordTitle}
-          className={newRecordLocked ? "pointer-events-none" : undefined}
-        >
-          新建记录
-        </Button>
-      </span>
-
-      {/* R-I-04：筛选生效后在工具栏显示「筛选中」徽标，可一键清空 */}
-      {filterActive && (
-        <FilterActiveBadge
-          count={filterCount || undefined}
-          onClear={() => onUpdateConfig({ filters: null })}
-        />
-      )}
-
-      {/* 行高：PERM-08 起 <1440 收进溢出菜单（菜单项「行高」打开同一面板）。
-          原阈值 <1024 挡不住 1280 档溢出，见 wideLayout 处注释。 */}
-      {wideLayout && (
-        <div className="relative hidden lg:block">
-          <ToolButton icon="rowHeight" label="行高" onClick={() => setOpen(open === "rh" ? null : "rh")} />
-          {open === "rh" && (
-            <Popover open onClose={() => setOpen(null)} align="left" width={140}>
-              {rowHeightPanel}
-            </Popover>
-          )}
-        </div>
-      )}
-
-      {/* 字段：<1440 收进溢出菜单（同上） */}
-      {wideLayout && (
-        <div className="relative hidden lg:block">
-          <ToolButton icon="eye" label="字段" onClick={() => setOpen(open === "fields" ? null : "fields")} />
-          {open === "fields" && (
-            <Popover open onClose={() => setOpen(null)} align="left" width={240}>
-              {fieldsPanel}
-            </Popover>
-          )}
-        </div>
-      )}
-
-      {wideLayout && <div className="h-5 w-px hidden shrink-0 bg-gx-separator lg:block" />}
-
-      {/* 中段：<768 收进溢出菜单（768–1023 仍常驻，参考图主操作） */}
-      <div className="relative hidden md:block">
-        <ToolButton
-          icon="filter"
-          label="筛选"
-          active={filterActive}
-          badge={filterActive ? filterCount : undefined}
-          onClick={() => setOpen(open === "filter" ? null : "filter")}
-        />
-        {open === "filter" && (
-          <Popover open onClose={() => setOpen(null)} align="left" width={320} className="p-0">
-            {filterPanel}
-          </Popover>
-        )}
-      </div>
-
-      <div className="relative hidden md:block">
-        <ToolButton
-          icon="group"
-          label="分组"
-          active={!!config.groupByFieldId}
-          onClick={() => setOpen(open === "group" ? null : "group")}
-        />
-        {open === "group" && (
-          <Popover open onClose={() => setOpen(null)} align="left" width={300} className="p-0">
-            {groupPanel}
-          </Popover>
-        )}
-      </div>
-
-      <div className="relative hidden md:block">
-        <ToolButton
-          icon="sortAsc"
-          label="排序"
-          active={config.sorts.length > 0}
-          onClick={() => setOpen(open === "sort" ? null : "sort")}
-        />
-        {open === "sort" && (
-          <Popover open onClose={() => setOpen(null)} align="left" width={260}>
-            {sortPanel}
-          </Popover>
-        )}
-      </div>
-
-      {/* 行颜色：<1440 收进溢出菜单（同 行高 / 字段，见 wideLayout 处注释） */}
-      {wideLayout && (
-        <div className="relative hidden lg:block">
-          <ToolButton
-            icon="palette"
-            label="行颜色"
-            active={config.rowColor.mode !== "none"}
-            onClick={() => setOpen(open === "color" ? null : "color")}
+        {/* 右段：搜索（R-I-03 宽 170 / 高 32 / 防抖 300ms / 搜索中置灰保留旧结果）
+            <768 主轴撑满（不换行、不挤掉其它按钮），≥768 严格回到 170 定宽 */}
+        <div className="ml-auto flex min-w-0 flex-1 md:flex-none">
+          <ListSearchBox
+            value={search.value}
+            onChange={search.setValue}
+            placeholder="搜索此视图…"
+            searching={search.pending}
+            width={null}
+            className="w-full md:w-[170px]"
           />
-          {open === "color" && (
-            <Popover open onClose={() => setOpen(null)} align="left" width={320} className="p-0">
-              {colorPanel}
+        </div>
+
+        {/* 导入 / 导出：第四批入口收敛后由这里独家承载（L2 表级操作行的导入导出格已下线）。
+            位置在搜索框**右侧**、常驻可见——表级导入导出是全站唯一的写入/导出口，
+            藏在「更多」里等于让新用户找不到；窄屏同样不收起（ToolButton 自带 shrink-0）。 */}
+        {/* 权限口径（WALK-权限组合-2026-09-20 · PERM-A1）：导入是**写数据**入口，无权限**不渲染**，
+            不做成灰色可点、也不让用户填完向导再被后端 403 打回。
+            权限源沿用本工具栏既有的一份（permissions.canEditData，来自 base.permissions）。
+            导出是读派生，不受此门控，仍对所有可见该表的身份常驻。 */}
+        {permissions.canEditData && (
+          <ToolButton icon="upload" label="导入" onClick={onImport} />
+        )}
+        <ToolButton icon="download" label="导出" onClick={onExport} />
+
+        {/* 溢出菜单：桌面装复制视图 / 清空表等表级操作；窄屏额外装载被收起的设置项。
+            导入 / 导出已改为常驻按钮，不再出现在菜单里。 */}
+        <div className="relative">
+          <ToolButton
+            icon="download"
+            label="更多"
+            onClick={() => {
+              setOpen(open === "more" ? null : "more");
+              setMoreView("root");
+            }}
+          />
+          {open === "more" && (
+            <Popover
+              open
+              onClose={closeAll}
+              align="right"
+              width={moreView === "root" ? 180 : 288}
+            >
+              {moreView === "root" ? (
+                <Menu width={180}>
+                  {/* R-D-31/32 + PERM-08：<1440 收起「行高 / 字段 / 行颜色」——入口收起，功能保留 */}
+                  {!wideLayout && (
+                    <div>
+                      <MenuItem icon="rowHeight" label="行高" onClick={() => setMoreView("rh")} />
+                      <MenuItem icon="eye" label="字段" onClick={() => setMoreView("fields")} />
+                      {/* R-D-33：<768 再收起「筛选 / 分组 / 排序」 */}
+                      <div className="md:hidden">
+                        <MenuItem
+                          icon="filter"
+                          active={filterActive}
+                          label={filterCount > 0 ? `筛选（${filterCount}）` : "筛选"}
+                          onClick={() => setMoreView("filter")}
+                        />
+                        <MenuItem
+                          icon="group"
+                          active={!!config.groupByFieldId}
+                          label="分组"
+                          onClick={() => setMoreView("group")}
+                        />
+                        <MenuItem
+                          icon="sortAsc"
+                          active={config.sorts.length > 0}
+                          label="排序"
+                          onClick={() => setMoreView("sort")}
+                        />
+                      </div>
+                      <MenuItem
+                        icon="palette"
+                        active={config.rowColor.mode !== "none"}
+                        label="行颜色"
+                        onClick={() => setMoreView("color")}
+                      />
+                      <MenuDivider />
+                    </div>
+                  )}
+                  <MenuItem icon="copy" label="复制视图" onClick={() => { onCopyView(); closeAll(); }} />
+                  {/* 权限口径（WALK-权限组合-2026-09-20 · PERM-02）：破坏性入口无权限时**不渲染**。
+                      后端真值：`POST /tables/:tableId/clear`（apps/api/src/routes/tables.ts:441）
+                      只要求 requireCanEditData，因此这里的门与后端完全一致，既不松也不紧。 */}
+                  {permissions.canEditData && (
+                    <MenuItem icon="trash" label="清空表" danger onClick={() => { onClearTable(); closeAll(); }} />
+                  )}
+                </Menu>
+              ) : (
+                <div className="flex max-h-[60vh] flex-col">
+                  <div className="flex shrink-0 items-center gap-1 border-b border-gx-separator px-2 py-1">
+                    <button
+                      type="button"
+                      onClick={() => setMoreView("root")}
+                      aria-label="返回更多菜单"
+                      className="flex h-6 shrink-0 items-center gap-1 rounded-gx-sm px-1 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover"
+                    >
+                      <Icon name="chevronLeft" size={13} />
+                      返回
+                    </button>
+                    <span className="flex-1 truncate text-right text-gx-12 font-medium text-gx-text-primary">
+                      {MORE_VIEW_TITLE[moreView]}
+                    </span>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    {moreView === "rh" && rowHeightPanel}
+                    {moreView === "fields" && fieldsPanel}
+                    {moreView === "filter" && filterPanel}
+                    {moreView === "group" && groupPanel}
+                    {moreView === "sort" && sortPanel}
+                    {moreView === "color" && colorPanel}
+                  </div>
+                </div>
+              )}
             </Popover>
           )}
         </div>
-      )}
-
-      {/* 右段：搜索（R-I-03 宽 170 / 高 32 / 防抖 300ms / 搜索中置灰保留旧结果）
-          <768 主轴撑满（不换行、不挤掉其它按钮），≥768 严格回到 170 定宽 */}
-      <div className="ml-auto flex min-w-0 flex-1 md:flex-none">
-        <ListSearchBox
-          value={search.value}
-          onChange={search.setValue}
-          placeholder="搜索此视图…"
-          searching={search.pending}
-          width={null}
-          className="w-full md:w-[170px]"
-        />
       </div>
 
-      {/* 导入 / 导出：第四批入口收敛后由这里独家承载（L2 表级操作行的导入导出格已下线）。
-          位置在搜索框**右侧**、常驻可见——表级导入导出是全站唯一的写入/导出口，
-          藏在「更多」里等于让新用户找不到；窄屏同样不收起（ToolButton 自带 shrink-0，
-          <768 被压缩的是搜索框那个 flex-1 容器，按钮本身不换行、不会挤掉其它按钮）。 */}
-      {/* 权限口径（WALK-权限组合-2026-09-20 · PERM-A1）：导入是**写数据**入口，四步向导的
-          最后一步才真正提交，阅读者一路走到底才收到 `API 403: 当前角色无权编辑数据`。
-          与「清空表」（PERM-02，aacf3f2）同一条红线——破坏性 / 写入类入口无权限时**不渲染**，
-          不做成灰色可点、也不让用户填完向导再被后端 403 打回。
-          权限源沿用本工具栏既有的一份（permissions.canEditData，来自 base.permissions），
-          不新造权限逻辑；与后端导入接口要求的编辑数据权限同宽。
-          导出是读派生，不受此门控，仍对所有可见该表的身份常驻。 */}
-      {permissions.canEditData && (
-        <ToolButton icon="upload" label="导入" onClick={onImport} />
-      )}
-      <ToolButton icon="download" label="导出" onClick={onExport} />
-
-      {/* 溢出菜单：桌面装复制视图 / 清空表等表级操作；窄屏额外装载被收起的按钮（功能一一等价）。
-          导入 / 导出已改为常驻按钮，不再出现在菜单里。 */}
-      <div className="relative">
-        <ToolButton
-          icon="download"
-          label="更多"
-          onClick={() => {
-            setOpen(open === "more" ? null : "more");
-            setMoreView("root");
-          }}
-        />
-        {open === "more" && (
-          <Popover
-            open
-            onClose={closeAll}
-            align="right"
-            width={moreView === "root" ? 180 : 288}
-          >
-            {moreView === "root" ? (
-              <Menu width={180}>
-                {/* R-D-31/32 + PERM-08：<1440 收起「行高 / 字段 / 行颜色」——入口收起，功能保留。
-                    阈值与内联按钮的 wideLayout 严格互补，任何档位下这三项都恰好出现一次。 */}
-                {!wideLayout && (
-                  <div>
-                    <MenuItem icon="rowHeight" label="行高" onClick={() => setMoreView("rh")} />
-                    <MenuItem icon="eye" label="字段" onClick={() => setMoreView("fields")} />
-                    {/* R-D-33：<768 再收起「筛选 / 分组 / 排序」 */}
-                    <div className="md:hidden">
-                      <MenuItem
-                        icon="filter"
-                        active={filterActive}
-                        label={filterCount > 0 ? `筛选（${filterCount}）` : "筛选"}
-                        onClick={() => setMoreView("filter")}
-                      />
-                      <MenuItem
-                        icon="group"
-                        active={!!config.groupByFieldId}
-                        label="分组"
-                        onClick={() => setMoreView("group")}
-                      />
-                      <MenuItem
-                        icon="sortAsc"
-                        active={config.sorts.length > 0}
-                        label="排序"
-                        onClick={() => setMoreView("sort")}
-                      />
-                    </div>
-                    <MenuItem
-                      icon="palette"
-                      active={config.rowColor.mode !== "none"}
-                      label="行颜色"
-                      onClick={() => setMoreView("color")}
-                    />
-                    <MenuDivider />
-                  </div>
-                )}
-                {/* 导入 / 导出已从菜单摘掉：提升为工具栏常驻按钮（见上方 ToolButton），
-                    避免同一能力两个入口。菜单里不再留重复项。 */}
-                <MenuItem icon="copy" label="复制视图" onClick={() => { onCopyView(); closeAll(); }} />
-                {/* 权限口径（WALK-权限组合-2026-09-20 · PERM-02）：破坏性入口无权限时**不渲染**，
-                    不做成灰色可点、也不让用户先填完确认再被后端 403 打回。
-                    后端真值：`POST /tables/:tableId/clear`（apps/api/src/routes/tables.ts:441）
-                    只要求 requireCanEditData，因此这里的门与后端完全一致，既不松也不紧
-                    —— 用 canManageSchema 会误伤「编辑者」（该角色 canEditData=true、
-                    canManageSchema=false，后端放行而这里却收口，属另一处口径不一致，见回报）。 */}
-                {permissions.canEditData && (
-                  <MenuItem icon="trash" label="清空表" danger onClick={() => { onClearTable(); closeAll(); }} />
-                )}
-              </Menu>
-            ) : (
-              <div className="flex max-h-[60vh] flex-col">
-                <div className="flex shrink-0 items-center gap-1 border-b border-gx-separator px-2 py-1">
-                  <button
-                    type="button"
-                    onClick={() => setMoreView("root")}
-                    aria-label="返回更多菜单"
-                    className="flex h-6 shrink-0 items-center gap-1 rounded-gx-sm px-1 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover"
-                  >
-                    <Icon name="chevronLeft" size={13} />
-                    返回
-                  </button>
-                  <span className="flex-1 truncate text-right text-gx-12 font-medium text-gx-text-primary">
-                    {MORE_VIEW_TITLE[moreView]}
-                  </span>
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto">
-                  {moreView === "rh" && rowHeightPanel}
-                  {moreView === "fields" && fieldsPanel}
-                  {moreView === "filter" && filterPanel}
-                  {moreView === "group" && groupPanel}
-                  {moreView === "sort" && sortPanel}
-                  {moreView === "color" && colorPanel}
-                </div>
-              </div>
-            )}
-          </Popover>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function countConditions(node: unknown): number {
-  if (!node || typeof node !== "object") return 0;
-  const n = node as { kind: string; children?: unknown[]; child?: unknown };
-  if (n.kind === "condition") return 1;
-  if (n.kind === "and" || n.kind === "or") {
-    return (n.children ?? []).reduce<number>((sum, c) => sum + countConditions(c), 0);
-  }
-  if (n.kind === "not") return countConditions(n.child);
-  return 0;
-}
-
-function SortPanel({
-  fields,
-  sorts,
-  degradedCodes,
-  onChange,
-}: {
-  fields: FieldDTO[];
-  sorts: SortSpec[];
-  degradedCodes?: string[];
-  onChange: (sorts: SortSpec[]) => void;
-}) {
-  const toggle = (fieldId: string, dir: SortDirection) => {
-    const existing = sorts.find((s) => s.fieldId === fieldId);
-    let next: SortSpec[];
-    if (existing && existing.direction === dir) {
-      next = sorts.filter((s) => s.fieldId !== fieldId);
-    } else {
-      next = [...sorts.filter((s) => s.fieldId !== fieldId), { fieldId, direction: dir }];
-    }
-    onChange(next);
-  };
-
-  return (
-    <div className="flex flex-col gap-2">
-      <span className="text-gx-13 font-semibold text-gx-text-primary">排序</span>
-      {fields.map((f) => {
-        const cur = sorts.find((s) => s.fieldId === f.id)?.direction;
-        // S8：降级态下，依赖非物理字段（计算/lookup/links/长正文等）的排序会把查询逼进内存路径，禁用新切换。
-        // 已生效的旧排序保持原样显示（不清、不崩），仅阻止再次切换。
-        const restricted = isSortGroupRestricted(degradedCodes, f);
-        const hint = "数据量较大，该字段排序需先收窄筛选";
-        return (
-          <div key={f.id} className="flex items-center justify-between rounded-gx-sm px-1 py-1 hover:bg-gx-bg">
-            <span
-              className={clsx(
-                "truncate text-gx-13",
-                restricted ? "text-gx-text-hint" : "text-gx-text-primary",
-              )}
-            >
-              {f.name}
-            </span>
-            <div className="flex gap-1">
-              <IconButton
-                icon="arrowUp"
-                size={14}
-                active={cur === "asc"}
-                label="升序"
-                title={restricted ? hint : "升序"}
-                aria-label={restricted ? `升序：${f.name}（${hint}）` : "升序"}
-                disabled={restricted}
-                className={restricted ? "disabled:cursor-not-allowed disabled:opacity-40" : undefined}
-                onClick={() => toggle(f.id, "asc")}
-              />
-              <IconButton
-                icon="arrowDown"
-                size={14}
-                active={cur === "desc"}
-                label="降序"
-                title={restricted ? hint : "降序"}
-                aria-label={restricted ? `降序：${f.name}（${hint}）` : "降序"}
-                disabled={restricted}
-                className={restricted ? "disabled:cursor-not-allowed disabled:opacity-40" : undefined}
-                onClick={() => toggle(f.id, "desc")}
-              />
-            </div>
-          </div>
-        );
-      })}
-      {sorts.length > 0 && (
-        <Button size="sm" variant="ghost" onClick={() => onChange([])}>
-          清除排序
-        </Button>
-      )}
+      {/* 第二行：七个视图呈现配置项（GridToolbarSettingsRow） */}
+      <GridToolbarSettingsRow
+        config={config}
+        allFields={allFields}
+        degradedCodes={degradedCodes}
+        filteredTotal={filteredTotal}
+        permissions={permissions}
+        newRecordBusy={newRecordBusy}
+        onUpdateConfig={onUpdateConfig}
+        onNewRecord={onNewRecord}
+        onEditField={onEditField}
+      />
     </div>
   );
 }

@@ -580,7 +580,7 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
     <div className="flex h-full flex-col bg-gx-surface">
       <GridToolbar
           leading={
-            <div className="flex min-w-0 items-center gap-1">
+            <div className="flex min-w-0 flex-1 items-center gap-1">
               {/* 数据表「图标与颜色」入口（五类实体收口的一部分）：
                   只有 GridView 有工具栏，kanban/calendar/gallery/form/detail 各自没有表页工具栏，
                   故入口落在网格工具栏最左侧的视图切换区。无表结构管理权限即不渲染（不 disabled 假装禁用）。

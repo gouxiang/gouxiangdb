@@ -15,6 +15,13 @@ import { GridToolbar } from "./GridToolbar";
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 const countOf = (s: string, needle: string) => s.split(needle).length - 1;
+/**
+ * 工具栏的源码断言一律对「GridToolbar + GridToolbarSettingsRow」两个文件生效。
+ * 改断言原因：设置项下移成独立第二行后，内联按钮（行高/字段/筛选/分组/排序/行颜色）搬到了
+ * GridToolbarSettingsRow.tsx（单文件 ≤300 行公约要求拆分），而「更多」菜单的等价项仍在
+ * GridToolbar.tsx。断言语义一字未变——拼起来才能看到「一份按钮 + 一份菜单项」的全貌。
+ */
+const toolbarSrc = () => read("./GridToolbar.tsx") + "\n" + read("./GridToolbarSettingsRow.tsx");
 
 const field = (id: string, name: string): FieldDTO =>
   ({ id, name, type: "text", options: null, order: 0 }) as unknown as FieldDTO;
@@ -75,7 +82,7 @@ describe("P1-A 根因：按钮不再被压到内容宽度以下", () => {
     expect(html.indexOf("导入")).toBeGreaterThan(html.indexOf("搜索此视图"));
     expect(html.indexOf("导出")).toBeGreaterThan(html.indexOf("搜索此视图"));
     // 「更多」菜单里不再重复挂这两项（同一能力不留两处入口）
-    const src = read("./GridToolbar.tsx");
+    const src = toolbarSrc();
     expect(src).not.toContain('label="CSV 导入"');
     expect(src).not.toContain('label="CSV 导出"');
   });
@@ -102,7 +109,7 @@ describe("P1-A 收起入口：窄屏只收按钮，不删功能", () => {
   });
 
   it("被收起的 6 个按钮在溢出菜单里都有可点等价项（同一 icon + 同一文案）", () => {
-    const src = read("./GridToolbar.tsx");
+    const src = toolbarSrc();
     for (const [icon, label] of [
       ["rowHeight", "行高"],
       ["eye", "字段"],
@@ -118,7 +125,7 @@ describe("P1-A 收起入口：窄屏只收按钮，不删功能", () => {
   });
 
   it("溢出菜单六个二级视图都能落到与内联按钮同一份面板（drill-down 不是空壳）", () => {
-    const src = read("./GridToolbar.tsx");
+    const src = toolbarSrc();
     for (const view of ["rh", "fields", "filter", "group", "sort", "color"] as const) {
       expect(src).toContain(`setMoreView("${view}")`);
       expect(src).toContain(`moreView === "${view}" &&`);
