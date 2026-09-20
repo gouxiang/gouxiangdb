@@ -11,6 +11,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useViews, useBase, useFields, useTables, useGXMutations } from "../../api/hooks";
 import type { DetailLayout, PermissionSet } from "@gx/shared-types";
 import { Spinner, toast } from "../../components/ui";
+import { ViewLoadFailure } from "./ViewLoadFailure";
 import { DetailLayoutEditor } from "../detail/DetailLayout";
 
 import { GridView } from "../grid/GridView";
@@ -90,7 +91,13 @@ export default function ViewRouter() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const { data: views, isLoading: viewsLoading } = useViews(tableId ?? null);
+  const {
+    data: views,
+    isLoading: viewsLoading,
+    isError: viewsError,
+    error: viewsErr,
+    refetch: refetchViews,
+  } = useViews(tableId ?? null);
   const { data: base } = useBase(baseId ?? null);
   const m = useGXMutations();
 
@@ -187,10 +194,34 @@ export default function ViewRouter() {
     }
   }, [tableId, viewId, permissions.canEditData, m, syncRecordParam]);
 
-  if (viewsLoading || !view) {
+  // 只有「真在加载」才给转圈。
+  //
+  // 原先这里把「加载中」和「视图拿不到」并成**同一个分支**、一律返回 <Spinner />，
+  // 于是任何拉不到视图的情形都会永远卡在那儿：
+  //   · PERM-04（WALK-权限组合-2026-09-20）：局外人手输 `/base/:id/table/:id/view/:id`，
+  //     `GET /api/views`（views.ts:72 requireCanView）与 `GET /api/bases/:id` 都正确 403，
+  //     后端没问题，前端却既不提示「无权限」也不跳转，只留一个永远不停的转圈。
+  //   · 同源第二例：视图列表拉到了、但 URL 上的 viewId 已不存在（视图被删过的旧链接），
+  //     同样掉进同一个分支永久转圈。
+  // 现在两者拆开：加载 → 转圈；失败 → ViewLoadFailure 给终态。
+  // 失败态按 ApiError.status 判真值，**不等「先操作再被后端 403 打回」**（那是入口侧要治的病）。
+  if (viewsLoading) {
     return (
       <div className="flex h-full items-center justify-center">
         <Spinner />
+      </div>
+    );
+  }
+
+  if (viewsError || !view) {
+    return (
+      <div className="flex h-full items-start justify-center pt-16">
+        <ViewLoadFailure
+          error={viewsErr}
+          viewMissing={!viewsError && !view}
+          onRetry={viewsError ? () => void refetchViews() : undefined}
+          onBack={() => navigate("/")}
+        />
       </div>
     );
   }
