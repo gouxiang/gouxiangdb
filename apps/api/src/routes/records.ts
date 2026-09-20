@@ -24,6 +24,7 @@ import {
 } from "../domain/recordService.js";
 import { isComputedFieldType, isSystemFieldType } from "../domain/types.js";
 import { parseCSV, inferFieldType, coerceCellValue } from "../domain/csv.js";
+import { resolveFieldRestoreName, resolveTableRestoreName } from "../domain/restoreName.js";
 import { createField } from "../domain/fieldService.js";
 import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
 import { applyCreateDefaults, applyEditDefaults, applyReverseDefaultsForChild, applyLinkChangeDefaults } from "../domain/defaults.js";
@@ -797,6 +798,10 @@ records.post("/trash/:id/restore", async (c) => {
   const parsed = restoreSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
 
+  // T-1：field/table 恢复可能因同名被自动改名，把最终名字透出给前端（提示文案另行派单）。
+  let restoreName: string | undefined;
+  let restoreRenamed: boolean | undefined;
+
   if (parsed.data.kind === "record") {
     const baseId = await baseIdOfRecord(id);
     await requireCanEditData(c, baseId);
@@ -815,39 +820,66 @@ records.post("/trash/:id/restore", async (c) => {
   } else if (parsed.data.kind === "field") {
     const f = await prisma.field.findUnique({
       where: { id },
-      select: { table: { select: { baseId: true } } },
+      select: {
+        name: true,
+        tableId: true,
+        type: true,
+        isReverse: true,
+        reverseFieldId: true,
+        linkFieldId: true,
+        table: { select: { baseId: true } },
+      },
     });
     if (!f) throw new HttpError(404, "字段不存在");
     // 恢复字段属于表结构变更，与删除字段一致需要 canManageSchema（垂直越权防护）。
     await requireCanManageSchema(c, f.table.baseId);
-    await prisma.field.update({ where: { id }, data: { deletedAt: null } });
+    // T-1：恢复前查重名。删除后重建同名字段、再恢复旧的，会在同表落下两个同名活字段
+    // （公式 {字段名} 引用歧义 / CSV 按列名匹配歧义）。恢复不能被 409 拒绝，故自动改名。
+    const finalName = await resolveFieldRestoreName(prisma, id, f.tableId, f.name);
+    await prisma.field.update({ where: { id }, data: { deletedAt: null, name: finalName } });
+    restoreName = finalName;
+    restoreRenamed = finalName !== f.name;
     // links/subtable 配对反向字段一并恢复（删除时是对称软删的，单独恢复一个会成孤儿）
-    const field = await prisma.field.findUnique({ where: { id } });
-    if (field && (field.type === "links" || field.type === "subtable")) {
-      const partnerId = field.isReverse ? field.reverseFieldId : field.linkFieldId;
+    if (f.type === "links" || f.type === "subtable") {
+      const partnerId = f.isReverse ? f.reverseFieldId : f.linkFieldId;
       if (partnerId) {
-        await prisma.field.updateMany({
-          where: { id: partnerId, deletedAt: { not: null } },
-          data: { deletedAt: null },
+        const partner = await prisma.field.findUnique({
+          where: { id: partnerId },
+          select: { name: true, tableId: true, deletedAt: true },
         });
+        // 配对字段同样查重名（同一个表内不允许两个同名活字段）；
+        // 若它已经是活字段则什么都不做（保持原 updateMany 只复活软删行的语义）。
+        if (partner?.deletedAt) {
+          const partnerName = await resolveFieldRestoreName(
+            prisma, partnerId, partner.tableId, partner.name,
+          );
+          await prisma.field.updateMany({
+            where: { id: partnerId, deletedAt: { not: null } },
+            data: { deletedAt: null, name: partnerName },
+          });
+        }
       }
       // 删字段时 linkRow 只打了软删标记，恢复字段时一并恢复，否则关联数据静默丢失
-      const fieldIds = [field.id, ...(partnerId ? [partnerId] : [])];
+      const fieldIds = [id, ...(partnerId ? [partnerId] : [])];
       await prisma.linkRow.updateMany({
         where: { linkFieldId: { in: fieldIds }, deletedAt: { not: null } },
         data: { deletedAt: null },
       });
     }
   } else {
-    const t = await prisma.table.findUnique({ where: { id }, select: { baseId: true } });
+    const t = await prisma.table.findUnique({ where: { id }, select: { baseId: true, name: true } });
     if (!t) throw new HttpError(404, "数据表不存在");
     // 恢复表属于表结构变更，与删除表一致需要 canManageSchema。
     await requireCanManageSchema(c, t.baseId);
     // M3/S3 #14：原裸多写收紧进单事务。恢复表连带恢复字段/记录（级联软删，单恢复会成空壳），
     // 视图 order=-1 重排为可见；nav 子树节点（table/view）原地复活、重算 ord/path
     // （仅当其 base 活；base 仍软删时期望集不含该表，节点保持软删与实体悬挂态一致）。
+    let finalName = t.name;
     await withWriteTx("table.restore", async (tx) => {
-      await tx.table.update({ where: { id }, data: { deletedAt: null } });
+      // T-1：同字段分支，恢复前查同 base 下同名活表，冲突则自动改名。
+      // 硬契约：此处只能用传入的 tx（写队列并发度 1，回调内再入队 runWrite/withWriteTx 会自死锁）。
+      finalName = await resolveTableRestoreName(tx, id, t.baseId, t.name);
+      await tx.table.update({ where: { id }, data: { deletedAt: null, name: finalName } });
       await tx.field.updateMany({ where: { tableId: id, deletedAt: { not: null } }, data: { deletedAt: null } });
       // 先取回待恢复记录 id，恢复后按「两端都存活」回填关联
       const restoredRows = await tx.record.findMany({
@@ -873,8 +905,15 @@ records.post("/trash/:id/restore", async (c) => {
       }
       await syncNavFromEntitiesTx(tx);
     });
+    restoreName = finalName;
+    restoreRenamed = finalName !== t.name;
   }
-  return c.json({ ok: true });
+  // 恢复记录没有「名字」概念，保持原响应形态；字段/表一律带 renamed+name，前端无需分支判空。
+  return c.json(
+    restoreName === undefined
+      ? { ok: true }
+      : { ok: true, renamed: restoreRenamed === true, name: restoreName },
+  );
 });
 
 records.delete("/trash/:id", async (c) => {
