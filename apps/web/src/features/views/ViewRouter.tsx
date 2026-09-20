@@ -6,12 +6,13 @@
 //  - 记录抽屉开关由本组件持有；跨表跳转时写入 sessionStorage「gx-pending-record」，
 //    目标表加载后由本组件读取并自动打开抽屉
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useViews, useBase, useFields, useTables, useGXMutations } from "../../api/hooks";
 import type { DetailLayout, PermissionSet } from "@gx/shared-types";
 import { Spinner, toast } from "../../components/ui";
 import { ViewLoadFailure } from "./ViewLoadFailure";
+import { ViewShell, type ViewShellArgs } from "./ViewShell";
 import { DetailLayoutEditor } from "../detail/DetailLayout";
 
 import { GridView } from "../grid/GridView";
@@ -235,33 +236,40 @@ export default function ViewRouter() {
     onOpenRecord,
   };
 
-  let content;
-  switch (view.type) {
-    case "grid":
-      content = <GridView {...viewProps} />;
-      break;
-    case "gallery":
-      content = <GalleryView {...viewProps} />;
-      break;
-    case "kanban":
-      content = <KanbanView {...viewProps} />;
-      break;
-    case "calendar":
-      content = <CalendarView {...viewProps} />;
-      break;
-    case "form":
-      content = <FormView {...viewProps} />;
-      break;
-    case "detail":
-      content = <DetailView {...viewProps} />;
-      break;
-    default:
-      content = <div className="p-gx-lg text-gx-13 text-gx-text-tertiary">未知视图类型</div>;
-  }
+  // 六类视图一律走统一外壳（ViewShell）：第一行视图标签条 + 第二行主工具栏（新建记录 /
+  // 搜索 / 导入 / 导出 / 更多）对所有视图生效；第三行网格设置行由 GridView 自己渲染。
+  // key={view.id}：切视图时整体重挂，外壳持有的视图配置随之回到目标视图的 config。
+  const renderContent = ({ config, onUpdateConfig, onNewRecord }: ViewShellArgs): ReactNode => {
+    switch (view.type) {
+      case "grid":
+        return <GridView {...viewProps} config={config} onUpdateConfig={onUpdateConfig} onNewRecord={onNewRecord} />;
+      case "gallery":
+        return <GalleryView {...viewProps} />;
+      case "kanban":
+        return <KanbanView {...viewProps} />;
+      case "calendar":
+        return <CalendarView {...viewProps} />;
+      case "form":
+        return <FormView {...viewProps} />;
+      case "detail":
+        return <DetailView {...viewProps} />;
+      default:
+        return <div className="p-gx-lg text-gx-13 text-gx-text-tertiary">未知视图类型</div>;
+    }
+  };
 
   return (
     <div className="relative h-full">
-      {content}
+      <ViewShell
+        key={view.id}
+        baseId={baseId ?? ""}
+        tableId={tableId ?? ""}
+        viewId={viewId ?? ""}
+        view={view}
+        permissions={permissions}
+      >
+        {renderContent}
+      </ViewShell>
       <RecordDrawer
         open={!!openRecordId}
         recordId={openRecordId}

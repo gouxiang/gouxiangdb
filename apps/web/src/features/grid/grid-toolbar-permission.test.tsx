@@ -16,14 +16,11 @@
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup as render } from "react-dom/server";
 import { readFileSync } from "node:fs";
-import type { FieldDTO, ViewConfig } from "@gx/shared-types";
+import type { ViewConfig } from "@gx/shared-types";
 import { GridToolbar } from "./GridToolbar";
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 const countOf = (s: string, needle: string) => s.split(needle).length - 1;
-
-const field = (id: string, name: string): FieldDTO =>
-  ({ id, name, type: "text", options: null, order: 0 }) as unknown as FieldDTO;
 
 const config: ViewConfig = {
   hiddenFieldIds: [],
@@ -45,21 +42,13 @@ function renderToolbar(permissions: { canEditData: boolean; canManageSchema: boo
   return render(
     <GridToolbar
       config={config}
-      allFields={[field("f1", "名称"), field("f2", "部门")]}
-      filteredTotal={2}
       permissions={permissions}
-      selectionCount={0}
       onUpdateConfig={noop}
       onNewRecord={noop}
-      onBulkDelete={noop}
-      onBulkEdit={noop}
-      onSelectAllPage={noop}
-      onClearSelection={noop}
       onImport={noop}
       onExport={noop}
       onCopyView={noop}
       onClearTable={noop}
-      onEditField={noop}
     />,
   );
 }

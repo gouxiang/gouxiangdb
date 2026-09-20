@@ -20,9 +20,10 @@ import { useRecordsInfinite } from "../../api/records-paging-hooks";
 import { isComputedInMem } from "../../api/records-paging";
 import { EmptyState, IconButton, Modal, Select, Input, Button, toast, COLOR_PALETTE } from "../../components/ui";
 import { SkeletonTable } from "../../components/states";
-import { confirmClearTable, confirmSoftDelete } from "../../components/feedback";
+import { confirmSoftDelete } from "../../components/feedback";
 // 阶段 4：R-D-15 延迟加载态 / R-I-26 防重复提交 / R-I-02 已加载 N 条 / R-I-05 列宽下限
 import {
+  BulkActionBar,
   MIN_COL_WIDTH,
   TriStateCheckbox,
   bulkDeleteText,
@@ -35,12 +36,10 @@ import {
 import { ResultNotice, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
 import { useBreakpointTier } from "../../lib/breakpoint";
 import { csvFileName } from "../../lib/file-name";
-import { EntityIconPicker } from "../../components/EntityIconPicker";
-import { GridToolbar } from "./GridToolbar";
+import GridToolbarSettingsRow from "./GridToolbarSettingsRow";
 import { ImportWizard } from "./ImportWizard";
 import { ExportDialog, type ExportScope } from "./ExportDialog";
 import { RecordCardList } from "./RecordCardList";
-import { ViewSwitcher } from "./ViewSwitcher";
 import { GridHeaderCell } from "./GridHeaderCell";
 import { GridRow } from "./GridRow";
 import { AggregationBar } from "./AggregationBar";
@@ -55,6 +54,11 @@ export interface GridViewProps {
   view: ViewDTO;
   permissions: PermissionSet;
   onOpenRecord?: (ref: LinkRefDTO) => void;
+  /** 视图配置由统一外壳（features/views/ViewShell）持有：第二行的搜索框写回同一份 config */
+  config: ViewConfig;
+  onUpdateConfig: (partial: Partial<ViewConfig>) => void;
+  /** 外壳第二行「新建记录」的同一个实现：网格空态复用它，避免两处各建一条草稿行 */
+  onNewRecord: () => void;
 }
 
 const ROW_HEADER_W = 56;
@@ -93,7 +97,17 @@ function defaultColWidth(field: FieldDTO): number {
   }
 }
 
-export default function GridView({ baseId, tableId, viewId, view, permissions, onOpenRecord }: GridViewProps) {
+export default function GridView({
+  baseId,
+  tableId,
+  viewId,
+  view,
+  permissions,
+  onOpenRecord,
+  config: cfg,
+  onUpdateConfig,
+  onNewRecord,
+}: GridViewProps) {
   const infiniteData = useRecordsInfinite({ tableId, viewId });
   const { data: allFieldsData } = useFields(tableId);
   const m = useGXMutations();
@@ -126,13 +140,8 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
 
   const primaryFieldId = visibleFields[0]?.id ?? "";
 
-  // 本地配置状态（乐观更新，并写回服务端）
-  const [cfg, setCfg] = useState<ViewConfig>(view.config);
-  useEffect(() => {
-    setCfg(view.config);
-    // 仅当切换视图时整体重置
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view.id]);
+  // 配置不再由网格自持：统一外壳 ViewShell 持有（第二行的搜索框要写同一份 config），
+  // 这里只读 + 经 onUpdateConfig 写。切视图时外壳带 key={view.id} 重挂，配置随之重置。
 
   const [editing, setEditing] = useState<{ recordId: string; fieldId: string } | null>(null);
   const [active, setActive] = useState<{ recordId: string; fieldId: string } | null>(null);
@@ -146,16 +155,11 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
   // 两者全仓零读取，留着只会让人误以为有这条能力，故摘除。
   const [editingFieldMeta, setEditingFieldMeta] = useState<FieldDTO | null>(null);
   const [fieldEditorOpen, setFieldEditorOpen] = useState(false);
+  // 表列表只供字段编辑器（关联字段候选表）使用；数据表图标入口已随外壳上提（六类视图都能改）。
   const { data: tablesData } = useTables(baseId);
-  // 当前表的自定义图标（DTO 已带 icon/iconColor）。本表页的图标入口 + 展示位就挂在工具栏最左侧：
-  // 旧壳 Sidebar 的那份入口只在重命名弹窗里、且旧壳默认不挂载，等于数据表改不了图标。
-  const currentTable = (tablesData ?? []).find((t) => t.id === tableId) ?? null;
-  // R-I-26 写操作在途守卫（新建记录 / 批量删除 / 导出）
-  const newRecordGuard = useWriteGuard();
-  const exportGuard = useWriteGuard();
-  // 导入 / 导出向导（第四批：与 L2 表级操作行同一套，入口收敛到工具栏常驻按钮）
-  const [importOpen, setImportOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
+  // R-I-26 写操作在途守卫（批量删除）
+  const bulkGuard = useWriteGuard();
+  // 导入 / 导出向导由统一外壳挂载（表级操作，六类视图共用），见 TableViewIoDialogs。
   // R-D-15：骨架屏 ≥300ms 才显示，避免「空白 → 骨架 → 内容」闪烁
   const showSkeleton = useDelayedFlag(isLoading);
   // R-D-27：局部刷新（续翻 / 筛选）保留旧内容 + 降透明度，不用骨架屏
@@ -186,19 +190,7 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
     return () => el.removeEventListener("scroll", onScroll);
   }, [hasNextPage, isFetchingNextPage, loadMore, records.length]);
 
-  // 写回 view.config
-  const updateConfig = useCallback(
-    async (partial: Partial<ViewConfig>) => {
-      const next = { ...cfg, ...partial };
-      setCfg(next);
-      try {
-        await m.updateView.mutateAsync({ viewId, tableId, data: { config: next } });
-      } catch (e) {
-        toast((e as Error).message ?? "保存视图配置失败", "error");
-      }
-    },
-    [cfg, m, viewId, tableId],
-  );
+  // 写回 view.config 由外壳持有（见 ViewShell），网格只发局部更新。
 
   const widthOf = useCallback((f: FieldDTO) => colWidths[f.id] ?? defaultColWidth(f), [colWidths]);
   const resizeField = useCallback(
@@ -231,13 +223,13 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
   const sortDirOf = (fieldId: string) => cfg.sorts.find((s) => s.fieldId === fieldId)?.direction;
   const handleSort = (fieldId: string, dir: "asc" | "desc" | null) => {
     const others = cfg.sorts.filter((s) => s.fieldId !== fieldId);
-    updateConfig({ sorts: dir ? [...others, { fieldId, direction: dir }] : others });
+    onUpdateConfig({ sorts: dir ? [...others, { fieldId, direction: dir }] : others });
   };
 
   // 隐藏字段
   const hideField = (fieldId: string) => {
     if (!cfg.hiddenFieldIds.includes(fieldId)) {
-      updateConfig({ hiddenFieldIds: [...cfg.hiddenFieldIds, fieldId] });
+      onUpdateConfig({ hiddenFieldIds: [...cfg.hiddenFieldIds, fieldId] });
     }
   };
   // 阶段 4 · R-D-23 L2（软删除进回收站，可恢复）+ R-I-08（toast 带撤销）
@@ -267,7 +259,7 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
     const collapsed = cfg.collapsedGroupKeys.includes(key)
       ? cfg.collapsedGroupKeys.filter((k) => k !== key)
       : [...cfg.collapsedGroupKeys, key];
-    updateConfig({ collapsedGroupKeys: collapsed });
+    onUpdateConfig({ collapsedGroupKeys: collapsed });
   };
 
   // ---------- 选中 / 编辑交互 ----------
@@ -391,17 +383,11 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
   };
 
   // ---------- 工具栏动作 ----------
-  // 就地新建草稿行：先建空记录再逐格补值，draft 跳过创建期必填（与编辑期允许临时为空一致）。
+  // 「新建记录」由统一外壳 ViewShell 提供（六类视图共用，见 ViewShell.onNewRecord），
+  // 网格经 props.onNewRecord 复用同一个实现——空态入口与外壳按钮是同一条链路。
   //
-  // R-I-26：走写操作在途守卫。新建是最典型的"双击产生两条记录"入口——
-  // 按钮 loading 只能挡住单个按钮，这里的 key 级去重还能挡住连点与多入口并发。
-  const onNewRecord = () =>
-    void newRecordGuard.run("new-record", () =>
-      m.createRecord
-        .mutateAsync({ tableId, fields: {}, viewId, draft: true })
-        .catch((e: unknown) => toast((e as Error)?.message || "新建记录失败", "error")),
-    );
   // R-I-15 批量删除 = L2 确认 + 可撤销；R-D-22 撤销窗口 6s
+  // R-I-26：批量删除同样走写在途守卫，防止连点把同一批记录删两次。
   const onBulkDelete = async () => {
     const ids = Array.from(selection.selectedIds);
     if (ids.length === 0) return;
@@ -412,69 +398,21 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
       count: ids.length,
     });
     if (!ok) return;
-    try {
-      await m.bulkDeleteRecords.mutateAsync({ ids, tableId, viewId });
-      selection.clear();
-      toastDeleted({
-        message: `已删除 ${ids.length} 行`,
-        restoredMessage: `已恢复 ${ids.length} 行`,
-        onUndo: () => Promise.all(ids.map((id) => m.restoreTrash.mutateAsync({ id, kind: "record", baseId }))),
-      });
-    } catch (e) {
-      toast((e as Error)?.message ?? "删除失败", "error");
-    }
-  };
-  const onClearSelection = () => selection.clear();
-  /**
-   * 导入 / 导出：第四批收敛后与 L2 表级操作行同一套向导（ImportWizard / ExportDialog），
-   * 不重写、不并行第二套实现。导出走服务端 Tables.exportCsvText（按视图/整表），
-   * 不受前端已加载行数限制；原先「客户端按当前可见字段拼 CSV」的实现随之移除。
-   */
-  const onExport = () => setExportOpen(true);
-  const onImport = () => setImportOpen(true);
-  const runExport = async (scope: ExportScope) => {
-    await exportGuard.run("export", async () => {
+    void bulkGuard.run("bulk-delete", async () => {
       try {
-        const csv = await Tables.exportCsvText(tableId, scope === "view" ? viewId : undefined);
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        // E-1：文件名用真实表名，不再把内部 tableId/viewId 抛给用户；表名缺失时退回 id 前缀。
-        a.download = csvFileName(
-          currentTable?.name,
-          tableId,
-          scope === "view" ? { name: view?.name, id: viewId } : null,
-        );
-        a.click();
-        URL.revokeObjectURL(url);
-        toast(scope === "view" ? "已导出当前视图" : "已导出整表", "success");
-        setExportOpen(false);
+        await m.bulkDeleteRecords.mutateAsync({ ids, tableId, viewId });
+        selection.clear();
+        toastDeleted({
+          message: `已删除 ${ids.length} 行`,
+          restoredMessage: `已恢复 ${ids.length} 行`,
+          onUndo: () => Promise.all(ids.map((id) => m.restoreTrash.mutateAsync({ id, kind: "record", baseId }))),
+        });
       } catch (e) {
-        toast(e instanceof Error ? e.message : "导出失败", "error");
+        toast((e as Error)?.message ?? "删除失败", "error");
       }
     });
   };
-  const onCopyView = () => void m.duplicateView.mutateAsync({ viewId, tableId });
-  // R-D-23 L3（可恢复的破坏性操作）+ R-D-24（主按钮用具体动词，见 confirmClearTable 内部「清空数据」）
-  //
-  // 后端真相：`POST /tables/:id/clear`（apps/api/src/routes/tables.ts:458）对记录做的是
-  // `updateMany({ data: { deletedAt: clearNow } })`，是**软删**；而回收站
-  // （apps/api/src/routes/records.ts:214 /trash）正是按 `deletedAt != null` 收 record 的。
-  // 所以原文案「不进回收站、不可撤销」是错的，用 L4 也是错级别——L4 留给真正没有退路的操作。
-  // 与顶栏 / 表设置行（TopBar.tsx、SettingsPage.tsx、SecondaryNavTableOps.tsx）共用同一个
-  // confirmClearTable 助手，避免同一个动作在不同入口出现两套文案与两套强度。
-  // 不传 scopedToView：清空接口本身不看视图（hooks.ts:398 只发 tableId），实际总是清整张表。
-  const onClearTable = () => {
-    const tableName = currentTable?.name ?? "该数据表";
-    void confirmClearTable({ tableName }).then((ok) => {
-      if (!ok) return;
-      void m.clearTable
-        .mutateAsync({ tableId, viewId })
-        .then(() => toast("已清空数据，记录已移入回收站", "success"))
-        .catch((e: unknown) => toast((e as Error)?.message ?? "清空失败", "error"));
-    });
-  };
+  const onClearSelection = () => selection.clear();
   // 记录映射（分组用）
   const recMap = useMemo(() => {
     const map = new Map<string, RecordDTO>();
@@ -578,81 +516,48 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
 
   return (
     <div className="flex h-full flex-col bg-gx-surface">
-      <GridToolbar
-          leading={
-            <div className="flex min-w-0 flex-1 items-center gap-1">
-              {/* 数据表「图标与颜色」入口（五类实体收口的一部分）：
-                  只有 GridView 有工具栏，kanban/calendar/gallery/form/detail 各自没有表页工具栏，
-                  故入口落在网格工具栏最左侧的视图切换区。无表结构管理权限即不渲染（不 disabled 假装禁用）。
-                  触发器自带 resolved 图标预览，因此它同时也是本表页的图标展示位。 */}
-              {currentTable && permissions.canManageSchema ? (
-                <EntityIconPicker
-                  icon={currentTable.icon}
-                  iconColor={currentTable.iconColor}
-                  defaultIcon="table"
-                  ariaLabel="数据表图标与颜色"
-                  triggerSize={20}
-                  onChange={(next) =>
-                    m.updateTable.mutateAsync({
-                      tableId,
-                      data: { icon: next.icon, iconColor: next.iconColor },
-                    })
-                  }
-                />
-              ) : null}
-              <ViewSwitcher
-                baseId={baseId}
-                tableId={tableId}
-                viewId={viewId}
-                canManageSchema={permissions.canManageSchema}
-              />
-            </div>
+      {/* 统一外壳第三行：网格专属设置行（行高 / 字段 / 筛选 / 分组 / 排序 / 行颜色）。
+          这六项是网格行列概念，数据来自网格自己的无限滚动查询（filteredTotal / degradedCodes）
+          与网格内的字段编辑器，所以留在这里渲染，而不是上提到外壳（见 ViewShell 文件头）。
+          R-I-12：勾选后本行整行换成批量操作条；外壳前两行（标签条 / 搜索·导入导出）保持不变——
+          批量操作时仍要能切视图、改搜索条件。 */}
+      {selection.count > 0 ? (
+        <BulkActionBar
+          count={selection.count}
+          total={filteredTotal}
+          onSelectAll={() => selection.toggleAll(records.map((r) => r.id))}
+          onClearSelection={onClearSelection}
+          actions={
+            <>
+              <Button size="sm" variant="secondary" onClick={() => setBulkEditOpen(true)}>
+                批量修改字段…
+              </Button>
+              {/* R-I-14：批量操作前展示影响条数——按钮文案直接带条数 */}
+              <Button size="sm" variant="danger" icon="trash" onClick={onBulkDelete}>
+                {bulkDeleteText(selection.count, "行")}
+              </Button>
+            </>
           }
-        config={cfg}
-        allFields={gridManageableFields}
-        degradedCodes={infiniteData.degraded ?? []}
-        filteredTotal={filteredTotal}
-        permissions={{ canEditData: permissions.canEditData, canManageSchema: permissions.canManageSchema }}
-        selectionCount={selection.count}
-        onUpdateConfig={(p) => void updateConfig(p)}
-        onNewRecord={onNewRecord}
-        newRecordBusy={newRecordGuard.isBusy("new-record")}
-        onBulkDelete={onBulkDelete}
-        onBulkEdit={() => setBulkEditOpen(true)}
-        onSelectAllPage={() => selection.toggleAll(records.map((r) => r.id))}
-        onClearSelection={onClearSelection}
-        onImport={onImport}
-        onExport={onExport}
-        onCopyView={onCopyView}
-        onClearTable={onClearTable}
-        onEditField={(id) => {
-          if (id == null) {
-            setEditingFieldMeta(null);
-          } else {
-            const found = allSchemaFields.find((f) => f.id === id) ?? null;
-            setEditingFieldMeta(found);
-          }
-          setFieldEditorOpen(true);
-        }}
-      />
-
-      {/* 导入 / 导出向导（复用 L2 表级操作行同一套组件，不重写）。
-          未打开时不挂载数据 hook（ImportWizard 的门面已保证），首屏无额外请求。 */}
-      <ImportWizard
-        open={importOpen}
-        tableId={tableId}
-        viewId={viewId}
-        baseId={baseId}
-        onClose={() => setImportOpen(false)}
-      />
-      <ExportDialog
-        open={exportOpen}
-        viewId={viewId}
-        viewName={view?.name}
-        busy={exportGuard.isBusy("export")}
-        onExport={runExport}
-        onClose={() => setExportOpen(false)}
-      />
+        />
+      ) : (
+        <GridToolbarSettingsRow
+          config={cfg}
+          allFields={gridManageableFields}
+          degradedCodes={infiniteData.degraded ?? []}
+          filteredTotal={filteredTotal}
+          permissions={{ canEditData: permissions.canEditData, canManageSchema: permissions.canManageSchema }}
+          onUpdateConfig={onUpdateConfig}
+          onEditField={(id) => {
+            if (id == null) {
+              setEditingFieldMeta(null);
+            } else {
+              const found = allSchemaFields.find((f) => f.id === id) ?? null;
+              setEditingFieldMeta(found);
+            }
+            setFieldEditorOpen(true);
+          }}
+        />
+      )}
 
       {degraded && (
         <div className="shrink-0 border-b border-gx-separator px-3 py-1.5">
@@ -802,7 +707,7 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
                 rowHeaderWidth={ROW_HEADER_W}
                 primaryFieldId={primaryFieldId}
                 onPick={(fieldId, func: AggFunc | null) =>
-                  updateConfig({ aggregations: { ...cfg.aggregations, [fieldId]: func } })
+                  onUpdateConfig({ aggregations: { ...cfg.aggregations, [fieldId]: func } })
                 }
                 degraded={degraded}
               />
@@ -866,6 +771,78 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
         }}
       />
     </div>
+  );
+}
+
+/**
+ * 导入 / 导出向导宿主：表级操作，与视图类型无关，故由统一外壳 ViewShell 为六类视图挂载一份。
+ *
+ * 执行侧（Tables.exportCsvText / ImportWizard 落库）一直放在本文件，不重写、不并行第二套实现：
+ * 导出走服务端（按视图 / 整表），不受前端已加载行数限制；原先「客户端按当前可见字段拼 CSV」
+ * 的实现已移除。未打开时不挂载数据 hook（ImportWizard 的门面已保证），首屏无额外请求。
+ */
+export function TableViewIoDialogs({
+  baseId,
+  tableId,
+  viewId,
+  viewName,
+  tableName,
+  importOpen,
+  exportOpen,
+  onCloseImport,
+  onCloseExport,
+}: {
+  baseId: string;
+  tableId: string;
+  viewId: string;
+  viewName?: string;
+  tableName?: string | null;
+  importOpen: boolean;
+  exportOpen: boolean;
+  onCloseImport: () => void;
+  onCloseExport: () => void;
+}) {
+  // R-I-26：导出是写派生 + 下载，同样按 key 去重，防止连点触发两次服务端导出。
+  const exportGuard = useWriteGuard();
+
+  const runExport = async (scope: ExportScope) => {
+    await exportGuard.run("export", async () => {
+      try {
+        const csv = await Tables.exportCsvText(tableId, scope === "view" ? viewId : undefined);
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        // E-1：文件名用真实表名，不再把内部 tableId/viewId 抛给用户；表名缺失时退回 id 前缀。
+        a.download = csvFileName(tableName, tableId, scope === "view" ? { name: viewName, id: viewId } : null);
+        a.click();
+        URL.revokeObjectURL(url);
+        toast(scope === "view" ? "已导出当前视图" : "已导出整表", "success");
+        onCloseExport();
+      } catch (e) {
+        toast(e instanceof Error ? e.message : "导出失败", "error");
+      }
+    });
+  };
+
+  return (
+    <>
+      <ImportWizard
+        open={importOpen}
+        tableId={tableId}
+        viewId={viewId}
+        baseId={baseId}
+        onClose={onCloseImport}
+      />
+      <ExportDialog
+        open={exportOpen}
+        viewId={viewId}
+        viewName={viewName}
+        busy={exportGuard.isBusy("export")}
+        onExport={runExport}
+        onClose={onCloseExport}
+      />
+    </>
   );
 }
 

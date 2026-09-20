@@ -1,19 +1,23 @@
 // apps/web/src/features/grid/GridToolbarSettingsRow.tsx
-// 工具栏最后一行（视图切换器单独成行后为第三行）：新建记录 / 行高 / 字段 / 筛选 / 分组 / 排序 / 行颜色。
+// 统一外壳第三行（仅 grid 渲染）：行高 / 字段 / 筛选 / 分组 / 排序 / 行颜色——网格专属设置项。
 //
-// 为什么单独成行：这七个都是**视图呈现配置**，原先和搜索框、导入导出挤在同一条 48px 工具栏里，
-// 1280 档内容区只有 848px 装不下（PERM-08 实测），只能靠把行高/字段/行颜色收进「更多」救场。
-// 拆成第二行后它们有了独立的一整行，宽屏七项全部常驻。
+// 为什么是独立一行：这六项原先和搜索框、导入导出挤在同一条工具栏里，1280 档内容区只有
+// 848px 装不下（PERM-08 实测）。独立成行后宽屏六项全部常驻。
+// 「新建记录」不在这里：它与搜索 / 导入 / 导出 / 更多同属外壳第二行（2026-09-21 行合并）。
 //
 // 为什么这一行不做 overflow-x-auto：设置项自带响应式收起（<1440 收 行高/字段/行颜色，
-// <768 再收 筛选/分组/排序），实测最宽档七项总宽约 490px，任何档位都不会横向溢出；
-// 而 `overflow-x-auto` 会让同一元素的 overflow-y 也变成 auto（CSS 规范：
-// 一个方向非 visible 时另一个方向的计算值不能再是 visible），从而把 Popover 的绝对定位
-// 浮层裁掉。因此这一行走「按断点收进「更多」菜单」，不走横向滚动。
+// <768 再收 筛选/分组/排序），实测最宽档六项总宽约 490px，任何档位都不会横向溢出；
+// 而 `overflow-x-auto` 会让同一元素的 overflow-y 也变成 auto（CSS 规范：一个方向非 visible
+// 时另一个方向的计算值不能再是 visible），从而把 Popover 的绝对定位浮层裁掉。
+// 收起的是**入口**不是功能：被收起的按钮在本行末尾的「更多」里都有打开同一份面板的可点等价项。
+//
+// 注意「更多」与本文件外层的表级「更多」是**两个不同的菜单**：本行的是网格设置项的溢出
+// （只在有按钮被收起时出现），外壳第二行那个是复制视图 / 清空表。
 
 import { useState } from "react";
 import type { FieldDTO, ViewConfig } from "@gx/shared-types";
-import { Button, Popover } from "../../components/ui";
+import { Popover, Menu, MenuItem } from "../../components/ui";
+import { Icon } from "../../components/icons";
 import { FilterActiveBadge } from "../../components/interaction";
 import { useBreakpointTier } from "../../lib/breakpoint";
 import { ToolButton, buildGridPanels, countConditions } from "./GridToolbarParts";
@@ -24,12 +28,21 @@ export interface GridToolbarSettingsRowProps {
   degradedCodes?: string[];
   filteredTotal: number;
   permissions: { canEditData: boolean; canManageSchema: boolean };
-  /** R-I-26 新建记录在途（按钮立即禁用 + spinner，防双击产生两条） */
-  newRecordBusy?: boolean;
   onUpdateConfig: (partial: Partial<ViewConfig>) => void;
-  onNewRecord: () => void;
   onEditField: (fieldId: string | null) => void;
 }
+
+/** 本行「更多」的二级视图：root = 菜单本体，其余 = 被收起的按钮对应的面板。 */
+type MoreView = "root" | "rh" | "fields" | "filter" | "group" | "sort" | "color";
+
+const MORE_VIEW_TITLE: Record<Exclude<MoreView, "root">, string> = {
+  rh: "行高",
+  fields: "字段",
+  filter: "筛选",
+  group: "分组",
+  sort: "排序",
+  color: "行颜色",
+};
 
 export function GridToolbarSettingsRow({
   config,
@@ -37,28 +50,20 @@ export function GridToolbarSettingsRow({
   degradedCodes,
   filteredTotal,
   permissions,
-  newRecordBusy,
   onUpdateConfig,
-  onNewRecord,
   onEditField,
 }: GridToolbarSettingsRowProps) {
   const [open, setOpen] = useState<string | null>(null);
-  // 与 GridToolbar「更多」菜单严格互补：<1440 这三项收进菜单，≥1440 在这一行常驻。
+  const [moreView, setMoreView] = useState<MoreView>("root");
+  // 与外壳第二行的「更多」严格互补：<1440 这三项收进菜单，≥1440 在这一行常驻。
   // SSR / 无 window 环境回落 "2xl"，单测拿到的是桌面全部常驻的表现。
   const wideLayout = useBreakpointTier() === "2xl";
 
   const filterActive = config.filters != null;
   const filterCount = filterActive ? countConditions(config.filters) : 0;
 
-  // PERM-A2 粘滞 tooltip 根因：提示是**原生 title**，而浏览器不对 disabled 表单控件派发
-  // 任何鼠标事件 → 按钮进入 disabled 后 mouseleave 永不到达，tooltip 冻结在屏幕上。
-  // 修法：锁定期把 title 交给外层**永不 disabled** 的 span，并给按钮 pointer-events-none
-  // 让 hover 命中穿透到 span。按钮自身的 disabled 口径与两段文案一字未动。
-  const newRecordTitle = !permissions.canEditData ? "无编辑权限" : "新建记录";
-  const newRecordLocked = !permissions.canEditData || !!newRecordBusy;
-
-  // 与「更多」菜单的 drill-down 严格同一份面板（GridToolbarParts.buildGridPanels），
-  // 关的是自己这个内联 Popover。
+  // 内联 Popover 与「更多」drill-down 共用同一份面板（GridToolbarParts.buildGridPanels），
+  // 关的是自己这个浮层。
   const { rowHeightPanel, fieldsPanel, filterPanel, groupPanel, sortPanel, colorPanel } =
     buildGridPanels({
       config,
@@ -71,23 +76,13 @@ export function GridToolbarSettingsRow({
       onClose: () => setOpen(null),
     });
 
-  return (
-    <div className="flex h-10 min-w-0 items-center gap-1 px-2 pb-1">
-      <span className="inline-flex shrink-0" title={newRecordLocked ? newRecordTitle : undefined}>
-        <Button
-          size="sm"
-          variant="primary"
-          icon="plus"
-          disabled={!permissions.canEditData}
-          loading={newRecordBusy}
-          onClick={onNewRecord}
-          title={newRecordLocked ? undefined : newRecordTitle}
-          className={newRecordLocked ? "pointer-events-none" : undefined}
-        >
-          新建记录
-        </Button>
-      </span>
+  const closeMore = () => {
+    setOpen(null);
+    setMoreView("root");
+  };
 
+  return (
+    <div className="flex h-10 min-w-0 shrink-0 items-center gap-1 border-b border-gx-separator bg-gx-surface px-2 pb-1">
       {/* 行高 / 字段：<1440 收进「更多」菜单（见文件头注释） */}
       {wideLayout && (
         <div className="relative hidden lg:block">
@@ -177,6 +172,71 @@ export function GridToolbarSettingsRow({
           {open === "color" && (
             <Popover open onClose={() => setOpen(null)} align="left" width={320} className="p-0">
               {colorPanel}
+            </Popover>
+          )}
+        </div>
+      )}
+
+      {/* 溢出菜单：只在真有按钮被收起时出现（≥1440 六项常驻，不留多余入口） */}
+      {!wideLayout && (
+        <div className="relative">
+          <ToolButton
+            icon="moreVertical"
+            label="更多"
+            onClick={() => {
+              setOpen(open === "more" ? null : "more");
+              setMoreView("root");
+            }}
+          />
+          {open === "more" && (
+            <Popover
+              open
+              onClose={closeMore}
+              align="right"
+              width={moreView === "root" ? 180 : 288}
+            >
+              {moreView === "root" ? (
+                <Menu width={180}>
+                  <MenuItem icon="rowHeight" label="行高" onClick={() => setMoreView("rh")} />
+                  <MenuItem icon="eye" label="字段" onClick={() => setMoreView("fields")} />
+                  {/* <768 再收起「筛选 / 分组 / 排序」 */}
+                  <div className="md:hidden">
+                    <MenuItem
+                      icon="filter"
+                      label={filterCount > 0 ? `筛选（${filterCount}）` : "筛选"}
+                      onClick={() => setMoreView("filter")}
+                    />
+                    <MenuItem icon="group" label="分组" onClick={() => setMoreView("group")} />
+                    <MenuItem icon="sortAsc" label="排序" onClick={() => setMoreView("sort")} />
+                  </div>
+                  <MenuItem icon="palette" label="行颜色" onClick={() => setMoreView("color")} />
+                </Menu>
+              ) : (
+                <div className="flex max-h-[60vh] flex-col">
+                  <div className="flex shrink-0 items-center gap-1 border-b border-gx-separator px-2 py-1">
+                    <button
+                      type="button"
+                      onClick={() => setMoreView("root")}
+                      aria-label="返回设置菜单"
+                      className="flex h-6 shrink-0 items-center gap-1 rounded-gx-sm px-1 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover"
+                    >
+                      <Icon name="chevronLeft" size={13} />
+                      返回
+                    </button>
+                    <span className="flex-1 truncate text-right text-gx-12 font-medium text-gx-text-primary">
+                      {MORE_VIEW_TITLE[moreView]}
+                    </span>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    {moreView === "rh" && rowHeightPanel}
+                    {moreView === "fields" && fieldsPanel}
+                    {moreView === "filter" && filterPanel}
+                    {moreView === "group" && groupPanel}
+                    {moreView === "sort" && sortPanel}
+                    {moreView === "color" && colorPanel}
+                  </div>
+                </div>
+              )}
             </Popover>
           )}
         </div>
