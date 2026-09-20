@@ -3,18 +3,22 @@
 //
 // 边界（M2 计划 §5-A / 派工）：
 //   - M2 锁定三枚组织管理动作；M3-S6 只增第四枚 manage_menu（导航菜单编排）；
-//     M4-S5 只增第五枚 manage_share（授权策略/分享管理）。
+//     M4-S5 只增第五枚 manage_share（授权策略/分享管理）；
+//     M6 只增第六枚 create_library（建库/建知识库的权限门）。
 //   - 资源动作 r/c/u/d/comment/manage_share（资源空间，见 authz.ts RESOURCE_ACTIONS）一律不与
 //     本 OrgAction 混用：组织空间的 manage_share 是独立第五枚，二者同名不同命名空间。
+//   - create_library 是能力门而非管理面动作：持有它才允许新建 Base / 知识库。默认仅
+//     role_owner 持全部动作，其余角色由管理员在后台勾选授予（按角色，不按人）。
 //   - 成功响应沿用现网：资源本体 / 分页对象 {items,total,page,limit,hasMore}；错误 {error,code}。
 
-/** 组织管理动作（M3-S6 起四枚，M4-S5 起五枚；只增不改既有成员顺序语义）。 */
+/** 组织管理动作（M3-S6 起四枚，M4-S5 起五枚，M6 起六枚；只增不改既有成员顺序语义）。 */
 export type OrgAction =
   | "manage_departments"
   | "manage_members"
   | "manage_roles"
   | "manage_menu"
-  | "manage_share";
+  | "manage_share"
+  | "create_library";
 
 export const ORG_ACTIONS: readonly OrgAction[] = [
   "manage_departments",
@@ -22,6 +26,7 @@ export const ORG_ACTIONS: readonly OrgAction[] = [
   "manage_roles",
   "manage_menu",
   "manage_share",
+  "create_library",
 ];
 
 /** 五枚系统组织角色 key（自定义角色 systemKey=null）。 */

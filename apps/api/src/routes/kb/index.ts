@@ -25,6 +25,7 @@ import {
   entityIconColorSchema,
 } from "../../validators/entity-icon.js";
 import { requireKb, shadowKbAction } from "./shared.js";
+import { assertCanCreateLibrary } from "../../domain/org/createLibraryGuard.js";
 import { membersRoutes } from "./members.js";
 import { docsRoutes } from "./docs.js";
 import { sharingRoutes } from "./sharing.js";
@@ -81,6 +82,10 @@ kb.post("/", async (c) => {
     });
     const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "名称不合法" }, 400);
+
+    // M6 权限门：与建库同源，建知识库须由管理员按角色授予 create_library（写库之前拦）。
+    // 抛出的 HttpError(403) 由下方 catch 的 errorResponse 映射为 {error, code} + 403。
+    await assertCanCreateLibrary(userId);
 
     // M3/S3 #11：建 kb（含 owner 成员）收紧进事务，同事务 upsert kb 节点。
     const created = await withWriteTx("kb.create", async (tx) => {

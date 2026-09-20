@@ -3,6 +3,7 @@
 // 删角色悬挂保护与 reassignTo、scope nodeId 一律 400、越权 403、effective-roles 路由来源。
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setupOrgHarness, json, type OrgHarness } from "./orgHarness.js";
+import { ORG_ACTIONS } from "@gx/shared-types";
 
 let h: OrgHarness;
 
@@ -28,14 +29,15 @@ async function dept(name: string, parentId?: string): Promise<string> {
 }
 
 describe("角色列表与系统角色锁定", () => {
-  it("列表系统角色固定序在前，仅 owner 持五动作", async () => {
+  it("列表系统角色固定序在前，仅 owner 持全部 ORG_ACTIONS", async () => {
     const res = await h.app.request("/api/v1/org/roles", { headers: await h.auth("admin") });
     const list = await json<Array<{ id: string; systemKey: string | null; isSystem: boolean; actions: string[]; name: string }>>(res);
     expect(list.slice(0, 5).map((r) => r.systemKey)).toEqual([
       "owner", "creator", "editor", "commenter", "viewer",
     ]);
     const owner = list.find((r) => r.systemKey === "owner")!;
-    expect(owner.actions.sort()).toEqual(["manage_departments", "manage_members", "manage_menu", "manage_roles", "manage_share"]);
+    // 派生自 ORG_ACTIONS（不写字面量）：再加动作位时此处自动跟随。
+    expect(owner.actions.sort()).toEqual([...ORG_ACTIONS].sort());
     for (const k of ["creator", "editor", "commenter", "viewer"]) {
       expect(list.find((r) => r.systemKey === k)!.actions).toEqual([]);
     }
@@ -73,7 +75,7 @@ describe("自定义角色与动作白名单", () => {
     });
   }
 
-  it("可建五动作任意子集（M4-S5 含 manage_share）；非法动作 400 文案列全五枚；重名 409", async () => {
+  it("可建任意动作子集（M6 含 create_library）；非法动作 400 文案由 ORG_ACTIONS 派生；重名 409", async () => {
     const ok = await createRole("成员管理员", ["manage_members"]);
     expect(ok.status).toBe(201);
     expect((await json<{ actions: string[]; isSystem: boolean }>(ok)).actions).toEqual(["manage_members"]);
@@ -88,14 +90,19 @@ describe("自定义角色与动作白名单", () => {
     expect(shareRole.status).toBe(201);
     expect((await json<{ actions: string[] }>(shareRole)).actions).toEqual(["manage_share"]);
 
-    // 非法动作 400，文案必须由 ORG_ACTIONS 派生列出全部五枚且含 manage_share（防硬编码四枚回退）。
+    // M6：create_library 是合法第六枚，自定义角色可勾选（建库/建知识库权限门）。
+    const libRole = await createRole("建库权限", ["create_library"]);
+    expect(libRole.status).toBe(201);
+    expect((await json<{ actions: string[] }>(libRole)).actions).toEqual(["create_library"]);
+
+    // 非法动作 400，文案必须由 ORG_ACTIONS 派生列出全部动作（派生而非硬编码，加动作位不回退）。
     const bad2 = await createRole("非法动作2", ["drop_table"]);
     expect(bad2.status).toBe(400);
     const badBody = await json<{ error: string }>(bad2);
     expect(badBody.error).toBe(
-      "存在非法组织管理动作（仅允许 manage_departments/manage_members/manage_roles/manage_menu/manage_share）",
+      `存在非法组织管理动作（仅允许 ${[...ORG_ACTIONS].join("/")}）`,
     );
-    for (const a of ["manage_departments", "manage_members", "manage_roles", "manage_menu", "manage_share"]) {
+    for (const a of ORG_ACTIONS) {
       expect(badBody.error).toContain(a);
     }
 

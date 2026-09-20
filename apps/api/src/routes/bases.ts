@@ -22,6 +22,7 @@ import {
   removeLegacyProjectionTx,
   LEGACY_REASONS,
 } from "../domain/authz/projection.js";
+import { assertCanCreateLibrary } from "../domain/org/createLibraryGuard.js";
 import { entityIconSchema, entityIconColorSchema } from "../validators/entity-icon.js";
 
 export const bases = new Hono();
@@ -159,6 +160,9 @@ bases.post("/", async (c) => {
   const userId = await requireUserId(c);
   const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法", details: parsed.error.issues }, 400);
+
+  // M6 权限门：建库不是登录即有的能力，须由管理员按角色授予 create_library（写库之前拦）。
+  await assertCanCreateLibrary(userId);
 
   // M3/S3 #1：建 base 多步写（base+owner 成员+starter 表/字段/视图）收紧进单事务，
   // 同事务同步 nav_nodes（base + table + view 节点）。nav 写失败整体回滚（裁决 9）。

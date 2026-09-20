@@ -37,7 +37,7 @@ beforeAll(async () => {
   fs.mkdirSync(path.join(tmpRoot, "migrations"));
   fs.copyFileSync(path.resolve("prisma/schema.prisma"), path.join(tmpRoot, "schema-legacy.prisma"));
   const dirs = migDirs();
-  expect(dirs.length).toBe(25); // M6-S1 起 PAT/mcp_idempotency 使 22 -> 23（M5-S1 时为 22、M4-S5 时为 20），首次部署管理员初始化再 +1，实体 icon/iconColor DDL 再 +1
+  expect(dirs.length).toBe(26); // M6 起 PAT/mcp_idempotency 使 22 -> 23，首次部署管理员初始化再 +1，实体 icon/iconColor DDL 再 +1，owner create_library 补位再 +1
   for (const name of dirs.slice(0, PRE_ORG_COUNT)) {
     fs.cpSync(path.resolve("prisma/migrations", name), path.join(tmpRoot, "migrations", name), { recursive: true });
   }
@@ -87,7 +87,7 @@ afterAll(async () => {
 describe("12 -> 25 直升回填（nav 迁移 B SQL 首跑；首次部署管理员初始化 + 实体 icon DDL 后总数 25）", () => {
   it("迁移全 applied（25），活实体节点数精确，软删/无视图表不产生悬挂", async () => {
     const applied = await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) n FROM _prisma_migrations WHERE rolled_back_at IS NULL`;
-    expect(Number(applied[0].n)).toBe(25);
+    expect(Number(applied[0].n)).toBe(26);
 
     const nodes = await prisma.navNode.findMany({ where: { deletedAt: null } });
     // 活实体：b1 + t1 + t2 + v1 + k1 + d1 + d2 + c1 = 8（b2 软删不回填）。

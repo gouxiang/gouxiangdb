@@ -31,7 +31,8 @@ export interface SystemRoleSpec {
 /**
  * 五枚系统角色单一真源（应用侧）。permissions/名称与迁移链逐字一致：
  * 20260915090000_enterprise_org_ddl 播三动作，20260916100000_owner_manage_menu
- * 只增补到四动作，20260916130000_owner_manage_share 只增补到五动作
+ * 只增补到四动作，20260916130000_owner_manage_share 只增补到五动作，
+ * 20260919110000_owner_create_library 只增补到六动作
  * （systemRolesMatchSeed 对拍测试跑在全量迁移后）。
  * owner actions 直接展开 ORG_ACTIONS 真源（不手维护本地字面量，加动作位时自动收窄）。
  * 仅 owner 持全部 manage_*，其余四枚为空（M4 资源角色命名锚点）。

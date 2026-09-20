@@ -1,8 +1,9 @@
 // M4/S5 manage_share 第五动作位：白名单穷举 + roleAdmin 非法文案 + owner 第 20 迁移幂等测试。
 //
-// - ORG_ACTIONS 恰为五枚（真源 shared-types），逐枚经 requireOrgAction 构造不抛"未知动作"；
+// - ORG_ACTIONS 恰为六枚（真源 shared-types，M6 追加 create_library），逐枚经 requireOrgAction
+//   构造不抛"未知动作"；
 //   非法动作必须同步抛（接线纪律）。
-// - 全量 deploy（M5-S1 后 22 迁移）后 role_owner permissions 恰为五动作固定 JSON 串。
+// - 全量 deploy 后 role_owner permissions 恰为六动作固定 JSON 串（含 M6 的 create_library）。
 // - 20260916130000_owner_manage_share 只把"恰为四动作"的 owner 行补到五动作：
 //   连跑恒等（FOUR -> FIVE，再跑不改写）；自定义角色不触碰；THREE 行不被越级补位（须先过迁移 19）。
 
@@ -20,6 +21,7 @@ let raw: Database.Database;
 const THREE = '["manage_departments","manage_members","manage_roles"]';
 const FOUR = '["manage_departments","manage_members","manage_roles","manage_menu"]';
 const FIVE = '["manage_departments","manage_members","manage_roles","manage_menu","manage_share"]';
+const SIX = '["manage_departments","manage_members","manage_roles","manage_menu","manage_share","create_library"]';
 const migrationSql = fs.readFileSync(
   path.resolve("prisma/migrations/20260916130000_owner_manage_share/migration.sql"),
   "utf8",
@@ -40,12 +42,14 @@ afterAll(async () => {
   await h.cleanup();
 });
 
-describe("组织管理动作白名单（五枚）", () => {
-  it("ORG_ACTIONS 恰为五枚且追加位是 manage_share", () => {
+describe("组织管理动作白名单（六枚）", () => {
+  it("ORG_ACTIONS 恰为六枚，追加位是 create_library 且既有五枚顺序未变", () => {
     expect([...ORG_ACTIONS]).toEqual([
       "manage_departments", "manage_members", "manage_roles", "manage_menu", "manage_share",
+      "create_library",
     ]);
     expect([...ORG_ACTIONS].sort()).toEqual([
+      "create_library",
       "manage_departments", "manage_members", "manage_menu", "manage_roles", "manage_share",
     ]);
   });
@@ -60,9 +64,9 @@ describe("组织管理动作白名单（五枚）", () => {
 });
 
 describe("全量 deploy 后 owner 第五动作", () => {
-  it("role_owner permissions 恰为五动作固定串（迁移 19 + 20 链）", () => {
+  it("role_owner permissions 恰为六动作固定串（迁移 19 + 20 + owner_create_library 链）", () => {
     const owner = raw.prepare("SELECT permissions FROM roles WHERE id='role_owner'").get() as { permissions: string };
-    expect(owner.permissions).toBe(FIVE);
+    expect(owner.permissions).toBe(SIX);
   });
 });
 

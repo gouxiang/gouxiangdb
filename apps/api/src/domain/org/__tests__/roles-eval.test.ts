@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { ORG_ACTIONS } from "@gx/shared-types";
 
 // 真库模式：被测领域模块依赖 db.ts 单例，必须在注入临时 DATABASE_URL/globalThis.__gx_prisma
 // 之后【动态 import】（静态 import 会在 beforeAll 前 new client 绑错库）。
@@ -92,7 +93,7 @@ function counted(client: PrismaClient) {
 }
 
 describe("系统角色常量与迁移种子对拍", () => {
-  it("五枚 id/key/name/isSystem/permissions 逐字一致，仅 owner 持五动作", async () => {
+  it("五枚系统角色 id/key/name/isSystem/permissions 逐字一致，仅 owner 持全部 ORG_ACTIONS", async () => {
     const rows = await prisma.role.findMany({ where: { workspaceId: "ws_default" } });
     expect(rows).toHaveLength(5);
     const byId = new Map(rows.map((r) => [r.id, r]));
@@ -105,9 +106,8 @@ describe("系统角色常量与迁移种子对拍", () => {
       expect(JSON.parse(row!.permissions).sort()).toEqual([...spec.actions].sort());
     }
     const owner = byId.get("role_owner")!;
-    expect(JSON.parse(owner.permissions).sort()).toEqual(
-      ["manage_departments", "manage_members", "manage_menu", "manage_roles", "manage_share"],
-    );
+    // 派生自 ORG_ACTIONS（不写字面量）：再加动作位时此处自动跟随，无需手改。
+    expect(JSON.parse(owner.permissions).sort()).toEqual([...ORG_ACTIONS].sort());
   });
 });
 
