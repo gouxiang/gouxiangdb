@@ -23,6 +23,7 @@ import {
 } from "./canvas/canvas-context";
 import { CanvasEnhanceOverlay } from "./canvas/CanvasEnhanceOverlay";
 import { installLinkBoardGuards, installPreviewBoardGuards } from "./canvas/board-guards";
+import { fitViewportWhenReady, isDataMutatingOp } from "./canvas/readonly-preview";
 
 // 顺序很重要：核心布局 → 文字编辑 → drawnix 皮肤
 import "./vendor/plait-board.css";
@@ -122,7 +123,12 @@ export const DrawnixCanvas = forwardRef<DrawnixCanvasHandle, DrawnixCanvasProps>
   onViewportRef.current = onViewportChange;
   const fitOnLoadRef = useRef(fitOnLoad);
   fitOnLoadRef.current = fitOnLoad;
+  /** 首帧适配的重试/监听取消句柄（见 canvas/readonly-preview.ts） */
+  const cancelFitRef = useRef<(() => void) | null>(null);
   const lastEmitted = useRef<string>(content ?? "");
+
+  // 卸载/重挂载时收掉首帧适配的 rAF 轮询与 ResizeObserver（预览卡频繁挂载卸载，不留悬挂监听）
+  useEffect(() => () => cancelFitRef.current?.(), []);
 
   // 命令式缩放控制：经 BoardTransforms 作用于真实 board（只读时也可用，viewport 是视图态不改数据、不进撤销栈）
   useImperativeHandle(
@@ -185,6 +191,7 @@ export const DrawnixCanvas = forwardRef<DrawnixCanvasHandle, DrawnixCanvasProps>
   // 这里改在容器捕获阶段拦截「结构编辑手势」（pointerdown 起手拖拽/绘制、双击改文字、右键菜单、
   // 键盘编辑、pointermove 悬停延伸幽灵预览），但主动放行 wheel —— 鼠标滚轮与触控板捏合/平移
   // 都以 wheel 事件下发，可直达 Drawnix 的缩放/平移处理；工具栏另由 CSS 隐藏。
+  // 全部五种事件统一按「目标是否在 overlay / 关联卡内」判定（见下方 blockUnlessOverlay）。
   useEffect(() => {
     if (!readonly || !allowViewInteraction) return;
     const el = wrapRef.current;
@@ -203,22 +210,20 @@ export const DrawnixCanvas = forwardRef<DrawnixCanvasHandle, DrawnixCanvasProps>
       e.preventDefault();
       e.stopPropagation();
     };
-    // pointermove 无"点击目标"语义（悬停幽灵预览/悬停手柄），无论目标在哪都拦，
-    // 避免只读时移动鼠标触发 drawnix 的延伸/连线悬停态。
-    const block = (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-    };
+    // P0-⑤：pointermove 此前无论目标在哪一律拦（原意是屏蔽悬停幽灵预览/连线悬停态），
+    // 但它同样会吃掉落在 overlay / 关联卡 [data-gx-link-fo] 上的 move —— 内层嵌套预览
+    // 的首帧测量正是靠这些 move 驱动的，全拦会让内层子画布永远测不出尺寸、停在空白。
+    // 收窄为与 pointerdown 同一套目标判定：只拦指向画布本体的 move。
     el.addEventListener("pointerdown", blockUnlessOverlay, true);
     el.addEventListener("dblclick", blockUnlessOverlay, true);
     el.addEventListener("contextmenu", blockUnlessOverlay, true);
-    el.addEventListener("pointermove", block, true);
+    el.addEventListener("pointermove", blockUnlessOverlay, true);
     el.addEventListener("keydown", blockUnlessOverlay, true);
     return () => {
       el.removeEventListener("pointerdown", blockUnlessOverlay, true);
       el.removeEventListener("dblclick", blockUnlessOverlay, true);
       el.removeEventListener("contextmenu", blockUnlessOverlay, true);
-      el.removeEventListener("pointermove", block, true);
+      el.removeEventListener("pointermove", blockUnlessOverlay, true);
       el.removeEventListener("keydown", blockUnlessOverlay, true);
     };
     // 必须含 Comp：wrap div 仅在动态 import 就绪（Comp 非 null）后才渲染，
@@ -308,15 +313,16 @@ export const DrawnixCanvas = forwardRef<DrawnixCanvasHandle, DrawnixCanvasProps>
       /* 忽略：只读设置失败不影响编辑 */
     }
     // C-1：只读数据层兜底。事件捕获拦截可能漏掉程序化调用/未来插件新手势/IME 合成事件，
-    // 这里包装 board.apply：只放行 set_viewport（平移缩放是 allowViewInteraction 的查看交互），
-    // 拒绝一切数据变更 op，保证只读预览的 board 数据与源 JSON 始终一致（UI 不失真）。
-    // selection 走 WeakMap 双轨（不经 apply），不受影响。
+    // 这里包装 board.apply：只拦数据变更类 op，保证只读预览的 board 数据与源 JSON 始终一致。
+    // 注意（P0-⑤）：旧实现只放行 set_viewport、其余一律静默 return undefined，把
+    // set_selection / set_interaction 这类「视图态」op 也吞了 —— plait 靠它们推进首次
+    // 布局与绘制，被吞后板停在 origin(0,0)/zoom 1，预览区纯白。现在只拦改内容的 op。
     if (readonly) {
       try {
         const origApply = board.apply?.bind(board);
         if (origApply) {
           board.apply = (op: { type?: string }) => {
-            if (op && op.type === "set_viewport") return origApply(op as never);
+            if (!isDataMutatingOp(op?.type)) return origApply(op as never);
             if (import.meta.env.DEV) console.debug("[gx] readonly board blocked op:", op?.type);
             return undefined;
           };
@@ -325,15 +331,12 @@ export const DrawnixCanvas = forwardRef<DrawnixCanvasHandle, DrawnixCanvasProps>
         /* 兜底失败不影响预览 */
       }
     }
-    // 只读预览：初始化后自动适配全貌（下一帧布局完成再执行，避免容器尺寸为 0 时算错包围盒）
+    // 只读预览：初始化后自动适配全貌。容器尺寸为 0 时下一帧重试，fit 失败按包围盒手算兜底，
+    // 全程不再静默（详见 canvas/readonly-preview.ts）。取消句柄存 ref，卸载时收掉。
     if (fitOnLoadRef.current) {
-      requestAnimationFrame(() => {
-        try {
-          BoardTransforms.fitViewport(boardRef.current);
-          onViewportRef.current?.({ zoom: boardRef.current?.viewport?.zoom ?? 1 });
-        } catch {
-          /* 忽略：适配失败不阻断预览 */
-        }
+      cancelFitRef.current?.();
+      cancelFitRef.current = fitViewportWhenReady(board, {
+        onDone: (zoom) => onViewportRef.current?.({ zoom }),
       });
     }
   }

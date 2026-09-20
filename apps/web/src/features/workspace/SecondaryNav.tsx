@@ -297,8 +297,10 @@ export function SecondaryNav({
         ) : (
           <>
             {/* 文档段的「回到顶级」落区（KB + 文档 tab 才有；无写权限不渲染）。
-                与旧 KbTree 同一套落区样式思路，颜色走 gx-* 令牌。 */}
-            {container.kind === "kb" && kbTab === "doc" && kbOps.canCreate && (
+                与旧 KbTree 同一套落区样式思路，颜色走 gx-* 令牌。
+                P0-④：仅拖拽进行中才进 DOM。此前常驻渲染、靠 border/text-transparent
+                藏起来，盒子照常占位（≈36px 空白条），知识库文档列表顶部因此空一大片。 */}
+            {container.kind === "kb" && kbTab === "doc" && kbOps.canCreate && kbOps.dragActive && (
               <div
                 onDragOver={kbOps.rootZone.onDragOver}
                 onDrop={kbOps.rootZone.onDrop}

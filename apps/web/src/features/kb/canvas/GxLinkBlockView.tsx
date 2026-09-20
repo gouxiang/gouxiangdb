@@ -231,7 +231,9 @@ export function GxLinkBlockView({ board, element, kbId, publicToken, canEdit }: 
         canEdit={canEdit}
         // 容器视觉类已由 LinkBlockForeignObject 的 HTML 包裹层提供；这里加 relative 作为
         // resize 手柄(absolute)的定位包含块，不重复边框/背景。
-        containerClassName="relative flex h-full w-full flex-col overflow-hidden"
+        // min-h 兜底（P0-⑤）：卡片被缩到极小或宿主高度为 0 时，内层预览仍有可见高度，
+        // 不会退化成 0 高容器 → 内嵌画布 fit 有尺寸可算。
+        containerClassName="relative flex h-full min-h-[120px] w-full flex-col overflow-hidden"
         containerStyle={{}}
         onHeaderPointerDown={canEdit ? handleHeaderPointerDown : undefined}
         canRename

@@ -30,6 +30,12 @@ export interface SecondaryKbOps {
   createNode: ReactNode | null;
   /** 文档行拖拽状态（画布行不给）。 */
   rowDrag: (id: string) => SecondaryRowDrag;
+  /**
+   * 当前是否有文档行正在被拖拽（dragId 非空）。
+   * 「移到顶级」落区据此按需渲染：非拖拽态整块不进 DOM，不再白占一片空白
+   * （P0-④ 知识库文档列表顶部空一大条）。
+   */
+  dragActive: boolean;
   /** 顶部「拖到此处移到顶级」落区。 */
   rootZone: {
     active: boolean;
@@ -107,6 +113,9 @@ export function useSecondaryKbOps({
 
   return {
     canCreate,
+    // 拖拽中标志：dragId 在 onDragStart 置位、onDragEnd/handleDrop 清空，
+    // 与行高亮（rowDrag.dragging）同源，不需要另接 dragstart/dragend 监听。
+    dragActive: dragId !== null,
     createNode: canCreate
       ? tab === "doc"
         ? (

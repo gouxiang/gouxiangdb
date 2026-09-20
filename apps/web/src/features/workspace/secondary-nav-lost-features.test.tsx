@@ -152,9 +152,18 @@ describe("② KB 文档拖拽改层级（moveDoc 的 parentId）", () => {
     expect(canvasTab).not.toContain('draggable="true"');
   });
 
-  it("文档 tab 有「拖到此处移到顶级」根落区；无写权限时整块不渲染", () => {
+  // P0-④：落区此前「常驻 DOM、靠 border/text-transparent 藏起来」，盒子照常占位，
+  // 知识库文档列表顶部因此空出一大条。改为仅拖拽进行中才进 DOM。
+  it("文档 tab 的「拖到此处移到顶级」根落区：静止态不进 DOM（不再白占一片）", () => {
     docs = [{ id: "d1", kind: "doc", title: "上线手册", parentId: null }];
-    expect(render(KB, "/kb/k1")).toContain("拖到此处移到顶级");
+    expect(render(KB, "/kb/k1")).not.toContain("拖到此处移到顶级");
+  });
+
+  it("根落区由 dragActive 门控；无写权限时整块不渲染", () => {
+    // 拖拽中才有落区，dragActive 由 SecondaryNavKbOps 的 dragId 派生（已有单测锁 rowDrag 同源）
+    expect(kbOps).toContain("dragActive");
+    expect(kbOps).toContain("dragActive: dragId !== null");
+    docs = [{ id: "d1", kind: "doc", title: "上线手册", parentId: null }];
     kbRole = "viewer";
     expect(render(KB, "/kb/k1")).not.toContain("拖到此处移到顶级");
   });

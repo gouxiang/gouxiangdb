@@ -71,7 +71,9 @@ export function RefEmbedBody({ resolved, refKind, reloadKey, publicToken, kbId }
   }, [mdHtml, kbId, publicToken, navigate, chain]);
 
   return (
-    <div className="relative min-h-0 flex-1 bg-gx-surface">
+    // P0-⑤：宿主没给确定高度时 flex-1 会被压成 0，内嵌画布容器随之 0 高 → 预览纯白。
+    // 用 min-h-[120px] 兜底（不叠加 min-h-0，两个 min-height 工具类会互相覆盖）。
+    <div className="relative min-h-[120px] flex-1 bg-gx-surface">
       {isLoading ? (
         <div className="flex h-full items-center justify-center"><Spinner size={18} /></div>
       ) : error || !doc ? (
@@ -102,7 +104,8 @@ export function RefEmbedBody({ resolved, refKind, reloadKey, publicToken, kbId }
           </div>
         </div>
       ) : refKind === "canvas" ? (
-        <div className="h-full bg-white" key={reloadKey}>
+        // min-h 兜底：宿主高度异常时画布容器仍有一个可见高度，fit 才不会对着 0 尺寸空操作
+        <div className="h-full min-h-[120px] bg-white" key={reloadKey}>
           {/* C-4：fitOnLoad 初始化后自动适配全貌，避免沿用保存时视口导致内容偏出可视区 */}
           <DrawnixCanvas content={doc.content} readonly allowViewInteraction fitOnLoad />
         </div>
