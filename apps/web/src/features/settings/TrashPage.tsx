@@ -44,8 +44,14 @@ export default function TrashPage() {
 
   async function restore(it: TrashItemDTO) {
     try {
-      await m.restoreTrash.mutateAsync({ id: it.id, kind: it.kind, baseId: baseId! });
-      toast("已恢复", "success");
+      const res = await m.restoreTrash.mutateAsync({ id: it.id, kind: it.kind, baseId: baseId! });
+      // 后端恢复字段/表时若同名活实体已存在会自动改名（T-1），此处按契约把最终名字告知用户；
+      // 恢复出来的实体名字以 res.name 为准（列表/侧栏由 invalidateAll 重新拉取，不做乐观写入）。
+      if ("renamed" in res && res.renamed) {
+        toast(`「${it.name}」这个名字已被占用，已恢复为「${res.name}」`, "success");
+      } else {
+        toast("已恢复", "success");
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : "恢复失败", "error");
     }

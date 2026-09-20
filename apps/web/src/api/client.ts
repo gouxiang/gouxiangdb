@@ -503,6 +503,18 @@ export interface AffectedParent {
   recordId: string;
 }
 
+/**
+ * 回收站恢复的响应体。
+ *
+ * 后端回收站恢复（T-1）在恢复字段/表时会先查重名：同名活实体已存在则把恢复出来的这个
+ * 改名为「原名（已恢复）」并递增序号，直到不冲突，因此 kind=field / kind=table **一律**
+ * 带 `renamed` 与最终名字 `name`（未改名时是 `{ renamed: false, name: "原名" }`）。
+ * kind=record 没有名字概念，仍是 `{ ok: true }`，不带这两个字段。
+ */
+export type TrashRestoreResult =
+  | { ok: true }
+  | { ok: true; renamed: boolean; name: string };
+
 export const Records = {
   list: (params: {
     tableId: string;
@@ -584,7 +596,7 @@ export const Records = {
 
   trash: (baseId: string) => apiFetch<{ items: TrashItemDTO[] }>(`/api/records/trash${qs({ baseId })}`),
   restore: (id: string, kind: "record" | "table" | "field") =>
-    apiFetch<{ ok: true }>(`/api/records/trash/${id}/restore`, {
+    apiFetch<TrashRestoreResult>(`/api/records/trash/${id}/restore`, {
       method: "POST",
       body: JSON.stringify({ kind }),
       timeoutMs: WRITE_TIMEOUT_MS,
