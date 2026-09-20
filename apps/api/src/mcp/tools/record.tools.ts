@@ -15,7 +15,6 @@ import {
   NON_WRITABLE_FIELD_TYPES,
 } from "../../domain/authz/fieldMask.js";
 import type { FieldMeta } from "../../domain/types.js";
-import { config } from "../../config.js";
 import { recordBriefById } from "../../domain/mcpReadModels.js";
 import { createRecordTx, softDeleteRecordTx, updateRecordTx } from "../../domain/recordWrite.js";
 import { applyCreateDefaults, applyEditDefaults, applyReverseDefaultsForChild } from "../../domain/defaults.js";

@@ -22,7 +22,6 @@ import {
   shadowKbAction,
 } from "./shared.js";
 import { enqueueChangeEventTx } from "../../domain/search/outbox.js";
-import type { ChangeEntityType } from "../../domain/search/outbox.js";
 import { entityIconSchema, entityIconColorSchema } from "../../validators/entity-icon.js";
 
 /** kb_docs.kind 到检索实体类型（doc/canvas 分别建索引）。 */

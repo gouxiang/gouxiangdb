@@ -776,8 +776,6 @@ function inferAST(
   ast: FormulaAST,
   fieldGroup: (name: string) => string | undefined,
 ): Set<FormulaOutType> {
-  const union = (a: FormulaAST, b: FormulaAST) =>
-    new Set<FormulaOutType>([...inferAST(a, fieldGroup), ...inferAST(b, fieldGroup)]);
   switch (ast.k) {
     case "number":
       return new Set(["num"]);

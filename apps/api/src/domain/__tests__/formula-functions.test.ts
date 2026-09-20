@@ -8,7 +8,7 @@
 // 综合场景走 hydrateOne 路径在 hydrate.test.ts 已覆盖。
 
 import { describe, it, expect } from "vitest";
-import { safeEvaluateFormula, FNULL, fnum, fstr, fbool, asString, type FormulaValue } from "../formula.js";
+import { safeEvaluateFormula, FNULL, fnum, fstr, fbool, type FormulaValue } from "../formula.js";
 
 const vars: Record<string, FormulaValue> = {
   名称: fstr("登录页改版"),

@@ -16,7 +16,7 @@
 //   不由 S6 判定（旧成员守卫已保证进得来出口），本层只做字段维收窄（只减不增）。off/shadow 时
 //   路由不构造本层（零引擎 SQL）；creator/workspace owner 经合成宽来源兜底全可见（与 decide 同源）。
 
-import type { ViewConfig, ResourceAction } from "@gx/shared-types";
+import type { ViewConfig } from "@gx/shared-types";
 import type { AuthzClient, ScopedPolicy } from "./types.js";
 import type { FieldMeta } from "../types.js";
 import type { HydrateDeps } from "../hydrate.js";

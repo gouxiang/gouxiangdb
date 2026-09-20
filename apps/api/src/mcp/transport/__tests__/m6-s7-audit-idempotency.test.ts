@@ -35,9 +35,9 @@ let prisma: PrismaClient;
 let app: { request: (u: string, i?: RequestInit) => Promise<Response> };
 let d1 = "";
 let rwToken = "";        // doc:read + doc:write（u1 签发：u1 有 r,u）
-let roToken = "";        // doc:read only（u1 签发，与 rw 同能力）
+let _roToken = "";       // doc:read only（u1 签发，与 rw 同能力）; P3 语义适配后暂无断言消费，保留绑定
 let rwPatId = "";
-let roPatId = "";
+let _roPatId = "";
 let noWriteToken = "";   // u2 签发：u2 对该文档只有 r -> 写工具不入册
 let noWritePatId = "";
 
@@ -98,7 +98,7 @@ beforeAll(async () => {
   const rw = await svc.createPat("u1", { name: "rw", scopes: ["doc:read", "doc:write"], expiresInDays: 90 });
   const ro = await svc.createPat("u1", { name: "ro", scopes: ["doc:read"], expiresInDays: 90 });
   rwToken = rw.plaintext; rwPatId = rw.pat.id;
-  roToken = ro.plaintext; roPatId = ro.pat.id;
+  _roToken = ro.plaintext; _roPatId = ro.pat.id;
   await prisma.user.create({ data: { id: "u2", email: "u2@x.com", displayName: "u2", passwordHash: "x", status: "ACTIVE" } });
   // noWriteToken：签发者 u2 对该文档无 u -> 写工具不入册（UNKNOWN_TOOL 用例的主体）。
   const nw = await svc.createPat("u2", { name: "nw", scopes: ["doc:read"], expiresInDays: 90 });

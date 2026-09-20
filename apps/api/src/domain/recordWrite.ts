@@ -18,7 +18,6 @@ import { HttpError } from "../guards.js";
 import { loadTableFields } from "./recordService.js";
 import { deleteRecordsTx, syncRecordsTx } from "./fieldIndex/sync.js";
 import { enqueueChangeEventTx } from "./search/outbox.js";
-import { applyCreateDefaults } from "./defaults.js";
 import { sidecarUniqueMatch, findUniqueConflictTx } from "./queryPlan/uniqueSidecar.js";
 import type { resolveTableMask } from "./authz/maskGate.js";
 import { AuthzFieldError } from "./authz/fieldMask.js";
