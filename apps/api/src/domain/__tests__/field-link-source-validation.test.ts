@@ -105,6 +105,18 @@ describe("F-04 · rollup/lookup/count 的关联源必须是本表 links 字段",
     expect(err).not.toBeNull();
   });
 
+  it("错误消息可行动：点名所选字段 + 它的真实类型 + 应该选什么类型", async () => {
+    // subtable 的真实中文名来自 @gx/shared-types 的 FIELD_TYPE_LABEL，不是裸类型 id。
+    const err = await validateFieldConfig(tableA, { type: "rollup", linkFieldId: subtableId, lookupFieldId: numId, rollupFunction: "sum" });
+    expect(err).toContain("明细");
+    expect(err).toContain("子表格");
+    expect(err).toContain("关联");
+
+    const scalar = await validateFieldConfig(tableA, { type: "count", linkFieldId: textId });
+    expect(scalar).toContain("名称");
+    expect(scalar).toContain("单行文本");
+  });
+
   it("普通标量字段作关联源同样被拒绝", async () => {
     const err = await validateFieldConfig(tableA, { type: "count", linkFieldId: textId });
     expect(err).not.toBeNull();

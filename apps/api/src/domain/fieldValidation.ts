@@ -14,7 +14,9 @@ import {
   fieldTypeGroup,
   isTypeAssignable,
   checkSubtableCompatibility,
+  FIELD_TYPE_LABEL,
   type FieldShape,
+  type FieldType,
 } from "@gx/shared-types";
 import { prisma } from "../db.js";
 import { validateFormulaOutput, parseFormula } from "./formula.js";
@@ -159,10 +161,14 @@ export async function validateFieldConfig(tableId: string, cfg: FieldConfigView)
       const lf = await fieldById(cfg.linkFieldId);
       if (!lf) return "关联字段不存在或已被删除";
       if (lf.type !== "links") {
-        return `查阅/聚合/计数的关联字段必须是「关联」类型的字段；「${lf.name}」不是关联字段，请重新选择。`;
+        // 错误消息要「可行动」：点名当前选中的字段、它的真实类型、应该选什么类型
+        // （与巡检脚本 check-link-source-integrity.mjs 同口径，用户据此能自己改对）。
+        const label = FIELD_TYPE_LABEL[lf.type as FieldType] ?? lf.type;
+        return `查阅/聚合/计数的关联字段必须是「关联」类型的字段；你现在选的是「${lf.name}」（${label}），`
+          + "不是关联字段，请在本数据表内重新选择一个「关联」类型的字段。";
       }
       if (lf.tableId && lf.tableId !== tableId) {
-        return "查阅/聚合/计数的关联字段必须属于当前数据表";
+        return `查阅/聚合/计数的关联字段必须属于当前数据表；「${lf.name}」属于其它数据表，请改选本表的「关联」字段。`;
       }
     }
   }
