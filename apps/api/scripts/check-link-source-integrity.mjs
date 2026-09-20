@@ -3,8 +3,8 @@
 // 查阅/聚合/计数三类字段的「关联源完整性」只读巡检（不连 ORM、不改任何数据）。
 //
 // 背景：hydrate.ts 的取值链路只认 linkField.type === "links"
-//   - resolveLookup（hydrate.ts:~625）：`if (!linkField || linkField.type !== "links") return [];`
-//   - resolveCount （hydrate.ts:~701）：同口径 return 0;
+//   - resolveLookup（hydrate.ts:628）：`if (!linkField || linkField.type !== "links") return [];`
+//   - resolveCount （hydrate.ts:701）：同口径 return 0;
 // 因此这三类字段一旦把关联源指向 subtable / 其它类型（或指向已删字段、跨表字段、干脆没设），
 // 字段就变成「永远为空」的死字段：lookup 恒 []、rollup 恒 null、count 恒 0，而界面无任何提示。
 // 写入侧已由 domain/fieldValidation.ts 硬校验（POST/PATCH /api/fields 返回 400），新数据不会再产生；
