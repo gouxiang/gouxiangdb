@@ -27,6 +27,7 @@ export function TopBar() {
   const perms = baseQ.data?.permissions;
   const canManageSchema = perms?.canManageSchema ?? false;
   const canManageBase = perms?.canManageBase ?? false;
+  const canEditData = perms?.canEditData ?? false;
 
   const m = useGXMutations();
 
@@ -174,8 +175,13 @@ export function TopBar() {
             <Menu width={180}>
               <MenuItem icon="copy" label="复制视图" disabled={!canManageSchema} onClick={duplicateView} />
               <MenuItem icon="download" label="导出 CSV" onClick={exportCsv} />
-              <MenuItem icon="upload" label="导入 CSV" onClick={() => { setMore(false); setShowImport(true); }} />
-              <MenuItem icon="trash" label="清空表" danger disabled={!canManageSchema} onClick={clearTable} />
+              {/* 权限口径（对齐网格工具栏 PERM-A1 / PERM-02，commit d1c635d / aacf3f2）：
+                  写入 / 破坏性入口无权限时**不渲染**，不做灰色可点，也不让用户走完向导才吃 403。
+                  门取 canEditData（后端导入与 POST /tables/:tableId/clear 都只要求它），不用 canManageSchema——后者误伤编辑者。 */}
+              {canEditData && (
+                <MenuItem icon="upload" label="导入 CSV" onClick={() => { setMore(false); setShowImport(true); }} />
+              )}
+              {canEditData && <MenuItem icon="trash" label="清空表" danger onClick={clearTable} />}
               <MenuItem icon="trash" label="删除表" danger disabled={!canManageSchema} onClick={deleteTable} />
             </Menu>
           </Popover>
