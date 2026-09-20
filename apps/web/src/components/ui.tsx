@@ -273,12 +273,23 @@ export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   readOnly?: boolean;
   /** R-D-09 禁用原因（渲染为 title 提示） */
   disabledReason?: string;
+  /**
+   * 也可以像原生 `<select>` 那样直接传 `<option>` / `<optgroup>` 子元素。
+   * 优先级：`groups` > `options` > `children`（H-160）。
+   */
+  children?: ReactNode;
 }
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
-  { options, groups, className, readOnly, disabledReason, title, ...rest },
+  { options, groups, className, readOnly, disabledReason, title, children, ...rest },
   ref,
 ) {
+  // 为什么 children 必须**显式解构出来**再渲染（H-160）：
+  // 若让 children 留在 rest 里经 {...rest} 传给 <select>，JSX 写在标签内的显式
+  // children 优先级更高，会把 props.children 直接覆盖掉，于是 options/groups 都
+  // 没传时（调用方用 <Select><option>…</option></Select> 写法）渲染出一个空下拉，
+  // 且服务端无任何报错。受害点例子：导入向导的字段映射下拉（ImportWizard.tsx:307）。
+  // 优先级保持原语义：groups > options > children。
   return (
     <select
       ref={ref}
@@ -299,20 +310,25 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
       )}
       {...rest}
     >
-      {groups?.map((g) => (
-        <optgroup key={g.label} label={g.label}>
-          {g.options.map((o) => (
-            <option key={o.value} value={o.value} disabled={o.disabled}>
-              {o.label}
-            </option>
-          ))}
-        </optgroup>
-      ))}
-      {options?.map((o) => (
-        <option key={o.value} value={o.value} disabled={o.disabled}>
-          {o.label}
-        </option>
-      ))}
+      {groups ? (
+        groups.map((g) => (
+          <optgroup key={g.label} label={g.label}>
+            {g.options.map((o) => (
+              <option key={o.value} value={o.value} disabled={o.disabled}>
+                {o.label}
+              </option>
+            ))}
+          </optgroup>
+        ))
+      ) : options ? (
+        options.map((o) => (
+          <option key={o.value} value={o.value} disabled={o.disabled}>
+            {o.label}
+          </option>
+        ))
+      ) : (
+        children
+      )}
     </select>
   );
 });
