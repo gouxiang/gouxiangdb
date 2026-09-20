@@ -13,6 +13,7 @@ import { ContextMenu, type ContextMenuItem, toast } from "../../components/ui";
 import { ColorPicker } from "../../components/ColorPicker";
 import { EntityPicker, type PickedEntity } from "../../components/EntityPicker";
 import { internalHref } from "../../lib/internal-links";
+import { COPY_FAIL_HINT_LINK, copyText } from "../../lib/clipboard";
 import { MentionPicker } from "./MentionPicker";
 import { CanvasEmbed } from "./CanvasEmbed";
 import { useLinkResolve } from "./hooks/useLinkResolve";
@@ -1416,7 +1417,10 @@ export function WysiwygEditor({
         syncBlock(hit.blockId);
       } },
       { kind: "item", label: "复制链接", icon: "copy", onClick: () => {
-        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(hit.href).catch(() => {});
+        void copyText(hit.href).then((ok) => {
+          if (ok) toast("链接已复制", "success");
+          else toast(COPY_FAIL_HINT_LINK, "error");
+        });
       } },
       { kind: "item", label: "在新窗口打开", icon: "expand", disabled: !isSafe, onClick: () => window.open(hit.href, "_blank", "noopener,noreferrer") },
       { kind: "divider" },
@@ -1958,10 +1962,10 @@ export function WysiwygEditor({
                 e.preventDefault();
                 e.stopPropagation();
                 const base = window.location.origin + window.location.pathname;
-                navigator.clipboard.writeText(`${base}#${finalHeadingId}`).then(
-                  () => toast("已复制标题锚点链接", "success"),
-                  () => toast("复制失败，请手动复制", "error"),
-                );
+                void copyText(`${base}#${finalHeadingId}`).then((ok) => {
+                  if (ok) toast("已复制标题锚点链接", "success");
+                  else toast(COPY_FAIL_HINT_LINK, "error");
+                });
               }}
             >
               <Icon name="link" size={13} />

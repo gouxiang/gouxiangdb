@@ -7,18 +7,18 @@ import { useState } from "react";
 import { Button, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { SEARCH_ENABLE_GUIDE as G } from "./search-admin-copy";
+import { COPY_FAIL_HINT_TEXT, copyText } from "../../lib/clipboard";
 
 export function SearchEnableGuide({ compact = false }: { compact?: boolean }) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(G.snippet);
+    // 非安全上下文（局域网 HTTP）无 navigator.clipboard，走三级降级；失败时 pre 块本身可选中。
+    if (await copyText(G.snippet)) {
       setCopied(true);
       toast(G.copyOk, "success");
-    } catch {
-      // 非安全上下文 / 无剪贴板权限时降级：code 块本身可选中，提示手动复制即可。
-      toast(G.copyFail, "error");
+    } else {
+      toast(COPY_FAIL_HINT_TEXT, "error");
     }
   }
 

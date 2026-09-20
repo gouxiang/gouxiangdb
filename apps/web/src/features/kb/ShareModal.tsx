@@ -2,11 +2,12 @@
 // 分享弹窗：①内部成员（团队）仅可见/可编辑 ②外部链接 开关/复制/权限/级联分享下级。
 // 内部访问以知识库团队角色为准；外部链接以分享设置为准（两套独立）。
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Modal, Button, Switch, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { useShareState, useSetShare, useSetInternalShare } from "./kb-hooks";
 import { withBase } from "../../api/client";
+import { COPY_FAIL_HINT_LINK, copyText } from "../../lib/clipboard";
 
 export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId: string; kbId: string; kind?: "doc" | "canvas"; open: boolean; onClose: () => void }) {
   const { data, isLoading } = useShareState(open ? docId : undefined);
@@ -17,6 +18,8 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
   const [linkRole, setLinkRole] = useState<"viewer" | "editor">("viewer");
   const [includeChildren, setIncludeChildren] = useState(false);
   const [internalRole, setInternalRole] = useState<"viewer" | "editor">("editor");
+  // 复制失败时用于自动选中链接文本，让用户可直接按 Ctrl/⌘ + C。
+  const linkInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (data?.share) {
@@ -36,12 +39,16 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
 
   async function copyLink() {
     if (!fullUrl) return;
-    try {
-      await navigator.clipboard.writeText(fullUrl);
+    // 局域网 HTTP 下 navigator.clipboard 不存在（非安全上下文），必须走三级降级。
+    const ok = await copyText(fullUrl);
+    if (ok) {
       toast("链接已复制", "success");
-    } catch {
-      toast("复制失败，请手动选择链接复制", "error");
+      return;
     }
+    toast(COPY_FAIL_HINT_LINK, "error");
+    // 自动选中只读输入框文本（onFocus 也会 select），用户可直接按 Ctrl/⌘ + C。
+    linkInputRef.current?.focus();
+    linkInputRef.current?.select();
   }
 
   async function toggleShare(next: boolean) {
@@ -139,6 +146,7 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
                 <div className="flex items-center gap-2 rounded-gx-lg border border-gx-separator bg-gx-bg px-2.5 py-2">
                   <Icon name="link" size={14} className="shrink-0 text-gx-text-tertiary" />
                   <input
+                    ref={linkInputRef}
                     readOnly
                     value={fullUrl}
                     onFocus={(e) => e.target.select()}

@@ -19,7 +19,8 @@ import {
   type FormulaCategory,
 } from "@gx/shared-types";
 import { useLookupTargets } from "../../api/hooks";
-import { Button, FieldIcon } from "../../components/ui";
+import { Button, FieldIcon, toast } from "../../components/ui";
+import { COPY_FAIL_HINT_TEXT, copyText } from "../../lib/clipboard";
 import { Icon } from "../../components/icons";
 
 export interface FormulaEditorModalProps {
@@ -193,7 +194,11 @@ export function FormulaEditorModal({ value, fields, onClose, onConfirm }: Formul
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="flex items-center justify-between border-b border-gx-separator px-3 py-1.5">
               <span className="font-mono text-gx-12 text-gx-text-secondary">公式 =</span>
-              <button type="button" onClick={() => { navigator.clipboard?.writeText(draft).catch(() => {}); }} className="inline-flex items-center gap-1 text-gx-11 text-gx-text-secondary hover:text-gx-accent">
+              {/* 原先静默吞错（点了没反应也不知道成败），现改为成功/失败都给明确 toast。 */}
+              <button type="button" onClick={() => { void copyText(draft).then((ok) => {
+                if (ok) toast("公式已复制", "success");
+                else toast(COPY_FAIL_HINT_TEXT, "error");
+              }); }} className="inline-flex items-center gap-1 text-gx-11 text-gx-text-secondary hover:text-gx-accent">
                 <Icon name="copy" size={12} /> 复制
               </button>
             </div>

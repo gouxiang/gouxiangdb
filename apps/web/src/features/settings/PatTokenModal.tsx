@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button, Modal, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { TOKEN_ONCE_WARNING } from "./pat-labels";
+import { COPY_FAIL_HINT_TEXT, copyText } from "../../lib/clipboard";
 
 export function PatTokenModal({
   token,
@@ -22,12 +23,11 @@ export function PatTokenModal({
 
   async function copy() {
     if (!token) return;
-    try {
-      await navigator.clipboard.writeText(token);
+    if (await copyText(token)) {
       setCopied(true);
       toast("已复制到剪贴板", "success");
-    } catch {
-      toast("复制失败，请手动选择并复制", "error");
+    } else {
+      toast(COPY_FAIL_HINT_TEXT, "error");
     }
   }
 

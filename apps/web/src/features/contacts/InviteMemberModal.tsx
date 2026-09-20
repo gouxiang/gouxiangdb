@@ -1,10 +1,11 @@
 // M2/S7 添加成员弹窗：两种方式——邀请（建 INVITED 账号，一次性返回激活链接+复制）/直接创建 ACTIVE 账号。
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button, Input, Modal, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { buildInviteLink } from "../../api/client";
 import { useOrgMemberMutations } from "./contacts-hooks";
 import { errText } from "./contacts-ui";
+import { COPY_FAIL_HINT_LINK, copyText } from "../../lib/clipboard";
 
 type Mode = "invite" | "create";
 
@@ -17,6 +18,8 @@ export function InviteMemberModal({ open, onClose }: { open: boolean; onClose: (
   // 邀请成功后的一次性结果（明文链接仅本次展示）
   const [inviteResult, setInviteResult] = useState<{ email: string; url: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  // 复制失败时用于自动选中激活链接文本，让用户可直接按 Ctrl/⌘ + C。
+  const urlInputRef = useRef<HTMLInputElement>(null);
 
   function reset() {
     setEmail("");
@@ -94,18 +97,19 @@ export function InviteMemberModal({ open, onClose }: { open: boolean; onClose: (
             把下面的激活链接发给对方，打开后设置密码即可激活。该链接为一次性，离开此窗口后无法再次查看。
           </p>
           <div className="flex items-center gap-2">
-            <Input readOnly value={inviteResult.url} className="flex-1" onFocus={(e) => e.target.select()} />
+            <Input ref={urlInputRef} readOnly value={inviteResult.url} className="flex-1" onFocus={(e) => e.target.select()} />
             <Button
               variant="secondary"
               icon={copied ? "check" : "copy"}
               onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(inviteResult.url);
+                if (await copyText(inviteResult.url)) {
                   setCopied(true);
-                  toast("已复制激活链接", "success");
-                } catch {
-                  toast("复制失败，请手动选择链接复制", "error");
+                  toast("链接已复制", "success");
+                  return;
                 }
+                toast(COPY_FAIL_HINT_LINK, "error");
+                urlInputRef.current?.focus();
+                urlInputRef.current?.select();
               }}
             >
               {copied ? "已复制" : "复制"}

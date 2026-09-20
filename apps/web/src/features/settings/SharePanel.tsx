@@ -10,6 +10,7 @@ import { Badge, EmptyState, Input, Select, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { ROLE_LABEL, type Role } from "@gx/shared-types";
 import { confirmIrreversible } from "../../components/feedback";
+import { COPY_FAIL_HINT_LINK, copyText } from "../../lib/clipboard";
 
 const SHARE_ROLES: Role[] = ["editor", "commenter", "viewer"];
 
@@ -30,11 +31,10 @@ export function SharePanel({ baseId, canManageBase }: { baseId: string; canManag
   async function copyLink(token: string) {
     // 子路径部署（/app/gouxiangdb）下分享链接必须带网关前缀，否则命中后端根 404。
     const url = `${location.origin}${withBase(`/join/${token}`)}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      toast("已复制", "success");
-    } catch {
-      toast("复制失败，请手动复制", "error");
+    if (await copyText(url)) {
+      toast("链接已复制", "success");
+    } else {
+      toast(COPY_FAIL_HINT_LINK, "error");
     }
   }
 

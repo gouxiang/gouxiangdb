@@ -72,7 +72,7 @@ export const SEARCH_ENABLE_GUIDE = {
   /** 安抚：关键词检索本来就能用，不受影响。 */
   reassure: "关键词检索无需任何配置，现在就可以正常使用；未启用期间索引重建等写入操作不可用。",
   copyOk: "配置片段已复制到剪贴板",
-  copyFail: "复制失败，请手动选中并复制",
+  // 失败文案不在本文件：统一由 lib/clipboard.ts 的 COPY_FAIL_HINT_TEXT 提供（含快捷键）。
 } as const;
 
 /** 云端出域确认文案（off->cloud 二次确认弹窗）。 */
