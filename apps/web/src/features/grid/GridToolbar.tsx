@@ -1,9 +1,12 @@
 // apps/web/src/features/grid/GridToolbar.tsx
-// 网格工具栏：第一行承载视图切换器（宿主传入）/ 搜索 / 导入 / 导出 / 更多（表级操作）；
-// 第二行（GridToolbarSettingsRow）承载七个视图呈现配置项。
+// 网格工具栏：三行。
+//   第 0 行 = 视图切换器（宿主经 leading 传入），独占整行；
+//   第一行 = 搜索 / 导入 / 导出 / 更多（表级操作）；
+//   第二行（GridToolbarSettingsRow）= 七个视图呈现配置项。
 //
-// 两行的职责切分见 GridToolbarSettingsRow 文件头注释：原先七项设置与搜索、导入导出同处一行，
-// 1280 档撑不下只能大量收进「更多」；下移成独立一行后宽屏七项全部常驻。
+// 为什么视图切换器单独成行：原先它与搜索框、导入导出共用一条 48px 工具栏，横向空间三方分账，
+// 视图一多选项卡就被挤成一小截；独占一行后可吃满整行宽度（本轮唯一改动点）。
+// 设置项为何单独成行见 GridToolbarSettingsRow 文件头注释（1280 档撑不下才收进「更多」）。
 //
 // 其余口径不变：
 //   ① 导入 / 导出是常驻按钮（第四批入口收敛后全站唯一入口），落在搜索框右侧
@@ -149,14 +152,20 @@ export function GridToolbar(props: GridToolbarProps) {
 
   return (
     <div className="shrink-0 border-b border-gx-separator bg-gx-surface">
-      {/* 第一行：视图切换器 / 搜索 / 导入 / 导出 / 更多 */}
-      <div className="flex h-12 items-center gap-1 px-2">
-        {leading}
-        {leading && <div className="h-5 w-px shrink-0 bg-gx-separator" />}
+      {/* 第 0 行：视图切换器独占整行（多行视图选项卡的横向空间预留，见文件头） */}
+      {leading ? (
+        <div
+          data-gx-toolbar-view-row=""
+          className="flex h-9 min-w-0 items-center gap-1 px-2 pt-1"
+        >
+          {leading}
+        </div>
+      ) : null}
 
-        {/* 右段：搜索（R-I-03 宽 170 / 高 32 / 防抖 300ms / 搜索中置灰保留旧结果）
-            <768 主轴撑满（不换行、不挤掉其它按钮），≥768 严格回到 170 定宽 */}
-        <div className="ml-auto flex min-w-0 flex-1 md:flex-none">
+      {/* 第一行：搜索 / 导入 / 导出 / 更多 */}
+      <div className="flex h-11 min-w-0 items-center gap-1 px-2">
+        {/* 搜索（R-I-03：宽 170 / 防抖 300ms；<768 撑满主轴，≥768 回到 170 定宽） */}
+        <div className="flex min-w-0 flex-1 md:flex-none">
           <ListSearchBox
             value={search.value}
             onChange={search.setValue}
@@ -167,9 +176,7 @@ export function GridToolbar(props: GridToolbarProps) {
           />
         </div>
 
-        {/* 导入 / 导出：第四批入口收敛后由这里独家承载（L2 表级操作行的导入导出格已下线）。
-            位置在搜索框**右侧**、常驻可见——表级导入导出是全站唯一的写入/导出口，
-            藏在「更多」里等于让新用户找不到；窄屏同样不收起（ToolButton 自带 shrink-0）。 */}
+        {/* 导入 / 导出：入口收敛后由这里独家承载，落在搜索框右侧、常驻不收起 */}
         {/* 权限口径（WALK-权限组合-2026-09-20 · PERM-A1）：导入是**写数据**入口，无权限**不渲染**，
             不做成灰色可点、也不让用户填完向导再被后端 403 打回。
             权限源沿用本工具栏既有的一份（permissions.canEditData，来自 base.permissions）。
@@ -273,7 +280,7 @@ export function GridToolbar(props: GridToolbarProps) {
         </div>
       </div>
 
-      {/* 第二行：七个视图呈现配置项（GridToolbarSettingsRow） */}
+      {/* 最后一行：七个视图呈现配置项（GridToolbarSettingsRow） */}
       <GridToolbarSettingsRow
         config={config}
         allFields={allFields}
