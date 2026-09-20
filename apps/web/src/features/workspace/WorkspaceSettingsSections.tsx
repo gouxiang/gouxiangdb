@@ -92,39 +92,8 @@ function EntityGroup({
   );
 }
 
-/** 资产：跳各库 / 各知识库自己的设置页（成员与角色切面各自独立，这里不重复提供）。 */
-export function AssetsSection() {
-  const navigate = useNavigate();
-  const { data: bases, isLoading: loadingBases } = useBases();
-  const { data: kbs, isLoading: loadingKb } = useKbList();
-
-  return (
-    <div className="flex flex-col gap-6">
-      <EntityGroup
-        title="智能数据库"
-        loading={loadingBases}
-        rows={bases ?? []}
-        fallbackIcon="database"
-        emptyIcon="database"
-        emptyTitle="暂无数据库"
-        emptyDesc="创建第一个智能数据库来存放结构化数据。"
-        rowLabel={(n) => `打开「${n}」的设置`}
-        onOpen={(id) => navigate(`/base/${id}/settings`)}
-      />
-      <EntityGroup
-        title="知识库"
-        loading={loadingKb}
-        rows={kbs ?? []}
-        fallbackIcon="book"
-        emptyIcon="book"
-        emptyTitle="暂无知识库"
-        emptyDesc="知识库用来沉淀文档与画布，可与数据库互链。"
-        rowLabel={(n) => `打开「${n}」的设置`}
-        onOpen={(id) => navigate(`/kb/${id}/settings`)}
-      />
-    </div>
-  );
-}
+// 「资产」分区已移除（AssetsSection 随之删除）：单个库/知识库的深度设置改由
+// 一级导航条目行尾的「…」菜单进入（重命名 / 设置），设置里不再重复列一份入口。
 
 /** 回收站聚合入口：库回收站 / 知识库回收站都从这里进（各资产侧边的就近入口保留不动）。 */
 export function TrashSection() {

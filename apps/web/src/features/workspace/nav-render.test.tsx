@@ -33,6 +33,8 @@ interface LibDTO {
   name: string;
   icon?: string | null;
   iconColor?: string | null;
+  /** 本人角色；缺省按 owner（与 KbSettingsPage 的 role ?? "owner" 同口径）。 */
+  role?: string;
 }
 
 const BASES: LibDTO[] = [
@@ -108,6 +110,40 @@ describe("PrimaryNav 一级只列数据库与知识库（第三批契约）", ()
     const src = readFileSync(fileURLToPath(new URL("./PrimaryNav.tsx", import.meta.url)), "utf8");
     expect(src).toContain("`/base/${row.entityId}`");
     expect(src).toContain("`/kb/${row.entityId}`");
+  });
+});
+
+describe("L1 行尾「…」菜单（重命名 / 设置）", () => {
+  it("有管理角色：每行一个「…」菜单，label 带库名（读屏能念出是哪一行）", () => {
+    const html = renderNav("/", { bases: BASES, kbs: KBS });
+    expect(html).toContain('aria-label="数据库操作 客户主库"');
+    expect(html).toContain('aria-label="知识库操作 产品知识库"');
+  });
+
+  it("菜单里只有「重命名 / 设置」，不放任何权限项", () => {
+    const src = readFileSync(fileURLToPath(new URL("./PrimaryNav.tsx", import.meta.url)), "utf8");
+    expect(src).toContain('label: "重命名"');
+    expect(src).toContain('label: "设置"');
+    // 权限配置已统一收敛到「工作区设置 → 权限管理」，L1 菜单里不再留第二处入口
+    expect(src).not.toContain('label: "权限');
+    expect(src).not.toContain('label: "成员');
+    expect(src).not.toContain('label: "分享');
+  });
+
+  it("无管理角色（viewer）：不渲染菜单按钮，只留等宽占位（不给无权限的人看到入口）", () => {
+    const html = renderNav("/", {
+      bases: [{ id: "base_2", name: "订单库", icon: null, iconColor: null, role: "viewer" }],
+    });
+    expect(html).toContain("订单库");
+    expect(html).not.toContain('aria-label="数据库操作 订单库"');
+    // 占位 span 仍在（行宽行高不跳变），但它不是可点按钮
+    expect(html).not.toContain('aria-haspopup="menu"');
+  });
+
+  it("折叠档（56 图标档）不渲染「…」菜单：折叠态只剩居中图标", () => {
+    const html = renderNav("/", { bases: BASES, kbs: KBS, collapsed: true });
+    expect(html).not.toContain('aria-label="数据库操作 客户主库"');
+    expect(html).not.toContain('aria-haspopup="menu"');
   });
 });
 

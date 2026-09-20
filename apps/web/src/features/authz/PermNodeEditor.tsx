@@ -115,7 +115,7 @@ export function PermNodeEditor({ node }: { node: NavNodeDTO }) {
       {!editable && (
         <div className="flex items-center gap-1.5 rounded-gx-lg bg-gx-row-hover px-2.5 py-1.5 text-gx-12 text-gx-text-hint">
           <Icon name="lock" size={13} className="shrink-0" />
-          {canManage ? "你没有该节点的分享管理权限，当前为只读视图。" : "权限编辑未在本环境开放，当前为只读视图。"}
+          {canManage ? "你没有该节点的分享管理权限，当前为只读视图。" : "你没有该节点的管理权限，当前为只读视图。"}
         </div>
       )}
 

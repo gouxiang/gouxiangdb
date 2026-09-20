@@ -1,6 +1,10 @@
 // apps/web/src/features/settings/SettingsPage.tsx
-// 设置中心：左二级导航（概览/成员与权限/分享/数据表/危险操作）+ 内容区
-// 顶部返回按钮回到上一个视图；支持 #share 等 hash 直达 tab
+// 设置中心：左二级导航（概览/数据表/危险操作）+ 内容区
+// 顶部返回按钮回到上一个视图；支持 #tables 等 hash 直达 tab
+//
+// 权限口径（不要再加回来）：「成员与权限」「分享」两个 tab 已移除 ——
+// 全站唯一的权限配置入口是「工作区设置 → 权限管理」，那里同时管组织角色、
+// 各库成员与分享、资源授权策略。这里只留本库自身的信息与结构设置。
 
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -18,15 +22,11 @@ import { EntityIconPicker } from "../../components/EntityIconPicker";
 import { confirmIrreversible, confirmSoftDelete, confirmClearTable } from "../../components/feedback";
 import { toastDeleted } from "../../components/interaction";
 import { colors } from "@gx/design-tokens";
-import { MembersPanel } from "./MembersPanel";
-import { SharePanel } from "./SharePanel";
 
-type Tab = "overview" | "members" | "share" | "tables" | "danger";
+type Tab = "overview" | "tables" | "danger";
 
-const TABS: { key: Tab; label: string; icon: "grid" | "users" | "share" | "table" | "alertCircle" }[] = [
+const TABS: { key: Tab; label: string; icon: "grid" | "table" | "alertCircle" }[] = [
   { key: "overview", label: "概览", icon: "grid" },
-  { key: "members", label: "成员与权限", icon: "users" },
-  { key: "share", label: "分享", icon: "share" },
   { key: "tables", label: "数据表", icon: "table" },
   { key: "danger", label: "危险操作", icon: "alertCircle" },
 ];
@@ -309,12 +309,27 @@ export default function SettingsPage() {
                   </div>
                 </div>
               </div>
+
+              {/* 成员与分享已从本页移除：全站唯一的权限入口是「工作区设置 → 权限管理」，
+                  这里只留一句引导，不再挂第二份编辑界面（两处都能改＝口径分裂）。 */}
+              <div className="flex flex-col gap-3 rounded-gx-lg border border-gx-border bg-gx-surface p-4 sm:flex-row sm:items-center">
+                <Icon name="users" size={20} className="shrink-0 text-gx-accent" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-gx-14 font-medium text-gx-text-primary">成员与权限</div>
+                  <p className="mt-0.5 text-gx-12 text-gx-text-tertiary">
+                    谁可以访问这个库、谁能改、谁能分享，统一在「工作区设置 → 权限管理」里配置。
+                  </p>
+                </div>
+                <Button
+                  variant="secondary"
+                  icon="shield"
+                  onClick={() => navigate("/workspace/settings/authz")}
+                >
+                  前往权限管理
+                </Button>
+              </div>
             </div>
           )}
-
-          {tab === "members" && baseId && <MembersPanel baseId={baseId} canManageBase={canManageBase} />}
-
-          {tab === "share" && baseId && <SharePanel baseId={baseId} canManageBase={canManageBase} />}
 
           {tab === "tables" && (
             <div className="rounded-gx-lg border border-gx-border">

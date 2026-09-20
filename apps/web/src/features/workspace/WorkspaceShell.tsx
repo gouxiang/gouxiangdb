@@ -47,6 +47,7 @@ import { WorkspaceTopBar } from "./WorkspaceTopBar";
 import { NavLibraryBlock } from "./NavLibraryBlock";
 import { L1_ROW_IDLE, L1_ROW_SELECTED, NAV_ROW_TRANSITION, PrimaryNav } from "./PrimaryNav";
 import { SecondaryNav, type SecondaryContainer } from "./SecondaryNav";
+import { useLibraryRename } from "./useLibraryRename";
 import { SecondaryNavRail } from "./SecondaryNavRail";
 import { useBreakpointTier, isDrawerTier, isFloatingL2Tier } from "../../lib/breakpoint";
 import {
@@ -171,6 +172,8 @@ function SideRail({
   navError = false,
   /** 一级导航顶部插槽：库切换器 + 单一「新建库」入口（库类型在弹窗内二选一）。 */
   header,
+  /** L1 行尾「…」菜单里的「重命名」：需要 QueryClient，故在壳层实现后注入。 */
+  onRename,
 }: {
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -182,6 +185,7 @@ function SideRail({
   navLoading?: boolean;
   navError?: boolean;
   header?: ReactNode;
+  onRename?: (kind: "base" | "kb", id: string, name: string) => Promise<void>;
 }) {
   return (
     <aside
@@ -198,6 +202,7 @@ function SideRail({
           error={navError}
           collapsed={collapsed}
           header={header}
+          onRename={onRename}
         />
       </div>
       <FooterNav collapsed={collapsed} />
@@ -274,6 +279,12 @@ export function WorkspaceShell() {
     () => deriveScopeContainer(bases, kbs, scopeKind && scopeId ? { kind: scopeKind, id: scopeId } : null),
     [scopeKind, scopeId, bases, kbs],
   );
+
+  /**
+   * L1 行尾「…」菜单的「重命名」：实现抽在 useLibraryRename（走 client 方法 + 失效列表缓存），
+   * 这里只取回调透传给 PrimaryNav —— 壳层不自己持有改名逻辑。
+   */
+  const renameLibrary = useLibraryRename();
 
   /** 显式收起：落盘（刷新保持），并清掉会话内 peek，否则 peek 会盖掉这次收起。 */
   const collapseL2 = useCallback(() => {
@@ -384,6 +395,7 @@ export function WorkspaceShell() {
                   navLoading={basesLoading || kbsLoading}
                   navError={basesError || kbsError}
                   header={<NavLibraryBlock active={activeLibrary} collapsed={collapsed} />}
+                  onRename={renameLibrary}
                 />
                 {showL2 && secondary && (
                   <div className="absolute left-0 top-0 bottom-0 gx-z-drawer shadow-gx-lg">
@@ -411,6 +423,7 @@ export function WorkspaceShell() {
                   }
                 : null
             }
+            onRename={renameLibrary}
           />
         )}
 

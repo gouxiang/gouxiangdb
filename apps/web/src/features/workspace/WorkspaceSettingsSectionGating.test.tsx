@@ -34,9 +34,6 @@ vi.mock("../search/search-admin-hooks", async (importOriginal) => {
   };
 });
 
-vi.mock("../contacts/ContactsDirectory", () => ({
-  ContactsDirectory: () => <div data-contacts-directory="1" />,
-}));
 // 分区门控要读 useAuthzCapability（权限分区），这里给确定值，不发请求。
 vi.mock("../authz/useAuthzCapability", () => ({
   useAuthzCapability: () => ({ canManage: true }),
@@ -60,7 +57,7 @@ const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 const pageSrc = read("./WorkspaceSettingsPage.tsx");
 
 /** 通用分区的锚点文案：右内容「有内容」的判据 */
-const GENERAL = "管理组织通讯录与资产入口";
+const GENERAL = "权限、语义检索与回收站都在这里配置";
 
 function renderPage(location = "/workspace/settings"): string {
   // 资产/回收站/导航子页内部用 useQuery（SSR 不跑 queryFn），需要 QueryClient 上下文。
@@ -141,22 +138,19 @@ describe("B. gated 分区只看 effectiveSection（不看 URL 原始 section）"
     expect(renderPage("/workspace/settings/mcp")).toContain("为 AI 客户端签发访问令牌");
   });
 
-  it("非 gated 分区直戳不受影响（assets / trash）", () => {
-    expect(renderPage("/workspace/settings/assets")).toContain("智能数据库");
+  it("非 gated 分区直戳不受影响（trash）", () => {
     expect(renderPage("/workspace/settings/trash")).toContain("数据库回收站");
   });
 
-  // P2-B3：通讯录分区改为 ownerOnly（内嵌真实成员数据，非 owner 不该见到）。
-  it("非 owner 直戳 /contacts → 回落通用，且右内容不含通讯录列表", () => {
-    isOwner = false;
-    const html = renderPage("/workspace/settings/contacts");
-    expect(html).toContain(GENERAL);
-    expect(html).not.toContain("data-contacts-directory");
-  });
-
-  it("owner 直戳 /contacts 仍然进得去（守卫没有反向误杀）", () => {
+  // 通讯录与资产分区已移除（一级导航已有通讯录入口；单库设置改由 L1「…」菜单进入）。
+  it("已下线的 /contacts 与 /assets 分区直戳都回落通用，不空白", () => {
     isOwner = true;
-    expect(renderPage("/workspace/settings/contacts")).toContain("data-contacts-directory");
+    const contacts = renderPage("/workspace/settings/contacts");
+    expect(contacts).toContain(GENERAL);
+    expect(contacts).not.toContain("data-contacts-directory");
+    const assets = renderPage("/workspace/settings/assets");
+    expect(assets).toContain(GENERAL);
+    expect(assets).not.toContain("智能数据库");
   });
 
   it("effectiveSection 由 visibleSections 反查得出（单一真源）", () => {

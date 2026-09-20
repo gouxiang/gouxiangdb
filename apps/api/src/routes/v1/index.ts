@@ -23,8 +23,31 @@ import { authzRoutes } from "./scope.js";
 import { searchRoutes } from "./search.js";
 import { adminSearchRoutes } from "./adminSearch.js";
 import { patRoutes } from "./pats.js";
+import { effectiveRoleRows } from "../../domain/org/authorization.js";
 
 export const v1 = new Hono();
+
+/**
+ * 权限管理能力位：当前用户能否进「工作区设置 → 权限管理」并使用写能力。
+ *
+ * 口径 = 持有任一 manage_* 组织动作 ∨ 持有系统 owner 角色。与 routes/v1/workspace.ts 的
+ * isWorkspaceAdmin 同族（同一个 effectiveRoleRows 真源），只是把「任一动作」收紧到 manage_*
+ * 并显式补上 owner（owner 的 actions 集合由角色配置决定，不假定它一定含 manage_*）。
+ *
+ * **不挂在 GX_AUTHZ_ENGINE 总门上**：新权限引擎默认 off / 降级 shadow，实际鉴权决策走旧三表；
+ * 挂总门会让管理员在任何环境看到的都还是「权限编辑未在本环境开放」的只读视图——
+ * 这正是本字段要修掉的那个现象。能力位只回答「这个人是不是组织权限管理者」，与引擎 readiness 正交。
+ *
+ * fail-closed：查询抛错一律 false，不让 /meta（能力探针）因此 500。
+ */
+async function authzManageFlag(userId: string): Promise<boolean> {
+  try {
+    const roles = await effectiveRoleRows(userId);
+    return roles.some((r) => r.systemKey === "owner" || r.actions.some((a) => a.startsWith("manage_")));
+  } catch {
+    return false;
+  }
+}
 
 // v1 全部端点要求登录且账号 ACTIVE/tv 匹配（条件挂载的子路由共享此链）。
 v1.use("*", requireActiveUser);
@@ -39,11 +62,13 @@ if (config.enterpriseOrg) {
   // M6/S1 个人访问令牌（PAT）REST：本人限定（C-5 定稿：与 /mcp 同受 GX_ENTERPRISE_ORG 门控，
   // off 即不挂载 -> v1 自身 404）。
   v1.route("/pats", patRoutes);
-  v1.get("/meta", (c) => {
+  v1.get("/meta", async (c) => {
     const auth = c.get("auth");
     return c.json({
       apiVersion: "v1",
       enterpriseOrg: true,
+      // 权限管理写能力位。见 authzManageFlag 的口径注释：与 GX_AUTHZ_ENGINE 总门解耦。
+      authzManage: await authzManageFlag(auth.userId),
       auth: {
         userId: auth.userId,
         status: auth.status,

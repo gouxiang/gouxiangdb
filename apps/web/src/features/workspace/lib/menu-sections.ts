@@ -63,6 +63,45 @@ export function navRowHeights(rows: readonly NavSectionRow[]): number[] {
 export interface LibraryEntity extends EntityIconValue {
   id: string;
   name: string;
+  /**
+   * 本人在这个库里的角色（BaseDTO.role / KbDTO.role，缺省按 owner）。
+   * 只用于决定行尾「…」菜单里的管理类项（重命名 / 设置）要不要出现。
+   */
+  role?: string;
+}
+
+/** 实体类型 → 默认图标（L1 / L2 / 权限资源树共用，单一真源）。 */
+export function navKindIcon(kind: string): IconName {
+  switch (kind) {
+    case "base":
+      return "database";
+    case "kb":
+      return "book";
+    case "table":
+      return "table";
+    case "doc":
+      return "doc";
+    case "canvas":
+      return "canvas";
+    case "view":
+      return "grid";
+    case "group":
+      return "group";
+    default:
+      return "link";
+  }
+}
+
+/**
+ * 行尾「…」菜单里的管理类项（重命名 / 设置）是否对本人开放。
+ *
+ * 口径与库设置页 / 知识库设置页同源：owner 与 creator 可以改名、进设置页。
+ * 拿不准的（role 缺失、后端新增角色档）按 KbSettingsPage 的 `role ?? "owner"` 兜底。
+ * 后端仍会按自己的口径鉴权，这里只是「不给明确无权限的人看到入口」。
+ */
+export function canManageLibrary(role?: string): boolean {
+  const r = role ?? "owner";
+  return r === "owner" || r === "creator";
 }
 
 /** 一级导航的平铺行。 */
@@ -76,6 +115,8 @@ export type LibraryNavRow =
       iconColor?: string;
       entityKind: "base" | "kb";
       entityId: string;
+      /** 本人可否管理这个库（决定行尾「…」菜单里的管理类项是否出现）。 */
+      canManage: boolean;
     };
 
 /** 两个一级分组的标题（用户定的口径：一级只有「数据库 / 知识库」）。 */
@@ -107,6 +148,7 @@ export function buildLibraryRows(
         iconColor: resolvedEntityColor(e),
         entityKind: kind,
         entityId: e.id,
+        canManage: canManageLibrary(e.role),
       });
     }
   };

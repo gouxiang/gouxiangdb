@@ -55,8 +55,10 @@ describe("S10 大菜单 DOM 有界（首屏不随项数线性膨胀）", () => {
     );
     const ms = performance.now() - t0;
 
-    // 每个库行是一个 <button ...><span class=...>表 i</span>。统计按钮中含「表 」文本的行数。
-    const rowHits = (html.match(/表 \d+/g) ?? []).length;
+    // 每个库行是一个带 data-nav-row="item" 的 <button>，行内文字 + 行尾「…」菜单的
+    // aria-label/title 都会重复一次库名 —— 按文本计数会把「渲染了 N 行」数成 3N，
+    // 故这里直接数行标记（S10 锁的是挂载的**行数**，不是文本出现次数）。
+    const rowHits = (html.match(/data-nav-row="item"/g) ?? []).length;
     // 首帧窗口：viewportH=32*24=768px，可见 24 行 + overscan 12*2=24 → 上界 48；留余量取 120。
     expect(rowHits).toBeGreaterThan(0);
     expect(rowHits).toBeLessThanOrEqual(120);

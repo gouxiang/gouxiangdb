@@ -32,6 +32,9 @@ vi.mock("../settings/pat-hooks", () => ({
 
 import { WorkspaceSettingsPage } from "./WorkspaceSettingsPage";
 
+/** 通用分区的锚点文案 */
+const GENERAL = "权限、语义检索与回收站都在这里配置";
+
 function renderPage(location = "/workspace/settings"): string {
   // 资产/导航子页内部用 useQuery（SSR 不跑 queryFn），需要 QueryClient 上下文。
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -72,13 +75,13 @@ describe("工作区设置 MCP 接入入口门控（fail-closed）", () => {
 describe("工作区设置子页按 URL 落位", () => {
   it("/workspace/settings/general → 通用", () => {
     const html = renderPage("/workspace/settings/general");
-    expect(html).toContain("组织通讯录与资产入口");
+    expect(html).toContain(GENERAL);
   });
 
   it("旧的 /workspace/settings/nav 不再进编排分区：回落通用且页面无「导航编排」文案", () => {
     manageMenu = true;
     const html = renderPage("/workspace/settings/nav");
-    expect(html).toContain("组织通讯录与资产入口");
+    expect(html).toContain(GENERAL);
     expect(html).not.toContain("导航编排");
     expect(html).not.toContain("一级导航、快捷项与分组");
   });
@@ -89,9 +92,11 @@ describe("工作区设置子页按 URL 落位", () => {
     expect(html).not.toContain("一级导航与分组管理");
   });
 
-  it("/workspace/settings/assets → 资产", () => {
+  // 资产分区已下线（单库深度设置改由 L1 条目「…」菜单进入）：旧链接回落通用，不白屏。
+  it("/workspace/settings/assets → 通用（资产分区已下线）", () => {
     const html = renderPage("/workspace/settings/assets");
-    expect(html).toContain("智能数据库");
+    expect(html).toContain(GENERAL);
+    expect(html).not.toContain("智能数据库");
   });
 
   it("/workspace/settings/mcp（企业组织开启）→ MCP 接入", () => {

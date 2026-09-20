@@ -151,7 +151,9 @@ describe("PermNodeEditor 门控 fail-closed 三态", () => {
     expect(html).not.toContain("保存权限");
     expect(html).not.toContain(">成员<"); // SubjectPicker 三页签不渲染
     expect(html).toContain("只读视图");
-    expect(html).toContain("权限编辑未在本环境开放");
+    // 门控关 = 本人不是该节点的管理者（后端 /meta 按 manage_* 动作 / owner 角色下发），
+    // 不再是「本环境没开放」——能力位已与权限引擎总门解耦。
+    expect(html).toContain("你没有该节点的管理权限");
     // 直接授权行仍只读可见（解释能力上线）
     expect(html).toContain("张三");
   });

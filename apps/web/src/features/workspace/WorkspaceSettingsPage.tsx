@@ -3,8 +3,8 @@
 //
 // 分区口径纪律（本轮治理的核心，改这个文件时不要破坏）：
 //   1. 右内容的渲染判定只认 effectiveSection，**绝不认 URL 原始 section**。
-//      门控分区（search/mcp…）守卫回落后若仍按 section 判断，会与左栏的
-//      effectiveSection 判定双双落空 → 右内容区整块空白（既不是通用也不是目标分区）。
+//      门控分区守卫回落后若仍按 section 判断，会与左栏的 effectiveSection 判定双双落空
+//      → 右内容区整块空白（既不是通用也不是目标分区）。
 //   2. effectiveSection 由 visibleSections 反查得出（单一真源）：
 //      新增 gated 分区只要在 SECTIONS 上打 ownerOnly/manageOnly/enterpriseOnly 标记就自动受约束，
 //      不需要再记得改第二处三元判断——这正是「点左侧右侧空白」的根因修复。
@@ -13,11 +13,10 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon, type IconName } from "../../components/icons";
 import { useIsWorkspaceOwner, useMyOrgActions } from "../contacts/contacts-hooks";
-import { ContactsDirectory } from "../contacts/ContactsDirectory";
-import PermPanel from "../authz/PermPanel";
 import { canSeeAuthz, canSeeWorkspaceSettings } from "./lib/nav-gate";
 import { useAuthzCapability } from "../authz/useAuthzCapability";
-import { AssetsSection, TrashSection } from "./WorkspaceSettingsSections";
+import { TrashSection } from "./WorkspaceSettingsSections";
+import { AuthzSection } from "./WorkspaceSettingsAuthz";
 import { EmbeddingSearchPanel } from "../search/EmbeddingSearchPanel";
 import { SearchCoveragePanel } from "../search/SearchCoveragePanel";
 import { ReindexModal } from "../search/ReindexModal";
@@ -29,7 +28,9 @@ import { useEnterpriseOrgFlag } from "../settings/pat-hooks";
 import { UploadLimitsPanel } from "../kb/UploadLimitsPanel";
 import { toast } from "../../components/ui";
 
-type Section = "general" | "contacts" | "authz" | "search" | "mcp" | "assets" | "trash";
+// 「通讯录」分区已移除：一级导航底部已有通讯录入口（/workspace/contacts），设置里不再重复。
+// 「资产」分区已移除：单个库/知识库的深度设置改由一级导航条目行尾的「…」菜单进入。
+type Section = "general" | "authz" | "search" | "mcp" | "trash";
 
 const SECTIONS: {
   key: Section;
@@ -38,9 +39,8 @@ const SECTIONS: {
   desc: string;
   ownerOnly?: boolean;
   /**
-   * 管理动作口径（与 lib/nav-gate.canSeeWorkspaceSettings 同源）：
-   * 持任一 manage_* 组织动作即见，owner 亦见。用于「需要进得去配置，但不必是所有者」的分区
-   * （语义检索：非 owner 管理员也要能开/关总门）。
+   * 管理动作口径（与 lib/nav-gate.canSeeWorkspaceSettings 同源）：持任一 manage_* 组织动作即见，
+   * owner 亦见。用于「需要进得去配置，但不必是所有者」的分区（语义检索：非 owner 管理员也要能开关总门）。
    */
   manageOnly?: boolean;
   /** M6 MCP 接入随 GX_ENTERPRISE_ORG 门控（off 即不挂载，fail-closed 隐入口）。 */
@@ -49,13 +49,11 @@ const SECTIONS: {
   { key: "general", label: "通用", icon: "settings", desc: "工作区设置中心" },
   // ownerOnly：分区涉及全组织成员/授权数据，沿用 SEARCH 分区既有的 owner 口径（见下 visibleSections），
   //   非 owner 连分区都不渲染——不做 disabled 假入口（P2-B3）。
-  { key: "contacts", label: "通讯录", icon: "building", desc: "部门、成员与组织角色", ownerOnly: true },
   { key: "authz", label: "权限管理", icon: "shield", desc: "资源树授权与策略下发", ownerOnly: true },
   // manageOnly：语义检索是「开关型」配置——非 owner 的管理员（持任一 manage_* 组织动作）也要能
   //   开/关总门，ownerOnly 会把他们一起挡在外面。口径与 canSeeWorkspaceSettings 同一处，owner 恒可见。
   { key: "search", label: "语义检索", icon: "sparkles", desc: "云端语义检索与索引覆盖度", manageOnly: true },
   { key: "mcp", label: "MCP 接入", icon: "keyRound", desc: "为 AI 客户端签发访问令牌", enterpriseOnly: true },
-  { key: "assets", label: "资产", icon: "database", desc: "数据库与知识库入口" },
   { key: "trash", label: "回收站", icon: "trash", desc: "数据库与知识库回收站入口" },
 ];
 
@@ -238,25 +236,8 @@ export function WorkspaceSettingsPage() {
             <div className="flex flex-col gap-2">
               <h2 className="text-gx-18 font-semibold text-gx-text-primary">工作区设置</h2>
               <p className="text-gx-13 text-gx-text-tertiary">
-                管理组织通讯录与资产入口。更多工作区能力将随对应版本在此增列。
+                权限、语义检索与回收站都在这里配置。单个数据库或知识库的设置，请在一级导航该条目行尾的「…」菜单里进入。
               </p>
-              {/* P2-B3：通讯录分区已 ownerOnly，这张跳转卡片对非 owner 就是点了没反应的假入口，
-                  与分区同口径渲染（非 owner 不出现）。 */}
-              {isOwner && (
-                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={() => goSection("contacts")}
-                    className="flex items-start gap-3 rounded-gx-lg border border-gx-separator p-4 text-left hover:bg-gx-row-hover"
-                  >
-                    <Icon name="building" size={18} className="mt-0.5 text-gx-accent" />
-                    <span>
-                      <span className="block text-gx-13 font-medium text-gx-text-primary">通讯录</span>
-                      <span className="mt-0.5 block text-gx-12 text-gx-text-hint">部门、成员与组织角色</span>
-                    </span>
-                  </button>
-                </div>
-              )}
 
               {/* 上传限制（原挂知识库设置页）：本机浏览器生效、跨全部知识库 → 归全局层 */}
               <div className="mt-6 flex flex-col gap-2">
@@ -268,36 +249,8 @@ export function WorkspaceSettingsPage() {
             </div>
           )}
 
-          {effectiveSection === "contacts" && (
-            <div className="flex min-w-0 flex-col gap-3">
-              <h2 className="text-gx-18 font-semibold text-gx-text-primary">通讯录</h2>
-              <p className="text-gx-13 text-gx-text-tertiary">
-                成员、部门与组织角色在此统一管理，改动即时生效。
-              </p>
-              <p className="text-gx-12 text-gx-text-hint">
-                单个数据库 / 知识库的成员与角色是另一层切面，请到各自资产的「设置」页管理。
-              </p>
-              {/* P2-B2：不再是「说明 + 跳转按钮」，直接内嵌 ContactsDirectory
-                  （与 /workspace/contacts 同一个组件），口径只有一处。 */}
-              <div className="h-[560px] overflow-hidden rounded-gx-lg border border-gx-separator">
-                <ContactsDirectory />
-              </div>
-            </div>
-          )}
-
-          {effectiveSection === "authz" && (
-            <div className="flex min-w-0 flex-col gap-3">
-              <h2 className="text-gx-18 font-semibold text-gx-text-primary">权限管理</h2>
-              <p className="text-gx-13 text-gx-text-tertiary">
-                按资源树查看与下发授权策略；这里的操作与「权限管理」页完全同源。
-              </p>
-              {/* PermPanel 自带 canSeeAuthz 门控（无能力出无权限态），
-                  这里再叠一层分区级判定：非 owner / 无能力时连分区都不渲染（P2-B3）。 */}
-              <div className="h-[560px] overflow-hidden rounded-gx-lg border border-gx-separator">
-                <PermPanel embedded />
-              </div>
-            </div>
-          )}
+          {/* 权限管理：全站唯一入口（角色与组织权限 / 各库成员与分享 / 资源授权策略）。 */}
+          {effectiveSection === "authz" && <AuthzSection canManageRoles={actions.has("manage_roles")} />}
 
           {effectiveSection === "search" && (
             <div className="flex flex-col gap-6">
@@ -322,13 +275,6 @@ export function WorkspaceSettingsPage() {
                 </p>
               </div>
               <PatListPanel />
-            </div>
-          )}
-
-          {effectiveSection === "assets" && (
-            <div className="flex flex-col gap-3">
-              <h2 className="mb-1 text-gx-18 font-semibold text-gx-text-primary">资产</h2>
-              <AssetsSection />
             </div>
           )}
 
