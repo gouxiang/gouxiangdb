@@ -24,6 +24,54 @@ export const HELP_ASSET_PATH = "/help/assets/";
 
 const HEADING_LINE = /^(#{1,6})\s+(.+?)\s*$/;
 const FENCE_LINE = /^\s*(```|~~~)/;
+/** HTML 注释：`<!-- … -->`（可跨行）。作者用它标注「待补截图」，不该出现在读者眼里。 */
+const HTML_COMMENT = /<!--[\s\S]*?-->/g;
+
+/**
+ * 剥掉 md 里的 HTML 注释后再渲染。
+ *
+ * H-02（2026-09-20 帮助中心验收）：真源 doc 用 `<!-- IMG: 待补 —— … -->` 标注待补配图，
+ * markdown 渲染器把整行当文本处理并转义成 `&lt;!-- … --&gt;`，于是注释以正文形态泄漏在
+ * 页面上（浏览器里 DOM 注释不可见，转义后正是可见文本）。注释对读者无信息量，先行剔除。
+ *
+ * 保护围栏代码块：``` 内部的 `<!-- … -->` 是**示例**（讲该怎么写的正文），不能删。
+ */
+export function stripHtmlComments(md: string): string {
+  const lines = md.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  let plain: string[] = [];
+  let fence: string[] | null = null;
+  let fenceMark = "";
+  const flushPlain = () => {
+    if (!plain.length) return;
+    // 整块（而非逐行）替换：注释可能跨多行，逐行扫描会在首行漏掉开头
+    out.push(plain.join("\n").replace(HTML_COMMENT, ""));
+    plain = [];
+  };
+  for (const line of lines) {
+    const mark = FENCE_LINE.exec(line)?.[1];
+    if (fence) {
+      fence.push(line);
+      if (mark && mark === fenceMark) {
+        out.push(fence.join("\n"));
+        fence = null;
+        fenceMark = "";
+      }
+      continue;
+    }
+    if (mark) {
+      flushPlain();
+      fence = [line];
+      fenceMark = mark;
+      continue;
+    }
+    plain.push(line);
+  }
+  flushPlain();
+  // 未闭合的围栏（正文里少写收尾 ```）：原样吐出，不吞用户的示例
+  if (fence) out.push(fence.join("\n"));
+  return out.join("\n");
+}
 
 /**
  * 抽取标题生成目录（跳过围栏代码块内的 `#`，那不是标题而是示例语法）。
@@ -106,7 +154,9 @@ function sanitizeWhenDom(html: string): string {
  * sanitizeHtml 是纵深防御（md 侧已转义，这里再挡一次脚本与事件属性）。
  */
 export function buildHelpHtml(md: string, base: string): { html: string; headings: HelpHeading[] } {
-  const headings = extractHelpHeadings(md);
-  const rendered = mapHelpAssetSrc(renderMarkdown(md), base);
+  // H-02：先剔除作者的 HTML 注释（待补配图标注等），再渲染，避免注释以正文形态泄漏。
+  const clean = stripHtmlComments(md);
+  const headings = extractHelpHeadings(clean);
+  const rendered = mapHelpAssetSrc(renderMarkdown(clean), base);
   return { html: attachHeadingIds(sanitizeWhenDom(rendered), headings), headings };
 }
