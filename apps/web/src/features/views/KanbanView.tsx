@@ -1,8 +1,10 @@
-/* eslint-disable react-hooks/rules-of-hooks -- 技术债 GX-LINT-DEBT-1：未配置看板字段时先
- * 渲染空态并早返回，之后才调 useState/useMemo。空态分支在该视图配置生命周期内稳定，当前
- * 运行正确；正确修法是把空态抽成独立包装组件，让 hooks 无条件执行。 */
 // apps/web/src/features/views/KanbanView.tsx
 // 看板视图：按 singleSelect 字段分列，支持 HTML5 拖拽换列
+//
+// hooks 顺序约定：本组件先无条件跑完全部 hooks，再按「分组字段是否已配置」早返回引导空态。
+// 空态已抽成独立子组件 KanbanSetup（见文件末尾）——早返回若发生在 hooks 之前，首帧 useFields
+// 尚未返回（fields 空 → 走空态少跑 hook）、次帧字段到达（走主分支多跑 hook）会命中
+// React #310「Rendered more hooks than during the previous render」整块崩溃。
 
 import { useMemo, useState } from "react";
 import { useFields, useGXMutations } from "../../api/hooks";
@@ -32,45 +34,8 @@ export default function KanbanView({
   const degraded = isComputedInMem(bounded.degraded);
   const kanbanField = fields.find((f) => f.id === view.config.kanbanFieldId);
 
-  // 未配置分组字段：引导用户选择一个 singleSelect 字段
-  if (!kanbanField || kanbanField.type !== "singleSelect") {
-    const selectable = fields.filter((f) => f.type === "singleSelect");
-    return (
-      <div className="flex h-full items-center justify-center bg-gx-card-bg p-gx-lg">
-        <EmptyState
-          icon="kanban"
-          title="设置看板分组字段"
-          description="请选择一个「单选」字段作为看板的分组依据。"
-          action={
-            <div className="mt-3 flex items-center gap-2">
-              <span className="text-gx-13 text-gx-text-secondary">分组字段：</span>
-              <Select
-                value=""
-                options={
-                  selectable.length === 0
-                    ? [{ value: "", label: "暂无可用的单选字段" }]
-                    : [{ value: "", label: "请选择…" }, ...selectable.map((f) => ({ value: f.id, label: f.name }))]
-                }
-                disabled={selectable.length === 0 || !permissions.canManageSchema}
-                onChange={(e) => {
-                  if (e.target.value) {
-                    void m.updateView.mutateAsync({
-                      viewId,
-                      tableId,
-                      data: { config: { kanbanFieldId: e.target.value } },
-                    });
-                  }
-                }}
-              />
-            </div>
-          }
-        />
-      </div>
-    );
-  }
-
-  const options = kanbanField.options ?? [];
-  // 列：每个选项 + 一个「未分类」
+  const options = kanbanField?.options ?? [];
+  // 列：每个选项 + 一个「未分类」（未配置分组字段时只有「未分类」，仅用于让下方 hooks 无条件跑完）
   const columns = [
     ...options.map((o) => ({ key: o.id, label: o.name, color: o.color, value: o.name })),
     { key: "__none__", label: "未分类", color: null as string | null, value: null as string | null },
@@ -82,6 +47,7 @@ export default function KanbanView({
   const grouped = useMemo(() => {
     const map = new Map<string, RecordDTO[]>();
     columns.forEach((c) => map.set(c.key, []));
+    if (!kanbanField) return map;
     records.forEach((r) => {
       const opt = resolveSelectOption(kanbanField, r.fields[kanbanField.id] as never);
       const key = opt ? opt.id : "__none__";
@@ -89,6 +55,19 @@ export default function KanbanView({
     });
     return map;
   }, [records, kanbanField, columns]);
+
+  // 未配置分组字段：引导用户选择一个 singleSelect 字段。
+  // 必须晚于上面全部 hooks —— 守卫结果会随 useFields 首帧空/次帧到达而翻转。
+  if (!kanbanField || kanbanField.type !== "singleSelect") {
+    return (
+      <KanbanSetup
+        tableId={tableId}
+        viewId={viewId}
+        fields={fields}
+        canManageSchema={permissions.canManageSchema}
+      />
+    );
+  }
 
   const primaryField = fields.find((f) => f.id === view.config.cardFieldIds?.[0]) ?? fields[0];
 
@@ -219,6 +198,58 @@ export default function KanbanView({
         })}
       </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 未配置分组字段时的引导空态（独立组件）。
+ * 拆出来是为了让父组件 KanbanView 的 hooks 无条件跑完：守卫早返回留在父组件里会让
+ * 「首帧字段未到 / 次帧字段到达」两次渲染的 hook 数量不一致，命中 React #310。
+ */
+function KanbanSetup({
+  tableId,
+  viewId,
+  fields,
+  canManageSchema,
+}: {
+  tableId: string;
+  viewId: string;
+  fields: FieldDTO[];
+  canManageSchema: boolean;
+}) {
+  const m = useGXMutations();
+  const selectable = fields.filter((f) => f.type === "singleSelect");
+  return (
+    <div className="flex h-full items-center justify-center bg-gx-card-bg p-gx-lg">
+      <EmptyState
+        icon="kanban"
+        title="设置看板分组字段"
+        description="请选择一个「单选」字段作为看板的分组依据。"
+        action={
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-gx-13 text-gx-text-secondary">分组字段：</span>
+            <Select
+              value=""
+              options={
+                selectable.length === 0
+                  ? [{ value: "", label: "暂无可用的单选字段" }]
+                  : [{ value: "", label: "请选择…" }, ...selectable.map((f) => ({ value: f.id, label: f.name }))]
+              }
+              disabled={selectable.length === 0 || !canManageSchema}
+              onChange={(e) => {
+                if (e.target.value) {
+                  void m.updateView.mutateAsync({
+                    viewId,
+                    tableId,
+                    data: { config: { kanbanFieldId: e.target.value } },
+                  });
+                }
+              }}
+            />
+          </div>
+        }
+      />
     </div>
   );
 }

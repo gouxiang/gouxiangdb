@@ -6,9 +6,13 @@
 //  - 多选生效，样式写入走 canvas-ops（原生 transforms，进入撤销栈、触发自动保存）；
 //  - 工具条 fixed 定位在选中包围盒上方居中，空间不足自动翻到下方。
 //
-/* eslint-disable react-hooks/rules-of-hooks -- 技术债 GX-LINT-DEBT-1：组件在守卫早返回
- * （board/style 不存在）之后才调 useState（见 popupBtnId）。守卫结果在组件生命周期内稳定，
- * 当前运行正确；正确修法是把空态抽成独立包装组件或把守卫下移到全部 hooks 之后。 */
+// hooks 顺序约定：全部 useState/useMemo/useRef 必须排在 `if (!board || !style) return null`
+// 守卫之前。守卫结果【不稳定】：style 取 plait 实时选区（readSelectionStyle 只认
+// geometry/arrow-line/vector-line/mindmap 三类），而本组件是否被挂载由
+// CanvasEnhanceOverlay 按 isStyleBarEligible 判定（还额外认 image / 纯文本）。
+// 于是「只选中图片或纯文本」→ style 为 null 走早返回；再 shift 多选一个几何图形
+// → style 非 null 走到守卫之后 —— 两次渲染 hook 数量不一致即 React #310。
+// 因此 popupBtnId 的 useState 已上提到其余 hooks 同一处，守卫之前不再有 hook。
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { PlaitBoard, PlaitElement } from "@plait/core";
@@ -98,6 +102,10 @@ export function NodeStyleBar({ anchor, elements: snapshotElements }: { anchor: S
   const rt = useCanvasBoard();
   const [popup, setPopup] = useState<PopupKind>(null);
   const [zMenu, setZMenu] = useState<{ x: number; y: number } | null>(null);
+  // C-5：shape/line 两分支存在同名按钮 id（strokeColor/strokeWidth/strokeStyle），
+  // btnRefs 互相覆盖导致弹窗锚错。pop 记录触发按钮 id，popupRect 优先按它实时定位。
+  // 注意：这个 useState 必须留在守卫之前（守卫结果不稳定，见文件头说明）。
+  const [popupBtnId, setPopupBtnId] = useState<string | null>(null);
   const btnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   const board = rt?.board ?? null;
@@ -145,9 +153,6 @@ export function NodeStyleBar({ anchor, elements: snapshotElements }: { anchor: S
   const noteCount = liveElements.filter((e) => !!readElementNote(e)).length;
   const refCount = liveElements.filter((e) => !!readElementDocRef(e)).length;
 
-  // C-5：shape/line 两分支存在同名按钮 id（strokeColor/strokeWidth/strokeStyle），
-  // btnRefs 互相覆盖导致弹窗锚错。pop 记录触发按钮 id，popupRect 优先按它实时定位。
-  const [popupBtnId, setPopupBtnId] = useState<string | null>(null);
   const pop = (k: PopupKind, btnId?: string) => {
     if (popup === k) { setPopup(null); return; }
     setPopupBtnId(btnId ?? k);

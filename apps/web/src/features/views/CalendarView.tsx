@@ -1,8 +1,10 @@
-/* eslint-disable react-hooks/rules-of-hooks -- 技术债 GX-LINT-DEBT-1：日期字段未配置时先
- * 渲染空态并早返回，之后才调 useState/useMemo。空态分支在该视图配置生命周期内稳定，当前
- * 运行正确；正确修法是把空态抽成独立包装组件，让 hooks 无条件执行。 */
 // apps/web/src/features/views/CalendarView.tsx
 // 日历视图：月/周视图，按配置的日期字段把记录铺到日期格子里（周日作为一周起点，对齐 NocoDB）
+//
+// hooks 顺序约定：本组件先无条件跑完全部 hooks，再按「日期字段是否已配置」早返回引导空态。
+// 空态已抽成独立子组件 CalendarSetup（见文件末尾）——早返回若发生在 hooks 之前，首帧
+// useFields 尚未返回（fields 空 → 走空态少跑 hook）、次帧字段到达（走主分支多跑 hook）
+// 会命中 React #310「Rendered more hooks than during the previous render」整块崩溃。
 
 import { useMemo, useState } from "react";
 import { useFields, useGXMutations } from "../../api/hooks";
@@ -29,7 +31,6 @@ export default function CalendarView({
 }: ViewProps) {
   const bounded = useRecordsBounded({ tableId, viewId });
   const { data: fieldsRes } = useFields(tableId);
-  const m = useGXMutations();
 
   const fields = fieldsRes ?? [];
   const records = bounded.records;
@@ -39,50 +40,13 @@ export default function CalendarView({
   const degraded = isComputedInMem(bounded.degraded);
   const dateField = fields.find((f) => f.id === view.config.dateFieldId);
 
-  // 未配置日期字段：引导选择
-  if (!dateField) {
-    const dateFields = fields.filter((f) =>
-      ["date", "datetime", "createdTime", "lastModifiedTime"].includes(f.type),
-    );
-    return (
-      <div className="flex h-full items-center justify-center bg-gx-card-bg p-gx-lg">
-        <EmptyState
-          icon="calendar"
-          title="设置日历日期字段"
-          description="请选择一个日期字段，用于把记录铺到日历上。"
-          action={
-            <div className="mt-3 flex items-center gap-2">
-              <span className="text-gx-13 text-gx-text-secondary">日期字段：</span>
-              <Select
-                value=""
-                options={[
-                  { value: "", label: "请选择…" },
-                  ...dateFields.map((f) => ({ value: f.id, label: f.name })),
-                ]}
-                disabled={!permissions.canManageSchema}
-                onChange={(e) => {
-                  if (e.target.value) {
-                    void m.updateView.mutateAsync({
-                      viewId,
-                      tableId,
-                      data: { config: { dateFieldId: e.target.value } },
-                    });
-                  }
-                }}
-              />
-            </div>
-          }
-        />
-      </div>
-    );
-  }
-
   const [cursor, setCursor] = useState<Date>(() => new Date());
   const [mode, setMode] = useState<"month" | "week">("month");
 
   // 按日期分组记录
   const grouped = useMemo(() => {
     const map = new Map<string, RecordDTO[]>();
+    if (!dateField) return map;
     records.forEach((r) => {
       const v = r.fields[dateField.id];
       if (v == null || v === "") return;
@@ -122,6 +86,19 @@ export default function CalendarView({
     }
     return out;
   }, [cursor, mode]);
+
+  // 未配置日期字段：引导选择。
+  // 必须晚于上面全部 hooks —— 守卫结果会随 useFields 首帧空/次帧到达而翻转。
+  if (!dateField) {
+    return (
+      <CalendarSetup
+        tableId={tableId}
+        viewId={viewId}
+        fields={fields}
+        canManageSchema={permissions.canManageSchema}
+      />
+    );
+  }
 
   const curY = cursor.getFullYear();
   const curM = cursor.getMonth();
@@ -235,6 +212,59 @@ export default function CalendarView({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/**
+ * 未配置日期字段时的引导空态（独立组件）。
+ * 拆出来是为了让父组件 CalendarView 的 hooks 无条件跑完：守卫早返回留在父组件里会让
+ * 「首帧字段未到 / 次帧字段到达」两次渲染的 hook 数量不一致，命中 React #310。
+ */
+function CalendarSetup({
+  tableId,
+  viewId,
+  fields,
+  canManageSchema,
+}: {
+  tableId: string;
+  viewId: string;
+  fields: FieldDTO[];
+  canManageSchema: boolean;
+}) {
+  const m = useGXMutations();
+  const dateFields = fields.filter((f) =>
+    ["date", "datetime", "createdTime", "lastModifiedTime"].includes(f.type),
+  );
+  return (
+    <div className="flex h-full items-center justify-center bg-gx-card-bg p-gx-lg">
+      <EmptyState
+        icon="calendar"
+        title="设置日历日期字段"
+        description="请选择一个日期字段，用于把记录铺到日历上。"
+        action={
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-gx-13 text-gx-text-secondary">日期字段：</span>
+            <Select
+              value=""
+              options={[
+                { value: "", label: "请选择…" },
+                ...dateFields.map((f) => ({ value: f.id, label: f.name })),
+              ]}
+              disabled={!canManageSchema}
+              onChange={(e) => {
+                if (e.target.value) {
+                  void m.updateView.mutateAsync({
+                    viewId,
+                    tableId,
+                    data: { config: { dateFieldId: e.target.value } },
+                  });
+                }
+              }}
+            />
+          </div>
+        }
+      />
     </div>
   );
 }
