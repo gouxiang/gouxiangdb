@@ -311,6 +311,12 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
   };
   const onCancelEdit = () => setEditing(null);
 
+  // PERM-03：无数据编辑权限（阅读者/评论者）不进入单元格编辑态。
+  // 编辑坐标只在有权限时下发给 GridRow——「不渲染编辑器」而非「渲染到一半再 403」，
+  // 与 PERM-01/02（导入/清空表入口无权限即不渲染）同一口径。
+  // 判定复用 GridView 既有口径 permissions.canEditData（来自 base.permissions），不新造权限逻辑。
+  const editingForRows = permissions.canEditData ? editing : null;
+
   // 键盘导航（非编辑态）
   const moveActive = (dir: "up" | "down" | "left" | "right") => {
     if (!active) {
@@ -530,7 +536,7 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
                     selected={selection.isSelected(rec.id)}
                     rowColor={rowColorOf(rec)}
                     activeFieldId={active?.recordId === rec.id ? active.fieldId : null}
-                    editing={editing}
+                    editing={editingForRows}
                     permissions={permissions}
                     rowHeaderWidth={ROW_HEADER_W}
                     primaryFieldId={primaryFieldId}
@@ -759,7 +765,7 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
                       rowHeight={rowH}
                       selected={selection.isSelected(rec.id)}
                       activeFieldId={active?.recordId === rec.id ? active.fieldId : null}
-                      editing={editing}
+                      editing={editingForRows}
                       permissions={permissions}
                       rowHeaderWidth={ROW_HEADER_W}
                       primaryFieldId={primaryFieldId}
