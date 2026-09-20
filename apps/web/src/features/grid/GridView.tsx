@@ -34,6 +34,7 @@ import {
 } from "../../components/interaction";
 import { ResultNotice, DEGRADED_RESULT_TEXT } from "../common/ResultNotice";
 import { useBreakpointTier } from "../../lib/breakpoint";
+import { csvFileName } from "../../lib/file-name";
 import { EntityIconPicker } from "../../components/EntityIconPicker";
 import { GridToolbar } from "./GridToolbar";
 import { ImportWizard } from "./ImportWizard";
@@ -440,9 +441,11 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
         const a = document.createElement("a");
         a.href = url;
         // E-1：文件名用真实表名，不再把内部 tableId/viewId 抛给用户；表名缺失时退回 id 前缀。
-        const safeTable = safeFilePart(currentTable?.name) || `table-${tableId}`;
-        const scopeSuffix = scope === "view" ? `-${safeFilePart(view?.name) || viewId}` : "";
-        a.download = `${safeTable}${scopeSuffix}.csv`;
+        a.download = csvFileName(
+          currentTable?.name,
+          tableId,
+          scope === "view" ? { name: view?.name, id: viewId } : null,
+        );
         a.click();
         URL.revokeObjectURL(url);
         toast(scope === "view" ? "已导出当前视图" : "已导出整表", "success");
@@ -864,16 +867,6 @@ export default function GridView({ baseId, tableId, viewId, view, permissions, o
       />
     </div>
   );
-}
-
-// 导出落盘名片段清洗：去掉文件系统不安全字符（/ \ : * ? " < > |），压缩空白并去掉首尾点。
-// 空结果由调用方退回 id 前缀，避免文件名退化成 ".csv"。
-function safeFilePart(raw: string | null | undefined): string {
-  return (raw ?? "")
-    .replace(/[/\\:*?"<>|]/g, "_")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^\.+|\.+$/g, "");
 }
 
 // 简单条件匹配（行颜色用）

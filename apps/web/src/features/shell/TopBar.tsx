@@ -5,13 +5,14 @@
 import { useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Tables } from "../../api/client";
-import { useBase, useGXMutations, useTables } from "../../api/hooks";
+import { useBase, useGXMutations, useTables, useViews } from "../../api/hooks";
 import { IconButton, Input, Menu, MenuItem, Modal, Popover, toast } from "../../components/ui";
 import { Icon, VIEW_ICON } from "../../components/icons";
 // 阶段 4：删除统一走 L2 确认 + 撤销 toast（R-D-23 / R-I-08 / R-D-22）
 import { confirmSoftDelete, confirmClearTable } from "../../components/feedback";
 import { toastDeleted } from "../../components/interaction";
 import { VIEW_TYPES, VIEW_TYPE_LABEL, type ViewType } from "@gx/shared-types";
+import { csvFileName } from "../../lib/file-name";
 import { ViewTabs } from "./ViewTabs";
 import { ViewSettingsModal } from "./ViewSettingsModal";
 
@@ -21,6 +22,8 @@ export function TopBar() {
 
   const baseQ = useBase(baseId ?? null);
   const { data: tables } = useTables(baseId ?? null);
+  // E-1：导出落盘名要真实表名/视图名；useViews 与 ViewTabs 同一 queryKey，不额外发请求。
+  const { data: views } = useViews(tableId ?? null);
   const perms = baseQ.data?.permissions;
   const canManageSchema = perms?.canManageSchema ?? false;
   const canManageBase = perms?.canManageBase ?? false;
@@ -70,7 +73,10 @@ export function TopBar() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `table-${tableId}.csv`;
+      // E-1：与 GridView 侧同一份命名规则——真实表名，拿不到才退回 id 前缀。
+      const table = (tables ?? []).find((t) => t.id === tableId);
+      const view = viewId ? (views ?? []).find((v) => v.id === viewId) : undefined;
+      a.download = csvFileName(table?.name, tableId, view ? { name: view.name, id: viewId } : null);
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
