@@ -279,8 +279,10 @@ export function SecondaryNav({
         )}
       </div>
 
-      {/* R-I-16 表级操作行：导入 ｜ 导出 ｜ 分享数据（表级能力，不在顶栏也不在表格工具栏）。
-          仅当前路由落在某张表上时渲染；库首页 / 知识库 / 工作区路由下不占位。 */}
+      {/* R-I-16 表级操作行挂载点（表级能力，不在顶栏也不在表格工具栏）。
+          导入 / 导出已收敛到网格工具栏常驻按钮，「分享数据」规划占位已下线，
+          故本行当前无入口可挂、渲染为空；仅当前路由落在某张表上时才有挂载上下文，
+          库首页 / 知识库 / 工作区路由下不占位。 */}
       <TableActionRow
         tableId={tableMatch?.params.tableId ?? null}
         viewId={viewMatch?.params.viewId ?? null}

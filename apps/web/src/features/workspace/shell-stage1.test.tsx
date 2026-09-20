@@ -6,7 +6,7 @@
 //              **且不再出现左侧 3px 色条**（规范明令的反例）
 //   R-N-11/12  行尾竖向三点：20×20 占位常驻 + 四条护栏（默认隐藏 / hover / 触屏 / 键盘 / 打开强制）
 //   R-N-17     「规划中」徽标 + 点击有明确反馈（非静默）
-//   R-I-16     导入 / 导出 / 分享数据落在 L2 表级操作行
+//   R-I-16     导入 / 导出落在 L2 表级操作行（「分享数据」规划占位已下线）
 //   R-N-19     主壳内无面包屑
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -275,18 +275,24 @@ describe("R-N-11/12 行尾竖向三点：四条护栏", () => {
 });
 
 describe("R-I-16 表级操作行（第四批：导入 / 导出已收敛到网格工具栏）", () => {
-  it("有表上下文时渲染分享数据格（挂「规划中」，点击 toast 非静默）", () => {
-    // 改断言原因：第四批导入导出收敛——「导入 / 导出」提升为 GridToolbar 常驻按钮
-    // （搜索框左侧），L2 操作行不再重复挂同一套向导的两个入口，只剩「分享数据」。
+  it("「分享数据」占位已下线：有表上下文时整行不渲染，不再留空操作条", () => {
+    // 改断言原因：「分享数据」是 R-N-17 的规划占位（无记录级分享接口，点了只弹一条
+    // 「规划中」toast），产品已批准下线——假入口不如没有入口。加上导入 / 导出早在第四批
+    // 就迁去 GridToolbar，本行已无表级入口，故与无表上下文一致返回 null（不留 40px 空条）。
     const html = renderToString(
       <StaticRouter location="/base/b1/table/t1">
         <TableActionRow tableId="t1" viewId="v1" />
       </StaticRouter>,
     );
-    expect(html).toContain("分享数据");
-    expect(html).toContain("规划中");
-    expect(html).toContain("text-gx-accent");
-    // 整行不空 → 不下线；但导入导出确已不在这一行
+    expect(html).toBe("");
+    expect(html).not.toContain("分享数据");
+    expect(html).not.toContain("规划中");
+    // 源码层也不留这个占位（含它的 toast 提示与「规划中」徽标）
+    const row = code("./TableActionRow.tsx");
+    expect(row).not.toContain("分享数据");
+    expect(row).not.toContain("plannedHint");
+    expect(row).not.toContain("PlannedBadge");
+    // 导入导出确已不在这一行
     expect(html).not.toContain(">导入<");
     expect(html).not.toContain(">导出<");
   });
