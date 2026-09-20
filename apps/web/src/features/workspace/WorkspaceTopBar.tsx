@@ -34,7 +34,7 @@ export function WorkspaceTopBar({ onOpenSearch }: { onOpenSearch: () => void }) 
       </button>
 
       {/*
-        库切换器与「新建数据库 / 新建知识库」入口已下移到左侧一级导航（NavLibraryBlock）：
+        库切换器与「新建库」入口已下移到左侧一级导航（NavLibraryBlock）：
         建库/切库都发生在导航里，顶栏只留品牌 / 全局搜索 / 个人中心。
         搜索按钮自带 mx-auto，撤下切换器后剩余空间由它吃掉，不留空位。
       */}

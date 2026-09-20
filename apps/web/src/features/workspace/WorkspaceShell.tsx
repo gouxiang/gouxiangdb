@@ -169,7 +169,7 @@ function SideRail({
   kbs,
   navLoading = false,
   navError = false,
-  /** 一级导航顶部插槽：库切换器 + 新建数据库/新建知识库入口。 */
+  /** 一级导航顶部插槽：库切换器 + 单一「新建库」入口（库类型在弹窗内二选一）。 */
   header,
 }: {
   collapsed: boolean;
