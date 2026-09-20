@@ -464,7 +464,15 @@ export function GridToolbar(props: GridToolbarProps) {
                 {/* 导入 / 导出已从菜单摘掉：提升为工具栏常驻按钮（见上方 ToolButton），
                     避免同一能力两个入口。菜单里不再留重复项。 */}
                 <MenuItem icon="copy" label="复制视图" onClick={() => { onCopyView(); closeAll(); }} />
-                <MenuItem icon="trash" label="清空表" danger onClick={() => { onClearTable(); closeAll(); }} />
+                {/* 权限口径（WALK-权限组合-2026-09-20 · PERM-02）：破坏性入口无权限时**不渲染**，
+                    不做成灰色可点、也不让用户先填完确认再被后端 403 打回。
+                    后端真值：`POST /tables/:tableId/clear`（apps/api/src/routes/tables.ts:441）
+                    只要求 requireCanEditData，因此这里的门与后端完全一致，既不松也不紧
+                    —— 用 canManageSchema 会误伤「编辑者」（该角色 canEditData=true、
+                    canManageSchema=false，后端放行而这里却收口，属另一处口径不一致，见回报）。 */}
+                {permissions.canEditData && (
+                  <MenuItem icon="trash" label="清空表" danger onClick={() => { onClearTable(); closeAll(); }} />
+                )}
               </Menu>
             ) : (
               <div className="flex max-h-[60vh] flex-col">
