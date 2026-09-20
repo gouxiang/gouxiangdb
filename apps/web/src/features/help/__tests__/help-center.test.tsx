@@ -68,16 +68,16 @@ describe("帮助中心：骨架渲染与目录锚点", () => {
 });
 
 describe("帮助中心：配图路径映射（部署基路径注入）", () => {
-  it("③ 子路径部署：src=\"assets/x.png\" → /app/gouxiangdb/help/assets/x.png", () => {
+  it("③ 子路径部署：src=\"assets/x.png\" → /app/gouxiangdb/help-assets/x.png", () => {
     const { html } = buildHelpHtml(MD_WITH_IMAGE, "/app/gouxiangdb");
-    expect(html).toContain('src="/app/gouxiangdb/help/assets/login.png"');
+    expect(html).toContain('src="/app/gouxiangdb/help-assets/login.png"');
     expect(html).not.toContain('src="assets/');
   });
 
-  it("③b 根部署（base=\"\"）：原样落在 /help/assets/ 下，不写死域名、不带双斜杠", () => {
+  it("③b 根部署（base=\"\"）：原样落在 /help-assets/ 下，不写死域名、不带双斜杠", () => {
     const { html } = buildHelpHtml(MD_WITH_IMAGE, "");
-    expect(html).toContain('src="/help/assets/login.png"');
-    expect(html).not.toContain("//help/assets");
+    expect(html).toContain('src="/help-assets/login.png"');
+    expect(html).not.toContain("//help-assets");
     // 纯函数层：外部 URL 与绝对路径不参与改写
     expect(mapHelpAssetSrc('<img src="https://x.test/a.png" />', "/app/gouxiangdb")).toContain(
       'src="https://x.test/a.png"',

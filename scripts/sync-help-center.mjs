@@ -9,12 +9,12 @@
 // 生成物（都进 .gitignore，改内容请改 _parts/）：
 //   docs/help-center/HELP-CENTER.md                       —— 分片按序拼接（片间插 `---`）
 //   apps/web/src/features/help/generated/help-center.md   —— 前端 ?raw 导入的副本
-//   apps/web/public/help/assets/*                         —— 配图的运行时静态副本
+//   apps/web/public/help-assets/*                          —— 配图的运行时静态副本
 //
 // ============================================================================
 // 注意（清理脚本硬要求（用户明确要求，不得删除本注释）：
 //    docs/help-center/assets/ 是**帮助中心截图专用资源目录**（含 .gitkeep），
-//    apps/web/public/help/assets/ 是它的运行时副本（本脚本每次重建）。
+//    apps/web/public/help-assets/ 是它的运行时副本（本脚本每次重建）。
 //    任何「清空 docs 下图片」「清理 public 目录」「删除未引用资源」类的脚本
 //    都必须显式排除这两个路径，否则帮助中心配图会整批消失且无法从真源恢复。
 //    同理：docs/help-center/_parts/ 是正文真源，不许当临时文件清理。
@@ -35,8 +35,16 @@ const PART_FILE_RE = /^\d+.*\.md$/;
 const OUT_MERGED = join(SRC_DIR, "HELP-CENTER.md");
 /** 生成物 2：前端 ?raw 导入的副本 */
 const OUT_WEB_MD = join(ROOT, "apps", "web", "src", "features", "help", "generated", "help-center.md");
-/** 生成物 3：配图运行时副本（vite publicDir 下） */
-const OUT_ASSETS = join(ROOT, "apps", "web", "public", "help", "assets");
+/**
+ * 生成物 3：配图运行时副本（vite publicDir 下）。
+ *
+ * H-01（2026-09-20 帮助中心验收）：目录名**不能叫 help**。public/ 下的目录会原样落到
+ * 部署根，`public/help/assets/` → 部署根下出现真实目录 `help/`，而 `/help` 同时又是
+ * 帮助中心的 SPA 路由——静态服务在 SPA 回退**之前**先按真实目录处理：
+ * nginx 实测 `/help` → 301 `/help/` → 403（autoindex off），随机路径反而 200 回退
+ * index.html。故改名 /help-assets/，让路由与静态目录彻底不重名（见 help-html.ts）。
+ */
+const OUT_ASSETS = join(ROOT, "apps", "web", "public", "help-assets");
 const SRC_ASSETS = join(SRC_DIR, "assets");
 
 /** 分片之间的分隔：只插在片与片之间，不改分片内部（渲染为 <hr/>） */

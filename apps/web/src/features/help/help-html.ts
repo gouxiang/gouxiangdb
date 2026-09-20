@@ -19,8 +19,15 @@ export interface HelpHeading {
   text: string;
 }
 
-/** 静态服务路径：public/help/assets/ → 部署后 /help/assets/（再挂部署 base）。 */
-export const HELP_ASSET_PATH = "/help/assets/";
+/**
+ * 静态服务路径：public/help-assets/ → 部署后 /help-assets/（再挂部署 base）。
+ *
+ * H-01（2026-09-20 帮助中心验收）：路径**不能落在 /help/ 下**。`/help` 是帮助中心的
+ * SPA 路由，若配图目录也叫 help（public/help/assets/ → 部署根下真实目录 help/），
+ * 静态服务会先按真实目录处理：nginx 实测 `/help` → 301 `/help/` → 403（autoindex off），
+ * 只有 SPA 内点击能进，直接输网址必挂。改名后路由与静态目录不再重名。
+ */
+export const HELP_ASSET_PATH = "/help-assets/";
 
 const HEADING_LINE = /^(#{1,6})\s+(.+?)\s*$/;
 const FENCE_LINE = /^\s*(```|~~~)/;
