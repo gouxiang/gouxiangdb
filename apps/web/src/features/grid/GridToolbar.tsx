@@ -1,7 +1,8 @@
 // 网格工具栏：新建 / 行高 / 字段显隐 / 筛选 / 分组 / 排序 / 行颜色 / 搜索 / 导入导出 / 批量操作。
 //
 // 窄屏（R-D-31/R-D-32/R-D-33）口径：按钮**不删功能、只收入口**。
-//   <1024：行高 / 字段 / 行颜色 收进右端「更多」溢出菜单（drill-down 打开同一份面板）
+//   <1440：行高 / 字段 / 行颜色 收进右端「更多」溢出菜单（drill-down 打开同一份面板）
+//          （PERM-08：原阈值 <1024 挡不住 1280 档溢出，提到 1440；见组件内 wideLayout 注释）
 //   <768 ：筛选 / 分组 / 排序 也收进同一个溢出菜单，搜索框改为自适应宽度
 //   ≥1024：与改动前完全一致（全部按钮常驻、文案不变）
 // 收起的每一个按钮在溢出菜单里都有可点的等价项（功能优先，禁止为布局删按钮）。
@@ -24,6 +25,7 @@ import {
   MenuDivider,
   toast,
 } from "../../components/ui";
+import { useBreakpointTier } from "../../lib/breakpoint";
 import { FilterPanel } from "./FilterPanel";
 import { GroupPanel } from "./GroupPanel";
 import { RowColorPanel } from "./RowColorPanel";
@@ -156,6 +158,19 @@ export function GridToolbar(props: GridToolbarProps) {
   const filterActive = config.filters != null;
   const filterCount = filterActive ? countConditions(config.filters) : 0;
 
+  // PERM-08（工具栏 1280~1440 溢出）：既有 Tailwind 断点（<1024 收起 行高/字段/行颜色）挡不住
+  // 1280 档——实测内容区只有 848（L1 224 + L2 208，见 WorkspaceShell R-D-30），工具栏实宽 893，
+  // 「更多」按钮 right=1325 被 `<main overflow-hidden>` 右缘裁掉一半。
+  // 这里把同一批「视觉配置类」按钮的常驻阈值从 1024 提到 1440（项目既有 2xl 档下界，
+  // 即「完整桌面布局」分界）：<1440 收进「更多」菜单，≥1440 与改动前逐字一致。
+  // SSR / 无 window 环境 useBreakpointTier 回落 "2xl"，故单测拿到的仍是全部常驻的桌面表现。
+  const wideLayout = useBreakpointTier() === "2xl";
+
+  // PERM-08（粘滞 tooltip）：「新建记录」的提示文案。原生 title 不能挂在会变 disabled 的元素上，
+  // 见下方按钮处的注释——锁定期（无权限 / 在途）改由外层永不 disabled 的 span 承载。
+  const newRecordTitle = !permissions.canEditData ? "无编辑权限" : "新建记录";
+  const newRecordLocked = !permissions.canEditData || !!newRecordBusy;
+
   const closeAll = () => {
     setOpen(null);
     setMoreView("root");
@@ -287,17 +302,30 @@ export function GridToolbar(props: GridToolbarProps) {
       {leading}
       {leading && <div className="h-5 w-px shrink-0 bg-gx-separator" />}
 
-      <Button
-        size="sm"
-        variant="primary"
-        icon="plus"
-        disabled={!permissions.canEditData}
-        loading={newRecordBusy}
-        onClick={onNewRecord}
-        title={!permissions.canEditData ? "无编辑权限" : "新建记录"}
-      >
-        新建记录
-      </Button>
+      {/* PERM-08 粘滞 tooltip 根因：提示是**原生 title**（全站 UI 组件没有自建 tooltip，
+          components/ui.tsx 一律把提示落到 DOM title 属性），而浏览器**不对 disabled 表单控件
+          派发任何鼠标事件**（mouseover/mousemove/mouseout/mouseleave）。于是：
+          hover「新建记录」→ 原生 tooltip 出现 → 点击 → newRecordBusy 置真 →
+          Button 内部 `isDisabled = !!disabled || !!loading`（ui.tsx:109/113）让按钮进入 disabled
+          → mouseleave 永远不再到达 → tooltip 冻结在屏幕上，恢复可用也不会补发。
+          按钮紧邻视图切换器，走查记录里就写成「『网格视图』旁有粘滞 tooltip『新建记录』不消失」。
+          修法：锁定期把 title 交给外层**永不 disabled** 的 span，并给按钮 pointer-events-none
+          让 hover 命中穿透到 span；span 从不 disabled，mouseleave 正常派发，tooltip 正常消失。
+          按钮自身的 disabled 口径与两段文案一字未动（perm-hide-gating 锁的是这个口径）。 */}
+      <span className="inline-flex shrink-0" title={newRecordLocked ? newRecordTitle : undefined}>
+        <Button
+          size="sm"
+          variant="primary"
+          icon="plus"
+          disabled={!permissions.canEditData}
+          loading={newRecordBusy}
+          onClick={onNewRecord}
+          title={newRecordLocked ? undefined : newRecordTitle}
+          className={newRecordLocked ? "pointer-events-none" : undefined}
+        >
+          新建记录
+        </Button>
+      </span>
 
       {/* R-I-04：筛选生效后在工具栏显示「筛选中」徽标，可一键清空 */}
       {filterActive && (
@@ -307,27 +335,32 @@ export function GridToolbar(props: GridToolbarProps) {
         />
       )}
 
-      {/* 行高：<1024 收进溢出菜单（菜单项「行高」打开同一面板） */}
-      <div className="relative hidden lg:block">
-        <ToolButton icon="rowHeight" label="行高" onClick={() => setOpen(open === "rh" ? null : "rh")} />
-        {open === "rh" && (
-          <Popover open onClose={() => setOpen(null)} align="left" width={140}>
-            {rowHeightPanel}
-          </Popover>
-        )}
-      </div>
+      {/* 行高：PERM-08 起 <1440 收进溢出菜单（菜单项「行高」打开同一面板）。
+          原阈值 <1024 挡不住 1280 档溢出，见 wideLayout 处注释。 */}
+      {wideLayout && (
+        <div className="relative hidden lg:block">
+          <ToolButton icon="rowHeight" label="行高" onClick={() => setOpen(open === "rh" ? null : "rh")} />
+          {open === "rh" && (
+            <Popover open onClose={() => setOpen(null)} align="left" width={140}>
+              {rowHeightPanel}
+            </Popover>
+          )}
+        </div>
+      )}
 
-      {/* 字段：<1024 收进溢出菜单 */}
-      <div className="relative hidden lg:block">
-        <ToolButton icon="eye" label="字段" onClick={() => setOpen(open === "fields" ? null : "fields")} />
-        {open === "fields" && (
-          <Popover open onClose={() => setOpen(null)} align="left" width={240}>
-            {fieldsPanel}
-          </Popover>
-        )}
-      </div>
+      {/* 字段：<1440 收进溢出菜单（同上） */}
+      {wideLayout && (
+        <div className="relative hidden lg:block">
+          <ToolButton icon="eye" label="字段" onClick={() => setOpen(open === "fields" ? null : "fields")} />
+          {open === "fields" && (
+            <Popover open onClose={() => setOpen(null)} align="left" width={240}>
+              {fieldsPanel}
+            </Popover>
+          )}
+        </div>
+      )}
 
-      <div className="h-5 w-px hidden shrink-0 bg-gx-separator lg:block" />
+      {wideLayout && <div className="h-5 w-px hidden shrink-0 bg-gx-separator lg:block" />}
 
       {/* 中段：<768 收进溢出菜单（768–1023 仍常驻，参考图主操作） */}
       <div className="relative hidden md:block">
@@ -373,20 +406,22 @@ export function GridToolbar(props: GridToolbarProps) {
         )}
       </div>
 
-      {/* 行颜色：<1024 收进溢出菜单 */}
-      <div className="relative hidden lg:block">
-        <ToolButton
-          icon="palette"
-          label="行颜色"
-          active={config.rowColor.mode !== "none"}
-          onClick={() => setOpen(open === "color" ? null : "color")}
-        />
-        {open === "color" && (
-          <Popover open onClose={() => setOpen(null)} align="left" width={320} className="p-0">
-            {colorPanel}
-          </Popover>
-        )}
-      </div>
+      {/* 行颜色：<1440 收进溢出菜单（同 行高 / 字段，见 wideLayout 处注释） */}
+      {wideLayout && (
+        <div className="relative hidden lg:block">
+          <ToolButton
+            icon="palette"
+            label="行颜色"
+            active={config.rowColor.mode !== "none"}
+            onClick={() => setOpen(open === "color" ? null : "color")}
+          />
+          {open === "color" && (
+            <Popover open onClose={() => setOpen(null)} align="left" width={320} className="p-0">
+              {colorPanel}
+            </Popover>
+          )}
+        </div>
+      )}
 
       {/* 右段：搜索（R-I-03 宽 170 / 高 32 / 防抖 300ms / 搜索中置灰保留旧结果）
           <768 主轴撑满（不换行、不挤掉其它按钮），≥768 严格回到 170 定宽 */}
@@ -437,39 +472,42 @@ export function GridToolbar(props: GridToolbarProps) {
           >
             {moreView === "root" ? (
               <Menu width={180}>
-                {/* R-D-31/32：<1024 收起「行高 / 字段 / 行颜色」——入口收起，功能保留 */}
-                <div className="lg:hidden">
-                  <MenuItem icon="rowHeight" label="行高" onClick={() => setMoreView("rh")} />
-                  <MenuItem icon="eye" label="字段" onClick={() => setMoreView("fields")} />
-                  {/* R-D-33：<768 再收起「筛选 / 分组 / 排序」 */}
-                  <div className="md:hidden">
+                {/* R-D-31/32 + PERM-08：<1440 收起「行高 / 字段 / 行颜色」——入口收起，功能保留。
+                    阈值与内联按钮的 wideLayout 严格互补，任何档位下这三项都恰好出现一次。 */}
+                {!wideLayout && (
+                  <div>
+                    <MenuItem icon="rowHeight" label="行高" onClick={() => setMoreView("rh")} />
+                    <MenuItem icon="eye" label="字段" onClick={() => setMoreView("fields")} />
+                    {/* R-D-33：<768 再收起「筛选 / 分组 / 排序」 */}
+                    <div className="md:hidden">
+                      <MenuItem
+                        icon="filter"
+                        active={filterActive}
+                        label={filterCount > 0 ? `筛选（${filterCount}）` : "筛选"}
+                        onClick={() => setMoreView("filter")}
+                      />
+                      <MenuItem
+                        icon="group"
+                        active={!!config.groupByFieldId}
+                        label="分组"
+                        onClick={() => setMoreView("group")}
+                      />
+                      <MenuItem
+                        icon="sortAsc"
+                        active={config.sorts.length > 0}
+                        label="排序"
+                        onClick={() => setMoreView("sort")}
+                      />
+                    </div>
                     <MenuItem
-                      icon="filter"
-                      active={filterActive}
-                      label={filterCount > 0 ? `筛选（${filterCount}）` : "筛选"}
-                      onClick={() => setMoreView("filter")}
+                      icon="palette"
+                      active={config.rowColor.mode !== "none"}
+                      label="行颜色"
+                      onClick={() => setMoreView("color")}
                     />
-                    <MenuItem
-                      icon="group"
-                      active={!!config.groupByFieldId}
-                      label="分组"
-                      onClick={() => setMoreView("group")}
-                    />
-                    <MenuItem
-                      icon="sortAsc"
-                      active={config.sorts.length > 0}
-                      label="排序"
-                      onClick={() => setMoreView("sort")}
-                    />
+                    <MenuDivider />
                   </div>
-                  <MenuItem
-                    icon="palette"
-                    active={config.rowColor.mode !== "none"}
-                    label="行颜色"
-                    onClick={() => setMoreView("color")}
-                  />
-                  <MenuDivider />
-                </div>
+                )}
                 {/* 导入 / 导出已从菜单摘掉：提升为工具栏常驻按钮（见上方 ToolButton），
                     避免同一能力两个入口。菜单里不再留重复项。 */}
                 <MenuItem icon="copy" label="复制视图" onClick={() => { onCopyView(); closeAll(); }} />
