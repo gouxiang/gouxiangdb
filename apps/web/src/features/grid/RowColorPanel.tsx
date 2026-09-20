@@ -41,7 +41,9 @@ export function RowColorPanel({ fields, value, onChange }: RowColorPanelProps) {
   const selectFields = fields.filter((f) => f.type === "singleSelect");
 
   return (
-    <div className="flex w-80 flex-col gap-3 p-3">
+    // H-157：溢出菜单（<1440）的浮层容器实测仅 288px，固定 w-80(320px) 会被裁出横向滚动条。
+    // 加 max-w-full 让窄容器下收敛到父宽，≥1440 内联入口仍保持 320px 原观感。
+    <div className="flex w-80 max-w-full flex-col gap-3 p-3">
       <span className="text-gx-13 font-semibold text-gx-text-primary">行颜色</span>
 
       <SegmentedControl<RowColorMode>
