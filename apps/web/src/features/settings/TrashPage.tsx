@@ -1,10 +1,18 @@
 // apps/web/src/features/settings/TrashPage.tsx
-// 回收站：列出已删除项，支持恢复 / 彻底删除（二次确认）
+// 回收站：**双选项卡**列出已删除项，支持恢复 / 彻底删除（二次确认）
 // 权限：canEditData 可恢复；canManageBase 可彻底删除
+//
+// 双选项卡（2026-09-20 补做）：
+//   A「数据表删除与恢复」= 表与字段（结构类，原有能力）
+//   B「数据删除与恢复」  = 记录（数据类）
+// 后端 `POST /trash/:id/restore` 的 record 分支一直存在（apps/api/src/routes/records.ts:810
+// 起，是三个分支里的第一个），删除-恢复链路本就打通；此前只是前端把三种 kind 混在
+// 一个列表里展示，结构类与数据类互相干扰。本页改动=呈现层拆分，未新增任何接口。
 
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useBase, useTrash, useGXMutations } from "../../api/hooks";
-import { Button, EmptyState, toast } from "../../components/ui";
+import { Button, EmptyState, SegmentedControl, toast } from "../../components/ui";
 // 阶段 4：R-D-15 延迟加载态 / R-D-16 错误态 / R-I-29 截断带 title
 import { ErrorState, SkeletonList } from "../../components/states";
 import { confirmIrreversible } from "../../components/feedback";
@@ -24,6 +32,19 @@ const KIND_LABEL: Record<TrashItemDTO["kind"], string> = {
   record: "记录",
 };
 
+/** A = 结构类（表 / 字段）；B = 数据类（记录）。 */
+type TrashTab = "schema" | "record";
+
+const TABS: readonly { value: TrashTab; label: string; empty: string }[] = [
+  { value: "schema", label: "数据表删除与恢复", empty: "被删除的数据表与字段会暂时保存在这里" },
+  { value: "record", label: "数据删除与恢复", empty: "被删除的记录会暂时保存在这里" },
+];
+
+/** 按选项卡过滤（纯函数，便于单测直接覆盖三种 kind × 两个选项卡）。 */
+export function filterTrashByTab(items: TrashItemDTO[], tab: TrashTab): TrashItemDTO[] {
+  return items.filter((it) => (tab === "record" ? it.kind === "record" : it.kind !== "record"));
+}
+
 function fmt(s: string): string {
   const d = new Date(s);
   return isNaN(d.getTime()) ? s : d.toLocaleString("zh-CN", { hour12: false });
@@ -38,6 +59,11 @@ export default function TrashPage() {
   const m = useGXMutations();
   // R-D-15：≥300ms 才显示骨架屏，避免「空白 → 骨架 → 内容」的闪烁
   const showSkeleton = useDelayedFlag(isLoading);
+
+  const [tab, setTab] = useState<TrashTab>("schema");
+  const activeTab = TABS.find((t) => t.value === tab)!;
+  /** 按选项卡过滤：A 只留结构类，B 只留记录。恢复 / 彻底删除逐项走同一个 kind 分派的接口。 */
+  const visible = filterTrashByTab(items ?? [], tab);
 
   const canEditData = baseQ.data?.permissions?.canEditData ?? false;
   const canManageBase = baseQ.data?.permissions?.canManageBase ?? false;
@@ -73,16 +99,17 @@ export default function TrashPage() {
     }
   }
 
+  /** 只清空**当前选项卡**里的项：另一个选项卡的内容不该被顺手清掉。 */
   async function purgeAll() {
-    if (!items) return;
+    if (visible.length === 0) return;
     const ok = await confirmIrreversible({
       title: "清空回收站",
       confirmText: "清空回收站",
-      description: `回收站里的 ${items.length} 项会被永久删除，不可恢复。`,
+      description: `「${activeTab.label}」里的 ${visible.length} 项会被永久删除，不可恢复。`,
     });
     if (!ok) return;
     try {
-      for (const it of items) {
+      for (const it of visible) {
         await m.purgeTrash.mutateAsync({ id: it.id, kind: it.kind, baseId: baseId! });
       }
       toast("回收站已清空", "success");
@@ -95,10 +122,22 @@ export default function TrashPage() {
     <div className="flex h-full flex-col bg-gx-surface">
       <div className="flex h-12 items-center justify-between border-b border-gx-separator px-4">
         <span className="text-gx-14 font-semibold text-gx-text-primary">回收站</span>
-        {canManageBase && items && items.length > 0 && (
+        {canManageBase && visible.length > 0 && (
           <Button size="sm" variant="ghost" className="text-gx-danger" onClick={purgeAll}>
             清空回收站
           </Button>
+        )}
+      </div>
+
+      {/* 选项卡行：结构类与数据类分开，各自独立的空态 / 计数 / 清空范围 */}
+      <div className="flex items-center gap-2 border-b border-gx-separator px-4 py-2">
+        <SegmentedControl
+          value={tab}
+          options={TABS.map((t) => ({ value: t.value, label: t.label }))}
+          onChange={setTab}
+        />
+        {visible.length > 0 && (
+          <span className="text-gx-12 text-gx-text-hint">{visible.length} 项</span>
         )}
       </div>
 
@@ -116,12 +155,12 @@ export default function TrashPage() {
         {/* R-D-15/25 列表首屏用骨架屏（≥300ms 才显示），不用「加载中…」裸文案 */}
         {!isError && showSkeleton && <SkeletonList rows={5} className="px-0" />}
 
-        {!isError && !isLoading && (!items || items.length === 0) && (
+        {!isError && !isLoading && visible.length === 0 && (
           // R-D-13 空态三要素齐备：图标 + 主文案 + 次文案 + 一个主行动入口
           <EmptyState
             icon="trash"
             title="回收站是空的"
-            description="被删除的数据表、字段与记录会暂时保存在这里"
+            description={activeTab.empty}
             action={
               <Button variant="primary" size="sm" onClick={() => baseId && navigate(`/base/${baseId}`)}>
                 返回该库
@@ -130,7 +169,7 @@ export default function TrashPage() {
           />
         )}
 
-        {!isError && items && items.length > 0 && (
+        {!isError && visible.length > 0 && (
           <div className="overflow-hidden rounded-gx-lg border border-gx-border">
             <div className="flex items-center gap-3 border-b border-gx-separator bg-gx-table-header px-3 py-2 text-gx-12 font-medium text-gx-text-secondary">
               <span className="w-16">类型</span>
@@ -139,7 +178,7 @@ export default function TrashPage() {
               <span className="w-44">删除时间</span>
               <span className="w-32 text-right">操作</span>
             </div>
-            {items.map((it) => (
+            {visible.map((it) => (
               <div key={`${it.kind}-${it.id}`} className="flex items-center gap-3 border-b border-gx-separator px-3 py-2 last:border-0">
                 <span className="flex w-16 items-center gap-1 text-gx-12 text-gx-text-tertiary">
                   <Icon name={KIND_ICON[it.kind]} size={14} />
