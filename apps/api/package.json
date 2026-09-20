@@ -22,7 +22,8 @@
     "init:admin": "tsx scripts/init-admin.ts",
     "db:reset": "prisma migrate reset --force",
     "backup:online": "node scripts/backup/online-backup.mjs",
-    "backup:verify": "node scripts/backup/verify-restore.mjs"
+    "backup:verify": "node scripts/backup/verify-restore.mjs",
+    "check:link-source": "node scripts/check-link-source-integrity.mjs"
   },
   "dependencies": {
     "@gx/design-tokens": "workspace:*",
