@@ -299,6 +299,97 @@ describe("collectRefDocIds 容错", () => {
   });
 });
 
+// ============ 旧格式 token 兼容（红线） ============
+//
+// genShareToken 由 hex(24B→48 字符) 改为 base64url(24B→32 字符) 后，历史上已发出的
+// 48 字符 hex 分享链接必须照常可打开。public.ts 的 findShareRoot 按 shareToken 等值查库，
+// 对 token 的长度/字符集无任何假设——本组用例把这条不变式钉死。
+
+/** 旧格式：24 字节 hex，48 字符（改动前的生成形态） */
+const LEGACY_HEX_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
+/** 新格式：24 字节 base64url，32 字符，含 - 与 _ 两个 URL-safe 特殊符号 */
+const NEW_B64_TOKEN = "abcDEF0123456789-_abcDEF01234567";
+
+async function getRoot(token: string) {
+  const res = await pub.request(`/s/${token}`, { method: "GET" });
+  const body = (await res.json().catch(() => ({}))) as {
+    rootToken?: string;
+    doc?: { id: string; title: string };
+    error?: string;
+  };
+  return { status: res.status, body };
+}
+
+describe("分享 token 编码切换的向后兼容（旧 48 位 hex 链接必须继续可用）", () => {
+  beforeEach(() => {
+    docs = [];
+  });
+
+  it("夹具形态自检：旧 token 是 48 位 hex、新 token 是 32 位 base64url", () => {
+    expect(LEGACY_HEX_TOKEN).toMatch(/^[0-9a-f]{48}$/);
+    expect(NEW_B64_TOKEN).toMatch(/^[A-Za-z0-9_-]{32}$/);
+  });
+
+  it("旧 48 位 hex token → 200，命中其所属文档", async () => {
+    docs = [
+      doc({ id: "OLD", kind: "doc", title: "旧链接文档", shareEnabled: true, shareToken: LEGACY_HEX_TOKEN }),
+    ];
+    const r = await getRoot(LEGACY_HEX_TOKEN);
+    expect(r.status).toBe(200);
+    expect(r.body.doc?.id).toBe("OLD");
+    expect(r.body.rootToken).toBe(LEGACY_HEX_TOKEN);
+  });
+
+  it("新 32 位 base64url token（含 - 与 _）→ 200，路径解析不被转义破坏", async () => {
+    docs = [
+      doc({ id: "NEW", kind: "doc", title: "新链接文档", shareEnabled: true, shareToken: NEW_B64_TOKEN }),
+    ];
+    const r = await getRoot(NEW_B64_TOKEN);
+    expect(r.status).toBe(200);
+    expect(r.body.doc?.id).toBe("NEW");
+    expect(r.body.rootToken).toBe(NEW_B64_TOKEN);
+  });
+
+  it("新旧两种格式 token 在同一库共存，各自解析到自己的文档（互不串味）", async () => {
+    docs = [
+      doc({ id: "OLD", kind: "doc", title: "旧链接文档", shareEnabled: true, shareToken: LEGACY_HEX_TOKEN }),
+      doc({ id: "NEW", kind: "doc", title: "新链接文档", shareEnabled: true, shareToken: NEW_B64_TOKEN }),
+    ];
+    const a = await getRoot(LEGACY_HEX_TOKEN);
+    const b = await getRoot(NEW_B64_TOKEN);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect(a.body.doc?.id).toBe("OLD");
+    expect(b.body.doc?.id).toBe("NEW");
+  });
+
+  it("旧 token 走子文档路径 /s/:token/doc/:docId 同样可用（级联分享）", async () => {
+    docs = [
+      doc({
+        id: "OLDROOT",
+        kind: "doc",
+        shareEnabled: true,
+        shareToken: LEGACY_HEX_TOKEN,
+        shareIncludeChildren: true,
+      }),
+      doc({ id: "OLDCHILD", kind: "doc", title: "子文档", parentId: "OLDROOT" }),
+    ];
+    const res = await pub.request(`/s/${LEGACY_HEX_TOKEN}/doc/OLDCHILD`, { method: "GET" });
+    const body = (await res.json().catch(() => ({}))) as { doc?: { id: string } };
+    expect(res.status).toBe(200);
+    expect(body.doc?.id).toBe("OLDCHILD");
+  });
+
+  it("旧 token 但分享已关闭 → 404（吊销语义不变，与编码无关）", async () => {
+    docs = [
+      doc({ id: "OLD", kind: "doc", shareEnabled: false, shareToken: LEGACY_HEX_TOKEN }),
+    ];
+    const r = await getRoot(LEGACY_HEX_TOKEN);
+    expect(r.status).toBe(404);
+    expect(r.body.error).toContain("失效");
+  });
+});
+
 describe("buildShareReferenceClosure 直接覆盖", () => {
   beforeEach(() => {
     docs = [];

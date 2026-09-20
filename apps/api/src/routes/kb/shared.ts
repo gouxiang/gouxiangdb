@@ -97,11 +97,24 @@ export async function requireDocAccess(userId: string, docId: string, needEdit =
   return { doc, role: effective as Role, canEdit };
 }
 
-/** 生成分享令牌：URL-safe 随机串 */
+/**
+ * 生成分享令牌：URL-safe 随机串。
+ * 24 字节（192 bit）CSPRNG 熵，base64url 编码 → 32 字符，字符集 A-Za-z0-9-_（不含 +/=，URL 免转义）。
+ *
+ * 编码选型：base64url 而非 hex。同样的 192 bit 熵，hex 需 48 字符、base64url 只需 32 字符，
+ * 24 字节恰好 8 组 3 字节，编码后无 padding。与库分享令牌（routes/bases.ts 的
+ * randomBytes(24).toString("base64url")）同长同字符集，两处口径一致。
+ * 用 Buffer 而非手写字母表：Node 全局可用（本项目已有 better-sqlite3 等原生依赖，
+ * 且 mcp/pat/tokens.ts、domain/queryPlan 已普遍使用 Buffer 的 base64url），不引入新依赖、
+ * 不新增自维护编码代码路径。
+ *
+ * 兼容性：只改生成、不改校验。public.ts 的 findShareRoot 按 shareToken 等值查库，
+ * 对长度/字符集无任何假设，故历史上已发出的 48 字符 hex token 继续可用。
+ */
 export function genShareToken(): string {
   const bytes = new Uint8Array(24);
   crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return Buffer.from(bytes).toString("base64url");
 }
 
 /** 判断 maybeDesc 是否为 ancestorId 的后代（沿 parentId 向上走，含深度上限防环） */
