@@ -405,7 +405,16 @@ export function GridToolbar(props: GridToolbarProps) {
           位置在搜索框**右侧**、常驻可见——表级导入导出是全站唯一的写入/导出口，
           藏在「更多」里等于让新用户找不到；窄屏同样不收起（ToolButton 自带 shrink-0，
           <768 被压缩的是搜索框那个 flex-1 容器，按钮本身不换行、不会挤掉其它按钮）。 */}
-      <ToolButton icon="upload" label="导入" onClick={onImport} />
+      {/* 权限口径（WALK-权限组合-2026-09-20 · PERM-A1）：导入是**写数据**入口，四步向导的
+          最后一步才真正提交，阅读者一路走到底才收到 `API 403: 当前角色无权编辑数据`。
+          与「清空表」（PERM-02，aacf3f2）同一条红线——破坏性 / 写入类入口无权限时**不渲染**，
+          不做成灰色可点、也不让用户填完向导再被后端 403 打回。
+          权限源沿用本工具栏既有的一份（permissions.canEditData，来自 base.permissions），
+          不新造权限逻辑；与后端导入接口要求的编辑数据权限同宽。
+          导出是读派生，不受此门控，仍对所有可见该表的身份常驻。 */}
+      {permissions.canEditData && (
+        <ToolButton icon="upload" label="导入" onClick={onImport} />
+      )}
       <ToolButton icon="download" label="导出" onClick={onExport} />
 
       {/* 溢出菜单：桌面装复制视图 / 清空表等表级操作；窄屏额外装载被收起的按钮（功能一一等价）。
