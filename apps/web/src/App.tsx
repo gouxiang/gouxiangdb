@@ -77,11 +77,11 @@ function RootRedirect() {
   if (!bases || bases.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-gx-13 text-gx-text-tertiary">
-        <div>还没有任何 Base</div>
+        <div>还没有任何库</div>
         {/* 有权限时指向真实入口（一级导航「新建库」）；无权限时提示找管理员，不误导。 */}
         <div className="text-gx-12 text-gx-text-hint">
           {canCreate
-            ? "点击顶栏的库名（或「选择库」），选择「新建库」开始使用"
+            ? "点击左侧导航栏底部的「新建库」开始使用"
             : "还没有可用的库，请联系管理员为你开通"}
         </div>
       </div>
