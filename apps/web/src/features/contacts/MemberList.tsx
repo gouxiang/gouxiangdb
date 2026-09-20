@@ -14,7 +14,7 @@ import {
 import { virtualWindow } from "./lib/tree";
 import { STATUS_LABEL, STATUS_ORDER, StatusBadge } from "./contacts-ui";
 import { MemberDrawer } from "./MemberDrawer";
-import { InviteMemberModal } from "./InviteMemberModal";
+import { InviteMemberModal, type MemberCreateMode } from "./InviteMemberModal";
 
 const ROW_H = 52;
 const OVERSCAN = 8;
@@ -23,16 +23,34 @@ export function MemberList({
   filter,
   onFilterChange,
   canManageMembers,
+  canInviteUsers,
+  canCreateUsers,
+  canDisableUsers,
+  canDeleteUsers,
 }: {
   filter: MemberFilter;
   onFilterChange: (next: MemberFilter) => void;
+  /** 仅用于「调岗/兼岗」这类部门归属写，仍挂在 manage_members 上。 */
   canManageMembers: boolean;
+  canInviteUsers: boolean;
+  canCreateUsers: boolean;
+  canDisableUsers: boolean;
+  canDeleteUsers: boolean;
 }) {
   const { data: depts } = useDepartments();
   const query = useOrgMembers(filter);
   const [qInput, setQInput] = useState(filter.q);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // 「添加」的开局模式由权限决定：两者都有时留给用户在弹窗内切换，
+  // 只有其一则直接落在那一种，避免点进一个自己用不了的分支。
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteMode, setInviteMode] = useState<MemberCreateMode>("invite");
+  const canAddMembers = canInviteUsers || canCreateUsers;
+
+  function openAdd(): void {
+    setInviteMode(canInviteUsers ? "invite" : "create");
+    setInviteOpen(true);
+  }
 
   // 搜索 300ms 防抖
   useEffect(() => {
@@ -104,8 +122,8 @@ export function MemberList({
               className="h-8 pl-7"
             />
           </div>
-          {canManageMembers && (
-            <Button size="sm" variant="primary" icon="userPlus" onClick={() => setInviteOpen(true)}>添加</Button>
+          {canAddMembers && (
+            <Button size="sm" variant="primary" icon="userPlus" onClick={openAdd}>添加</Button>
           )}
         </div>
         <div className="mt-2 flex items-center gap-2">
@@ -156,8 +174,8 @@ export function MemberList({
             description={filtering ? undefined : "邀请同事加入后即可在这里统一管理角色与部门。"}
             onClearFilters={filtering ? () => onFilterChange({ q: "", deptId: null, status: null }) : undefined}
             action={
-              filtering || !canManageMembers ? undefined : (
-                <Button size="sm" variant="primary" icon="userPlus" onClick={() => setInviteOpen(true)}>
+              filtering || !canAddMembers ? undefined : (
+                <Button size="sm" variant="primary" icon="userPlus" onClick={openAdd}>
                   添加成员
                 </Button>
               )
@@ -213,12 +231,20 @@ export function MemberList({
       {selected && (
         <MemberDrawer
           member={selected}
-          canManage={canManageMembers}
+          canManageMembers={canManageMembers}
+          canDisableUsers={canDisableUsers}
+          canDeleteUsers={canDeleteUsers}
           onClose={() => setSelectedId(null)}
         />
       )}
 
-      <InviteMemberModal open={inviteOpen} onClose={() => setInviteOpen(false)} />
+      <InviteMemberModal
+        open={inviteOpen}
+        defaultMode={inviteMode}
+        allowInvite={canInviteUsers}
+        allowCreate={canCreateUsers}
+        onClose={() => setInviteOpen(false)}
+      />
     </div>
   );
 }

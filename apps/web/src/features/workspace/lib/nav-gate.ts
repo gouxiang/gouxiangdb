@@ -5,8 +5,8 @@
 //       本文件只回答「某账号能不能看到某入口」，不动四项定义本身。
 //
 // 两套能力口径并存是已知现状（统一它们是后续架构项，本次不做）：
-//   ① 组织动作集合 actions（/api/v1/org/members/me/effective-roles 聚合的五枚 OrgAction，
-//      目前仅系统角色 owner 持有，其余四枚系统角色 permissions=[]）；
+//   ① 组织动作集合 actions（/api/v1/org/members/me/effective-roles 聚合的十一枚 OrgAction，
+//      目前仅系统角色 owner 与管理员自建的自定义角色持有）；
 //   ② 权限引擎能力位 authzManage（GET /api/v1/meta，featuregate.ts:canManageAuthz 的严格 ===true）。
 //      注意：后端 /meta 目前**从不下发 authzManage**（apps/api/src/routes/v1/index.ts:36-49
 //      只返 {apiVersion, enterpriseOrg, auth}），故该口径在当前环境恒 false——
@@ -26,11 +26,17 @@ export interface FooterNavCapabilities {
   loading?: boolean;
 }
 
-/** 通讯录：同 ContactsPage.tsx:14-16 的三枚组织动作口径（部门/成员/角色任一写权限）。 */
+/**
+ * 通讯录：能不能进组织管理面。
+ * manage_* 三枚是**写**权限（能改部门/成员/角色的人自然要能进去改）；
+ * view_directory 是**读**权限，必须单独列——只被授予「查看通讯录」的角色没有任何写动作，
+ * 若只看三枚 manage_*，它会被挡在门外，等于把 view_directory 授予架空。
+ */
 const CONTACTS_ACTIONS: readonly OrgAction[] = [
   "manage_departments",
   "manage_members",
   "manage_roles",
+  "view_directory",
 ];
 
 export function canSeeContacts(actions: ReadonlySet<OrgAction>): boolean {

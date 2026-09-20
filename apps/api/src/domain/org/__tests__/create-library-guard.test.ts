@@ -137,11 +137,12 @@ describe("assertCanCreateLibrary 兜底与判定", () => {
 });
 
 describe("第六枚组织动作常量", () => {
-  it("ORG_ACTIONS 含 create_library，且既有五枚顺序未变（追加在末尾）", () => {
+  it("ORG_ACTIONS 含 create_library，且既有六枚顺序未变（追加在末尾，企业化定位后共十一枚）", () => {
     expect(ORG_ACTIONS).toContain("create_library");
     expect([...ORG_ACTIONS]).toEqual([
       "manage_departments", "manage_members", "manage_roles", "manage_menu", "manage_share",
       "create_library",
+      "view_directory", "invite_users", "create_users", "disable_users", "delete_users",
     ]);
   });
 

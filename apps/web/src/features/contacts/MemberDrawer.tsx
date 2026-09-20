@@ -1,4 +1,6 @@
 // M2/S7 成员编辑抽屉：多部门（主部门单选 + 兼岗多选）、只读有效角色来源清单、停用/重新激活（二次确认）。
+// 企业化定位：部门归属写仍挂 manage_members（调岗/兼岗），停用改由 disable_users 门控，
+// 并新增「删除账号」——物理删除、不可恢复，所以单独占一枚 delete_users，不与停用共用动词。
 import { useEffect, useMemo, useState } from "react";
 import { Button, Checkbox, Spinner, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
@@ -9,14 +11,20 @@ import {
   useOrgMemberMutations,
 } from "./contacts-hooks";
 import { ConfirmDanger, StatusBadge, errText } from "./contacts-ui";
+import { confirmIrreversible } from "../../components/feedback";
 
 export function MemberDrawer({
   member,
-  canManage,
+  canManageMembers,
+  canDisableUsers,
+  canDeleteUsers,
   onClose,
 }: {
   member: OrgMemberDTO;
-  canManage: boolean;
+  /** 部门归属写权限（管理成员 = 调岗/兼岗）。 */
+  canManageMembers: boolean;
+  canDisableUsers: boolean;
+  canDeleteUsers: boolean;
   onClose: () => void;
 }) {
   const { data: depts } = useDepartments();
@@ -115,7 +123,7 @@ export function MemberDrawer({
           {/* 部门归属 */}
           <section className="mb-5">
             <div className="mb-2 text-gx-13 font-semibold text-gx-text-primary">部门归属</div>
-            {!canManage && (
+            {!canManageMembers && (
               <p className="mb-2 text-gx-12 text-gx-text-hint">你没有管理成员的权限，以下为只读。</p>
             )}
             {liveDepts.length === 0 ? (
@@ -129,7 +137,7 @@ export function MemberDrawer({
                     <div key={d.id} className="flex items-center gap-2 rounded-gx-sm px-1 py-1 hover:bg-gx-bg">
                       <Checkbox
                         checked={inDept}
-                        disabled={!canManage}
+                        disabled={!canManageMembers}
                         onChange={() => toggleDept(d.id)}
                         label={<span className="text-gx-13 text-gx-text-primary">{d.name}</span>}
                       />
@@ -137,7 +145,7 @@ export function MemberDrawer({
                         {inDept && (
                           isMain ? (
                             <span className="rounded-full bg-gx-accent-bg px-2 py-0.5 text-gx-11 font-medium text-gx-accent">主部门</span>
-                          ) : canManage ? (
+                          ) : canManageMembers ? (
                             <button
                               type="button"
                               onClick={() => setMainId(d.id)}
@@ -153,7 +161,7 @@ export function MemberDrawer({
                 })}
               </div>
             )}
-            {canManage && (
+            {canManageMembers && (
               <p className="mt-1.5 text-gx-11 text-gx-text-hint">勾选为兼岗；每个成员有且仅有一个主部门。</p>
             )}
           </section>
@@ -190,38 +198,68 @@ export function MemberDrawer({
           </section>
         </div>
 
-        {/* 底部：保存 / 停用 / 重新激活 */}
-        {canManage && (
+        {/* 底部：保存 / 停用 / 重新激活 / 删除账号
+            三件套各自门控：能调岗不一定能停用，能停用不一定能删人。 */}
+        {(canManageMembers || canDisableUsers || canDeleteUsers) && (
           <div className="border-t border-gx-separator px-4 py-3">
-            <div className="mb-2 flex gap-2">
-              {isDisabled ? (
-                <Button variant="secondary" icon="refresh" block loading={m.reactivate.isPending}
+            {canDisableUsers && (
+              <div className="mb-2 flex gap-2">
+                {isDisabled ? (
+                  <Button variant="secondary" icon="refresh" block loading={m.reactivate.isPending}
+                    onClick={async () => {
+                      try {
+                        await m.reactivate.mutateAsync(member.id);
+                        toast("已重新激活，对方需重新登录", "success");
+                        onClose();
+                      } catch (e) {
+                        toast(errText(e, "激活失败"), "error");
+                      }
+                    }}
+                  >
+                    重新激活
+                  </Button>
+                ) : (
+                  <Button variant="danger" icon="userSlash" block disabled={isInvited}
+                    title={isInvited ? "待激活账号无需停用" : "停用账号"}
+                    onClick={() => setConfirmDisable(true)}
+                  >
+                    停用账号
+                  </Button>
+                )}
+              </div>
+            )}
+            {canDeleteUsers && (
+              <div className="mb-2">
+                <Button variant="danger" icon="trash" block loading={m.remove.isPending}
                   onClick={async () => {
+                    const ok = await confirmIrreversible({
+                      title: `删除账号「${member.displayName}」`,
+                      confirmText: "彻底删除账号",
+                      description:
+                        `将从工作区移除 ${member.email} 及其全部数据（部门归属、角色授予、令牌与评论一并清除）。` +
+                        "该操作不可恢复——如果对方只是暂时不需要访问，应改用「停用账号」。",
+                    });
+                    if (!ok) return;
                     try {
-                      await m.reactivate.mutateAsync(member.id);
-                      toast("已重新激活，对方需重新登录", "success");
+                      await m.remove.mutateAsync(member.id);
+                      toast("账号已删除", "success");
                       onClose();
                     } catch (e) {
-                      toast(errText(e, "激活失败"), "error");
+                      toast(errText(e, "删除失败"), "error");
                     }
                   }}
                 >
-                  重新激活
+                  删除账号
                 </Button>
-              ) : (
-                <Button variant="danger" icon="userSlash" block disabled={isInvited}
-                  title={isInvited ? "待激活账号无需停用" : "停用账号"}
-                  onClick={() => setConfirmDisable(true)}
-                >
-                  停用账号
-                </Button>
-              )}
-            </div>
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={onClose}>关闭</Button>
-              <Button variant="primary" disabled={!dirty || saving} loading={saving} onClick={save}>
-                保存部门
-              </Button>
+              {canManageMembers && (
+                <Button variant="primary" disabled={!dirty || saving} loading={saving} onClick={save}>
+                  保存部门
+                </Button>
+              )}
             </div>
           </div>
         )}

@@ -24,9 +24,16 @@ export interface ContactsDirectoryProps {
 
 export function ContactsDirectory({ className = "h-full" }: ContactsDirectoryProps) {
   const { actions, isLoading: actionsLoading } = useMyOrgActions();
+  // 企业化定位：通讯录入口由 view_directory 单独门控；四类成员写动作各自投票，
+  // 不再用「manage_members 一把梭」。写动作不蕴含读——两者必须分开判。
+  const canViewDirectory = actions.has("view_directory");
   const canManageDepts = actions.has("manage_departments");
-  const canManageMembers = actions.has("manage_members");
+  const canManageMembers = actions.has("manage_members"); // 仅调岗/兼岗仍走这一枚
   const canManageRoles = actions.has("manage_roles");
+  const canInviteUsers = actions.has("invite_users");
+  const canCreateUsers = actions.has("create_users");
+  const canDisableUsers = actions.has("disable_users");
+  const canDeleteUsers = actions.has("delete_users");
 
   const [deptId, setDeptId] = useState<string | null>(null);
   const [filter, setFilter] = useState<MemberFilter>({ q: "", deptId: null, status: null });
@@ -54,6 +61,20 @@ export function ContactsDirectory({ className = "h-full" }: ContactsDirectoryPro
     );
   }
 
+  // 没有 view_directory 就不该看到任何组织信息——直访 URL 也要挡住，
+  // 而不是渲染一个空壳让人以为通讯录是空的。
+  if (!canViewDirectory) {
+    return (
+      <div className={`${className} flex flex-col items-center justify-center gap-1 bg-gx-bg px-6 text-center`}>
+        <Icon name="users" size={24} className="text-gx-text-hint" />
+        <p className="text-gx-13 font-medium text-gx-text-primary">没有通讯录查看权限</p>
+        <p className="max-w-[320px] text-gx-12 text-gx-text-tertiary">
+          需要由管理员给你所在的角色勾选「查看通讯录」后才能查看成员与部门。
+        </p>
+      </div>
+    );
+  }
+
   const deptPanel = (
     <div className="h-full min-h-0 w-60 shrink-0 border-r border-gx-separator bg-gx-surface">
       <DeptTree
@@ -71,6 +92,10 @@ export function ContactsDirectory({ className = "h-full" }: ContactsDirectoryPro
         filter={filter}
         onFilterChange={setFilter}
         canManageMembers={canManageMembers}
+        canInviteUsers={canInviteUsers}
+        canCreateUsers={canCreateUsers}
+        canDisableUsers={canDisableUsers}
+        canDeleteUsers={canDeleteUsers}
       />
     </div>
   );

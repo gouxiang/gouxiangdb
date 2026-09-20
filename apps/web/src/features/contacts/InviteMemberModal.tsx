@@ -1,4 +1,5 @@
 // M2/S7 添加成员弹窗：两种方式——邀请（建 INVITED 账号，一次性返回激活链接+复制）/直接创建 ACTIVE 账号。
+// 企业化定位：两种方式分别由 invite_users / create_users 门控，不再是「能管成员就能两者都做」。
 import { useRef, useState } from "react";
 import { Button, Input, Modal, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
@@ -9,9 +10,24 @@ import { COPY_FAIL_HINT_LINK, copyText } from "../../lib/clipboard";
 
 type Mode = "invite" | "create";
 
-export function InviteMemberModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** 只有一种方式被授权时锁死在该方式，不再渲染另一种的入口。 */
+export type MemberCreateMode = Mode;
+
+export function InviteMemberModal({
+  open,
+  defaultMode = "invite",
+  allowInvite,
+  allowCreate,
+  onClose,
+}: {
+  open: boolean;
+  defaultMode?: MemberCreateMode;
+  allowInvite: boolean;
+  allowCreate: boolean;
+  onClose: () => void;
+}) {
   const m = useOrgMemberMutations();
-  const [mode, setMode] = useState<Mode>("invite");
+  const [mode, setMode] = useState<Mode>(defaultMode);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
@@ -118,23 +134,27 @@ export function InviteMemberModal({ open, onClose }: { open: boolean; onClose: (
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          <div className="inline-flex w-fit rounded-gx-lg border border-gx-border bg-gx-surface p-0.5">
-            {([
-              { v: "invite" as Mode, label: "邀请加入" },
-              { v: "create" as Mode, label: "直接创建账号" },
-            ]).map((o) => (
-              <button
-                key={o.v}
-                type="button"
-                onClick={() => setMode(o.v)}
-                className={`rounded-gx-sm px-3 py-1 text-gx-12 font-medium transition-colors ${
-                  mode === o.v ? "bg-gx-accent-bg text-gx-accent" : "text-gx-text-tertiary hover:bg-gx-bg"
-                }`}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
+          {/* 两种方式都授权时才给切换；只有一种时连 tab 都不渲染，
+             避免用户点进一个必然 403 的分支。 */}
+          {allowInvite && allowCreate && (
+            <div className="inline-flex w-fit rounded-gx-lg border border-gx-border bg-gx-surface p-0.5">
+              {([
+                { v: "invite" as Mode, label: "邀请加入" },
+                { v: "create" as Mode, label: "直接创建账号" },
+              ]).map((o) => (
+                <button
+                  key={o.v}
+                  type="button"
+                  onClick={() => setMode(o.v)}
+                  className={`rounded-gx-sm px-3 py-1 text-gx-12 font-medium transition-colors ${
+                    mode === o.v ? "bg-gx-accent-bg text-gx-accent" : "text-gx-text-tertiary hover:bg-gx-bg"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           <label className="flex flex-col gap-1.5">
             <span className="text-gx-12 font-medium text-gx-text-secondary">邮箱</span>

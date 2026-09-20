@@ -946,6 +946,13 @@ export interface LifecycleResult {
   tokenVersion: number;
 }
 
+/** DELETE /api/v1/org/members/:id 的删除结果（物理删除，不可恢复）。 */
+export interface DeleteUserResult {
+  id: string;
+  email: string;
+  deleted: true;
+}
+
 /**
  * 由一次性激活码拼出可线下转发的激活链接（M2 不投递邮件）。
  * 走 withBase 以兼容子路径部署：根部署为 "/invite/<token>"，
@@ -1000,6 +1007,9 @@ export const OrgMembers = {
     apiFetch<LifecycleResult>(`/api/v1/org/members/${id}/disable`, { method: "POST" }),
   reactivate: (id: string) =>
     apiFetch<LifecycleResult>(`/api/v1/org/members/${id}/reactivate`, { method: "POST" }),
+  /** 删除账号（需 delete_users）：物理删除，不可恢复；自删 400、删掉最后 owner 409。 */
+  remove: (id: string) =>
+    apiFetch<DeleteUserResult>(`/api/v1/org/members/${id}`, { method: "DELETE" }),
 };
 
 export const OrgRoles = {

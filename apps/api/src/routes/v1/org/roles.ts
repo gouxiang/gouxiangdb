@@ -9,7 +9,9 @@ import { audit } from "../../../audit/emit.js";
 export const roles = new Hono();
 
 // GET /org/roles：系统角色固定序在前 + 自定义
-roles.get("/", async (c) => c.json(await roleAdmin.listRoles()));
+// view_directory 门控：角色清单本身就是通讯录右栏的内容，能看通讯录才看得到有哪些角色；
+// 此前登录即可读，等于向每个账号公开整套权限编排。
+roles.get("/", requireOrgAction("view_directory"), async (c) => c.json(await roleAdmin.listRoles()));
 
 // POST /org/roles {name,description?,actions?} -> 201（动作白名单在 service 校验，非法 400）
 roles.post("/", requireOrgAction("manage_roles"), async (c) => {
@@ -54,7 +56,9 @@ roles.delete("/:id", requireOrgAction("manage_roles"), async (c) => {
 });
 
 // GET /org/roles/:id/assignments
-roles.get("/:id/assignments", async (c) => {
+// 同 view_directory 门控：授予清单回答的是「谁持有这个角色」，与角色清单同一量级的
+// 组织信息，不能因为新加了列表守卫却留这一个空着让人绕过去。
+roles.get("/:id/assignments", requireOrgAction("view_directory"), async (c) => {
   const id = c.req.param("id");
   if (!id) return c.json({ error: "缺少角色 id", code: "BAD_REQUEST" }, 400);
   return c.json(await roleAdmin.listAssignments(id));

@@ -4,21 +4,36 @@
 // 边界（M2 计划 §5-A / 派工）：
 //   - M2 锁定三枚组织管理动作；M3-S6 只增第四枚 manage_menu（导航菜单编排）；
 //     M4-S5 只增第五枚 manage_share（授权策略/分享管理）；
-//     M6 只增第六枚 create_library（建库/建知识库的权限门）。
+//     M6 只增第六枚 create_library（建库/建知识库的权限门）；
+//     企业化定位追加第七至十一枚——通讯录五件套：view_directory / invite_users /
+//     create_users / disable_users / delete_users，把原先「manage_members 一把梭」的
+//     成员管理面拆成可按角色分别勾选的细粒度动词，使「只能看不能动」「只能邀请不能删」
+//     这类企业口径第一次可表达（此前只有「有 manage_members」与「没有 manage_members」
+//     两种状态，看权限等于能改权限）。
+//   - view_directory 是读动作、其余四枚（invite_users/create_users/disable_users/delete_users）
+//     是写动作：写动作不含读，需要「只看不改」时必须单独勾 view_directory。
 //   - 资源动作 r/c/u/d/comment/manage_share（资源空间，见 authz.ts RESOURCE_ACTIONS）一律不与
 //     本 OrgAction 混用：组织空间的 manage_share 是独立第五枚，二者同名不同命名空间。
 //   - create_library 是能力门而非管理面动作：持有它才允许新建 Base / 知识库。默认仅
 //     role_owner 持全部动作，其余角色由管理员在后台勾选授予（按角色，不按人）。
 //   - 成功响应沿用现网：资源本体 / 分页对象 {items,total,page,limit,hasMore}；错误 {error,code}。
 
-/** 组织管理动作（M3-S6 起四枚，M4-S5 起五枚，M6 起六枚；只增不改既有成员顺序语义）。 */
+/**
+ * 组织管理动作（M3-S6 起四枚，M4-S5 起五枚，M6 起六枚，企业化定位起十一枚；
+ * 只增不改既有成员顺序语义——末尾追加，历史 migrations 的 JSON 串按此顺序定序）。
+ */
 export type OrgAction =
   | "manage_departments"
   | "manage_members"
   | "manage_roles"
   | "manage_menu"
   | "manage_share"
-  | "create_library";
+  | "create_library"
+  | "view_directory"
+  | "invite_users"
+  | "create_users"
+  | "disable_users"
+  | "delete_users";
 
 export const ORG_ACTIONS: readonly OrgAction[] = [
   "manage_departments",
@@ -27,6 +42,11 @@ export const ORG_ACTIONS: readonly OrgAction[] = [
   "manage_menu",
   "manage_share",
   "create_library",
+  "view_directory",
+  "invite_users",
+  "create_users",
+  "disable_users",
+  "delete_users",
 ];
 
 /** 五枚系统组织角色 key（自定义角色 systemKey=null）。 */

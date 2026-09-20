@@ -117,7 +117,7 @@ export function useEffectiveRoles(memberId: string | null) {
   });
 }
 
-/** 当前登录者的有效组织动作集合（全员可读目录，写按钮据三枚动作门控显隐/禁用）。 */
+/** 当前登录者的有效组织动作集合（通讯录由 view_directory 门控，写按钮据余下十枚动作显隐）。 */
 export function useMyOrgActions(): { actions: Set<OrgAction>; isLoading: boolean } {
   const query = useQuery({
     queryKey: ORG_QK.myEffectiveRoles,
@@ -191,6 +191,15 @@ export function useOrgMemberMutations() {
     }),
     disable: useMutation({ mutationFn: OrgMembers.disable, onSuccess: invalidateMembers }),
     reactivate: useMutation({ mutationFn: OrgMembers.reactivate, onSuccess: invalidateMembers }),
+    // 删除是物理删除：deleteUser 会连外键覆盖不到的孤立 user 授予行一起清，
+    // 故角色详情的主体清单（role_assignments 视图）也要一并失效。
+    remove: useMutation({
+      mutationFn: OrgMembers.remove,
+      onSuccess: () => {
+        invalidateMembers();
+        void qc.invalidateQueries({ queryKey: ["org", "roles"] });
+      },
+    }),
   };
 }
 

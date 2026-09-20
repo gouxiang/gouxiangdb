@@ -1,6 +1,7 @@
 // M2 账号生命周期状态机（计划 §5-D）。
 // S4：接受邀请（INVITED -> ACTIVE，一次性激活码，发带 tv JWT）。
 // S6：disableUser / reactivateUser / assertNotLastOwner（本文件在 S6 扩充）。
+// 企业化定位：新增 deleteUser（物理删除，权限位 delete_users 单独门控）。
 
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
@@ -155,6 +156,73 @@ export async function disableUser(actorId: string, targetId: string): Promise<Li
     return toLifecycleResult(updated);
   });
   // tokenVersion 已 +1：即使开了短缓存也主动失效，保证同进程下一次请求即 401。
+  invalidateAuthState(targetId);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// 企业化定位：删除用户（物理删除，最后 owner 保护）
+// ---------------------------------------------------------------------------
+
+export interface DeleteUserResult {
+  id: string;
+  email: string;
+  deleted: true;
+}
+
+/**
+ * 删除成员账号：自删 400；删除后工作区无在岗 owner -> 409 回滚；否则物理删除。
+ *
+ * 为什么是物理删除而不是加 users.deletedAt 软删列：
+ *   schema 已把 memberships / kbMemberships / kbDocAcls / comments / deptMemberships /
+ *   personalAccessTokens 全部配成 ON DELETE CASCADE（见 prisma/schema.prisma 的 User 模型），
+ *   链路本身是完整的，软删只会让"同一个邮箱能不能再建一次账号"这类问题多出一套分支，
+ *   且 User.email 唯一索引在软删后会长期占住不可复用。代价是删除不可恢复——
+ *   因此这个动作必须单独成一枚 delete_users 权限位，不与停用共用。
+ *
+ * 保护次序（都必须在同一事务内，删完再检查才不会被"删了才发现没人兜底"绕过）：
+ *   1. actorId === targetId -> 400（参照自停用的写法）；
+ *   2. 目标不存在 -> 404；
+ *   3. 先把未吊销的 PAT 置 revokedAt：PAT 行会被级联删掉，但"吊销"应留下可审计的终态；
+ *   4. 物理删除用户，手工清两种不被级联覆盖的悬挂引用（见下）；
+ *   5. 写后复算 owner 集合：用户的 owner 授予行不被 SQLite 级联覆盖、必须显式删，
+ *      否则 usersWithRole 会算出一名已不存在的 owner，兜底形同虚设；且只有在删之前
+ *      工作区确实还有 owner 时才要求删完仍有 owner（否则无主工作区永远清不干净）。
+ */
+export async function deleteUser(actorId: string, targetId: string): Promise<DeleteUserResult> {
+  if (actorId === targetId) {
+    throw new HttpError(400, "不能删除自己的账号");
+  }
+  const result = await withWriteTx("org.member.delete", async (tx) => {
+    const user = await tx.user.findUnique({ where: { id: targetId } });
+    if (!user) throw new HttpError(404, "成员不存在");
+
+    // PAT 吊销先于删除落库（同 disableUser 的做法）：即便立刻被级联清除，
+    // 吊销状态也要先成为可查询/可审计的终态。
+    await tx.personalAccessToken.updateMany({
+      where: { userId: targetId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    // 写前快照：原来有几位在岗 owner。这个数决定 409 该不该参与判定（见下）。
+    const ownersBefore = await usersWithRole(OWNER_ROLE_ID, tx);
+
+    await tx.user.delete({ where: { id: targetId } });
+
+    // 悬挂授予清理：role_assignments.subjectId 是多态列、无 FK（见 schema 注释），
+    // SQLite 不会替我们级联，必须显式删掉该用户作为主体的授予行。留着会让
+    // usersWithRole 反查出已不存在的用户 id，最后 owner 兜底因此失效。
+    await tx.roleAssignment.deleteMany({
+      where: { subjectType: "user", subjectId: targetId },
+    });
+
+    // 写后兜底：只在「删之前工作区还有 owner」时才要求删完仍有 owner。
+    // 不能无条件调用 assertWorkspaceHasOwnerTx——那样在一个本身就没有 owner 的工作区里
+    // 任何账号都删不掉（包括清理一个没人管的残留账号），这不是保护而是死锁。
+    // 「一位 owner 都没有」是部署事故，不是删除操作造成的，不该由删除路径背锅。
+    if (ownersBefore.length > 0) await assertWorkspaceHasOwnerTx(tx);
+    return { id: user.id, email: user.email, deleted: true as const };
+  });
   invalidateAuthState(targetId);
   return result;
 }

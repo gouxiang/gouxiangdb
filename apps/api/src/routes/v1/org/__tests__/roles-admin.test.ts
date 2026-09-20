@@ -39,7 +39,10 @@ describe("角色列表与系统角色锁定", () => {
     // 派生自 ORG_ACTIONS（不写字面量）：再加动作位时此处自动跟随。
     expect(owner.actions.sort()).toEqual([...ORG_ACTIONS].sort());
     for (const k of ["creator", "editor", "commenter", "viewer"]) {
-      expect(list.find((r) => r.systemKey === k)!.actions).toEqual([]);
+      // 四枚资源锚点系统角色没有任何管理动作，但迁移 20260920220000 给它们补了读基线
+      // view_directory（原来登录即可读通讯录，不能因为加守卫让被授予它们的人突然失读）。
+      // 写动作一枚都不给——能不能改通讯录仍然只能由管理员勾选自定义角色决定。
+      expect(list.find((r) => r.systemKey === k)!.actions).toEqual(["view_directory"]);
     }
   });
 
@@ -122,11 +125,28 @@ describe("自定义角色与动作白名单", () => {
       body: JSON.stringify({ name: "越权", actions: [] }),
     });
     expect(attempt.status).toBe(403);
-    // 但 manage_members 动作允许其管成员
-    const invite = await h.app.request("/api/v1/org/members/invite", {
+
+    // 企业化定位后，成员管理拆成 invite_users/create_users/disable_users/delete_users 四枚：
+    // 本次新建的角色只勾了 manage_members，它就只有 manage_members 那一件（调岗/兼岗），
+    // 不能邀请。想邀必须显式勾 invite_users——这正是「细粒度可按角色分别授予」要达到的效果。
+    const noInvite = await h.app.request("/api/v1/org/members/invite", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(await h.auth("mgr")) },
       body: JSON.stringify({ email: "m@x.com", displayName: "M" }),
+    });
+    expect(noInvite.status).toBe(403);
+  });
+
+  it("补勾 invite_users 后同一个角色即可邀请（验收口径：能力来自勾选，不来自 manage_members）", async () => {
+    await h.createUser("mgr2");
+    const created = await createRole("成员管理员3", ["manage_members", "invite_users"]);
+    const roleId = (await json<{ id: string }>(created)).id;
+    await h.grant(roleId, "user", "mgr2");
+
+    const invite = await h.app.request("/api/v1/org/members/invite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await h.auth("mgr2")) },
+      body: JSON.stringify({ email: "m2@x.com", displayName: "M2" }),
     });
     expect(invite.status).toBe(201);
   });

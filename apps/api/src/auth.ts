@@ -34,7 +34,7 @@ const signupSchema = z.object({
  *
  * 只回两个布尔，绝不回邮箱/数量/任何账号信息——未部署实例上任何账号细节都可能被枚举：
  *   initialized = users 表是否已有任何用户（count>0，走 COUNT 不 hydrate）；
- *   signupOpen  = 公开注册开关 GX_ALLOW_PUBLIC_SIGNUP 的判定（未设置恒开放）。
+ *   signupOpen  = 公开注册开关 GX_ALLOW_PUBLIC_SIGNUP 的判定（未设置则为关闭，见 configSignup.ts）。
  * 与 signup 同为免鉴权路由（在 requireActiveUser 之外，v1 路由见 routes/v1/index.ts:28）。
  */
 auth.get("/bootstrap-status", async (c) => {

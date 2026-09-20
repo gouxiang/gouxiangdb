@@ -1,6 +1,7 @@
 // M4/S5 manage_share 第五动作位：白名单穷举 + roleAdmin 非法文案 + owner 第 20 迁移幂等测试。
 //
-// - ORG_ACTIONS 恰为六枚（真源 shared-types，M6 追加 create_library），逐枚经 requireOrgAction
+// - ORG_ACTIONS 恰为十一枚（真源 shared-types，M6 追加 create_library，企业化定位追加通讯录
+//   五件套 view_directory/invite_users/create_users/disable_users/delete_users），逐枚经 requireOrgAction
 //   构造不抛"未知动作"；
 //   非法动作必须同步抛（接线纪律）。
 // - 全量 deploy 后 role_owner permissions 恰为六动作固定 JSON 串（含 M6 的 create_library）。
@@ -22,6 +23,8 @@ const THREE = '["manage_departments","manage_members","manage_roles"]';
 const FOUR = '["manage_departments","manage_members","manage_roles","manage_menu"]';
 const FIVE = '["manage_departments","manage_members","manage_roles","manage_menu","manage_share"]';
 const SIX = '["manage_departments","manage_members","manage_roles","manage_menu","manage_share","create_library"]';
+// 企业化定位（迁移 20260920220000_org_directory_actions）：owner 再追加通讯录五件套。
+const ELEVEN = '["manage_departments","manage_members","manage_roles","manage_menu","manage_share","create_library","view_directory","invite_users","create_users","disable_users","delete_users"]';
 const migrationSql = fs.readFileSync(
   path.resolve("prisma/migrations/20260916130000_owner_manage_share/migration.sql"),
   "utf8",
@@ -42,15 +45,17 @@ afterAll(async () => {
   await h.cleanup();
 });
 
-describe("组织管理动作白名单（六枚）", () => {
-  it("ORG_ACTIONS 恰为六枚，追加位是 create_library 且既有五枚顺序未变", () => {
+describe("组织管理动作白名单（十一枚）", () => {
+  it("ORG_ACTIONS 恰为十一枚，追加位是通讯录五件套且既有六枚顺序未变", () => {
     expect([...ORG_ACTIONS]).toEqual([
       "manage_departments", "manage_members", "manage_roles", "manage_menu", "manage_share",
       "create_library",
+      "view_directory", "invite_users", "create_users", "disable_users", "delete_users",
     ]);
     expect([...ORG_ACTIONS].sort()).toEqual([
-      "create_library",
+      "create_library", "create_users", "delete_users", "disable_users", "invite_users",
       "manage_departments", "manage_members", "manage_menu", "manage_roles", "manage_share",
+      "view_directory",
     ]);
   });
 
@@ -63,10 +68,10 @@ describe("组织管理动作白名单（六枚）", () => {
   });
 });
 
-describe("全量 deploy 后 owner 第五动作", () => {
-  it("role_owner permissions 恰为六动作固定串（迁移 19 + 20 + owner_create_library 链）", () => {
+describe("全量 deploy 后 owner 的权限位", () => {
+  it("role_owner permissions 恰为十一动作固定串（迁移 19 + 20 + owner_create_library + directory_actions 链）", () => {
     const owner = raw.prepare("SELECT permissions FROM roles WHERE id='role_owner'").get() as { permissions: string };
-    expect(owner.permissions).toBe(SIX);
+    expect(owner.permissions).toBe(ELEVEN);
   });
 });
 

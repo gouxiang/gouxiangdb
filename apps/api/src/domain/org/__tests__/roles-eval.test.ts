@@ -93,7 +93,18 @@ function counted(client: PrismaClient) {
 }
 
 describe("系统角色常量与迁移种子对拍", () => {
-  it("五枚系统角色 id/key/name/isSystem/permissions 逐字一致，仅 owner 持全部 ORG_ACTIONS", async () => {
+  // 20260920220000_org_directory_actions 给「不含 manage_members」的角色补了读权限基线
+  // view_directory——迁移动机是切到 view_directory 守卫后，原本今天能读通讯录的人不能突然
+  // 读不到。这条基线是**迁移写进数据库列的**，不在 SYSTEM_ROLES 常量里：
+  //   常量 SYSTEM_ROLES.actions 回答「这类系统角色有没有组织管理权」（非 owner 四枚恒空，
+  //   create-library-guard.test.ts 有一条不变量锁着，不许给）；
+  //   数据库 roles.permissions 是运行期唯一读取源，含这条迁移补出来的读基线。
+  // 故对拍时两边都剔除读基线再比管理动作，基线本身另有一条断言单独锁住。
+  const READ_BASELINE = "view_directory";
+  const withoutBaseline = (actions: readonly string[]) =>
+    actions.filter((a) => a !== READ_BASELINE).sort();
+
+  it("五枚系统角色 id/key/name/isSystem/管理动作逐字一致，且都持有迁移补的读基线", async () => {
     const rows = await prisma.role.findMany({ where: { workspaceId: "ws_default" } });
     expect(rows).toHaveLength(5);
     const byId = new Map(rows.map((r) => [r.id, r]));
@@ -103,7 +114,14 @@ describe("系统角色常量与迁移种子对拍", () => {
       expect(row!.systemKey).toBe(spec.systemKey);
       expect(row!.name).toBe(spec.name);
       expect(row!.isSystem).toBe(1);
-      expect(JSON.parse(row!.permissions).sort()).toEqual([...spec.actions].sort());
+      const rowActions = JSON.parse(row!.permissions) as string[];
+      // 管理动作必须与常量逐字一致——含「非 owner 四枚一枚管理动作都不给」这条不变量。
+      expect(withoutBaseline(rowActions)).toEqual(withoutBaseline(spec.actions));
+      // 迁移补的读基线：五枚系统角色都应拿到。缺了它，被授予这些角色的成员会在
+      // view_directory 守卫上线后失读，而退回前今天是人人可读的。
+      expect(rowActions, `${spec.id} 缺迁移补的 ${READ_BASELINE}`).toContain(READ_BASELINE);
+      // 追加式迁移不能写出重复项（json_insert 无去重能力）。
+      expect(new Set(rowActions).size).toBe(rowActions.length);
     }
     const owner = byId.get("role_owner")!;
     // 派生自 ORG_ACTIONS（不写字面量）：再加动作位时此处自动跟随，无需手改。

@@ -28,13 +28,25 @@ const OWNER = setOf(
 );
 
 describe("能力判定：四项各自一套口径", () => {
-  it("通讯录：三枚组织动作任一放行，其余不放行", () => {
-    for (const a of ["manage_departments", "manage_members", "manage_roles"] as OrgAction[]) {
-      expect(canSeeContacts(setOf(a))).toBe(true);
+  it("通讯录：三枚成员写动作与 view_directory 任一放行，其余不放行", () => {
+    for (const a of [
+      "manage_departments",
+      "manage_members",
+      "manage_roles",
+      "view_directory",
+    ] as OrgAction[]) {
+      expect(canSeeContacts(setOf(a)), a).toBe(true);
     }
     expect(canSeeContacts(setOf("manage_menu"))).toBe(false);
     expect(canSeeContacts(setOf("manage_share"))).toBe(false);
     expect(canSeeContacts(setOf())).toBe(false);
+  });
+
+  it("只有只读通讯录权限的角色（view_directory + 邀请/创建）也能进通讯录入口", () => {
+    expect(canSeeContacts(setOf("view_directory", "invite_users", "create_users"))).toBe(true);
+    // 单独一枚写动作不含读：不能因为能邀请就推断能看通讯录
+    expect(canSeeContacts(setOf("invite_users"))).toBe(false);
+    expect(canSeeContacts(setOf("delete_users"))).toBe(false);
   });
 
   it("导航编排：只认 manage_menu", () => {
@@ -55,7 +67,7 @@ describe("能力判定：四项各自一套口径", () => {
     expect(canSeeWorkspaceSettings(OWNER)).toBe(true);
     expect(canSeeWorkspaceSettings(setOf("manage_menu"))).toBe(true);
     expect(canSeeWorkspaceSettings(setOf("manage_share"))).toBe(true);
-    // viewer/commenter（系统角色 permissions=[]）不可见
+    // viewer/commenter（系统角色无组织动作）不可见
     expect(canSeeWorkspaceSettings(setOf())).toBe(false);
   });
 });

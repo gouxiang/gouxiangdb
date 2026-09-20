@@ -1,13 +1,13 @@
 // 0.1.7 公开引导状态与注册开关端到端（真迁移临时库 + 真 createApp + 真 hono/jwt，不 mock）。
 //
 // 覆盖：
-//  ① 空库 GET /api/auth/bootstrap-status -> 200 {initialized:false, signupOpen:true}，
+//  ① 空库 GET /api/auth/bootstrap-status -> 200 {initialized:false, signupOpen:false}，
 //     且**免鉴权**（无 Authorization 头不 401）、响应体只有两个布尔（不泄漏邮箱/数量）；
 //  ② 库里有用户后 initialized=true；
-//  ③ 开关关闭（GX_ALLOW_PUBLIC_SIGNUP=off）时 signupOpen=false，非空库 POST signup -> 403
+//  ③ 开关关闭（GX_ALLOW_PUBLIC_SIGNUP=off，含未设置的默认值）时 signupOpen=false，非空库 POST signup -> 403
 //     code=SIGNUP_CLOSED 且不新增用户；
 //  ④ 关闭态**空库仍可注册**（首用户引导必须永远可行）并自举 owner；
-//  ⑤ 开关字面量：off/false/0（大小写不敏感、含空白）关闭；未设置/on/1 开放。
+//  ⑤ 开关字面量（fail-closed 口径）：未设置/空值/无法识别的值一律关闭；仅显式 on/true/1 开放。
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
@@ -69,14 +69,14 @@ afterEach(() => {
 });
 
 describe("GET /api/auth/bootstrap-status", () => {
-  it("① 空库：免鉴权 200，initialized=false / signupOpen=true，响应体只有两个布尔", async () => {
+  it("① 空库：免鉴权 200，initialized=false / signupOpen=false（未设置即关闭），响应体只有两个布尔", async () => {
     const res = await app.request("/api/auth/bootstrap-status");
     expect(res.status).toBe(200);
     const body = await json<Record<string, unknown>>(res);
     // 免鉴权：不带任何 Authorization 头也不 401/403（登录/注册同级公开端点）。
     expect(Object.keys(body).sort()).toEqual(["initialized", "signupOpen"]);
     expect(body.initialized).toBe(false);
-    expect(body.signupOpen).toBe(true);
+    expect(body.signupOpen).toBe(false);
     // 绝不泄漏账号信息：整份响应体不含邮箱/数量等任何用户字段。
     expect(JSON.stringify(body)).not.toContain("@");
   });
@@ -94,18 +94,19 @@ describe("GET /api/auth/bootstrap-status", () => {
     expect(res.status).toBe(200);
     const body = await json<{ initialized: boolean; signupOpen: boolean }>(res);
     expect(body.initialized).toBe(true);
-    expect(body.signupOpen).toBe(true);
+    // 未显式开放 -> 关闭（企业部署口径，fail-closed）。
+    expect(body.signupOpen).toBe(false);
     expect(JSON.stringify(body)).not.toContain("boot@example.com");
   });
 
-  it("⑤ 开关字面量：off/false/0（大小写与空白不敏感）关闭，未设置/on/1 开放", async () => {
-    for (const closed of ["off", "OFF", " Off ", "false", "FALSE", "0"]) {
+  it("⑤ fail-closed：未设置/空值/无法识别的值一律关闭，仅显式 on/true/1 开放", async () => {
+    for (const closed of ["off", "OFF", " Off ", "false", "FALSE", "0", "", "yes", "open", "opne"]) {
       setSignupFlag(closed);
       const res = await app.request("/api/auth/bootstrap-status");
       const body = await json<{ signupOpen: boolean }>(res);
       expect(body.signupOpen, `GX_ALLOW_PUBLIC_SIGNUP=${JSON.stringify(closed)} 应关闭`).toBe(false);
     }
-    for (const open of ["on", "1", "true", "yes", ""]) {
+    for (const open of ["on", "ON", " On ", "1", "true", "TRUE"]) {
       setSignupFlag(open);
       const res = await app.request("/api/auth/bootstrap-status");
       const body = await json<{ signupOpen: boolean }>(res);
@@ -115,11 +116,12 @@ describe("GET /api/auth/bootstrap-status", () => {
     const unset = await json<{ signupOpen: boolean }>(
       await app.request("/api/auth/bootstrap-status"),
     );
-    expect(unset.signupOpen).toBe(true);
+    // 未设置 = 关闭：企业部署不应允许自助注册，账号统一由管理员建立或邀请。
+    expect(unset.signupOpen).toBe(false);
   });
 });
 
-describe("GX_ALLOW_PUBLIC_SIGNUP=off 时的注册闸门", () => {
+describe("公开注册开关与注册闸门（fail-closed 默认值）", () => {
   it("③ 非空库注册 -> 403 SIGNUP_CLOSED，且不新增用户", async () => {
     await prisma.user.create({
       data: {
@@ -175,7 +177,8 @@ describe("GX_ALLOW_PUBLIC_SIGNUP=off 时的注册闸门", () => {
     expect(grants[0]!.roleId).toBe("role_owner");
   });
 
-  it("开放态（默认/未设置）非空库注册照旧 200（0.1.6 行为零回归）", async () => {
+  it("显式开放（GX_ALLOW_PUBLIC_SIGNUP=on）时非空库注册照旧 200（开关未变，仅默认值翻转）", async () => {
+    setSignupFlag("on");
     await prisma.user.create({
       data: {
         id: "u-exist2",

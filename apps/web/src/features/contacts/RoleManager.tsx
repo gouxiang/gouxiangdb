@@ -33,7 +33,23 @@ const ACTION_LABEL: Record<OrgAction, string> = {
   manage_menu: "导航编排",
   manage_share: "分享授权",
   create_library: "新建库",
+  view_directory: "查看通讯录",
+  invite_users: "邀请用户",
+  create_users: "创建账号",
+  disable_users: "停用用户",
+  delete_users: "删除用户",
 };
+
+/**
+ * 通讯录角色面只暴露「超级管理员 + 自定义角色」。
+ * creator/editor/commenter/viewer 四枚系统角色在组织层没有任何组织动作（actions 恒空），
+ * 它们的真实用途是资源授权策略（auth_policies）的合法主体——从数据库挖掉会让既有策略
+ * 变成悬挂主体（reconcile 报 C3_DANGLING_ROLE）。所以这里**只在通讯录 UI 过滤显示**，
+ * 不动数据，也不影响 MemberDrawer 的有效角色审计清单。
+ */
+function isDirectoryVisibleRole(r: OrgRoleDTO): boolean {
+  return r.systemKey === "owner" || !r.isSystem;
+}
 
 const NO_FILTER: MemberFilter = { q: "", deptId: null, status: null };
 
@@ -43,9 +59,16 @@ export function RoleManager({ canManageRoles }: { canManageRoles: boolean }) {
   const [editing, setEditing] = useState<{ role: OrgRoleDTO | null } | null>(null);
 
   const roles = useMemo(() => rolesQ.data ?? [], [rolesQ.data]);
+  // 通讯录视角：只给「超级管理员 + 自定义角色」，四枚资源锚点系统角色不在此显示（见函数注释）。
+  const visibleRoles = useMemo(() => roles.filter(isDirectoryVisibleRole), [roles]);
   useEffect(() => {
-    if (!selectedRoleId && roles.length) setSelectedRoleId(roles[0]!.id);
-  }, [roles, selectedRoleId]);
+    if (!visibleRoles.length) return;
+    // 默认选中不必落在 visibleRoles[0]：后端 listRoles 已保证系统角色前置且 owner 居首，
+    // 但若管理员删光了自定义角色而 selectedRoleId 还指向旧的，这里要收敛回可见集合。
+    if (!selectedRoleId || !visibleRoles.some((r) => r.id === selectedRoleId)) {
+      setSelectedRoleId(visibleRoles[0]!.id);
+    }
+  }, [visibleRoles, selectedRoleId]);
 
   if (rolesQ.isLoading) {
     return <div className="flex h-full items-center justify-center"><Spinner size={20} /></div>;
@@ -62,20 +85,26 @@ export function RoleManager({ canManageRoles }: { canManageRoles: boolean }) {
           )}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto py-1">
-          {roles.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => setSelectedRoleId(r.id)}
-              className={`flex w-full items-center gap-1.5 px-3 py-2 text-left text-gx-13 ${
-                selectedRoleId === r.id ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-primary hover:bg-gx-row-hover"
-              }`}
-            >
-              {r.isSystem ? <Icon name="crown" size={13} className="shrink-0 text-gx-warning" /> : <Icon name="shield" size={13} className="shrink-0 opacity-60" />}
-              <span className="flex-1 truncate">{r.name}</span>
-              {r.isSystem && <Icon name="lock" size={11} className="shrink-0 text-gx-text-hint" />}
-            </button>
-          ))}
+          {visibleRoles.length === 0 ? (
+            <p className="px-3 py-4 text-gx-12 text-gx-text-hint">
+              还没有自定义角色。点上方加号新建，按需要勾选通讯录权限。
+            </p>
+          ) : (
+            visibleRoles.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => setSelectedRoleId(r.id)}
+                className={`flex w-full items-center gap-1.5 px-3 py-2 text-left text-gx-13 ${
+                  selectedRoleId === r.id ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-primary hover:bg-gx-row-hover"
+                }`}
+              >
+                {r.isSystem ? <Icon name="crown" size={13} className="shrink-0 text-gx-warning" /> : <Icon name="shield" size={13} className="shrink-0 opacity-60" />}
+                <span className="flex-1 truncate">{r.name}</span>
+                {r.isSystem && <Icon name="lock" size={11} className="shrink-0 text-gx-text-hint" />}
+              </button>
+            ))
+          )}
         </div>
       </div>
 

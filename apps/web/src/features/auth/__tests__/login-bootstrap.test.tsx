@@ -65,20 +65,26 @@ describe("resolveLoginEntry（登录页形态判定）", () => {
     });
   });
 
-  it("已初始化 → 现状（登录 + 注册）", () => {
+  it("已初始化 + 后端显式 signupOpen=true → 登录 + 注册", () => {
     expect(resolveLoginEntry(OK)).toEqual({ bootstrap: false, signupVisible: true });
   });
 
-  it("已初始化但 signupOpen=false → 隐藏注册 tab", () => {
+  it("已初始化 + signupOpen=false → 隐藏注册 tab", () => {
     expect(resolveLoginEntry({ initialized: true, signupOpen: false })).toEqual({
       bootstrap: false,
       signupVisible: false,
     });
   });
 
-  it("探针未完成/失败（null）→ 降级为现状，不卡住用户", () => {
+  it("已初始化但 signupOpen 字段缺失 → fail-closed，不给注册入口", () => {
+    const noFlag = { initialized: true } as BootstrapStatus;
+    expect(resolveLoginEntry(noFlag)).toEqual({ bootstrap: false, signupVisible: false });
+  });
+
+  it("探针未完成/失败（null/undefined）→ 降级为纯登录，不误显示自注册", () => {
     expect(resolveLoginEntry(null)).toEqual(DEGRADED_LOGIN_ENTRY);
     expect(resolveLoginEntry(undefined)).toEqual(DEGRADED_LOGIN_ENTRY);
+    expect(DEGRADED_LOGIN_ENTRY).toEqual({ bootstrap: false, signupVisible: false });
   });
 });
 
@@ -167,7 +173,7 @@ describe("LoginPage 四种形态渲染", () => {
     expect(html).not.toContain("没有账号？去注册");
   });
 
-  it("已初始化 → 维持现状（登录/注册 tabs）", () => {
+  it("已初始化 + signupOpen=true → 显示登录/注册 tabs（企业部署下需后端显式开放）", () => {
     const html = render(OK);
     expect(html).toContain(">登录<");
     expect(html).toContain(">注册<");
@@ -176,11 +182,19 @@ describe("LoginPage 四种形态渲染", () => {
     expect(html).not.toContain("创建超级管理员");
   });
 
-  it("探针失败（无数据）→ 降级为现状登录页", () => {
+  it("探针失败（无数据）→ fail-closed，降级为纯登录页，不给自注册入口", () => {
     const html = render(null);
     expect(html).toContain(">登录<");
-    expect(html).toContain(">注册<");
+    expect(html).not.toContain(">注册<");
+    expect(html).not.toContain("没有账号？去注册");
     expect(html).not.toContain("创建超级管理员");
+  });
+
+  it("signupOpen 字段缺失（老后端）→ 按关闭处理，只剩登录", () => {
+    const html = render({ initialized: true } as BootstrapStatus);
+    expect(html).toContain(">登录<");
+    expect(html).not.toContain(">注册<");
+    expect(html).not.toContain("没有账号？去注册");
   });
 
   it("signupOpen=false → 只剩登录，隐藏注册 tab 与去注册入口", () => {

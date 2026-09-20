@@ -9,26 +9,31 @@ import { fetchBootstrapStatus, type BootstrapStatus } from "../../api/client";
 export interface LoginEntry {
   /** true = 空库首运行：渲染「创建超级管理员」引导，不出现登录/注册 tab。 */
   bootstrap: boolean;
-  /** 常规形态下注册 tab 是否可见（后端 signupOpen=false 时隐藏）。 */
+  /** 常规形态下注册 tab 是否可见（仅后端 signupOpen === true 时显示，其余一律隐藏）。 */
   signupVisible: boolean;
 }
 
-/** 探针未完成或失败时的形态：维持现状（登录 + 注册），不把用户卡在错误页。 */
-export const DEGRADED_LOGIN_ENTRY: LoginEntry = { bootstrap: false, signupVisible: true };
+/**
+ * 探针未完成或失败时的形态：fail-closed，不给注册入口。
+ * 企业部署下账号统一由管理员建立或邀请，误显示一个自注册入口的代价远大于
+ * 探针抖动时少显示一个（后者只是让访客去找管理员，前者是任何人都能自助进工作区）。
+ */
+export const DEGRADED_LOGIN_ENTRY: LoginEntry = { bootstrap: false, signupVisible: false };
 
 /** 空库首运行形态：只给创建超级管理员一条路（注册 tab 无意义，首个注册者即 owner）。 */
 const BOOTSTRAP_LOGIN_ENTRY: LoginEntry = { bootstrap: true, signupVisible: false };
 
 /**
  * 由初始化状态推导登录页形态。
- * status 为 null/undefined 表示「加载中或探针失败」——此时一律降级为现状，
- * 因为把用户锁在一个加载失败页上的代价远大于多显示一个注册 tab。
+ * status 为 null/undefined 表示「加载中或探针失败」——此时降级为纯登录（fail-closed），
+ * 因为误显示自注册入口会让任意访客自助注册进企业工作区，而少显示它只是让访客去找管理员。
  */
 export function resolveLoginEntry(status: BootstrapStatus | null | undefined): LoginEntry {
   if (!status) return DEGRADED_LOGIN_ENTRY;
   if (status.initialized === false) return BOOTSTRAP_LOGIN_ENTRY;
-  // signupOpen 缺失（老后端/字段未下发）时按开放处理，避免误关注册入口。
-  return { bootstrap: false, signupVisible: status.signupOpen !== false };
+  // signupOpen 缺失（老后端/字段未下发）或任何非 true 值一律按关闭处理：
+  // 企业平台的注册入口必须由后端显式声明开放才显示，不能靠前端默认值补齐。
+  return { bootstrap: false, signupVisible: status.signupOpen === true };
 }
 
 /** 引导表单原始输入（确认密码只在前端存在，不发给后端） */
@@ -86,7 +91,7 @@ export async function loadBootstrapStatus(): Promise<BootstrapStatus | null> {
   try {
     return await fetchBootstrapStatus();
   } catch (err) {
-    console.warn("[auth] bootstrap-status 查询失败，登录页降级为常规登录/注册", err);
+    console.warn("[auth] bootstrap-status 查询失败，登录页降级为纯登录（不显示注册入口）", err);
     return null;
   }
 }

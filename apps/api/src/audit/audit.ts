@@ -24,6 +24,8 @@ export type AuditEventName =
   | "role_created"
   | "role_deleted"
   | "role_assignment_changed"
+  // 企业化定位：管理员删除成员账号（需 delete_users，物理删除不可恢复）
+  | "member_deleted"
   // M3 导航对账脚本（--purge-broken 物理清理 broken 节点/shortcut，脚本侧主动留痕）
   | "nav_broken_purged"
   // M3/S6 导航编排（菜单写/分组/权威移动，全部需 manage_menu）
