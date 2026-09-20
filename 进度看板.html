@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GouXiangDB 企业版 · 进度看板</title>
+<style>
+:root{--bg:#ffffff;--panel:#f7f8fa;--line:#e3e6ea;--text:#1f2329;--muted:#6b7280;
+--done:#0d7a3f;--donebg:#e8f5ec;--run:#b06a00;--runbg:#fff5e6;--wait:#8a8f98;--waitbg:#f2f3f5;--accent:#2b5797;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+h1{font-size:22px;margin:0 0 6px}
+h2{font-size:17px;margin:30px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--line)}
+.sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}
+.kpis{display:flex;flex-wrap:wrap;gap:12px;margin:14px 0}
+.kpi{flex:1 1 150px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.kpi .n{font-size:22px;font-weight:600;color:var(--accent)}
+.kpi .l{font-size:12px;color:var(--muted);margin-top:2px}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:#fafbfc;font-weight:600;color:#374151;font-size:12px;letter-spacing:.02em}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.p-done{background:var(--donebg);color:var(--done)}
+.p-run{background:var(--runbg);color:var(--run)}
+.p-wait{background:var(--waitbg);color:var(--wait)}
+code{background:#f1f3f5;padding:1px 5px;border-radius:4px;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.tl{font-size:13px}
+.tl div{padding:3px 0;border-bottom:1px dashed var(--line)}
+.tl .h{color:var(--accent);font-family:ui-monospace,Menlo,monospace}
+.note{font-size:13px;color:#374151;background:#fffdf5;border:1px solid #f0e3b8;border-radius:8px;padding:12px 14px;margin:12px 0}
+ul{margin:8px 0 0 18px;padding:0}
+li{margin:4px 0}
+.foot{color:var(--muted);font-size:12px;margin-top:26px;border-top:1px solid var(--line);padding-top:12px}
+</style></head><body><div class="wrap">
+<h1>GouXiangDB 企业版 · 进度看板</h1>
+<div class="sub"><!--GX_UPDATED_START-->
+最后更新：2026-09-18 15:02<code>f2f483c</code> &nbsp;|&nbsp; 全部数字由项目总监在本机实测
+<!--GX_UPDATED_END--></div>
+
+<div class="card"><!--GX_HEADLINE_START-->
+<b>一句话现状：</b>M0–M5 全部完成；<b>M6（AI 接入服务）12 片已完成 12 片</b>（S0–S9 全套工具 + 审计幂等 + 前端令牌页 + 出口硬门全部落地并独立复验；M6 = 12/12 完成），现执行 M7 企业版总验收：门①②③④已过闸（③含 P1 修复后的 R6/R6b 两面复跑），门⑤判「有条件过」，api 全量 2145 / web 314 / shared 56 全绿 0 失败；剩余门⑥ x86/fpk 外部面与门⑧四项签字。本轮另修一处真缺陷：M5 增量索引链路从未接线（`249df44`）
+<!--GX_HEADLINE_END--></div>
+
+<div class="kpis">
+<!--GX_KPI_START-->
+<div class="kpi"><div class="n">239</div><div class="l">累计提交（今日 40 条）</div></div>
+<div class="kpi"><div class="n">2145</div><div class="l">后端自动化测试用例（0 失败）</div></div>
+<div class="kpi"><div class="n">314</div><div class="l">前端测试用例</div></div>
+<div class="kpi"><div class="n">56</div><div class="l">共享包测试用例（shared-types + canvas）</div></div>
+<div class="kpi"><div class="n">0</div><div class="l">类型检查错误（三包）</div></div>
+<!--GX_KPI_END-->
+</div>
+
+<h2>里程碑总览</h2>
+<table><tr><th>里程碑</th><th>内容</th><th>状态</th></tr>
+<tr><td>M0 生产基座</td><td>部署/备份/CI/健康检查</td><td><span class="pill p-done">已完成</span></td></tr>
+<tr><td>M1 数据底座</td><td>分页、索引、容量铺路</td><td><span class="pill p-done">已完成</span></td></tr>
+<tr><td>M2 组织通讯录</td><td>部门/成员/角色</td><td><span class="pill p-done">已完成</span></td></tr>
+<tr><td>M3 统一导航</td><td>资源树/菜单</td><td><span class="pill p-done">已完成（留 2 项收尾）</span></td></tr>
+<tr><td>M4 权限引擎</td><td>统一权限/字段掩码/继承</td><td><span class="pill p-done">已完成</span></td></tr>
+<tr><td>M5 检索</td><td>关键词+语义检索、管理面、降级自愈</td><td><span class="pill p-done">已完成</span></td></tr>
+<tr><td><b>M6 AI 接入服务</b></td><td>MCP 标准协议 + 令牌鉴权 + 全套工具</td><td><!--GX_M6STATUS_START-->
+<span class="pill p-done">已完成</span>
+<!--GX_M6STATUS_END--></td></tr>
+<tr><td>M7 企业版总验收</td><td>整体验收与交付</td><td><span class="pill p-wait">待开始</span></td></tr>
+</table>
+
+<h2>M6 切片明细（当前主战场）</h2>
+<table><tr><th>切片</th><th>内容</th><th>状态</th><th>提交 / 备注</th></tr>
+<!--GX_M6SLICES_START-->
+<tr><td>S0</td><td>基线锁定（把“不能破坏的行为”冻成回归护栏）</td><td><span class="pill p-done">已过闸</span></td><td><code>a474a7f</code> 15:59 · 复核出计划里 19 处过期信息</td></tr>
+<tr><td>S1</td><td>访问令牌基座（只显示一次、停用连带吊销、删除级联）</td><td><span class="pill p-done">已过闸</span></td><td><code>4141e99</code> 16:09 · 迁移 #23</td></tr>
+<tr><td>S2</td><td>MCP 传输层（官方 SDK、只对 MCP 放开 11MB、按令牌限流）</td><td><span class="pill p-done">已过闸</span></td><td><code>55c90f8</code> 16:23 + <code>7a86fb8</code> 16:33</td></tr>
+<tr><td>S3</td><td>双闸门鉴权（工具按权限动态注册；未授权工具与不存在工具响应完全一致）</td><td><span class="pill p-done">已过闸</span></td><td><code>8d46a9e</code> 16:31 + <code>ef4eccf</code> 17:11（只写令牌可用）</td></tr>
+<tr><td>S4</td><td>表/记录能力：读 5 工具 + 创建/更新/删除写工具</td><td><span class="pill p-done">已过闸</span></td><td><code>6277c92</code> 读 · <code>5f5780e</code>/<code>68dbf5a</code>/<code>b8d6738</code>/<code>04de085</code> 写原语搬运 · <code>4ace2fe</code>/<code>b1af5e4</code>/<code>0333694</code> 三写工具</td></tr>
+<tr><td>S5</td><td>文档块引擎下沉共享包 + 文档读写工具（4 个）</td><td><span class="pill p-done">已过闸</span></td><td><code>656f9fb</code> 引擎下沉 <code>@gx/blocks</code>（纯移动 <b>0 行改动</b>）· <code>dbec6f1</code> 四工具 · <code>c4fdbdf</code> 修「baseVersion 必填致只写身份死锁」· <code>2fc9aa0</code> 测试真断言化</td></tr>
+<tr><td>S6</td><td>画布读取 + 命令行入口 + 三份语言说明</td><td><span class="pill p-done">已过闸</span></td><td><code>b1c3688</code> 19:36 只读 <code>canvas.get_board</code> + stdio 第二入口 + 三语言说明书 · <code>9232eda</code> 19:43 说明书时序改正（只读期不宣称写入已上线）</td></tr>
+<tr><td>S6b</td><td>画布结构校验器 + 图元写入（保证 AI 画的图网页端能正常打开）</td><td><span class="pill p-done">已过闸</span></td><td><code>d1a7a72</code> 20:07 校验器 · <code>3bf7691</code> 20:28 写入工具 · <code>1d2151b</code> 20:38 · <code>99c16ae</code> 21:07 <b>服务端产出 JSON → 前端真画布加载</b> golden（chromium+webkit）。总监变异测试:删掉「禁自带 id」黑名单 → 3 例立即变红，证明断言有效</td></tr>
+<tr><td>S7</td><td>审计与幂等</td><td><span class="pill p-done">已过闸</span></td><td><code>b4d51b2</code>+<code>4b06af8</code> 21:20 审计四枚事件 + 请求幂等（并发同键只执行一次）+ 30 秒超时 · <code>006d334</code> 21:27</td></tr>
+<tr><td>S8</td><td>三种客户端连通 + 四类对抗回归</td><td><span class="pill p-done">已过闸</span></td><td><code>6d898b0</code> 22:04 · 15 文件 +2008 <b>纯新增</b>（零生产码）；<code>498e201</code> 22:30 补 stdio 入口 IDOR 两族 + 陈旧 baseVersion 409；<code>58f0845</code> 22:35 文档对齐 <b>64 例</b>。总监独立复验：e2e <b>6 文件 64 例全绿</b>（20.8s，真 TCP / unix socket / stdio 网络栈）；常规门收集总数恒 <b>2089</b>=基线；tsc 0 / eslint 0 error；读码确认 IDOR 带「隐藏资源确实存在」前置证明 + 反例护栏、Inspector 真自动化（pin 0.16.6）、审计连 token 随机段都零泄漏</td></tr>
+<tr><td>S9</td><td>出口收口（决策记录、接口文档、运维手册、接入说明）</td><td><span class="pill p-done">已过闸</span></td><td><code>3446851</code> ADR-0051~55 · <code>1b51b96</code> openapi 只增 pats/x-mcp + runbook/onboarding + 出口基线 · <code>06d3a5c</code> caddy 笔误 · <code>7990038</code> org 默认挂载姿态行</td></tr>
+<tr><td>M6-FE</td><td>前端令牌管理页</td><td><span class="pill p-done">已过闸</span></td><td><code>fbb4981</code> 22:00 设置→MCP 接入（列表 / 新建一次性明文 / 吊销）。总监复验：web 23 文件 <b>278 例</b>全绿、类型检查 0；<b>令牌零落 localStorage/sessionStorage/URL、关闭即焚</b>（亲自 grep + 读码确认）</td></tr>
+<!--GX_M6SLICES_END-->
+</table>
+
+<h2>最近推进时间线（真实提交，可自行核对）</h2>
+<div class="tl" id="gx-timeline"><div style="color:#6b7280">正在读取数据…</div></div>
+<h2>质量把关方式（每个切片都做）</h2>
+<div class="card"><ul>
+<li><b>不采信汇报，自己跑</b>：每个切片我都亲手跑全量测试 + 三包类型检查；数字与对方自报不一致时以我的为准。</li>
+<li><b>纯搬运类改动做机械比对</b>：不让对方自述"只是搬运"，用脚本把函数原文抽出来逐行比对（已核实 9 个函数逐行一致、仅 export/import 差异）。</li>
+<li><b>回归护栏</b>：上线前先冻结"不能破坏的行为"（如普通 API 的 1MB 上传上限必须不变），改动后再验证未被放宽。</li>
+<li><b>诚实记账</b>：未达标/未实测的项一律写明，不美化（例：M5 语义检索在低配机的容量上限、arm 架构未实测）。</li>
+</ul></div>
+
+<h2>已知遗留与风险（如实登记）</h2>
+<div class="note"><ul>
+<li><b>一个长期存在的测试不稳定项</b>：<code>s10-ac-upgrade-20x20</code> 在全量并发下偶发 5 秒超时（隔离跑必绿，与 M6 无关，已追溯为早期遗留）。<b>已修复 <code>f041978</code></b>：全量负载下该用例实测 7.6 秒（确认超 5 秒预算），修复后全量 2045 例 0 失败、总耗时 55s→41s。</li>
+<li><b>语义检索容量边界</b>（M5 实测）：低配机上混合检索约 1 万条=0.65 秒、10 万条=14.6 秒；关键词路 1 万条=0.15 秒。默认关闭，需管理员显式开启。</li>
+<li><b>arm 架构未做真机性能实测</b>（已授权留缺口，不拿 x86 数字冒充）。</li>
+<li><b>M3 两项历史遗留</b>（导航十万节点压测、部署链路重算）仍在，未计入 M5/M6 成果。</li>
+<li><b>画布写入的残余风险（S6b 预研结论，如实登记）</b>：画布「六不变量」里服务端只能静态校验 4 条（自定义键白名单、尺寸正数、尾插序、z 序即数组序），另 2 条（选区 WeakMap、WebKit 渲染补偿）根本不进 JSON 故由白名单处理。最大残余风险是 Plait 的 normalize 行为只能靠<b>运行时测试</b>证明、无法静态论证 —— 因此 S6b 必须配一个「服务端产出 JSON → 前端画布真实加载」的 golden 测试，不能只靠校验器自证。</li>
+<li><b>文档写入的规模上限只有一道闸</b>：正文 10MB 上限此前只写在 REST 的入参校验里，底层保存函数本身不检查。MCP 写路径已自行补上同一道检查（写入后正文超过 10MB 直接拒绝）。</li>
+<li><b>AI 接入的令牌校验口径（S8 实测确认）</b>：拿不出有效令牌的三种情况（没带令牌 / 不是本系统令牌形态 / 伪造令牌）**响应体逐字节完全相同**——攻击者无法枚举"某个令牌是否存在"；而"已过期 / 已吊销 / 账号停用"三种会明确说明原因，便于持令人自查。此口径为 M6 计划 §4.3 的既有设计，非缺陷。</li>
+<li><b>出口硬门（S8）的验证方式</b>：不是"能跑通"而是"能拦住"——三客户端（curl / 官方 SDK / 官方 Inspector，版本固定 0.16.6）经<b>真实网络栈</b>（TCP 端口 / unix socket / 子进程 stdio）各跑一遍；四类对抗逐条先构造应被拒的输入、断言拒绝码，并额外证明"被拒时数据库内容逐字节未变"。这些对抗用例与常规测试套件<b>收集规则零交集</b>，故常规门用例数恒定不变（2089）。</li>
+</ul></div>
+
+
+<h2>进度更新时间</h2>
+<div class="card" style="font-size:13px">
+  <div style="color:#374151"><b>当前在做什么：</b><!--GX_NEXT_START-->
+门⑥ 收口：x86 裸机 tar + x86_64 Docker；fpk 原地升级 upgrade_callback（需 UI 通道）；arm 真机；门⑦ 26 条未做项；门⑧ 四项签字
+<!--GX_NEXT_END--></div>
+  <div id="gx-last" style="color:#6b7280;margin-top:8px">—</div>
+  <div style="color:#8a8f98;margin-top:6px">本页由项目总监在每个切片过闸后刷新（数据取自本机实测）；直接刷新页面即可看到最新。</div>
+</div>
+
+<h2>你想自己核对时可以看</h2>
+<div class="card">
+<div>· 本地进度台账：<code>.workbuddy/PROJECT-STATUS.md</code>（每个切片的过闸证据与遗留都在里面）</div>
+<div>· 今日工作日志：<code>.workbuddy/memory/2026-09-17.md</code></div>
+<div>· <b>续跑指令单</b>（中断后接手用）：<code>.workbuddy/NEXT-ACTION.md</code></div>
+<div>· <b>数据源</b>（页面自检读它）：<code>进度数据.js</code>，由 <code>scripts/refresh-progress-data.mjs</code> 生成</div>
+<div>· 提交历史（终端）：<code>git log --oneline -30</code></div>
+<div>· 测试跑法：<code>cd apps/api &amp;&amp; pnpm vitest run</code></div>
+</div>
+
+<div class="foot">本看板由项目总监在每个切片过闸后刷新；数字均取自本机实测，不含推测。</div>
+</div>
+<!-- ===== 页内自检（5 分钟倒计时 + 自动刷新时间线）===== -->
+<!--GX_DATA_START-->
+<!-- 内嵌数据快照：由 scripts/refresh-progress-data.mjs 生成（外部脚本被拦时仍能渲染） -->
+<script>window.__GX_PROGRESS__ = {"generatedAt":"2026-09-18T07:02:31.194Z","head":"f2f483c","headTime":"09-18 15:02","commitsTotal":239,"commitsToday":40,"counts":{"api":2145,"web":314,"shared":56},"nextAction":"门⑥ 收口：x86 裸机 tar + x86_64 Docker；fpk 原地升级 upgrade_callback（需 UI 通道）；arm 真机；门⑦ 26 条未做项；门⑧ 四项签字","slices":[{"id":"S0","status":"done"},{"id":"S1","status":"done"},{"id":"S2","status":"done"},{"id":"S3","status":"done"},{"id":"S4","status":"done"},{"id":"S5","status":"done"},{"id":"S6","status":"done"},{"id":"S6b","status":"done"},{"id":"S7","status":"done"},{"id":"S8","status":"done"},{"id":"S9","status":"done"},{"id":"M6-FE","status":"done"}],"commits":[{"hash":"f2f483c","time":"09-18 15:02","subject":"fpk 证据补 §3.1 升级/卸载/重装与版本一致性"},{"hash":"e4b10ee","time":"09-18 15:01","subject":"manifest.version 改为由 rootPkg 统一重写（真机实证版本漂移）"},{"hash":"6dbaf8c","time":"09-18 14:53","subject":"飞牛 fpk 真机过闸证据 + 报告/清单同步"},{"hash":"f98bb8f","time":"09-18 14:49","subject":"fpk 打包/安装三处真缺陷（飞牛真机实测）"},{"hash":"22fc7a1","time":"09-18 12:49","subject":"订正 sidecar 迁移的错误注释（DDL 不动）"},{"hash":"cf9e00b","time":"09-18 12:40","subject":"⑦-07 SQL 方言巡检证据文档（只读审计，不改码/迁移/测试）"},{"hash":"5657d92","time":"09-18 12:40","subject":"补记门⑥总监独立docker复验 + P1默认姿态零副作用 + api全量2145/web314/shared56待回填"},{"hash":"34993ff","time":"09-18 12:31","subject":"采纳门⑦ checklist 的三处判核（R8/R9 手测未签、门②目检未签、RELEASE.md 非发布说明）"},{"hash":"47da0b8","time":"09-18 12:27","subject":"门⑦ 逐条可勾 checklist（86 条，每条挂硬证据）+ 总验收报告 §7 加指向链接"},{"hash":"83bf3ef","time":"09-18 12:19","subject":"门③ R6/R6b 两面证据 + P1(249df44)修复关闭 + 全量门实数与剩余阻塞"},{"hash":"2035c32","time":"09-18 12:18","subject":"P1 索引接线已修（249df44）+ 门③ R6/R6b 两面证据 + 剩余阻塞更新"},{"hash":"a23a68c","time":"09-18 12:15","subject":"封版产物基于 11c4dc8 重验补记（含 P1 worker 修复，默认 off 休眠；on 产品级 1s 追平坐实）"}]};</script>
+<!--GX_DATA_END-->
+<script src="进度数据.js"></script>
+<script>
+(function () {
+  "use strict";
+  var d = window.__GX_PROGRESS__ || null;
+  var $ = function (id) { return document.getElementById(id); };
+  var tl = $("gx-timeline"), up = $("gx-last");
+  if (!d || !d.commits) {
+    if (tl) tl.innerHTML = '<div style="color:#a8071a">未读取到数据源</div>';
+    if (up) up.textContent = "未读取到数据源";
+    return;
+  }
+  tl.innerHTML = d.commits.map(function (c) {
+    return '<div><span class="h">' + c.time + '</span> ' + c.subject + ' <code>' + c.hash + '</code></div>';
+  }).join("") || '<div style="color:#6b7280">（暂无提交记录）</div>';
+  var k = document.querySelectorAll(".kpi .n");
+  if (k.length >= 3 && d.counts) {
+    if (d.counts.api) k[1].textContent = d.counts.api;
+    if (d.counts.web) k[2].textContent = d.counts.web;
+  }
+  var snap = document.querySelector(".sub code");
+  if (snap && d.head) snap.textContent = d.head;
+  if (up) up.textContent = "最后更新：" + (d.generatedAt ? new Date(d.generatedAt).toLocaleString() : "—")
+    + "　|　最新提交：" + (d.headTime || "—") + " " + (d.head || "")
+    + (d.nextAction ? "　|　当前：" + d.nextAction : "");
+})();
+</script>
+
+</body></html>
