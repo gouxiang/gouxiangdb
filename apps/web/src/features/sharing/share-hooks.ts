@@ -23,7 +23,12 @@ export const SHARE_QK = {
 };
 
 /**
- * 本表当前的全部分享链接（档位由后端现算）。
+ * 本表当前的全部分享链接（档位由后端现算）+ 本人此刻能否开「可编辑」。
+ *
+ * canGrantEdit 来自后端现算，前端**不再自己用库级权限位猜**：
+ * 库级 canEditData 是聚合信号（本库任一表可写就为真），而后端建链接判的是「本人对**这一张表**的
+ * update」——用它置灰会偏松（看着能点、点了 403）。这里直接消费后端同一次判定的结论，
+ * 并 fail-closed：数据没回来时按「不能开可编辑」渲染。
  *
  * retry=false：表看不见 / 两级「允许分享」开关没开时后端统一 403，重试只是白等两轮——
  * 弹窗里的错误态要立刻给出原因，而不是转圈。
@@ -31,13 +36,19 @@ export const SHARE_QK = {
 export function useTableShareLinks(
   tableId: string | null,
   enabled = true,
-): UseQueryResult<ObjectShareLinkDTO[]> {
+): UseQueryResult<TableSharesPayload> {
   return useQuery({
     queryKey: SHARE_QK.tableLinks(tableId ?? ""),
-    queryFn: async () => (await TableShares.list(tableId!)).links,
+    queryFn: async () => await TableShares.list(tableId!),
     enabled: !!tableId && enabled,
     retry: false,
   });
+}
+
+export interface TableSharesPayload {
+  links: ObjectShareLinkDTO[];
+  /** 本人此刻能否创建「可编辑」链接；后端现算。未加载/出错时按 false 处理。 */
+  canGrantEdit: boolean;
 }
 
 export function useCreateTableShareLink() {

@@ -174,11 +174,11 @@ export function ViewShell({
       />
 
       {/* 数据表分享：档位两档（只读 / 可编辑），可编辑要求分享人本人此刻有编辑权，
-          且分享人之后被降权时链接会自动回落只读——判定全在后端，这里只渲染 + 置灰。 */}
+          且分享人之后被降权时链接会自动回落只读——判定全在后端（GET /share 的 canGrantEdit），
+          这里不传权限位、不自己猜，只负责渲染与置灰。 */}
       <TableShareModal
         tableId={tableId}
         viewId={viewId}
-        canEditSelf={permissions.canEditData}
         open={shareOpen}
         onClose={() => setShareOpen(false)}
       />

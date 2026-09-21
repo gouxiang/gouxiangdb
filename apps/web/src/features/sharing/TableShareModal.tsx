@@ -5,10 +5,9 @@
 // 分享入口（旧的「分享数据·规划中」占位已按产品要求下线）。
 //
 // 权限口径：前端不算权限。
-//   · 「可编辑」是否置灰 = 调用方传入的 canEditSelf（库级 canEditData 权限位，后端现算）；
-//     它是**偏松**的信号——只要这个人在本库任一表上可写，该位就是 true，而后端建链接时判的是
-//     「本人对**这一张表**的 update」（shareCaps.ts assertSharerCanGrantEdit）。偏松的那一侧
-//     由后端 403 + 原样 toast 兜住，不在前端假装判准。
+//   · 「可编辑」是否置灰 = **后端** GET /share 现算的 canGrantEdit（判的是"本人对**这一张表**的
+//     update"，与建链接时的 assertSharerCanGrantEdit 是同一次判定）。未加载/出错一律按 false
+//     （fail-closed），不用库级 canEditData 猜——那是聚合位，本库任一表可写就为真，置灰会偏松。
 //   · 列表里的档位一律显示 effectiveMode；degraded=true 的那条由 ShareLinkList 显示降级提示。
 
 import { useEffect, useState } from "react";
@@ -33,13 +32,11 @@ export interface TableShareModalProps {
   tableId: string;
   /** 当前视图：作为新链接默认视图的初值（可改） */
   viewId: string;
-  /** 本人此刻对本表的编辑权（后端权限位 canEditData）；false → 可编辑置灰 */
-  canEditSelf: boolean;
   open: boolean;
   onClose: () => void;
 }
 
-export function TableShareModal({ tableId, viewId, canEditSelf, open, onClose }: TableShareModalProps) {
+export function TableShareModal({ tableId, viewId, open, onClose }: TableShareModalProps) {
   const links = useTableShareLinks(open ? tableId : null);
   const { data: views } = useViews(open ? tableId : null);
   const create = useCreateTableShareLink();
@@ -49,14 +46,17 @@ export function TableShareModal({ tableId, viewId, canEditSelf, open, onClose }:
   const [defaultViewId, setDefaultViewId] = useState(viewId);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // 后端现算的「本人能否开可编辑」；数据未到 / 出错时按不能（fail-closed）。
+  const canGrantEdit = links.data?.canGrantEdit ?? false;
+
   // 换表 / 切视图后重开弹窗：默认视图跟着当前视图走（用户多半就想分享眼前这一屏）
   useEffect(() => {
     if (open) setDefaultViewId(viewId);
   }, [open, viewId]);
   // 本人已无编辑权时不允许停留在「可编辑」档位上（比如刚被降权），回落只读。
   useEffect(() => {
-    if (!canEditSelf) setMode("view");
-  }, [canEditSelf]);
+    if (!canGrantEdit) setMode("view");
+  }, [canGrantEdit]);
 
   async function copyLink(url: string) {
     if (await copyText(shareUrlOf(url))) {
@@ -103,7 +103,7 @@ export function TableShareModal({ tableId, viewId, canEditSelf, open, onClose }:
           <ShareModeField
             value={mode}
             onChange={setMode}
-            canGrantEdit={canEditSelf}
+            canGrantEdit={canGrantEdit}
             disabledReason="你本人对这张表没有编辑权，因此不能创建可编辑的分享链接"
           />
         </section>
@@ -140,7 +140,7 @@ export function TableShareModal({ tableId, viewId, canEditSelf, open, onClose }:
             </div>
           ) : (
             <ShareLinkList
-              links={links.data ?? []}
+              links={links.data?.links ?? []}
               busyId={busyId}
               onCopy={(l) => void copyLink(l.url)}
               onRevoke={(l) => void close(l.id, l.url)}

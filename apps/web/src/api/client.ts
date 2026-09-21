@@ -503,7 +503,7 @@ export const Tables = {
 // （见 shareErrorMessage，不要换成自己的措辞，也不要用 ApiError.message——它带 "API 403: " 前缀）。
 export const TableShares = {
   list: (tableId: string) =>
-    apiFetch<{ links: ObjectShareLinkDTO[] }>(`/api/tables/${tableId}/share`),
+    apiFetch<{ links: ObjectShareLinkDTO[]; canGrantEdit: boolean }>(`/api/tables/${tableId}/share`),
   create: (
     tableId: string,
     data: { mode: ShareMode; viewId?: string; expiresAt?: string },
@@ -802,6 +802,12 @@ export interface KbShareStateDTO {
   requestedMode?: ShareMode;
   /** requestedMode=edit 但分享人已失去编辑权 → 链接自动降级为只读。 */
   degraded?: boolean;
+  /**
+   * 本人此刻能否开「可编辑」档位（GET 才回，后端 canSharerGrantDocEdit 现算）。
+   * 与 POST 时的 assertSharerCanGrantDocEdit 是同一次判定——用它把选项置灰，不要前端自己猜。
+   * 未加载 / 出错时按不能处理（fail-closed）。
+   */
+  canGrantEdit?: boolean;
 }
 
 export interface KbPublicDocDTO {

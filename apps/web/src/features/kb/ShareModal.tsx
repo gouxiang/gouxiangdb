@@ -42,11 +42,11 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
   // 降级：申请了「可编辑」但分享人后来失去了编辑权 → 后端每次访问现算，链接已回落只读
   // （resolveDocShareCaps）。这里只显示结论，不重算权限。
   const degraded = share?.degraded === true;
-  // 「可编辑」能不能开：后端 GET 只给「本次生效档位 + 是否已降级」两个结论，没有单发一个
-  // 「本人此刻能否授予编辑」的位。唯一能确定的是：申请过 edit 且已降级 → 本人没有编辑权，
-  // 必须置灰。其余情形不假装判准——后端 POST 会再判一次（assertSharerCanGrantDocEdit），
-  // 403 的原文由 updateLinkRole 原样 toast 出来。
-  const canGrantEdit = !(share?.requestedMode === "edit" && degraded);
+  // 「可编辑」能不能开：以后端 GET 现算的 canGrantEdit 为准（canSharerGrantDocEdit，与 POST 时的
+  // assertSharerCanGrantDocEdit 是同一次判定）——前端不自己推导"我大概能编辑"。
+  // 字段缺失时（旧缓存/契约回退）退化为保守判定：申请过 edit 且已降级 → 本人确定失权，置灰。
+  // 无论哪条路径，后端 POST 都会再判一次，403 原文由 updateLinkRole 原样 toast。
+  const canGrantEdit = share?.canGrantEdit ?? !(share?.requestedMode === "edit" && degraded);
 
   async function copyLink() {
     if (!fullUrl) return;
@@ -183,10 +183,9 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
                     disabled={!canManage}
                     disabledReason="你本人对这个知识库没有编辑权，因此不能创建可编辑的分享链接"
                     viewDesc="获得链接的人无需登录即可查看，不能编辑"
-                    editDesc="持链者可写这篇文档里嵌入的数据表；正文仍不可改"
-                    // 作用范围必须写清楚：文档正文的匿名写后端仍关闭（publicDoc.ts canEdit 恒 false），
-                    // 这个档位驱动的是「文档/画布里嵌入的数据表预览能不能写」，不是正文。
-                    scopeNote="说明：文档正文的匿名编辑仍然关闭，「可编辑」档位决定的是这篇文档 / 画布里嵌入的数据表能不能改。"
+                    editDesc="获得链接的人无需登录即可直接编辑正文，也能改文档里嵌入的数据表"
+                    // 作用范围与生效边界必须写清楚，避免把「链接级档位」误当成系统内角色权限。
+                    scopeNote="说明：「可编辑」只作用于这一条链接，不改变任何人在系统内的角色权限；分享人一旦失去编辑权，链接会自动回落为只读。"
                   />
                   {degraded ? <ShareDegradedNote /> : null}
                 </div>

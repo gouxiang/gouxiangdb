@@ -170,16 +170,22 @@ describe("④ 入口接线（浮层无法 SSR，退源码断言）", () => {
 
     const shell = read("../../../features/views/ViewShell.tsx");
     expect(shell).toContain("<TableShareModal");
-    expect(shell).toContain("canEditSelf={permissions.canEditData}");
+    // 能否开「可编辑」由后端 GET /share 现算的 canGrantEdit 决定：ViewShell 不再传权限位。
+    // 库级 canEditData 是聚合信号（本库任一表可写即为真），拿它置灰会偏松。
+    expect(shell).not.toContain("canEditSelf");
+    const modal = read("../../../features/sharing/TableShareModal.tsx");
+    expect(modal).toContain("canGrantEdit");
   });
 
-  it("文档分享弹窗恢复两档：不再写「一律只读」，且带作用范围说明", () => {
+  it("文档分享弹窗恢复两档：不再写「一律只读」，且说清作用范围与降级", () => {
     const modal = read("../../../features/kb/ShareModal.tsx");
     expect(modal).toContain("<ShareModeField");
     expect(modal).not.toContain("分享链接一律只读");
     expect(modal).toContain("ShareDegradedNote");
-    // 文档正文匿名写仍关闭，必须说清「可编辑」当前的作用范围
-    expect(modal).toContain("嵌入的数据表");
+    // 正文匿名编辑已开放：文案必须说清「可编辑」作用于正文 + 嵌入的数据表、
+    // 是链接级能力（不改系统内角色权限）、且分享人降权后会自动回落只读。
+    expect(modal).toContain("自动回落为只读");
+    expect(modal).not.toContain("正文仍不可改");
   });
 
   it("过期的「外发一律只读」文案已下线（labels 常量改名并两处引用同步）", () => {
