@@ -10,7 +10,7 @@
 // 否则页面会显示"没有任何角色能访问本库"，而事实上这两类人全都能进，
 // 管理员会照着错误的结论去"补授权"，越补越乱。
 
-import { prisma } from "../../db.js";
+import { prisma, withWriteTx } from "../../db.js";
 import type { LibraryKind, LibraryVisibilityResponse } from "@gx/shared-types";
 import { usersWithRole, ADMIN_ROLE_ID, SUPER_ADMIN_ROLE_ID } from "../org/roles.js";
 
@@ -85,6 +85,18 @@ export async function readShareEnabled(libraryKind: LibraryKind, libraryId: stri
 }
 
 /** 开关某个库的「允许分享」（调用方必须先过 requireCanToggleShare）。 */
+/**
+ * 开/关「允许分享」总闸。
+ *
+ * ★数据表库的库级开关必须把【库内所有表】一起同步（下表 shareEnabled 是它的快照）。
+ *   原因：`tableShareAllowed()` 要求库级 && 表级两个开关都为 1，而**表级没有任何写入口**
+ *   （`setTableShareEnabled` 至今没暴露路由）。若只改库级，会出现这样的死锁——
+ *   管理员把库的「允许分享」打开，前端却仍然拿不到任何一张表的外发链接，
+ *   接口恒回 403「该数据表未开启分享」，且界面上找不到能把它打开的地方。
+ *   同步之后：总闸即入口；新建表在建表处继承当前库级值（见 routes/tables.ts）。
+ *   将来若要支持「单独禁止某张表外发」，再给 setTableShareEnabled 接一个端点即可，
+ *   本函数把表级置为库级同值不会与之冲突（它是初始快照，之后可被单独覆盖）。
+ */
 export async function setShareEnabled(
   libraryKind: LibraryKind,
   libraryId: string,
@@ -93,9 +105,13 @@ export async function setShareEnabled(
   const v = enabled ? 1 : 0;
   if (libraryKind === "kb") {
     await prisma.knowledgeBase.update({ where: { id: libraryId }, data: { shareEnabled: v } });
-  } else {
-    await prisma.base.update({ where: { id: libraryId }, data: { shareEnabled: v } });
+    return enabled;
   }
+  await withWriteTx("library.shareEnabled.set", async (tx) => {
+    await tx.base.update({ where: { id: libraryId }, data: { shareEnabled: v } });
+    // 只同步未删除的表；回收站里的表不该被总闸悄悄改动。
+    await tx.table.updateMany({ where: { baseId: libraryId, deletedAt: null }, data: { shareEnabled: v } });
+  });
   return enabled;
 }
 

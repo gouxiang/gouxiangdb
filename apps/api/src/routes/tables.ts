@@ -87,8 +87,18 @@ tables.post("/", async (c) => {
   // U-9：建表多步写事务化——任何一步失败整体回滚，
   // 不再留下无 primaryField / 无视图的半截表。
   const { table, primaryFieldId } = await withWriteTx("table.create", async (tx) => {
+    // shareEnabled 继承当前库级总闸：表级开关是库级「允许分享」的快照，
+    // tableShareAllowed() 两级都判。不继承的话，管理员打开库开关之后新建的表依旧是 0，
+    // 又是一张「库已允许、却没入口能开」的死表（表级没有写端点）。
+    const owner = await tx.base.findUnique({ where: { id: baseId }, select: { shareEnabled: true } });
     const t = await tx.table.create({
-      data: { baseId, name: parsed.data.name, primaryFieldId: "", createdBy: userId },
+      data: {
+        baseId,
+        name: parsed.data.name,
+        primaryFieldId: "",
+        createdBy: userId,
+        shareEnabled: owner?.shareEnabled ?? 0,
+      },
     });
 
     const nameField = await tx.field.create({
@@ -261,7 +271,9 @@ tables.post("/:tableId/duplicate", async (c) => {
   const { copy, primary } = await withWriteTx("table.duplicate", async (tx) => {
   const copy = await tx.table.create({
     // 视觉标识（自定义图标/颜色）随副本继承，避免复制后莫名回退到默认图标。
-    data: { baseId, name, primaryFieldId: "", createdBy: userId, icon: src.icon, iconColor: src.iconColor },
+    // shareEnabled 一并继承源表（它本身是库级「允许分享」总闸的快照）——
+    // 否则复制出来的表会默认 0，成为又一张「库已允许、却没入口能开」的死表。
+    data: { baseId, name, primaryFieldId: "", createdBy: userId, icon: src.icon, iconColor: src.iconColor, shareEnabled: src.shareEnabled },
   });
 
   // 字段 id 映射（tabsConfig 内部引用的字段 id 需要重映射）
