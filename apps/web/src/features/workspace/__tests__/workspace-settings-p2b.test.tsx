@@ -15,11 +15,31 @@ import { readFileSync } from "node:fs";
 let isOwner = false;
 let canSeeAuthzCap = true;
 let actions: string[] = [];
-let permPanelProps: Record<string, unknown> = {};
+// 角色清单桩：三枚预设（超级管理员不可编辑不可删）+ 一枚自定义。
+let roles: {
+  id: string; name: string; description: string; systemKey: string | null;
+  isSystem: boolean; immutable: boolean; actions: string[];
+}[] = [];
+
+const PRESET_ROLES = [
+  { id: "role_super", name: "超级管理员", systemKey: "super_admin", immutable: true },
+  { id: "role_admin", name: "管理员", systemKey: "admin", immutable: false },
+  { id: "role_restricted", name: "受限成员", systemKey: "restricted", immutable: false },
+  { id: "role_c_finance", name: "财务", systemKey: null, immutable: false },
+];
+
+const noopAsync = () => Promise.resolve({ id: "x" });
 
 vi.mock("../../contacts/contacts-hooks", () => ({
   useMyOrgActions: () => ({ actions: new Set(actions), isLoading: false }),
   useIsWorkspaceOwner: () => ({ isOwner, isLoading: false }),
+  useOrgRoles: () => ({ data: roles, isLoading: false, isError: false, refetch: vi.fn() }),
+  useOrgRoleMutations: () => ({
+    createRole: { mutateAsync: noopAsync, isPending: false },
+    updateRole: { mutateAsync: noopAsync, isPending: false },
+    removeRole: { mutateAsync: noopAsync, isPending: false },
+    replaceAssignments: { mutateAsync: noopAsync, isPending: false },
+  }),
 }));
 vi.mock("../../authz/useAuthzCapability", () => ({
   useAuthzCapability: () => ({ canManage: canSeeAuthzCap }),
@@ -27,19 +47,8 @@ vi.mock("../../authz/useAuthzCapability", () => ({
 vi.mock("../../contacts/ContactsDirectory", () => ({
   ContactsDirectory: () => <div data-contacts-directory="1" />,
 }));
-vi.mock("../../authz/PermPanel", () => ({
-  default: (props: Record<string, unknown>) => {
-    permPanelProps = props;
-    return <div data-perm-panel-embedded="1" />;
-  },
-}));
-// 权限分区现在是三块（角色 / 各库成员与分享 / 资源授权策略），下面这些子组件各自会发请求，
-// 本组用例只关心分区口径与渲染位置 → 一律桩掉，保持「不发请求」的既有风格。
-vi.mock("../../contacts/RoleManager", () => ({
-  RoleManager: (props: { canManageRoles: boolean }) => (
-    <div data-role-manager={props.canManageRoles ? "manage" : "ro"} />
-  ),
-}));
+// 权限分区现在是两块（上半角色与权限 / 下半选中角色的通讯录 + 库权限），下面这些子组件
+// 各自会发请求，本组用例只关心分区口径与渲染位置 → 一律桩掉，保持「不发请求」的既有风格。
 vi.mock("../../settings/MembersPanel", () => ({
   MembersPanel: () => <div data-members-panel="1" />,
 }));
@@ -72,7 +81,6 @@ import ContactsPage from "../../contacts/ContactsPage";
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 const appSrc = read("../../../App.tsx");
 const settingsSrc = read("../WorkspaceSettingsPage.tsx");
-const authzSrc = read("../WorkspaceSettingsAuthz.tsx");
 const contactsSrc = read("../../contacts/ContactsPage.tsx");
 const directorySrc = read("../../contacts/ContactsDirectory.tsx");
 
@@ -92,11 +100,24 @@ function renderAt(location: string, node: React.ReactNode): string {
 
 const GENERAL = "权限、语义检索与回收站都在这里配置";
 
+/** 角色清单桩的装填器：顺序即面板顺序，默认选中第一枚（超级管理员第一）。 */
+function setRoles(order: typeof PRESET_ROLES) {
+  roles = order.map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: "",
+    systemKey: r.systemKey,
+    isSystem: r.systemKey !== null,
+    immutable: r.immutable,
+    actions: [],
+  }));
+}
+
 beforeEach(() => {
   isOwner = false;
   canSeeAuthzCap = true;
   actions = [];
-  permPanelProps = {};
+  setRoles(PRESET_ROLES);
 });
 
 describe("B1：底部区只剩两项，但路由仍可达", () => {
@@ -149,15 +170,48 @@ describe("B2：设置里不再有通讯录与资产入口", () => {
 });
 
 describe("B3：非 owner / 无能力不渲染，不出 disabled 假入口", () => {
-  it("owner + manage_share：权限管理能进，三块都在（角色 / 各库成员与分享 / 授权策略）", () => {
+  it("owner + edit_roles：权限分区上下两块都在，三枚预设角色全列出", () => {
     isOwner = true;
-    actions = ["manage_share"];
-    const authz = renderAt("/workspace/settings/authz", <WorkspaceSettingsPage />);
-    expect(authz).toContain("data-perm-panel-embedded");
-    expect(authz).toContain("data-role-manager");
-    expect(authz).toContain("角色与组织权限");
-    expect(authz).toContain("库与知识库成员权限");
-    expect(authz).toContain("资源授权策略");
+    actions = ["view_directory", "edit_roles"];
+    const html = renderAt("/workspace/settings/authz", <WorkspaceSettingsPage />);
+    expect(html).toContain("角色与权限");
+    for (const r of PRESET_ROLES) expect(html).toContain(r.name);
+    // 下半：选中角色（默认第一枚 = 超级管理员）的权限分段
+    expect(html).toContain("超级管理员」的权限");
+    expect(html).toContain("通讯录权限");
+  });
+
+  it("三条硬规则里的两条（建库 / 删库）在通讯录权限里写明「勾不出来」", () => {
+    isOwner = true;
+    actions = ["view_directory", "edit_roles"];
+    // 超级管理员锁死，不渲染勾选网格；把可编辑的管理员排到第一枚才能看到十二枚与硬规则行
+    setRoles([PRESET_ROLES[1]!, ...PRESET_ROLES.filter((r) => r.id !== "role_admin")]);
+    const html = renderAt("/workspace/settings/authz", <WorkspaceSettingsPage />);
+    expect(html).toContain("建库 / 建知识库");
+    expect(html).toContain("仅超级管理员与管理员");
+    expect(html).toContain("删除库");
+    expect(html).toContain("仅超级管理员");
+  });
+
+  it("超级管理员角色不可编辑、不可删除，且给出原因", () => {
+    isOwner = true;
+    actions = ["view_directory", "edit_roles", "delete_roles"];
+    const html = renderAt("/workspace/settings/authz", <WorkspaceSettingsPage />);
+    expect(html).toContain("不可编辑、不可删除");
+    expect(html).toContain("超级管理员是系统内置角色");
+  });
+
+  it("角色写能力按 create/edit/delete_roles 下发，不按 owner 一刀切", () => {
+    isOwner = true;
+    actions = ["view_directory"];
+    // 无 create_roles：新建按钮禁用并把原因挂在 title 上（不做「点了才报错」的假入口）
+    expect(renderAt("/workspace/settings/authz", <WorkspaceSettingsPage />)).toContain(
+      "需要「新建角色」权限才能新建自定义角色",
+    );
+    actions = ["view_directory", "create_roles"];
+    expect(renderAt("/workspace/settings/authz", <WorkspaceSettingsPage />)).not.toContain(
+      "需要「新建角色」权限才能新建自定义角色",
+    );
   });
 
   it("非 owner：左二级不出现权限管理分区（连 disabled 入口也没有）", () => {
@@ -185,23 +239,12 @@ describe("B3：非 owner / 无能力不渲染，不出 disabled 假入口", () =
     expect(html).not.toContain("data-perm-panel-embedded");
   });
 
-  it("内嵌 PermPanel 走 embedded（不重复一个大标题）", () => {
+  it("owner 但无任一授权动作且无 authzManage 时：权限分区不出，回落通用", () => {
     isOwner = true;
-    actions = ["manage_share"];
-    renderAt("/workspace/settings/authz", <WorkspaceSettingsPage />);
-    expect(permPanelProps.embedded).toBe(true);
-    expect(authzSrc).toContain("<PermPanel embedded />");
-  });
-
-  it("角色管理块的写能力按 manage_roles 动作下发，不按 owner 一刀切", () => {
-    isOwner = true;
-    actions = ["manage_share"];
-    expect(renderAt("/workspace/settings/authz", <WorkspaceSettingsPage />)).toContain(
-      'data-role-manager="ro"',
-    );
-    actions = ["manage_share", "manage_roles"];
-    expect(renderAt("/workspace/settings/authz", <WorkspaceSettingsPage />)).toContain(
-      'data-role-manager="manage"',
-    );
+    actions = [];
+    canSeeAuthzCap = false;
+    const html = renderAt("/workspace/settings/authz", <WorkspaceSettingsPage />);
+    expect(html).toContain(GENERAL);
+    expect(html).not.toContain("角色与权限");
   });
 });

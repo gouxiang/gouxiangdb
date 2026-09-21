@@ -38,6 +38,16 @@ const ACTION_LABEL: Record<OrgAction, string> = {
   create_users: "创建账号",
   disable_users: "停用用户",
   delete_users: "删除用户",
+  // 权限核心模型（一）追加的七枚：后端 OrgAction 已扩到十八枚，而本表是 Record<OrgAction,string>，
+  // 缺键即编译失败（apps/web 的 tsc 此前已红）。这里只补齐键位让类型闭合，
+  // 通讯录勾选面板本身仍按旧口径只渲染前十二枚（见 ORG_DIRECTORY_ACTIONS）。
+  create_roles: "新建角色",
+  edit_roles: "编辑角色",
+  delete_roles: "删除角色",
+  assign_role_members: "授予角色",
+  create_departments: "新建部门",
+  edit_departments: "编辑部门",
+  delete_departments: "删除部门",
 };
 
 /**

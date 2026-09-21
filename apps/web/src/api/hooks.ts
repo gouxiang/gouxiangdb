@@ -4,13 +4,19 @@
 // 约定：所有写操作成功后按「维度」失效（而不是精确 key），
 // 保证 records 改动后 fields 上的 count/lookup/rollup 也会刷新。
 
+import type {
+  LibraryKind,
+  LibraryVisibilityResponse,
+  PutLibraryScopeInput,
+  RoleLibraryScopeDTO,
+} from "@gx/shared-types";
 import {
   useQuery,
   useMutation,
   useQueryClient,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { Auth, Bases, Tables, Fields, Records, Views, SearchApi, OrgMembers } from "./client";
+import { Auth, Bases, Tables, Fields, Records, Views, SearchApi, OrgMembers, RoleScopes } from "./client";
 import { useAuthStore } from "../store/auth";
 import type {
   BaseDTO,
@@ -41,6 +47,9 @@ export const QK = {
   fields: (tableId: string) => ["fields", tableId] as const,
   lookupTargets: (linkFieldId: string) => ["lookupTargets", linkFieldId] as const,
   relationTypes: ["relationTypes"] as const,
+  // 权限核心模型（二）：角色 × 库视野。失效维度按 roleId，不按库——PUT 是整份替换。
+  roleScopes: (roleId: string) => ["org", "library-scopes", roleId] as const,
+  libraryVisibility: (kind: string, id: string) => ["org", "library-visibility", kind, id] as const,
   records: (tableId: string, viewId?: string) => ["records", tableId, viewId ?? "default"] as const,
   record: (id: string) => ["record", id] as const,
   views: (tableId: string) => ["views", tableId] as const,
@@ -584,3 +593,60 @@ export function useGXMutations() {
 }
 
 export type GXMutations = ReturnType<typeof useGXMutations>;
+
+// ============ 角色 × 库视野（权限核心模型二） ============
+//
+// 命名一律 RoleScopes 前缀：库设置页那组（bases/kb 成员与分享）是另一套读写面，
+// 两边共用 /api/bases、/api/kb 前缀却不共用语义，前缀分开避免误挂失效。
+
+/** 某角色的全部库视野。roleId 为空不选（不查询）。 */
+export function useRoleScopes(roleId: string | null): UseQueryResult<RoleLibraryScopeDTO[]> {
+  return useQuery({
+    queryKey: QK.roleScopes(roleId ?? ""),
+    queryFn: async () => (await RoleScopes.list(roleId as string)).scopes,
+    enabled: !!roleId,
+  });
+}
+
+/** 整份替换某角色的库视野（未出现在 items 里的库 = 撤销）。 */
+export function useRoleScopesSave() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { roleId: string; items: PutLibraryScopeInput[] }) =>
+      RoleScopes.replace(v.roleId, v.items),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: QK.roleScopes(v.roleId) });
+      // 库视野变了，逐库「谁能进来」的台账随之变
+      void qc.invalidateQueries({ queryKey: ["org", "library-visibility"] });
+      // 当前登录者自己的可见库集合可能随之变（把自己所在角色的库去掉了）
+      void qc.invalidateQueries({ queryKey: QK.bases });
+    },
+  });
+}
+
+/** 某个库被哪些角色覆盖（只读台账）。kind/id 任一为空不查询。 */
+export function useRoleScopesVisibility(
+  kind: LibraryKind | null,
+  libraryId: string | null,
+): UseQueryResult<LibraryVisibilityResponse> {
+  return useQuery({
+    queryKey: QK.libraryVisibility(kind ?? "", libraryId ?? ""),
+    queryFn: () => RoleScopes.visibility(kind as LibraryKind, libraryId as string),
+    enabled: !!kind && !!libraryId,
+  });
+}
+
+/** 库级「允许分享」开关。后端按硬规则 C 门控（管理权角色 + 超级管理员 + 管理员），越权 403。 */
+export function useRoleScopesShareEnabled() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { kind: LibraryKind; libraryId: string; enabled: boolean }) =>
+      RoleScopes.setShareEnabled(v.kind, v.libraryId, v.enabled),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({
+        queryKey: QK.libraryVisibility(v.kind, v.libraryId),
+      });
+      void qc.invalidateQueries({ queryKey: QK.bases });
+    },
+  });
+}

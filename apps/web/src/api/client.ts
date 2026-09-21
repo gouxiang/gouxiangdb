@@ -37,6 +37,14 @@ import type {
   UserAccountStatus,
   DeptMembershipDTO,
 } from "@gx/shared-types";
+// 权限核心模型（二）：角色 × 库视野。契约真源 packages/shared-types/src/roleLibraryScope.ts，
+// 端点真源 apps/api/src/routes/v1/org/roleLibraryScopes.ts。
+import type {
+  LibraryKind,
+  RoleLibraryScopeDTO,
+  PutLibraryScopeInput,
+  LibraryVisibilityResponse,
+} from "@gx/shared-types";
 import type {
   NavNodeDTO,
   NavTreeDTO,
@@ -1042,6 +1050,37 @@ export const OrgRoles = {
       method: "PUT",
       body: JSON.stringify({ subjects }),
     }),
+};
+
+/**
+ * 角色 × 库视野（权限核心模型二）。命名 RoleScopes 前缀，与库设置页那组读写区分开。
+ *
+ * 端点形态（与后端 roleLibraryScopes.ts 严格对应，改任一侧都要同步）：
+ *   GET  /api/v1/org/library-scopes?roleId=       某角色的全部库视野
+ *   PUT  /api/v1/org/library-scopes  {roleId,items} 整体替换（roleId 走【请求体】，不是 query）
+ *   GET  /api/v1/org/libraries/:kind/:id/visibility  这个库被哪些角色覆盖（只读台账）
+ *   PATCH /api/bases/:id/share-enabled、/api/kb/:id/share-enabled  库级允许分享开关
+ *
+ * PUT 必须整体替换：逐条改会让「取消勾选」与「没提交」无法区分，从而留下删不干净的授权。
+ */
+export const RoleScopes = {
+  list: (roleId: string) =>
+    apiFetch<{ roleId: string; scopes: RoleLibraryScopeDTO[] }>(
+      `/api/v1/org/library-scopes${qs({ roleId })}`,
+    ),
+  replace: (roleId: string, items: PutLibraryScopeInput[]) =>
+    apiFetch<{ roleId: string; scopes: RoleLibraryScopeDTO[] }>("/api/v1/org/library-scopes", {
+      method: "PUT",
+      body: JSON.stringify({ roleId, items }),
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
+  visibility: (kind: LibraryKind, libraryId: string) =>
+    apiFetch<LibraryVisibilityResponse>(`/api/v1/org/libraries/${kind}/${libraryId}/visibility`),
+  setShareEnabled: (kind: LibraryKind, libraryId: string, enabled: boolean) =>
+    apiFetch<{ shareEnabled: boolean }>(
+      `${kind === "kb" ? `/api/kb/${libraryId}` : `/api/bases/${libraryId}`}/share-enabled`,
+      { method: "PATCH", body: JSON.stringify({ enabled }), timeoutMs: WRITE_TIMEOUT_MS },
+    ),
 };
 
 /**

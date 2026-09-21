@@ -16,7 +16,7 @@ import { useIsWorkspaceOwner, useMyOrgActions } from "../contacts/contacts-hooks
 import { canSeeAuthz, canSeeWorkspaceSettings } from "./lib/nav-gate";
 import { useAuthzCapability } from "../authz/useAuthzCapability";
 import { TrashSection } from "./WorkspaceSettingsSections";
-import { AuthzSection } from "./WorkspaceSettingsAuthz";
+import { RolePermissionSection } from "../settings/role-permission/RolePermissionSection";
 import { EmbeddingSearchPanel } from "../search/EmbeddingSearchPanel";
 import { SearchCoveragePanel } from "../search/SearchCoveragePanel";
 import { ReindexModal } from "../search/ReindexModal";
@@ -249,8 +249,8 @@ export function WorkspaceSettingsPage() {
             </div>
           )}
 
-          {/* 权限管理：全站唯一入口（角色与组织权限 / 各库成员与分享 / 资源授权策略）。 */}
-          {effectiveSection === "authz" && <AuthzSection canManageRoles={actions.has("manage_roles")} />}
+          {/* 权限管理：全站唯一入口——角色列表 + 该角色的通讯录权限与库权限。 */}
+          {effectiveSection === "authz" && <RolePermissionSection />}
 
           {effectiveSection === "search" && (
             <div className="flex flex-col gap-6">
