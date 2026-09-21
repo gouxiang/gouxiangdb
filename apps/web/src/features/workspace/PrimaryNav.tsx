@@ -267,7 +267,9 @@ function LibraryRow({
     <div style={{ marginBottom: NAV_ROW_GAP }}>
       {/* 跳转按钮与「…」是兄弟节点，不是父子：嵌套 button 是非法 HTML，
           且点「…」会连带触发整行跳转。 */}
-      <div className={cx("flex items-center gap-1", iconOnly && "justify-center")}>
+      {/* group：悬停整行时让行尾「…」显形（.gx-row-more 默认 opacity:0，
+          与 L2 表行同款行为，否则入口根本不可见——见 .gx-row-more 的显形条件）。 */}
+      <div className={cx("group flex items-center gap-1", iconOnly && "justify-center")}>
         <button
           type="button"
           onClick={() => onNavigate(href)}
