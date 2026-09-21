@@ -60,7 +60,15 @@ export type AuditEventName =
   | "admin_initialized"
   // 0.1.7 管理员口令重置（init-admin --reset）：按邮箱重置既有账号口令并置强制改密 +
   // 恢复 ACTIVE + tokenVersion+1 踢掉旧会话。detail 只落脱敏邮箱与版本号，绝不落新密码。
-  | "admin_password_reset";
+  | "admin_password_reset"
+  // 分享链接生命周期（对象化分享：base/table/kb_doc）。
+  // 创建时带 objectType/objectId/mode；mode=edit 的创建意味着放行了一条外部写通道，必须留痕。
+  | "share_link_created"
+  | "share_link_revoked"
+  // 外部访问者（无登录态）经分享链接的写入：成功记 share_external_write，
+  // 被档位/权限/字段闸拒绝记 share_external_denied。detail 记 action 与字段 id，绝不记 token。
+  | "share_external_write"
+  | "share_external_denied";
 
 export interface AuditInput {
   event: AuditEventName;

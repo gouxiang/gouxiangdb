@@ -28,3 +28,4 @@ export * from "./roleLibraryScope.js";
 export * from "./nav.js";
 export * from "./authz.js";
 export * from "./policy.js";
+export * from "./share.js";

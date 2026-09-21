@@ -280,9 +280,25 @@ model ShareLink {
   expiresAt DateTime?
   createdAt DateTime  @default(now())
 
+  // 分享对象（迁移 20260922010000_share_link_objects 只增列，存量行回落 base）：
+  //   objectType = base   —— 整个数据表库（objectId 为空）
+  //   objectType = table  —— 某张数据表，objectId=tableId，可选 viewId 锚定视图
+  //   objectType = kb_doc —— 知识库文档/画布，objectId=docId（baseId 沿用所在库占位）
+  // 文档/画布的分享令牌历史落在 kb_docs.share_token 上，两种令牌由
+  // domain/share/shareLinkLookup.ts 统一解析，互不影响。
+  objectType String   @default("base")
+  objectId   String?
+  viewId     String?
+  // 分享档位：view=只读 / edit=可编辑。edit 只在创建时要求分享人本人有编辑权，
+  // 且每次访问按分享人当前权限重算（见 domain/share/shareCaps.ts），不是一次性判定。
+  mode       String   @default("view")
+  // 分享人：可编辑链接的动态降级以他当前的库权限为准；为空的存量链接一律只读。
+  createdBy  String?
+
   base      Base      @relation(fields: [baseId], references: [id], onDelete: Cascade)
 
   @@index([baseId])
+  @@index([objectType, objectId])
   @@map("share_links")
 }
 
@@ -352,6 +368,10 @@ model KbDoc {
   shareToken          String? @unique // 开启时生成；关闭置空（旧链接立即失效）
   shareRole           String  @default("viewer") // viewer(仅可见) | editor(可编辑)
   shareIncludeChildren Boolean @default(false) // 级联分享：本级及整棵子树一并可外链访问
+  // 开分享的人（迁移 20260922010000_share_link_objects 只增列）。
+  // 可编辑分享的动态降级按【他当前】的库权限重算：他失去编辑权，链接当次回落只读。
+  // 存量行无值 -> 一律按只读处理（不凭空给写权限）。
+  shareCreatedBy      String?
 
   kb          KnowledgeBase @relation(fields: [kbId], references: [id], onDelete: Cascade)
   versions    KbDocVersion[]

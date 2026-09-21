@@ -53,6 +53,11 @@ let docs: FakeDoc[] = [];
 
 vi.mock("../../db.js", () => ({
   prisma: {
+    // 对象化分享链接（表/库/文档）：本组用例全是文档令牌，这里恒查不到，
+    // 解析随即回落到 kb_docs.share_token，与改造前逐字节一致。
+    shareLink: { findUnique: () => Promise.resolve(null) },
+    // 库级「允许分享」开关：文档分享解析会先确认所在知识库仍开着分享。
+    knowledgeBase: { findUnique: () => Promise.resolve({ shareEnabled: 1 }) },
     kbDoc: {
       // findShareRoot（where 带 shareToken）与目标文档查询（where 带 id）共用
       findFirst: ({ where }: { where: Record<string, unknown> }) => {

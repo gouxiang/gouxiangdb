@@ -415,7 +415,7 @@ bases.get("/:baseId/share", async (c) => {
 
 bases.post("/:baseId/share", async (c) => {
   const baseId = c.req.param("baseId");
-  await requireCanManageBase(c, baseId);
+  const { userId } = await requireCanManageBase(c, baseId);
   const parsed = shareSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
 
@@ -427,6 +427,9 @@ bases.post("/:baseId/share", async (c) => {
       token,
       role: parsed.data.role,
       expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null,
+      // 存量库级链接沿用旧语义（objectType 默认 base、mode 默认 view），只补分享人：
+      // 库级链接不提供记录写入面，但补上主体后未来若开放可编辑，动态降级才有判定依据。
+      createdBy: userId,
     },
   });
   return c.json({
