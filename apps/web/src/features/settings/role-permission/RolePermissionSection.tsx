@@ -15,6 +15,7 @@ import { confirmAction } from "../../../components/feedback";
 import { useMyOrgActions, useOrgRoles, useOrgRoleMutations } from "../../contacts/contacts-hooks";
 import type { OrgRoleDTO } from "@gx/shared-types";
 import { DirectoryPermGrid } from "./DirectoryPermGrid";
+import { LibraryScopePanel } from "./LibraryScopePanel";
 import { RoleFormModal } from "./RoleFormModal";
 import { LOCKED_ROLE_REASON, RoleListPanel, isVisibleRole } from "./RoleListPanel";
 
@@ -166,6 +167,17 @@ export function RolePermissionSection() {
                 <p className="text-gx-12 text-gx-text-hint">{LOCKED_ROLE_REASON}</p>
               ) : (
                 <DirectoryPermGrid key={selected.id} role={selected} canEdit={canEdit} />
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <div className="text-gx-13 font-medium text-gx-text-primary">库权限</div>
+              {selected.immutable ? (
+                <p className="text-gx-12 text-gx-text-hint">
+                  超级管理员不用配库权限：它天然能进全部库、管全部库，也是唯一能删库的角色。
+                </p>
+              ) : (
+                <LibraryScopePanel key={selected.id} role={selected} canEdit={canEdit} />
               )}
             </div>
           </div>
