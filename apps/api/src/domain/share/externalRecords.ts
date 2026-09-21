@@ -136,7 +136,11 @@ export interface ExternalWriteInput {
   token: string;
 }
 
-function auditWrite(input: { event: "share_external_write" | "share_external_denied"; status: number; sharerId: string | null; ip: string; detail: Record<string, unknown> }): void {
+/**
+ * 外部写入的统一审计出口（数据表记录写与文档正文写共用，避免两套 event/脱敏口径）。
+ * detail 内绝不带 token 明文（writeAudit 也会脱敏，这里再收一层）。
+ */
+export function auditWrite(input: { event: "share_external_write" | "share_external_denied"; status: number; sharerId: string | null; ip: string; detail: Record<string, unknown> }): void {
   writeAudit(config.auditDir, {
     event: input.event,
     actorId: input.sharerId,

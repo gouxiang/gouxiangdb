@@ -7,7 +7,7 @@
 //   GET /s/:token/ref/:docId                 引用闭包内文档（publicDoc.ts）
 //   GET /s/:token/records                    数据表分享翻页（publicTable.ts）
 //   POST|PATCH|DELETE /s/:token/records[/:id] 数据表分享写入（publicTable.ts，需可编辑）
-//   PUT /s/:token/doc/:docId/content         已关闭（一律 403）：分享链接对文档正文只读
+//   PUT  /s/:token/doc/:docId/content        文档正文保存（publicDoc.ts，可编辑档位 + 乐观锁）
 //
 // 权限完全以分享设置为准，与团队成员权限无关。不暴露成员邮箱、不暴露库内未分享内容。
 // 数据表分享的可见范围 = 库级 shareEnabled && 表级 shareEnabled；任一级关掉，链接当次即失效。
