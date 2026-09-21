@@ -15,7 +15,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { HttpError, errorResponse, requireUserId } from "../guards.js";
 import type { ObjectShareLinkDTO, ShareMode } from "@gx/shared-types";
-import { resolveBaseAccessByTable } from "../domain/authz/libraryPolicy.js";
+import { resolveBaseAccessByTable, tableAccessOf } from "../domain/authz/libraryPolicy.js";
 import { tableShareAllowed } from "../domain/authz/libraryVisibility.js";
 import { assertSharerCanGrantEdit, resolveTableShareCaps } from "../domain/share/shareCaps.js";
 import { genShareToken } from "./kb/shared.js";
@@ -69,12 +69,18 @@ tableShares.get("/:tableId/share", async (c) => {
   try {
     const userId = await requireUserId(c);
     const tableId = c.req.param("tableId");
-    await assertCanShareTable(userId, tableId);
+    const access = await assertCanShareTable(userId, tableId);
     const rows = await prisma.shareLink.findMany({
       where: { objectType: "table", objectId: tableId },
       orderBy: { createdAt: "desc" },
     });
-    return c.json({ links: await Promise.all(rows.map(toDTO)) });
+    return c.json({
+      links: await Promise.all(rows.map(toDTO)),
+      // 本人此刻能否开「可编辑」档位——供弹窗把该选项置灰。
+      // 复用 assertCanShareTable 刚拿到的裁决结果，判定链与 canSharerGrantTableEdit /
+      // assertSharerCanGrantEdit 完全同一条（resolveBaseAccessByTable -> tableAccessOf.update）。
+      canGrantEdit: !!tableAccessOf(access, tableId)?.update,
+    });
   } catch (e) {
     return errorResponse(c, e);
   }

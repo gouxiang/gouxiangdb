@@ -157,19 +157,38 @@ export function externalFieldGate(
   };
 }
 
+/**
+ * 数据表：本人此刻能否授予「可编辑」档位（不抛错版本）。
+ * 与 assert 版共用同一条判定链，避免 GET 置灰与 POST 校验两套口径。
+ */
+export async function canSharerGrantTableEdit(sharerId: string, tableId: string): Promise<boolean> {
+  const access = await resolveBaseAccessByTable(sharerId, tableId);
+  return !!access && !!tableAccessOf(access, tableId)?.update;
+}
+
 /** 创建「可编辑」分享的前置校验：分享人本人必须对该表有改权，否则 403。 */
 export async function assertSharerCanGrantEdit(sharerId: string, tableId: string): Promise<void> {
-  const access = await resolveBaseAccessByTable(sharerId, tableId);
-  const table = access ? tableAccessOf(access, tableId) : null;
-  if (!table?.update) {
+  if (!(await canSharerGrantTableEdit(sharerId, tableId))) {
     throw new HttpError(403, "只有本人对该数据表有编辑权时才能创建可编辑分享");
   }
 }
 
+/**
+ * 文档/画布：本人此刻能否授予「可编辑」档位（不抛错版本）。
+ *
+ * ★为什么要有这个布尔版：前端分享弹窗需要在用户点之前就把「可编辑」置灰，
+ *   而置灰所需的信息（我本人对这个知识库的内容有没有改权）只有后端知道。
+ *   assert 版在 false 时抛 403，无法用于 GET；若 GET 自己再写一套判定，
+ *   两处口径迟早分裂（一边灰一边放行）。故判定只此一处，assert 复用它。
+ */
+export async function canSharerGrantDocEdit(sharerId: string, kbId: string): Promise<boolean> {
+  const access = await resolveKbAccess(sharerId, kbId);
+  return !!access && access.visible && contentAccessOf(access).update;
+}
+
 /** 创建文档/画布「可编辑」分享的前置校验：分享人本人必须对该知识库内容有改权。 */
 export async function assertSharerCanGrantDocEdit(sharerId: string, kbId: string): Promise<void> {
-  const access = await resolveKbAccess(sharerId, kbId);
-  if (!access || !access.visible || !contentAccessOf(access).update) {
+  if (!(await canSharerGrantDocEdit(sharerId, kbId))) {
     throw new HttpError(403, "只有本人对该知识库内容有编辑权时才能创建可编辑分享");
   }
 }

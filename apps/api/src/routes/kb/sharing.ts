@@ -7,7 +7,7 @@ import { z } from "zod";
 import { prisma } from "../../db.js";
 import { requireUserId, errorResponse } from "../../guards.js";
 import { readShareEnabled } from "../../domain/authz/libraryVisibility.js";
-import { assertSharerCanGrantDocEdit, resolveDocShareCaps } from "../../domain/share/shareCaps.js";
+import { assertSharerCanGrantDocEdit, canSharerGrantDocEdit, resolveDocShareCaps } from "../../domain/share/shareCaps.js";
 import { genShareToken, requireDocAccess } from "./shared.js";
 
 export const sharingRoutes = new Hono();
@@ -36,6 +36,9 @@ sharingRoutes.get("/docs/:docId/share", async (c) => {
         mode: caps.mode,
         requestedMode: caps.requestedMode,
         degraded: caps.degraded,
+        // 本人此刻能否开「可编辑」——供弹窗把该选项置灰。后端 POST 仍会再判一次，
+        // 这里是同一次判定（canSharerGrantDocEdit / assertSharerCanGrantDocEdit 共用），不会两套口径。
+        canGrantEdit: await canSharerGrantDocEdit(userId, doc.kbId),
       },
       // 内部成员能不能改由所在知识库的角色配置决定；这里只回一个汇总开关给弹窗。
       internal: { membersCanEdit: access.canManage },
