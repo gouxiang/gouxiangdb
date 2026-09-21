@@ -251,29 +251,6 @@ export async function getUserId(c: { req: { header: (k: string) => string | unde
   return resolved?.userId ?? null;
 }
 
-// 帮助函数：检查 user 对 base 的角色
-export async function userRoleInBase(
-  userId: string,
-  baseId: string,
-): Promise<Role | undefined> {
-  const member = await prisma.member.findUnique({
-    where: { baseId_userId: { baseId, userId } },
-  });
-  return member?.role as Role | undefined;
-}
-
-// 权限位（v1 同构）
-export const Permission = {
-  canManageBase(role: Role | undefined): boolean {
-    return role === "owner";
-  },
-  canManageSchema(role: Role | undefined): boolean {
-    return role === "owner" || role === "creator";
-  },
-  canEditData(role: Role | undefined): boolean {
-    return role === "owner" || role === "creator" || role === "editor";
-  },
-  canComment(role: Role | undefined): boolean {
-    return role !== "viewer" && role !== undefined;
-  },
-};
+// 权限位判定（canManageBase/canManageSchema/canEditData/canComment）在 guards.ts 有唯一真源
+// （基于 @gx/shared-types 的 permissionsForRole 矩阵）。此前 auth.ts 另存一份手写 Permission 副本，
+// 全仓零调用，已删除，避免被误当成真源修改。base 角色读取一律走 guards.ts 的 roleOf。

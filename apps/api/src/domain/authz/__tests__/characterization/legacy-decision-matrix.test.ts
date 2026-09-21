@@ -268,16 +268,22 @@ describe("匿名 public resolveShare 不查成员/ACL/auth_policies", () => {
     expect(out.status).toBe(404);
   });
 
-  it("匿名编辑：editor 分享 200，viewer 分享 403「仅可见」，均零授权查询", async () => {
-    const ok = await h.app.request(`/api/public/s/${editorToken}/doc/${childId}/content`, {
+  // 产品口径变更（M7）：分享链接对外只读，匿名写整体关闭。原用例断言 editor 分享可匿名 200 改写
+  // 正文，与新口径相反，故改为断言两档分享一律 403，并强证正文/updatedBy 未被改动。
+  it("匿名编辑已关闭：editor / viewer 分享一律 403「只读」，正文未改且零授权查询", async () => {
+    const before = await h.prisma.kbDoc.findUniqueOrThrow({ where: { id: childId } });
+    const deniedEditor = await h.app.request(`/api/public/s/${editorToken}/doc/${childId}/content`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "anon" }),
     });
-    expect(ok.status).toBe(200);
+    expect(deniedEditor.status).toBe(403);
+    expect((await json<{ error: string }>(deniedEditor)).error).toContain("只读");
     assertNoAuthzQuery();
-    const denied = await h.app.request(`/api/public/s/${viewerToken}/doc/x/content`, {
+    const deniedViewer = await h.app.request(`/api/public/s/${viewerToken}/doc/x/content`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "z" }),
     });
-    expect(denied.status).toBe(403);
-    expect((await json<{ error: string }>(denied)).error).toBe("该分享为仅可见，无法编辑");
+    expect(deniedViewer.status).toBe(403);
+    const after = await h.prisma.kbDoc.findUniqueOrThrow({ where: { id: childId } });
+    expect(after.content).toBe(before.content);
+    expect(after.updatedBy).toBe(before.updatedBy);
   });
 });

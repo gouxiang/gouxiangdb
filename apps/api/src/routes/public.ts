@@ -4,19 +4,15 @@
 //   - GET /s/:token                 分享根节点内容 + 级联子树摘要
 //   - GET /s/:token/doc/:docId      级联子树内某文档内容（需根开启 shareIncludeChildren）
 //   - GET /s/:token/ref/:docId      引用闭包内文档（画布 gxDocRef/gxLinkRef 指向的子树外文档，只读）
-//   - PUT /s/:token/doc/:docId/content  匿名编辑保存（仅 shareRole=editor 放行）
+//   - PUT /s/:token/doc/:docId/content  已关闭（一律 403）：分享链接对外只读
 // 权限完全以分享设置为准，与团队成员权限无关。不暴露成员邮箱、不暴露知识库其他文档。
+// 写口径（M7）：外部人经分享链接只能看不能写；登录用户的编辑走 /api/kb/docs/:docId/content。
 
 import { Hono } from "hono";
-import { z } from "zod";
-import { prisma, withWriteTx } from "../db.js";
+import { prisma } from "../db.js";
 import { HttpError, errorResponse } from "../guards.js";
-import { buildSearchText, maybeAutoSnapshotTx } from "../domain/kb.js";
-import { enqueueChangeEventTx } from "../domain/search/outbox.js";
 
 export const pub = new Hono();
-
-const ANON = "anonymous:share";
 
 interface ShareContext {
   root: { id: string; kbId: string; kind: string; title: string; content: string; shareRole: string; shareIncludeChildren: boolean; updatedAt: Date };
@@ -62,13 +58,10 @@ async function subtreeIdSet(rootId: string): Promise<Set<string>> {
 
 /**
  * 解析一次公开访问：token → 根；可选 docId 指定子树内某文档。
- * needEdit=true 时要求根 shareRole=editor。
+ * 只读解析（写路由已关闭，不再有 needEdit 形态）。
  */
-async function resolveShare(token: string, docId?: string, needEdit = false): Promise<ShareContext> {
+async function resolveShare(token: string, docId?: string): Promise<ShareContext> {
   const root = await findShareRoot(token);
-  if (needEdit && root.shareRole !== "editor") {
-    throw new HttpError(403, "该分享为仅可见，无法编辑");
-  }
 
   let targetId = root.id;
   if (docId && docId !== root.id) {
@@ -257,33 +250,11 @@ pub.get("/s/:token/ref/:docId", async (c) => {
   }
 });
 
-// 匿名编辑保存
+// 匿名编辑保存：已关闭。
+// 原实现在 shareRole=editor 时允许不登录的外部访客改写文档正文（匿名写）。产品口径改为
+// 「分享链接进来的外部人只读」，故本路由不再接受任何写：一律 403，不读请求体、不碰库，
+// 也就不存在匿名写路径被重新打开的可能。读接口（GET /s/:token、/doc/:docId、/ref/:docId）
+// 不受影响；登录用户的编辑走 /api/kb/docs/:docId/content（routes/kb/docs.ts），与本路由无关。
 pub.put("/s/:token/doc/:docId/content", async (c) => {
-  try {
-    const token = c.req.param("token");
-    const docId = c.req.param("docId");
-    const ctx = await resolveShare(token, docId, true);
-    // U-10：匿名公开写加 2MB 长度上限（此前无上限，可写爆单行/拖垮快照与搜索冗余）
-    const schema = z.object({ content: z.string().max(2_000_000, "内容超过 2MB 上限") });
-    const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "内容不合法" }, 400);
-    const content = parsed.data.content;
-    const searchText = buildSearchText(ctx.doc.kind, content);
-    // M5/S1：ANON 公开编辑也发 outbox（实体存在即索引，匿名不影响归属）。原裸 update +
-    // 非事务快照收紧进单事务：正文、快照、outbox 共生死，enqueue 失败则编辑整体回滚。
-    await withWriteTx("public.doc.content.save", async (tx) => {
-      await tx.kbDoc.update({
-        where: { id: ctx.doc.id },
-        data: { content, searchText, updatedBy: ANON },
-      });
-      await maybeAutoSnapshotTx(tx, ctx.doc.id, ANON);
-      await enqueueChangeEventTx(tx, {
-        entityType: ctx.doc.kind === "canvas" ? "canvas" : "doc",
-        entityId: ctx.doc.id, op: "upsert", version: BigInt(Date.now()),
-      });
-    });
-    return c.json({ ok: true, savedAt: new Date().toISOString() });
-  } catch (e) {
-    return errorResponse(c, e);
-  }
+  return errorResponse(c, new HttpError(403, "分享链接为只读，不接受通过分享链接的编辑"));
 });

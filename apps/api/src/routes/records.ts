@@ -10,7 +10,6 @@ import {
   requireCanEditData,
   requireCanComment,
   requireCanManageBase,
-  requireCanManageSchema,
   resolveBaseIdByTable,
   resolveBaseIdByRecord,
   HttpError,
@@ -809,7 +808,8 @@ records.post("/trash/:id/restore", async (c) => {
 
   if (parsed.data.kind === "record") {
     const baseId = await baseIdOfRecord(id);
-    await requireCanEditData(c, baseId);
+    // 恢复与彻底删除同档（可管理库）：普通编辑者不能自行恢复已删除的数据。
+    await requireCanManageBase(c, baseId);
     const rec = await prisma.record.findUnique({ where: { id }, select: { tableId: true } });
     // M5/S1：原 record.update + linkRow + sidecar 三段裸写收紧进单事务，承载 outbox upsert。
     await withWriteTx("record.restore", async (tx) => {
@@ -836,8 +836,8 @@ records.post("/trash/:id/restore", async (c) => {
       },
     });
     if (!f) throw new HttpError(404, "字段不存在");
-    // 恢复字段属于表结构变更，与删除字段一致需要 canManageSchema（垂直越权防护）。
-    await requireCanManageSchema(c, f.table.baseId);
+    // 恢复字段同回收站口径：与彻底删除同一档（可管理库），不再按 canManageSchema 放行 creator。
+    await requireCanManageBase(c, f.table.baseId);
     // T-1：恢复前查重名。删除后重建同名字段、再恢复旧的，会在同表落下两个同名活字段
     // （公式 {字段名} 引用歧义 / CSV 按列名匹配歧义）。恢复不能被 409 拒绝，故自动改名。
     const finalName = await resolveFieldRestoreName(prisma, id, f.tableId, f.name);
@@ -874,8 +874,8 @@ records.post("/trash/:id/restore", async (c) => {
   } else {
     const t = await prisma.table.findUnique({ where: { id }, select: { baseId: true, name: true } });
     if (!t) throw new HttpError(404, "数据表不存在");
-    // 恢复表属于表结构变更，与删除表一致需要 canManageSchema。
-    await requireCanManageSchema(c, t.baseId);
+    // 恢复表同回收站口径：与彻底删除同一档（可管理库），不再按 canManageSchema 放行 creator。
+    await requireCanManageBase(c, t.baseId);
     // M3/S3 #14：原裸多写收紧进单事务。恢复表连带恢复字段/记录（级联软删，单恢复会成空壳），
     // 视图 order=-1 重排为可见；nav 子树节点（table/view）原地复活、重算 ord/path
     // （仅当其 base 活；base 仍软删时期望集不含该表，节点保持软删与实体悬挂态一致）。
