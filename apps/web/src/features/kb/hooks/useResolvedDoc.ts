@@ -55,7 +55,8 @@ export function useResolvedDoc(
       isLoading: pub.isLoading,
       error: pub.error,
       status,
-      // 公开分享恒只读：匿名写端点已下线，后端读接口也把 canEdit 写死成 false。
+      // 公开分享：此处（嵌入解析通道）仍按只读返回；直接访问分享子树文档的 canEdit
+      // 由 PublicApi.getDoc 返回真实值，见 features/kb/PublicSharePage.tsx。
       canEdit: false,
       refetch: () => pub.refetch(),
       isPublic: true,

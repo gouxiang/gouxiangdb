@@ -70,7 +70,7 @@ export function DocEditModal({
     onClose();
   }, [onClose]);
 
-  // 公开分享恒只读：匿名写端点已下线，这里直接不给保存入口（不依赖后端 canEdit 字段）。
+  // 公开分享下这个弹窗编辑入口仍不给保存（分享页顶层的正文编辑见 PublicSharePage）。
   const saveDisabled = saving || isLoading || !!publicToken;
 
   async function save() {

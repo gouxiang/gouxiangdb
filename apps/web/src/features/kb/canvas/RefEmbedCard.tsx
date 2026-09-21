@@ -85,7 +85,7 @@ export function RefEmbedCard({
   const effectiveCanEdit = canEdit && r.canEdit;
   // 嵌入数据表的写权限与「宿主正文可否编辑」是两回事：
   //   - 登录态：ctx.embedCanEdit 未设 → 回落 canEdit（画布能编辑，嵌入的表就能编辑）
-  //   - 分享态：canEdit 恒 false（正文匿名写已关闭），写权限由宿主分享档位 mode 决定
+  //   - 分享态：嵌入表写权限由宿主分享档位 mode 决定（正文能否写看宿主 canEdit，两者独立）
   const embedCanEdit = rt?.ctx.embedCanEdit ?? canEdit;
 
 

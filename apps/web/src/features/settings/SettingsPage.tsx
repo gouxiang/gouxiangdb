@@ -235,7 +235,7 @@ export default function SettingsPage() {
               {baseId && <LibraryAccessPanel kind="base" libraryId={baseId} />}
 
               {/* 分享链接管理：生成 / 复制 / 关闭。受上面的「允许分享」开关控制，
-                  外发恒只读（后端已关匿名写）。此前这块界面被误删，库分享只剩开关、没有入口。 */}
+                  外发默认只读；「可编辑」档位需分享人此刻仍有编辑权（后端每次访问现算，降权即回落只读）。此前这块界面被误删，库分享只剩开关、没有入口。 */}
               {baseId && <ShareLinksPanel baseId={baseId} canManageBase={canManageBase} />}
             </div>
           )}

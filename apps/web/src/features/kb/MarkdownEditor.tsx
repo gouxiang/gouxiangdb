@@ -99,11 +99,12 @@ export function MarkdownEditor({
   embedCanEdit,
 }: {
   initialMarkdown: string;
-  /** 只读场景（公开分享页）可不传：没有写通道，也就没有「改动」要上报。 */
+  /** 内容变化回调；只读场景（readOnly）无需上报改动，可不传。 */
   onChange?: (md: string) => void;
   /**
-   * 立即云端保存（Cmd/Ctrl+S）。由 DocEditorPage 透传 `persist.saveNow()`；
-   * SourceEditor 内的 Ctrl+S 拦截会调用它，避免与 DocEditorPage 顶层 useShortcuts 双触发。
+   * 立即云端保存（Cmd/Ctrl+S）。登录态由 DocEditorPage 透传 `persist.saveNow()`；
+   * 公开分享页在「可编辑」档位下透传自己的乐观锁保存。SourceEditor 内的 Ctrl+S 拦截会
+   * 调用它，避免与宿主顶层 useShortcuts 双触发。
    */
   onSave?: () => void | Promise<void>;
   readOnly?: boolean;
@@ -114,7 +115,7 @@ export function MarkdownEditor({
   /**
    * 内嵌【数据表】预览的写权限（与 readOnly 分开）：
    *   - 登录态：不传 → 回落 !readOnly（文档能编辑，嵌入的表就能编辑）
-   *   - 分享态：readOnly 恒 true（正文匿名写已关闭），写权限由宿主分享档位 mode 决定
+   *   - 分享态：显式传宿主分享档位（mode==="edit"）——与「正文能否写」（看 canEdit）是两件事
    */
   embedCanEdit?: boolean;
 }) {

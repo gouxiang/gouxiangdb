@@ -37,7 +37,7 @@ export interface GxCanvasProps {
   publicToken?: string;
   /**
    * 画布【内嵌数据表预览】的写权限。缺省 → 回落 canEdit。
-   * 分享态必须显式传宿主分享档位（mode==="edit"），因为此时 canEdit 恒 false。
+   * 分享态显式传宿主分享档位（mode==="edit"）——它与「画布正文能否写」（看 canEdit）是两件事。
    */
   embedCanEdit?: boolean;
   /** 编辑回调（每次编辑上抛最新 JSON，防抖/保存由调用方接管） */

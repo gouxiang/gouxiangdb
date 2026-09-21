@@ -1,42 +1,23 @@
 // apps/web/src/features/kb/PublicSharePage.tsx
-// 公开分享页（/s/:token）：匿名可访问，无需登录，**只读**。
+// 公开分享页（/s/:token）外壳：匿名可访问，无需登录。负责「加载分享 + 选中文档 + 拉内容」，
+// 渲染交给 PublicDocView（可被单测直接渲染）。
 //
-// 匿名写已整体关闭：后端 public.ts 不再提供任何写端点，读接口的 canEdit 恒 false
-// （曾按 shareRole=editor 派生，于是前端把已下线的保存接口又调一次、拿到 404/403）。
-// 因此这里不再有任何编辑态：文档走只读渲染，画布只读且没有保存按钮。
+// 正文是否可编辑由**读取接口的真实 canEdit** 决定（fail-closed：缺字段/出错一律按只读）：
+//   - 分享根看 GET /api/public/s/:token 的 canEdit；
+//   - 子树内某篇看 GET /api/public/s/:token/doc/:docId 的 canEdit；
+//     引用闭包内的文档（/ref/）仍恒只读，不属于本次分享子树。
+// 可编辑档位且分享人此刻仍有内容编辑权时 canEdit=true；分享人被降权后后端每次访问现算，
+// 链接自动回落只读。保存走乐观锁（baseUpdatedAt）：冲突回 409 就地刷新为最新内容并提示重编。
 // - 级联分享：左侧文档树，仅展示被分享根节点及其下级，支持展开/收起/点击切换
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { Spinner, toast } from "../../components/ui";
-import { PublicApi, type KbTreeItemDTO } from "../../api/client";
+import { PublicApi } from "../../api/client";
 import { usePublicShare } from "./kb-hooks";
-import { MarkdownEditor } from "./MarkdownEditor";
-import { GxCanvas } from "./canvas/GxCanvas";
-import { DocKindIcon } from "./kb-ui";
-import { DocOutline } from "./DocOutline";
-
-interface TreeNode extends KbTreeItemDTO {
-  children: TreeNode[];
-}
-
-function buildTree(items: KbTreeItemDTO[], rootId: string): TreeNode[] {
-  const map = new Map<string, TreeNode>();
-  items.forEach((it) => map.set(it.id, { ...it, children: [] }));
-  const roots: TreeNode[] = [];
-  items.forEach((it) => {
-    const node = map.get(it.id)!;
-    if (it.id === rootId || !it.parentId) {
-      roots.push(node);
-    } else {
-      const parent = map.get(it.parentId);
-      if (parent) parent.children.push(node);
-      else roots.push(node);
-    }
-  });
-  return roots;
-}
+import { PublicShareTree } from "./PublicShareTree";
+import { PublicDocView, type RemoteDoc } from "./PublicDocView";
 
 export default function PublicSharePage() {
   const { token, docId: routeDocId } = useParams();
@@ -44,45 +25,67 @@ export default function PublicSharePage() {
   const { data, isLoading, error } = usePublicShare(token);
 
   const [activeDocId, setActiveDocId] = useState<string | undefined>(undefined);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [remoteDoc, setRemoteDoc] = useState<RemoteDoc | null>(null);
+  const [docLoading, setDocLoading] = useState(false);
 
   // 当前展示的文档：路由/树选中的子文档，否则根文档
   const effectiveDocId = routeDocId ?? activeDocId ?? data?.doc.id;
-  const [remoteDoc, setRemoteDoc] = useState<{ id: string; content: string; title: string; kind: string } | null>(null);
-  const [docLoading, setDocLoading] = useState(false);
-  const docAreaRef = useRef<HTMLDivElement>(null);
 
   // 根数据加载后初始化
   useEffect(() => {
     if (data) {
-      setRemoteDoc({ id: data.doc.id, content: data.doc.content, title: data.doc.title, kind: data.doc.kind });
+      setRemoteDoc({
+        id: data.doc.id,
+        content: data.doc.content,
+        title: data.doc.title,
+        kind: data.doc.kind,
+        canEdit: data.canEdit === true,
+        updatedAt: data.doc.updatedAt,
+      });
       setActiveDocId(undefined);
     }
   }, [data?.rootToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 切换子文档时拉取内容
+  // 切换子文档时拉取内容（每篇各自带自己的 canEdit 与 updatedAt 基线）
   useEffect(() => {
     if (!token || !effectiveDocId || !data) return;
     if (effectiveDocId === data.doc.id) {
-      setRemoteDoc({ id: data.doc.id, content: data.doc.content, title: data.doc.title, kind: data.doc.kind });
+      setRemoteDoc({
+        id: data.doc.id,
+        content: data.doc.content,
+        title: data.doc.title,
+        kind: data.doc.kind,
+        canEdit: data.canEdit === true,
+        updatedAt: data.doc.updatedAt,
+      });
       return;
     }
     let alive = true;
     setDocLoading(true);
     PublicApi.getDoc(token, effectiveDocId)
       .then((r) => {
-        if (alive) setRemoteDoc({ id: r.doc.id, content: r.doc.content, title: r.doc.title, kind: r.doc.kind });
+        if (alive)
+          setRemoteDoc({
+            id: r.doc.id,
+            content: r.doc.content,
+            title: r.doc.title,
+            kind: r.doc.kind,
+            canEdit: r.canEdit === true,
+            updatedAt: r.doc.updatedAt,
+          });
       })
       .catch((e) => {
-        if (alive) toast(e instanceof Error ? e.message : "无法加载该内容", "error");
+        if (alive) {
+          // fail-closed：内容没拿到就清空并按只读渲染，绝不沿用上一篇的编辑权
+          setRemoteDoc(null);
+          toast(e instanceof Error ? e.message : "无法加载该内容", "error");
+        }
       })
       .finally(() => alive && setDocLoading(false));
     return () => {
       alive = false;
     };
   }, [effectiveDocId, token]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const tree = useMemo(() => (data ? buildTree(data.tree, data.doc.id) : []), [data]);
 
   if (isLoading) {
     return (
@@ -111,22 +114,8 @@ export default function PublicSharePage() {
 
   const showTree = data.includeChildren && data.tree.length > 0;
   // 宿主分享档位：决定文档/画布里【嵌入的数据表预览】能不能写。
-  // 注意与 canEdit 的区别——正文的匿名写后端仍关闭（canEdit 恒 false），
-  // 所以「档位」是唯一能表达"嵌入表可编辑"的信号。
+  // 与「正文能否写」是两件事：正文看 canEdit，嵌入表看 mode（后端按同一档位分别算）。
   const embedCanEdit = data.mode === "edit";
-
-  function toggle(id: string) {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function openDoc(id: string) {
-    setActiveDocId(id);
-  }
 
   return (
     <div className="flex h-screen bg-gx-bg">
@@ -134,160 +123,20 @@ export default function PublicSharePage() {
       {showTree && (
         <aside className="flex w-64 shrink-0 flex-col border-r border-gx-separator bg-gx-surface">
           <div className="border-b border-gx-separator px-3 py-2.5 text-gx-12 font-medium text-gx-text-secondary">分享内容</div>
-          <div className="min-h-0 flex-1 overflow-y-auto py-1">
-            {tree.map((node) => (
-              <TreeRow
-                key={node.id}
-                node={node}
-                depth={0}
-                activeId={effectiveDocId}
-                collapsed={collapsed}
-                onToggle={toggle}
-                onOpen={openDoc}
-              />
-            ))}
-          </div>
+          <PublicShareTree items={data.tree} rootId={data.doc.id} activeId={effectiveDocId} onOpen={setActiveDocId} />
         </aside>
       )}
 
-      {/* 主内容区 */}
-      <main className="flex min-w-0 flex-1 flex-col">
-        {/* 顶栏 */}
-        <header className="flex items-center gap-2 border-b border-gx-separator bg-gx-surface px-4 py-2.5">
-          <DocKindIcon kind={remoteDoc?.kind as "doc" | "canvas"} />
-          <span className="min-w-0 flex-1 truncate text-gx-14 font-semibold text-gx-text-primary">
-            {remoteDoc?.title ?? "加载中…"}
-          </span>
-          {/* 正文恒只读（匿名写后端已关闭）；档位只在「嵌入的数据表预览」上生效。 */}
-          <span className="inline-flex items-center gap-1 rounded-gx-sm bg-gx-bg px-2 py-0.5 text-gx-11 text-gx-text-tertiary">
-            <Icon name={embedCanEdit ? "edit" : "eye"} size={12} />
-            {embedCanEdit ? "正文只读 · 内嵌数据表可编辑" : "仅可见"}
-          </span>
-          <button
-            type="button"
-            onClick={() => navigate("/login")}
-            className="rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-bg"
-          >
-            在构想工作台中打开
-          </button>
-        </header>
-
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {docLoading ? (
-            <div className="flex h-full items-center justify-center">
-              <Spinner size={20} />
-            </div>
-          ) : remoteDoc?.kind === "canvas" ? (
-            <PublicCanvas doc={remoteDoc} token={token!} embedCanEdit={embedCanEdit} />
-          ) : (
-            <div className="relative flex h-full min-h-0 flex-1 flex-col bg-gx-surface" ref={docAreaRef}>
-              <div className="min-h-0 flex-1 overflow-y-auto" data-outline-scroll>
-                <div className="mx-auto max-w-3xl px-6 py-6">
-                  <MarkdownEditor
-                    key={remoteDoc?.id}
-                    initialMarkdown={remoteDoc?.content ?? ""}
-                    readOnly
-                    publicToken={token}
-                    embedCanEdit={embedCanEdit}
-                  />
-                </div>
-              </div>
-              <DocOutline rootRef={docAreaRef} />
-            </div>
-          )}
-        </div>
-      </main>
-    </div>
-  );
-}
-
-// 画布公开查看：只读，没有保存按钮也没有保存通道（匿名写端点已下线）。
-function PublicCanvas({
-  doc,
-  token,
-  embedCanEdit,
-}: {
-  doc: { id: string; content: string; title: string; kind: string };
-  token: string;
-  /** 宿主分享档位：画布里嵌入的数据表预览按它决定只读/可编辑 */
-  embedCanEdit: boolean;
-}) {
-  const [content, setContent] = useState(doc.content);
-
-  useEffect(() => {
-    setContent(doc.content);
-  }, [doc.id, doc.content]);
-
-  return (
-    <div className="relative h-full">
-      <GxCanvas
-        docId={doc.id}
-        content={content}
-        canEdit={false}
-        publicToken={token}
-        embedCanEdit={embedCanEdit}
-        onContentChange={(json) => setContent(json)}
-      />
-    </div>
-  );
-}
-
-function TreeRow({
-  node,
-  depth,
-  activeId,
-  collapsed,
-  onToggle,
-  onOpen,
-}: {
-  node: TreeNode;
-  depth: number;
-  activeId?: string;
-  collapsed: Set<string>;
-  onToggle: (id: string) => void;
-  onOpen: (id: string) => void;
-}) {
-  const hasChildren = node.children.length > 0;
-  const isCollapsed = collapsed.has(node.id);
-  const active = activeId === node.id;
-  return (
-    <div>
-      <div
-        className={`group flex h-8 cursor-pointer items-center gap-1 pr-2 ${active ? "bg-gx-accent-bg" : "hover:bg-gx-bg"}`}
-        style={{ paddingLeft: `${8 + depth * 16}px` }}
-        onClick={() => onOpen(node.id)}
-      >
-        <button
-          type="button"
-          className="flex h-4 w-4 shrink-0 items-center justify-center text-gx-text-hint"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (hasChildren) onToggle(node.id);
-          }}
-        >
-          {hasChildren ? (
-            <Icon name="chevronRight" size={12} className={isCollapsed ? "" : "rotate-90 transition-transform"} />
-          ) : null}
-        </button>
-        <DocKindIcon kind={node.kind} />
-        <span className={`min-w-0 flex-1 truncate text-gx-13 ${active ? "font-medium text-gx-accent" : "text-gx-text-secondary"}`}>
-          {node.title}
-        </span>
-      </div>
-      {hasChildren && !isCollapsed && (
-        <div>
-          {node.children.map((child) => (
-            <TreeRow
-              key={child.id}
-              node={child}
-              depth={depth + 1}
-              activeId={activeId}
-              collapsed={collapsed}
-              onToggle={onToggle}
-              onOpen={onOpen}
-            />
-          ))}
-        </div>
+      {docLoading ? (
+        <main className="flex min-w-0 flex-1 items-center justify-center">
+          <Spinner size={20} />
+        </main>
+      ) : remoteDoc ? (
+        <PublicDocView key={remoteDoc.id} doc={remoteDoc} token={token} embedCanEdit={embedCanEdit} />
+      ) : (
+        <main className="flex min-w-0 flex-1 items-center justify-center text-gx-13 text-gx-text-tertiary">
+          无法加载该内容
+        </main>
       )}
     </div>
   );

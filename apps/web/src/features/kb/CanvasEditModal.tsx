@@ -42,8 +42,8 @@ export function CanvasEditModal({
   const error = r.error;
   const modalRef = useRef<HTMLDivElement | null>(null);
   // 弹窗内嵌套画布的可编辑性：显式传入优先，否则按数据通道 r.canEdit。
-  // 公开分享一律只读——匿名写端点已下线，r.canEdit 也恒 false，
-  // 但这里再压一道：不依赖后端字段也能保证「分享页没有编辑态」。
+  // 公开分享下这些嵌套/弹窗入口仍按只读处理（分享页顶层的正文编辑见 PublicSharePage），
+  // 不再假设后端 canEdit 字段恒 false。
   const canEdit = publicToken ? false : (canEditProp ?? r.canEdit);
   // 统一保存作用域：无论焦点在弹窗画布内还是顶栏，Cmd/Ctrl+S 只保存本弹窗、不穿透背景画布
   useModalKeyboardGuard(modalRef, true, () => {

@@ -42,8 +42,8 @@ export interface CanvasEnhanceContextValue {
   /**
    * 画布【内嵌数据表预览】的写权限（与 canEdit 分开，因为两者来源不同）：
    *   - 登录态：不传 → 回落 canEdit（画布能编辑，嵌入的表就能编辑）
-   *   - 分享态：由宿主文档/画布的分享档位决定（mode==="edit" 才 true），
-   *     此时 canEdit 恒为 false（画布正文匿名写已关闭），嵌入的表却可能可写。
+   *   - 分享态：由宿主文档/画布的分享档位决定（mode==="edit" 才 true）；
+   *     正文能否写看 canEdit，嵌入表能否写看 mode，两者独立。
    */
   embedCanEdit?: boolean;
 }

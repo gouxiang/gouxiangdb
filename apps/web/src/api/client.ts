@@ -163,10 +163,22 @@ export class ApiError extends Error {
     /**
      * 后端统一错误体（apps/api/src/guards.ts errorResponse）：
      *   { error: string; code: string }，500 在 dev 下额外带 message。
-     * code 是稳定的机器可读枚举（BAD_REQUEST / NOT_FOUND / FORBIDDEN / INTERNAL …），
+     * code 是稳定的机器可读枚举（BAD_REQUEST / NOT_FOUND / FORBIDDEN / CONFLICT / INTERNAL …），
      * 调用方要按 code 分支而不是按 error 文案分支——文案会变，code 不会。
+     *
+     * 公开分享页正文保存的 409（code=CONFLICT）额外带 `content` + `updatedAt`：
+     * 库中最新正文与版本水位，供前端「就地刷新为最新」用（见 PublicApi.updateDocContent）。
      */
-    public body: { error?: string; code?: string; message?: string; details?: unknown },
+    public body: {
+      error?: string;
+      code?: string;
+      message?: string;
+      details?: unknown;
+      /** 409 冲突：库中最新正文（仅公开分享正文保存路径带）。 */
+      content?: string;
+      /** 409 冲突：库中最新 updatedAt（仅公开分享正文保存路径带），刷新后作为新 baseUpdatedAt。 */
+      updatedAt?: string;
+    },
     /** 429 时后端给的 Retry-After 秒数（缺省 undefined）；M6 PAT 等敏感端点据此提示退避。 */
     public retryAfter?: number,
   ) {
@@ -781,8 +793,9 @@ export interface KbShareStateDTO {
   shareAllowed?: boolean;
   /**
    * 本次访问实际生效的档位（GET 才回，后端 resolveDocShareCaps 现算）。
-   * 文档正文的匿名写仍关闭（publicDoc.ts 恒 canEdit:false），这个档位驱动的是
-   * 「文档中嵌入的数据表预览能不能写」。分享人被降权时 mode 回落 view 且 degraded=true。
+   * 是文档里「嵌入的数据表预览能不能写」的开关；文档正文能否写看同响应的 canEdit
+   * （两者都由同一档位算出来，但语义不同：正文可写的前提是分享人此刻仍有内容编辑权）。
+   * 分享人被降权时 mode 回落 view 且 degraded=true。
    */
   mode?: ShareMode;
   /** 创建时申请的档位（mode=edit 而 effective=view 时才看得出差别）。 */
@@ -933,8 +946,9 @@ async function publicFetch<T>(path: string, init?: RequestInit): Promise<T> {
 export const PublicApi = {
   /**
    * 分享根：内容 + 级联子树摘要。
-   * canEdit 恒 false（正文匿名写已下线）；真实档位看 mode / degraded ——
-   * 文档里嵌入的数据表预览按 mode 决定只读还是可编辑。
+   * canEdit 为真实值：可编辑档位且分享人此刻仍有内容编辑权时为 true，否则 false。
+   * mode / degraded 描述生效档位与降级情况；文档里嵌入的数据表预览按 mode 决定读写。
+   * 前端一律以 canEdit 为准决定正文是否可编辑（缺字段 / 出错时 fail-closed 按只读）。
    */
   getShare: (token: string) =>
     publicFetch<{
@@ -951,15 +965,35 @@ export const PublicApi = {
       doc: KbPublicDocDTO;
       tree: KbTreeItemDTO[];
     }>(`/api/public/s/${token}`),
-  /** 子树内某文档内容 */
+  /** 子树内某文档内容（canEdit 为真实值，同分享根口径） */
   getDoc: (token: string, docId: string) =>
     publicFetch<{ doc: KbPublicDocDTO; canEdit: boolean; shareRole: "viewer" | "editor" }>(
       `/api/public/s/${token}/doc/${docId}`,
     ),
-  /** 引用闭包内文档（画布 gxDocRef/gxLinkRef 指向的子树外文档，匿名只读） */
+  /** 引用闭包内文档（画布 gxDocRef/gxLinkRef 指向的子树外文档，匿名只读；canEdit 恒 false） */
   getRef: (token: string, docId: string) =>
     publicFetch<{ doc: KbPublicDocDTO; canEdit: boolean; shareRole: "viewer" | "editor" }>(
       `/api/public/s/${token}/ref/${docId}`,
+    ),
+
+  /**
+   * 保存正文（可编辑档位下的匿名写）。
+   * 乐观锁：必须带上「加载 / 上次成功保存」时拿到的 updatedAt 作为 baseUpdatedAt。
+   *   200 → { ok, updatedAt, canEdit, mode }，用返回的 updatedAt 作为新基线；
+   *   409 → body 带 code="CONFLICT" + 最新 content/updatedAt，**绝不覆盖他人改动**，
+   *         调用方应就地刷新为最新内容并提示用户重新编辑（不得自动重发）；
+   *   403 → 档位不足（分享人被降权后链接回落只读）；
+   *   400 → 缺 baseUpdatedAt。
+   * docId 走子树通道（/doc/），只对本次分享子树内文档有效。
+   */
+  updateDocContent: (
+    token: string,
+    docId: string,
+    data: { content: string; baseUpdatedAt: string },
+  ) =>
+    publicFetch<{ ok: true; updatedAt: string; canEdit: boolean; mode: ShareMode }>(
+      `/api/public/s/${token}/doc/${docId}/content`,
+      { method: "PUT", body: JSON.stringify(data) },
     ),
 
   // ---- 文档/画布中【嵌入的数据表预览】的分享态通道 ----
@@ -988,8 +1022,8 @@ export const PublicApi = {
       `/api/public/s/${token}/embed/${tableId}/records/${recordId}`,
       { method: "DELETE" },
     ),
-  // 匿名写已整体关闭：后端 public.ts 不再提供任何文档写端点（读接口的 canEdit 因此恒 false），
-  // 这里也不再保留 saveContent——留着就是「能打开编辑器但保存必失败」。
+  // 正文匿名写：仅「可编辑」档位 + 分享人此刻仍有内容编辑权时开放（读接口 canEdit 随之返回真实值）。
+  // 保存走上面的 updateDocContent（乐观锁 baseUpdatedAt）。
 };
 
 // ============ 可关联对象 / 嵌入数据表预览：重导出 ============

@@ -75,7 +75,7 @@ export interface EnhanceEmbedOpts {
    * 内嵌【数据表】预览的写权限（与 canEdit 分开，两者来源不同）：
    *   - 登录态：不传 → 由调用方按「宿主文档是否可编辑」传 !readOnly
    *   - 分享态：由宿主文档/画布的分享档位 mode 决定（mode==="edit" 才 true）；
-   *     此时 canEdit 仍可能是 false（正文匿名写已关闭），但嵌入的表可能可写。
+   *     正文能否写看宿主 canEdit，嵌入表能否写看 mode，两者独立。
    */
   embedCanEdit?: boolean;
 }
