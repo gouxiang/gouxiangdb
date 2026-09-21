@@ -29,15 +29,17 @@ async function dept(name: string, parentId?: string): Promise<string> {
 }
 
 describe("角色列表与系统角色锁定", () => {
-  it("列表系统角色固定序在前，仅 owner 持全部 ORG_ACTIONS", async () => {
+  it("列表系统角色固定序在前，超级管理员/管理员持全部 ORG_ACTIONS", async () => {
     const res = await h.app.request("/api/v1/org/roles", { headers: await h.auth("admin") });
     const list = await json<Array<{ id: string; systemKey: string | null; isSystem: boolean; actions: string[]; name: string }>>(res);
-    expect(list.slice(0, 5).map((r) => r.systemKey)).toEqual([
-      "owner", "creator", "editor", "commenter", "viewer",
+    // 三枚权限预设在前，其后为 M4 资源名锚点，最后是自定义角色。
+    expect(list.slice(0, 7).map((r) => r.systemKey)).toEqual([
+      "super_admin", "admin", "restricted", "creator", "editor", "commenter", "viewer",
     ]);
-    const owner = list.find((r) => r.systemKey === "owner")!;
-    // 派生自 ORG_ACTIONS（不写字面量）：再加动作位时此处自动跟随。
-    expect(owner.actions.sort()).toEqual([...ORG_ACTIONS].sort());
+    const all = [...ORG_ACTIONS].sort();
+    expect(list.find((r) => r.id === "role_owner")!.actions.sort()).toEqual(all);
+    expect(list.find((r) => r.id === "role_admin")!.actions.sort()).toEqual(all);
+    expect(list.find((r) => r.systemKey === "restricted")!.actions).toEqual([]);
     for (const k of ["creator", "editor", "commenter", "viewer"]) {
       // 四枚资源锚点系统角色没有任何管理动作，但迁移 20260920220000 给它们补了读基线
       // view_directory（原来登录即可读通讯录，不能因为加守卫让被授予它们的人突然失读）。
@@ -46,7 +48,7 @@ describe("角色列表与系统角色锁定", () => {
     }
   });
 
-  it("系统角色不可删（405）、不可改 name/actions（405），仅 description 可改", async () => {
+  it("immutable 角色不可删（405）、连 description 也不可改（405）", async () => {
     const del = await h.app.request("/api/v1/org/roles/role_viewer", {
       method: "DELETE", headers: await h.auth("admin"),
     });
@@ -59,13 +61,37 @@ describe("角色列表与系统角色锁定", () => {
     });
     expect(rename.status).toBe(405);
 
+    // 权限核心模型：immutable=1 的角色完全钉死，说明也不再开放——
+    // 否则「不可编辑」只挡住名字，实际口径仍是半开。
     const desc = await h.app.request("/api/v1/org/roles/role_viewer", {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...(await h.auth("admin")) },
       body: JSON.stringify({ description: "更新说明" }),
     });
-    expect(desc.status).toBe(200);
-    expect((await json<{ description: string }>(desc)).description).toBe("更新说明");
+    expect(desc.status).toBe(405);
+  });
+
+  it("管理员/受限成员是预置但 immutable=0：可改名（断言后还原，不破坏后续用例）", async () => {
+    const listed = await h.app.request("/api/v1/org/roles", { headers: await h.auth("admin") });
+    expect(listed.status).toBe(200);
+    const rows = (await json<Array<{ id: string; immutable: boolean }>>(listed));
+    expect(rows.find((r) => r.id === "role_owner")!.immutable).toBe(true);
+    expect(rows.find((r) => r.id === "role_admin")!.immutable).toBe(false);
+    expect(rows.find((r) => r.id === "role_restricted")!.immutable).toBe(false);
+
+    const rename = await h.app.request("/api/v1/org/roles/role_admin", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...(await h.auth("admin")) },
+      body: JSON.stringify({ name: "二级管理员" }),
+    });
+    expect(rename.status).toBe(200);
+    expect((await json<{ name: string }>(rename)).name).toBe("二级管理员");
+    // 还原（同一文件内用例共用一套库，不把预设行留在改名状态）。
+    await h.app.request("/api/v1/org/roles/role_admin", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...(await h.auth("admin")) },
+      body: JSON.stringify({ name: "管理员" }),
+    });
   });
 });
 

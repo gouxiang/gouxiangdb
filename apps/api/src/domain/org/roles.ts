@@ -26,35 +26,69 @@ export interface SystemRoleSpec {
   name: string;
   description: string;
   actions: OrgAction[];
+  /** 不可编辑 / 不可删除（roles.immutable）。 */
+  immutable: boolean;
 }
 
 /**
- * 五枚系统角色单一真源（应用侧）。permissions/名称与迁移链逐字一致：
- * 20260915090000_enterprise_org_ddl 播三动作，20260916100000_owner_manage_menu
- * 只增补到四动作，20260916130000_owner_manage_share 只增补到五动作，
- * 20260919110000_owner_create_library 只增补到六动作
- * （systemRolesMatchSeed 对拍测试跑在全量迁移后）。
- * owner actions 直接展开 ORG_ACTIONS 真源（不手维护本地字面量，加动作位时自动收窄）。
- * 仅 owner 持全部 manage_*，其余四枚为空（M4 资源角色命名锚点）。
+ * 系统角色单一真源（应用侧）。permissions/名称/immutable 与迁移链逐字一致：
+ * 20260915090000_enterprise_org_ddl 播三动作，20260916100000_owner_manage_menu 只增补到四动作，
+ * 20260916130000_owner_manage_share 只增补到五动作，20260919110000_owner_create_library 只增补到六动作，
+ * 20260920220000_org_directory_actions 补到十一枚，20260921010000_role_core_models 升十一枚中的
+ * role_owner 为「超级管理员」并新增「管理员」「受限成员」两枚预设（systemRolesMatchSeed 对拍测试
+ * 跑在全量迁移后）。
+ *
+ * 命名取舍：超级管理员的行 id 沿用 'role_owner'——既有 role_assignments / auth_policies 都以硬 id
+ * 指向它，改 id 等于让所有现存管理员在一次发布里失去全部角色。systemKey 与展示名已改为
+ * super_admin / 超级管理员，行 id 只是稳定的物理锚点（OWNER_ROLE_ID 保留为同义旧名，勿再新增引用）。
+ *
+ * owner / admin / restricted 的 actions 直接展开 ORG_ACTIONS 真源（不手维护本地字面量，
+ * 加动作位时自动收窄）；后四枚资源锚点角色仍为空数组。
  */
 export const SYSTEM_ROLES: readonly SystemRoleSpec[] = [
   {
     id: "role_owner",
-    systemKey: "owner",
-    name: "所有者",
-    description: "工作区所有者，承担组织管理面全部动作",
+    systemKey: "super_admin",
+    name: "超级管理员",
+    description: "系统最高权限角色：可见并管理全部库、可建库、可删库、可开关分享；本身不可编辑、不可删除",
     actions: [...ORG_ACTIONS],
+    immutable: true,
   },
-  { id: "role_creator", systemKey: "creator", name: "创建者", description: "M4 资源角色命名锚点，M2 无组织管理动作", actions: [] },
-  { id: "role_editor", systemKey: "editor", name: "编辑者", description: "M4 资源角色命名锚点，M2 无组织管理动作", actions: [] },
-  { id: "role_commenter", systemKey: "commenter", name: "评论者", description: "M4 资源角色命名锚点，M2 无组织管理动作", actions: [] },
-  { id: "role_viewer", systemKey: "viewer", name: "阅读者", description: "M4 资源角色命名锚点，M2 无组织管理动作", actions: [] },
+  {
+    id: "role_admin",
+    systemKey: "admin",
+    name: "管理员",
+    description: "系统预置：通讯录与建库能力同超级管理员，但不参与「最后一位超级管理员」保护，可被删除",
+    actions: [...ORG_ACTIONS],
+    immutable: false,
+  },
+  {
+    id: "role_restricted",
+    systemKey: "restricted",
+    name: "受限成员",
+    description: "系统预置：无通讯录权限、无任何库权限，仅可修改自己的个人信息；新建用户未指定角色时的默认值",
+    actions: [],
+    immutable: false,
+  },
+  { id: "role_creator", systemKey: "creator", name: "创建者", description: "M4 资源角色命名锚点，无组织管理动作", actions: [], immutable: true },
+  { id: "role_editor", systemKey: "editor", name: "编辑者", description: "M4 资源角色命名锚点，无组织管理动作", actions: [], immutable: true },
+  { id: "role_commenter", systemKey: "commenter", name: "评论者", description: "M4 资源角色命名锚点，无组织管理动作", actions: [], immutable: true },
+  { id: "role_viewer", systemKey: "viewer", name: "阅读者", description: "M4 资源角色命名锚点，无组织管理动作", actions: [], immutable: true },
 ];
 
 export const SYSTEM_ROLE_BY_ID = new Map(SYSTEM_ROLES.map((r) => [r.id, r]));
 
-/** owner 系统角色 id 锚点（写后守卫等处复用，避免散落裸字符串 "role_owner"）。 */
-export const OWNER_ROLE_ID = SYSTEM_ROLES[0].id;
+/**
+ * 角色 id 锚点三连。OWNER_ROLE_ID 是超级管理员的旧名（等于 SUPER_ADMIN_ROLE_ID），
+ * 保留仅为不改动既有调用点；新代码一律用 SUPER_ADMIN_ROLE_ID。
+ */
+export const SUPER_ADMIN_ROLE_ID = "role_owner";
+export const ADMIN_ROLE_ID = "role_admin";
+export const RESTRICTED_ROLE_ID = "role_restricted";
+export const OWNER_ROLE_ID = SUPER_ADMIN_ROLE_ID;
+
+/** 角色列表固定序：三枚权限预设在前，其后为 M4 资源名锚点，最后是自定义角色。 */
+export const SYSTEM_ROLE_ID_ORDER: readonly string[] = SYSTEM_ROLES.map((r) => r.id);
 
 export function isSystemRoleId(id: string): boolean {
   return SYSTEM_ROLE_BY_ID.has(id);

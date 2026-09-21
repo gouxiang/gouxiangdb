@@ -5,9 +5,9 @@
 // 插入 3 个仅带原始列的存量用户与 base/kb 业务数据；随后用真实 22 迁移 schema 再 deploy，
 // 断言：
 //   - 组织/nav/manage_menu/authz 回填/scope creator 索引/manage_share 八迁移落表 applied；存量 users 全 ACTIVE/ws_default/tv0；
-//   - owner 自举恰好一行（createdAt 最早者，createdBy=system-bootstrap）；
-//   - ws_default/五系统角色就位（owner 持六枚组织动作含 create_library）；存量 members/kb 行无损；
-//   - 再跑一次 deploy 幂等：26 行 applied、无新增 owner。
+//   - 超级管理员自举恰好一行（createdAt 最早者，createdBy=system-bootstrap）；
+//   - ws_default/七系统角色就位（超级管理员持全部组织动作）；存量 members/kb 行无损；
+//   - 再跑一次 deploy 幂等：28 行 applied、无新增超级管理员。
 // 注：迁移总数 12 -> 14（M2 组织）-> 16（M3 nav）-> 17（M3-S6 manage_menu）
 //     -> 18（M4-S2 authz_policies_backfill）-> 19（M4-S4 createdBy 四索引）
 //     -> 20（M4-S5 owner manage_share 补位）-> 21/22（M5-S1 outbox DDL/活实体播种）
@@ -53,7 +53,7 @@ beforeAll(() => {
   fs.mkdirSync(path.join(tmpRoot, "migrations"));
   fs.copyFileSync(path.resolve("prisma/schema.prisma"), path.join(tmpRoot, "schema.prisma"));
   const dirs = migDirs();
-  expect(dirs.length).toBe(26); // M6 起 22 -> 23（PAT/mcp_idempotency 两表），首次部署管理员初始化 +1，实体 icon/iconColor DDL +1，owner create_library 补位 +1
+  expect(dirs.length).toBe(28); // M6 起 22 -> 23（PAT/mcp_idempotency 两表），首次部署管理员初始化 +1，实体 icon/iconColor DDL +1，owner create_library 补位 +1，通讯录五件套 +1，权限核心模型角色升级 +1
   for (const name of dirs.slice(0, PRE_ORG_COUNT)) {
     fs.cpSync(path.resolve("prisma/migrations", name), path.join(tmpRoot, "migrations", name), { recursive: true });
   }
@@ -90,7 +90,7 @@ afterAll(() => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-describe("旧库（前 12 迁移）升级到 26 迁移", () => {
+describe("旧库（前 12 迁移）升级到 28 迁移", () => {
   it("组织/nav/manage_menu/authz 回填/scope 索引/manage_share/outbox DDL+播种 十迁移 applied，存量用户回填 ACTIVE/ws_default/tv0，owner 自举恰好一行", () => {
     // 真实 schema（26 迁移）对旧库 deploy：补两条组织 + 两条 nav + manage_menu + authz 回填 + scope 索引 + manage_share + M5-S1 outbox DDL/播种 + 实体 icon DDL + owner create_library。
     expect(() => deploy(path.resolve("prisma/schema.prisma"))).not.toThrow();
@@ -99,7 +99,7 @@ describe("旧库（前 12 迁移）升级到 26 迁移", () => {
     const applied = db.prepare(
       "SELECT migration_name FROM _prisma_migrations WHERE rolled_back_at IS NULL ORDER BY finished_at",
     ).all() as Array<{ migration_name: string }>;
-    expect(applied).toHaveLength(26);
+    expect(applied).toHaveLength(28);
     expect(applied.map((r) => r.migration_name)).toContain("20260915090000_enterprise_org_ddl");
     expect(applied.map((r) => r.migration_name)).toContain("20260915090100_enterprise_org_backfill");
     expect(applied.map((r) => r.migration_name)).toContain("20260916100000_owner_manage_menu");
@@ -140,12 +140,12 @@ describe("旧库（前 12 迁移）升级到 26 迁移", () => {
     const ws = db.prepare("SELECT id FROM workspaces").all() as Array<{ id: string }>;
     expect(ws.map((w) => w.id)).toEqual(["ws_default"]);
     const roleCount = db.prepare("SELECT count(*) n FROM roles WHERE isSystem=1").get() as { n: number };
-    expect(roleCount.n).toBe(5);
+    expect(roleCount.n).toBe(7);
 
-    // 升级链上 owner 从三动作经迁移 19/20 补到五动作，再经 M6 的 owner_create_library 补到六动作，串逐字同序无空格。
+    // 升级链上超级管理员（行 id role_owner）从三动作一路补到十八动作，串逐字同序无空格。
     const ownerPerms = db.prepare("SELECT permissions FROM roles WHERE id='role_owner'").get() as { permissions: string };
     expect(ownerPerms.permissions).toBe(
-      '["manage_departments","manage_members","manage_roles","manage_menu","manage_share","create_library"]',
+      '["manage_departments","manage_members","manage_roles","manage_menu","manage_share","create_library","view_directory","invite_users","create_users","disable_users","delete_users","create_roles","edit_roles","delete_roles","assign_role_members","create_departments","edit_departments","delete_departments"]',
     );
 
     // 存量业务数据无损
@@ -154,14 +154,14 @@ describe("旧库（前 12 迁移）升级到 26 迁移", () => {
     expect((db.prepare("SELECT count(*) n FROM kb_members").get() as { n: number }).n).toBe(1);
   });
 
-  it("再 deploy 一次幂等：仍 26 applied，owner 六动作串不变且只一行，legacy 投影不重复增长", async () => {
+  it("再 deploy 一次幂等：仍 28 applied，owner 六动作串不变且只一行，legacy 投影不重复增长", async () => {
     expect(() => deploy(path.resolve("prisma/schema.prisma"))).not.toThrow();
     const n = (db.prepare("SELECT count(*) n FROM _prisma_migrations").get() as { n: number }).n;
-    expect(n).toBe(26);
-    // owner create_library 迁移（M6）幂等：owner 仍恰为六动作串，连跑不被改写。
+    expect(n).toBe(28);
+    // 权限核心模型迁移幂等：超级管理员仍恰为全动作串，连跑不被改写/不重复追加。
     const ownerPerms = db.prepare("SELECT permissions FROM roles WHERE id='role_owner'").get() as { permissions: string };
     expect(ownerPerms.permissions).toBe(
-      '["manage_departments","manage_members","manage_roles","manage_menu","manage_share","create_library"]',
+      '["manage_departments","manage_members","manage_roles","manage_menu","manage_share","create_library","view_directory","invite_users","create_users","disable_users","delete_users","create_roles","edit_roles","delete_roles","assign_role_members","create_departments","edit_departments","delete_departments"]',
     );
     const owners = (db.prepare(
       "SELECT count(*) n FROM role_assignments WHERE roleId='role_owner' AND subjectType='user'",

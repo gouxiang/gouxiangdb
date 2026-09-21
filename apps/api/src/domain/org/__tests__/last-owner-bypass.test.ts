@@ -97,7 +97,7 @@ async function expectConflict409(p: Promise<unknown>): Promise<{ status: number;
   expect(err).not.toBeNull();
   const httpErr = err as HttpError;
   expect(httpErr.status).toBe(409);
-  expect(httpErr.message).toContain("至少保留一位工作区所有者");
+  expect(httpErr.message).toContain("至少保留一位超级管理员");
   return httpErr;
 }
 

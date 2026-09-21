@@ -14,7 +14,9 @@ export const roles = new Hono();
 roles.get("/", requireOrgAction("view_directory"), async (c) => c.json(await roleAdmin.listRoles()));
 
 // POST /org/roles {name,description?,actions?} -> 201（动作白名单在 service 校验，非法 400）
-roles.post("/", requireOrgAction("manage_roles"), async (c) => {
+// 201：新建角色。旧门锁是 manage_roles 一枚；拆分后一律走 create_roles，
+// 以便"能改角色但不能建角色"这类口径可表达。
+roles.post("/", requireOrgAction("create_roles"), async (c) => {
   const body = await c.req.json().catch(() => null);
   if (!body || typeof body !== "object") {
     return c.json({ error: "请求体必须是 JSON 对象", code: "BAD_REQUEST" }, 400);
@@ -30,7 +32,7 @@ roles.post("/", requireOrgAction("manage_roles"), async (c) => {
 });
 
 // PATCH /org/roles/:id（系统角色仅 description）
-roles.patch("/:id", requireOrgAction("manage_roles"), async (c) => {
+roles.patch("/:id", requireOrgAction("edit_roles"), async (c) => {
   const id = c.req.param("id");
   if (!id) return c.json({ error: "缺少角色 id", code: "BAD_REQUEST" }, 400);
   const body = await c.req.json().catch(() => null);
@@ -41,7 +43,7 @@ roles.patch("/:id", requireOrgAction("manage_roles"), async (c) => {
 });
 
 // DELETE /org/roles/:id?reassignTo=roleId（有悬挂授予 -> 409 带数）
-roles.delete("/:id", requireOrgAction("manage_roles"), async (c) => {
+roles.delete("/:id", requireOrgAction("delete_roles"), async (c) => {
   const id = c.req.param("id");
   if (!id) return c.json({ error: "缺少角色 id", code: "BAD_REQUEST" }, 400);
   const reassignTo = c.req.query("reassignTo");
@@ -65,7 +67,7 @@ roles.get("/:id/assignments", requireOrgAction("view_directory"), async (c) => {
 });
 
 // PUT /org/roles/:id/assignments {subjects:[{subjectType,subjectId}]} 批量 diff 替换
-roles.put("/:id/assignments", requireOrgAction("manage_roles"), async (c) => {
+roles.put("/:id/assignments", requireOrgAction("assign_role_members"), async (c) => {
   const id = c.req.param("id");
   if (!id) return c.json({ error: "缺少角色 id", code: "BAD_REQUEST" }, 400);
   const body = await c.req.json().catch(() => null);

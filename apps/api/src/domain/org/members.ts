@@ -13,6 +13,7 @@ import { withWriteTx, type DbTx } from "../../db.js";
 import { getDefaultWorkspaceId } from "./workspace.js";
 import { USER_STATUS } from "./authState.js";
 import { assertWorkspaceHasOwnerTx } from "./lifecycle.js";
+import { RESTRICTED_ROLE_ID, SUPER_ADMIN_ROLE_ID } from "./roles.js";
 
 // 只读 DTO/查询从 memberDirectory 再导出，调用方可只从 members 一处导入。
 export type {
@@ -129,6 +130,30 @@ export function newInviteToken(): { plain: string; hash: string } {
   return { plain, hash };
 }
 
+/**
+ * 新账号的默认角色：受限成员。
+ * 产品口径「新建用户未指定角色时的默认角色 = 受限成员」——不授予等于留一个权限来源不明的
+ * 账号：它在通讯录里看不出少了什么，进库时又按"没有任何角色"处理。
+ * 容错：角色可能被超级管理员删掉（管理员/受限成员是 immutable=0 的预置），删了就跳过，
+ * 不因为兜底逻辑把建号流程整个搞挂——此时该账号仍是一枚零权限账号，语义一致。
+ */
+export async function grantDefaultRoleTx(tx: DbTx, userId: string): Promise<void> {
+  const exists = await tx.role.findFirst({
+    where: { id: RESTRICTED_ROLE_ID, deletedAt: null },
+    select: { id: true },
+  });
+  if (!exists) return;
+  await tx.roleAssignment.create({
+    data: {
+      roleId: RESTRICTED_ROLE_ID,
+      subjectType: "user",
+      subjectId: userId,
+      scopeType: "workspace",
+      createdBy: "system-default-role",
+    },
+  });
+}
+
 export interface InvitedUserResult {
   userId: string;
   email: string;
@@ -169,6 +194,7 @@ export async function createInvitedUser(input: {
         invitedAt: new Date(),
       },
     });
+    await grantDefaultRoleTx(tx, user.id);
     return { userId: user.id, email: user.email, status: user.status, inviteToken: plain };
   });
 }
@@ -200,28 +226,32 @@ export async function createActiveUser(input: {
     const user = await tx.user.create({
       data: { email, displayName, passwordHash, status: USER_STATUS.ACTIVE, workspaceId },
     });
+    await grantDefaultRoleTx(tx, user.id);
     return { userId: user.id, email: user.email, status: user.status };
   });
 }
 
 /**
- * 供 signup 运行时 owner 自举（计划 §5-D.4）：仅当该用户是工作区唯一用户、且尚不存在任何
- * user 级 owner 授予时，授予系统 owner。幂等（重复调用不产生第二行）。返回是否授予。
+ * signup 运行时超级管理员自举（计划 §5-D.4）：仅当该用户是工作区唯一用户、且尚不存在任何
+ * user 级超级管理员授予时，授予超级管理员角色。幂等（重复调用不产生第二行）。返回是否授予。
  * 事务内只用 tx（workspaceId 由调用方传入，不在此触全局 prisma）。
+ *
+ * 未命中自举分支的用户由调用方走 grantDefaultRoleTx 落受限成员——首位之后的注册者不应
+ * 意外拿到管理权，也不应变成一个没有角色、权限来源不明的账号。
  */
 export async function bootstrapFirstOwnerTx(
   tx: DbTx,
   userId: string,
   workspaceId: string,
 ): Promise<boolean> {
-  const [userCount, ownerCount] = await Promise.all([
+  const [userCount, headCount] = await Promise.all([
     tx.user.count({ where: { workspaceId } }),
-    tx.roleAssignment.count({ where: { roleId: "role_owner", subjectType: "user" } }),
+    tx.roleAssignment.count({ where: { roleId: SUPER_ADMIN_ROLE_ID, subjectType: "user" } }),
   ]);
-  if (userCount === 1 && ownerCount === 0) {
+  if (userCount === 1 && headCount === 0) {
     await tx.roleAssignment.create({
       data: {
-        roleId: "role_owner",
+        roleId: SUPER_ADMIN_ROLE_ID,
         subjectType: "user",
         subjectId: userId,
         scopeType: "workspace",

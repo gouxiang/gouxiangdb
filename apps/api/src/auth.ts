@@ -9,7 +9,7 @@ import { audit as recordAudit } from "./audit/emit.js";
 import { issueToken, resolveActiveAuth, invalidateAuthState, USER_STATUS } from "./domain/org/authState.js";
 import { publicUser } from "./domain/userProjection.js";
 import { withWriteTx } from "./db.js";
-import { bootstrapFirstOwnerTx } from "./domain/org/members.js";
+import { bootstrapFirstOwnerTx, grantDefaultRoleTx } from "./domain/org/members.js";
 import { DEFAULT_WORKSPACE_ID } from "./domain/org/workspace.js";
 import { config } from "./config.js";
 import { publicSignupOpen } from "./configSignup.js";
@@ -67,7 +67,9 @@ auth.post("/signup", async (c) => {
       const created = await tx.user.create({
         data: { email, displayName, passwordHash, workspaceId: DEFAULT_WORKSPACE_ID },
       });
-      await bootstrapFirstOwnerTx(tx, created.id, DEFAULT_WORKSPACE_ID);
+      const bootstrapped = await bootstrapFirstOwnerTx(tx, created.id, DEFAULT_WORKSPACE_ID);
+      // 非首位注册者：落受限成员，不留"无任何角色"的账号（权限只从角色来）。
+      if (!bootstrapped) await grantDefaultRoleTx(tx, created.id);
       return created;
     });
     const token = await issueToken(user.id, user.tokenVersion);

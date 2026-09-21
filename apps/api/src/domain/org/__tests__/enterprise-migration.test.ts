@@ -2,7 +2,8 @@
 //
 // 覆盖：
 //  - 迁移目录数 12 -> 14；两条新迁移都被记录为 applied；
-//  - ws_default 幂等单播；五枚系统角色（owner 随迁移链持六枚组织动作含 create_library，余 permissions=[]）；
+//  - ws_default 幂等单播；七枚系统角色（超级管理员/管理员持全十八枚组织动作，
+//    受限成员与四枚资源锚点 permissions=[]）；
 //  - 空库 backfill 不产生 owner 自举；新 users 列默认 status=ACTIVE/tv0/workspaceId=NULL；
 //  - 手动重放 backfill：全部用户置 ACTIVE/ws_default/0、最早用户恰好获一枚 owner 授予；
 //    再重放两次仍只一枚（幂等可重入）；
@@ -79,17 +80,39 @@ describe("系统种子（幂等单播）", () => {
     expect(ws).toEqual([{ id: "ws_default", name: "默认工作区", policyVersion: 0 }]);
   });
 
-  it("五枚系统角色，仅 owner 持六枚组织动作，其余 permissions=[]", () => {
-    const ORDER: Record<string, number> = { owner: 0, creator: 1, editor: 2, commenter: 3, viewer: 4 };
-    const roles = (db.prepare("SELECT systemKey, isSystem, permissions FROM roles").all() as
-      Array<{ systemKey: string; isSystem: number; permissions: string }>)
+  it("七枚系统角色：超级管理员/管理员持全十八枚组织动作，受限成员与四枚资源锚点 permissions=[]", () => {
+    const ORDER: Record<string, number> = {
+      super_admin: 0, admin: 1, restricted: 2, creator: 3, editor: 4, commenter: 5, viewer: 6,
+    };
+    const roles = (db.prepare("SELECT systemKey, isSystem, immutable, permissions FROM roles").all() as
+      Array<{ systemKey: string; isSystem: number; immutable: number; permissions: string }>)
       .sort((a, b) => ORDER[a.systemKey] - ORDER[b.systemKey]);
-    expect(roles.map((r) => r.systemKey)).toEqual(["owner", "creator", "editor", "commenter", "viewer"]);
+    expect(roles.map((r) => r.systemKey)).toEqual([
+      "super_admin", "admin", "restricted", "creator", "editor", "commenter", "viewer",
+    ]);
     expect(roles.every((r) => r.isSystem === 1)).toBe(true);
+    // 只有超级管理员与四枚历史资源锚点不可变更；管理员/受限成员是预置但可删可改的角色。
+    const immutableByKey = Object.fromEntries(roles.map((r) => [r.systemKey, r.immutable]));
+    expect(immutableByKey.super_admin).toBe(1);
+    expect(immutableByKey.admin).toBe(0);
+    expect(immutableByKey.restricted).toBe(0);
     const byKey = Object.fromEntries(roles.map((r) => [r.systemKey, JSON.parse(r.permissions) as string[]]));
-    // owner 六枚（M6 追加 create_library），注意与左侧同为 sort() 后的字典序。
-    expect(byKey.owner.sort()).toEqual(["create_library", "manage_departments", "manage_members", "manage_menu", "manage_roles", "manage_share"]);
-    for (const k of ["creator", "editor", "commenter", "viewer"]) expect(byKey[k]).toEqual([]);
+    // 超级管理员与管理员同权：动作集等于 ORG_ACTIONS 全集的字典序。
+    const all = [
+      "assign_role_members", "create_departments", "create_library", "create_roles", "create_users",
+      "delete_departments", "delete_roles", "delete_users", "disable_users", "edit_departments",
+      "edit_roles", "invite_users", "manage_departments", "manage_members", "manage_menu",
+      "manage_roles", "manage_share", "view_directory",
+    ];
+    expect(byKey.super_admin.sort()).toEqual(all);
+    expect(byKey.admin.sort()).toEqual(all);
+    // 受限成员零动作；四枚历史资源锚点被更早的迁移 20260920220000 补过一枚读基线
+    // view_directory（保既有可读性），故只锁"除该基线外为空"。
+    expect(byKey.restricted).toEqual([]);
+    for (const k of ["creator", "editor", "commenter", "viewer"]) {
+      expect(byKey[k].filter((a: string) => a !== "view_directory"), `${k} 不应持组织动作`).toEqual([]);
+      expect(byKey[k]).toContain("view_directory");
+    }
   });
 
   it("空库 backfill 不产生 owner 自举", () => {

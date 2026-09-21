@@ -117,7 +117,11 @@ describe("AC-M2-1 对抗 1-4：6 层部门 + 双兼岗 + 部门授予并集与�
 
     const roles = await effRoles(ownerToken, u.id);
     const byId = new Map(roles.map((x) => [x.roleId as string, x] as const));
-    expect([...byId.keys()].sort()).toEqual([qId, rId, "role_viewer"].sort());
+    // 第四个是受限成员：账号经 POST /org/members 落成，按「新建用户未指定角色时的默认角色
+    // = 受限成员」自动获得。它零动作，不参与下列任何并集，但必须在列表里——否则
+    // 有效角色与"这个人为什么什么都不能做"对不上账。
+    expect([...byId.keys()].sort()).toEqual([qId, rId, "role_restricted", "role_viewer"].sort());
+    expect(byId.get("role_restricted")!.actions).toEqual([]);
 
     const r = byId.get(rId)!;
     expect(r.actions).toEqual(["manage_members"]);

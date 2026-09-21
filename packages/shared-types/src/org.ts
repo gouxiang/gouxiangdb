@@ -14,8 +14,8 @@
 //     是写动作：写动作不含读，需要「只看不改」时必须单独勾 view_directory。
 //   - 资源动作 r/c/u/d/comment/manage_share（资源空间，见 authz.ts RESOURCE_ACTIONS）一律不与
 //     本 OrgAction 混用：组织空间的 manage_share 是独立第五枚，二者同名不同命名空间。
-//   - create_library 是能力门而非管理面动作：持有它才允许新建 Base / 知识库。默认仅
-//     role_owner 持全部动作，其余角色由管理员在后台勾选授予（按角色，不按人）。
+//   - 权限核心模型重构（本次，迁移 20260921010000）：追加 role_manage 三枚、部门三枚、
+//     角色成员授予一枚，共十八枚。通讯录勾选面板的可勾项见下方 ORG_DIRECTORY_ACTIONS。
 //   - 成功响应沿用现网：资源本体 / 分页对象 {items,total,page,limit,hasMore}；错误 {error,code}。
 
 /**
@@ -33,7 +33,14 @@ export type OrgAction =
   | "invite_users"
   | "create_users"
   | "disable_users"
-  | "delete_users";
+  | "delete_users"
+  | "create_roles"
+  | "edit_roles"
+  | "delete_roles"
+  | "assign_role_members"
+  | "create_departments"
+  | "edit_departments"
+  | "delete_departments";
 
 export const ORG_ACTIONS: readonly OrgAction[] = [
   "manage_departments",
@@ -47,13 +54,62 @@ export const ORG_ACTIONS: readonly OrgAction[] = [
   "create_users",
   "disable_users",
   "delete_users",
+  "create_roles",
+  "edit_roles",
+  "delete_roles",
+  "assign_role_members",
+  "create_departments",
+  "edit_departments",
+  "delete_departments",
 ];
 
-/** 五枚系统组织角色 key（自定义角色 systemKey=null）。 */
-export type SystemRoleKey = "owner" | "creator" | "editor" | "commenter" | "viewer";
+/**
+ * 通讯录（组织）勾选面板的可勾动词 —— 产品口径的十二枚。
+ * 刻意不含 create_library（属"库权限"面板）与四枚历史粗粒度位
+ * （manage_departments/manage_members/manage_roles/manage_menu/manage_share）：
+ * 前三枚已被拆成上面的细粒度动词，拆细后不再新增授予它们；保留在 ORG_ACTIONS 里只是为了让
+ * 历史 permissions 串不至于失效（一枚冗余位 >> 一次无声的能力收回）。
+ * 前端渲染勾选面板与后端录入校验共用这一个真源，避免"面板能勾但后端不认"。
+ */
+export const ORG_DIRECTORY_ACTIONS: readonly OrgAction[] = [
+  "view_directory",
+  "invite_users",
+  "create_users",
+  "disable_users",
+  "delete_users",
+  "create_roles",
+  "edit_roles",
+  "delete_roles",
+  "assign_role_members",
+  "create_departments",
+  "edit_departments",
+  "delete_departments",
+];
 
-/** 系统角色固定展示顺序（owner 在前，其余按创建者/编辑者/评论者/阅读者）。 */
+/**
+ * 系统预设角色 key。
+ * 三枚「权限核心模型」预设在前（超级管理员 / 管理员 / 受限成员），后五枚是 M4 资源授权
+ * 引擎的角色名锚点（owner/creator/editor/commenter/viewer），二者同表但语义不同：
+ *   - super_admin / admin / restricted 决定一个人在【通讯录 + 库】里能做什么；
+ *   - 后五枚是资源策略（auth_policies）的合法主体名，本次不动。
+ * 'owner' 仍留在联合类型里：它曾是超级管理员行的旧 systemKey（迁移 20260921010000
+ * 起改为 super_admin），保留该字面量只为编译期兼容，运行期不再产出。
+ */
+export type SystemRoleKey =
+  | "super_admin"
+  | "admin"
+  | "restricted"
+  | "owner"
+  | "creator"
+  | "editor"
+  | "commenter"
+  | "viewer";
+
+/** 系统角色固定展示顺序：三枚权限预设在前，其后为资源名锚点。 */
 export const SYSTEM_ROLE_ORDER: readonly SystemRoleKey[] = [
+  "super_admin",
+  "admin",
+  "restricted",
   "owner",
   "creator",
   "editor",
@@ -91,6 +147,13 @@ export interface OrgRoleDTO {
   name: string;
   description: string;
   isSystem: boolean;
+  /**
+   * 不可编辑 / 不可删除标记（roles.immutable）。
+   * 与 isSystem 分离：isSystem=1 只表示「系统内置、行由迁移种子拥有」，
+   * immutable=1 才表示「连名称与说明都不许改、不许删」。
+   * 三枚预设里只有超级管理员 immutable=1；管理员与受限成员可被超级管理员编辑/删除。
+   */
+  immutable: boolean;
   actions: OrgAction[];
   createdAt: string;
   deletedAt: string | null;

@@ -93,20 +93,24 @@ function counted(client: PrismaClient) {
 }
 
 describe("系统角色常量与迁移种子对拍", () => {
-  // 20260920220000_org_directory_actions 给「不含 manage_members」的角色补了读权限基线
-  // view_directory——迁移动机是切到 view_directory 守卫后，原本今天能读通讯录的人不能突然
-  // 读不到。这条基线是**迁移写进数据库列的**，不在 SYSTEM_ROLES 常量里：
-  //   常量 SYSTEM_ROLES.actions 回答「这类系统角色有没有组织管理权」（非 owner 四枚恒空，
-  //   create-library-guard.test.ts 有一条不变量锁着，不许给）；
-  //   数据库 roles.permissions 是运行期唯一读取源，含这条迁移补出来的读基线。
-  // 故对拍时两边都剔除读基线再比管理动作，基线本身另有一条断言单独锁住。
-  const READ_BASELINE = "view_directory";
-  const withoutBaseline = (actions: readonly string[]) =>
-    actions.filter((a) => a !== READ_BASELINE).sort();
+  // 权限核心模型重构后，SYSTEM_ROLES.actions 就是数据库列的期望值本身：
+  // 不再有「迁移补出来的读基线不在常量里」的例外——三枚权限预设的动作集全部由
+  // ORG_ACTIONS 派生（超级管理员/管理员）或显式空（受限成员），旧的四枚资源名锚点恒空。
+  // 由此对拍恢复为逐字严格相等，任何一侧加动作都必须在另一侧同步，否则红灯。
 
-  it("五枚系统角色 id/key/name/isSystem/管理动作逐字一致，且都持有迁移补的读基线", async () => {
+  // 例外：四枚历史资源名锚点（creator/editor/commenter/viewer）被更早的迁移
+  // 20260920220000 补过一枚读基线 view_directory（动机：切到 view_directory 守卫后不让原本
+  // 能读通讯录的人突然读不到）。这条基线写在数据库列里、不在常量中，故这四枚对拍时剔除它。
+  // 三枚权限预设不受此影响：它们的动作集由 ORG_ACTIONS 派生或显式空，必须逐字严格相等。
+  const ANCHOR_IDS = new Set(["role_creator", "role_editor", "role_commenter", "role_viewer"]);
+  const expectedActions = (spec: { id: string; actions: readonly string[] }) =>
+    ANCHOR_IDS.has(spec.id) ? spec.actions.filter((a) => a !== "view_directory") : [...spec.actions];
+  const actualActions = (id: string, row: string) =>
+    ANCHOR_IDS.has(id) ? (JSON.parse(row) as string[]).filter((a) => a !== "view_directory") : JSON.parse(row) as string[];
+
+  it("七枚系统角色 id/key/name/isSystem/immutable/动作集逐字一致", async () => {
     const rows = await prisma.role.findMany({ where: { workspaceId: "ws_default" } });
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(SYSTEM_ROLES.length);
     const byId = new Map(rows.map((r) => [r.id, r]));
     for (const spec of SYSTEM_ROLES) {
       const row = byId.get(spec.id);
@@ -114,18 +118,20 @@ describe("系统角色常量与迁移种子对拍", () => {
       expect(row!.systemKey).toBe(spec.systemKey);
       expect(row!.name).toBe(spec.name);
       expect(row!.isSystem).toBe(1);
+      // immutable 必须与常量一致：它是「能不能被编辑/删除」的唯一判据，
+      // 常量与列不同步会让"超级管理员可被改名"或"管理员删不掉"这类事故静默发生。
+      expect(row!.immutable, `${spec.id} immutable 与常量不一致`).toBe(spec.immutable ? 1 : 0);
       const rowActions = JSON.parse(row!.permissions) as string[];
-      // 管理动作必须与常量逐字一致——含「非 owner 四枚一枚管理动作都不给」这条不变量。
-      expect(withoutBaseline(rowActions)).toEqual(withoutBaseline(spec.actions));
-      // 迁移补的读基线：五枚系统角色都应拿到。缺了它，被授予这些角色的成员会在
-      // view_directory 守卫上线后失读，而退回前今天是人人可读的。
-      expect(rowActions, `${spec.id} 缺迁移补的 ${READ_BASELINE}`).toContain(READ_BASELINE);
+      expect(actualActions(spec.id, row!.permissions)).toEqual(expectedActions(spec));
       // 追加式迁移不能写出重复项（json_insert 无去重能力）。
       expect(new Set(rowActions).size).toBe(rowActions.length);
     }
-    const owner = byId.get("role_owner")!;
-    // 派生自 ORG_ACTIONS（不写字面量）：再加动作位时此处自动跟随，无需手改。
-    expect(JSON.parse(owner.permissions).sort()).toEqual([...ORG_ACTIONS].sort());
+    // 超级管理员全动作；管理员与其同权；受限成员零动作。
+    const superAdmin = byId.get("role_owner")!;
+    expect(JSON.parse(superAdmin.permissions).sort()).toEqual([...ORG_ACTIONS].sort());
+    const admin = byId.get("role_admin")!;
+    expect(JSON.parse(admin.permissions).sort()).toEqual([...ORG_ACTIONS].sort());
+    expect(JSON.parse(byId.get("role_restricted")!.permissions)).toEqual([]);
   });
 });
 

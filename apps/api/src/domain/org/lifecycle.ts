@@ -8,7 +8,7 @@ import bcrypt from "bcryptjs";
 import { HttpError } from "../../guards.js";
 import { withWriteTx, type DbTx } from "../../db.js";
 import { USER_STATUS, issueToken, invalidateAuthState } from "./authState.js";
-import { usersWithRole, OWNER_ROLE_ID } from "./roles.js";
+import { usersWithRole, SUPER_ADMIN_ROLE_ID } from "./roles.js";
 
 /** 激活码明文 -> sha256 摘要（与建邀请时同一算法）。 */
 export function hashInviteToken(plain: string): string {
@@ -78,29 +78,30 @@ export async function acceptInvite(input: {
 // ---------------------------------------------------------------------------
 
 /**
- * 最后 owner 保护（必须把部门继承授予展开计入，计划 §5-D.4 / §11-15）。
- * owners 经 usersWithRole 反查：user 直接持 role_owner ∪ 被授 role_owner 部门【子树】内的
- * ACTIVE 成员。若目标当前是在岗 owner 且停用后 owner 集合为空 -> 409。
+ * 最后一位超级管理员保护（旧的「最后 owner 保护」，语义不变：role_owner 升格为
+ * 超级管理员后仍是同一行、同一个 id）。
+ * userIds 经 usersWithRole 反查：直接持超级管理员 ∪ 被授超级管理员部门【子树】内的
+ * ACTIVE 成员。若目标当前是在岗超级管理员且停用后该集合为空 -> 409。
  * 事务内执行，复用同一事务视图，避免"检查-写入"间隙被绕过。
  */
 export async function assertNotLastOwnerTx(tx: DbTx, targetId: string): Promise<void> {
-  const owners = await usersWithRole(OWNER_ROLE_ID, tx);
-  if (owners.includes(targetId) && owners.length <= 1) {
-    throw new HttpError(409, "至少保留一位工作区所有者，请先移交所有者再停用");
+  const heads = await usersWithRole(SUPER_ADMIN_ROLE_ID, tx);
+  if (heads.includes(targetId) && heads.length <= 1) {
+    throw new HttpError(409, "至少保留一位超级管理员，请先移交超级管理员角色再停用");
   }
 }
 
 /**
- * 写操作后兜底守卫：确保工作区仍至少有一位【在岗】(ACTIVE) owner，否则 409 回滚。
+ * 写操作后兜底守卫：确保工作区仍至少有一位【在岗】(ACTIVE) 超级管理员，否则 409 回滚。
  * 与针对单个 targetId 的写前检查 assertNotLastOwnerTx 分开——replaceAssignments（主体集
- * 批量替换）与 assignDepartments（移除部门归属）都可能不经停用路径就摘掉全部有效 owner
- * 来源，故在事务内写操作完成后统一复算 usersWithRole。必须在 withWriteTx 回调内调用，
+ * 批量替换）与 assignDepartments（移除部门归属）都可能不经停用路径就摘掉全部有效来源，
+ * 故在事务内写操作完成后统一复算 usersWithRole。必须在 withWriteTx 回调内调用，
  * 抛错即触发事务回滚，delete/create 全部不落库。
  */
 export async function assertWorkspaceHasOwnerTx(tx: DbTx): Promise<void> {
-  const owners = await usersWithRole(OWNER_ROLE_ID, tx);
-  if (owners.length === 0) {
-    throw new HttpError(409, "至少保留一位工作区所有者");
+  const heads = await usersWithRole(SUPER_ADMIN_ROLE_ID, tx);
+  if (heads.length === 0) {
+    throw new HttpError(409, "至少保留一位超级管理员");
   }
 }
 
@@ -204,8 +205,8 @@ export async function deleteUser(actorId: string, targetId: string): Promise<Del
       data: { revokedAt: new Date() },
     });
 
-    // 写前快照：原来有几位在岗 owner。这个数决定 409 该不该参与判定（见下）。
-    const ownersBefore = await usersWithRole(OWNER_ROLE_ID, tx);
+    // 写前快照：原来有几位在岗超级管理员。这个数决定 409 该不该参与判定（见下）。
+    const headsBefore = await usersWithRole(SUPER_ADMIN_ROLE_ID, tx);
 
     await tx.user.delete({ where: { id: targetId } });
 
@@ -220,7 +221,7 @@ export async function deleteUser(actorId: string, targetId: string): Promise<Del
     // 不能无条件调用 assertWorkspaceHasOwnerTx——那样在一个本身就没有 owner 的工作区里
     // 任何账号都删不掉（包括清理一个没人管的残留账号），这不是保护而是死锁。
     // 「一位 owner 都没有」是部署事故，不是删除操作造成的，不该由删除路径背锅。
-    if (ownersBefore.length > 0) await assertWorkspaceHasOwnerTx(tx);
+    if (headsBefore.length > 0) await assertWorkspaceHasOwnerTx(tx);
     return { id: user.id, email: user.email, deleted: true as const };
   });
   invalidateAuthState(targetId);

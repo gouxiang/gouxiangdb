@@ -464,8 +464,11 @@ model Role {
   systemKey   String? // owner/creator/editor/commenter/viewer；自定义角色为 null
   name        String
   description String    @default("")
-  isSystem    Int       @default(0) // 1=系统角色不可删/不可改 key
-  permissions String    @default("[]") // JSON 字符串数组，仅组织管理动作三枚
+  isSystem    Int       @default(0) // 1=系统种子行，由迁移拥有（不等价于不可变更）
+  // immutable=1：连名称/说明都不许改、不许删。与 isSystem 分离——
+  // 三枚权限预设中只有超级管理员（role_owner）immutable=1，管理员/受限成员可删可改。
+  immutable   Int       @default(0)
+  permissions String    @default("[]") // JSON 字符串数组，组织管理动作（含通讯录十二枚）
   createdAt   DateTime  @default(now())
   deletedAt   DateTime?
 

@@ -10,7 +10,7 @@ import { ORG_ACTIONS } from "@gx/shared-types";
 import { HttpError } from "../../guards.js";
 import { withWriteTx, prisma, type DbTx } from "../../db.js";
 import { getDefaultWorkspaceId } from "./workspace.js";
-import { SYSTEM_ROLE_BY_ID, OWNER_ROLE_ID, assertOrgActions } from "./roles.js";
+import { SYSTEM_ROLE_BY_ID, SYSTEM_ROLE_ID_ORDER, SUPER_ADMIN_ROLE_ID, assertOrgActions } from "./roles.js";
 import { assertWorkspaceHasOwnerTx } from "./lifecycle.js";
 
 /** 动作白名单非法统一为 400（assertOrgActions 抛普通 Error，边界翻译避免冒泡 500）。 */
@@ -25,7 +25,7 @@ function parseActionsStrict(raw: unknown): OrgAction[] {
 
 function toRoleDTO(r: {
   id: string; workspaceId: string; systemKey: string | null; name: string; description: string;
-  isSystem: number; permissions: string; createdAt: Date; deletedAt: Date | null;
+  isSystem: number; immutable: number; permissions: string; createdAt: Date; deletedAt: Date | null;
 }): OrgRoleDTO {
   let actions: OrgAction[] = [];
   try {
@@ -44,6 +44,7 @@ function toRoleDTO(r: {
     name: r.name,
     description: r.description,
     isSystem: r.isSystem === 1,
+    immutable: r.immutable === 1,
     actions,
     createdAt: r.createdAt.toISOString(),
     deletedAt: r.deletedAt ? r.deletedAt.toISOString() : null,
@@ -61,8 +62,7 @@ export async function listRoles(): Promise<OrgRoleDTO[]> {
     const sb = SYSTEM_ROLE_BY_ID.get(b.id) ? 0 : 1;
     if (sa !== sb) return sa - sb;
     if (sa === 0) {
-      const order = ["role_owner", "role_creator", "role_editor", "role_commenter", "role_viewer"];
-      return order.indexOf(a.id) - order.indexOf(b.id);
+      return SYSTEM_ROLE_ID_ORDER.indexOf(a.id) - SYSTEM_ROLE_ID_ORDER.indexOf(b.id);
     }
     return a.createdAt.getTime() - b.createdAt.getTime();
   }).map(toRoleDTO);
@@ -111,12 +111,12 @@ export async function updateRole(id: string, input: {
   return withWriteTx("org.role.update", async (tx) => {
     const role = await tx.role.findUnique({ where: { id } });
     if (!role || role.deletedAt !== null) throw new HttpError(404, "角色不存在或已删除");
-    if (role.isSystem === 1) {
-      // 系统角色：仅 description 可改；改 name/actions 405。
-      const triesManageKey = input.name !== undefined || input.actions !== undefined;
-      if (triesManageKey) throw new HttpError(405, "系统角色仅可修改说明，不可改名称或动作");
-      const description = typeof input.description === "string" ? input.description.slice(0, 200) : role.description;
-      return toRoleDTO(await tx.role.update({ where: { id }, data: { description } }));
+    // 不可变角色（超级管理员）：名称/说明/权限一律不许改，也不许删。
+    // 与旧「系统角色仅可改 description」的差别是产品口径：超级管理员必须完全钉死，
+    // 否则有人能把它的动作位摘掉，反过来把真正的管理员锁在系统外面。
+    // 其余系统预置（管理员 / 受限成员）immutable=0，可被超级管理员改甚至删。
+    if (role.immutable === 1) {
+      throw new HttpError(405, "超级管理员角色不可编辑");
     }
     const data: { name?: string; description?: string; permissions?: string } = {};
     if (input.name !== undefined) {
@@ -147,7 +147,7 @@ export async function deleteRole(id: string, reassignTo?: unknown): Promise<{ id
   await withWriteTx("org.role.delete", async (tx) => {
     const role = await tx.role.findUnique({ where: { id } });
     if (!role || role.deletedAt !== null) throw new HttpError(404, "角色不存在或已删除");
-    if (role.isSystem === 1) throw new HttpError(405, "系统角色不可删除");
+    if (role.immutable === 1) throw new HttpError(405, "超级管理员角色不可删除");
 
     const assignments = await tx.roleAssignment.findMany({ where: { roleId: id } });
     if (assignments.length > 0) {
@@ -296,10 +296,11 @@ export async function replaceAssignments(
         added.push({ subjectType: s.subjectType, subjectId: s.subjectId });
       }
     }
-    // 写后兜底：替换 role_owner 主体集可能删掉全部有效 owner 来源（空 subjects、换成
-    // DISABLED 用户、换成无 ACTIVE 成员的部门），复算在岗 owner 为空则 409 回滚。
-    // 自定义角色不持 owner 语义，不触发。
-    if (roleId === OWNER_ROLE_ID) {
+    // 写后兜底：替换超级管理员主体集可能删掉全部有效来源（空 subjects、换成 DISABLED 用户、
+    // 换成无 ACTIVE 成员的部门），复算在岗超级管理员为空则 409 回滚——
+    // 这就是「系统里最后一个超级管理员不可被移除」这条硬规则的执行点。
+    // 管理员（role_admin）不持该保护：它被设计成可被删除/摘空，把超级管理员让位后不留死锁。
+    if (roleId === SUPER_ADMIN_ROLE_ID) {
       await assertWorkspaceHasOwnerTx(tx);
     }
     const finalRows = await tx.roleAssignment.findMany({ where: { roleId }, orderBy: { createdAt: "asc" } });

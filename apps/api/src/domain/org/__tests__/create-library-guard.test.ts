@@ -137,22 +137,34 @@ describe("assertCanCreateLibrary 兜底与判定", () => {
 });
 
 describe("第六枚组织动作常量", () => {
-  it("ORG_ACTIONS 含 create_library，且既有六枚顺序未变（追加在末尾，企业化定位后共十一枚）", () => {
+  it("ORG_ACTIONS 含 create_library，且既有序列未变（只许末尾追加；权限模型重构后共十八枚）", () => {
     expect(ORG_ACTIONS).toContain("create_library");
     expect([...ORG_ACTIONS]).toEqual([
       "manage_departments", "manage_members", "manage_roles", "manage_menu", "manage_share",
       "create_library",
       "view_directory", "invite_users", "create_users", "disable_users", "delete_users",
+      // 权限核心模型重构追加：角色三枚 + 角色成员授予 + 部门三枚
+      "create_roles", "edit_roles", "delete_roles", "assign_role_members",
+      "create_departments", "edit_departments", "delete_departments",
     ]);
   });
 
-  it("role_owner 默认 actions 自动含 create_library（从 SYSTEM_ROLES 派生，不写字面量）", () => {
-    const owner = SYSTEM_ROLES.find((r) => r.systemKey === "owner");
-    expect(owner).toBeTruthy();
-    expect(owner!.actions).toEqual([...ORG_ACTIONS]);
-    expect(owner!.actions).toContain("create_library");
-    for (const r of SYSTEM_ROLES.filter((x) => x.systemKey !== "owner")) {
-      expect(r.actions).toEqual([]);
+  it("超级管理员/管理员默认 actions 自动含 create_library（从 SYSTEM_ROLES 派生，不写字面量）", () => {
+    // 超级管理员的行 id 仍是 role_owner（迁移不改 id，见 roles.ts 命名取舍注释）。
+    const privileged = SYSTEM_ROLES.filter((r) => r.id === "role_owner" || r.id === "role_admin");
+    expect(privileged).toHaveLength(2);
+    for (const r of privileged) {
+      expect(r.actions).toEqual([...ORG_ACTIONS]);
+      expect(r.actions).toContain("create_library");
     }
+    // 受限成员与四枚资源名锚点一律零组织动作。
+    for (const r of SYSTEM_ROLES) {
+      if (r.id === "role_owner" || r.id === "role_admin") continue;
+      expect(r.actions, `${r.id} 不应持任何组织动作`).toEqual([]);
+    }
+    // 只有超级管理员钉死不可编辑/不可删除。
+    expect(SYSTEM_ROLES.filter((r) => r.immutable).map((r) => r.id)).toEqual([
+      "role_owner", "role_creator", "role_editor", "role_commenter", "role_viewer",
+    ]);
   });
 });
