@@ -24,6 +24,7 @@ export * from "./formula-functions.js";
 export * from "./defaults.js";
 export * from "./api.js";
 export * from "./org.js";
+export * from "./roleLibraryScope.js";
 export * from "./nav.js";
 export * from "./authz.js";
 export * from "./policy.js";

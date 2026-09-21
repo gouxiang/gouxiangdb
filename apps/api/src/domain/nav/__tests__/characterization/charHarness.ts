@@ -24,6 +24,12 @@ export interface CharHarness {
   app: { request: (url: string, init?: RequestInit) => Promise<Response> };
   /** 直接造 ACTIVE 用户（password123），不建任何成员关系。 */
   createUser: (id: string, opts?: { email?: string; displayName?: string }) => Promise<void>;
+  /**
+   * 直接给用户挂一枚组织角色（权限核心模型落地后，库权限一律走「角色 × 库」，
+   * 不再认"谁建的库"/members.role）。纯脚手架用户必须显式拿角色才能建库、进库。
+   * 默认挂超级管理员（role_owner）；挂 role_restricted 就是"零权限成员"。
+   */
+  grantRole: (userId: string, roleId?: string) => Promise<void>;
   /** 生成与 issueToken 同形态的真 JWT（{userId,tv:0}，HS256）。 */
   token: (userId: string) => Promise<string>;
   auth: (userId: string) => Promise<Record<string, string>>;
@@ -62,6 +68,12 @@ export async function setupCharHarness(label = "gx-m3-char-"): Promise<CharHarne
     });
   };
 
+  const grantRole: CharHarness["grantRole"] = async (userId, roleId = "role_owner") => {
+    await prisma.roleAssignment.create({
+      data: { roleId, subjectType: "user", subjectId: userId, scopeType: "workspace", createdBy: "seed" },
+    });
+  };
+
   const token = async (userId: string): Promise<string> => {
     const now = Math.floor(Date.now() / 1000);
     return sign({ userId, tv: 0, iat: now, exp: now + TTL }, JWT_SECRET, "HS256");
@@ -73,7 +85,7 @@ export async function setupCharHarness(label = "gx-m3-char-"): Promise<CharHarne
     fs.rmSync(tmpDir, { recursive: true, force: true });
   };
 
-  return { tmpDir, prisma, app, createUser, token, auth, cleanup };
+  return { tmpDir, prisma, app, createUser, grantRole, token, auth, cleanup };
 }
 
 export async function json<T = unknown>(res: Response): Promise<T> {

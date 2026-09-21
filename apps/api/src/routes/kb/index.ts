@@ -4,8 +4,8 @@
 //
 // M4/S5 commit ① 从单文件 routes/kb.ts（897 行）按资源分包（零行为变化）：
 //   index    容器 5 端点（list/create/get/rename/soft-delete）+ 子路由装配
-//   members  成员 3 端点；docs 内容 9 端点；sharing 分享 3 端点；
-//   versions 版本 4 端点；acl 文档权限 2 端点；recycle 回收站 + 永久删 2 端点；
+//   members  成员只读 1 端点；docs 内容 9 端点；sharing 分享 3 端点；
+//   versions 版本 4 端点；recycle 回收站 + 永久删 2 端点；
 //   shared   守卫/角色/ACL/shadow 对拍缝（无路由）。
 // URL/请求/响应/状态码与拆分前逐字节一致；app.ts 改 import "./routes/kb/index.js"
 // （Bundler 解析下带 .js 后缀不会回退目录索引，显式指向本 index，同 v1 路由写法）。
@@ -25,12 +25,14 @@ import {
   entityIconColorSchema,
 } from "../../validators/entity-icon.js";
 import { requireKb, shadowKbAction } from "./shared.js";
+import { resolveKbAccess, resolveManyAccess, visibleLibraryIds } from "../../domain/authz/libraryPolicy.js";
+import { libraryVisibility, setShareEnabled } from "../../domain/authz/libraryVisibility.js";
+import { seedAdminScopeTx } from "../../domain/authz/libraryScopeSeed.js";
 import { assertCanCreateLibrary } from "../../domain/org/createLibraryGuard.js";
 import { membersRoutes } from "./members.js";
 import { docsRoutes } from "./docs.js";
 import { sharingRoutes } from "./sharing.js";
 import { versionsRoutes } from "./versions.js";
-import { aclRoutes } from "./acl.js";
 import { recycleRoutes } from "./recycle.js";
 
 export const kb = new Hono();
@@ -44,30 +46,30 @@ const KB_DEFAULT_ICON_COLOR = "#0F6E56";
 kb.get("/", async (c) => {
   try {
     const userId = await requireUserId(c);
-    const memberships = await prisma.kbMember.findMany({
-      where: { userId, kb: { deletedAt: null } },
-      include: {
-        kb: {
-          include: {
-            _count: { select: { docs: { where: { deletedAt: null } } } },
-          },
-        },
-      },
-      orderBy: { joinedAt: "desc" },
+    // 与 bases 列表同源：能看见哪些知识库由【角色的库视野】决定，不再看 kb_members。
+    const { all, ids } = await visibleLibraryIds(userId, "kb");
+    const rows = await prisma.knowledgeBase.findMany({
+      where: { deletedAt: null, ...(all ? {} : { id: { in: ids } }) },
+      include: { _count: { select: { docs: { where: { deletedAt: null } } } } },
+      orderBy: { createdAt: "desc" },
     });
-    const kbs = memberships
-      .filter((m) => m.kb)
-      .map((m) => ({
-        id: m.kb!.id,
-        name: m.kb!.name,
-        iconColor: m.kb!.iconColor,
-        icon: m.kb!.icon,
-        role: m.role,
-        docCount: m.kb!._count.docs,
-        createdAt: m.kb!.createdAt,
-        updatedAt: m.kb!.updatedAt,
-      }));
-    return c.json({ knowledgeBases: kbs });
+    const accessMap = await resolveManyAccess(userId, "kb", rows.map((r) => r.id));
+    const knowledgeBases = rows.map((k) => {
+      const access = accessMap.get(k.id)!;
+      return {
+        id: k.id,
+        name: k.name,
+        iconColor: k.iconColor,
+        icon: k.icon,
+        role: access.canManage ? "owner" : "viewer",
+        canManage: access.canManage,
+        shareEnabled: k.shareEnabled === 1,
+        docCount: k._count.docs,
+        createdAt: k.createdAt,
+        updatedAt: k.updatedAt,
+      };
+    });
+    return c.json({ knowledgeBases });
   } catch (e) {
     return errorResponse(c, e);
   }
@@ -97,6 +99,8 @@ kb.post("/", async (c) => {
           members: { create: { userId, role: "owner" } },
         },
       });
+      // 取消库主后同建库：给超级管理员/管理员补「角色 × 知识库」视野行（管理权唯一来源）。
+      await seedAdminScopeTx(tx, "kb", k.id);
       await syncNavFromEntitiesTx(tx);
       // 与建库同理：一级导航已改为直接读 knowledge_bases，不再靠 menu_items shortcut，
       // 自动写入随「导航编排」一并下线（ensureEntityShortcutTx 已从 domain/nav/menu.ts 摘除）。
@@ -183,10 +187,12 @@ kb.delete("/:kbId", async (c) => {
   try {
     const userId = await requireUserId(c);
     const kbId = c.req.param("kbId");
-    const { role } = await requireKb(userId, kbId);
-    if (role !== "owner") {
+    // 硬规则：删除知识库只有超级管理员。对本库有管理权的角色也删不掉。
+    await requireKb(userId, kbId);
+    const access = await resolveKbAccess(userId, kbId);
+    if (!access.canDeleteLibrary) {
       await shadowKbAction("kb.delete", userId, kbId, "manage_share", false);
-      throw new HttpError(403, "只有所有者可删除知识库");
+      throw new HttpError(403, "只有超级管理员可以删除知识库");
     }
     await shadowKbAction("kb.delete", userId, kbId, "manage_share", true);
     const now = new Date();
@@ -214,6 +220,23 @@ kb.delete("/:kbId", async (c) => {
   }
 });
 
+// 库级「允许分享」开关：只有对本库有管理权的角色 + 超级管理员 + 管理员能开。
+kb.patch("/:kbId/share-enabled", async (c) => {
+  try {
+    const userId = await requireUserId(c);
+    const kbId = c.req.param("kbId");
+    await requireKb(userId, kbId);
+    const access = await resolveKbAccess(userId, kbId);
+    if (!access.canToggleShare) throw new HttpError(403, "只有对本库有管理权限的角色、超级管理员或管理员可开关分享");
+    const schema = z.object({ enabled: z.boolean() });
+    const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
+    return c.json({ shareEnabled: await setShareEnabled("kb", kbId, parsed.data.enabled) });
+  } catch (e) {
+    return errorResponse(c, e);
+  }
+});
+
 // ============ 子路由装配（同挂 kb 子 app，路径不变） ============
 // 注册覆盖 monolith 原全部端点；Hono 静态段优先于参数段（/docs/* 先于 /:kbId），与拆分前同解析。
 kb.route("/", membersRoutes);
@@ -221,4 +244,3 @@ kb.route("/", docsRoutes);
 kb.route("/", sharingRoutes);
 kb.route("/", versionsRoutes);
 kb.route("/", recycleRoutes);
-kb.route("/", aclRoutes);

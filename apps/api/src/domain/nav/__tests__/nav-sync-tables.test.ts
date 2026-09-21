@@ -25,6 +25,8 @@ const OWNER = "owner";
 beforeAll(async () => {
   h = await makeNavHarness("gx-m3-s3-tables-");
   await h.createUser(OWNER, { email: "owner-t@x.com", displayName: "Owner" });
+  // 权限核心模型（二）：库放行只看「角色 × 库」，脚手架 owner 挂超级管理员才动得了库。
+  await h.grantRole(OWNER);
 }, 30_000);
 // 守卫而非兜 bug：beforeAll 一旦超时，h 仍是 undefined，直接 h.cleanup() 会再抛
 // "Cannot read properties of undefined"，把一个超时掩盖成两个报错、干扰定位。

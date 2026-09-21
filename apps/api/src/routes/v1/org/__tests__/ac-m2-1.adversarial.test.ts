@@ -172,6 +172,10 @@ describe("AC-M2-1 对抗 5-6：停用即时失效，旧 token 对两个门面的
     await h.grantSystemRole("u_owner3");
     const ot = await h.token("u_owner3");
     const u = await provisionUser(ot, "u_carol", "Carol");
+    // 通讯录读取是显式权限（可见通讯录），新账号默认受限成员零动作读不到；
+    // 本用例验的是 token 失效，故补一枚只带 view_directory 的角色让"停前可用"成立。
+    const dirRole = await mkRole(ot, "R_dir", ["view_directory"]);
+    await h.grant(dirRole, "user", u.id);
 
     // 停用前两个门面均 200
     expect((await app.request("/api/auth/me", { headers: { Authorization: `Bearer ${u.token}` } })).status).toBe(200);
@@ -228,7 +232,7 @@ describe("AC-M2-1 对抗 7：最后 owner 三路径保护", () => {
 
     // 仅持 manage_members 的管理员（可调停用端点，但不是 owner）
     const mgr = await provisionUser(ot, "u_mgr", "Mgr");
-    const mgrRole = await mkRole(ot, "MgrOnly", ["manage_members"]);
+    const mgrRole = await mkRole(ot, "MgrOnly", ["manage_members", "disable_users"]);
     await h.grant(mgrRole, "user", mgr.id);
 
     // 部门继承 owner：role_owner 授 root，z 在 child

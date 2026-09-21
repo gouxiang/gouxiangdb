@@ -75,6 +75,10 @@ beforeAll(async () => {
       status: "ACTIVE", workspaceId: "ws_default",
     },
   });
+  // 权限核心模型（二）：库放行只看「角色 × 库」，members.role 不再生效；给 u1 挂超级管理员。
+  await prisma.roleAssignment.create({
+    data: { roleId: "role_owner", subjectType: "user", subjectId: U, scopeType: "workspace", createdBy: "seed" },
+  });
   // 记录列表夹具：base + member(editor) + table + field + 3 行。
   const base = await prisma.base.create({ data: { name: "b", createdBy: U } });
   await prisma.member.create({ data: { baseId: base.id, userId: U, role: "editor" } });
@@ -162,6 +166,8 @@ describe("S0-3 GET /api/v1/meta 200 形状", () => {
     expect(await res.json()).toEqual({
       apiVersion: "v1",
       enterpriseOrg: true,
+      // 后加的写能力位（与 GX_AUTHZ_ENGINE 总门解耦），形状测试只锁它存在且是布尔。
+      authzManage: expect.any(Boolean),
       auth: { userId: U, status: "ACTIVE", workspaceId: "ws_default" },
     });
   });

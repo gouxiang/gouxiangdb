@@ -141,7 +141,8 @@ describe("GET /s/:token/ref/:docId 引用闭包授权", () => {
     expect(r.body.canEdit).toBe(false);
   });
 
-  it("目标在文档子树内：可编辑性跟随 shareRole（与 GET /doc 一致）", async () => {
+  // 产品口径变更（权限核心模型二）：分享链接对外一律只读，可编辑性不再跟随 shareRole。
+  it("目标在文档子树内：即便 shareRole=editor，引用闭包也恒 canEdit=false（对外只读）", async () => {
     docs = [
       doc({
         id: "R",
@@ -155,7 +156,7 @@ describe("GET /s/:token/ref/:docId 引用闭包授权", () => {
     ];
     const r = await getRef("tok-sub", "CHILD");
     expect(r.status).toBe(200);
-    expect(r.body.canEdit).toBe(true);
+    expect(r.body.canEdit).toBe(false);
   });
 
   it("未被任何已授权画布引用的 id → 403", async () => {

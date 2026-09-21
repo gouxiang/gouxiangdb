@@ -15,6 +15,8 @@ let h: CharHarness;
 beforeAll(async () => {
   h = await setupCharHarness("gx-m4-shapes-");
   await h.createUser("owner");
+  // 权限核心模型（二）后建库/进库一律看角色：脚手架 owner 挂超级管理员才建得起库。
+  await h.grantRole("owner");
 }, 120000);
 afterAll(() => h.cleanup());
 

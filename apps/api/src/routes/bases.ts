@@ -10,7 +10,11 @@ import {
   requireUserId,
   requireCanView,
   requireCanManageBase,
+  requireCanDeleteBase,
+  requireCanToggleShare,
   permissionsOf,
+  displayRole,
+  permit,
   HttpError,
 } from "../guards.js";
 import { permissionsForRole, type Role, type ViewConfig } from "@gx/shared-types";
@@ -23,6 +27,9 @@ import {
   LEGACY_REASONS,
 } from "../domain/authz/projection.js";
 import { assertCanCreateLibrary } from "../domain/org/createLibraryGuard.js";
+import { resolveManyAccess, visibleLibraryIds } from "../domain/authz/libraryPolicy.js";
+import { libraryVisibility, setShareEnabled } from "../domain/authz/libraryVisibility.js";
+import { seedAdminScopeTx } from "../domain/authz/libraryScopeSeed.js";
 import { entityIconSchema, entityIconColorSchema } from "../validators/entity-icon.js";
 
 export const bases = new Hono();
@@ -43,15 +50,6 @@ const updateSchema = z.object({
   // 自定义颜色：#RRGGBB | null（恢复默认色）| 缺省（不改动）。
   iconColor: entityIconColorSchema,
   icon: entityIconSchema,
-});
-
-const inviteSchema = z.object({
-  email: z.string().email(),
-  role: z.enum(["creator", "editor", "commenter", "viewer"]),
-});
-
-const updateMemberSchema = z.object({
-  role: z.enum(["creator", "editor", "commenter", "viewer"]),
 });
 
 const shareSchema = z.object({
@@ -126,31 +124,31 @@ async function createStarterTableTx(tx: DbTx, baseId: string, userId: string, na
 
 bases.get("/", async (c) => {
   const userId = await requireUserId(c);
-  const members = await prisma.member.findMany({
-    where: { userId },
-    include: {
-      base: {
-        include: { _count: { select: { tables: { where: { deletedAt: null } } } } },
-      },
-    },
-    orderBy: { joinedAt: "asc" },
+  // 权限核心模型：能看见哪些库由【角色的库视野】决定，不再看 members 表。
+  // 超级管理员/管理员返回 all=true（进得去所有库），其余按勾中的库过滤。
+  const { all, ids } = await visibleLibraryIds(userId, "base");
+  const rows = await prisma.base.findMany({
+    where: { deletedAt: null, ...(all ? {} : { id: { in: ids } }) },
+    include: { _count: { select: { tables: { where: { deletedAt: null } } } } },
+    orderBy: { createdAt: "asc" },
   });
-
-  const out = await Promise.all(
-    members
-      .filter((m) => !m.base.deletedAt)
-      .map(async (m) => ({
-        id: m.base.id,
-        name: m.base.name,
-        iconColor: m.base.iconColor,
-        icon: m.base.icon,
-        createdAt: m.base.createdAt.toISOString(),
-        createdBy: m.base.createdBy,
-        role: m.role as Role,
-        permissions: permissionsForRole(m.role as Role),
-        tableCount: m.base._count.tables,
-      })),
-  );
+  const accessMap = await resolveManyAccess(userId, "base", rows.map((r) => r.id));
+  const out = rows.map((b) => {
+    const access = accessMap.get(b.id)!;
+    return {
+      id: b.id,
+      name: b.name,
+      iconColor: b.iconColor,
+      icon: b.icon,
+      createdAt: b.createdAt.toISOString(),
+      createdBy: b.createdBy,
+      // 展示档位，不承载授权语义（真判据是下面的 permissions/access 派生）。
+      role: displayRole(access),
+      permissions: permit(access),
+      shareEnabled: b.shareEnabled === 1,
+      tableCount: b._count.tables,
+    };
+  });
   return c.json({ bases: out });
 });
 
@@ -175,9 +173,13 @@ bases.post("/", async (c) => {
         createdBy: userId,
       },
     });
-    const ownerMember = await tx.member.create({ data: { baseId: b.id, userId, role: "owner" } });
     // M4/S5 同事务投影 owner 到 base 节点 user 策略行（auth_policies 无 FK，先于 sync 建节点亦安全）。
+    // 注意：members 行在权限核心模型（二）之后【不再参与放行】，仅作导航旧表的投影源与台账。
+    const ownerMember = await tx.member.create({ data: { baseId: b.id, userId, role: "owner" } });
     await syncBaseMemberTx(tx, { oldRowId: ownerMember.id, baseId: b.id, userId, role: "owner" });
+    // 取消库主后，库权限一律走「角色 × 库」：建库同事务给超级管理员/管理员补视野行，
+    // 否则管理员建完库连一张表都加不上（管理权只来自 role_library_scope.canManage）。
+    await seedAdminScopeTx(tx, "base", b.id);
     await createStarterTableTx(tx, b.id, userId);
     await syncNavFromEntitiesTx(tx);
     // 第三批导航重构后一级导航直接读 bases/knowledge_bases，不再读 menu_items，
@@ -264,7 +266,8 @@ bases.patch("/:baseId", async (c) => {
 
 bases.delete("/:baseId", async (c) => {
   const baseId = c.req.param("baseId");
-  await requireCanManageBase(c, baseId);
+  // 硬规则：删除库只有超级管理员。能管这个库的人也删不掉。
+  await requireCanDeleteBase(c, baseId);
   const now = new Date();
   // M3/S3 #3：软删 base + 其下 tables 收紧进单事务；nav 子树（base/table/view）整棵软删。
   // view 实体行不碰 deletedAt（views 表无此列），其节点随 path 子树一并软删，恢复依赖对账。
@@ -365,100 +368,30 @@ bases.get("/:baseId/erd", async (c) => {
   });
 });
 
-// ============ 成员管理 ============
+// ============ 成员可见性（只读） ============
+//
+// 逐库逐人的成员名册已下线：权限只按角色配，所以这里能回答的只有
+// "哪些角色覆盖到这个库、覆盖到多少人"。POST/PATCH/DELETE 全部移除——
+// 留着它们就等于留一条"改一行数据就能绕过角色体系"的旁路。
+// 要改谁能进来：去通讯录改这个人的角色，或改角色的库视野。
 
 bases.get("/:baseId/members", async (c) => {
   const baseId = c.req.param("baseId");
   await requireCanView(c, baseId);
-  const members = await prisma.member.findMany({
-    where: { baseId },
-    include: { user: { select: { email: true, displayName: true } } },
-    orderBy: { joinedAt: "asc" },
-  });
-  return c.json({
-    members: members.map((m) => ({
-      id: m.id,
-      baseId: m.baseId,
-      userId: m.userId,
-      email: m.user.email,
-      displayName: m.user.displayName,
-      role: m.role,
-      joinedAt: m.joinedAt.toISOString(),
-    })),
-  });
+  return c.json(await libraryVisibility("base", baseId));
 });
 
-bases.post("/:baseId/members", async (c) => {
+// ============ 允许分享开关（库级） ============
+// 只有对该库有管理权的角色 + 超级管理员 + 管理员能开。开了才允许成员外发本库数据。
+
+bases.patch("/:baseId/share-enabled", async (c) => {
   const baseId = c.req.param("baseId");
-  await requireCanManageBase(c, baseId);
-  const parsed = inviteSchema.safeParse(await c.req.json().catch(() => ({})));
-  if (!parsed.success) return c.json({ error: "参数不合法", details: parsed.error.issues }, 400);
-
-  const user = await prisma.user.findUnique({ where: { email: parsed.data.email } });
-  if (!user) return c.json({ error: "该邮箱尚未注册" }, 404);
-
-  const existing = await prisma.member.findUnique({ where: { baseId_userId: { baseId, userId: user.id } } });
-  if (existing) return c.json({ error: "该用户已是成员" }, 409);
-
-  const member = await withWriteTx("base.member.add", async (tx) => {
-    const created = await tx.member.create({
-      data: { baseId, userId: user.id, role: parsed.data.role },
-    });
-    // M4/S5 同事务投影：加成员即写 base 节点 user 策略行（legacy:member）。
-    await syncBaseMemberTx(tx, {
-      oldRowId: created.id, baseId, userId: user.id, role: parsed.data.role,
-    });
-    return created;
-  });
-  return c.json({
-    member: {
-      id: member.id,
-      baseId,
-      userId: user.id,
-      email: user.email,
-      displayName: user.displayName,
-      role: member.role,
-      joinedAt: member.joinedAt.toISOString(),
-    },
-  }, 201);
-});
-
-bases.patch("/:baseId/members/:memberId", async (c) => {
-  const baseId = c.req.param("baseId");
-  await requireCanManageBase(c, baseId);
-  const parsed = updateMemberSchema.safeParse(await c.req.json().catch(() => ({})));
+  await requireCanToggleShare(c, baseId);
+  const schema = z.object({ enabled: z.boolean() });
+  const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
-
-  const member = await prisma.member.findUnique({ where: { id: c.req.param("memberId") } });
-  if (!member || member.baseId !== baseId) throw new HttpError(404, "成员不存在");
-  if (member.role === "owner") throw new HttpError(400, "不能修改所有者的角色");
-
-  const updated = await withWriteTx("base.member.role", async (tx) => {
-    const row = await tx.member.update({
-      where: { id: member.id },
-      data: { role: parsed.data.role },
-    });
-    // M4/S5 精确 SET 投影（降级 owner->viewer 必须收窄，不能用并集，见 setLegacyByRowTx）。
-    await syncBaseMemberTx(tx, {
-      oldRowId: row.id, baseId, userId: row.userId, role: row.role,
-    });
-    return row;
-  });
-  return c.json({ member: { id: updated.id, role: updated.role } });
-});
-
-bases.delete("/:baseId/members/:memberId", async (c) => {
-  const baseId = c.req.param("baseId");
-  await requireCanManageBase(c, baseId);
-  const member = await prisma.member.findUnique({ where: { id: c.req.param("memberId") } });
-  if (!member || member.baseId !== baseId) throw new HttpError(404, "成员不存在");
-  if (member.role === "owner") throw new HttpError(400, "不能移除所有者");
-  await withWriteTx("base.member.remove", async (tx) => {
-    await tx.member.delete({ where: { id: member.id } });
-    // M4/S5 同事务删该成员的 legacy 投影（确定性策略 id 由旧行 id 派生，先删后删投影均可）。
-    await removeLegacyProjectionTx(tx, LEGACY_REASONS.member, member.id);
-  });
-  return c.json({ ok: true });
+  const enabled = await setShareEnabled("base", baseId, parsed.data.enabled);
+  return c.json({ shareEnabled: enabled });
 });
 
 // ============ 分享链接 ============
@@ -515,31 +448,3 @@ bases.delete("/:baseId/share/:linkId", async (c) => {
   await prisma.shareLink.deleteMany({ where: { id: c.req.param("linkId"), baseId } });
   return c.json({ ok: true });
 });
-
-// ============ 通过分享 token 加入 ============
-
-bases.post("/join/:token", async (c) => {
-  const userId = await requireUserId(c);
-  const token = c.req.param("token");
-  const link = await prisma.shareLink.findUnique({ where: { token } });
-  if (!link) throw new HttpError(404, "分享链接无效");
-  if (link.expiresAt && link.expiresAt < new Date()) throw new HttpError(410, "分享链接已过期");
-
-  const existing = await prisma.member.findUnique({
-    where: { baseId_userId: { baseId: link.baseId, userId } },
-  });
-  if (existing) {
-    return c.json({ baseId: link.baseId, role: existing.role, alreadyMember: true });
-  }
-
-  const joined = await withWriteTx("base.member.join", async (tx) => {
-    const row = await tx.member.create({ data: { baseId: link.baseId, userId, role: link.role } });
-    // M4/S5 持票加入同事务投影到 base 节点 user 策略行。
-    await syncBaseMemberTx(tx, {
-      oldRowId: row.id, baseId: link.baseId, userId, role: row.role,
-    });
-    return row;
-  });
-  return c.json({ baseId: link.baseId, role: joined.role, alreadyMember: false }, 201);
-});
-

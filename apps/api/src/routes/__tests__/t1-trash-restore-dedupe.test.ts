@@ -190,9 +190,17 @@ describe("T-1 回收站恢复同名去歧义", () => {
 
   it("无 canManageSchema（editor）恢复字段/表仍 403，且不改名不复活", async () => {
     const baseId = await h.makeBase();
-    await prisma.member.update({
-      where: { baseId_userId: { baseId, userId: OWNER_ID } },
-      data: { role: "editor" }, // editor: canManageSchema=false
+    // 权限核心模型（二）：members.role 已不参与放行，"改结构"资格只来自 role_library_scope
+    // 的 canManage。故把 u1 从超级管理员摘下来，改挂一枚只带可见（canManage=0）的角色。
+    await prisma.roleAssignment.deleteMany({ where: { subjectId: OWNER_ID } });
+    await prisma.role.create({
+      data: { id: "t1_role_editor", workspaceId: "ws_default", name: "t1 编辑", isSystem: 0, permissions: "[]" },
+    });
+    await prisma.roleAssignment.create({
+      data: { roleId: "t1_role_editor", subjectType: "user", subjectId: OWNER_ID, scopeType: "workspace", createdBy: "seed" },
+    });
+    await prisma.roleLibraryScope.create({
+      data: { roleId: "t1_role_editor", libraryKind: "base", libraryId: baseId, canManage: 0, visible: 1 },
     });
     const { id: tableId } = await h.makeTable(baseId, "t");
     const f = await prisma.field.create({

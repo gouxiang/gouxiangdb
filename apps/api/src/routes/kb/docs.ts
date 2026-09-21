@@ -14,14 +14,13 @@ import {
   softDeleteSingleNodeTx,
 } from "../../domain/nav/sync.js";
 import {
-  RANK,
   isDescendant,
   requireDocAccess,
   requireKb,
-  kbRoleOf,
   shadowKbAction,
 } from "./shared.js";
 import { enqueueChangeEventTx } from "../../domain/search/outbox.js";
+import { contentAccessOf } from "../../domain/authz/libraryPolicy.js";
 import { entityIconSchema, entityIconColorSchema } from "../../validators/entity-icon.js";
 
 /** kb_docs.kind 到检索实体类型（doc/canvas 分别建索引）。 */
@@ -63,8 +62,9 @@ docsRoutes.post("/:kbId/docs", async (c) => {
   try {
     const userId = await requireUserId(c);
     const kbId = c.req.param("kbId");
-    const { role } = await requireKb(userId, kbId);
-    const canCreate = RANK[role]! >= RANK["editor"]!;
+    const { access } = await requireKb(userId, kbId);
+    // 知识库没有"表"：文档与画布共用 content 这一档对象的增/删/改/查。
+    const canCreate = contentAccessOf(access).create;
     if (!canCreate) {
       await shadowKbAction("kb.doc.create", userId, kbId, "c", false);
       throw new HttpError(403, "当前角色无权创建内容");
@@ -295,10 +295,9 @@ docsRoutes.post("/docs/:docId/restore", async (c) => {
     const docId = c.req.param("docId");
     const doc = await prisma.kbDoc.findUnique({ where: { id: docId } });
     if (!doc) throw new HttpError(404, "文档不存在");
-    // 找回需要知识库成员编辑权限
-    await requireKb(userId, doc.kbId);
-    const role = await kbRoleOf(userId, doc.kbId);
-    if (!role || RANK[role]! < RANK["editor"]!) throw new HttpError(403, "无权找回");
+    // 找回需要知识库成员编辑权限（同一份 content 档位，不再看 kb_members 的角色列）
+    const { access } = await requireKb(userId, doc.kbId);
+    if (!contentAccessOf(access).update) throw new HttpError(403, "无权找回");
     // M3/S3 #13d-恢复：复活实体 + 复活软删节点（期望集对齐含原地复活、重挂父、重算 ord/path）。
     await withWriteTx("doc.restore", async (tx) => {
       await tx.kbDoc.update({ where: { id: docId }, data: { deletedAt: null, deletedBy: null } });

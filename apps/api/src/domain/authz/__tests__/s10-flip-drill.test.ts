@@ -56,6 +56,16 @@ beforeAll(async () => {
   h = await setupCharHarness("gx-m4-s10-flip-");
   ({ engineDecideResource } = await import("../adapter.js"));
   for (const u of USERS) await h.createUser(u);
+  // 权限核心模型（二）：库门判定收归「角色 × 库」。owner 挂超级管理员（建库硬规则），
+  // editor / viewer 各挂一枚视野角色，档位对拍下面 probes 里的旧期望矩阵。
+  await h.grantRole("f_owner");
+  await h.prisma.role.create({ data: { id: "f_role_view", workspaceId: "ws_default", name: "flip 只读", isSystem: 0, permissions: "[]" } });
+  await h.prisma.role.create({ data: { id: "f_role_edit", workspaceId: "ws_default", name: "flip 编辑", isSystem: 0, permissions: "[]" } });
+  for (const [u, roleId] of [["f_viewer", "f_role_view"], ["f_editor", "f_role_edit"]] as const) {
+    await h.prisma.roleAssignment.create({
+      data: { roleId, subjectType: "user", subjectId: u, scopeType: "workspace", createdBy: "seed" },
+    });
+  }
 
   const b = await h.app.request("/api/bases", {
     method: "POST", headers: { "Content-Type": "application/json", ...(await h.auth("f_owner")) },
@@ -80,6 +90,27 @@ beforeAll(async () => {
   docId = (await json<{ doc: { id: string } }>(d)).doc.id;
   await h.prisma.kbDocAcl.create({ data: { docId, userId: "f_editor", role: "editor" } });
 
+  // 角色 × 库 视野：editor 那份逐表勾到 u（改数据），不勾可管理（改结构/分享仍拒）。
+  await h.prisma.roleLibraryScope.createMany({
+    data: [
+      { roleId: "f_role_view", libraryKind: "base", libraryId: baseId, canManage: 0, visible: 1 },
+      { roleId: "f_role_view", libraryKind: "kb", libraryId: kbId, canManage: 0, visible: 1 },
+      { roleId: "f_role_edit", libraryKind: "base", libraryId: baseId, canManage: 0, visible: 1,
+        config: JSON.stringify({ tables: { [tableId]: { read: true, create: true, update: true, delete: false } }, fields: {} }) },
+      { roleId: "f_role_edit", libraryKind: "kb", libraryId: kbId, canManage: 0, visible: 1 },
+    ],
+  });
+  // 引擎侧对齐：editor 在旧三表里没有 kb 成员行，现在凭角色视野进得去 kb，
+  // 故给 kb 节点补一条 r，否则 shadow 下每处 requireKb 都是 OVERDENY。
+  const kbNodeId = (await h.prisma.navNode.findUniqueOrThrow({
+    where: { workspaceId_resourceType_resourceId: { workspaceId: "ws_default", resourceType: "kb", resourceId: kbId } },
+    select: { id: true },
+  })).id;
+  await h.prisma.authPolicy.create({
+    data: { id: "flip_kbr_editor", workspaceId: "ws_default", nodeId: kbNodeId,
+      subjectType: "user", subjectId: "f_editor", actions: "r", createdBy: "t" },
+  });
+
   const fixes = await applyAuthzReconcileFixes(h.prisma);
   expect(fixes.created).toBeGreaterThan(0);
   baseNodeId = (await h.prisma.navNode.findUniqueOrThrow({
@@ -99,7 +130,7 @@ beforeAll(async () => {
     { guard: "requireCanManageBase", action: "manage_share", ref: { resourceType: "base", resourceId: baseId },
       old: { f_owner: true, f_editor: false, f_viewer: false, f_stranger: false } },
     { guard: "requireKb", action: "r", ref: { resourceType: "kb", resourceId: kbId },
-      old: { f_owner: true, f_editor: false, f_viewer: true, f_stranger: false } },
+      old: { f_owner: true, f_editor: true, f_viewer: true, f_stranger: false } },
     { guard: "requireDocAccess", action: "r", ref: { resourceType: "doc", resourceId: docId },
       old: { f_owner: true, f_editor: true, f_viewer: true, f_stranger: false } },
   ];

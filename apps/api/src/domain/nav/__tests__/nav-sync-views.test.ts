@@ -26,6 +26,8 @@ const OWNER = "owner";
 beforeAll(async () => {
   h = await makeNavHarness("gx-m3-s3-views-");
   await h.createUser(OWNER, { email: "owner-v@x.com", displayName: "Owner" });
+  // 权限核心模型（二）：库放行只看「角色 × 库」，脚手架 owner 挂超级管理员才动得了库。
+  await h.grantRole(OWNER);
 });
 afterAll(async () => h.cleanup());
 afterEach(async () => stopFailing(h));

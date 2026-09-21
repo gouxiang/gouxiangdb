@@ -54,6 +54,12 @@ export async function setupHarness(prefix: string, routes: HarnessRoutes = "reco
   await prisma.user.create({
     data: { id: OWNER_ID, email: "u1@example.com", displayName: "U1", passwordHash: "x" },
   });
+  // 权限核心模型（二）：库放行只看「角色 × 库」，members.role / kb_members.role 不再参与。
+  // 本夹具的 u1 是"所有实体都是我建的"那个 owner，故直接挂超级管理员——否则它连自己
+  // 建的库都进不去（硬规则 B 之外，进库门同样只认角色视野）。
+  await prisma.roleAssignment.create({
+    data: { roleId: "role_owner", subjectType: "user", subjectId: OWNER_ID, scopeType: "workspace", createdBy: "seed" },
+  });
 
   // 动态 import：各路由此刻才解析 db.ts 单例（= 上面注入的 prisma）。
   const guardsMod = await import("../../guards.js");

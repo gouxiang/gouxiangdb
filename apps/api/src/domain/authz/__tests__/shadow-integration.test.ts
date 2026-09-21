@@ -34,6 +34,17 @@ beforeAll(async () => {
   h = await setupCharHarness("gx-m4-shadow-");
   prisma = (await import("../../../db.js")).prisma;
   for (const u of ["sh_owner", "sh_editor", "sh_viewer", "sh_stranger"]) await h.createUser(u);
+  // 权限核心模型（二）：库放行只看「角色 × 库」。sh_owner 挂超级管理员（建库硬规则），
+  // sh_editor / sh_viewer 各挂一枚视野角色（editor 那份带 canManage，才建得起记录）。
+  // 旧 members / kb_members / kb_doc_acls 三表行照旧保留——它们是导航引擎对拍的输入。
+  await h.grantRole("sh_owner");
+  await h.prisma.role.create({ data: { id: "sh_role_view", workspaceId: "ws_default", name: "shadow 只读", isSystem: 0, permissions: "[]" } });
+  await h.prisma.role.create({ data: { id: "sh_role_edit", workspaceId: "ws_default", name: "shadow 编辑", isSystem: 0, permissions: "[]" } });
+  for (const [u, roleId] of [["sh_viewer", "sh_role_view"], ["sh_editor", "sh_role_view"], ["sh_editor", "sh_role_edit"]] as const) {
+    await h.prisma.roleAssignment.create({
+      data: { roleId, subjectType: "user", subjectId: u, scopeType: "workspace", createdBy: "seed" },
+    });
+  }
 
   const b = await call("POST", "/api/bases", "sh_owner", { name: "shadow base" });
   baseId = (await json<{ base: { id: string } }>(b)).base.id;
@@ -48,6 +59,29 @@ beforeAll(async () => {
   const d = await call("POST", `/api/kb/${kbId}/docs`, "sh_owner", { kind: "doc", title: "d" });
   docId = (await json<{ doc: { id: string } }>(d)).doc.id;
   await h.prisma.kbDocAcl.create({ data: { docId, userId: "sh_editor", role: "viewer" } });
+
+  // 角色 × 库 视野（建库时给超级管理员/管理员补的行之外，这里按用例档位再补两条）。
+  await h.prisma.roleLibraryScope.createMany({
+    data: [
+      { roleId: "sh_role_view", libraryKind: "base", libraryId: baseId, canManage: 0, visible: 1 },
+      { roleId: "sh_role_view", libraryKind: "kb", libraryId: kbId, canManage: 0, visible: 1 },
+      { roleId: "sh_role_edit", libraryKind: "base", libraryId: baseId, canManage: 1, visible: 1 },
+      { roleId: "sh_role_edit", libraryKind: "kb", libraryId: kbId, canManage: 0, visible: 1 },
+    ],
+  });
+  // 对拍侧同步：新模型把【库门】判定收归角色视野，导航引擎的输入必须跟着一致，否则
+  // 处处 OVERDENY（旧允新拒）。sh_editor 在旧三表里没有 kb 成员行（只有 doc ACL），
+  // 现在它凭角色视野进得去 kb，故给 kb 节点补一条 r 让引擎结论对齐。
+  const kbNodeId = (await h.prisma.navNode.findUniqueOrThrow({
+    where: { workspaceId_resourceType_resourceId: { workspaceId: "ws_default", resourceType: "kb", resourceId: kbId } },
+    select: { id: true },
+  })).id;
+  await h.prisma.authPolicy.createMany({
+    data: ["sh_viewer", "sh_editor"].map((subjectId) => ({
+      id: `pol_test_kbr_${subjectId}`, workspaceId: "ws_default", nodeId: kbNodeId,
+      subjectType: "user", subjectId, actions: "r", createdBy: "test",
+    })),
+  });
 
   // 建资源写点已同事务同步 nav 节点；reconcile 把当前旧三表活行投影到 auth_policies（等价升级后状态）。
   const fixes = await applyAuthzReconcileFixes(h.prisma);

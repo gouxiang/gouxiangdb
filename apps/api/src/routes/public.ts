@@ -7,6 +7,7 @@
 //   - PUT /s/:token/doc/:docId/content  已关闭（一律 403）：分享链接对外只读
 // 权限完全以分享设置为准，与团队成员权限无关。不暴露成员邮箱、不暴露知识库其他文档。
 // 写口径（M7）：外部人经分享链接只能看不能写；登录用户的编辑走 /api/kb/docs/:docId/content。
+// 读接口的 canEdit 因此恒为 false（曾按 shareRole=editor 派生，导致前端调被关掉的写接口）。
 
 import { Hono } from "hono";
 import { prisma } from "../db.js";
@@ -78,7 +79,10 @@ async function resolveShare(token: string, docId?: string): Promise<ShareContext
   });
   if (!doc) throw new HttpError(404, "文档不存在或已被删除");
 
-  return { root, doc, canEdit: root.shareRole === "editor" };
+  // 分享链接进来的外部人恒只读：写能力已整体关闭（PUT /s/:token/doc/:docId/content 一律 403），
+  // 读接口若继续宣称 canEdit=true，前端就会把被关掉的那个保存接口再调一次、拿到 403。
+  // 故这里不再看 shareRole，一律 false——与"外部人只能看不能写"这条产品口径保持一致。
+  return { root, doc, canEdit: false };
 }
 
 function publicDoc(d: { id: string; kind: string; title: string; content: string; updatedAt: Date; parentId: string | null }, canEdit: boolean) {
@@ -226,16 +230,14 @@ pub.get("/s/:token/ref/:docId", async (c) => {
       for (const id of await subtreeIdSet(root.id)) subtree.add(id);
     }
 
-    let canEdit: boolean;
-    if (subtree.has(targetId)) {
-      canEdit = root.shareRole === "editor";
-    } else {
-      // 子树外：必须落在引用闭包内，且恒为只读
+    // 外部人只读（同源口径：不再按 shareRole 派生可编辑性）。
+    let canEdit = false;
+    if (!subtree.has(targetId)) {
+      // 子树外：必须落在引用闭包内才可见
       const closure = await buildShareReferenceClosure(root);
       if (!closure.has(targetId)) {
         throw new HttpError(403, "该内容未包含在本次分享范围内");
       }
-      canEdit = false;
     }
 
     const row = await prisma.kbDoc.findFirst({

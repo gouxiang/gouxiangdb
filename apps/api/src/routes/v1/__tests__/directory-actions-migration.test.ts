@@ -47,11 +47,13 @@ afterAll(async () => {
 });
 
 describe("① 有 manage_members 的角色：补满五枚，原能力面不缩水", () => {
-  it("owner 从六动作补到十一动作，且顺序与 ORG_ACTIONS 一致", () => {
+  it("owner 从六动作补到十一动作，且顺序与 ORG_ACTIONS 前十一枚一致", () => {
     setPerms("role_owner", SIX);
     raw.exec(migrationSql);
     expect(perms("role_owner")).toBe(ELEVEN);
-    expect(JSON.parse(perms("role_owner"))).toEqual([...ORG_ACTIONS]);
+    // 本迁移只负责通讯录五件套；ORG_ACTIONS 里后续的七枚（权限核心模型追加）由
+    // 20260921010000_role_core_models 补，不归这段脚本管，故只比对前十一枚。
+    expect(JSON.parse(perms("role_owner"))).toEqual([...ORG_ACTIONS].slice(0, 11));
   });
 
   it("只勾了 manage_members 的旧自定义角色同样补满五枚", async () => {

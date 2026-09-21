@@ -38,8 +38,20 @@ vi.mock("../../../db.js", () => ({
         Promise.resolve(args.where.id === "T1" ? { baseId: "B1" } : null),
     },
     member: {
-      // editor 拥有 canView/canEditData
+      // 权限核心模型（二）后 members.role 不再参与放行；保留桩只为不破坏旧断言形态。
       findUnique: () => Promise.resolve({ role: "editor" }),
+    },
+    // 新放行链只走「角色 × 库」：effectiveRoleRows 先查部门归属，再查授予行。
+    // u1 无部门，直接给一条超级管理员授予 -> libraryPolicy 短路为全权，不再查视野表。
+    deptMember: {
+      findMany: () => Promise.resolve([]),
+    },
+    roleAssignment: {
+      // effectiveRoleRows 用 include:{role:true} 取角色行，缺 role 会被整条跳过。
+      findMany: () => Promise.resolve([{
+        roleId: "role_owner", subjectType: "user", subjectId: "u1",
+        role: { id: "role_owner", systemKey: "super_admin", name: "超级管理员", isSystem: 1, permissions: "[]", deletedAt: null },
+      }]),
     },
     field: {
       findMany: () => Promise.resolve(fieldRows),

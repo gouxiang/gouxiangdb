@@ -24,6 +24,8 @@ beforeAll(async () => {
   h = await setupCharHarness("gx-m3-life-");
   u = "u_life";
   await h.createUser(u, { email: "life@example.com" });
+  // 权限核心模型（二）：库放行只看「角色 × 库」，脚手架用户挂超级管理员才动得了库。
+  await h.grantRole(u);
 });
 afterAll(() => h.cleanup());
 

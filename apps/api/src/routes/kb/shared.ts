@@ -1,14 +1,21 @@
 // apps/api/src/routes/kb/shared.ts
-// 知识库路由共享层：角色/ACL 读取、访问守卫、shadow 对拍缝、乐观锁错误、分享令牌/防环辅助。
-// M4/S5 commit ① 从 routes/kb.ts 机械拆出，零行为变化（URL/响应/状态码不变）。
+// 知识库路由共享层：库/文档访问守卫、shadow 对拍缝、分享令牌/防环辅助。
 //
-// 分层说明：本文件是 kb 子路由包（index/members/docs/sharing/recycle/versions/acl）的内部
-// 依赖，仅导出守卫与纯辅助；不挂任何 Hono 路由。
+// 权限核心模型重构后：本文件不再有自己的判定逻辑。
+// requireKb / requireDocAccess 的放行与拦截全部来自 domain/authz/libraryPolicy.ts 的
+// resolveKbAccess —— 与 Base 侧共用同一个裁决模块。旧的「kb_members 角色」与
+// 「单篇文档 ACL 取较高者」两条判定均已退出：
+//   - kb_members：不再是授权入口（谁进得来由角色的库视野决定），只作为历史成员留档；
+//   - kb_doc_acls：彻底不参与放行。单篇文档的独立授权入口已连同 routes/kb/acl.ts 一起删除，
+//     否则会留下一个"配了也对权限毫无影响"的死开关（这正是本次要消灭的形态）。
+// 知识库没有"表"，文档与画布共用 content 这一档对象的增/删/改/查。
 
 import { prisma } from "../../db.js";
 import { HttpError } from "../../guards.js";
 import { authzShadowActive } from "../../configAuthz.js";
 import { runShadowCheck } from "../../domain/authz/adapter.js";
+import type { LibraryAccessDTO } from "@gx/shared-types";
+import { contentAccessOf, resolveKbAccess } from "../../domain/authz/libraryPolicy.js";
 
 export type Role = "owner" | "editor" | "commenter" | "viewer";
 
@@ -22,21 +29,9 @@ export async function kbRoleOf(userId: string, kbId: string): Promise<Role | nul
   return (m?.role as Role) ?? null;
 }
 
-export async function docAclRoleOf(userId: string, docId: string): Promise<Role | null> {
-  const a = await prisma.kbDocAcl.findUnique({
-    where: { docId_userId: { docId, userId } },
-    select: { role: true },
-  });
-  return (a?.role as Role) ?? null;
-}
-
-
 /**
  * M4/S3 shadow 对拍缝：仅 GX_AUTHZ_ENGINE 生效为 shadow 时跑引擎同上下文对拍；
  * off 时空操作零新增 SQL。旧决策永远为准，对拍只分类计数/脱敏日志、不改返回、不抛错。
- * 按守卫名 + kb 节点动作对拍：requireKb 只裁决成员资格(r)；处理器内的 owner-only 提级
- * （改名/删除/加成员/踢成员）对拍 manage_share，建内容对拍 c——引擎 kb owner 串恰比 editor
- * 多 manage_share、editor 持 c，与旧提级判断同口径。业务保护（不能踢 owner/自己）不属授权动作，不对拍。
  */
 export async function shadowKbAction(
   guard: string,
@@ -54,47 +49,68 @@ async function shadowKb(userId: string, kbId: string, oldAllowed: boolean): Prom
   await shadowKbAction("requireKb", userId, kbId, "r", oldAllowed);
 }
 
-export async function requireKb(userId: string, kbId: string): Promise<{ role: Role }> {
+/**
+ * 由唯一裁决结果推出一个"展示档位"：canManage→owner / 能写内容→editor / 能看→viewer。
+ * 保持旧返回形态是为了不牵动十几个调用点；但它已经【不再表示任何授权】——
+ * 真正的判据永远是随结果一起返回的 access。
+ */
+function derivedRole(access: LibraryAccessDTO): Role {
+  if (access.canManage) return "owner";
+  const content = contentAccessOf(access);
+  if (content.create || content.update || content.delete) return "editor";
+  return "viewer";
+}
+
+export interface KbGuardResult {
+  role: Role;
+  access: LibraryAccessDTO;
+}
+
+export async function requireKb(userId: string, kbId: string): Promise<KbGuardResult> {
   const kb = await prisma.knowledgeBase.findFirst({ where: { id: kbId, deletedAt: null } });
   if (!kb) throw new HttpError(404, "知识库不存在");
-  const role = await kbRoleOf(userId, kbId);
-  if (!role) {
+  const access = await resolveKbAccess(userId, kbId);
+  if (!access.visible) {
     await shadowKb(userId, kbId, false);
     throw new HttpError(403, "无权访问该知识库");
   }
   await shadowKb(userId, kbId, true);
-  return { role };
+  return { role: derivedRole(access), access };
 }
 
 /**
- * 内容访问：知识库成员 或 单文档 ACL 授权。
- * shadow：读映射内容节点（resourceType=doc.kind，覆盖 doc/canvas）r；写映射 u；
- * 旧"取较高"结果为准，引擎对拍只观测。404（资源软删/缺失）不属授权漂移，不对拍。
+ * 内容访问：一律跟随所在知识库的角色配置。
+ * 知识的"能不能看/能不能改"只有这一个来源——文档级 ACL 已不再参与任何判定。
  */
-export async function requireDocAccess(userId: string, docId: string, needEdit = false) {
-  const doc = await prisma.kbDoc.findFirst({ where: { id: docId, deletedAt: null } });
-  if (!doc) throw new HttpError(404, "文档不存在或已删除");
-  const kbRole = await kbRoleOf(userId, doc.kbId);
-  const aclRole = await docAclRoleOf(userId, docId);
-  const effective =
-    kbRole && aclRole ? (RANK[kbRole]! >= RANK[aclRole]! ? kbRole : aclRole) : (kbRole ?? aclRole);
+export async function requireDocAccess(
+  userId: string,
+  docId: string,
+  needEdit = false,
+): Promise<{ doc: Awaited<ReturnType<typeof loadDoc>>; role: Role; canEdit: boolean; access: LibraryAccessDTO }> {
+  const doc = await loadDoc(docId);
+  await requireKb(userId, doc.kbId);
+  const access = await resolveKbAccess(userId, doc.kbId);
+  const content = contentAccessOf(access);
+  const canEdit = content.update;
+
   const action = needEdit ? ("u" as const) : ("r" as const);
   const shadowContent = async (oldAllowed: boolean): Promise<void> => {
     if (!authzShadowActive()) return;
     const kind = doc.kind === "canvas" ? "canvas" : "doc";
     await runShadowCheck("requireDocAccess", userId, { resourceType: kind, resourceId: docId }, action, oldAllowed);
   };
-  if (!effective) {
-    await shadowContent(false);
-    throw new HttpError(403, "无权访问该内容");
-  }
-  const canEdit = RANK[effective]! >= RANK["editor"]!;
   if (needEdit && !canEdit) {
     await shadowContent(false);
     throw new HttpError(403, "当前角色无权编辑");
   }
   await shadowContent(needEdit ? canEdit : true);
-  return { doc, role: effective as Role, canEdit };
+  return { doc, role: derivedRole(access), canEdit, access };
+}
+
+async function loadDoc(docId: string) {
+  const doc = await prisma.kbDoc.findFirst({ where: { id: docId, deletedAt: null } });
+  if (!doc) throw new HttpError(404, "文档不存在或已删除");
+  return doc;
 }
 
 /**

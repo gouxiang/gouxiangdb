@@ -41,6 +41,7 @@ export const records = new Hono();
 
 // M6/S4：写原语已移入 domain/recordWrite.ts（纯移动）+ re-export 保持既有导入点不变。
 import { applyFieldWrites, assertUnique, createRecordTx, parseStoredFields, runMaskWriteGate, softDeleteRecordTx, updateRecordTx } from "../domain/recordWrite.js";
+import { fieldWriteGate } from "../domain/authz/libraryPolicy.js";
 export { assertRequiredOnCreate, assertUnique } from "../domain/recordWrite.js";
 
 // ============ 工具 ============
@@ -137,7 +138,7 @@ records.post("/", async (c) => {
   const tableId = c.req.query("tableId");
   if (!tableId) return c.json({ error: "缺少 tableId" }, 400);
   const baseId = await baseIdOfTable(tableId);
-  const { userId } = await requireCanEditData(c, baseId);
+  const { userId, access } = await requireCanEditData(c, baseId);
 
   const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
@@ -170,8 +171,10 @@ records.post("/", async (c) => {
   // 否则「字段校验失败但空记录已落库」会留下孤儿记录。
   const isDraft = parsed.data.draft === true;
   // M6/S4：事务体已移入 domain/recordWrite.ts（纯移动 + 显式传参）。
+  // 字段级写闸：人对『仅可见』『隐藏』字段的写入在落盘前被挡（系统自动计算不受限）。
+  const fieldGate = fieldWriteGate(access, tableId, (id) => fields.find((f) => f.id === id)?.name ?? id);
   const rec = await withWriteTx("record.create", (tx) => createRecordTx(tx, {
-    tableId, payloadFields, fields, userId, isDraft,
+    tableId, payloadFields, fields, userId, isDraft, fieldGate,
   }));
 
   // 创建期默认逻辑：static 填入、autoNumber 编号、lookup/formula 初值、subtable 整表抓取播种
@@ -369,7 +372,7 @@ const updateSchema = z.object({ fields: z.record(z.unknown()) });
 records.patch("/:recordId", async (c) => {
   const recordId = c.req.param("recordId");
   const baseId = await baseIdOfRecord(recordId);
-  const { userId } = await requireCanEditData(c, baseId);
+  const { userId, access } = await requireCanEditData(c, baseId);
 
   const parsed = updateSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
@@ -386,8 +389,9 @@ records.patch("/:recordId", async (c) => {
   // 事务：unique 校验 + 物理字段写入 + link_row 写入 + updatedBy 落库，
   // 任一步失败整体回滚，避免「链接写了一半、文本没写」的中间态。
   // M6/S4：事务体已移入 domain/recordWrite.ts（纯移动 + 显式传参）。
+  const fieldGate = fieldWriteGate(access, rec.tableId, (id) => fields.find((f) => f.id === id)?.name ?? id);
   await withWriteTx("record.update", (tx) => updateRecordTx(tx, {
-    tableId: rec.tableId, recordId, patch: parsed.data.fields, fields, userId,
+    tableId: rec.tableId, recordId, patch: parsed.data.fields, fields, userId, fieldGate,
   }));
 
   // 编辑期默认值联动：被触发的 lookup/formula 默认字段（及子表格重播种）由后端权威重算

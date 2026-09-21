@@ -2,9 +2,9 @@
 //
 // M3 新外壳的二级列表会改读 nav tree，但旧 /api 列表契约必须保持（旧壳 flag 回退仍消费；
 // M3 计划 §3-3）。本文件钉死四个侧栏数据源端点在 43bac9b 基线上的行为：
-//  - GET /api/bases：仅自己有 member 行的库；软删库过滤；输出按 joinedAt asc；
+//  - GET /api/bases：仅自己【有角色视野】的库；软删库过滤；输出按 joinedAt asc；
 //  - GET /api/tables?baseId=：非成员 403；按 createdAt asc；软删表不返回；
-//  - GET /api/kb：仅自己有 kb_member 行的库；软删过滤；按 joinedAt desc；
+//  - GET /api/kb：仅自己【有角色视野】的库；软删过滤；按 joinedAt desc；
 //  - GET /api/kb/:id/docs：非 kb 成员 403；按 updatedAt desc；软删文档不返回；kind 过滤。
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -20,9 +20,27 @@ beforeAll(async () => {
 });
 afterAll(() => h.cleanup());
 
+// 权限核心模型（二）：列表不再按"我是谁的库成员"过滤，而按「角色 × 库」的可见性过滤。
+// 旧 member / kb_member 行照旧写入（台账），但要让库出现在列表里必须补一条角色视野行。
+async function grantVisible(userId: string, kind: "base" | "kb", libraryId: string): Promise<void> {
+  const roleId = `role_${userId}`;
+  if (!(await h.prisma.role.findUnique({ where: { id: roleId } }))) {
+    await h.prisma.role.create({
+      data: { id: roleId, workspaceId: "ws_default", name: `${userId} 的视野`, isSystem: 0, permissions: "[]" },
+    });
+    await h.prisma.roleAssignment.create({
+      data: { roleId, subjectType: "user", subjectId: userId, scopeType: "workspace", createdBy: "seed" },
+    });
+  }
+  await h.prisma.roleLibraryScope.create({
+    data: { roleId, libraryKind: kind, libraryId, canManage: 1, visible: 1 },
+  });
+}
+
 async function mkBase(owner: string, name: string, createdAt: Date) {
   const b = await h.prisma.base.create({ data: { name, createdBy: owner, createdAt } });
   await h.prisma.member.create({ data: { baseId: b.id, userId: owner, role: "owner", joinedAt: createdAt } });
+  await grantVisible(owner, "base", b.id);
   return b.id;
 }
 
@@ -81,6 +99,7 @@ describe("GET /api/tables?baseId 排序与守卫", () => {
 async function mkKb(owner: string, name: string, joinedAt: Date) {
   const k = await h.prisma.knowledgeBase.create({ data: { name, createdBy: owner, createdAt: joinedAt } });
   await h.prisma.kbMember.create({ data: { kbId: k.id, userId: owner, role: "owner", joinedAt } });
+  await grantVisible(owner, "kb", k.id);
   return k.id;
 }
 

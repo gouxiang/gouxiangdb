@@ -1,23 +1,25 @@
-// M4/S0 旧三表决策 characterization golden（只锁现状，不修正；禁改生产码）。
+// M4/S0 决策 characterization golden：权限核心模型（二）之后的现状。
 //
-// 锁四件事，作为 S3 shadow 适配层包壳、S6 fieldMask 后 off 态逐值不变的对照源：
-//   1. base 五角色 × 八操作 200/403 矩阵（真 HTTP/真 JWT/真守卫），并对拍 permissionsForRole；
-//   2. kb 成员角色 × doc ACL「取较高」（kb.ts:68-69），含 team-lead 指定两路；
-//   3. 无成员 / 无 ACL / 软删资源的 403/404 文案与机器 code；
-//   4. 匿名 public resolveShare 路径零 members/kb_members/kb_doc_acls/auth_policies 查询。
-// 真库真 17 迁移，复用 M3 charHarness（不 mock auth/守卫）。
+// 旧版锁的是"base 五角色 × 八操作"与"kb 成员角色 × doc ACL 取较高"——这两套判定
+// 【已被本次重构整体退出放行链】（members.role / kb_members.role / kb_doc_acls 三张旧表
+// 不再参与放行，见 domain/authz/libraryPolicy.ts 的注释）。留着旧断言等于给新模型上锁，
+// 故本文件改为锁两件事：
+//   1. 旧三表确实不再放行（配了也没用，且入口已摘除，不会出现"配了没用"的开关）；
+//   2. 库/表/字段放行只有一个来源：角色 × 库（role_library_scope），逐表逐字段勾选。
+// 第三个 describe（匿名分享零授权查询）与软删文案不受模型影响，原样保留。
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { permissionsForRole, type Role } from "@gx/shared-types";
+import { KB_CONTENT_KEY } from "@gx/shared-types";
 import { setupCharHarness, json, type CharHarness } from "../../../nav/__tests__/characterization/charHarness.js";
 
 let h: CharHarness;
-const BASE_ROLES: Role[] = ["owner", "creator", "editor", "commenter", "viewer"];
+const LEGACY_ROLES = ["owner", "creator", "editor", "commenter", "viewer"] as const;
 
 beforeAll(async () => {
   h = await setupCharHarness("gx-m4-decision-");
-  for (const r of BASE_ROLES) await h.createUser(`bu_${r}`);
+  for (const r of LEGACY_ROLES) await h.createUser(`bu_${r}`);
   await h.createUser("bu_none");
+  await h.grantRole("bu_owner"); // 硬规则 B：只有超级管理员/管理员建得起库
 });
 afterAll(() => h.cleanup());
 
@@ -30,171 +32,117 @@ async function status(method: string, url: string, userId: string | null, body?:
   return (await call(method, url, userId, body)).status;
 }
 
-describe("base 五角色 × 八操作矩阵（现状，对照 permissionsForRole）", () => {
+describe("旧三表不再参与放行（members.role / kb_members.role / kb_doc_acls）", () => {
   let baseId: string;
   let tableId: string;
-  let detailRecordId: string;
-  const recordByRole: Record<string, string> = {};
 
   beforeAll(async () => {
     const res = await call("POST", "/api/bases", "bu_owner", { name: "M4 决策库" });
     baseId = (await json<{ base: { id: string } }>(res)).base.id;
-    for (const r of BASE_ROLES.filter((x) => x !== "owner")) {
-      await h.prisma.member.create({ data: { baseId, userId: `bu_${r}`, role: r } });
-    }
     const t = await call("GET", `/api/tables?baseId=${baseId}`, "bu_owner");
     tableId = (await json<{ tables: Array<{ id: string }> }>(t)).tables[0]!.id;
-    // 给每个能编辑的角色预造一条独立记录，避免改/删互相干扰。
-    for (const r of ["owner", "creator", "editor"]) {
-      const rec = await h.prisma.record.create({
-        data: { tableId, fields: "{}", createdBy: `bu_${r}`, updatedBy: `bu_${r}` },
-      });
-      recordByRole[r] = rec.id;
+    // 旧三表照旧写满五档成员行——它们仍是导航引擎的投影源，但对放行为零。
+    for (const r of LEGACY_ROLES.filter((x) => x !== "owner")) {
+      await h.prisma.member.create({ data: { baseId, userId: `bu_${r}`, role: r } });
     }
-    recordByRole.commenter = (await h.prisma.record.create({
-      data: { tableId, fields: "{}", createdBy: "bu_owner", updatedBy: "bu_owner" },
-    })).id;
-    recordByRole.viewer = recordByRole.commenter;
-    // 评论专用活记录（owner 自己那条会在改/删用例被软删）。
-    recordByRole.commentTarget = (await h.prisma.record.create({
-      data: { tableId, fields: "{}", createdBy: "bu_owner", updatedBy: "bu_owner" },
-    })).id;
-    // 详情专用活记录，不被任何改/删用例触碰。
-    detailRecordId = (await h.prisma.record.create({
-      data: { tableId, fields: "{}", createdBy: "bu_owner", updatedBy: "bu_owner" },
-    })).id;
   });
 
-  it.each(BASE_ROLES)("%s PermissionSet 与 MATRIX 一致", (r) => {
-    const p = permissionsForRole(r);
-    expect(p).toEqual({
-      canManageBase: r === "owner",
-      canManageSchema: r === "owner" || r === "creator",
-      canEditData: r === "owner" || r === "creator" || r === "editor",
-      canComment: r !== "viewer",
-      canView: true,
-    });
-  });
-
-  // 列表 / 详情 = canView：五角色 200。
-  it.each(BASE_ROLES)("%s 列表(canView) 200", async (r) => {
-    expect(await status("GET", `/api/tables?baseId=${baseId}`, `bu_${r}`)).toBe(200);
-    expect(await status("GET", `/api/records/${detailRecordId}`, `bu_${r}`)).toBe(200);
-  });
-
-  // 建记录 = canEditData。
-  it.each(["owner", "creator", "editor"] as Role[])("%s 建记录(canEditData) 201", async (r) => {
-    expect(await status("POST", `/api/records?tableId=${tableId}`, `bu_${r}`, { fields: {} })).toBe(201);
-  });
-  it.each(["commenter", "viewer"] as Role[])("%s 建记录 403", async (r) => {
+  it.each(LEGACY_ROLES.filter((r) => r !== "owner"))("%s 成员行不再授予任何库权限 -> 403 FORBIDDEN", async (r) => {
+    const res = await call("GET", `/api/tables?baseId=${baseId}`, `bu_${r}`);
+    expect(res.status).toBe(403);
+    expect((await json<{ code: string }>(res)).code).toBe("FORBIDDEN");
     expect(await status("POST", `/api/records?tableId=${tableId}`, `bu_${r}`, { fields: {} })).toBe(403);
   });
 
-  // 改 / 删记录 = canEditData（用各角色独立记录）。
-  it.each(["owner", "creator", "editor"] as Role[])("%s 改/删记录 200", async (r) => {
-    const id = recordByRole[r]!;
-    expect(await status("PATCH", `/api/records/${id}`, `bu_${r}`, { fields: {} })).toBe(200);
-    expect(await status("DELETE", `/api/records/${id}`, `bu_${r}`)).toBe(200);
-  });
-  it.each(["commenter", "viewer"] as Role[])("%s 改/删记录 403", async (r) => {
-    const id = recordByRole[r]!;
-    expect(await status("PATCH", `/api/records/${id}`, `bu_${r}`, { fields: {} })).toBe(403);
-    expect(await status("DELETE", `/api/records/${id}`, `bu_${r}`)).toBe(403);
-  });
-
-  // 改结构 = canManageSchema。
-  it.each(["owner", "creator"] as Role[])("%s 建字段(canManageSchema) 201", async (r) => {
-    expect(await status("POST", `/api/fields?tableId=${tableId}`, `bu_${r}`, { name: `f_${r}_${r}`, type: "singleLineText" })).toBe(201);
-  });
-  it.each(["editor", "commenter", "viewer"] as Role[])("%s 建字段 403", async (r) => {
-    expect(await status("POST", `/api/fields?tableId=${tableId}`, `bu_${r}`, { name: `f_${r}`, type: "singleLineText" })).toBe(403);
-  });
-
-  // 管成员 = canManageBase：仅 owner（目标须为已注册用户，否则 404；先建账号）。
-  it("管成员(canManageBase)：owner 201，其余 403", async () => {
-    await h.createUser("member_target");
-    expect(await status("POST", `/api/bases/${baseId}/members`, "bu_owner", { email: "member_target@example.com", role: "viewer" })).toBe(201);
-    for (const r of ["creator", "editor", "commenter", "viewer"] as Role[]) {
-      // 未注册邮箱先抛 404 也属拒绝，但为精确锁 403，用已存在账号（已是成员则 owner 成功，其余仍先过 canManageBase 403）。
-      expect(await status("POST", `/api/bases/${baseId}/members`, `bu_${r}`, { email: "member_target@example.com", role: "viewer" })).toBe(403);
+  it("唯一真来源：给角色配上「角色 × 库」视野后，同一批用户立刻可见可写", async () => {
+    await h.prisma.role.create({
+      data: { id: "dm_role_scope", workspaceId: "ws_default", name: "决策档", isSystem: 0, permissions: "[]" },
+    });
+    for (const r of LEGACY_ROLES.filter((x) => x !== "owner")) {
+      await h.prisma.roleAssignment.create({
+        data: { roleId: "dm_role_scope", subjectType: "user", subjectId: `bu_${r}`, scopeType: "workspace", createdBy: "seed" },
+      });
+    }
+    await h.prisma.roleLibraryScope.create({
+      data: {
+        roleId: "dm_role_scope", libraryKind: "base", libraryId: baseId, canManage: 0, visible: 1,
+        config: JSON.stringify({
+          tables: { [tableId]: { read: true, create: true, update: true, delete: false } },
+          fields: {},
+        }),
+      },
+    });
+    // 与成员档无关：五个人拿的是同一枚角色，结果必须完全一致。
+    for (const r of LEGACY_ROLES.filter((x) => x !== "owner")) {
+      expect(await status("GET", `/api/tables?baseId=${baseId}`, `bu_${r}`)).toBe(200);
+      expect(await status("POST", `/api/records?tableId=${tableId}`, `bu_${r}`, { fields: {} })).toBe(201);
     }
   });
 
-  // 评论 = canComment（用独立活记录）。
-  it.each(["owner", "creator", "editor", "commenter"] as Role[])("%s 评论(canComment) 201", async (r) => {
-    expect(await status("POST", `/api/records/${recordByRole.commentTarget}/comments`, `bu_${r}`, { body: "x" })).toBe(201);
-  });
-  it("viewer 评论 403", async () => {
-    expect(await status("POST", `/api/records/${recordByRole.commentTarget}/comments`, "bu_viewer", { body: "x" })).toBe(403);
-  });
-
-  it("非成员全部资源操作 403 且 code=FORBIDDEN；无 token 401", async () => {
-    const res = await call("GET", `/api/records?tableId=${tableId}`, "bu_none");
+  it("无来源用户 403 且 code=FORBIDDEN；无 token 401", async () => {
+    const res = await call("GET", `/api/tables?baseId=${baseId}`, "bu_none");
     expect(res.status).toBe(403);
     expect((await json<{ code: string }>(res)).code).toBe("FORBIDDEN");
-    expect(await status("POST", `/api/records?tableId=${tableId}`, "bu_none", { fields: {} })).toBe(403);
     expect((await call("GET", `/api/tables?baseId=${baseId}`, null)).status).toBe(401);
   });
 });
 
-describe("kb 成员角色 × doc ACL「取较高」（kb.ts:68-69）", () => {
+describe("知识库：文档一律跟随知识库的角色配置，单篇 ACL 不再放行", () => {
   let kbId: string;
   let docId: string;
 
   beforeAll(async () => {
-    await h.createUser("ku_viewer");
-    await h.createUser("ku_editor");
-    await h.createUser("ku_commenter");
-    await h.createUser("acl_editor");
+    await h.createUser("ku_member");
+    await h.createUser("ku_acl_only");
     const res = await call("POST", "/api/kb", "bu_owner", { name: "M4 决策知识库" });
     kbId = (await json<{ knowledgeBase: { id: string } }>(res)).knowledgeBase.id;
-    // owner（bu_owner）建库即 owner 成员；其余三个成员档显式加入。
-    for (const [u, role] of [["ku_viewer", "viewer"], ["ku_editor", "editor"], ["ku_commenter", "commenter"]] as const) {
-      await h.prisma.kbMember.create({ data: { kbId, userId: u, role } });
-    }
-    await h.createUser("acl_only_editor");
+    // 旧 kb_members 行（owner 成员）与单篇 ACL 行照旧写入，均不再参与放行。
+    await h.prisma.kbMember.create({ data: { kbId, userId: "ku_member", role: "editor" } });
     const d = await call("POST", `/api/kb/${kbId}/docs`, "bu_owner", { kind: "doc", title: "ACL 文档" });
     docId = (await json<{ doc: { id: string } }>(d)).doc.id;
+    await h.prisma.kbDocAcl.create({ data: { docId, userId: "ku_acl_only", role: "editor" } });
+    await h.prisma.kbDocAcl.create({ data: { docId, userId: "ku_member", role: "viewer" } });
   });
 
-  async function myRole(user: string): Promise<{ myRole: string; canEdit: boolean }> {
-    const res = await call("GET", `/api/kb/docs/${docId}`, user);
-    expect(res.status).toBe(200);
-    const doc = (await json<{ doc: { myRole: string; canEdit: boolean } }>(res)).doc;
-    return { myRole: doc.myRole, canEdit: doc.canEdit };
-  }
-
-  it("取较高①：viewer 成员 + editor ACL -> effective=editor，可编辑，PUT content 200", async () => {
-    await h.prisma.kbDocAcl.create({ data: { docId, userId: "ku_viewer", role: "editor" } });
-    expect(await myRole("ku_viewer")).toEqual({ myRole: "editor", canEdit: true });
-    expect(await status("PUT", `/api/kb/docs/${docId}/content`, "ku_viewer", { content: "a" })).toBe(200);
+  it("只有 kb 成员行 / 只有 editor ACL，都进不去：一律 403 FORBIDDEN", async () => {
+    for (const u of ["ku_member", "ku_acl_only"]) {
+      const res = await call("GET", `/api/kb/docs/${docId}`, u);
+      expect(res.status).toBe(403);
+      expect((await json<{ code: string }>(res)).code).toBe("FORBIDDEN");
+    }
   });
 
-  it("取较高②：editor 成员 + viewer ACL -> 仍 editor（成员档不被 ACL 拉低），可编辑", async () => {
-    await h.prisma.kbDocAcl.create({ data: { docId, userId: "ku_editor", role: "viewer" } });
-    expect(await myRole("ku_editor")).toEqual({ myRole: "editor", canEdit: true });
-    expect(await status("PUT", `/api/kb/docs/${docId}/content`, "ku_editor", { content: "b" })).toBe(200);
-  });
+  it("给角色配 kb 视野后：只读档 canEdit=false，勾了 content 写动作才 canEdit=true", async () => {
+    await h.prisma.role.create({
+      data: { id: "dm_role_kb_ro", workspaceId: "ws_default", name: "kb 只读", isSystem: 0, permissions: "[]" },
+    });
+    await h.prisma.role.create({
+      data: { id: "dm_role_kb_rw", workspaceId: "ws_default", name: "kb 可写", isSystem: 0, permissions: "[]" },
+    });
+    for (const [u, roleId] of [["ku_member", "dm_role_kb_ro"], ["ku_acl_only", "dm_role_kb_rw"]] as const) {
+      await h.prisma.roleAssignment.create({
+        data: { roleId, subjectType: "user", subjectId: u, scopeType: "workspace", createdBy: "seed" },
+      });
+    }
+    await h.prisma.roleLibraryScope.createMany({
+      data: [
+        { roleId: "dm_role_kb_ro", libraryKind: "kb", libraryId: kbId, canManage: 0, visible: 1 },
+        { roleId: "dm_role_kb_rw", libraryKind: "kb", libraryId: kbId, canManage: 0, visible: 1,
+          config: JSON.stringify({
+            tables: { [KB_CONTENT_KEY]: { read: true, create: true, update: true, delete: false } },
+            fields: {},
+          }) },
+      ],
+    });
+    const ro = await call("GET", `/api/kb/docs/${docId}`, "ku_member");
+    expect(ro.status).toBe(200);
+    expect((await json<{ doc: { canEdit: boolean } }>(ro)).doc.canEdit).toBe(false);
+    expect(await status("PUT", `/api/kb/docs/${docId}/content`, "ku_member", { content: "x" })).toBe(403);
 
-  it("commenter 成员 + viewer ACL -> commenter，不可编辑，PUT 403", async () => {
-    await h.prisma.kbDocAcl.create({ data: { docId, userId: "ku_commenter", role: "viewer" } });
-    expect(await myRole("ku_commenter")).toEqual({ myRole: "commenter", canEdit: false });
-    const res = await call("PUT", `/api/kb/docs/${docId}/content`, "ku_commenter", { content: "c" });
-    expect(res.status).toBe(403);
-    expect((await json<{ code: string; error: string }>(res)).error).toBe("当前角色无权编辑");
-  });
-
-  it("无成员但有 editor ACL -> 凭 ACL 可编辑", async () => {
-    await h.prisma.kbDocAcl.create({ data: { docId, userId: "acl_only_editor", role: "editor" } });
-    expect(await myRole("acl_only_editor")).toEqual({ myRole: "editor", canEdit: true });
-  });
-
-  it("无成员且无 ACL -> 403「无权访问该内容」code=FORBIDDEN", async () => {
-    const res = await call("GET", `/api/kb/docs/${docId}`, "bu_none");
-    expect(res.status).toBe(403);
-    const b = await json<{ code: string; error: string }>(res);
-    expect(b.code).toBe("FORBIDDEN");
-    expect(b.error).toBe("无权访问该内容");
+    const rw = await call("GET", `/api/kb/docs/${docId}`, "ku_acl_only");
+    expect(rw.status).toBe(200);
+    expect((await json<{ doc: { canEdit: boolean } }>(rw)).doc.canEdit).toBe(true);
+    expect(await status("PUT", `/api/kb/docs/${docId}/content`, "ku_acl_only", { content: "y" })).toBe(200);
   });
 
   it("软删文档 404「文档不存在或已删除」；软删知识库 404「知识库不存在」", async () => {

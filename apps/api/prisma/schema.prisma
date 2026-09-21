@@ -22,6 +22,9 @@ model Base {
   iconColor   String   @default("#378ADD")
   // 自定义图标名（ENTITY_ICONS 白名单之一）；null = 未自定义，前端按类型渲染默认图标。
   icon        String?
+  // 允许分享（库级开关）：关闭时库内任何数据都不能被成员外发链接。
+  // 只有对该库持管理权的角色 + 超级管理员 + 管理员能开（domain/authz/libraryPolicy.ts）。
+  shareEnabled Int     @default(0)
   createdAt   DateTime @default(now())
   createdBy   String
   deletedAt   DateTime?
@@ -44,6 +47,8 @@ model Table {
   icon           String?
   // 自定义图标颜色 #RRGGBB；null = 未自定义，前端按类型取默认色。
   iconColor      String?
+  // 允许分享（表级开关）：库级开了还不够，表级也得开，成员才能外发这张表的数据。
+  shareEnabled   Int      @default(0)
   createdAt      DateTime @default(now())
   createdBy      String
   deletedAt      DateTime?
@@ -289,6 +294,8 @@ model KnowledgeBase {
   iconColor String   @default("#0F6E56")
   // 自定义图标名（ENTITY_ICONS 白名单之一）；null = 未自定义，前端按类型渲染默认图标。
   icon      String?
+  // 允许分享（库级开关）：同 Base.shareEnabled，作用于文档与画布。
+  shareEnabled Int   @default(0)
   createdBy String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -419,6 +426,37 @@ model Workspace {
   menuItems     MenuItem[]
 
   @@map("workspaces")
+}
+
+// ============================================================================
+// 权限核心模型（二）：角色 × 库 的库权限段（role_library_scope）
+//   每行 = 一个角色对一个库（base 或 kb，用 libraryKind 区分）的一条视野授权。
+//   与通讯录段（roles.permissions）分开：库权限是二维的（库 × 表 × 字段），
+//   塞进一维数组会退化成无法寻址的字符串黑魔法。
+//   刻意不复用 auth_policies：那套带着"配了不生效"的未启用引擎语义，
+//   复用等于把"为什么这条策略没起作用"的坑再买一次。
+//   roleId 不建 Prisma 关系/FK：角色是软删（deletedAt），不需要也不该有级联。
+//   硬规则（删库/建库/分享只读）不落本表，一律在 domain/authz/libraryPolicy.ts 现算。
+// ============================================================================
+
+model RoleLibraryScope {
+  id          String   @id @default(cuid())
+  roleId      String
+  libraryKind String   // "base" | "kb"
+  libraryId   String
+  // 1 = 该角色在这个库里持管理权（改结构/改数据/开分享），不含删库。
+  canManage   Int      @default(0)
+  // 1 = 该角色能进这个库。只勾可见不做逐表设置 = 该库全部表只读。
+  visible     Int      @default(0)
+  // JSON.stringify(LibraryScopeConfig)：逐表增删改查勾选 + 逐字段 仅可见/可编辑/隐藏。
+  config      String   @default("{\"tables\":{},\"fields\":{}}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([roleId, libraryKind, libraryId])
+  @@index([roleId])
+  @@index([libraryKind, libraryId])
+  @@map("role_library_scope")
 }
 
 model Department {

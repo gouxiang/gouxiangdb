@@ -330,6 +330,12 @@ export interface CreateRecordParams {
   payloadFields: Record<string, unknown>;
   fields: Awaited<ReturnType<typeof loadTableFields>>;
   userId: string;
+  /**
+   * 字段级写闸：由调用方从「角色 × 库」裁决结果派生，收到待写字段名后自行决定抛什么错。
+   * 只挡【人】的写入——公式/自动关联等系统自动计算走 applyFieldWrites 内部的
+   * isComputedFieldType/isSystemFieldType 分支，根本不经过这里，故不受"仅可见"限制。
+   */
+  fieldGate?: (fieldIds: readonly string[]) => void;
   /** draft=true 跳过创建期必填兜底（就地新建空行草稿，与编辑期允许临时为空一致）。 */
   isDraft: boolean;
 }
@@ -344,6 +350,8 @@ export async function createRecordTx(tx: DbTx, params: CreateRecordParams): Prom
     if (!params.isDraft) {
       await assertRequiredOnCreate(params.fields, params.payloadFields);
     }
+    // 字段级写闸先于任何写：整条记录的字段要么全过，要么一条都不写（不留半条记录）。
+    params.fieldGate?.(Object.keys(params.payloadFields));
     // unique 校验放进事务内，避免并发下检查与写入之间被插队（TOCTOU）
     await assertUnique(params.tableId, params.fields, params.payloadFields, undefined, undefined, tx);
     const created = await tx.record.create({
@@ -367,6 +375,8 @@ export interface UpdateRecordParams {
   patch: Record<string, unknown>;
   fields: Awaited<ReturnType<typeof loadTableFields>>;
   userId: string;
+  /** 同 CreateRecordParams.fieldGate：字段级写闸（只挡人的写入）。 */
+  fieldGate?: (fieldIds: readonly string[]) => void;
 }
 
 /**
@@ -375,6 +385,8 @@ export interface UpdateRecordParams {
  * -> outbox upsert。调用方负责 defaults 联动、写后 hydrate 与掩码投影。
  */
 export async function updateRecordTx(tx: DbTx, params: UpdateRecordParams): Promise<void> {
+    // 字段级写闸先于任何写：与批量路径的 runMaskWriteGate 同口径——整批要么全过要么不写。
+    params.fieldGate?.(Object.keys(params.patch));
     await assertUnique(params.tableId, params.fields, params.patch, params.recordId, undefined, tx);
     await applyFieldWrites(params.tableId, params.recordId, params.patch, params.fields, tx);
     await tx.record.update({ where: { id: params.recordId }, data: { updatedBy: params.userId } });

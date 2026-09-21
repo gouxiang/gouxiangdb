@@ -1,12 +1,28 @@
 // apps/api/src/guards.ts
-// 路由级权限守卫（RBAC）
+// 路由级权限守卫。
+//
+// 权限核心模型重构后：库/表/字段级的裁定【只有一个来源】——
+// domain/authz/libraryPolicy.ts 的 resolveBaseAccess。本文件不再读 Member.role，
+// 也不再自己拼权限位：下面每个 require* 都是对同一份 LibraryAccess 的一次取 shard。
+//
+// 保留 PermissionSet 这个返回形态：旧调用点（tables/fields/records/views…）按布尔位分支，
+// 一次改完它们的入参会牵动十几处路由；保留形态、换掉计算，是零行为漂移的最小改动面。
+// 需要表/字段级细粒度时用返回的 access + libraryPolicy 的 tableAccessOf/fieldAccessOf。
 
 import type { Context } from "hono";
 import { prisma } from "./db.js";
 import { getUserId, type Role } from "./auth.js";
-import { permissionsForRole, type PermissionSet, type ResourceAction } from "@gx/shared-types";
+import type { PermissionSet, TableAccess } from "@gx/shared-types";
 import { authzShadowActive } from "./configAuthz.js";
 import { runShadowCheck } from "./domain/authz/adapter.js";
+import type { LibraryAccessDTO } from "@gx/shared-types";
+import {
+  resolveBaseAccess,
+  resolveBaseAccessByRecord,
+  resolveBaseAccessByTable,
+  resolveBaseAccessByView,
+  tableAccessOf,
+} from "./domain/authz/libraryPolicy.js";
 
 export class HttpError extends Error {
   /** 可选机器可读错误码（不传时按状态码回落 BAD_REQUEST/CONFLICT 等）。 */
@@ -23,7 +39,8 @@ export async function requireUserId(c: Context): Promise<string> {
   return userId;
 }
 
-/** tableId → baseId */
+// ============ id 反查（纯数据访问，与授权无关） ============
+
 export async function resolveBaseIdByTable(tableId: string): Promise<string | null> {
   const t = await prisma.table.findUnique({ where: { id: tableId }, select: { baseId: true } });
   return t?.baseId ?? null;
@@ -45,20 +62,30 @@ export async function resolveBaseIdByRecord(recordId: string): Promise<string | 
   return r?.table.baseId ?? null;
 }
 
-export async function roleOf(userId: string, baseId: string): Promise<Role | undefined> {
-  const m = await prisma.member.findUnique({
-    where: { baseId_userId: { baseId, userId } },
-    select: { role: true },
-  });
-  return m?.role as Role | undefined;
+// ============ 由唯一裁决结果推导旧形态 ============
+
+/** 把 LibraryAccess 投影成旧的五个权限位（供未改造的调用点与列表接口继续使用）。 */
+export function permit(access: LibraryAccessDTO): PermissionSet {
+  // 库级可管理 = 全表可写；否则看有没有任何一张表被勾了写动作。
+  const anyWritable = Object.values(access.tables).some((t: TableAccess) => t.create || t.update || t.delete);
+  const canEditData = access.canManage || anyWritable;
+  return {
+    canManageBase: access.canManage,
+    canManageSchema: access.canManage,
+    canEditData,
+    // 只读可见不等于可评论：旧模型里 viewer 的 canComment 就是 false，评论权跟写权限走。
+    // 新模型没有"评论者"这一档库权限，故沿用旧口径——宁可窄，不擅自放宽。
+    canComment: canEditData,
+    canView: access.visible,
+  };
 }
 
-export async function permissionsOf(userId: string, baseId: string): Promise<PermissionSet> {
-  const role = await roleOf(userId, baseId);
-  if (!role) {
-    return { canManageBase: false, canManageSchema: false, canEditData: false, canComment: false, canView: false };
-  }
-  return permissionsForRole(role);
+/** 展示用角色名。不承载授权语义，答案本身由同一份 LibraryAccess 推出。 */
+export function displayRole(access: LibraryAccessDTO): Role {
+  if (access.canManage) return "owner";
+  if (permit(access).canEditData) return "editor";
+  if (access.visible) return "viewer";
+  return "viewer";
 }
 
 const DENY_PERM: PermissionSet = {
@@ -69,107 +96,174 @@ const DENY_PERM: PermissionSet = {
   canView: false,
 };
 
-/**
- * M4/S3 shadow 对拍缝：仅在 GX_AUTHZ_ENGINE 生效为 shadow 时跑引擎同上下文对拍。
- * off 时 authzShadowActive()=false，本函数空操作，不实例化引擎、零新增 SQL。
- * 旧守卫一律以自身旧逻辑结果为准；对拍只分类计数/脱敏日志，绝不改返回、不抛错。
- * 动作映射：view=r / editData=u（旧 canEditData 同闸 c/u/d，投影 editor 同集，u 作编辑哨兵）/
- * schema=manage_schema / manageBase=manage_share / comment=comment，均落 base 节点（成员权限本就 base 级）。
- */
+/** M4/S3 shadow 对拍缝：仅 shadow 模式下跑引擎对拍，只计数/记日志，不改返回、不抛错。 */
 async function shadowBase(
   guard: string,
   userId: string,
   baseId: string,
-  action: ResourceAction,
+  action: ResourceActionLiteral,
   oldAllowed: boolean,
 ): Promise<void> {
   if (!authzShadowActive()) return;
   await runShadowCheck(guard, userId, { resourceType: "base", resourceId: baseId }, action, oldAllowed);
 }
 
-/** 加载 base 成员视图（不做 shadow 对拍，供公开守卫在落定旧决策后统一对拍一次）。401 未登录直接抛。 */
-async function loadBaseMember(
-  c: Context,
-  baseId: string,
-): Promise<{ userId: string; role: Role | null; perm: PermissionSet }> {
+type ResourceActionLiteral = "r" | "c" | "u" | "d" | "comment" | "manage_share" | "manage_schema";
+
+/** 加载一次裁决结果（同一个请求里多处复用同一份评估）。 */
+export async function baseAccessOf(userId: string, baseId: string): Promise<LibraryAccessDTO> {
+  return resolveBaseAccess(userId, baseId);
+}
+
+/** 按 tableId 加载裁决结果；表不存在返回 null。 */
+export async function baseAccessOfTable(userId: string, tableId: string): Promise<LibraryAccessDTO | null> {
+  return resolveBaseAccessByTable(userId, tableId);
+}
+
+export async function permissionsOf(userId: string, baseId: string): Promise<PermissionSet> {
+  const access = await resolveBaseAccess(userId, baseId);
+  if (!access.visible) return DENY_PERM;
+  return permit(access);
+}
+
+// ============ 守卫 ============
+
+export interface BaseGuardResult {
+  userId: string;
+  /** 展示用角色名，不承载授权语义。 */
+  role: Role;
+  perm: PermissionSet;
+  access: LibraryAccessDTO;
+}
+
+async function loadBaseAccess(c: Context, baseId: string): Promise<BaseGuardResult> {
   const userId = await requireUserId(c);
-  const role = await roleOf(userId, baseId);
-  if (!role) return { userId, role: null, perm: DENY_PERM };
-  return { userId, role, perm: permissionsForRole(role) };
+  const access = await resolveBaseAccess(userId, baseId);
+  return {
+    userId,
+    role: access.visible ? displayRole(access) : ("viewer" as Role),
+    perm: access.visible ? permit(access) : DENY_PERM,
+    access,
+  };
 }
 
 export async function requireRole(c: Context, baseId: string): Promise<Role> {
-  const userId = await requireUserId(c);
-  const role = await roleOf(userId, baseId);
-  if (!role) throw new HttpError(403, "无权访问该 Base");
-  return role;
+  const g = await loadBaseAccess(c, baseId);
+  if (!g.access.visible) throw new HttpError(403, "无权访问该 Base");
+  return g.role;
 }
 
-export async function requireCanView(c: Context, baseId: string): Promise<{ userId: string; role: Role; perm: PermissionSet }> {
-  const m = await loadBaseMember(c, baseId);
-  if (!m.role) {
-    await shadowBase("requireCanView", m.userId, baseId, "r", false);
+export async function requireCanView(c: Context, baseId: string): Promise<BaseGuardResult> {
+  const g = await loadBaseAccess(c, baseId);
+  if (!g.access.visible) {
+    await shadowBase("requireCanView", g.userId, baseId, "r", false);
     throw new HttpError(403, "无权访问该 Base");
   }
-  await shadowBase("requireCanView", m.userId, baseId, "r", true);
-  return { userId: m.userId, role: m.role, perm: m.perm };
+  await shadowBase("requireCanView", g.userId, baseId, "r", true);
+  return g;
 }
 
-export async function requireCanEditData(c: Context, baseId: string): Promise<{ userId: string; role: Role }> {
-  const m = await loadBaseMember(c, baseId);
-  if (!m.role) {
-    await shadowBase("requireCanEditData", m.userId, baseId, "u", false);
+export async function requireCanEditData(c: Context, baseId: string): Promise<BaseGuardResult> {
+  const g = await loadBaseAccess(c, baseId);
+  if (!g.access.visible) {
+    await shadowBase("requireCanEditData", g.userId, baseId, "u", false);
     throw new HttpError(403, "无权访问该 Base");
   }
-  if (!m.perm.canEditData) {
-    await shadowBase("requireCanEditData", m.userId, baseId, "u", false);
+  if (!g.perm.canEditData) {
+    await shadowBase("requireCanEditData", g.userId, baseId, "u", false);
     throw new HttpError(403, "当前角色无权编辑数据");
   }
-  await shadowBase("requireCanEditData", m.userId, baseId, "u", true);
-  return { userId: m.userId, role: m.role };
+  await shadowBase("requireCanEditData", g.userId, baseId, "u", true);
+  return g;
 }
 
-export async function requireCanManageSchema(c: Context, baseId: string): Promise<{ userId: string; role: Role }> {
-  const m = await loadBaseMember(c, baseId);
-  if (!m.role) {
-    await shadowBase("requireCanManageSchema", m.userId, baseId, "manage_schema", false);
+export async function requireCanManageSchema(c: Context, baseId: string): Promise<BaseGuardResult> {
+  const g = await loadBaseAccess(c, baseId);
+  if (!g.access.visible) {
+    await shadowBase("requireCanManageSchema", g.userId, baseId, "manage_schema", false);
     throw new HttpError(403, "无权访问该 Base");
   }
-  if (!m.perm.canManageSchema) {
-    await shadowBase("requireCanManageSchema", m.userId, baseId, "manage_schema", false);
+  if (!g.perm.canManageSchema) {
+    await shadowBase("requireCanManageSchema", g.userId, baseId, "manage_schema", false);
     throw new HttpError(403, "当前角色无权修改表结构");
   }
-  await shadowBase("requireCanManageSchema", m.userId, baseId, "manage_schema", true);
-  return { userId: m.userId, role: m.role };
+  await shadowBase("requireCanManageSchema", g.userId, baseId, "manage_schema", true);
+  return g;
 }
 
-export async function requireCanManageBase(c: Context, baseId: string): Promise<{ userId: string; role: Role }> {
-  const m = await loadBaseMember(c, baseId);
-  if (!m.role) {
-    await shadowBase("requireCanManageBase", m.userId, baseId, "manage_share", false);
+export async function requireCanManageBase(c: Context, baseId: string): Promise<BaseGuardResult> {
+  const g = await loadBaseAccess(c, baseId);
+  if (!g.access.visible) {
+    await shadowBase("requireCanManageBase", g.userId, baseId, "manage_share", false);
     throw new HttpError(403, "无权访问该 Base");
   }
-  if (!m.perm.canManageBase) {
-    await shadowBase("requireCanManageBase", m.userId, baseId, "manage_share", false);
-    throw new HttpError(403, "只有所有者可管理 Base");
+  if (!g.perm.canManageBase) {
+    await shadowBase("requireCanManageBase", g.userId, baseId, "manage_share", false);
+    throw new HttpError(403, "只有对本库有管理权限的角色可管理该库");
   }
-  await shadowBase("requireCanManageBase", m.userId, baseId, "manage_share", true);
-  return { userId: m.userId, role: m.role };
+  await shadowBase("requireCanManageBase", g.userId, baseId, "manage_share", true);
+  return g;
 }
 
-export async function requireCanComment(c: Context, baseId: string): Promise<{ userId: string; role: Role }> {
-  const m = await loadBaseMember(c, baseId);
-  if (!m.role) {
-    await shadowBase("requireCanComment", m.userId, baseId, "comment", false);
+/** 硬规则：删除库只有超级管理员（管理权不含删库，故单独成守卫，别挂到 requireCanManageBase）。 */
+export async function requireCanDeleteBase(c: Context, baseId: string): Promise<BaseGuardResult> {
+  const g = await loadBaseAccess(c, baseId);
+  if (!g.access.visible) throw new HttpError(403, "无权访问该 Base");
+  if (!g.access.canDeleteLibrary) {
+    throw new HttpError(403, "只有超级管理员可以删除库");
+  }
+  return g;
+}
+
+/** 硬规则 C：开关某个库的「允许分享」——对该库有管理权者 + 超级管理员 + 管理员。 */
+export async function requireCanToggleShare(c: Context, baseId: string): Promise<BaseGuardResult> {
+  const g = await loadBaseAccess(c, baseId);
+  if (!g.access.visible) throw new HttpError(403, "无权访问该 Base");
+  if (!g.access.canToggleShare) {
+    throw new HttpError(403, "只有对本库有管理权限的角色、超级管理员或管理员可开关分享");
+  }
+  return g;
+}
+
+export async function requireCanComment(c: Context, baseId: string): Promise<BaseGuardResult> {
+  const g = await loadBaseAccess(c, baseId);
+  if (!g.access.visible) {
+    await shadowBase("requireCanComment", g.userId, baseId, "comment", false);
     throw new HttpError(403, "无权访问该 Base");
   }
-  if (!m.perm.canComment) {
-    await shadowBase("requireCanComment", m.userId, baseId, "comment", false);
+  if (!g.perm.canComment) {
+    await shadowBase("requireCanComment", g.userId, baseId, "comment", false);
     throw new HttpError(403, "当前角色无权评论");
   }
-  await shadowBase("requireCanComment", m.userId, baseId, "comment", true);
-  return { userId: m.userId, role: m.role };
+  await shadowBase("requireCanComment", g.userId, baseId, "comment", true);
+  return g;
 }
+
+// ============ 表级细粒度（拿到 tableId 的路由应当使用这一组） ============
+
+/** 表不存在 -> 404；不可见 -> 403。返回该表的四枚数据动作。 */
+export async function requireTableAccess(
+  c: Context,
+  tableId: string,
+): Promise<{ userId: string; access: LibraryAccessDTO; table: ReturnType<typeof tableAccessOf> }> {
+  const userId = await requireUserId(c);
+  const access = await resolveBaseAccessByTable(userId, tableId);
+  if (!access) throw new HttpError(404, "表不存在");
+  const table = tableAccessOf(access, tableId);
+  if (!table.read) throw new HttpError(403, "无权查看该表");
+  return { userId, access, table };
+}
+
+/** 按 recordId / viewId 反查所在库后裁决（无单表语义，走库级并集）。 */
+export async function baseAccessOfRecord(userId: string, recordId: string): Promise<LibraryAccessDTO | null> {
+  return resolveBaseAccessByRecord(userId, recordId);
+}
+
+export async function baseAccessOfView(userId: string, viewId: string): Promise<LibraryAccessDTO | null> {
+  return resolveBaseAccessByView(userId, viewId);
+}
+
+// ============ 统一错误出口 ============
 
 /** 状态码 → 机器可读错误码（仅增补字段，不改变 HTTP 状态码与中文 error 文案）。 */
 function errorCodeForStatus(status: number): string {

@@ -1,13 +1,13 @@
-// M2/S0 特征测试（二）：资源 RBAC 五角色矩阵现状锁（真迁移临时库 + 真 guards + 真 JWT）。
+// 特征测试（二）：库权限判定现状锁（真迁移临时库 + 真 guards + 真 JWT）。
 //
-// M2 最高回归红线（计划 §3.1）：组织层接入前后，任意用户对 base 的资源权限
-// requireCanView/EditData/ManageSchema/ManageBase/Comment 结果逐值不变。
-// 本文件钉死两层事实：
-//   1. shared-types permissionsForRole 的五角色布尔矩阵（每次返回副本）；
-//   2. guards 真库 + 真 JWT 求值：requireCan* 对五角色放行/403、非成员 403、无 token 401。
+// 权限核心模型重构后本文件钉死的是【新的】两层事实：
+//   1. guards 的每个 require* 都由「角色 × 库视野」推导，members.role 不再参与放行；
+//   2. 三条硬规则的落点：删库只有超级管理员、管理员不自动获得管理权、
+//      允许分享开关放宽到管理员。
+// permissionsForRole 的五角色矩阵作为遗留投影保留（仍在 shared-types），
+// 但它只在测试中比对，不再进入任何库权限判定路径。
 // 用 hono/jwt 以同一 HS256 密钥直接签发 {userId} token（与 auth.issueToken 同形态，
-// 但不依赖其导出），从而走通 getUserId 验签 -> 真库 roleOf -> 权限判定整条链。
-// M2 的 roles/role_assignments 组织角色不接入这些判定，S9 必须复跑本文件且逐值绿。
+// 但不依赖其导出），走通 getUserId 验签 -> libraryPolicy 裁决 -> 权限判定整条链。
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
@@ -73,15 +73,36 @@ beforeAll(async () => {
 
   const base = await prisma.base.create({ data: { name: "b", createdBy: "seed" } });
   baseId = base.id;
-  for (const role of ROLES) {
-    await prisma.user.create({
-      data: { id: `u_${role}`, email: `${role}@example.com`, displayName: role, passwordHash: "x" },
-    });
-    await prisma.member.create({ data: { baseId, userId: `u_${role}`, role } });
-  }
-  await prisma.user.create({
-    data: { id: "u_out", email: "out@example.com", displayName: "out", passwordHash: "x" },
+
+  const mkUser = (id: string) => prisma.user.create({
+    data: { id, email: `${id}@example.com`, displayName: id, passwordHash: "x", workspaceId: "ws_default" },
   });
+  const grant = (roleId: string, userId: string) => prisma.roleAssignment.create({
+    data: { roleId, subjectType: "user", subjectId: userId, scopeType: "workspace", createdBy: "seed" },
+  });
+  // 只勾可见（不做逐表设置）与勾了可管理，是 B 段库权限的两种典型形状。
+  const scope = (roleId: string, canManage: boolean) => prisma.roleLibraryScope.create({
+    data: {
+      roleId, libraryKind: "base", libraryId: baseId,
+      visible: 1, canManage: canManage ? 1 : 0,
+      config: JSON.stringify({ tables: {}, fields: {} }),
+    },
+  });
+  const custom = (id: string, name: string) => prisma.role.create({
+    data: { id, workspaceId: "ws_default", name, isSystem: 0, immutable: 0, permissions: "[]" },
+  });
+
+  await Promise.all(["u_super", "u_admin", "u_visible", "u_manager", "u_restricted", "u_out"].map(mkUser));
+  await grant("role_owner", "u_super");
+  await grant("role_admin", "u_admin");
+  await grant("role_restricted", "u_restricted");
+  const roleVisible = await custom("role_c_visible", "可见某个库");
+  await grant(roleVisible.id, "u_visible");
+  await scope(roleVisible.id, false);
+  const roleManager = await custom("role_c_manager", "管某个库");
+  await grant(roleManager.id, "u_manager");
+  await scope(roleManager.id, true);
+  // u_out 刻意不授予任何角色：零授权用户。
 }, 120000);
 
 afterAll(async () => {
@@ -89,7 +110,7 @@ afterAll(async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-describe("permissionsForRole 五角色布尔矩阵（shared-types 真源）", () => {
+describe("permissionsForRole 五角色布尔矩阵（shared-types 遗留投影）", () => {
   const EXPECTED: Record<Role, [boolean, boolean, boolean, boolean, boolean]> = {
     // [ManageBase, ManageSchema, EditData, Comment, View]
     owner:     [true, true, true, true, true],
@@ -110,51 +131,100 @@ describe("permissionsForRole 五角色布尔矩阵（shared-types 真源）", ()
     a.canView = false;
     expect(permissionsForRole("owner").canView).toBe(true);
   });
+
+  it("该矩阵已【退出】库权限判定：members.role 不再参与放行", async () => {
+    // 用户被写进 members 表且 role=owner，但没有任何组织角色/库视野 —— 必须什么都没有。
+    // 这是权限核心模型重构的核心断言：074号 invariants 之一。
+    await prisma.member.create({ data: { baseId, userId: "u_out", role: "owner" } });
+    const perm = await guards.permissionsOf("u_out", baseId);
+    expect(perm.canView).toBe(false);
+    expect(perm.canManageBase).toBe(false);
+    await prisma.member.deleteMany({ where: { baseId, userId: "u_out" } });
+  });
 });
 
-describe("guards 真库：roleOf / permissionsOf", () => {
-  it.each(ROLES)("%s 经 members.role 取角色并映射权限", async (role) => {
-    expect(await guards.roleOf(`u_${role}`, baseId)).toBe(role);
-    expect(await guards.permissionsOf(`u_${role}`, baseId)).toEqual(permissionsForRole(role));
-  });
+describe("guards 真库：PermissionsOf 由『角色 × 库视野』推导", () => {
+  const ALL_FALSE = {
+    canManageBase: false, canManageSchema: false, canEditData: false,
+    canComment: false, canView: false,
+  };
 
-  it("非成员 -> roleOf=undefined，permissionsOf 全 false（含 canView=false）", async () => {
-    expect(await guards.roleOf("u_out", baseId)).toBeUndefined();
-    expect(await guards.permissionsOf("u_out", baseId)).toEqual({
-      canManageBase: false, canManageSchema: false, canEditData: false,
-      canComment: false, canView: false,
+  it("超级管理员：全权（不看库视野配置）", async () => {
+    expect(await guards.permissionsOf("u_super", baseId)).toEqual({
+      canManageBase: true, canManageSchema: true, canEditData: true,
+      canComment: true, canView: true,
     });
   });
+
+  it("管理员：能进所有库，但管理权来自配置（未勾选时只可见）", async () => {
+    const before = await guards.permissionsOf("u_admin", baseId);
+    expect(before.canView).toBe(true);
+    expect(before.canManageBase).toBe(false);
+    expect(before.canEditData).toBe(false);
+  });
+
+  it("自定义角色 + 只勾可见（未做逐表设置）：库内全表只读", async () => {
+    const perm = await guards.permissionsOf("u_visible", baseId);
+    expect(perm.canView).toBe(true);
+    // 只读可见不等于可评论：评论权跟写权限走（旧模型 viewer 的 canComment 也是 false）。
+    expect(perm.canComment).toBe(false);
+    expect(perm.canEditData).toBe(false);
+    expect(perm.canManageBase).toBe(false);
+  });
+
+  it("自定义角色 + 勾了可管理：除删库外全权", async () => {
+    const perm = await guards.permissionsOf("u_manager", baseId);
+    expect(perm).toEqual({
+      canManageBase: true, canManageSchema: true, canEditData: true,
+      canComment: true, canView: true,
+    });
+    const access = await guards.baseAccessOf("u_manager", baseId);
+    // 硬规则：删库不是管理权的子集。
+    expect(access.canDeleteLibrary).toBe(false);
+  });
+
+  it("受限成员 / 零角色：全 false（含 canView=false）", async () => {
+    expect(await guards.permissionsOf("u_out", baseId)).toEqual(ALL_FALSE);
+    expect(await guards.permissionsOf("u_restricted", baseId)).toEqual(ALL_FALSE);
+  });
 });
 
-describe("guards 端到端（真 JWT -> 真库取 role -> 权限判定）", () => {
-  // fn 在 beforeAll 动态拿到 guards 之后才解析（describe 体在导入期即求值）。
-  const CASES: Array<{ name: string; fnName: keyof GuardsModule; allow: Role[] }> = [
-    { name: "requireCanView", fnName: "requireCanView", allow: ROLES },
-    { name: "requireCanEditData", fnName: "requireCanEditData", allow: ["owner", "creator", "editor"] },
-    { name: "requireCanManageSchema", fnName: "requireCanManageSchema", allow: ["owner", "creator"] },
-    { name: "requireCanManageBase", fnName: "requireCanManageBase", allow: ["owner"] },
-    { name: "requireCanComment", fnName: "requireCanComment",
-      allow: ["owner", "creator", "editor", "commenter"] },
+describe("guards 端到端（真 JWT -> 库视野裁决）", () => {
+  const CASES: Array<{
+    name: string;
+    fnName: keyof GuardsModule;
+    allow: string[];
+  }> = [
+    { name: "requireCanView", fnName: "requireCanView", allow: ["u_super", "u_admin", "u_visible", "u_manager"] },
+    { name: "requireCanEditData", fnName: "requireCanEditData", allow: ["u_super", "u_manager"] },
+    { name: "requireCanManageSchema", fnName: "requireCanManageSchema", allow: ["u_super", "u_manager"] },
+    { name: "requireCanManageBase", fnName: "requireCanManageBase", allow: ["u_super", "u_manager"] },
+    { name: "requireCanComment", fnName: "requireCanComment", allow: ["u_super", "u_manager"] },
+    // 硬规则 A：删库只有超级管理员。
+    { name: "requireCanDeleteBase", fnName: "requireCanDeleteBase", allow: ["u_super"] },
+    // 硬规则 C：允许分享开关——有管理权者 + 超级管理员 + 管理员。
+    { name: "requireCanToggleShare", fnName: "requireCanToggleShare", allow: ["u_super", "u_admin", "u_manager"] },
   ];
 
+  const ALL_USERS = ["u_super", "u_admin", "u_visible", "u_manager", "u_restricted", "u_out"];
+
   for (const { name, fnName, allow } of CASES) {
-    it(`${name}：允许角色 200，其余五角色内成员 403`, async () => {
+    it(`${name}：放行名单 200，其余 403`, async () => {
       const fn = guards[fnName] as unknown as GuardFn;
-      for (const role of ROLES) {
+      for (const userId of ALL_USERS) {
         const res = await guardApp(fn).request(`/${baseId}`, {
-          headers: { Authorization: `Bearer ${await tokenFor(`u_${role}`)}` },
+          headers: { Authorization: `Bearer ${await tokenFor(userId)}` },
         });
-        expect(res.status, `${name} / ${role}`).toBe(allow.includes(role) ? 200 : 403);
+        expect(res.status, `${name} / ${userId}`).toBe(allow.includes(userId) ? 200 : 403);
       }
     });
   }
 
-  it("已登录但非成员 -> 五类动作全部 403", async () => {
+  it("受限成员 -> 六类动作全部 403", async () => {
     for (const { fnName } of CASES) {
       const fn = guards[fnName] as unknown as GuardFn;
       const res = await guardApp(fn).request(`/${baseId}`, {
-        headers: { Authorization: `Bearer ${await tokenFor("u_out")}` },
+        headers: { Authorization: `Bearer ${await tokenFor("u_restricted")}` },
       });
       expect(res.status).toBe(403);
     }

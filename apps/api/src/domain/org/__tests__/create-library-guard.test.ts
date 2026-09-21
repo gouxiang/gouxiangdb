@@ -99,12 +99,22 @@ describe("assertCanCreateLibrary 兜底与判定", () => {
     await expect(assertCanCreateLibrary("u_none")).resolves.toBeUndefined();
   });
 
-  it("有授予 + 用户持 create_library -> 放行", async () => {
+  it("管理员持 create_library -> 放行（硬规则 B：建库只给超级管理员与管理员）", async () => {
     await mkUser("u_yes");
-    const r = await mkRole("role_c_yes", ["create_library"]);
-    await grant(r.id, "user", "u_yes");
+    await mkRole("role_c_yes", ["create_library"]);
+    await grant("role_admin", "user", "u_yes");
     expect(await prisma.roleAssignment.count()).toBeGreaterThan(0);
     await expect(assertCanCreateLibrary("u_yes")).resolves.toBeUndefined();
+  });
+
+  it("硬规则 B 不认动作：自定义角色含 create_library 但不是管理员 -> 403", async () => {
+    await mkUser("u_act_only");
+    const r = await mkRole("role_c_act", ["create_library"]);
+    await grant(r.id, "user", "u_act_only");
+    await expect(assertCanCreateLibrary("u_act_only")).rejects.toMatchObject({
+      status: 403,
+      message: CREATE_LIBRARY_DENIED,
+    });
   });
 
   it("有授予 + 用户不持 create_library -> 抛 403 且文案固定", async () => {
@@ -125,13 +135,12 @@ describe("assertCanCreateLibrary 兜底与判定", () => {
     await expect(assertCanCreateLibrary("u_self")).rejects.toMatchObject({ status: 403 });
   });
 
-  it("按角色不按人：部门授予荫及子树成员 -> 放行", async () => {
+  it("按角色不按人：部门授予管理员荫及子树成员 -> 放行", async () => {
     await mkUser("u_dept");
     const top = await mkDept("dl", null);
     const sub = await mkDept("dl1", "dl");
     await prisma.deptMember.create({ data: { departmentId: sub, userId: "u_dept", isMain: 1 } });
-    const r = await mkRole("role_c_libd", ["create_library"]);
-    await grant(r.id, "dept", top);
+    await grant("role_admin", "dept", top);
     await expect(assertCanCreateLibrary("u_dept")).resolves.toBeUndefined();
   });
 });

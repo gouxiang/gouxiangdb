@@ -66,11 +66,16 @@ beforeEach(async () => {
   await prisma.field.deleteMany({});
   await prisma.table.deleteMany({});
   await prisma.member.deleteMany({});
+  await prisma.roleAssignment.deleteMany({}); // subjectId 不是外键，删 users 不会级联掉
   await prisma.user.deleteMany({});
   await prisma.base.deleteMany({});
 
   await prisma.user.create({
     data: { id: "u1", email: "u1@example.com", displayName: "U1", passwordHash: "x" },
+  });
+  // 权限核心模型（二）：members.role 不再放行，u1 挂超级管理员才读得到这张表。
+  await prisma.roleAssignment.create({
+    data: { roleId: "role_owner", subjectType: "user", subjectId: "u1", scopeType: "workspace", createdBy: "seed" },
   });
   const base = await prisma.base.create({ data: { name: "b", createdBy: "u1" } });
   await prisma.member.create({ data: { baseId: base.id, userId: "u1", role: "editor" } });

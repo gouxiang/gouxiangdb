@@ -41,6 +41,10 @@ beforeAll(async () => {
   process.env.GX_DATA_DIR = tmpDir;
   process.env.GX_AUDIT_DIR = path.join(tmpDir, ".audit");
   process.env.JWT_SECRET = JWT_SECRET;
+  // 公开注册默认 fail-closed（configSignup.ts），关闭态下"重复邮箱"分支根本走不到
+  // （非空库先被 403 SIGNUP_CLOSED 拦掉）。本文件锁的是邮箱重复 -> 409 这条契约，
+  // 故显式开注册，让该分支可达；关闭态本身另有 auth-state 测试覆盖。
+  process.env.GX_ALLOW_PUBLIC_SIGNUP = "on";
   execSync("pnpm exec prisma migrate deploy --schema=prisma/schema.prisma", {
     cwd: process.cwd(), stdio: "ignore", env: process.env,
   });

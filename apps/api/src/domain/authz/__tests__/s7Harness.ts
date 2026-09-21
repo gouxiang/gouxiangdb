@@ -125,6 +125,27 @@ export async function setupS7Fixture(): Promise<S7Fixture> {
   const seededBase = { baseId: "s7_base1", tableId: "s7_t1", viewId: "s7_v1" };
   const { syncNavFromEntitiesTx } = await import("../../nav/sync.js");
   await h.prisma.$transaction((tx) => syncNavFromEntitiesTx(tx));
+
+  // ---- 权限核心模型（二）：库门一律走「角色 × 库」----
+  // 本夹具的主题是导航树的中断继承 / 剪枝 / 移动影响面，不测库权限；但新模型下"进不了库
+  // 门"会先于节点引擎短路成 403，把节点层的判定整个盖掉。故给除 NOBODY（它必须无来源）
+  // 与停用用户外的全部角色发一枚纯视野角色，把判定权交还给节点引擎——用例断言不变。
+  await h.prisma.role.create({
+    data: { id: "s7_role_scope", workspaceId: "ws_default", name: "s7 库视野", isSystem: 0, permissions: "[]" },
+  });
+  for (const [id] of USERS) {
+    if (id === NOBODY || id === "s7_inactive") continue;
+    await h.prisma.roleAssignment.create({
+      data: { roleId: "s7_role_scope", subjectType: "user", subjectId: id, scopeType: "workspace", createdBy: "seed" },
+    });
+  }
+  await h.prisma.roleLibraryScope.createMany({
+    data: [
+      { roleId: "s7_role_scope", libraryKind: "kb", libraryId: kb, canManage: 0, visible: 1 },
+      { roleId: "s7_role_scope", libraryKind: "base", libraryId: "s7_base1", canManage: 0, visible: 1 },
+    ],
+  });
+
   // restricted 边界 + impact/d2 继承开关现状（M3 回填恒 1，这里只把边界节点置 0）。
   await h.prisma.navNode.update({ where: { id: nodeId("doc", docs.secret) }, data: { inheritAncestors: 0 } });
 
@@ -156,8 +177,17 @@ export async function setupS7Fixture(): Promise<S7Fixture> {
   });
 
   // ---- A-6：d1 的 doc ACL（旧表 + 同事务投影到 doc 节点；kb 不给 DIRECT 任何来源）----
-  const acl = await call("PUT", `/api/kb/docs/${docs.d1}/acl`, OWNER, { email: `${DIRECT}@x.com`, role: "viewer" });
-  if (acl.status !== 200) throw new Error(`acl grant ${acl.status}: ${await acl.text()}`);
+  // 权限核心模型（二）把「单篇文档授权」从授权入口上摘掉了：PUT /api/kb/docs/:docId/acl
+  // 这个端点已随 kbDocAcl 退出放行链一并删除（不许留"配了不生效"的入口），故夹具改为
+  // 直接写 kb_doc_acls 行 + 调 syncDocAclTx 补那条 legacy:acl 节点投影——与端点内部
+  // 同事务做的两件事逐字相同，导航引擎侧的输入不变。
+  const aclRow = await h.prisma.kbDocAcl.create({
+    data: { id: "s7_acl_direct", docId: docs.d1, userId: DIRECT, role: "viewer" },
+  });
+  const { syncDocAclTx } = await import("../projection.js");
+  await h.prisma.$transaction((tx) =>
+    syncDocAclTx(tx, { oldRowId: aclRow.id, docId: docs.d1, userId: DIRECT, role: "viewer" }),
+  );
 
   // ---- d_impact 三源授予（只挂 kb 节点，关继承即全失）----
   const kbNode = nodeId("kb", kb);

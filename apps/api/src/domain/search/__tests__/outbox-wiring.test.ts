@@ -61,6 +61,8 @@ async function patchRecord(id: string, title: string): Promise<Response> {
 beforeAll(async () => {
   h = await makeNavHarness("gx-m5-s1-wire-");
   await h.createUser(OWNER, { email: "owner@m5w.x", displayName: "所有者" });
+  // 权限核心模型（二）：库放行只看「角色 × 库」，脚手架 owner 挂超级管理员才动得了库。
+  await h.grantRole(OWNER);
   await seedTable();
   await h.prisma.$transaction([
     h.prisma.knowledgeBase.create({ data: { id: KB, name: "w kb", createdBy: OWNER } }),
@@ -240,7 +242,9 @@ describe("文档/画布写点：建/内容/改名/移动/软删恢复/共生死"
 });
 
 describe("ANON 公开写与表级联", () => {
-  it("匿名公开编辑发 upsert（实体存在即索引）", async () => {
+  // 产品口径变更（M7 / 权限核心模型二）：分享链接对外一律只读，匿名写整体关闭，
+  // 故公开编辑不再产生 upsert 事件。这里改锁"匿名写被拒且不产事件"。
+  it("匿名公开编辑已被关闭：403 且不产生 upsert 事件", async () => {
     const docId = "m5w_pub";
     await h.prisma.kbDoc.create({
       data: {
@@ -253,9 +257,9 @@ describe("ANON 公开写与表级联", () => {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: "# 匿名写入正文 检索词乙" }),
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
     const evs = await eventsFor("doc", docId);
-    expect(evs.some((e) => e.op === "upsert" && e.status === "pending")).toBe(true);
+    expect(evs.some((e) => e.op === "upsert" && e.status === "pending")).toBe(false);
   });
 
   it("清空表：被清记录逐条 delete", async () => {

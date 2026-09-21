@@ -24,6 +24,12 @@ describe("停用即时失效（AC-M2-1）", () => {
     await h.createUser("admin");
     await h.grantSystemRole("admin", "owner");
     await h.createUser("target");
+    // 通讯录读取现在是一枚显式权限（可见通讯录），零角色用户读不到；本用例要验的是
+    // token 失效，故给 target 挂一枚只带 view_directory 的角色，让"停前可用"成立。
+    const dirRole = await h.prisma.role.create({
+      data: { id: "role_dir", workspaceId: "ws_default", name: "可看通讯录", isSystem: 0, permissions: '["view_directory"]' },
+    });
+    await h.grant(dirRole.id, "user", "target");
 
     const targetToken = await h.token("target", 0);
     const headers = { Authorization: `Bearer ${targetToken}` };
@@ -133,7 +139,7 @@ describe("自我停用与最后 owner 保护", () => {
     const role = await h.app.request("/api/v1/org/roles", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(await h.auth("a")) },
-      body: JSON.stringify({ name: "成员主管", actions: ["manage_members"] }),
+      body: JSON.stringify({ name: "成员主管", actions: ["manage_members", "disable_users"] }),
     });
     const roleId = (await json<{ id: string }>(role)).id;
     await h.grant(roleId, "user", "c");
@@ -161,7 +167,7 @@ describe("自我停用与最后 owner 保护", () => {
     });
     // admin 仅持 manage_members 自定义角色（非 owner，不进 owner 集合）
     const mgrRole = await h.prisma.role.create({
-      data: { id: "role_mgr", workspaceId: "ws_default", name: "mgr", isSystem: 0, permissions: '["manage_members"]' },
+      data: { id: "role_mgr", workspaceId: "ws_default", name: "mgr", isSystem: 0, permissions: '["manage_members","disable_users"]' },
     });
     await h.prisma.roleAssignment.create({
       data: { roleId: mgrRole.id, subjectType: "user", subjectId: "admin", scopeType: "workspace" },

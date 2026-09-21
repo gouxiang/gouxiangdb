@@ -7,6 +7,7 @@
 // deny 路径在写库前抛 403 不产生副作用；DELETE owner 用独立库（真软删），其余共享一个库。
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { KB_CONTENT_KEY } from "@gx/shared-types";
 import { setupCharHarness, json, type CharHarness } from "../../nav/__tests__/characterization/charHarness.js";
 import { driftRegistry } from "../shadow.js";
 import { applyAuthzReconcileFixes } from "../reconcile.js";
@@ -26,6 +27,15 @@ async function makeKb(owner: string, extra: Array<[string, string]> = []): Promi
   for (const [u, role] of extra) {
     await h.prisma.kbMember.create({ data: { kbId, userId: u, role } });
   }
+  // 权限核心模型（二）：进知识库的门只看「角色 × 库」。kb_members 行照旧保留（引擎对拍输入），
+  // 但放行由下面这两条角色视野决定；editor 那份把 content 勾到 c，才有"建内容"的资格。
+  await h.prisma.roleLibraryScope.createMany({
+    data: [
+      { roleId: "ke_role_view", libraryKind: "kb", libraryId: kbId, canManage: 0, visible: 1 },
+      { roleId: "ke_role_edit", libraryKind: "kb", libraryId: kbId, canManage: 0, visible: 1,
+        config: JSON.stringify({ tables: { [KB_CONTENT_KEY]: { read: true, create: true, update: true, delete: false } }, fields: {} }) },
+    ],
+  });
   await applyAuthzReconcileFixes(h.prisma);
   return kbId;
 }
@@ -50,6 +60,15 @@ beforeAll(async () => {
   delete process.env.GX_AUTHZ_ENGINE;
   h = await setupCharHarness("gx-m4-s31-kb-");
   for (const u of ["ke_owner", "ke_editor", "ke_viewer", "ke_none", "ke_target"]) await h.createUser(u);
+  // 建知识库是硬规则 B（只有超级管理员/管理员），故 owner 必须挂超级管理员。
+  await h.grantRole("ke_owner");
+  await h.prisma.role.create({ data: { id: "ke_role_view", workspaceId: "ws_default", name: "ke 只读", isSystem: 0, permissions: "[]" } });
+  await h.prisma.role.create({ data: { id: "ke_role_edit", workspaceId: "ws_default", name: "ke 建内容", isSystem: 0, permissions: "[]" } });
+  for (const [u, roleId] of [["ke_viewer", "ke_role_view"], ["ke_editor", "ke_role_edit"]] as const) {
+    await h.prisma.roleAssignment.create({
+      data: { roleId, subjectType: "user", subjectId: u, scopeType: "workspace", createdBy: "seed" },
+    });
+  }
 }, 120000);
 
 afterAll(async () => {
@@ -84,22 +103,13 @@ describe("shadow：kb 四处 owner-only 提级（manage_share）+ 建内容（c�
     expect(driftRegistry.snapshot().compared).toBeGreaterThan(0);
   });
 
-  it("kb.member.add POST /:kbId/members：owner 201，editor/viewer/非成员 403，全 0 drift", async () => {
-    const ok = await call("POST", `/api/kb/${shared}/members`, "ke_owner", { email: "ke_target@example.com", role: "viewer" });
-    expect(ok.status).toBe(201);
-    expect((await call("POST", `/api/kb/${shared}/members`, "ke_editor", { email: "ke_target@example.com", role: "viewer" })).status).toBe(403);
-    expect((await call("POST", `/api/kb/${shared}/members`, "ke_viewer", { email: "ke_target@example.com", role: "viewer" })).status).toBe(403);
-    expect((await call("POST", `/api/kb/${shared}/members`, "ke_none", { email: "ke_target@example.com", role: "viewer" })).status).toBe(403);
-    expectNoDrift();
-  });
-
-  it("kb.member.remove DELETE /:kbId/members/:u：owner 过授权闸（踢自己->业务 400，不删），editor/viewer/非成员 403，全 0 drift", async () => {
-    // owner 授权 allow（manage_share）后命中"不能移除自己"业务保护 400；授权对拍已记 allow 且与引擎一致。
-    expect((await call("DELETE", `/api/kb/${shared}/members/ke_owner`, "ke_owner")).status).toBe(400);
-    expect((await call("DELETE", `/api/kb/${shared}/members/ke_viewer`, "ke_editor")).status).toBe(403);
-    expect((await call("DELETE", `/api/kb/${shared}/members/ke_viewer`, "ke_viewer")).status).toBe(403);
-    expect((await call("DELETE", `/api/kb/${shared}/members/ke_viewer`, "ke_none")).status).toBe(403);
-    expectNoDrift();
+  // 「逐库逐人授权」已取消：知识库成员不再是授权维度（权限跟角色走），故增删端点整体下线，
+  // 只留只读的 GET /:kbId/members 供"谁有权限进来"台账查看。这里锁死"入口已摘除"，
+  // 防止将来又长出一条"配了不生效"的写通道。
+  it("kb 成员增删端点已下线：POST/DELETE /:kbId/members -> 404（只读 GET 仍在）", async () => {
+    expect((await call("POST", `/api/kb/${shared}/members`, "ke_owner", { email: "ke_target@example.com", role: "viewer" })).status).toBe(404);
+    expect((await call("DELETE", `/api/kb/${shared}/members/ke_viewer`, "ke_owner")).status).toBe(404);
+    expect((await call("GET", `/api/kb/${shared}/members`, "ke_owner")).status).toBe(200);
   });
 
   it("kb.doc.create POST /:kbId/docs：owner/editor 201（c allow），viewer/非成员 403（c deny / requireKb），全 0 drift", async () => {

@@ -136,7 +136,9 @@ describe("直接创建 ACTIVE 账号", () => {
     expect(dup.status).toBe(409);
   });
 
-  it("非管理员写 -> 403；登录者可读目录", async () => {
+  // 口径变更（权限核心模型）：通讯录读取不再是"登录即可"，而是一枚显式权限
+  // 「可见通讯录」。新账号默认是受限成员（零动作），故读目录同样是 403。
+  it("非管理员写 -> 403；无『可见通讯录』读目录也 403（登录即可读的旧口径已废）", async () => {
     await h.createUser("plain");
     const denied = await h.app.request("/api/v1/org/members", {
       method: "POST", headers: { "Content-Type": "application/json", ...(await h.auth("plain")) },
@@ -144,7 +146,7 @@ describe("直接创建 ACTIVE 账号", () => {
     });
     expect(denied.status).toBe(403);
     const read = await h.app.request("/api/v1/org/members", { headers: await h.auth("plain") });
-    expect(read.status).toBe(200);
+    expect(read.status).toBe(403);
   });
 });
 
@@ -248,6 +250,9 @@ describe("signup 运行时 owner 自举", () => {
   it("空工作区首个 signup 自动获系统 owner；后续 signup 不获", async () => {
     // beforeEach 已播 admin；此处清空到真正的 0 用户工作区。
     await h.reset();
+    // 公开注册默认 fail-closed，非空库第二个 signup 会被 403 SIGNUP_CLOSED 挡掉，
+    // 本用例要验的是"第二个注册者不再自举 owner"，故显式开注册让该路径可达。
+    process.env.GX_ALLOW_PUBLIC_SIGNUP = "on";
     const first = await h.app.request("/api/auth/signup", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "first@x.com", password: "password123", displayName: "First" }),

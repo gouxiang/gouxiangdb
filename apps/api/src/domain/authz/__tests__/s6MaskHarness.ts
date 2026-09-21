@@ -89,6 +89,9 @@ export async function setupS6MaskFixture(): Promise<S6Fixture> {
   const h = await setupCharHarness("gx-m4-s6-");
   await h.createUser(OWNER);
   await h.createUser(MASK);
+  // 权限核心模型（二）：建库/进库/改结构一律看「角色 × 库」。脚手架 OWNER 挂超级管理员
+  // 才有库视野；MASK 保持零角色（它靠节点窄策略进库，不靠角色）。
+  await h.grantRole(OWNER);
 
   const call: S6Fixture["call"] = async (method, url, user, body) => {
     const headers: Record<string, string> = await h.auth(user);
@@ -174,7 +177,30 @@ export async function setupS6MaskFixture(): Promise<S6Fixture> {
   const viewA = (await json<{ view: { id: string } }>(vp)).view.id;
 
   // ---- u_mask 旧三表成员（editor）；双写会在 base 节点落宽 legacy 行 ----
+  // 权限核心模型（二）后 members.role 已不参与放行，保留此行仅为导航旧表投影的台账。
   await h.prisma.member.create({ data: { id: "s6_member_mask", baseId: base1, userId: MASK, role: "editor" } });
+
+  // ---- u_mask 的「角色 × 库」视野：新模型下这是它唯一能进库门的来源 ----
+  // 档位对拍节点策略：A 可读可写、B 只读、C 显式全 false（②档表级不可见；不配会兜底成只读可见）。
+  await h.prisma.role.create({
+    data: { id: "s6_role_mask", workspaceId: "ws_default", name: "s6 掩码档", isSystem: 0, permissions: "[]" },
+  });
+  await h.prisma.roleAssignment.create({
+    data: { roleId: "s6_role_mask", subjectType: "user", subjectId: MASK, scopeType: "workspace", createdBy: "seed" },
+  });
+  await h.prisma.roleLibraryScope.create({
+    data: {
+      roleId: "s6_role_mask", libraryKind: "base", libraryId: base1, canManage: 0, visible: 1,
+      config: JSON.stringify({
+        tables: {
+          [A]: { read: true, create: true, update: true, delete: false },
+          [B]: { read: true, create: false, update: false, delete: false },
+          [C]: { read: false, create: false, update: false, delete: false },
+        },
+        fields: {},
+      }),
+    },
+  });
 
   // 删除 base 节点 u_mask 宽投影（O8：宽来源在 base 会击败 table 窄 mask，必须收窄宽来源本身），
   // 改为在 table 节点挂窄策略；tableC 完全不插行 -> ②档表级不可见。
