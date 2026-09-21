@@ -56,12 +56,16 @@ describe("权限治理第二批：管理类隐藏 / 数据编辑类保留禁用"
     expect(src).toContain("无编辑权限");
   });
 
-  it("成员与权限：角色下拉 / 移除对无权限与所有者行不渲染", () => {
+  it("成员与权限：逐库成员写端点下线，面板改只读台账；无管理权不渲染「允许分享」开关", () => {
+    // 改断言原因：后端把加人 / 改角色 / 踢人三个写端点一并下线后，旧口径（角色下拉与
+    // 「移除」按钮按 canManageBase 显隐）失去了断言对象——留着就是断言一段已删的代码。
+    // 新口径同一条纪律：管理类操作无权限即**不渲染**，不给 disabled 假入口。
     const src = read("./MembersPanel.tsx");
-    expect(src).toContain("canManageBase && !isOwner ? (");
-    expect(src).toContain("canManageBase && !isOwner && (");
-    expect(src).not.toContain("disabled={!canManageBase || isOwner}");
-    expect(src).not.toContain("disabled={isOwner}");
+    expect(src).toContain("canToggleShare ? (");
+    expect(src).not.toContain("disabled={!canManageBase}");
+    // 只读台账：不再有角色下拉与移除入口
+    expect(src).not.toContain("isOwner");
+    expect(src).not.toContain("useGXMutations");
   });
 
   it("红线：表格工具栏「新建记录」仍是 disabled + 原因，不许改成隐藏", () => {

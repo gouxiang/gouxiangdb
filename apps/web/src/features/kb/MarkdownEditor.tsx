@@ -98,7 +98,8 @@ export function MarkdownEditor({
   docId,
 }: {
   initialMarkdown: string;
-  onChange: (md: string) => void;
+  /** 只读场景（公开分享页）可不传：没有写通道，也就没有「改动」要上报。 */
+  onChange?: (md: string) => void;
   /**
    * 立即云端保存（Cmd/Ctrl+S）。由 DocEditorPage 透传 `persist.saveNow()`；
    * SourceEditor 内的 Ctrl+S 拦截会调用它，避免与 DocEditorPage 顶层 useShortcuts 双触发。
@@ -133,7 +134,7 @@ export function MarkdownEditor({
     });
   }, [mode, md, kbId, readOnly, publicToken, navigate, docId]);
 
-  const emit = useCallback((v: string) => { setMd(v); onChange(v); }, [onChange]);
+  const emit = useCallback((v: string) => { setMd(v); onChange?.(v); }, [onChange]);
 
   /* 切换模式：只读用户固定预览 */
   const switchMode = (m: Mode) => {

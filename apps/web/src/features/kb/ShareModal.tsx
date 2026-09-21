@@ -110,7 +110,7 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
             <div className="mb-2 flex items-center gap-1.5 text-gx-13 font-semibold text-gx-text-primary">
               <Icon name="users" size={15} className="text-gx-text-secondary" />
               内部成员
-              <span className="font-normal text-gx-text-hint">（知识库团队 · 共 {data?.internal?.memberCount ?? 0} 人）</span>
+              {/* 人数不再显示：逐库逐人的成员名册下线后，后端这个接口没有人数可回。 */}
             </div>
             <div className="rounded-gx-lg border border-gx-separator bg-gx-bg p-1">
               <RoleOption
@@ -160,22 +160,20 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
 
                 <div>
                   <div className="mb-1.5 text-gx-12 text-gx-text-secondary">持链者权限</div>
+                  {/* 匿名写已关闭：后端 public.ts 不再提供任何写端点，读接口 canEdit 恒 false。
+                      旧的「可编辑」档位还在库里存着但不再生效，继续展示＝一个选了也没用的开关。 */}
                   <div className="rounded-gx-lg border border-gx-separator bg-gx-bg p-1">
                     <RoleOption
                       active={linkRole === "viewer"}
                       title="仅可见"
-                      desc="获得链接的人仅可查看"
+                      desc="获得链接的人无需登录即可查看，不能编辑"
                       disabled={!canManage}
                       onClick={() => updateLinkRole("viewer")}
                     />
-                    <RoleOption
-                      active={linkRole === "editor"}
-                      title="可编辑"
-                      desc="获得链接的人无需登录即可编辑"
-                      disabled={!canManage}
-                      onClick={() => updateLinkRole("editor")}
-                    />
                   </div>
+                  <p className="mt-1.5 text-gx-11 text-gx-text-hint">
+                    分享链接一律只读：外部人不能改内容，需要改请让对方登录后在知识库内编辑。
+                  </p>
                 </div>
 
                 {kind === "doc" && (

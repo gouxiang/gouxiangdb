@@ -22,6 +22,7 @@ import { EntityIconPicker } from "../../components/EntityIconPicker";
 import { confirmIrreversible, confirmSoftDelete, confirmClearTable } from "../../components/feedback";
 import { toastDeleted } from "../../components/interaction";
 import { colors } from "@gx/design-tokens";
+import { LibraryAccessPanel } from "./MembersPanel";
 
 type Tab = "overview" | "tables" | "danger";
 
@@ -310,24 +311,9 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              {/* 成员与分享已从本页移除：全站唯一的权限入口是「工作区设置 → 权限管理」，
-                  这里只留一句引导，不再挂第二份编辑界面（两处都能改＝口径分裂）。 */}
-              <div className="flex flex-col gap-3 rounded-gx-lg border border-gx-border bg-gx-surface p-4 sm:flex-row sm:items-center">
-                <Icon name="users" size={20} className="shrink-0 text-gx-accent" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-gx-14 font-medium text-gx-text-primary">成员与权限</div>
-                  <p className="mt-0.5 text-gx-12 text-gx-text-tertiary">
-                    谁可以访问这个库、谁能改、谁能分享，统一在「工作区设置 → 权限管理」里配置。
-                  </p>
-                </div>
-                <Button
-                  variant="secondary"
-                  icon="shield"
-                  onClick={() => navigate("/workspace/settings/authz")}
-                >
-                  前往权限管理
-                </Button>
-              </div>
+              {/* 成员与权限的**编辑**面已收敛到「工作区设置 → 权限管理」（两处都能改＝口径分裂）。
+                  这里只留一份只读台账：谁覆盖到本库、各多少人，外加库级「允许分享」开关。 */}
+              {baseId && <LibraryAccessPanel kind="base" libraryId={baseId} />}
             </div>
           )}
 

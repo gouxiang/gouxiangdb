@@ -42,7 +42,8 @@ export function CanvasEmbed({ docId, kbId, canEdit, publicToken, onNavigate }: C
       ? { id: internal.data.id, title: internal.data.title, content: internal.data.content }
       : undefined;
   // 公开页的可编辑性以分享角色为准
-  const effectiveCanEdit = publicToken ? !!pub.data?.canEdit && canEdit : canEdit;
+  // 公开分享恒只读：匿名写已关闭（后端 public.ts 无任何写端点，读接口 canEdit 恒 false）。
+  const effectiveCanEdit = publicToken ? false : canEdit;
 
   const [editing, setEditing] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);

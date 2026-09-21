@@ -63,7 +63,21 @@ function isDirectoryVisibleRole(r: OrgRoleDTO): boolean {
 
 const NO_FILTER: MemberFilter = { q: "", deptId: null, status: null };
 
-export function RoleManager({ canManageRoles }: { canManageRoles: boolean }) {
+export function RoleManager({
+  canCreateRoles,
+  canEditRoles,
+  canDeleteRoles,
+  canAssignRoleMembers,
+}: {
+  /** create_roles：新建自定义角色。 */
+  canCreateRoles: boolean;
+  /** edit_roles：改名称/说明与组织动作。 */
+  canEditRoles: boolean;
+  /** delete_roles：删除自定义角色（弹窗内的删除按钮）。 */
+  canDeleteRoles: boolean;
+  /** assign_role_members：这个角色授予给哪些成员/部门。 */
+  canAssignRoleMembers: boolean;
+}) {
   const rolesQ = useOrgRoles();
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ role: OrgRoleDTO | null } | null>(null);
@@ -90,7 +104,7 @@ export function RoleManager({ canManageRoles }: { canManageRoles: boolean }) {
       <div className="flex w-44 shrink-0 flex-col border-r border-gx-separator">
         <div className="flex items-center justify-between border-b border-gx-separator px-3 py-2">
           <span className="text-gx-13 font-semibold text-gx-text-primary">角色</span>
-          {canManageRoles && (
+          {canCreateRoles && (
             <IconButton icon="plus" size={15} label="新建自定义角色" onClick={() => setEditing({ role: null })} />
           )}
         </div>
@@ -123,7 +137,8 @@ export function RoleManager({ canManageRoles }: { canManageRoles: boolean }) {
         {selectedRoleId ? (
           <RoleDetail
             role={roles.find((r) => r.id === selectedRoleId) ?? null}
-            canManage={canManageRoles}
+            canEdit={canEditRoles}
+            canAssignRoleMembers={canAssignRoleMembers}
             onEdit={() => {
               const r = roles.find((x) => x.id === selectedRoleId) ?? null;
               if (r && !r.isSystem) setEditing({ role: r });
@@ -135,7 +150,11 @@ export function RoleManager({ canManageRoles }: { canManageRoles: boolean }) {
       </div>
 
       {editing && (
-        <RoleEditModal role={editing.role} onClose={() => setEditing(null)} />
+        <RoleEditModal
+          role={editing.role}
+          canDeleteRoles={canDeleteRoles}
+          onClose={() => setEditing(null)}
+        />
       )}
     </div>
   );
@@ -143,11 +162,13 @@ export function RoleManager({ canManageRoles }: { canManageRoles: boolean }) {
 
 function RoleDetail({
   role,
-  canManage,
+  canEdit,
+  canAssignRoleMembers,
   onEdit,
 }: {
   role: OrgRoleDTO | null;
-  canManage: boolean;
+  canEdit: boolean;
+  canAssignRoleMembers: boolean;
   onEdit: () => void;
 }) {
   const assignmentsQ = useRoleAssignments(role?.id ?? null);
@@ -164,7 +185,7 @@ function RoleDetail({
           {role.isSystem && (
             <span className="rounded-full bg-gx-warning-bg px-2 py-0.5 text-gx-11 font-medium text-gx-warning">系统角色</span>
           )}
-          {canManage && !role.isSystem && (
+          {canEdit && !role.isSystem && (
             <Button size="sm" variant="ghost" icon="edit" className="ml-auto" onClick={onEdit}>编辑</Button>
           )}
         </div>
@@ -184,7 +205,7 @@ function RoleDetail({
 
       <AssignmentEditor
         role={role}
-        canManage={canManage}
+        canManage={canAssignRoleMembers}
       />
 
       <div className="border-t border-gx-separator px-3 py-2 text-gx-11 text-gx-text-hint">
@@ -393,7 +414,16 @@ function SubjectPicker({
 }
 
 /** 新建/编辑自定义角色 Modal：名称/说明/三枚组织动作（系统角色不由此编辑）。 */
-function RoleEditModal({ role, onClose }: { role: OrgRoleDTO | null; onClose: () => void }) {
+function RoleEditModal({
+  role,
+  canDeleteRoles,
+  onClose,
+}: {
+  role: OrgRoleDTO | null;
+  /** delete_roles：没有这一枚就不给删除按钮（不给点了才报错的假入口）。 */
+  canDeleteRoles: boolean;
+  onClose: () => void;
+}) {
   const m = useOrgRoleMutations();
   const [name, setName] = useState(role?.name ?? "");
   const [description, setDescription] = useState(role?.description ?? "");
@@ -463,7 +493,7 @@ function RoleEditModal({ role, onClose }: { role: OrgRoleDTO | null; onClose: ()
           submitDisabledReason={!name.trim() ? "请先填写角色名称" : undefined}
           onCancel={onClose}
           leading={
-            role ? (
+            role && canDeleteRoles ? (
               <Button variant="danger" icon="trash" loading={m.removeRole.isPending} onClick={() => void remove()}>
                 删除
               </Button>

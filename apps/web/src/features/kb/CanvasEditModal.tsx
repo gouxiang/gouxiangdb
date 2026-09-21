@@ -13,7 +13,7 @@ import { Icon } from "../../components/icons";
 import { Spinner, toast } from "../../components/ui";
 // 阶段 4：关闭确认从 window.confirm 换成 feedback 的 L2 确认（原生 confirm 在自动化测试环境会挂死）
 import { confirmDiscardChanges } from "../../components/feedback";
-import { KbApi, PublicApi } from "../../api/client";
+import { KbApi } from "../../api/client";
 import { useResolvedDoc } from "./hooks/useResolvedDoc";
 import { useModalKeyboardGuard } from "./hooks/useModalKeyboardGuard";
 import { GxCanvas } from "./canvas/GxCanvas";
@@ -41,8 +41,10 @@ export function CanvasEditModal({
   const isLoading = r.isLoading;
   const error = r.error;
   const modalRef = useRef<HTMLDivElement | null>(null);
-  // 弹窗内嵌套画布的可编辑性：显式传入优先，否则按数据通道 r.canEdit
-  const canEdit = canEditProp ?? r.canEdit;
+  // 弹窗内嵌套画布的可编辑性：显式传入优先，否则按数据通道 r.canEdit。
+  // 公开分享一律只读——匿名写端点已下线，r.canEdit 也恒 false，
+  // 但这里再压一道：不依赖后端字段也能保证「分享页没有编辑态」。
+  const canEdit = publicToken ? false : (canEditProp ?? r.canEdit);
   // 统一保存作用域：无论焦点在弹窗画布内还是顶栏，Cmd/Ctrl+S 只保存本弹窗、不穿透背景画布
   useModalKeyboardGuard(modalRef, true, () => {
     if (!saveDisabled) void save();
@@ -75,12 +77,9 @@ export function CanvasEditModal({
     savingRef.current = true;
     setSaving(true);
     try {
-      if (publicToken) {
-        await PublicApi.saveContent(publicToken, docId, latest.current);
-      } else {
-        const res = await KbApi.saveContent(docId, { content: latest.current, baseVersion: versionRef.current });
-        if (res.contentVersion != null) versionRef.current = res.contentVersion;
-      }
+      // 公开分享没有写端点（saveDisabled 已挡住入口），这里只保留内部态一条通道。
+      const res = await KbApi.saveContent(docId, { content: latest.current, baseVersion: versionRef.current });
+      if (res.contentVersion != null) versionRef.current = res.contentVersion;
       // 保存成功后清脏标记（requestClose 不再误报）
       dirtyRef.current = false;
       toast("画布已保存", "success");

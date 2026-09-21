@@ -15,14 +15,14 @@ import { confirmIrreversible } from "../../components/feedback";
 
 export function MemberDrawer({
   member,
-  canManageMembers,
+  canAssignDepartments,
   canDisableUsers,
   canDeleteUsers,
   onClose,
 }: {
   member: OrgMemberDTO;
-  /** 部门归属写权限（管理成员 = 调岗/兼岗）。 */
-  canManageMembers: boolean;
+  /** 部门归属写权限（调岗/兼岗），后端门控动作是 manage_members。 */
+  canAssignDepartments: boolean;
   canDisableUsers: boolean;
   canDeleteUsers: boolean;
   onClose: () => void;
@@ -123,8 +123,8 @@ export function MemberDrawer({
           {/* 部门归属 */}
           <section className="mb-5">
             <div className="mb-2 text-gx-13 font-semibold text-gx-text-primary">部门归属</div>
-            {!canManageMembers && (
-              <p className="mb-2 text-gx-12 text-gx-text-hint">你没有管理成员的权限，以下为只读。</p>
+            {!canAssignDepartments && (
+              <p className="mb-2 text-gx-12 text-gx-text-hint">你没有调整部门归属的权限，以下为只读。</p>
             )}
             {liveDepts.length === 0 ? (
               <p className="text-gx-12 text-gx-text-hint">暂无部门，可先在左侧创建。</p>
@@ -137,7 +137,7 @@ export function MemberDrawer({
                     <div key={d.id} className="flex items-center gap-2 rounded-gx-sm px-1 py-1 hover:bg-gx-bg">
                       <Checkbox
                         checked={inDept}
-                        disabled={!canManageMembers}
+                        disabled={!canAssignDepartments}
                         onChange={() => toggleDept(d.id)}
                         label={<span className="text-gx-13 text-gx-text-primary">{d.name}</span>}
                       />
@@ -145,7 +145,7 @@ export function MemberDrawer({
                         {inDept && (
                           isMain ? (
                             <span className="rounded-full bg-gx-accent-bg px-2 py-0.5 text-gx-11 font-medium text-gx-accent">主部门</span>
-                          ) : canManageMembers ? (
+                          ) : canAssignDepartments ? (
                             <button
                               type="button"
                               onClick={() => setMainId(d.id)}
@@ -161,7 +161,7 @@ export function MemberDrawer({
                 })}
               </div>
             )}
-            {canManageMembers && (
+            {canAssignDepartments && (
               <p className="mt-1.5 text-gx-11 text-gx-text-hint">勾选为兼岗；每个成员有且仅有一个主部门。</p>
             )}
           </section>
@@ -200,7 +200,7 @@ export function MemberDrawer({
 
         {/* 底部：保存 / 停用 / 重新激活 / 删除账号
             三件套各自门控：能调岗不一定能停用，能停用不一定能删人。 */}
-        {(canManageMembers || canDisableUsers || canDeleteUsers) && (
+        {(canAssignDepartments || canDisableUsers || canDeleteUsers) && (
           <div className="border-t border-gx-separator px-4 py-3">
             {canDisableUsers && (
               <div className="mb-2 flex gap-2">
@@ -255,7 +255,7 @@ export function MemberDrawer({
             )}
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={onClose}>关闭</Button>
-              {canManageMembers && (
+              {canAssignDepartments && (
                 <Button variant="primary" disabled={!dirty || saving} loading={saving} onClick={save}>
                   保存部门
                 </Button>

@@ -13,7 +13,6 @@ import type {
   RecordDTO,
   GroupBucketDTO,
   CommentDTO,
-  MemberDTO,
   ShareLinkDTO,
   ViewDTO,
   ViewConfig,
@@ -118,7 +117,6 @@ export type {
   AggFunc,
   RowHeight,
   RowColorConfig,
-  MemberDTO,
   CommentDTO,
   ShareLinkDTO,
   Role,
@@ -383,19 +381,11 @@ export const Bases = {
       }[];
     }>(`/api/bases/${baseId}/erd`),
 
-  members: (baseId: string) => apiFetch<{ members: MemberDTO[] }>(`/api/bases/${baseId}/members`),
-  invite: (baseId: string, data: { email: string; role: Role }) =>
-    apiFetch<{ member: MemberDTO }>(`/api/bases/${baseId}/members`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  updateMember: (baseId: string, memberId: string, data: { role: Role }) =>
-    apiFetch<{ member: MemberDTO }>(`/api/bases/${baseId}/members/${memberId}`, {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    }),
-  removeMember: (baseId: string, memberId: string) =>
-    apiFetch<{ ok: true }>(`/api/bases/${baseId}/members/${memberId}`, { method: "DELETE" }),
+  // 权限核心模型后这里是**只读台账**：后端只回答「哪些角色覆盖到这个库、各多少人」，
+  // 逐库逐人的成员名册与其三个写端点（POST/PATCH/DELETE）已下线（bases.ts 同款注释）。
+  // 要改谁能进来：去通讯录改这个人的角色，或改角色的库视野。
+  members: (baseId: string) =>
+    apiFetch<LibraryVisibilityResponse>(`/api/bases/${baseId}/members`),
 
   shareLinks: (baseId: string) => apiFetch<{ links: ShareLinkDTO[] }>(`/api/bases/${baseId}/share`),
   createShareLink: (baseId: string, data: { role: "editor" | "commenter" | "viewer"; expiresAt?: string | null }) =>
@@ -751,14 +741,6 @@ export interface KbDocVersionDTO {
   createdAt: string;
 }
 
-export interface KbMemberDTO {
-  id?: string;
-  userId: string;
-  email: string;
-  displayName: string;
-  role: Role;
-}
-
 export const KbApi = {
   list: () => apiFetch<{ knowledgeBases: KbDTO[] }>("/api/kb"),
   get: (kbId: string) => apiFetch<{ knowledgeBase: KbDTO }>(`/api/kb/${kbId}`),
@@ -771,17 +753,9 @@ export const KbApi = {
   remove: (kbId: string) =>
     apiFetch<{ ok: true }>(`/api/kb/${kbId}`, { method: "DELETE", timeoutMs: WRITE_TIMEOUT_MS }),
 
-  members: (kbId: string) => apiFetch<{ members: KbMemberDTO[] }>(`/api/kb/${kbId}/members`),
-  addMember: (kbId: string, data: { email: string; role: Role }) =>
-    apiFetch<{ member: { userId: string; role: string } }>(`/api/kb/${kbId}/members`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  removeMember: (kbId: string, userId: string) =>
-    apiFetch<{ ok: true }>(`/api/kb/${kbId}/members/${userId}`, {
-      method: "DELETE",
-      timeoutMs: WRITE_TIMEOUT_MS,
-    }),
+  // 只读台账，与 Bases.members 同源（后端 libraryVisibility）：加人/改档位/踢人三个
+  // 写端点已下线，kb_members 行只作历史留档。
+  members: (kbId: string) => apiFetch<LibraryVisibilityResponse>(`/api/kb/${kbId}/members`),
 
   docs: (kbId: string, params?: { kind?: KbDocKind; q?: string }) =>
     apiFetch<{ docs: KbDocDTO[] }>(`/api/kb/${kbId}/docs${qs(params ?? {})}`),
@@ -795,7 +769,8 @@ export const KbApi = {
       body: JSON.stringify({ parentId }),
     }),
   getShare: (docId: string) =>
-    apiFetch<{ share: KbShareStateDTO; internal: { membersCanEdit: boolean; memberCount: number } }>(
+    // 内部段后端只回一个汇总开关（sharing.ts）：逐库逐人的成员名册下线后不再有人数可给。
+    apiFetch<{ share: KbShareStateDTO; internal: { membersCanEdit: boolean } }>(
       `/api/kb/docs/${docId}/share`,
     ),
   setShare: (
@@ -899,12 +874,8 @@ export const PublicApi = {
     publicFetch<{ doc: KbPublicDocDTO; canEdit: boolean; shareRole: "viewer" | "editor" }>(
       `/api/public/s/${token}/ref/${docId}`,
     ),
-  /** 匿名编辑保存 */
-  saveContent: (token: string, docId: string, content: string) =>
-    publicFetch<{ ok: true; savedAt: string }>(`/api/public/s/${token}/doc/${docId}/content`, {
-      method: "PUT",
-      body: JSON.stringify({ content }),
-    }),
+  // 匿名写已整体关闭：后端 public.ts 不再提供任何写端点（读接口的 canEdit 因此恒 false），
+  // 这里也不再保留 saveContent——留着就是「能打开编辑器但保存必失败」。
 };
 
 // ============ M2 组织通讯录 /api/v1/org/*（冻结契约，只消费后端） ============

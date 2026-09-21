@@ -9,8 +9,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../../components/icons";
-import { Button, Input, toast } from "../../components/ui";
+import { Input, toast } from "../../components/ui";
 import { EntityIconPicker } from "../../components/EntityIconPicker";
+import { LibraryAccessPanel } from "../settings/MembersPanel";
 import { useKb, useUpdateKb } from "./kb-hooks";
 
 export default function KbSettingsPage() {
@@ -109,19 +110,9 @@ export default function KbSettingsPage() {
           </p>
         </div>
 
-        {/* 成员与权限已统一收敛到「工作区设置 → 权限管理」，这里只留一句引导。 */}
-        <div className="flex flex-col gap-3 rounded-gx-lg border border-gx-border bg-gx-surface p-4 sm:flex-row sm:items-center">
-          <Icon name="users" size={18} className="shrink-0 text-gx-accent" />
-          <div className="min-w-0 flex-1">
-            <div className="text-gx-13 font-medium text-gx-text-primary">成员与权限</div>
-            <p className="mt-0.5 text-gx-12 text-gx-text-tertiary">
-              谁能看这个知识库、谁能改，统一在「工作区设置 → 权限管理」里配置。
-            </p>
-          </div>
-          <Button variant="secondary" icon="shield" onClick={() => navigate("/workspace/settings/authz")}>
-            前往权限管理
-          </Button>
-        </div>
+        {/* 成员与权限的**编辑**面已统一收敛到「工作区设置 → 权限管理」；
+            这里只留一份只读台账 + 本知识库的「允许分享」开关（组件自带前往权限管理的入口）。 */}
+        {kbId && <LibraryAccessPanel kind="kb" libraryId={kbId} />}
       </div>
     </div>
   );

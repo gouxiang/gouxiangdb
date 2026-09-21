@@ -24,12 +24,20 @@ export interface ContactsDirectoryProps {
 
 export function ContactsDirectory({ className = "h-full" }: ContactsDirectoryProps) {
   const { actions, isLoading: actionsLoading } = useMyOrgActions();
-  // 企业化定位：通讯录入口由 view_directory 单独门控；四类成员写动作各自投票，
-  // 不再用「manage_members 一把梭」。写动作不蕴含读——两者必须分开判。
+  // 企业化定位：通讯录入口由 view_directory 单独门控；写动作各自按细分动词投票，
+  // 不再用「manage_departments / manage_roles / manage_members」三枚粗粒度位一把梭
+  // （自定义角色只勾新十二枚时旧位为空，按旧位判会把这些人全部挡在门外）。
+  // 唯一保留的旧位是 manage_members：后端「改某人属于哪个部门」至今仍按它门控，
+  // 十二枚细分里没有对应动词（详见 DeptTree 同名注释）。
   const canViewDirectory = actions.has("view_directory");
-  const canManageDepts = actions.has("manage_departments");
-  const canManageMembers = actions.has("manage_members"); // 仅调岗/兼岗仍走这一枚
-  const canManageRoles = actions.has("manage_roles");
+  const canCreateDepts = actions.has("create_departments");
+  const canEditDepts = actions.has("edit_departments");
+  const canDeleteDepts = actions.has("delete_departments");
+  const canAssignDepartments = actions.has("manage_members");
+  const canCreateRoles = actions.has("create_roles");
+  const canEditRoles = actions.has("edit_roles");
+  const canDeleteRoles = actions.has("delete_roles");
+  const canAssignRoleMembers = actions.has("assign_role_members");
   const canInviteUsers = actions.has("invite_users");
   const canCreateUsers = actions.has("create_users");
   const canDisableUsers = actions.has("disable_users");
@@ -80,8 +88,10 @@ export function ContactsDirectory({ className = "h-full" }: ContactsDirectoryPro
       <DeptTree
         selectedDeptId={deptId}
         onSelectDept={setDeptId}
-        canManage={canManageDepts}
-        canManageMembers={canManageMembers}
+        canCreateDepts={canCreateDepts}
+        canEditDepts={canEditDepts}
+        canDeleteDepts={canDeleteDepts}
+        canAssignDepartments={canAssignDepartments}
       />
     </div>
   );
@@ -91,7 +101,7 @@ export function ContactsDirectory({ className = "h-full" }: ContactsDirectoryPro
       <MemberList
         filter={filter}
         onFilterChange={setFilter}
-        canManageMembers={canManageMembers}
+        canAssignDepartments={canAssignDepartments}
         canInviteUsers={canInviteUsers}
         canCreateUsers={canCreateUsers}
         canDisableUsers={canDisableUsers}
@@ -102,7 +112,12 @@ export function ContactsDirectory({ className = "h-full" }: ContactsDirectoryPro
 
   const rolesPanel = (
     <div className="h-full min-h-0 flex-1 border-l border-gx-separator bg-gx-surface">
-      <RoleManager canManageRoles={canManageRoles} />
+      <RoleManager
+        canCreateRoles={canCreateRoles}
+        canEditRoles={canEditRoles}
+        canDeleteRoles={canDeleteRoles}
+        canAssignRoleMembers={canAssignRoleMembers}
+      />
     </div>
   );
 

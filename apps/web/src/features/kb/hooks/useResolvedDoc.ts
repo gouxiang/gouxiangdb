@@ -55,7 +55,8 @@ export function useResolvedDoc(
       isLoading: pub.isLoading,
       error: pub.error,
       status,
-      canEdit: !!pub.data?.canEdit,
+      // 公开分享恒只读：匿名写端点已下线，后端读接口也把 canEdit 写死成 false。
+      canEdit: false,
       refetch: () => pub.refetch(),
       isPublic: true,
     };

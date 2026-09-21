@@ -1,222 +1,165 @@
 // apps/web/src/features/settings/MembersPanel.tsx
-// 成员与权限管理：成员列表 + 角色下拉 + 邀请 + 5 角色 × 5 权限矩阵
-// 规则：owner 不可改角色/移除；非 canManageBase 整面板只读
+// 库 / 知识库设置页里的「谁能访问这个库」——只读台账 + 库级「允许分享」开关。
+//
+// 权限核心模型落地前，这里是一张逐库逐人的成员名册（加人 / 改角色 / 踢人三个写端点）。
+// 模型改成「角色 × 库」单一裁决后，后端把这三个端点一并下线（bases.ts / kb/members.ts
+// 同款注释）：名册不再是授权入口，留着写按钮就是点了必 404 的死入口。
+// 现在这里只回答一个问题——哪些角色覆盖到这个库、各覆盖多少人；
+// 要改谁能进来，去通讯录改这个人的角色，或去权限管理改角色的库视野。
+//
+// 两条纪律：
+//   - 超级管理员与管理员不配库视野也能进所有库，必须单独列人数。不列的话页面会显示
+//     「没有任何角色能访问本库」，管理员照着这个错误结论去补授权，越补越乱。
+//   - fail-closed：台账没回来 / 出错 / 还在加载，一律按「看不到也改不了」渲染——
+//     开关不出现（不是置灰；置灰等于告诉别人这里有个门）。
 
-import { useState } from "react";
-import { useMembers, useGXMutations } from "../../api/hooks";
-import { Input, Select, toast } from "../../components/ui";
-import { confirmAction } from "../../components/feedback";
+import { useNavigate } from "react-router-dom";
+import { Button, Switch, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import {
-  ROLES,
-  ROLE_LABEL,
-  ROLE_DESCRIPTION,
-  permissionsForRole,
-  type Role,
-  type PermissionSet,
-} from "@gx/shared-types";
-import { AVATAR_PALETTE } from "@gx/design-tokens";
+import { useLibraryAccess, useRoleScopesShareEnabled } from "../../api/hooks";
+import { useMyRoleRefs } from "./role-permission/role-permission-hooks";
+import type { LibraryKind } from "@gx/shared-types";
 
-// 矩阵列定义
-const PERM_COLS: { key: keyof PermissionSet; label: string }[] = [
-  { key: "canManageBase", label: "管理 Base" },
-  { key: "canManageSchema", label: "管理结构" },
-  { key: "canEditData", label: "编辑数据" },
-  { key: "canComment", label: "评论" },
-  { key: "canView", label: "查看" },
-];
+export function LibraryAccessPanel({
+  kind,
+  libraryId,
+}: {
+  kind: LibraryKind;
+  libraryId: string;
+}) {
+  const navigate = useNavigate();
+  const access = useLibraryAccess(kind, libraryId);
+  const { roleIds, isSuperOrAdmin, isLoading: myLoading } = useMyRoleRefs();
+  const setShareEnabled = useRoleScopesShareEnabled();
 
-function avatarColor(seed: string): string {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return AVATAR_PALETTE[h % AVATAR_PALETTE.length]!;
-}
+  const vis = access.data ?? null;
+  // 谁能开这个开关：对该库有管理权的角色成员，或超级管理员 / 管理员。
+  // 三个信号任一没回来都判 false（加载中、出错、空数据）。
+  const canToggleShare =
+    !access.isLoading && !access.isError && !myLoading && !!vis
+      ? isSuperOrAdmin || vis.roles.some((r) => r.canManage && roleIds.has(r.roleId))
+      : false;
 
-export function MembersPanel({ baseId, canManageBase }: { baseId: string; canManageBase: boolean }) {
-  const { data: members, isLoading } = useMembers(baseId);
-  const m = useGXMutations();
-
-  const [email, setEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<Role>("editor");
-
-  async function changeRole(memberId: string, role: Role) {
+  async function flipShare(next: boolean) {
     try {
-      await m.updateMember.mutateAsync({ baseId, memberId, role });
-      toast("已更新角色", "success");
+      await setShareEnabled.mutateAsync({ kind, libraryId, enabled: next });
+      toast(next ? "已允许分享这个库" : "已关闭这个库的分享", "success");
     } catch (e) {
-      toast(e instanceof Error ? e.message : "更新失败", "error");
+      toast(e instanceof Error ? e.message : "操作失败，可能你没有这个库的分享管理权", "error");
     }
   }
-
-  async function remove(memberId: string, label: string) {
-    // 移除成员无撤销接口（回收站只收 record/table/field），故必须显式确认；
-    // 可重新邀请，按 L2 普通确认而非 L4。R-D-24：主按钮用具体动词「移除成员」。
-    const ok = await confirmAction({
-      title: "移除成员",
-      confirmText: "移除成员",
-      cancelText: "取消",
-      level: 2,
-      description: `${label} 将失去本库的访问权限，可重新邀请恢复。`,
-    });
-    if (!ok) return;
-    try {
-      await m.removeMember.mutateAsync({ baseId, memberId });
-      toast("已移除成员", "success");
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "移除失败", "error");
-    }
-  }
-
-  async function invite() {
-    if (!email.trim()) return;
-    try {
-      await m.inviteMember.mutateAsync({ baseId, email: email.trim(), role: inviteRole });
-      setEmail("");
-      toast("已发送邀请", "success");
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "邀请失败", "error");
-    }
-  }
-
-  const roleOptions = ROLES.filter((r) => r !== "owner").map((r) => ({ value: r, label: ROLE_LABEL[r] }));
 
   return (
-    <div className="flex flex-col gap-6">
-      {!canManageBase && (
-        <div className="rounded-gx-lg border border-gx-border bg-gx-bg px-3 py-2 text-gx-12 text-gx-text-secondary">
-          你不是 Base 所有者，只能查看成员与权限，无法修改。
+    <div className="rounded-gx-lg border border-gx-border bg-gx-surface p-4">
+      <div className="flex flex-wrap items-start gap-3">
+        <Icon name="users" size={20} className="mt-0.5 shrink-0 text-gx-accent" />
+        <div className="min-w-0 flex-1">
+          <div className="text-gx-14 font-medium text-gx-text-primary">谁能访问这个库</div>
+          <p className="mt-0.5 text-gx-12 text-gx-text-tertiary">
+            权限按角色配置，下面是当前覆盖到本库的角色与人数。要改谁能进来，请到权限管理里改角色的库视野，
+            或到通讯录改这个人属于哪个角色。
+          </p>
+        </div>
+        <Button
+          variant="secondary"
+          icon="shield"
+          onClick={() => navigate("/workspace/settings/authz")}
+        >
+          前往权限管理
+        </Button>
+      </div>
+
+      {access.isLoading && (
+        <div className="mt-3 text-gx-12 text-gx-text-hint">正在读取这个库的角色覆盖…</div>
+      )}
+
+      {access.isError && (
+        <div className="mt-3 flex items-start gap-1.5 text-gx-12 text-gx-text-tertiary">
+          <Icon name="alertCircle" size={13} className="mt-0.5 shrink-0" />
+          <span>角色覆盖读取失败，暂时无法判断是否允许分享。</span>
         </div>
       )}
 
-      {/* 成员列表 */}
-      <div className="rounded-gx-lg border border-gx-border">
-        <div className="flex items-center gap-3 border-b border-gx-separator bg-gx-table-header px-3 py-2 text-gx-12 font-medium text-gx-text-secondary">
-          <span className="flex-1">成员</span>
-          <span className="w-[140px]">角色</span>
-          {canManageBase && <span className="w-16 text-right">操作</span>}
-        </div>
+      {vis && (
+        <div className="mt-3 flex flex-col gap-2">
+          <div className="flex flex-wrap gap-1.5">
+            <CoverageChip icon="crown" text={`超级管理员 ${vis.implicitSuperAdminCount} 人（不配也能进）`} />
+            <CoverageChip icon="shield" text={`管理员 ${vis.implicitAdminCount} 人（不配也能进）`} />
+            {vis.roles.length === 0 && (
+              <span className="text-gx-11 text-gx-text-hint">还没有任何角色通过库视野覆盖到本库。</span>
+            )}
+          </div>
 
-        {isLoading && <div className="px-3 py-6 text-center text-gx-13 text-gx-text-hint">加载中…</div>}
-
-        {(members ?? []).map((mem) => {
-          const isOwner = mem.role === "owner";
-          return (
-            <div key={mem.id} className="flex items-center gap-3 border-b border-gx-separator px-3 py-2">
-              <div className="flex flex-1 items-center gap-2">
-                <span
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gx-12 font-semibold text-white"
-                  style={{ backgroundColor: avatarColor(mem.displayName || mem.email) }}
+          {vis.roles.length > 0 && (
+            <div className="overflow-hidden rounded-gx-lg border border-gx-border">
+              <div className="flex items-center gap-3 border-b border-gx-separator bg-gx-table-header px-3 py-1.5 text-gx-12 font-medium text-gx-text-secondary">
+                <span className="flex-1">角色</span>
+                <span className="w-20">在本库</span>
+                <span className="w-20 text-right">人数</span>
+              </div>
+              {vis.roles.map((r) => (
+                <div
+                  key={r.roleId}
+                  className="flex items-center gap-3 border-b border-gx-separator px-3 py-1.5 last:border-0"
                 >
-                  {(mem.displayName || mem.email).charAt(0).toUpperCase()}
-                </span>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate text-gx-13 font-medium text-gx-text-primary">{mem.displayName}</span>
-                    {isOwner && (
-                      <span className="rounded-full bg-gx-accent-bg px-1.5 py-0.5 text-gx-11 text-gx-accent">所有者</span>
+                  <span className="flex flex-1 items-center gap-1.5 text-gx-13 text-gx-text-primary">
+                    {r.systemKey ? (
+                      <Icon name="crown" size={12} className="shrink-0 text-gx-warning" />
+                    ) : (
+                      <Icon name="shield" size={12} className="shrink-0 text-gx-text-tertiary" />
                     )}
-                  </div>
-                  <div className="truncate text-gx-12 text-gx-text-tertiary">{mem.email}</div>
+                    <span className="truncate">{r.roleName}</span>
+                  </span>
+                  <span className="w-20 text-gx-12 text-gx-text-secondary">
+                    {r.canManage ? "可管理" : "可见"}
+                  </span>
+                  <span className="w-20 text-right text-gx-12 tabular-nums text-gx-text-tertiary">
+                    {r.memberCount}
+                  </span>
                 </div>
-              </div>
-
-              <div className="w-[140px]" title={ROLE_DESCRIPTION[mem.role]}>
-                {/* 权限治理第二批：改成员角色属管理类操作，无权限（或对所有者行）不给灰掉的下拉，
-                    改为只读文本展示当前角色。 */}
-                {canManageBase && !isOwner ? (
-                  <Select
-                    value={mem.role}
-                    options={ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] }))}
-                    onChange={(e) => changeRole(mem.id, e.target.value as Role)}
-                  />
-                ) : (
-                  <span className="select-text text-gx-13 text-gx-text-primary">{ROLE_LABEL[mem.role]}</span>
-                )}
-              </div>
-
-              {canManageBase && !isOwner && (
-                <div className="w-16 text-right">
-                  <button
-                    type="button"
-                    title="移除成员"
-                    onClick={() => void remove(mem.id, mem.email || "该成员")}
-                    className="text-gx-12 text-gx-danger hover:underline"
-                  >
-                    移除
-                  </button>
-                </div>
-              )}
+              ))}
             </div>
-          );
-        })}
-      </div>
+          )}
 
-      {/* 邀请表单（仅所有者可见） */}
-      {canManageBase && (
-        <div className="flex items-end gap-2 rounded-gx-lg border border-gx-border p-3">
-          <div className="flex-1">
-            <div className="mb-1 text-gx-12 text-gx-text-tertiary">邮箱</div>
-            <Input
-              type="email"
-              placeholder="invite@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
-          <div className="w-[140px]">
-            <div className="mb-1 text-gx-12 text-gx-text-tertiary">角色</div>
-            <Select value={inviteRole} options={roleOptions} onChange={(e) => setInviteRole(e.target.value as Role)} />
-          </div>
-          <button
-            type="button"
-            onClick={invite}
-            className="rounded-gx-lg bg-gx-accent px-3 py-2 text-gx-13 font-medium text-white hover:brightness-95"
-          >
-            邀请
-          </button>
+          {canToggleShare ? (
+            <div className="flex flex-col gap-1 border-t border-gx-separator pt-2.5">
+              <Switch
+                checked={vis.shareEnabled}
+                onChange={(v) => void flipShare(v)}
+                label={<span className="text-gx-13">允许把这个库的内容分享出去</span>}
+              />
+              <p className="text-gx-11 text-gx-text-hint">
+                关掉之后再外发的链接会失效；外部人始终只读，分享不提供任何写能力。
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-start gap-1.5 border-t border-gx-separator pt-2.5 text-gx-11 text-gx-text-tertiary">
+              <Icon name="lock" size={12} className="mt-0.5 shrink-0" />
+              <span>
+                「允许分享」只有对本库有管理权的角色、超级管理员与管理员能开；当前登录者不在其中，所以这里没有开关。
+              </span>
+            </div>
+          )}
         </div>
       )}
-
-      {/* 权限说明矩阵 */}
-      <div>
-        <div className="mb-2 text-gx-14 font-medium text-gx-text-primary">权限说明</div>
-        <div className="overflow-x-auto rounded-gx-lg border border-gx-border">
-          <table className="w-full border-collapse text-gx-12">
-            <thead>
-              <tr className="bg-gx-table-header">
-                <th className="border-b border-gx-separator px-3 py-2 text-left font-medium text-gx-text-secondary">角色</th>
-                {PERM_COLS.map((c) => (
-                  <th key={c.key} className="border-b border-gx-separator px-3 py-2 text-center font-medium text-gx-text-secondary">
-                    {c.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {ROLES.map((role) => {
-                const ps = permissionsForRole(role);
-                return (
-                  <tr key={role} className="border-b border-gx-separator last:border-0">
-                    <td className="px-3 py-2 text-gx-text-primary">
-                      <div className="font-medium">{ROLE_LABEL[role]}</div>
-                      <div className="text-gx-11 text-gx-text-hint">{ROLE_DESCRIPTION[role]}</div>
-                    </td>
-                    {PERM_COLS.map((c) => (
-                      <td key={c.key} className="px-3 py-2 text-center">
-                        {ps[c.key] ? (
-                          <Icon name="check" size={15} className="mx-auto text-gx-success" />
-                        ) : (
-                          <span className="text-gx-text-hint">—</span>
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
+  );
+}
+
+function CoverageChip({
+  icon,
+  text,
+}: {
+  icon: "crown" | "shield";
+  text: string;
+}) {
+  return (
+    <span
+      title={text}
+      className="inline-flex max-w-full items-center gap-1 rounded-full bg-gx-bg px-2 py-0.5 text-gx-11 text-gx-text-secondary"
+    >
+      <Icon name={icon} size={11} className="shrink-0 text-gx-text-tertiary" />
+      <span className="truncate">{text}</span>
+    </span>
   );
 }

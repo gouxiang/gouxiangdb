@@ -2,7 +2,7 @@
 // 知识库 TanStack Query hooks：缓存键与失效策略（独立前缀，不触碰数据表缓存）。
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { KbApi, PublicApi, type KbDTO, type KbDocDTO, type KbDocKind, type KbDocVersionDTO, type KbMemberDTO, type KbShareStateDTO, type KbPublicDocDTO, type KbTreeItemDTO } from "../../api/client";
+import { KbApi, PublicApi, type KbDTO, type KbDocDTO, type KbDocKind, type KbDocVersionDTO, type KbShareStateDTO, type KbPublicDocDTO, type KbTreeItemDTO } from "../../api/client";
 
 const QK = {
   kbList: ["kb", "list"] as const,
@@ -11,7 +11,6 @@ const QK = {
   doc: (id: string) => ["kb", "doc", id] as const,
   versions: (id: string) => ["kb", "doc", id, "versions"] as const,
   trash: (kbId: string) => ["kb", kbId, "trash"] as const,
-  members: (kbId: string) => ["kb", kbId, "members"] as const,
   acl: (docId: string) => ["kb", "doc", docId, "acl"] as const,
 };
 
@@ -57,33 +56,11 @@ export function useDeleteKb() {
   });
 }
 
-// ============ 成员 ============
-
-export function useKbMembers(kbId: string | undefined) {
-  return useQuery({
-    queryKey: QK.members(kbId ?? ""),
-    queryFn: () => KbApi.members(kbId!).then((r) => r.members as KbMemberDTO[]),
-    enabled: !!kbId,
-  });
-}
-
-export function useAddKbMember(kbId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: { email: string; role: KbMemberDTO["role"] }) => KbApi.addMember(kbId, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: QK.members(kbId) }),
-  });
-}
-
-export function useRemoveKbMember(kbId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (userId: string) => KbApi.removeMember(kbId, userId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: QK.members(kbId) }),
-  });
-}
-
 // ============ 内容（文档/画布） ============
+//
+// 成员段已整体删除：GET /kb/:kbId/members 现在是「哪些角色覆盖本库」的只读台账
+// （LibraryVisibilityResponse，不再是人员名册），三个写端点已下线。
+// 唯一消费过它的 @提及改为走组织通讯录，见 MentionPicker 注释。
 
 export function useKbDocs(kbId: string | undefined, kind?: KbDocKind | "all", q?: string) {
   return useQuery({

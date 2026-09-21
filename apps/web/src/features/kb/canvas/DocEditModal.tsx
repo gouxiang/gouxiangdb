@@ -1,6 +1,6 @@
 // apps/web/src/features/kb/canvas/DocEditModal.tsx
 // 画布内关联文档的弹窗编辑器（#119，不离开当前画布即可编辑被引用文档）。
-// 复用文档编辑器同款 MarkdownEditor，保存走 KbApi/PublicApi，与 CanvasEditModal 对称。
+// 复用文档编辑器同款 MarkdownEditor，保存走 KbApi（公开分享只读，无写通道），与 CanvasEditModal 对称。
 //
 // KB-EDITOR-ROUND-5：
 //   - 取数统一走 useResolvedDoc；
@@ -14,7 +14,7 @@ import { Icon } from "../../../components/icons";
 import { Spinner, toast } from "../../../components/ui";
 // 阶段 4：关闭确认从 window.confirm 换成 feedback 的 L2 确认（原生 confirm 在自动化测试环境会挂死）
 import { confirmDiscardChanges } from "../../../components/feedback";
-import { KbApi, PublicApi } from "../../../api/client";
+import { KbApi } from "../../../api/client";
 import { useResolvedDoc } from "../hooks/useResolvedDoc";
 import { useModalKeyboardGuard } from "../hooks/useModalKeyboardGuard";
 import { MarkdownEditor } from "../MarkdownEditor";
@@ -70,19 +70,16 @@ export function DocEditModal({
     onClose();
   }, [onClose]);
 
-  // 公开引用闭包内文档只读（r.canEdit 恒 false）：禁用保存
-  const saveDisabled = saving || isLoading || (!!publicToken && !r.canEdit);
+  // 公开分享恒只读：匿名写端点已下线，这里直接不给保存入口（不依赖后端 canEdit 字段）。
+  const saveDisabled = saving || isLoading || !!publicToken;
 
   async function save() {
     if (savingRef.current) return;
     savingRef.current = true;
     setSaving(true);
     try {
-      if (publicToken) await PublicApi.saveContent(publicToken, docId, latest.current);
-      else {
-        const res = await KbApi.saveContent(docId, { content: latest.current, baseVersion: versionRef.current });
-        if (res.contentVersion != null) versionRef.current = res.contentVersion;
-      }
+      const res = await KbApi.saveContent(docId, { content: latest.current, baseVersion: versionRef.current });
+      if (res.contentVersion != null) versionRef.current = res.contentVersion;
       // 保存成功后以当前内容为新的未修改基线（requestClose 不再误报脏）
       initialRef.current = latest.current;
       toast("文档已保存", "success");

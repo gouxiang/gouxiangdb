@@ -1,7 +1,9 @@
 // apps/web/src/features/kb/PublicSharePage.tsx
-// 公开分享页（/s/:token）：匿名可访问，无需登录。
-// - 文档：viewer 只读预览；editor 可编辑（防抖保存走 PublicApi）
-// - 画布：viewer 只读；editor 可编辑 + 保存按钮
+// 公开分享页（/s/:token）：匿名可访问，无需登录，**只读**。
+//
+// 匿名写已整体关闭：后端 public.ts 不再提供任何写端点，读接口的 canEdit 恒 false
+// （曾按 shareRole=editor 派生，于是前端把已下线的保存接口又调一次、拿到 404/403）。
+// 因此这里不再有任何编辑态：文档走只读渲染，画布只读且没有保存按钮。
 // - 级联分享：左侧文档树，仅展示被分享根节点及其下级，支持展开/收起/点击切换
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -81,7 +83,6 @@ export default function PublicSharePage() {
   }, [effectiveDocId, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tree = useMemo(() => (data ? buildTree(data.tree, data.doc.id) : []), [data]);
-  const canEdit = data?.canEdit ?? false;
 
   if (isLoading) {
     return (
@@ -153,13 +154,10 @@ export default function PublicSharePage() {
           <span className="min-w-0 flex-1 truncate text-gx-14 font-semibold text-gx-text-primary">
             {remoteDoc?.title ?? "加载中…"}
           </span>
-          <span
-            className={`inline-flex items-center gap-1 rounded-gx-sm px-2 py-0.5 text-gx-11 ${
-              canEdit ? "bg-gx-accent-bg text-gx-accent" : "bg-gx-bg text-gx-text-tertiary"
-            }`}
-          >
-            <Icon name={canEdit ? "edit" : "eye"} size={12} />
-            {canEdit ? "可编辑" : "仅可见"}
+          {/* 外部人恒只读：分享链接不提供任何写能力，故不按 canEdit 切两态。 */}
+          <span className="inline-flex items-center gap-1 rounded-gx-sm bg-gx-bg px-2 py-0.5 text-gx-11 text-gx-text-tertiary">
+            <Icon name="eye" size={12} />
+            仅可见
           </span>
           <button
             type="button"
@@ -176,7 +174,7 @@ export default function PublicSharePage() {
               <Spinner size={20} />
             </div>
           ) : remoteDoc?.kind === "canvas" ? (
-            <PublicCanvas doc={remoteDoc} canEdit={canEdit} token={token!} />
+            <PublicCanvas doc={remoteDoc} token={token!} />
           ) : (
             <div className="relative flex h-full min-h-0 flex-1 flex-col bg-gx-surface" ref={docAreaRef}>
               <div className="min-h-0 flex-1 overflow-y-auto" data-outline-scroll>
@@ -184,9 +182,8 @@ export default function PublicSharePage() {
                   <MarkdownEditor
                     key={remoteDoc?.id}
                     initialMarkdown={remoteDoc?.content ?? ""}
-                    readOnly={!canEdit}
+                    readOnly
                     publicToken={token}
-                    onChange={(md) => scheduleSaveDoc(token!, remoteDoc!.id, md)}
                   />
                 </div>
               </div>
@@ -199,70 +196,28 @@ export default function PublicSharePage() {
   );
 }
 
-// 文档防抖保存（匿名 editor）
-let docSaveTimer: ReturnType<typeof setTimeout> | null = null;
-function scheduleSaveDoc(token: string, docId: string, content: string) {
-  if (docSaveTimer) clearTimeout(docSaveTimer);
-  docSaveTimer = setTimeout(() => {
-    PublicApi.saveContent(token, docId, content).catch(() => {
-      toast("自动保存失败，请检查网络", "error");
-    });
-  }, 1200);
-}
-
-// 画布公开查看/编辑
+// 画布公开查看：只读，没有保存按钮也没有保存通道（匿名写端点已下线）。
 function PublicCanvas({
   doc,
-  canEdit,
   token,
 }: {
   doc: { id: string; content: string; title: string; kind: string };
-  canEdit: boolean;
   token: string;
 }) {
   const [content, setContent] = useState(doc.content);
-  const [saving, setSaving] = useState(false);
-  const latest = useRef(content);
-  latest.current = content;
 
   useEffect(() => {
     setContent(doc.content);
   }, [doc.id, doc.content]);
 
-  async function save() {
-    setSaving(true);
-    try {
-      await PublicApi.saveContent(token, doc.id, latest.current);
-      toast("画布已保存", "success");
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "保存失败", "error");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
     <div className="relative h-full">
-      {canEdit && (
-        <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={save}
-            disabled={saving}
-            className="inline-flex h-8 items-center gap-1.5 rounded-gx-lg bg-gx-accent px-3 text-gx-12 font-medium text-white hover:brightness-95 disabled:opacity-50"
-          >
-            <Icon name="save" size={14} />
-            {saving ? "保存中…" : "保存"}
-          </button>
-        </div>
-      )}
       <GxCanvas
         docId={doc.id}
         content={content}
-        canEdit={canEdit}
+        canEdit={false}
         publicToken={token}
         onContentChange={(json) => setContent(json)}
-        onSave={() => void save()}
       />
     </div>
   );

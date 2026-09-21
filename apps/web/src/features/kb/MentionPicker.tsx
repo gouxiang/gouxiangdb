@@ -5,7 +5,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../../components/icons";
-import { useKbDocs, useKbMembers } from "./kb-hooks";
+import { useKbDocs } from "./kb-hooks";
+// 成员候选改走组织通讯录：权限核心模型后 /kb/:kbId/members 已变成「哪些角色覆盖本库」的
+// 只读台账，不再返回人员名单，@提及无法再按库取人。通讯录是唯一的人员名册来源，
+// 门控是 view_directory——没有该动作的人拿到的是空列表，成员分组随之不渲染（fail-closed）。
+import { useOrgMembers } from "../contacts/contacts-hooks";
 import { DocKindIcon } from "./kb-ui";
 import { userMention, docLink, canvasEmbedFence } from "./mentions";
 
@@ -28,25 +32,26 @@ export function MentionPicker({
   onPick: (snippet: string, isCanvasEmbed?: boolean) => void;
   onClose: () => void;
 }) {
-  const { data: members } = useKbMembers(kbId);
+  // 只取在岗成员一页（100 人为服务端单页上限），本地按输入过滤——提及是随手选人，
+  // 不值得为每次敲键打一次服务端；停用与待激活账号不进候选（@ 了也收不到）。
+  const roster = useOrgMembers({ q: "", deptId: null, status: "ACTIVE" });
   const { data: docs } = useKbDocs(kbId, "all");
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
 
   const memberItems = useMemo(() => {
     const kw = q.trim().toLowerCase();
-    return (members ?? [])
+    return (roster.isError ? [] : roster.items)
       .filter((m) => !kw || (m.displayName ?? m.email ?? "").toLowerCase().includes(kw))
       .slice(0, 6)
       .map((m) => ({
-        key: `u-${m.userId ?? m.id}`,
+        key: `u-${m.id}`,
         type: "user" as const,
         title: m.displayName || m.email || "成员",
         sub: m.email,
-        role: m.role,
-        id: m.userId ?? (m as unknown as { id: string }).id,
+        id: m.id,
       }));
-  }, [members, q]);
+  }, [roster.items, roster.isError, q]);
 
   const docItems = useMemo(() => {
     const kw = q.trim().toLowerCase();

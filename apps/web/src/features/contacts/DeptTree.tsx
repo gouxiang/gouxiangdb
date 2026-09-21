@@ -28,17 +28,32 @@ import { confirmIrreversible } from "../../components/feedback";
 interface DeptTreeProps {
   selectedDeptId: string | null;
   onSelectDept: (id: string | null) => void;
-  canManage: boolean;
-  /** 组织动作 manage_members：部门菜单里的「添加已有成员」按此门控（写的是成员归属）。 */
-  canManageMembers?: boolean;
+  /** 组织动作 create_departments：新建顶级/子部门。 */
+  canCreateDepts?: boolean;
+  /** 组织动作 edit_departments：重命名与移动到…。 */
+  canEditDepts?: boolean;
+  /** 组织动作 delete_departments：删除部门。 */
+  canDeleteDepts?: boolean;
+  /**
+   * 组织动作 manage_members：部门菜单里的「添加已有成员」（写的是成员归属）。
+   * 十二枚细分动作里没有「改某人属于哪个部门」这一位——后端 POST /org/members/:id/departments
+   * 至今仍按 manage_members 门控，所以这枚旧位不能删，删了就是把一个还能用的能力藏起来。
+   * 它与 delete_users（删账号）是两件事，不要互相串门。
+   */
+  canAssignDepartments?: boolean;
 }
 
 export function DeptTree({
   selectedDeptId,
   onSelectDept,
-  canManage,
-  canManageMembers = false,
+  canCreateDepts = false,
+  canEditDepts = false,
+  canDeleteDepts = false,
+  canAssignDepartments = false,
 }: DeptTreeProps) {
+  // 一枚部门动作都没有就不渲染「…」菜单——空菜单比没有菜单更让人困惑。
+  const canAnyDeptOp =
+    canCreateDepts || canEditDepts || canDeleteDepts || canAssignDepartments;
   const { data: flat, isLoading, isError, error } = useDepartments();
   const m = useOrgDeptMutations();
 
@@ -102,7 +117,7 @@ export function DeptTree({
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-gx-separator px-3 py-2">
         <span className="text-gx-13 font-semibold text-gx-text-primary">部门</span>
-        {canManage && (
+        {canCreateDepts && (
           <IconButton
             icon="plus"
             size={15}
@@ -128,7 +143,7 @@ export function DeptTree({
           <EmptyState
             icon="building"
             title="还没有部门"
-            description={canManage ? "新建一个顶级部门开始组织通讯录" : "管理员尚未创建部门"}
+            description={canCreateDepts ? "新建一个顶级部门开始组织通讯录" : "管理员尚未创建部门"}
           />
         )}
 
@@ -161,7 +176,7 @@ export function DeptTree({
                 <span className="truncate">{dept.name}</span>
                 <span className="ml-auto shrink-0 text-gx-11 text-gx-text-hint">{dept.memberCount}</span>
               </button>
-              {canManage && (
+              {canAnyDeptOp && (
                 <span className="relative shrink-0">
                   <IconButton
                     icon="more"
@@ -172,13 +187,21 @@ export function DeptTree({
                   />
                   <Popover open={menuFor === dept.id} onClose={() => setMenuFor(null)} align="right" width={170}>
                     <Menu width={170}>
-                      <MenuItem icon="plus" label="新建子部门" onClick={() => { setMenuFor(null); setCreatingParent(dept.id); }} />
-                      {canManageMembers && (
+                      {canCreateDepts && (
+                        <MenuItem icon="plus" label="新建子部门" onClick={() => { setMenuFor(null); setCreatingParent(dept.id); }} />
+                      )}
+                      {canAssignDepartments && (
                         <MenuItem icon="userPlus" label="添加已有成员" onClick={() => { setMenuFor(null); setAddingMembers(dept); }} />
                       )}
-                      <MenuItem icon="edit" label="重命名" onClick={() => { setMenuFor(null); setRenaming(dept); }} />
-                      <MenuItem icon="swap" label="移动到…" onClick={() => { setMenuFor(null); setMoving(dept); }} />
-                      <MenuItem icon="trash" label="删除部门" danger onClick={() => { setMenuFor(null); void removeDept(dept); }} />
+                      {canEditDepts && (
+                        <MenuItem icon="edit" label="重命名" onClick={() => { setMenuFor(null); setRenaming(dept); }} />
+                      )}
+                      {canEditDepts && (
+                        <MenuItem icon="swap" label="移动到…" onClick={() => { setMenuFor(null); setMoving(dept); }} />
+                      )}
+                      {canDeleteDepts && (
+                        <MenuItem icon="trash" label="删除部门" danger onClick={() => { setMenuFor(null); void removeDept(dept); }} />
+                      )}
                     </Menu>
                   </Popover>
                 </span>

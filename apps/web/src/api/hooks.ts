@@ -16,7 +16,7 @@ import {
   useQueryClient,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { Auth, Bases, Tables, Fields, Records, Views, SearchApi, OrgMembers, RoleScopes } from "./client";
+import { Auth, Bases, KbApi, Tables, Fields, Records, Views, SearchApi, OrgMembers, RoleScopes } from "./client";
 import { useAuthStore } from "../store/auth";
 import type {
   BaseDTO,
@@ -27,10 +27,8 @@ import type {
   ViewConfig,
   ViewType,
   LockMode,
-  MemberDTO,
   CommentDTO,
   ShareLinkDTO,
-  Role,
   CSVImportResult,
   TrashItemDTO,
   GroupBucketDTO,
@@ -41,7 +39,6 @@ export const QK = {
   base: (id: string) => ["base", id] as const,
   baseStats: (id: string) => ["base", id, "stats"] as const,
   baseErd: (id: string) => ["base", id, "erd"] as const,
-  members: (baseId: string) => ["base", baseId, "members"] as const,
   shareLinks: (baseId: string) => ["base", baseId, "share"] as const,
   tables: (baseId: string) => ["tables", baseId] as const,
   fields: (tableId: string) => ["fields", tableId] as const,
@@ -50,6 +47,8 @@ export const QK = {
   // 权限核心模型（二）：角色 × 库视野。失效维度按 roleId，不按库——PUT 是整份替换。
   roleScopes: (roleId: string) => ["org", "library-scopes", roleId] as const,
   libraryVisibility: (kind: string, id: string) => ["org", "library-visibility", kind, id] as const,
+  // 库设置页那份台账走 /:baseId/members（门控是「能看这个库」），与上面的组织面台账同源但缓存分开。
+  libraryAccess: (kind: string, id: string) => ["library-access", kind, id] as const,
   records: (tableId: string, viewId?: string) => ["records", tableId, viewId ?? "default"] as const,
   record: (id: string) => ["record", id] as const,
   views: (tableId: string) => ["views", tableId] as const,
@@ -291,13 +290,28 @@ export function useViews(tableId: string | null): UseQueryResult<ViewDTO[]> {
   });
 }
 
-// ============ Members / Share / Trash ============
+// ============ 库访问台账（只读）/ Share / Trash ============
 
-export function useMembers(baseId: string | null): UseQueryResult<MemberDTO[]> {
+/**
+ * 某个库的「谁能进来」只读台账。
+ *
+ * 与 useRoleScopesVisibility 的区别只有取数路径：那个走 /api/v1/org/libraries/:kind/:id/visibility
+ * （门控是组织动作 view_directory），这个走 /:baseId/members 或 /:kbId/members（门控是「能看这个库」）。
+ * 两者后端同源于 libraryVisibility，返回同一份 DTO；设置页面向的是普通库成员，只有后者够得着。
+ *
+ * fail-closed：加载中 / 出错时 data 为 undefined，调用方一律按「看不到、改不了」渲染。
+ */
+export function useLibraryAccess(
+  kind: LibraryKind | null,
+  libraryId: string | null,
+): UseQueryResult<LibraryVisibilityResponse> {
   return useQuery({
-    queryKey: QK.members(baseId ?? ""),
-    queryFn: async () => (await Bases.members(baseId!)).members,
-    enabled: enabledOf(baseId),
+    queryKey: QK.libraryAccess(kind ?? "", libraryId ?? ""),
+    queryFn: () =>
+      kind === "kb"
+        ? KbApi.members(libraryId as string)
+        : Bases.members(libraryId as string),
+    enabled: !!kind && enabledOf(libraryId),
   });
 }
 
@@ -537,25 +551,9 @@ export function useGXMutations() {
       onSuccess: (_d, v) => void qc.invalidateQueries({ queryKey: ["views", v.tableId] }),
     }),
 
-    // --- members / share ---
-    inviteMember: useMutation({
-      mutationFn: async (p: { baseId: string; email: string; role: Role }) =>
-        (await Bases.invite(p.baseId, { email: p.email, role: p.role })).member,
-      onSuccess: (_d, v) => {
-        void qc.invalidateQueries({ queryKey: QK.members(v.baseId) });
-        void qc.invalidateQueries({ queryKey: QK.baseStats(v.baseId) });
-      },
-    }),
-    updateMember: useMutation({
-      mutationFn: async (p: { baseId: string; memberId: string; role: Role }) =>
-        (await Bases.updateMember(p.baseId, p.memberId, { role: p.role })).member,
-      onSuccess: (_d, v) => void qc.invalidateQueries({ queryKey: QK.members(v.baseId) }),
-    }),
-    removeMember: useMutation({
-      mutationFn: async (p: { baseId: string; memberId: string }) =>
-        await Bases.removeMember(p.baseId, p.memberId),
-      onSuccess: (_d, v) => void qc.invalidateQueries({ queryKey: QK.members(v.baseId) }),
-    }),
+    // --- share ---
+    // 成员写操作（inviteMember / updateMember / removeMember）已随后端三个端点一起删除：
+    // 权限只按角色配后，逐库逐人的名册不再是授权入口。
     createShareLink: useMutation({
       mutationFn: async (p: { baseId: string; role: "editor" | "commenter" | "viewer" }) =>
         (await Bases.createShareLink(p.baseId, { role: p.role })).link,
@@ -646,6 +644,9 @@ export function useRoleScopesShareEnabled() {
       void qc.invalidateQueries({
         queryKey: QK.libraryVisibility(v.kind, v.libraryId),
       });
+      // 库设置页那份台账走的是另一个端点（/members），得单独失效，
+      // 否则开关拨完页面上的状态还是旧的。
+      void qc.invalidateQueries({ queryKey: QK.libraryAccess(v.kind, v.libraryId) });
       void qc.invalidateQueries({ queryKey: QK.bases });
     },
   });

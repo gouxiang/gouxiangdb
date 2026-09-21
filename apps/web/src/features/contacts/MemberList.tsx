@@ -22,7 +22,7 @@ const OVERSCAN = 8;
 export function MemberList({
   filter,
   onFilterChange,
-  canManageMembers,
+  canAssignDepartments,
   canInviteUsers,
   canCreateUsers,
   canDisableUsers,
@@ -30,8 +30,8 @@ export function MemberList({
 }: {
   filter: MemberFilter;
   onFilterChange: (next: MemberFilter) => void;
-  /** 仅用于「调岗/兼岗」这类部门归属写，仍挂在 manage_members 上。 */
-  canManageMembers: boolean;
+  /** 仅用于「调岗/兼岗」这类部门归属写：后端按 manage_members 门控，见 DeptTree 同名注释。 */
+  canAssignDepartments: boolean;
   canInviteUsers: boolean;
   canCreateUsers: boolean;
   canDisableUsers: boolean;
@@ -231,7 +231,7 @@ export function MemberList({
       {selected && (
         <MemberDrawer
           member={selected}
-          canManageMembers={canManageMembers}
+          canAssignDepartments={canAssignDepartments}
           canDisableUsers={canDisableUsers}
           canDeleteUsers={canDeleteUsers}
           onClose={() => setSelectedId(null)}

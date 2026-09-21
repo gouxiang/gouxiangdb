@@ -47,14 +47,9 @@ vi.mock("../../authz/useAuthzCapability", () => ({
 vi.mock("../../contacts/ContactsDirectory", () => ({
   ContactsDirectory: () => <div data-contacts-directory="1" />,
 }));
-// 权限分区现在是两块（上半角色与权限 / 下半选中角色的通讯录 + 库权限），下面这些子组件
-// 各自会发请求，本组用例只关心分区口径与渲染位置 → 一律桩掉，保持「不发请求」的既有风格。
-vi.mock("../../settings/MembersPanel", () => ({
-  MembersPanel: () => <div data-members-panel="1" />,
-}));
-vi.mock("../../settings/SharePanel", () => ({
-  SharePanel: () => <div data-share-panel="1" />,
-}));
+// 权限分区现在是两块（上半角色与权限 / 下半选中角色的通讯录 + 库权限）。
+// 原先桩掉的 MembersPanel / SharePanel 已随 WorkspaceSettingsAuthz 一起删除（零引用），
+// 这两个 mock 若留着，桩的模块不存在会让用例在解析阶段就失败，故一并去掉。
 vi.mock("../../api/hooks", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return { ...actual, useBases: () => ({ data: [], isLoading: false }) };

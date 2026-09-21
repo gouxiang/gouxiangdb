@@ -253,9 +253,9 @@ describe("全仓收口：不得再有裸 navigator.clipboard 调用", () => {
   });
 
   it("8 处调用点全部 import 了 copyText", () => {
+    // SharePanel.tsx 已删（分享链接管理面板零引用），故从 8 处调用点里去掉。
     const files = [
       "features/kb/ShareModal.tsx",
-      "features/settings/SharePanel.tsx",
       "features/contacts/InviteMemberModal.tsx",
       "features/settings/PatTokenModal.tsx",
       "features/kb/WysiwygEditor.tsx",
