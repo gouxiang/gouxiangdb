@@ -235,4 +235,15 @@ export interface EffectiveRoleDTO {
 export interface EffectiveRolesResponse {
   userId: string;
   roles: EffectiveRoleDTO[];
+  /**
+   * 硬规则 B：当前登录者能否新建库 / 知识库。
+   *
+   * 由后端按 domain/authz/libraryPolicy 的裁决现算（超级管理员或管理员；组织角色体系尚未
+   * 启用的实例按「登录即可建库」旧行为给 true），前端只读这个信号，不再自己重抄一遍角色规则。
+   * 此前前端按「是否持有 create_library 动作」判断，与新模型（建库不再是可分配动作）已经
+   * 漂移，会出现「按钮显示了但点了 403」或「超管反而看不到按钮」。
+   *
+   * 只有 GET /org/members/me/effective-roles 下发；GET /:id/effective-roles（查他人）不含。
+   */
+  canCreateLibrary?: boolean;
 }

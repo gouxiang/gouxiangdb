@@ -39,8 +39,9 @@ const ACTION_LABEL: Record<OrgAction, string> = {
   disable_users: "停用用户",
   delete_users: "删除用户",
   // 权限核心模型（一）追加的七枚：后端 OrgAction 已扩到十八枚，而本表是 Record<OrgAction,string>，
-  // 缺键即编译失败（apps/web 的 tsc 此前已红）。这里只补齐键位让类型闭合，
-  // 通讯录勾选面板本身仍按旧口径只渲染前十二枚（见 ORG_DIRECTORY_ACTIONS）。
+  // 缺键即编译失败（apps/web 的 tsc 此前已红）。这里只补齐键位让类型闭合。
+  // 注：本弹窗是通讯录侧的旧角色编辑器，仍按全量 ORG_ACTIONS 渲染（与新权限面板
+  // ORG_DIRECTORY_ACTIONS 不完全一致，属历史现状，未在本次收尾范围内统一）。
   create_roles: "新建角色",
   edit_roles: "编辑角色",
   delete_roles: "删除角色",
@@ -56,9 +57,12 @@ const ACTION_LABEL: Record<OrgAction, string> = {
  * 它们的真实用途是资源授权策略（auth_policies）的合法主体——从数据库挖掉会让既有策略
  * 变成悬挂主体（reconcile 报 C3_DANGLING_ROLE）。所以这里**只在通讯录 UI 过滤显示**，
  * 不动数据，也不影响 MemberDrawer 的有效角色审计清单。
+ *
+ * systemKey 认 'super_admin'（现行）与 'owner'（旧值，存量库可能还挂着）：迁移 20260921010000
+ * 已把超级管理员行的 systemKey 改成 super_admin，只判 'owner' 会让这一行在通讯录里消失。
  */
 function isDirectoryVisibleRole(r: OrgRoleDTO): boolean {
-  return r.systemKey === "owner" || !r.isSystem;
+  return r.systemKey === "super_admin" || r.systemKey === "owner" || !r.isSystem;
 }
 
 const NO_FILTER: MemberFilter = { q: "", deptId: null, status: null };

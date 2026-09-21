@@ -121,30 +121,37 @@ export function useEffectiveRoles(memberId: string | null) {
 export function useMyOrgActions(): { actions: Set<OrgAction>; isLoading: boolean } {
   const query = useQuery({
     queryKey: ORG_QK.myEffectiveRoles,
-    queryFn: async () => (await OrgMembers.myEffectiveRoles()).roles,
+    queryFn: async () => await OrgMembers.myEffectiveRoles(),
     staleTime: 60_000,
   });
   const actions = useMemo(() => {
     const s = new Set<OrgAction>();
-    for (const r of query.data ?? []) for (const a of r.actions) s.add(a);
+    for (const r of query.data?.roles ?? []) for (const a of r.actions) s.add(a);
     return s;
   }, [query.data]);
   return { actions, isLoading: query.isLoading };
 }
 
 /**
- * 当前登录者是否为工作区所有者（任一有效系统角色 systemKey="owner"）。
- * 复用 myEffectiveRoles 同一查询缓存，不新增请求。M5 检索管理面（role_owner）据此门控。
+ * 当前登录者是否为「工作区管理员」——持有超级管理员或管理员系统角色
+ * （super_admin/admin；'owner' 是超级管理员的旧 systemKey，存量库仍可能挂着，一并认）。
+ * 复用 myEffectiveRoles 同一查询缓存，不新增请求。工作区设置页的「仅管理员可见」分区据此门控。
+ *
+ * 历史口径 systemKey==="owner" 已失效：新权限模型把该行的 systemKey 改成了 super_admin，
+ * 于是这个判定恒为 false，工作区设置页里所有 ownerOnly 分区（含权限管理）对超管也不显示。
  * 加载未完成时 isOwner=false，调用方应同时看 isLoading，避免在信号缺失时闪现面板。
  */
 export function useIsWorkspaceOwner(): { isOwner: boolean; isLoading: boolean } {
   const query = useQuery({
     queryKey: ORG_QK.myEffectiveRoles,
-    queryFn: async () => (await OrgMembers.myEffectiveRoles()).roles,
+    queryFn: async () => await OrgMembers.myEffectiveRoles(),
     staleTime: 60_000,
   });
   const isOwner = useMemo(
-    () => (query.data ?? []).some((r) => r.systemKey === "owner"),
+    () =>
+      (query.data?.roles ?? []).some(
+        (r) => r.systemKey === "super_admin" || r.systemKey === "admin" || r.systemKey === "owner",
+      ),
     [query.data],
   );
   return { isOwner, isLoading: query.isLoading };

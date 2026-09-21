@@ -5,12 +5,12 @@
 //       本文件只回答「某账号能不能看到某入口」，不动四项定义本身。
 //
 // 两套能力口径并存是已知现状（统一它们是后续架构项，本次不做）：
-//   ① 组织动作集合 actions（/api/v1/org/members/me/effective-roles 聚合的十一枚 OrgAction，
-//      目前仅系统角色 owner 与管理员自建的自定义角色持有）；
+//   ① 组织动作集合 actions（/api/v1/org/members/me/effective-roles 聚合的十八枚 OrgAction，
+//      系统预设角色 super_admin/admin 持有全量，自定义角色按其勾选持有）；
 //   ② 权限引擎能力位 authzManage（GET /api/v1/meta，featuregate.ts:canManageAuthz 的严格 ===true）。
-//      注意：后端 /meta 目前**从不下发 authzManage**（apps/api/src/routes/v1/index.ts:36-49
-//      只返 {apiVersion, enterpriseOrg, auth}），故该口径在当前环境恒 false——
-//      因此入口不能只挂它，否则连所有者都看不到「权限管理」；这里用 OR 让两者各自都能生效。
+//      后端 /meta 已下发 authzManage（apps/api/src/routes/v1/index.ts 的 authzManageFlag：
+//      持 super_admin/admin 系统角色 ∨ 任一 manage_* 动作）；入口仍用 OR 兼容旧环境
+//      （历史某版本不下发该字段）——两者任一到位都能看见。
 //
 // 全部 fail-closed：空集 / 未传 / 探针未完成（loading）一律判不可见，
 // 避免「先闪出管理入口、探针回来再消失」的跳变。

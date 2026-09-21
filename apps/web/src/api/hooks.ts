@@ -94,11 +94,17 @@ export function useMe() {
 }
 
 /**
- * 建库 / 建知识库权限门：当前登录者是否持有 create_library 动作。
+ * 建库 / 建知识库权限门：当前登录者能否建库（硬规则 B：超级管理员或管理员）。
  *
- * queryKey 用字面量 ["org","me","effective-roles"]，与 features/contacts/contacts-hooks.ts
- * 的 ORG_QK.myEffectiveRoles 同键——两处共享同一份缓存，不新增请求。
- * 这里不 import contacts-hooks：api 层不反向依赖 features 层。
+ * 判据来自后端现算并随有效角色响应下发的 canCreateLibrary 布尔（shared-types
+ * EffectiveRolesResponse.canCreateLibrary）——不在前端重抄一遍角色规则，杜绝口径漂移。
+ * 此前这里按「是否持有 create_library 动作」判断，那是已被新模型取代的旧规则，会出现
+ * 「按钮显示了但点了 403」或「超管/管理员反而看不到按钮」。
+ *
+ * queryKey 用字面量 ["org","me","effective-roles"]，与 features/contacts/contacts-hooks.ts 的
+ * ORG_QK.myEffectiveRoles、features/settings/role-permission/role-permission-hooks.ts 的
+ * useMyRoleRefs 同键——三处共享同一份缓存、同一份响应形状（都由 OrgMembers.myEffectiveRoles()
+ * 的整份响应填充），不新增请求。这里不 import features：api 层不反向依赖 features 层。
  *
  * 默认拒绝：加载中 / 请求失败 / 数据缺失一律 false。宁可暂时不渲染建库入口，
  * 也不能让无权限用户看见按钮（后端 assertCanCreateLibrary 同步门控 403）。
@@ -106,12 +112,11 @@ export function useMe() {
 export function useCanCreateLibrary(): boolean {
   const query = useQuery({
     queryKey: ["org", "me", "effective-roles"],
-    queryFn: async () => (await OrgMembers.myEffectiveRoles()).roles,
+    queryFn: async () => await OrgMembers.myEffectiveRoles(),
     staleTime: 60_000,
     retry: false,
   });
-  if (query.isLoading || query.isError || !query.data) return false;
-  return query.data.some((r) => r.actions.includes("create_library"));
+  return query.data?.canCreateLibrary === true;
 }
 
 /** 个人中心 — 更新昵称/用户名/手机/简介 */

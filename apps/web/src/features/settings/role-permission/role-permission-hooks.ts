@@ -27,19 +27,19 @@ export function useMyRoleRefs(): {
 } {
   const query = useQuery({
     queryKey: ["org", "me", "effective-roles"],
-    queryFn: async () => (await OrgMembers.myEffectiveRoles()).roles,
+    queryFn: async () => await OrgMembers.myEffectiveRoles(),
     staleTime: 60_000,
     retry: false,
   });
   const roleIds = useMemo(
-    () => new Set((query.data ?? []).map((r) => r.roleId)),
+    () => new Set((query.data?.roles ?? []).map((r) => r.roleId)),
     [query.data],
   );
   const isSuperOrAdmin = useMemo(
     // owner 是超级管理员的旧 systemKey（迁移 20260921010000 起改为 super_admin），
     // 存量数据里仍可能出现，一并认。
     () =>
-      (query.data ?? []).some(
+      (query.data?.roles ?? []).some(
         (r) => r.systemKey === "super_admin" || r.systemKey === "admin" || r.systemKey === "owner",
       ),
     [query.data],

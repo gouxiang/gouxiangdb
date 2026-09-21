@@ -30,9 +30,14 @@ export const v1 = new Hono();
 /**
  * 权限管理能力位：当前用户能否进「工作区设置 → 权限管理」并使用写能力。
  *
- * 口径 = 持有任一 manage_* 组织动作 ∨ 持有系统 owner 角色。与 routes/v1/workspace.ts 的
- * isWorkspaceAdmin 同族（同一个 effectiveRoleRows 真源），只是把「任一动作」收紧到 manage_*
- * 并显式补上 owner（owner 的 actions 集合由角色配置决定，不假定它一定含 manage_*）。
+ * 口径 = 持有超级管理员/管理员系统角色 ∨ 持有任一 manage_* 组织动作。与 routes/v1/workspace.ts
+ * 的 isWorkspaceAdmin 同族（同一个 effectiveRoleRows 真源）。
+ *
+ * 口径对齐（新权限模型）：系统角色 systemKey 已从 'owner' 改为 'super_admin'，旧的
+ * `systemKey === "owner"` 判断在运行期恒为 false；虽有 manage_* 分支兜住预设角色，但那只是
+ * 巧合——预设角色之所以能进，是因为它们恰好持有全部细粒度动作，不应用这个巧合当判据。
+ * 显式列出两个管理角色，manage_* 分支保留给「持旧粗粒度动作的自定义角色」（迁移
+ * 20260921010000 会把它们补进细粒度动作但保留旧位，故这些角色仍走 manage_* 命中）。
  *
  * **不挂在 GX_AUTHZ_ENGINE 总门上**：新权限引擎默认 off / 降级 shadow，实际鉴权决策走旧三表；
  * 挂总门会让管理员在任何环境看到的都还是「权限编辑未在本环境开放」的只读视图——
@@ -43,7 +48,12 @@ export const v1 = new Hono();
 async function authzManageFlag(userId: string): Promise<boolean> {
   try {
     const roles = await effectiveRoleRows(userId);
-    return roles.some((r) => r.systemKey === "owner" || r.actions.some((a) => a.startsWith("manage_")));
+    return roles.some(
+      (r) =>
+        r.systemKey === "super_admin" ||
+        r.systemKey === "admin" ||
+        r.actions.some((a) => a.startsWith("manage_")),
+    );
   } catch {
     return false;
   }

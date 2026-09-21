@@ -12,16 +12,23 @@ import { Hono } from "hono";
 import { requireOrgAction } from "../../../middleware/authActive.js";
 import * as members from "../../../domain/org/members.js";
 import { effectiveRoleRows } from "../../../domain/org/authorization.js";
+import { canCreateLibraryNow } from "../../../domain/org/createLibraryGuard.js";
 import { deleteUser, disableUser, reactivateUser } from "../../../domain/org/lifecycle.js";
 import { audit } from "../../../audit/emit.js";
 
 export const memberRoutes = new Hono();
 
 // 注意：Hono 按注册顺序匹配，静态段 /me 必须在 /:id 之前注册。
+// canCreateLibrary：硬规则 B 的能力位，由后端现算下发，前端据此显示建库入口（见 shared-types
+// EffectiveRolesResponse 注释）。只在这里下发——查他人的 /:id/effective-roles 不需要这一位。
 memberRoutes.get("/me/effective-roles", async (c) => {
   const auth = c.get("auth");
   const roles = await effectiveRoleRows(auth.userId);
-  return c.json({ userId: auth.userId, roles });
+  return c.json({
+    userId: auth.userId,
+    roles,
+    canCreateLibrary: await canCreateLibraryNow(auth.userId),
+  });
 });
 
 // 成员目录分页：GET /org/members?page&limit(<=100)&q&deptId&status

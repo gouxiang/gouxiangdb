@@ -18,13 +18,23 @@ import { canCreateLibrary } from "../authz/libraryPolicy.js";
 export const CREATE_LIBRARY_DENIED = "没有新建库/知识库的权限，请联系管理员开通";
 
 /**
+ * 判定 userId 能否新建库/知识库（不抛错，供「建库入口是否显示」的能力位复用）。
+ * 判定次序：无角色授予的实例直接放行 → 是超级管理员/管理员且持 create_library 动作 → 放行。
+ *
+ * 与 assertCanCreateLibrary 共用同一份判定，杜绝「界面显示能建、点下去 403」这类前端/后端
+ * 口径漂移（前端 api/hooks 的 useCanCreateLibrary 读的就是这个函数的输出）。
+ */
+export async function canCreateLibraryNow(userId: string): Promise<boolean> {
+  const grantCount = await prisma.roleAssignment.count();
+  if (grantCount === 0) return true;
+  if (!(await canCreateLibrary(userId))) return false;
+  return hasOrgAction(userId, "create_library");
+}
+
+/**
  * 断言 userId 可以新建库/知识库；无权限抛 403 HttpError（路由层经 errorResponse 映射）。
- * 判定次序：无角色授予的实例直接放行 → 持 create_library 且是超级管理员/管理员 → 放行。
+ * 判定委托 canCreateLibraryNow，两条出口口径恒等。
  */
 export async function assertCanCreateLibrary(userId: string): Promise<void> {
-  const grantCount = await prisma.roleAssignment.count();
-  if (grantCount === 0) return;
-  if (!(await canCreateLibrary(userId))) throw new HttpError(403, CREATE_LIBRARY_DENIED);
-  if (await hasOrgAction(userId, "create_library")) return;
-  throw new HttpError(403, CREATE_LIBRARY_DENIED);
+  if (!(await canCreateLibraryNow(userId))) throw new HttpError(403, CREATE_LIBRARY_DENIED);
 }

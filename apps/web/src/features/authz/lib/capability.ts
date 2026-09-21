@@ -4,7 +4,8 @@
 // authzManage === true 才放行。字段缺失 / undefined / false / meta 探针失败（null）
 // 一律判 false。
 //
-// 后端下发口径：authzManage = 当前用户持有任一 manage_* 组织动作 ∨ 系统 owner 角色。
+// 后端下发口径：authzManage = 当前用户持有超级管理员/管理员系统角色 ∨ 任一 manage_* 组织动作
+// （见 apps/api/src/routes/v1/index.ts 的 authzManageFlag）。
 // **与 GX_AUTHZ_ENGINE 总门解耦**：引擎默认 off / 降级 shadow，实际鉴权决策走旧三表，
 // 挂总门会让管理员在任何环境都只能看到只读视图（「权限编辑未在本环境开放」的根因）。
 // 只读解释类（effective 来源链 / visible-scope / breadcrumb 截断标记）不经过此门控。
