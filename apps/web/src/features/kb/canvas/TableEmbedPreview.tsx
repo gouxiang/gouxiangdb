@@ -196,8 +196,9 @@ export function TableEmbedPreview({
 
       <div className="flex shrink-0 items-center gap-2 border-t border-gx-hairline px-2.5 py-1 text-gx-11 text-gx-text-hint">
         <span className="min-w-0 flex-1 truncate">
-          共 {data.filteredTotal || data.total} 条
-          {data.filteredTotal > EMBED_PAGE_LIMIT ? `（显示前 ${EMBED_PAGE_LIMIT} 条）` : ""}
+          {/* filteredTotal 与 total 都用 ?? 判定：筛选命中 0 条时 `||` 会错误地回落成 total */}
+          共 {data.filteredTotal ?? data.total} 条
+          {(data.filteredTotal ?? data.total) > EMBED_PAGE_LIMIT ? `（显示前 ${EMBED_PAGE_LIMIT} 条）` : ""}
           {data.degraded ? " · 分享档位已降级为只读" : ""}
         </span>
         {/* 新增入口只在可编辑时出现——只读态不得有任何编辑入口 */}
