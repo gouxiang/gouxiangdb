@@ -121,10 +121,17 @@ describe("N5 §1.3 旧链接生成点源码守卫（换壳/窗口化重构后仍
     expect(s).toContain('ref_.kind === "canvas" ? `/kb/${kbId}/canvas/${ref_.docId}` : `/kb/${kbId}/doc/${ref_.docId}`');
   });
 
-  it("GxLinkBlockView 解析后 navigate 的 target 仍是 /kb/:id/:kind/:docId 旧形", () => {
+  it("GxLinkBlockView 的跳转目标：doc/canvas 仍是 /kb/:id/:kind/:docId，table 走数据表侧", () => {
+    // 断言变更原因：关联块现在还能指向【数据表】（GxDocRef.kind="table"）。数据表 URL 带
+    // /base/:baseId 段，而 docId 承载的是 tableId，推不出 baseId，故无法在组件里内联一条
+    // 单一模板——模板收敛到 gx-ref-target.ts 单一真源，组件只做「取不到目标就不跳」。
+    // 旧不变式（组件内必须出现 /kb 模板字面量）随之失效，改为逐条锁模板真源。
     const s = read("../../features/kb/canvas/GxLinkBlockView.tsx");
-    expect(s).toContain("const target = `/kb/${kbId ?? \"\"}/${element.gxLinkRef.kind}/${element.gxLinkRef.docId}`");
-    expect(s).toContain("navigate(target)");
+    expect(s).toContain("gxRefNavTarget(element.gxLinkRef, kbId)");
+    expect(s).toContain("navigate(navTarget)");
+    const t = read("../../features/kb/canvas/gx-ref-target.ts");
+    expect(t).toContain("return `/kb/${kbId ?? \"\"}/${ref.kind}/${ref.docId}`");
+    expect(t).toContain("`/base/${ref.baseId}/table/${ref.docId}/view/${ref.viewId}`");
   });
 
   it("RefEmbedBody 的 onNavigate 交回 react-router navigate（不整页刷新、不新形）", () => {

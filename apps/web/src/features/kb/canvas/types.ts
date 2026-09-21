@@ -7,16 +7,37 @@
 //
 // 自定义字段：
 //   gxNote?: string                                  节点注释正文
-//   gxDocRef?: { docId: string; kind: "doc"|"canvas"; title: string }  节点关联的文档/画布
+//   gxDocRef?/gxLinkRef?: GxDocRef                    节点关联的文档/画布/数据表
 
 import type { PlaitElement, Point } from "@plait/core";
 import { PlaitDrawElement } from "@plait/draw";
 
+/**
+ * 关联目标的种类。
+ * - "doc" / "canvas"：知识库里的实体，按 docId 走 /api/kb/docs 与公开 ref 闭包解析。
+ * - "table"：数据表。**字段复用 docId 承载 tableId**（历史字段名不改，避免破坏已落库
+ *   的画布 JSON：老数据只有 docId/kind/title 三个键）。dataTable 的预览不走文档接口，
+ *   而是按 viewId 走 records（登录态）或 /api/public/s/:token/embed/:tableId（分享态）。
+ */
+export type GxRefKind = "doc" | "canvas" | "table";
+
 export interface GxDocRef {
+  /** 文档/画布 id；kind="table" 时是 tableId */
   docId: string;
-  kind: "doc" | "canvas";
+  kind: GxRefKind;
   /** 插入时快照标题；实时标题由预览组件拉取，此处仅用于离线/无权限时兜底展示 */
   title: string;
+  /** kind="table"：插入时选中的视图 id（null = 该表默认第一个视图） */
+  viewId?: string | null;
+  /** kind="table"：插入时快照的视图名，供离线 / 无权限时兜底展示 */
+  viewName?: string;
+  /**
+   * kind="table"：插入时快照的表所在库（base）id。
+   * 只有它能让「跳转到源表」拼出 /base/:baseId/table/:tableId/view/:viewId——
+   * 数据表的 URL 带 baseId 段，而 docId 字段承载的是 tableId，推不出 baseId。
+   * 老数据（只有 docId/kind/title 三键）没有该字段，此时 table 关联块不提供跳转。
+   */
+  baseId?: string;
   /** 本地重命名（覆盖源标题，画布块标题旁的 edit 图标写入） */
   displayTitle?: string;
   /** 预览类型：full=完整预览（带摘要/图片）；minimal=极简（仅标题+跳转） */

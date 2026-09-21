@@ -1,6 +1,7 @@
 // apps/web/src/features/kb/enhanceEmbeds.ts
-// 预览/分享页增强：renderMarkdown 输出的 <div class="md-canvas-embed" data-canvas-doc>
-// 占位节点，挂载为可交互的 <CanvasEmbed />（只读预览 + 跳转 + 弹窗编辑）。
+// 预览/分享页增强：renderMarkdown 输出的两类占位节点挂载为可交互预览器——
+//   <div class="md-canvas-embed" data-canvas-doc>  → <CanvasEmbed />（画布，只读预览 + 跳转 + 弹窗编辑）
+//   <div class="md-table-embed" data-table-id>     → <TableEmbed />（数据表，读写档位随宿主分享档位）
 // 用独立 React root 挂载，卸载时清理，避免与 dangerouslySetInnerHTML 的静态 HTML 冲突。
 // 注意①：独立 root 不在主应用 Provider 树内，必须自行包 QueryClientProvider；
 // 注意②（P2-A）：同一原因，root 内的子树过去也拿不到 Router context——而增强层
@@ -15,6 +16,7 @@ import { createElement, Fragment, useEffect, useRef, type ReactNode } from "reac
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CanvasEmbed } from "./CanvasEmbed";
+import { TableEmbed } from "./TableEmbed";
 import { EmbedDepthFallback } from "./EmbedDepthFallback";
 import { EmbedChainContext, planEmbed, ROOT_EMBED_CHAIN, type EmbedChain } from "./embed-depth";
 
@@ -69,6 +71,13 @@ export interface EnhanceEmbedOpts {
    * （用 chainWithSelf），本函数不再重复推导宿主身份。缺省即根链——顶层文档预览。
    */
   chain?: EmbedChain;
+  /**
+   * 内嵌【数据表】预览的写权限（与 canEdit 分开，两者来源不同）：
+   *   - 登录态：不传 → 由调用方按「宿主文档是否可编辑」传 !readOnly
+   *   - 分享态：由宿主文档/画布的分享档位 mode 决定（mode==="edit" 才 true）；
+   *     此时 canEdit 仍可能是 false（正文匿名写已关闭），但嵌入的表可能可写。
+   */
+  embedCanEdit?: boolean;
 }
 
 export function enhanceCanvasEmbeds(container: HTMLElement, opts: EnhanceEmbedOpts): () => void {
@@ -120,6 +129,39 @@ export function enhanceCanvasEmbeds(container: HTMLElement, opts: EnhanceEmbedOp
       ),
     );
   });
+  // 数据表内嵌：占位节点 .md-table-embed[data-table-id] → TableEmbed。
+  // 数据表不参与 doc/canvas 的嵌套环判定（它既不是 doc 也不是 canvas），故不问 planEmbed。
+  const tablePlaceholders = container.querySelectorAll<HTMLElement>(".md-table-embed[data-table-id]");
+  tablePlaceholders.forEach((ph) => {
+    const tableId = ph.dataset.tableId ?? "";
+    if (!tableId) return;
+    if (roots.has(ph)) return; // 已挂载
+    const root = createRoot(ph);
+    roots.set(ph, root);
+    mounted.push([ph, root]);
+    root.render(
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(
+          NavBridge,
+          { onNavigate: opts.onNavigate },
+          createElement(
+            QueryClientProvider,
+            { client: embedQueryClient },
+            createElement(TableEmbed, {
+              tableId,
+              viewId: ph.dataset.viewId ?? null,
+              kbId: opts.kbId,
+              publicToken: opts.publicToken,
+              embedCanEdit: opts.embedCanEdit,
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+
   // C-3：返回 cleanup。调用方（effect cleanup/组件卸载）必须执行，
   // 否则 innerHTML 重建后旧 placeholder 上的 root 永不 unmount（组件树/订阅泄漏）。
   return () => {

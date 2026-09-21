@@ -11,6 +11,8 @@ import { EmbedDepthFallback } from "../EmbedDepthFallback";
 import type { GxDocRef } from "./types";
 import { LinkBlockPreview } from "./LinkBlockPreview";
 import { RefEmbedBody } from "./RefEmbedBody";
+import { TableEmbedPreview } from "./TableEmbedPreview";
+import { useCanvasBoard } from "./canvas-context";
 import { CanvasEditModal } from "../CanvasEditModal";
 import { DocEditModal } from "./DocEditModal";
 
@@ -66,15 +68,26 @@ export function RefEmbedCard({
   onJump,
   showRefresh,
 }: RefEmbedCardProps) {
-  const r = useResolvedDoc(gxRef.docId, { publicToken });
+  // kind="table" 不是文档：没有可解析的 doc，也不能走文档预览链，提前分流。
+  const isTable = gxRef.kind === "table";
+  const r = useResolvedDoc(isTable ? undefined : gxRef.docId, { publicToken });
+  const rt = useCanvasBoard();
   const qc = useQueryClient();
   const [reloadKey, setReloadKey] = useState(0);
   const [editing, setEditing] = useState(false);
 
   // 标题优先级：本地 displayTitle > 源 doc.title > 插入时快照 title
-  const title = gxRef.displayTitle?.trim() || r.doc?.title || gxRef.title || "未命名";
+  // 数据表没有源标题，用 displayTitle > 快照 title（视图名由预览内部展示）。
+  const title = isTable
+    ? gxRef.displayTitle?.trim() || gxRef.title || "数据表"
+    : gxRef.displayTitle?.trim() || r.doc?.title || gxRef.title || "未命名";
   // 公开引用闭包内文档 r.canEdit 恒 false；公开可编辑子树为 true
   const effectiveCanEdit = canEdit && r.canEdit;
+  // 嵌入数据表的写权限与「宿主正文可否编辑」是两回事：
+  //   - 登录态：ctx.embedCanEdit 未设 → 回落 canEdit（画布能编辑，嵌入的表就能编辑）
+  //   - 分享态：canEdit 恒 false（正文匿名写已关闭），写权限由宿主分享档位 mode 决定
+  const embedCanEdit = rt?.ctx.embedCanEdit ?? canEdit;
+
 
   const handleSaved = () => {
     setReloadKey((k) => k + 1);
@@ -84,24 +97,34 @@ export function RefEmbedCard({
 
   // P2-A：canvas→doc/doc→canvas 这条互嵌链的判定下沉到统一入口。
   // 链由外层画布所在的嵌入链继承（context），测试用例与主画布（顶层）都落在根链上。
+  // 数据表不参与这条链（它既不是 doc 也不是 canvas），故不查链。
   const chain = useEmbedChain();
-  const plan = planEmbed(gxRef.docId, chain);
+  const plan = isTable ? null : planEmbed(gxRef.docId, chain);
+  // isTable 是独立布尔，TS 无法据此收窄 gxRef.kind；这里显式收敛出文档侧的 kind。
+  const docKind: "doc" | "canvas" = gxRef.kind === "canvas" ? "canvas" : "doc";
   // 降级卡复用外层注入的跳转行为（onJump），不额外引入 react-router 依赖。
-  const body =
-    plan.kind === "render" ? (
-      <EmbedChainContext.Provider value={plan.chain}>
-        <RefEmbedBody resolved={r} refKind={gxRef.kind} reloadKey={reloadKey} publicToken={publicToken} kbId={kbId} />
-      </EmbedChainContext.Provider>
-    ) : (
-      <EmbedDepthFallback
-        docId={gxRef.docId}
-        kind={plan.kind}
-        kbId={kbId}
-        title={title}
-        targetKind={gxRef.kind}
-        onNavigate={onJump}
-      />
-    );
+  const body = isTable ? (
+    <TableEmbedPreview
+      tableId={gxRef.docId}
+      viewId={gxRef.viewId ?? null}
+      publicToken={publicToken}
+      canEdit={embedCanEdit}
+      fallbackTitle={gxRef.title}
+    />
+  ) : plan?.kind === "render" ? (
+    <EmbedChainContext.Provider value={plan.chain}>
+      <RefEmbedBody resolved={r} refKind={docKind} reloadKey={reloadKey} publicToken={publicToken} kbId={kbId} />
+    </EmbedChainContext.Provider>
+  ) : plan ? (
+    <EmbedDepthFallback
+      docId={gxRef.docId}
+      kind={plan.kind}
+      kbId={kbId}
+      title={title}
+      targetKind={docKind}
+      onNavigate={onJump}
+    />
+  ) : null;
   return (
     <>
       <LinkBlockPreview
@@ -112,7 +135,8 @@ export function RefEmbedCard({
         onRename={onRename}
         jumpEnabled={jumpEnabled}
         onJump={onJump ?? (() => {})}
-        onEdit={effectiveCanEdit ? () => setEditing(true) : undefined}
+        // 数据表没有「正文」可编辑：增删改就在预览区里完成，不弹编辑弹窗。
+        onEdit={!isTable && effectiveCanEdit ? () => setEditing(true) : undefined}
         onRefresh={
           showRefresh && !publicToken
             ? () => {
@@ -133,7 +157,8 @@ export function RefEmbedCard({
         onHeaderPointerDown={onHeaderPointerDown}
         trailingNode={trailingNode}
       />
-      {editing &&
+      {!isTable &&
+        editing &&
         (gxRef.kind === "canvas" ? (
           <CanvasEditModal
             docId={gxRef.docId}

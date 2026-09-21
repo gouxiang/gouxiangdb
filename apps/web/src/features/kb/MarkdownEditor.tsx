@@ -16,7 +16,7 @@ import { mediaKindOf } from "@gx/blocks";
 import { loadUploadLimits, validateUpload } from "./upload-limits";
 import { makeLinkClickHandler } from "../../lib/internal-links";
 import { WysiwygEditor } from "./WysiwygEditor";
-import { MentionPicker } from "./MentionPicker";
+import { MentionPicker, type MentionEmbedKind } from "./MentionPicker";
 import { enhanceCanvasEmbeds } from "./enhanceEmbeds";
 import { chainWithSelf } from "./embed-depth";
 import "./kb.css";
@@ -96,6 +96,7 @@ export function MarkdownEditor({
   readOnly = false,
   publicToken,
   docId,
+  embedCanEdit,
 }: {
   initialMarkdown: string;
   /** 只读场景（公开分享页）可不传：没有写通道，也就没有「改动」要上报。 */
@@ -110,6 +111,12 @@ export function MarkdownEditor({
   publicToken?: string;
   /** 当前编辑文档 id——@ picker 排除自身引用 */
   docId?: string;
+  /**
+   * 内嵌【数据表】预览的写权限（与 readOnly 分开）：
+   *   - 登录态：不传 → 回落 !readOnly（文档能编辑，嵌入的表就能编辑）
+   *   - 分享态：readOnly 恒 true（正文匿名写已关闭），写权限由宿主分享档位 mode 决定
+   */
+  embedCanEdit?: boolean;
 }) {
   const [md, setMd] = useState(initialMarkdown);
   const [mode, setMode] = useState<Mode>(readOnly ? "preview" : "wysiwyg");
@@ -128,11 +135,13 @@ export function MarkdownEditor({
       kbId,
       canEdit: !readOnly,
       publicToken,
+      // 嵌入数据表的写权限：分享态看宿主档位，登录态回落「本文档可编辑」。
+      embedCanEdit: embedCanEdit ?? !readOnly,
       onNavigate: (p) => navigate(p),
       // P2-A：预览的就是本文档，把 docId 并进祖先集合，本文档再被外层嵌套回来时判环。
       chain: chainWithSelf(docId),
     });
-  }, [mode, md, kbId, readOnly, publicToken, navigate, docId]);
+  }, [mode, md, kbId, readOnly, publicToken, navigate, docId, embedCanEdit]);
 
   const emit = useCallback((v: string) => { setMd(v); onChange?.(v); }, [onChange]);
 
@@ -408,7 +417,7 @@ function SourceEditor({
   }
 
   // 「@」提及/引用：把 @触发词到光标处替换为插入片段
-  function onMentionPick(snippet: string, isCanvasEmbed = false) {
+  function onMentionPick(snippet: string, embed?: MentionEmbedKind) {
     const ta = taRef.current;
     const v = valueRef.current;
     const pos = ta?.selectionStart ?? v.length;
@@ -416,7 +425,8 @@ function SourceEditor({
     const before = v.slice(0, trigger);
     const after = v.slice(pos);
     const lead = before.length === 0 || before.endsWith("\n") ? "" : "\n";
-    const trail = isCanvasEmbed ? "\n" : "";
+    // 围栏块（canvas-embed / table-embed）独占块级：前后补换行，避免与正文行粘在一起。
+    const trail = embed ? "\n" : "";
     const insert = `${lead}${snippet}${trail}`;
     emit(before + insert + after);
     const caret = (before + insert).length;

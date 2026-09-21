@@ -9,7 +9,8 @@ import { Popover } from "../../../components/ui";
 import { useCanvasBoard } from "./canvas-context";
 import { insertLinkBlock } from "./canvas-ops";
 import { EditorModal } from "./EditorModal";
-import { InsertLinkBlockPicker } from "./CanvasLinkPicker";
+import { InsertLinkBlockPicker, toDocRef } from "./LinkPickerWrappers";
+import type { PickResult } from "./link-picker-types";
 import type { KbDocKind } from "../../../api/client";
 
 /**
@@ -35,16 +36,18 @@ export function CanvasLinkEntry() {
   // 公开分享页暂不允许关联入口（沿用 LinkBlockInserter 旧策略：内部页才显示新建按钮）
   if (rt.ctx.publicToken) return null;
 
-  function handlePick(docId: string, kind: KbDocKind, title: string, previewType: "full" | "minimal") {
+  function handlePick(ref: PickResult, previewType: "full" | "minimal") {
     if (!rt?.board) return;
     insertLinkBlock(
       rt.board,
-      { docId, kind, title: title || "未命名", previewType },
+      { ...toDocRef(ref), title: ref.title || "未命名", previewType },
       { cascade: true },
     );
     setOpen(false);
+    // 数据表没有「正文」可编辑：EditorModal 编辑的是文档/画布内容，对表无意义，故不弹。
+    if (ref.kind === "table") return;
     // 立即打开 EditorModal 让用户填标题/正文
-    setCreating({ docId, kind, title: title || "未命名" });
+    setCreating({ docId: ref.docId, kind: ref.kind, title: ref.title || "未命名" });
   }
 
   return (
@@ -57,7 +60,7 @@ export function CanvasLinkEntry() {
         <button
           ref={btnRef}
           type="button"
-          title="插入关联（文档 / 画布）"
+          title="插入关联（文档 / 画布 / 数据表）"
           onClick={() => setOpen((v) => !v)}
           className={`inline-flex h-8 items-center gap-1.5 rounded-gx-lg border border-gx-separator bg-gx-surface px-2.5 text-gx-12 font-medium shadow-lg transition-colors ${
             open

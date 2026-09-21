@@ -14,7 +14,7 @@ import { ColorPicker } from "../../components/ColorPicker";
 import { EntityPicker, type PickedEntity } from "../../components/EntityPicker";
 import { internalHref } from "../../lib/internal-links";
 import { COPY_FAIL_HINT_LINK, copyText } from "../../lib/clipboard";
-import { MentionPicker } from "./MentionPicker";
+import { MentionPicker, type MentionEmbedKind } from "./MentionPicker";
 import { CanvasEmbed } from "./CanvasEmbed";
 import { useLinkResolve } from "./hooks/useLinkResolve";
 import { useAuthStore } from "../../store/auth";
@@ -1586,7 +1586,7 @@ export function WysiwygEditor({
    * 操作活动 DOM。改为纯 state 更新（emit 改 block.text / 插块），Editable 失焦态会自动把
    * innerHTML 同步为 inlineMdToHtml(text)。只写一次，不手动覆写 DOM，避免双写竞态重复。
    */
-  function onMentionPick(snippet: string, isCanvasEmbed = false) {
+  function onMentionPick(snippet: string, embed?: MentionEmbedKind) {
     const st = mention;
     setMention(null);
     if (!st) return;
@@ -1597,15 +1597,19 @@ export function WysiwygEditor({
     // 触发块当前文本（syncBlock 在输入时已实时回写 b.text）去掉行尾 "@检索词"
     const stripped = (blk.text ?? "").replace(/(^|\s)@[^\s@]*$/, "$1").replace(/\u00A0/g, " ");
 
-    if (isCanvasEmbed) {
-      // 画布内嵌：去触发词 + 结构化 code(canvas-embed) 块插入其后 + 紧跟可编辑 spacer p
-      // 修复 #2：插入完成后立刻把焦点与光标落到新 spacer p，用户可继续向下输入无需手动点击。
-      const docId = snippet.replace(/^\s*```canvas-embed\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
+    if (embed) {
+      // 围栏内嵌块（canvas-embed / table-embed）：去触发词 + 结构化 code 块插入其后
+      // + 紧跟可编辑 spacer p。插入完成后立刻把焦点与光标落到新 spacer p，
+      // 用户可继续向下输入无需手动点击。
+      // canvas 的 code 只放 docId；table 的 code 放围栏 body（tableId[\nviewId]），
+      // 由 markdown 渲染器按行解析，与 mentions.ts 的 fence 构造保持一致。
+      const lang = embed === "canvas" ? "canvas-embed" : "table-embed";
+      const body = snippet.trim().replace("```" + lang, "").replace(/```$/, "").trim();
       const cur = blocksRef.current.map((x) => (x.id === blockId ? { ...x, text: stripped } : x));
       const idx = cur.findIndex((x) => x.id === blockId);
       if (idx < 0) return;
       const isCurEmpty = cur[idx]!.type === "p" && (cur[idx]!.text ?? "").trim() === "";
-      const embedBlock = newBlock("code", { lang: "canvas-embed", code: docId });
+      const embedBlock = newBlock("code", { lang, code: body });
       const spacer = newBlock("p", { text: "" });
       let final: Block[];
       if (isCurEmpty) {

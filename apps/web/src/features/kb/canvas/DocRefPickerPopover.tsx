@@ -9,7 +9,7 @@ import type { PlaitElement } from "@plait/core";
 import { Icon } from "../../../components/icons";
 import { useCanvasBoard } from "./canvas-context";
 import { PopoverShell } from "./style-popups";
-import { AttachRefPicker } from "./CanvasLinkPicker";
+import { AttachRefPicker } from "./LinkPickerWrappers";
 
 export function DocRefPickerPopover({
   x,
@@ -30,7 +30,7 @@ export function DocRefPickerPopover({
     <PopoverShell x={x} y={y} width={300} onClose={onClose}>
       <div className="mb-1.5 flex items-center gap-1.5 text-gx-12 font-medium text-gx-text-secondary">
         <Icon name="link" size={14} />
-        关联文档或画布
+        关联文档、画布或数据表
       </div>
       {rt?.ctx.publicToken ? (
         <div className="px-1 py-3 text-center text-gx-12 text-gx-text-hint">

@@ -110,6 +110,10 @@ export default function PublicSharePage() {
   }
 
   const showTree = data.includeChildren && data.tree.length > 0;
+  // 宿主分享档位：决定文档/画布里【嵌入的数据表预览】能不能写。
+  // 注意与 canEdit 的区别——正文的匿名写后端仍关闭（canEdit 恒 false），
+  // 所以「档位」是唯一能表达"嵌入表可编辑"的信号。
+  const embedCanEdit = data.mode === "edit";
 
   function toggle(id: string) {
     setCollapsed((prev) => {
@@ -154,10 +158,10 @@ export default function PublicSharePage() {
           <span className="min-w-0 flex-1 truncate text-gx-14 font-semibold text-gx-text-primary">
             {remoteDoc?.title ?? "加载中…"}
           </span>
-          {/* 外部人恒只读：分享链接不提供任何写能力，故不按 canEdit 切两态。 */}
+          {/* 正文恒只读（匿名写后端已关闭）；档位只在「嵌入的数据表预览」上生效。 */}
           <span className="inline-flex items-center gap-1 rounded-gx-sm bg-gx-bg px-2 py-0.5 text-gx-11 text-gx-text-tertiary">
-            <Icon name="eye" size={12} />
-            仅可见
+            <Icon name={embedCanEdit ? "edit" : "eye"} size={12} />
+            {embedCanEdit ? "正文只读 · 内嵌数据表可编辑" : "仅可见"}
           </span>
           <button
             type="button"
@@ -174,7 +178,7 @@ export default function PublicSharePage() {
               <Spinner size={20} />
             </div>
           ) : remoteDoc?.kind === "canvas" ? (
-            <PublicCanvas doc={remoteDoc} token={token!} />
+            <PublicCanvas doc={remoteDoc} token={token!} embedCanEdit={embedCanEdit} />
           ) : (
             <div className="relative flex h-full min-h-0 flex-1 flex-col bg-gx-surface" ref={docAreaRef}>
               <div className="min-h-0 flex-1 overflow-y-auto" data-outline-scroll>
@@ -184,6 +188,7 @@ export default function PublicSharePage() {
                     initialMarkdown={remoteDoc?.content ?? ""}
                     readOnly
                     publicToken={token}
+                    embedCanEdit={embedCanEdit}
                   />
                 </div>
               </div>
@@ -200,9 +205,12 @@ export default function PublicSharePage() {
 function PublicCanvas({
   doc,
   token,
+  embedCanEdit,
 }: {
   doc: { id: string; content: string; title: string; kind: string };
   token: string;
+  /** 宿主分享档位：画布里嵌入的数据表预览按它决定只读/可编辑 */
+  embedCanEdit: boolean;
 }) {
   const [content, setContent] = useState(doc.content);
 
@@ -217,6 +225,7 @@ function PublicCanvas({
         content={content}
         canEdit={false}
         publicToken={token}
+        embedCanEdit={embedCanEdit}
         onContentChange={(json) => setContent(json)}
       />
     </div>

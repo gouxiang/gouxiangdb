@@ -163,6 +163,19 @@ export function renderMarkdown(src: string): string {
         out.push(`<div class="md-canvas-embed" data-canvas-doc="${escapeHtml(docId)}"></div>`);
         continue;
       }
+      // 数据表内嵌（关联插入）：第一行 tableId，第二行可选 viewId；
+      // 同样输出占位节点，由 React 预览层增强为表格预览器（读写档位随宿主分享档位）。
+      if (lang === "table-embed") {
+        const lines = buf.join("\n").split("\n").map((l) => l.trim().replace(/[^a-zA-Z0-9]/g, ""));
+        const tableId = lines[0] ?? "";
+        const viewId = lines[1] ?? "";
+        if (tableId) {
+          out.push(
+            `<div class="md-table-embed" data-table-id="${escapeHtml(tableId)}"${viewId ? ` data-view-id="${escapeHtml(viewId)}"` : ""}></div>`,
+          );
+        }
+        continue;
+      }
       out.push(`<pre class="md-pre"><code${lang ? ` data-lang="${escapeHtml(lang)}"` : ""}>${escapeHtml(buf.join("\n"))}</code></pre>`);
       continue;
     }

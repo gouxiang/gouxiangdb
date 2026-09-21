@@ -18,9 +18,11 @@
 import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Icon } from "../../../components/icons";
 import { DocKindIcon } from "../kb-ui";
+import type { GxRefKind } from "./types";
 
 export interface LinkBlockPreviewProps {
-  kind: "doc" | "canvas";
+  /** 关联目标类型：文档 / 画布 / 数据表（数据表只影响图标与标题语义） */
+  kind: GxRefKind;
   /** 显示标题（含本地 displayTitle 覆盖层） */
   title: string;
   canEdit: boolean;
@@ -66,7 +68,7 @@ export interface LinkBlockPreviewProps {
 }
 
 interface HeaderProps {
-  kind: "doc" | "canvas";
+  kind: GxRefKind;
   title: string;
   canEdit: boolean;
   canRename?: boolean;

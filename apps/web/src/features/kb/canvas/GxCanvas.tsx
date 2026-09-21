@@ -35,6 +35,11 @@ export interface GxCanvasProps {
   kbId?: string;
   /** 公开分享 token；存在时数据通道走匿名 PublicApi */
   publicToken?: string;
+  /**
+   * 画布【内嵌数据表预览】的写权限。缺省 → 回落 canEdit。
+   * 分享态必须显式传宿主分享档位（mode==="edit"），因为此时 canEdit 恒 false。
+   */
+  embedCanEdit?: boolean;
   /** 编辑回调（每次编辑上抛最新 JSON，防抖/保存由调用方接管） */
   onContentChange?: (json: string) => void;
   /** Cmd/Ctrl+S 保存（可编辑时生效） */
@@ -49,6 +54,7 @@ export function GxCanvas({
   canEdit,
   kbId,
   publicToken,
+  embedCanEdit,
   onContentChange,
   onSave,
   fitOnLoad,
@@ -67,7 +73,7 @@ export function GxCanvas({
       fitOnLoad={fitOnLoad}
       // 增强层无论只读与否都挂：只读成员/公开 viewer 仍能看到注释、节点关联角标与预览；
       // 样式条/插入入口/删除等编辑 UI 在 CanvasEnhanceOverlay 内按 canEdit/publicToken 自门控。
-      enhance={{ kbId, publicToken, currentDocId: docId, canEdit }}
+      enhance={{ kbId, publicToken, currentDocId: docId, canEdit, embedCanEdit }}
     />
   );
 }

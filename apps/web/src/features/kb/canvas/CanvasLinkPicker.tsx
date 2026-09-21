@@ -1,26 +1,37 @@
 // apps/web/src/features/kb/canvas/CanvasLinkPicker.tsx
 // 统一关联选择弹层（KB-EDITOR-ROUND-4 §1.2.2）：
-//  - 替代 LinkBlockPicker（LinkBlockInserter 旧组件）+ DocRefPickerPopover 的列表部分；
 //  - 两类调用场景由 mode 决定（"standalone" = 插入独立块；"attach" = 给现有元素挂 gxDocRef）；
-//  - 文档 / 画布用并排两个按钮 + 内联标题输入，差异仅 kind 字段；
-//  - 包含并排搜索 + 类型 tab（保留 LinkBlockPicker 的 tab，方便过滤）。
-//
-// 容器外壳由 caller 提供（CanvasLinkEntry 走 Popover；DocRefPickerPopover 走 PopoverShell），
-// 故本组件只负责内容布局，不处理定位 / 点击外部关闭。
+//  - 数据源是 GET /api/linkable —— **后端已按库权限过滤**，前端拿到什么就能关联什么；
+//    因此这里没有、也不该有任何「可见性判断」。
+//  - 类型 tab：全部 / 文档 / 画布 / 数据表；数据表点开后先选视图（网格/看板/画廊/日历…）。
+//  - 新建文档 / 新建画布的内联表单在 CreateInlineForm.tsx；结果列表在 LinkableResultList.tsx。
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Icon, type IconName } from "../../../components/icons";
-import { toast } from "../../../components/ui";
-import { DocKindIcon } from "../kb-ui";
 import { useCanvasBoard } from "./canvas-context";
-import { setElementDocRef, readElementDocRef } from "./canvas-ops";
-import { useCreateDoc, useKbDocs } from "../kb-hooks";
-import { insertLinkBlock } from "./canvas-ops";
-import type { KbDocKind } from "../../../api/client";
-import type { GxDocRef, GxShapeElement } from "./types";
+import { readElementDocRef } from "./canvas-ops";
+import { useLinkable } from "./linkable-hooks";
+import { CreateInlineForm } from "./CreateInlineForm";
+import { LinkableResultList } from "./LinkableResultList";
+import type { KbDocKind, LinkableItem, LinkableType } from "../../../api/client";
+import type { GxShapeElement } from "./types";
+import type { PickResult, PreviewType } from "./link-picker-types";
 
-export type PreviewType = "full" | "minimal";
-type FilterKind = "all" | "doc" | "canvas";
+export type { PreviewType, PickResult } from "./link-picker-types";
+
+type FilterKind = "all" | "doc" | "canvas" | "table";
+
+/**
+ * tab → types 查询参数。
+ * 「全部」只取三类**可作关联目标**的类型（doc/canvas/table）：
+ * base/kb 是「库」本身，GxDocRef.kind 表达不了，插不出关联块。
+ */
+const FILTER_TYPES: Record<FilterKind, LinkableType[]> = {
+  all: ["doc", "canvas", "table"],
+  doc: ["doc"],
+  canvas: ["canvas"],
+  table: ["table"],
+};
 
 export interface CanvasLinkPickerProps {
   /** 关闭回调（创建 / 选择 / Esc / 点击外部由 caller 触发） */
@@ -33,16 +44,11 @@ export interface CanvasLinkPickerProps {
   mode: "standalone" | "attach";
 
   /** standalone 模式必传：把选中的 ref 插入为 link-block */
-  onPickStandalone?: (
-    docId: string,
-    kind: KbDocKind,
-    title: string,
-    previewType?: PreviewType,
-  ) => void;
+  onPickStandalone?: (ref: PickResult, previewType: PreviewType) => void;
   /** attach 模式必传：把 ref 写入 element.gxDocRef */
-  onPickAttach?: (docId: string, kind: KbDocKind, title: string) => void;
+  onPickAttach?: (ref: PickResult) => void;
 
-  /** attach 模式必传：当前元素 */
+  /** attach 模式：当前元素（用于给「已选中的那一条」加高亮） */
   attachElement?: GxShapeElement;
   /** attach 模式：当前是否已挂 ref（控制"取消关联"按钮显隐） */
   attachHasRef?: boolean;
@@ -70,44 +76,51 @@ export function CanvasLinkPicker(props: CanvasLinkPickerProps) {
   const kbId = rt?.ctx.kbId;
   // 内部页才支持选择；公开分享页显示无 kb 列表提示
   const canFetch = !rt?.ctx.publicToken && !!kbId;
-  const { data: docs } = useKbDocs(canFetch ? kbId : undefined, "all");
 
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<FilterKind>("all");
   const [previewType, setPreviewType] = useState<PreviewType>("full");
-  const [creating, setCreating] = useState<null | "doc" | "canvas">(null);
+  const [creating, setCreating] = useState<null | KbDocKind>(null);
 
-  const items = useMemo(() => {
-    const kw = q.trim().toLowerCase();
-    return (docs ?? [])
-      .filter((d) => !d.deletedAt && d.id !== currentDocId)
-      .filter((d) => filter === "all" || d.kind === filter)
-      .filter((d) => !kw || d.title.toLowerCase().includes(kw))
-      .slice(0, 30);
-  }, [docs, q, filter, currentDocId]);
+  const { data, isLoading, isError } = useLinkable({
+    q,
+    types: FILTER_TYPES[filter],
+    limit: 50,
+    enabled: canFetch,
+  });
+
+  // 只排除自身（不允许把当前画布关联给自己）；搜索/类型过滤都在服务端做。
+  const items = (data?.items ?? []).filter((it) => it.id !== currentDocId);
 
   const tabs: { value: FilterKind; label: ReactNode; icon: IconName }[] = [
     { value: "all", label: "全部", icon: "link" },
     { value: "doc", label: "文档", icon: "doc" },
     { value: "canvas", label: "画布", icon: "canvas" },
+    { value: "table", label: "数据表", icon: "table" },
   ];
 
-  function pickExisting(docId: string, kind: KbDocKind, title: string) {
-    if (mode === "standalone") {
-      onPickStandalone?.(docId, kind, title, previewType);
-    } else {
-      onPickAttach?.(docId, kind, title);
-    }
+  function pick(ref: PickResult) {
+    if (mode === "standalone") onPickStandalone?.(ref, previewType);
+    else onPickAttach?.(ref);
     onClose();
   }
 
-  function handleAttachClear() {
-    onAttachClear?.();
-    onClose();
+  function pickItem(item: LinkableItem) {
+    pick({ docId: item.id, kind: item.type === "canvas" ? "canvas" : "doc", title: item.title });
   }
 
-  // Esc 关闭由 caller 的容器处理（Popover/PopoverShell 均已自带）；
-  // 这里不重复绑定（避免双绑产生竞态）。
+  function pickTable(item: LinkableItem, view: { id: string; name: string } | null) {
+    pick({
+      docId: item.id,
+      kind: "table",
+      title: item.title,
+      viewId: view?.id ?? null,
+      ...(view ? { viewName: view.name } : {}),
+      ...(item.libraryId ? { baseId: item.libraryId } : {}),
+    });
+  }
+
+  // Esc 关闭由 caller 的容器处理（Popover/PopoverShell 均已自带）；这里不重复绑定。
   return (
     <div>
       {/* 搜索 + 类型 tab */}
@@ -118,7 +131,7 @@ export function CanvasLinkPicker(props: CanvasLinkPickerProps) {
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="搜索文档或画布…"
+            placeholder="搜索文档、画布或数据表…"
             className="w-full rounded-gx-sm bg-gx-bg py-1.5 pl-7 pr-2 text-gx-13 text-gx-text-primary outline-none placeholder:text-gx-text-hint focus:bg-gx-surface"
           />
         </div>
@@ -144,31 +157,16 @@ export function CanvasLinkPicker(props: CanvasLinkPickerProps) {
         <div className="px-3 py-6 text-center text-gx-12 text-gx-text-hint">
           分享页暂不支持新建关联，仅可查看已有关联。
         </div>
-      ) : items.length === 0 ? (
-        <div className="px-3 py-6 text-center text-gx-12 text-gx-text-hint">无匹配结果</div>
       ) : (
-        <div className="max-h-64 overflow-y-auto py-1">
-          {items.map((d) => {
-            // attach 模式对当前已选中的项加高亮 + 对勾
-            const isCurrent = mode === "attach" && attachHasRef && attachElement
-              && (readElementDocRef(attachElement)?.docId === d.id);
-            return (
-              <button
-                key={d.id}
-                type="button"
-                onClick={() => pickExisting(d.id, d.kind, d.title || "未命名")}
-                className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-gx-accent-bg ${
-                  isCurrent ? "text-gx-accent" : "text-gx-text-primary"
-                }`}
-              >
-                <DocKindIcon kind={d.kind} size={14} />
-                <span className="min-w-0 flex-1 truncate text-gx-13">{d.title || "未命名"}</span>
-                {isCurrent && <Icon name="check" size={13} />}
-                {!isCurrent && <Icon name="plus" size={13} className="text-gx-text-hint" />}
-              </button>
-            );
-          })}
-        </div>
+        <LinkableResultList
+          items={items}
+          isLoading={isLoading}
+          isError={isError}
+          truncated={!!data?.truncated}
+          currentId={mode === "attach" && attachElement ? readElementDocRef(attachElement)?.docId ?? null : null}
+          onPickItem={pickItem}
+          onPickTable={pickTable}
+        />
       )}
 
       {/* 创建入口：并排两个按钮（文档 / 画布） */}
@@ -198,14 +196,7 @@ export function CanvasLinkPicker(props: CanvasLinkPickerProps) {
         <CreateInlineForm
           kind={creating}
           onCancel={() => setCreating(null)}
-          onCreated={(docId, title) => {
-            if (mode === "standalone") {
-              onPickStandalone?.(docId, creating, title, previewType);
-            } else {
-              onPickAttach?.(docId, creating, title);
-            }
-            onClose();
-          }}
+          onCreated={(docId, title) => pick({ docId, kind: creating, title })}
         />
       )}
 
@@ -242,8 +233,11 @@ export function CanvasLinkPicker(props: CanvasLinkPickerProps) {
       {mode === "attach" && attachHasRef && (
         <button
           type="button"
-          onClick={handleAttachClear}
-          className="w-full rounded-gx-sm px-2 py-1.5 text-center text-gx-12 text-gx-text-tertiary hover:bg-gx-bg hover:text-danger border-t border-gx-separator"
+          onClick={() => {
+            onAttachClear?.();
+            onClose();
+          }}
+          className="w-full rounded-gx-sm border-t border-gx-separator px-2 py-1.5 text-center text-gx-12 text-gx-text-tertiary hover:bg-gx-bg hover:text-danger"
         >
           取消关联
         </button>
@@ -251,170 +245,3 @@ export function CanvasLinkPicker(props: CanvasLinkPickerProps) {
     </div>
   );
 }
-
-/* ============================================================
- * 创建文档 / 画布内联表单（合并 LinkBlockInserter 的 NewDocForm）
- * 简化版：与 picker 内嵌；只关心 kbId 与 pickExisting 调用方
- * ============================================================ */
-function CreateInlineForm({
-  kind,
-  onCancel,
-  onCreated,
-}: {
-  kind: KbDocKind;
-  onCancel: () => void;
-  onCreated: (docId: string, title: string) => void;
-}) {
-  const rt = useCanvasBoard();
-  const kbId = rt?.ctx.kbId;
-  const createDoc = useCreateDoc(kbId ?? "");
-
-  const [title, setTitle] = useState(kind === "canvas" ? "未命名画布" : "未命名文档");
-  const [submitting, setSubmitting] = useState(false);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  useEffect(() => {
-    const id = requestAnimationFrame(() => inputRef.current?.select());
-    return () => cancelAnimationFrame(id);
-  }, []);
-
-  if (!kbId) return null;
-
-  async function run() {
-    const t = title.trim();
-    if (!t) return;
-    setSubmitting(true);
-    try {
-      const res = await createDoc.mutateAsync({ kind, title: t });
-      onCreated(res.doc.id, t);
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "新建失败", "error");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <div className="border-t border-gx-separator p-3">
-      <div className="mb-2 flex items-center gap-1.5 text-gx-12 font-medium text-gx-text-secondary">
-        <Icon name={kind === "canvas" ? "canvas" : "doc"} size={14} />
-        {kind === "canvas" ? "新建画布" : "新建文档"}
-      </div>
-      <input
-        ref={inputRef}
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !submitting) {
-            e.preventDefault();
-            void run();
-          }
-          if (e.key === "Escape") onCancel();
-        }}
-        placeholder={kind === "canvas" ? "画布标题" : "文档标题"}
-        className="w-full rounded-gx-sm border border-gx-border bg-gx-bg px-2 py-1.5 text-gx-13 text-gx-text-primary outline-none focus:border-gx-accent"
-      />
-      <div className="mt-2.5 flex items-center justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={submitting}
-          className="inline-flex h-7 items-center rounded-gx-sm px-2.5 text-gx-12 text-gx-text-tertiary hover:bg-gx-bg disabled:opacity-50"
-        >
-          取消
-        </button>
-        <button
-          type="button"
-          onClick={() => void run()}
-          disabled={submitting || !title.trim()}
-          className="inline-flex h-7 items-center gap-1 rounded-gx-sm bg-gx-accent px-2.5 text-gx-12 font-medium text-white hover:brightness-95 disabled:opacity-50"
-        >
-          {submitting ? "创建中…" : "创建并选择"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================
- * 便捷封装：把 CanvasLinkPicker 接成 LinkBlockInserter 的旧 onPick 回调。
- * 给独立块场景直接用，外部只关心 onPickRef 即可。
- * ============================================================ */
-export interface InsertLinkBlockPickerProps {
-  /** 触发位置（caller 用来 popover 对齐） */
-  anchor: { x: number; y: number };
-  currentDocId?: string;
-  /** 已选则调 insertLinkBlock（previewType 由 picker 内部 state 决定） */
-  onInsert: (docId: string, kind: KbDocKind, title: string, previewType: PreviewType) => void;
-  onClose: () => void;
-}
-export function InsertLinkBlockPicker(props: InsertLinkBlockPickerProps) {
-  // 直接转发至 mode="standalone"。picker 内部始终给出 previewType（非可选），
-  // 故此处 onPickStandalone 用强制类型避免 React 类型推断把可选参数拉低。
-  return (
-    <CanvasLinkPicker
-      mode="standalone"
-      anchor={props.anchor}
-      currentDocId={props.currentDocId}
-      onClose={props.onClose}
-      showPreviewType
-      onPickStandalone={(docId, kind, title, previewType) =>
-        props.onInsert(docId, kind, title, previewType ?? "full")
-      }
-    />
-  );
-}
-
-/* ============================================================
- * 便捷封装：把 CanvasLinkPicker 接成给现有元素挂 ref 的回调。
- * ============================================================ */
-export interface AttachRefPickerProps {
-  anchor: { x: number; y: number };
-  element: GxShapeElement;
-  onClose: () => void;
-}
-export function AttachRefPicker(props: AttachRefPickerProps) {
-  const rt = useCanvasBoard();
-  const currentDocId = rt?.ctx.currentDocId;
-  const existing = readElementDocRef(props.element);
-  return (
-    <CanvasLinkPicker
-      mode="attach"
-      anchor={props.anchor}
-      currentDocId={currentDocId}
-      attachElement={props.element}
-      attachHasRef={!!existing}
-      onClose={props.onClose}
-      onPickAttach={(docId, kind, title) => {
-        if (!rt?.board) return;
-        // 切换到新目标时：身份字段（docId/kind/title）一律用新选择；
-        // 只沿用与目标无关的布局偏好 previewType（完整/极简）。
-        // displayTitle 是针对旧目标的本地改名，切目标必须丢弃，否则新关联顶着旧标题。
-        const ref: GxDocRef = {
-          docId,
-          kind,
-          title,
-          ...(existing?.previewType ? { previewType: existing.previewType } : {}),
-        };
-        setElementDocRef(rt.board, props.element, ref);
-        // setNode 改自定义字段后显式 notify 一次，确保角标/样式条关联态即时刷新
-        // （不依赖 plait 是否为该 op 派发 onChange；rAF 合帧，重复调用幂等）。
-        rt.notify();
-        rt.refreshSelection();
-      }}
-      onAttachClear={() => {
-        if (!rt?.board) return;
-        setElementDocRef(rt.board, props.element, null);
-        rt.notify();
-        rt.refreshSelection();
-      }}
-    />
-  );
-}
-
-/** 把一个 GxShapeElement 安全转型为本模块期待的类型（运行时由 caller 保证） */
-export function pickRefAsShape(el: GxShapeElement): GxShapeElement {
-  return el;
-}
-
-/** 同样便捷导出 insertLinkBlock，便于一次性 import */
-export { insertLinkBlock };

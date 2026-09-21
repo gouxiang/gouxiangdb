@@ -7,11 +7,12 @@ import type { KbDocKind } from "../../api/client";
 import { colors } from "@gx/design-tokens";
 
 /**
- * 文档/画布类型图标（不用 emoji）。
+ * 文档 / 画布 / 数据表 类型图标（不用 emoji）。
  *
  * icon / iconColor 为实体自定义值（ENTITY_ICONS 白名单之一 / #RRGGBB）；
  * 两者都不传时，resolveEntityIcon 原样返回 kind 对应的默认图标与默认色
- * ——渲染结果与改动前逐字节一致（样式的 style color 也一致）。
+ * ——doc/canvas 的渲染结果与改动前逐字节一致（样式的 style color 也一致）。
+ * "table" 用于关联块/选择器里的数据表（图标库若无自定义则回落 table 图标）。
  */
 export function DocKindIcon({
   kind,
@@ -20,7 +21,7 @@ export function DocKindIcon({
   icon,
   iconColor,
 }: {
-  kind: KbDocKind;
+  kind: KbDocKind | "table";
   size?: number;
   className?: string;
   /** 实体自定义图标名；null/undefined = 未自定义，按 kind 渲染默认图标。 */
@@ -28,13 +29,9 @@ export function DocKindIcon({
   /** 实体自定义色；null/undefined = 用 kind 默认色。 */
   iconColor?: string | null;
 }) {
-  const resolved = resolveEntityIcon(
-    { icon, iconColor },
-    {
-      name: kind === "canvas" ? "canvas" : ("doc" as IconName),
-      color: kind === "canvas" ? colors.secondaryAlt : colors.accent,
-    },
-  );
+  const fallbackName: IconName = kind === "canvas" ? "canvas" : kind === "table" ? "table" : "doc";
+  const fallbackColor = kind === "canvas" ? colors.secondaryAlt : kind === "table" ? colors.success : colors.accent;
+  const resolved = resolveEntityIcon({ icon, iconColor }, { name: fallbackName, color: fallbackColor });
   return <Icon name={resolved.name} size={size} className={className} style={{ color: resolved.color }} />;
 }
 

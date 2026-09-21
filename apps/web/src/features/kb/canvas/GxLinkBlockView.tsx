@@ -25,6 +25,7 @@ import {
   setLinkBlockDisplayTitle,
 } from "./canvas-ops";
 import { RefEmbedCard } from "./RefEmbedCard";
+import { gxRefNavTarget } from "./gx-ref-target";
 import { LinkBlockForeignObject } from "./LinkBlockForeignObject";
 import { syncLinkDragPoints, translateLinkPoints, type LinkDragPhase } from "./link-drag";
 
@@ -68,15 +69,21 @@ export function GxLinkBlockView({ board, element, kbId, publicToken, canEdit }: 
   const x = box.x;
   const y = box.y;
 
-  const target = `/kb/${kbId ?? ""}/${element.gxLinkRef.kind}/${element.gxLinkRef.docId}`;
+  // doc/canvas → /kb/:kbId/:kind/:docId（旧形未变）；kind="table" → /base/:baseId/table/:tableId…
+  // 缺 baseId 快照（老数据）时返回 null，此时不出跳转入口而不是拼一个必然 404 的地址。
+  const navTarget = gxRefNavTarget(element.gxLinkRef, kbId);
 
   function handleNavigate() {
-    void resolveLink(target).then((res: { ok: boolean; toast?: string }) => {
+    if (!navTarget) {
+      toast("该数据表关联缺少跳转信息，请重新关联一次", "error");
+      return;
+    }
+    void resolveLink(navTarget).then((res: { ok: boolean; toast?: string }) => {
       if (!res.ok) {
         toast(res.toast || "目标不可访问", "error");
         return;
       }
-      navigate(target);
+      navigate(navTarget);
     });
   }
 
@@ -238,7 +245,7 @@ export function GxLinkBlockView({ board, element, kbId, publicToken, canEdit }: 
         onHeaderPointerDown={canEdit ? handleHeaderPointerDown : undefined}
         canRename
         onRename={(v) => setLinkBlockDisplayTitle(board, element, v.trim() ? v : null)}
-        jumpEnabled={!!kbId}
+        jumpEnabled={!!navTarget}
         onJump={handleNavigate}
         showRefresh={!publicToken}
         onDelete={canEdit ? () => removeLinkBlock(board, element) : undefined}

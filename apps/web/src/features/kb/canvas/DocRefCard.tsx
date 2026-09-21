@@ -11,6 +11,7 @@ import { useNavigate } from "react-router-dom";
 import { useCanvasBoard, type ScreenRect } from "./canvas-context";
 import type { GxDocRef } from "./types";
 import { RefEmbedCard } from "./RefEmbedCard";
+import { gxRefNavTarget } from "./gx-ref-target";
 
 const MIN_W = 280;
 const MIN_H = 200;
@@ -121,11 +122,12 @@ export function DocRefCard({
   let y = Math.max(12, nodeRect.y - 20);
   if (y + size.h > vh - 12) y = Math.max(12, vh - size.h - 12);
 
+  // doc/canvas 的旧跳转形（单一真源，勿改形）；table 的目标在数据表侧。
+  const docTarget = ref_.kind === "canvas" ? `/kb/${kbId}/canvas/${ref_.docId}` : `/kb/${kbId}/doc/${ref_.docId}`;
+  const navTarget = ref_.kind === "table" ? gxRefNavTarget(ref_, kbId) : kbId ? docTarget : null;
+
   function jump() {
-    if (!kbId) return;
-    navigate(
-      ref_.kind === "canvas" ? `/kb/${kbId}/canvas/${ref_.docId}` : `/kb/${kbId}/doc/${ref_.docId}`,
-    );
+    if (navTarget) navigate(navTarget);
   }
 
   return (
@@ -137,7 +139,7 @@ export function DocRefCard({
       containerClassName="gx-z-canvas-card absolute flex flex-col overflow-hidden rounded-gx-lg border border-gx-separator bg-gx-surface shadow-2xl"
       containerStyle={{ left: x, top: y, width: size.w, height: size.h }}
       onContainerPointerDown={(e) => e.stopPropagation()}
-      jumpEnabled={!!kbId}
+      jumpEnabled={!!navTarget}
       onJump={jump}
       onClose={onClose}
       trailingNode={
