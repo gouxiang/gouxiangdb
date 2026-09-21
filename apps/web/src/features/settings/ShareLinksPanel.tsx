@@ -8,8 +8,10 @@
 // 三条纪律：
 //   1) 生成受「允许分享」开关控制：开关没开就不给生成按钮（不是给个灰按钮），并写明原因，
 //      否则管理员会一直找那个点不动的按钮。开关本体在同页的 LibraryAccessPanel 里。
-//   2) 外发一律只读：后端 public.ts 已关掉匿名写，链接点进来的人只能看。界面不提供
-//      「可编辑」档位（选了也不生效），并用文案说清这一点。
+//   2) 档位口径（2026-09 改版）：外发有只读 / 可编辑两档，可编辑只发给本人此刻就有编辑权的人，
+//      且分享人被降权后链接自动回落只读——这条由 SHARE_MODE_HINT 统一描述。
+//      **库级（整库）链接仍走旧口径只有只读一档**，两档选择器在数据表分享（ViewShell「更多」
+//      → 分享）与文档分享弹窗里，故这里生成的仍是 viewer 链接。
 //   3) fail-closed：分享设置没读回来 / 出错，一律按「不能生成」渲染。
 
 import { useState } from "react";
@@ -19,7 +21,7 @@ import { confirmAction } from "../../components/feedback";
 import { useGXMutations, useLibraryAccess, useShareLinks } from "../../api/hooks";
 import { withBase } from "../../api/client";
 import { COPY_FAIL_HINT_LINK, copyText } from "../../lib/clipboard";
-import { SHARE_READONLY_HINT } from "./role-permission/labels";
+import { SHARE_MODE_HINT } from "./role-permission/labels";
 
 function fmtTime(s: string): string {
   const d = new Date(s);
@@ -50,7 +52,7 @@ export function ShareLinksPanel({ baseId, canManageBase }: { baseId: string; can
   async function create() {
     setBusy(true);
     try {
-      // 外发恒只读：只生成 viewer 链接（后端已关匿名写，editor/commenter 档位没有意义）。
+      // 库级链接恒只读（旧口径，见文件头纪律 2）；可编辑档位在数据表 / 文档分享里。
       await m.createShareLink.mutateAsync({ baseId, role: "viewer" });
       toast("已生成分享链接", "success");
     } catch (e) {
@@ -83,7 +85,7 @@ export function ShareLinksPanel({ baseId, canManageBase }: { baseId: string; can
         <Icon name="share" size={20} className="mt-0.5 shrink-0 text-gx-accent" />
         <div className="min-w-0 flex-1">
           <div className="text-gx-14 font-medium text-gx-text-primary">分享链接</div>
-          <p className="mt-0.5 text-gx-12 text-gx-text-tertiary">{SHARE_READONLY_HINT}</p>
+          <p className="mt-0.5 text-gx-12 text-gx-text-tertiary">{SHARE_MODE_HINT}</p>
         </div>
         {canManageBase && loaded && shareEnabled && (
           <Button variant="primary" icon="plus" loading={busy} onClick={() => void create()}>

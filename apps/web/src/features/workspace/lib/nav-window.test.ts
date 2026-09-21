@@ -209,30 +209,39 @@ describe("buildSecondaryRows 三段合并单序列（SecondaryNav 单窗口输�
   });
 });
 
-describe("纯切片算术耗时（Node performance.now —— 非浏览器 P95，仅证 O(窗口) 量级）", () => {
-  // 方法说明：在 Node/vitest 下用 performance.now() 夹「摊平 + 窗口切片」纯函数。
-  // 这是 CPU 算术耗时，不含 React reconciliation / DOM commit / 样式重排，
-  // 因此严禁解读为浏览器交互 P95；浏览器侧数字以真机 Performance 面板为准（见 RC-46 手测项）。
+describe("切片工作量（确定性计数，不依赖真实时钟）", () => {
+  // 方法说明：不用 performance.now() 断言耗时——CI 抖动机上同一段算术能从 3ms 飘到 60ms+，
+  // 阈值断言必然偶发红（flaky），且红/绿都不说明任何性能事实。改为**数工作量**：
+  //   · flattenVisits = 摊平触达的菜单项数（O(total)，一次遍历，与窗口化无关）；
+  //   · sliceVisits   = 真正进入渲染列表的行数（= 窗口大小，与 total 无关 → O(窗口)）。
+  // 这两个数是算法属性，次数恒定，不受机器快慢/调度抖动影响。
   const measure = (n: number) => {
     const items: MenuItemDTO[] = [container("c")];
     for (let i = 0; i < n; i++) items.push(shortcut(`s${i}`, `n${i}`, "c", i));
-    const t0 = performance.now();
     const flat = flattenMenuRows(buildMenuTree(items), () => true);
     const win = virtualWindow(0, VIEWPORT_H, PRIMARY_ROW_H, flat.length, OVERSCAN);
-    const _sliced = flat.slice(win.start, win.end);
-    const t1 = performance.now();
-    return { total: flat.length, mounted: win.end - win.start, ms: t1 - t0 };
+    const sliced = flat.slice(win.start, win.end);
+    return {
+      total: flat.length,
+      flattenVisits: flat.length,
+      sliceVisits: sliced.length,
+      mounted: win.end - win.start,
+    };
   };
 
-  it("1000 与 10000 菜单：摊平+切片毫秒级完成，挂载行数恒定（数字仅 Node 算术口径）", () => {
+  it("1000 与 10000 菜单：挂载行数恒定，切片工作量与总量无关", () => {
     const r1k = measure(1000);
     const r10k = measure(10000);
-    console.log("[nav-window] Node 纯算术（非浏览器 P95）", JSON.stringify({ r1k, r10k }));
+    console.log("[nav-window] 工作量计数（非耗时）", JSON.stringify({ r1k, r10k }));
     expect(r1k.total).toBe(1001);
     expect(r10k.total).toBe(10001);
     expect(r1k.mounted).toBe(r10k.mounted); // 总量 ×10，挂载行数不变
-    // 宽松上界：万级摊平+切片纯算术在 CI 抖动机上也应远小于一帧；此阈值不用于性能宣称
-    expect(r10k.ms).toBeLessThan(50);
+    // 切片只走窗口：万级与千级触达的行数完全相同（O(窗口)，不是 O(总量)）
+    expect(r10k.sliceVisits).toBe(r1k.sliceVisits);
+    expect(r10k.sliceVisits).toBeLessThanOrEqual(48);
+    // 摊平仍是 O(总量) 的一次遍历（窗口化没有把它变成全量渲染，但也没让它免费）
+    expect(r10k.flattenVisits).toBe(r10k.total);
+    expect(r10k.flattenVisits).toBeGreaterThan(r10k.sliceVisits);
   });
 });
 

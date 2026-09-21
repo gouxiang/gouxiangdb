@@ -66,6 +66,19 @@ import type {
   InheritanceChangeResultDTO,
   NodeBreadcrumbDTO,
 } from "@gx/shared-types";
+// 分享链接两档（只读 / 可编辑）+ 可关联对象。契约真源 packages/shared-types/src/share.ts，
+// 端点真源 apps/api/src/routes/tableShares.ts 与 apps/api/src/routes/linkable.ts。
+// 前端一律以 effectiveMode 为准渲染：mode 只是「创建时申请的档位」，分享人被降权后
+// effectiveMode 会回落 view（degraded=true），此时链接实际上就是只读。
+import type {
+  ObjectShareLinkDTO,
+  ShareMode,
+  LinkableType,
+  LinkableItem,
+  LinkableResponse,
+  /** 文档/画布中嵌入的数据表预览响应形状（GET /api/public/s/:token/embed/:tableId） */
+  EmbeddedTablePayload,
+} from "@gx/shared-types";
 import { resolveApiBase, withBase as joinBase } from "../lib/base";
 import { saveSessionFrom } from "../lib/session-from";
 import { authHeaders } from "./authHeader";
@@ -121,6 +134,9 @@ export type {
   ShareLinkDTO,
   Role,
   PermissionSet,
+  // 分享链接两档 + 可关联对象（packages/shared-types/src/share.ts）已在上方 import type 块
+  // 引入成本地绑定，并由文件末尾的 export type 统一重导出——此处不再重复列名，
+  // 否则同一模块内「import type X + export type { X } from」会触发 TS2300 Duplicate identifier。
   FieldType,
   CSVImportResult,
   TrashItemDTO,
@@ -144,7 +160,13 @@ import type {
 export class ApiError extends Error {
   constructor(
     public status: number,
-    public body: { error?: string; message?: string; details?: unknown },
+    /**
+     * 后端统一错误体（apps/api/src/guards.ts errorResponse）：
+     *   { error: string; code: string }，500 在 dev 下额外带 message。
+     * code 是稳定的机器可读枚举（BAD_REQUEST / NOT_FOUND / FORBIDDEN / INTERNAL …），
+     * 调用方要按 code 分支而不是按 error 文案分支——文案会变，code 不会。
+     */
+    public body: { error?: string; code?: string; message?: string; details?: unknown },
     /** 429 时后端给的 Retry-After 秒数（缺省 undefined）；M6 PAT 等敏感端点据此提示退避。 */
     public retryAfter?: number,
   ) {
@@ -458,6 +480,49 @@ export const Tables = {
   },
 };
 
+// ============ 数据表分享链接（挂载在 /api/tables 下） ============
+//
+//   GET    /api/tables/:tableId/share          本表当前全部分享链接（档位现算）
+//   POST   /api/tables/:tableId/share          建链接 { mode: "view"|"edit", viewId?, expiresAt? }
+//   DELETE /api/tables/:tableId/share/:linkId  吊销
+//
+// 两道前置门与「可编辑」的硬约束都在后端（routes/tableShares.ts），前端置灰只是提示：
+// 后端拒绝时 body 形如 { error: "<可读文案>", code }，调用方要把 error 原样呈现
+// （见 shareErrorMessage，不要换成自己的措辞，也不要用 ApiError.message——它带 "API 403: " 前缀）。
+export const TableShares = {
+  list: (tableId: string) =>
+    apiFetch<{ links: ObjectShareLinkDTO[] }>(`/api/tables/${tableId}/share`),
+  create: (
+    tableId: string,
+    data: { mode: ShareMode; viewId?: string; expiresAt?: string },
+  ) =>
+    apiFetch<{ link: ObjectShareLinkDTO }>(`/api/tables/${tableId}/share`, {
+      method: "POST",
+      body: JSON.stringify(data),
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
+  remove: (tableId: string, linkId: string) =>
+    apiFetch<{ ok: true }>(`/api/tables/${tableId}/share/${linkId}`, {
+      method: "DELETE",
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
+};
+
+// ============ 可关联对象（关联插入选择器） ============
+//
+// GET /api/linkable?q=&types=&limit= —— 后端已按 libraryPolicy 过滤，响应里不会出现任何
+// 不可见对象的 id 或标题；truncated=true 表示还有更多（前端据此展示「还有更多」）。
+export const LinkableApi = {
+  search: (params: { q?: string; types?: readonly LinkableType[]; limit?: number } = {}) =>
+    apiFetch<LinkableResponse>(
+      `/api/linkable${qs({
+        q: params.q,
+        types: params.types?.length ? params.types.join(",") : undefined,
+        limit: params.limit,
+      })}`,
+    ),
+};
+
 // ============ Fields ============
 
 export const Fields = {
@@ -712,6 +777,18 @@ export interface KbShareStateDTO {
   shareRole: "viewer" | "editor";
   shareIncludeChildren: boolean;
   shareUrl?: string | null;
+  /** 所在知识库的「允许分享」开关（GET 才回；POST 响应不带）。 */
+  shareAllowed?: boolean;
+  /**
+   * 本次访问实际生效的档位（GET 才回，后端 resolveDocShareCaps 现算）。
+   * 文档正文的匿名写仍关闭（publicDoc.ts 恒 canEdit:false），这个档位驱动的是
+   * 「文档中嵌入的数据表预览能不能写」。分享人被降权时 mode 回落 view 且 degraded=true。
+   */
+  mode?: ShareMode;
+  /** 创建时申请的档位（mode=edit 而 effective=view 时才看得出差别）。 */
+  requestedMode?: ShareMode;
+  /** requestedMode=edit 但分享人已失去编辑权 → 链接自动降级为只读。 */
+  degraded?: boolean;
 }
 
 export interface KbPublicDocDTO {
@@ -854,12 +931,22 @@ async function publicFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const PublicApi = {
-  /** 分享根：内容 + 级联子树摘要 */
+  /**
+   * 分享根：内容 + 级联子树摘要。
+   * canEdit 恒 false（正文匿名写已下线）；真实档位看 mode / degraded ——
+   * 文档里嵌入的数据表预览按 mode 决定只读还是可编辑。
+   */
   getShare: (token: string) =>
     publicFetch<{
       rootToken: string;
       shareRole: "viewer" | "editor";
       canEdit: boolean;
+      /** 分享链接申请档位 */
+      requestedMode: ShareMode;
+      /** 本次访问实际生效档位（分享人被降权时回落 view）。前端一律以它为准。 */
+      mode: ShareMode;
+      /** mode=edit 但实际只读 —— 分享人已失去编辑权，链接自动降级。 */
+      degraded: boolean;
       includeChildren: boolean;
       doc: KbPublicDocDTO;
       tree: KbTreeItemDTO[];
@@ -874,9 +961,52 @@ export const PublicApi = {
     publicFetch<{ doc: KbPublicDocDTO; canEdit: boolean; shareRole: "viewer" | "editor" }>(
       `/api/public/s/${token}/ref/${docId}`,
     ),
-  // 匿名写已整体关闭：后端 public.ts 不再提供任何写端点（读接口的 canEdit 因此恒 false），
+
+  // ---- 文档/画布中【嵌入的数据表预览】的分享态通道 ----
+  // 档位由宿主文档/画布的分享档位决定（canEdit/mode 由服务端按宿主档位算好），
+  // 与该数据表自身的分享开关无关。没有宿主 token 就没有这条通道。
+  getEmbed: (token: string, tableId: string, opts?: { viewId?: string | null; limit?: number; offset?: number }) =>
+    publicFetch<EmbeddedTablePayload>(
+      `/api/public/s/${token}/embed/${tableId}${qs({
+        viewId: opts?.viewId ?? undefined,
+        limit: opts?.limit,
+        offset: opts?.offset,
+      })}`,
+    ),
+  createEmbedRecord: (token: string, tableId: string, fields: Record<string, unknown>) =>
+    publicFetch<{ record: { id: string }; canEdit: boolean; mode: ShareMode }>(
+      `/api/public/s/${token}/embed/${tableId}/records`,
+      { method: "POST", body: JSON.stringify({ fields }) },
+    ),
+  updateEmbedRecord: (token: string, tableId: string, recordId: string, fields: Record<string, unknown>) =>
+    publicFetch<{ ok: true; canEdit: boolean; mode: ShareMode }>(
+      `/api/public/s/${token}/embed/${tableId}/records/${recordId}`,
+      { method: "PATCH", body: JSON.stringify({ fields }) },
+    ),
+  deleteEmbedRecord: (token: string, tableId: string, recordId: string) =>
+    publicFetch<{ ok: true; canEdit: boolean; mode: ShareMode }>(
+      `/api/public/s/${token}/embed/${tableId}/records/${recordId}`,
+      { method: "DELETE" },
+    ),
+  // 匿名写已整体关闭：后端 public.ts 不再提供任何文档写端点（读接口的 canEdit 因此恒 false），
   // 这里也不再保留 saveContent——留着就是「能打开编辑器但保存必失败」。
 };
+
+// ============ 可关联对象 / 嵌入数据表预览：重导出 ============
+// 类型名在上方 import type 块已引入本地绑定（LinkableApi / PublicApi.getEmbed 直接用），
+// 这里做本地重导出供消费点 import（features/kb/canvas/linkable-hooks.ts 等）。
+export type {
+  ObjectShareLinkDTO,
+  ShareMode,
+  LinkableType,
+  LinkableItem,
+  LinkableResponse,
+  EmbeddedTablePayload,
+};
+
+// 若干单测/调试入口按既有约定从这里取 toast 快照（真实实现住在 components/ui）。
+// 组件层不反向依赖本模块，因此这条重导出不构成循环依赖。
+export { toastSnapshot } from "../components/ui";
 
 // ============ M2 组织通讯录 /api/v1/org/*（冻结契约，只消费后端） ============
 //

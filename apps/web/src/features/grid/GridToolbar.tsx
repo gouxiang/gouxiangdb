@@ -35,6 +35,11 @@ export interface GridToolbarProps {
   onExport: () => void;
   onCopyView: () => void;
   onClearTable: () => void;
+  /**
+   * 分享：打开数据表分享弹窗（外壳持有弹窗，六类视图共用同一份）。
+   * 可选——老调用点（单测里的裸工具栏）不传就不渲染这一项。
+   */
+  onShare?: () => void;
 }
 
 export function GridToolbar({
@@ -48,6 +53,7 @@ export function GridToolbar({
   onExport,
   onCopyView,
   onClearTable,
+  onShare,
 }: GridToolbarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   // R-I-03：搜索输入防抖 300ms（此前是各列表各写一份 setTimeout，口径统一到 hook）
@@ -116,6 +122,11 @@ export function GridToolbar({
           {moreOpen && (
             <Popover open onClose={closeMore} align="right" width={180}>
               <Menu width={180}>
+                {/* 分享放在表级操作首位：它是本表唯一的外发入口（旧的「分享数据」规划占位已下线）。
+                    读派生，不做权限门控——没开分享时后端 403 的原文会由弹窗直接说明原因。 */}
+                {onShare ? (
+                  <MenuItem icon="share" label="分享" onClick={() => { onShare(); closeMore(); }} />
+                ) : null}
                 <MenuItem icon="copy" label="复制视图" onClick={() => { onCopyView(); closeMore(); }} />
                 {/* 权限口径（WALK-权限组合-2026-09-20 · PERM-02）：破坏性入口无权限时**不渲染**。
                     后端真值：`POST /tables/:tableId/clear`（apps/api/src/routes/tables.ts:441）

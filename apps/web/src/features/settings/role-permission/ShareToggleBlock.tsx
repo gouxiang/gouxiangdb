@@ -14,7 +14,7 @@ import { useState } from "react";
 import { Icon } from "../../../components/icons";
 import { Select, Spinner, Switch, toast } from "../../../components/ui";
 import { useRoleScopesShareEnabled, useRoleScopesVisibility } from "../../../api/hooks";
-import { HARD_RULES, LIBRARY_KIND_LABEL, SHARE_READONLY_HINT } from "./labels";
+import { HARD_RULES, LIBRARY_KIND_LABEL, SHARE_MODE_HINT } from "./labels";
 import { parseScopeKey, useMyRoleRefs } from "./role-permission-hooks";
 import type { LibraryRow } from "./library-scope-draft";
 
@@ -86,7 +86,7 @@ export function ShareToggleBlock({ rows }: { rows: LibraryRow[] }) {
             onChange={(v) => void flip(v)}
             label={<span className="text-gx-13">允许把这个库的内容分享出去</span>}
           />
-          <p className="text-gx-11 text-gx-text-hint">{SHARE_READONLY_HINT}</p>
+          <p className="text-gx-11 text-gx-text-hint">{SHARE_MODE_HINT}</p>
         </div>
       ) : (
         <div className="flex items-start gap-1.5 text-gx-11 text-gx-text-tertiary">

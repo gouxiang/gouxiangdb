@@ -64,11 +64,16 @@ describe("阶段3 · 确认弹窗主按钮用具体动词（R-D-24）", () => {
     // 清空表：后端是软删进回收站（tables.ts:458 updateMany deletedAt；records.ts:214 /trash
     // 按 deletedAt 收 record），属**可恢复**破坏性操作 → 必须复用共享的 confirmClearTable（L3），
     // 不得再用 L4 的 confirmIrreversible，也不得保留「不进回收站 / 不可撤销」的错误口径。
-    const grid = read("../features/grid/GridView.tsx");
-    expect(grid).toContain("confirmClearTable({");
-    expect(grid).not.toContain("confirmIrreversible({");
-    expect(grid).not.toContain("不进回收站、不可撤销。");
-    expect(grid).not.toContain("确定清空表中所有记录？此操作不可撤销。");
+    //
+    // 断言对象 2026-09-21 起改为 ViewShell.tsx：工具栏上提成统一外壳时，「清空表」随表级
+    // 「更多」菜单一起迁出 GridView（六类视图共用同一份），语义一字未变。
+    const shell = read("../features/views/ViewShell.tsx");
+    expect(shell).toContain("confirmClearTable({");
+    expect(shell).not.toContain("confirmIrreversible({");
+    expect(shell).not.toContain("不进回收站、不可撤销。");
+    expect(shell).not.toContain("确定清空表中所有记录？此操作不可撤销。");
+    // 迁出后 GridView 不再自带一份：同一动作不允许出现两套文案 / 两个确认口径。
+    expect(read("../features/grid/GridView.tsx")).not.toContain("confirmClearTable(");
 
     const trash = read("../features/settings/TrashPage.tsx");
     expect(trash).toContain('confirmText: "彻底删除"');
@@ -90,9 +95,10 @@ describe("阶段3 · 文案不得与后端恢复能力相悖", () => {
   it("清空表：走共享 L3 助手，并如实提示记录已进回收站", () => {
     // 后端软删 → 可从回收站恢复 → 调用点复用 L3 的 confirmClearTable，
     // 且操作完成后的 toast 必须如实说明记录的去向。
-    const grid = read("../features/grid/GridView.tsx");
-    expect(grid).toContain("confirmClearTable({");
-    expect(grid).toContain("记录已移入回收站");
+    // （清空表入口在 ViewShell，断言随之上提，理由见上一组。）
+    const shell = read("../features/views/ViewShell.tsx");
+    expect(shell).toContain("confirmClearTable({");
+    expect(shell).toContain("记录已移入回收站");
   });
 
   it("删库：如实说明无法从回收站恢复，且走 L4 不可恢复确认", () => {

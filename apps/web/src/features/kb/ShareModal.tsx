@@ -8,6 +8,8 @@ import { Icon } from "../../components/icons";
 import { useShareState, useSetShare, useSetInternalShare } from "./kb-hooks";
 import { withBase } from "../../api/client";
 import { COPY_FAIL_HINT_LINK, copyText } from "../../lib/clipboard";
+import { ShareDegradedNote, ShareModeField } from "../sharing/ShareModeField";
+import { shareErrorMessage } from "../sharing/share-hooks";
 
 export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId: string; kbId: string; kind?: "doc" | "canvas"; open: boolean; onClose: () => void }) {
   const { data, isLoading } = useShareState(open ? docId : undefined);
@@ -36,6 +38,15 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
   const canManage = share?.canManage ?? true;
   // 子路径部署（/app/gouxiangdb）下公开分享链接必须带网关前缀。
   const fullUrl = share?.shareToken ? `${window.location.origin}${withBase(`/s/${share.shareToken}`)}` : "";
+
+  // 降级：申请了「可编辑」但分享人后来失去了编辑权 → 后端每次访问现算，链接已回落只读
+  // （resolveDocShareCaps）。这里只显示结论，不重算权限。
+  const degraded = share?.degraded === true;
+  // 「可编辑」能不能开：后端 GET 只给「本次生效档位 + 是否已降级」两个结论，没有单发一个
+  // 「本人此刻能否授予编辑」的位。唯一能确定的是：申请过 edit 且已降级 → 本人没有编辑权，
+  // 必须置灰。其余情形不假装判准——后端 POST 会再判一次（assertSharerCanGrantDocEdit），
+  // 403 的原文由 updateLinkRole 原样 toast 出来。
+  const canGrantEdit = !(share?.requestedMode === "edit" && degraded);
 
   async function copyLink() {
     if (!fullUrl) return;
@@ -72,7 +83,9 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
     try {
       await setShare.mutateAsync({ shareEnabled: true, shareRole: role, shareIncludeChildren: includeChildren });
     } catch (e) {
-      toast(e instanceof Error ? e.message : "操作失败", "error");
+      // 本人没编辑权时后端 403 的原文（「只有本人对该知识库内容有编辑权时才能创建可编辑分享」）
+      // 就是给用户的答案：置灰只是提示，后端才是防线，不要换成前端自己的措辞。
+      toast(shareErrorMessage(e, "操作失败"), "error");
     }
   }
 
@@ -160,20 +173,22 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
 
                 <div>
                   <div className="mb-1.5 text-gx-12 text-gx-text-secondary">持链者权限</div>
-                  {/* 匿名写已关闭：后端 public.ts 不再提供任何写端点，读接口 canEdit 恒 false。
-                      旧的「可编辑」档位还在库里存着但不再生效，继续展示＝一个选了也没用的开关。 */}
-                  <div className="rounded-gx-lg border border-gx-separator bg-gx-bg p-1">
-                    <RoleOption
-                      active={linkRole === "viewer"}
-                      title="仅可见"
-                      desc="获得链接的人无需登录即可查看，不能编辑"
-                      disabled={!canManage}
-                      onClick={() => updateLinkRole("viewer")}
-                    />
-                  </div>
-                  <p className="mt-1.5 text-gx-11 text-gx-text-hint">
-                    分享链接一律只读：外部人不能改内容，需要改请让对方登录后在知识库内编辑。
-                  </p>
+                  {/* 两档恢复到界面：可编辑要求分享人本人此刻有编辑权，且不是一锤子买卖——
+                      分享人之后被降权，链接每次访问重算并自动回落只读（后端 resolveDocShareCaps）。
+                      置灰不是防线，后端 POST 会再判一次并把 403 原文回给这里。 */}
+                  <ShareModeField
+                    value={linkRole === "editor" ? "edit" : "view"}
+                    onChange={(m) => updateLinkRole(m === "edit" ? "editor" : "viewer")}
+                    canGrantEdit={canGrantEdit}
+                    disabled={!canManage}
+                    disabledReason="你本人对这个知识库没有编辑权，因此不能创建可编辑的分享链接"
+                    viewDesc="获得链接的人无需登录即可查看，不能编辑"
+                    editDesc="持链者可写这篇文档里嵌入的数据表；正文仍不可改"
+                    // 作用范围必须写清楚：文档正文的匿名写后端仍关闭（publicDoc.ts canEdit 恒 false），
+                    // 这个档位驱动的是「文档/画布里嵌入的数据表预览能不能写」，不是正文。
+                    scopeNote="说明：文档正文的匿名编辑仍然关闭，「可编辑」档位决定的是这篇文档 / 画布里嵌入的数据表能不能改。"
+                  />
+                  {degraded ? <ShareDegradedNote /> : null}
                 </div>
 
                 {kind === "doc" && (

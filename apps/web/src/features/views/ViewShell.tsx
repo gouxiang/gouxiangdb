@@ -28,6 +28,7 @@ import { EntityIconPicker } from "../../components/EntityIconPicker";
 import { ViewSwitcher } from "../grid/ViewSwitcher";
 import { GridToolbar } from "../grid/GridToolbar";
 import { TableViewIoDialogs } from "../grid/GridView";
+import { TableShareModal } from "../sharing/TableShareModal";
 
 export interface ViewShellArgs {
   /** 视图配置（外壳持有并写回服务端；第二行的搜索框写 config.search） */
@@ -60,6 +61,8 @@ export function ViewShell({
   const newRecordGuard = useWriteGuard();
   const [importOpen, setImportOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  // 分享弹窗由外壳持有：六类视图的「更多」菜单都指向同一份，不需要每类视图各挂一个。
+  const [shareOpen, setShareOpen] = useState(false);
 
   const currentTable = (tablesData ?? []).find((t) => t.id === tableId) ?? null;
 
@@ -151,6 +154,7 @@ export function ViewShell({
         onExport={() => setExportOpen(true)}
         onCopyView={onCopyView}
         onClearTable={onClearTable}
+        onShare={() => setShareOpen(true)}
       />
 
       {/* 视图内容：第三行起（网格自己再渲染一行设置项，其余视图直接进内容区） */}
@@ -167,6 +171,16 @@ export function ViewShell({
         exportOpen={exportOpen}
         onCloseImport={() => setImportOpen(false)}
         onCloseExport={() => setExportOpen(false)}
+      />
+
+      {/* 数据表分享：档位两档（只读 / 可编辑），可编辑要求分享人本人此刻有编辑权，
+          且分享人之后被降权时链接会自动回落只读——判定全在后端，这里只渲染 + 置灰。 */}
+      <TableShareModal
+        tableId={tableId}
+        viewId={viewId}
+        canEditSelf={permissions.canEditData}
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
       />
     </div>
   );
