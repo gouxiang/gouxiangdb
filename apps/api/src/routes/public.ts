@@ -20,12 +20,14 @@ import { readSharedTable, sharePage } from "../domain/share/externalRecords.js";
 import { docShareResponse } from "./publicDoc.js";
 import { publicDocRoutes } from "./publicDoc.js";
 import { publicTableRoutes } from "./publicTable.js";
+import { publicEmbedRoutes } from "./publicEmbed.js";
 
 export const pub = new Hono();
 
 // 注册顺序：挂载的子路由先匹配（它们的路径都比 /s/:token 更长，不会互相遮蔽）。
 pub.route("/", publicDocRoutes);
 pub.route("/", publicTableRoutes);
+pub.route("/", publicEmbedRoutes);
 
 // 历史导出面保持不动：routes/__tests__/public.test.ts 从本文件取这两个纯函数。
 export { collectRefDocIds, buildShareReferenceClosure } from "./publicDoc.js";

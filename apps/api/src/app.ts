@@ -23,6 +23,7 @@ import { fields } from "./routes/fields.js";
 import { records } from "./routes/records.js";
 import { views } from "./routes/views.js";
 import { tableShares } from "./routes/tableShares.js";
+import { linkable } from "./routes/linkable.js";
 import { kb } from "./routes/kb/index.js";
 import { pub } from "./routes/public.js";
 import { search } from "./routes/search.js";
@@ -147,6 +148,8 @@ function createMount(webRoot: string | null): Hono {
   api.route("/views", views);
   // 数据表分享链接（同一 /api/tables 前缀，单独成文件避免 tables.ts 超长）
   api.route("/tables", tableShares);
+  // 关联插入选择器（后端按 libraryPolicy 过滤可见对象）
+  api.route("/linkable", linkable);
   api.route("/kb", kb);
   api.route("/public", pub);
   api.route("/search", search);

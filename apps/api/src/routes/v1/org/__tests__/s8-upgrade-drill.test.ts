@@ -7,7 +7,7 @@
 //   - 组织/nav/manage_menu/authz 回填/scope creator 索引/manage_share 八迁移落表 applied；存量 users 全 ACTIVE/ws_default/tv0；
 //   - 超级管理员自举恰好一行（createdAt 最早者，createdBy=system-bootstrap）；
 //   - ws_default/七系统角色就位（超级管理员持全部组织动作）；存量 members/kb 行无损；
-//   - 再跑一次 deploy 幂等：29 行 applied、无新增超级管理员。
+//   - 再跑一次 deploy 幂等：30 行 applied、无新增超级管理员。
 // 注：迁移总数 12 -> 14（M2 组织）-> 16（M3 nav）-> 17（M3-S6 manage_menu）
 //     -> 18（M4-S2 authz_policies_backfill）-> 19（M4-S4 createdBy 四索引）
 //     -> 20（M4-S5 owner manage_share 补位）-> 21/22（M5-S1 outbox DDL/活实体播种）
@@ -53,7 +53,7 @@ beforeAll(() => {
   fs.mkdirSync(path.join(tmpRoot, "migrations"));
   fs.copyFileSync(path.resolve("prisma/schema.prisma"), path.join(tmpRoot, "schema.prisma"));
   const dirs = migDirs();
-  expect(dirs.length).toBe(29); // M6 起 22 -> 23（PAT/mcp_idempotency 两表），首次部署管理员初始化 +1，实体 icon/iconColor DDL +1，owner create_library 补位 +1，通讯录五件套 +1，权限核心模型角色升级 +1，角色×库视野表 +1
+  expect(dirs.length).toBe(30); // M6 起 22 -> 23（PAT/mcp_idempotency 两表），首次部署管理员初始化 +1，实体 icon/iconColor DDL +1，owner create_library 补位 +1，通讯录五件套 +1，权限核心模型角色升级 +1，角色×库视野表 +1，分享链接对象化 +1
   for (const name of dirs.slice(0, PRE_ORG_COUNT)) {
     fs.cpSync(path.resolve("prisma/migrations", name), path.join(tmpRoot, "migrations", name), { recursive: true });
   }
@@ -90,7 +90,7 @@ afterAll(() => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-describe("旧库（前 12 迁移）升级到 29 迁移", () => {
+describe("旧库（前 12 迁移）升级到 30 迁移", () => {
   it("组织/nav/manage_menu/authz 回填/scope 索引/manage_share/outbox DDL+播种 十迁移 applied，存量用户回填 ACTIVE/ws_default/tv0，owner 自举恰好一行", () => {
     // 真实 schema（26 迁移）对旧库 deploy：补两条组织 + 两条 nav + manage_menu + authz 回填 + scope 索引 + manage_share + M5-S1 outbox DDL/播种 + 实体 icon DDL + owner create_library。
     expect(() => deploy(path.resolve("prisma/schema.prisma"))).not.toThrow();
@@ -99,7 +99,7 @@ describe("旧库（前 12 迁移）升级到 29 迁移", () => {
     const applied = db.prepare(
       "SELECT migration_name FROM _prisma_migrations WHERE rolled_back_at IS NULL ORDER BY finished_at",
     ).all() as Array<{ migration_name: string }>;
-    expect(applied).toHaveLength(29);
+    expect(applied).toHaveLength(30);
     expect(applied.map((r) => r.migration_name)).toContain("20260915090000_enterprise_org_ddl");
     expect(applied.map((r) => r.migration_name)).toContain("20260915090100_enterprise_org_backfill");
     expect(applied.map((r) => r.migration_name)).toContain("20260916100000_owner_manage_menu");
@@ -154,10 +154,10 @@ describe("旧库（前 12 迁移）升级到 29 迁移", () => {
     expect((db.prepare("SELECT count(*) n FROM kb_members").get() as { n: number }).n).toBe(1);
   });
 
-  it("再 deploy 一次幂等：仍 29 applied，owner 六动作串不变且只一行，legacy 投影不重复增长", async () => {
+  it("再 deploy 一次幂等：仍 30 applied，owner 六动作串不变且只一行，legacy 投影不重复增长", async () => {
     expect(() => deploy(path.resolve("prisma/schema.prisma"))).not.toThrow();
     const n = (db.prepare("SELECT count(*) n FROM _prisma_migrations").get() as { n: number }).n;
-    expect(n).toBe(29);
+    expect(n).toBe(30);
     // 权限核心模型迁移幂等：超级管理员仍恰为全动作串，连跑不被改写/不重复追加。
     const ownerPerms = db.prepare("SELECT permissions FROM roles WHERE id='role_owner'").get() as { permissions: string };
     expect(ownerPerms.permissions).toBe(
