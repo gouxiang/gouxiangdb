@@ -1,7 +1,7 @@
 // apps/web/src/features/settings/role-permission/DirectoryPermGrid.tsx
-// 权限管理 · 下半 (A)：通讯录权限——十二枚动作勾选 + 两条「勾不出来」的硬规则。
+// 权限管理 · 下半 (A)：通讯录权限——十三枚动作勾选 + 两条「勾不出来」的硬规则。
 //
-// 十二枚动作的清单与顺序取自后端真源 ORG_DIRECTORY_ACTIONS，前端不自己排一遍：
+// 十三枚动作的清单与顺序取自后端真源 ORG_DIRECTORY_ACTIONS，前端不自己排一遍：
 // 「面板能勾但后端不认」是权限面最贵的一类 bug，宁可少一个勾选项也不能多一个。
 
 import { useState } from "react";
@@ -25,13 +25,19 @@ export function DirectoryPermGrid({
   const toggle = (a: OrgAction, on: boolean) =>
     setDraft((prev) => (on ? [...prev, a] : prev.filter((x) => x !== a)));
 
+  // 面板不渲染的动作（历史粗粒度位 create_library / manage_departments / manage_roles /
+  // manage_menu / manage_share）保存时必须原样带上：只提交勾选面板里的动作，会把它们悄悄摘掉
+  // ——例如预设「管理员」在这里点一次「保存通讯录权限」，就丢掉 create_library 与 manage_share。
+  // 按仓库一贯口径「一枚冗余位 >> 一次无声的能力收回」，一律保守保留。
+  const others = role.actions.filter((a) => !DIRECTORY_ACTIONS.includes(a));
+  const nextActions = [...others, ...draft];
   const dirty =
-    draft.length !== role.actions.length || draft.some((a) => !role.actions.includes(a));
+    nextActions.length !== role.actions.length || nextActions.some((a) => !role.actions.includes(a));
 
   async function save() {
     if (!canEdit || !dirty) return;
     try {
-      await updateRole.mutateAsync({ id: role.id, data: { actions: draft } });
+      await updateRole.mutateAsync({ id: role.id, data: { actions: nextActions } });
       toast("已保存这个角色的通讯录权限", "success");
     } catch (e) {
       toast(e instanceof Error ? e.message : "保存失败，请重试", "error");

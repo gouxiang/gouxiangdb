@@ -64,11 +64,16 @@ export const ORG_ACTIONS: readonly OrgAction[] = [
 ];
 
 /**
- * 通讯录（组织）勾选面板的可勾动词 —— 产品口径的十二枚。
- * 刻意不含 create_library（属"库权限"面板）与四枚历史粗粒度位
- * （manage_departments/manage_members/manage_roles/manage_menu/manage_share）：
- * 前三枚已被拆成上面的细粒度动词，拆细后不再新增授予它们；保留在 ORG_ACTIONS 里只是为了让
- * 历史 permissions 串不至于失效（一枚冗余位 >> 一次无声的能力收回）。
+ * 通讯录（组织）勾选面板的可勾动词 —— 产品口径的十三枚。
+ * 前十二枚是细分动词（view_directory … delete_departments）；末一枚 manage_members 是**唯一
+ * 被保留进面板的旧粗粒度位**：它至今是 POST /org/members/:id/departments「调整成员部门归属」
+ * 的后端门控（apps/api/src/routes/v1/org/members.ts），而十二枚细分动作里没有对应动词——
+ * 不放进面板，自定义角色就永远勾不出这个能力，只有超级管理员/管理员（持全量动作）用得了。
+ *
+ * 刻意仍不含 create_library（属"库权限"面板）与其余三枚历史粗粒度位
+ * （manage_departments/manage_roles/manage_menu/manage_share）：它们已被拆成上面的细粒度动词，
+ * 拆细后不再新增授予；保留在 ORG_ACTIONS 里只是为了让历史 permissions 串不至于失效
+ * （一枚冗余位 >> 一次无声的能力收回）。
  * 前端渲染勾选面板与后端录入校验共用这一个真源，避免"面板能勾但后端不认"。
  */
 export const ORG_DIRECTORY_ACTIONS: readonly OrgAction[] = [
@@ -84,6 +89,7 @@ export const ORG_DIRECTORY_ACTIONS: readonly OrgAction[] = [
   "create_departments",
   "edit_departments",
   "delete_departments",
+  "manage_members",
 ];
 
 /**

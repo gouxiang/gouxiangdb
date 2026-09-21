@@ -23,6 +23,7 @@ import { confirmIrreversible, confirmSoftDelete, confirmClearTable } from "../..
 import { toastDeleted } from "../../components/interaction";
 import { colors } from "@gx/design-tokens";
 import { LibraryAccessPanel } from "./MembersPanel";
+import { ShareLinksPanel } from "./ShareLinksPanel";
 
 type Tab = "overview" | "tables" | "danger";
 
@@ -314,6 +315,10 @@ export default function SettingsPage() {
               {/* 成员与权限的**编辑**面已收敛到「工作区设置 → 权限管理」（两处都能改＝口径分裂）。
                   这里只留一份只读台账：谁覆盖到本库、各多少人，外加库级「允许分享」开关。 */}
               {baseId && <LibraryAccessPanel kind="base" libraryId={baseId} />}
+
+              {/* 分享链接管理：生成 / 复制 / 关闭。受上面的「允许分享」开关控制，
+                  外发恒只读（后端已关匿名写）。此前这块界面被误删，库分享只剩开关、没有入口。 */}
+              {baseId && <ShareLinksPanel baseId={baseId} canManageBase={canManageBase} />}
             </div>
           )}
 

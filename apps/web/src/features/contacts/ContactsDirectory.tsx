@@ -27,8 +27,9 @@ export function ContactsDirectory({ className = "h-full" }: ContactsDirectoryPro
   // 企业化定位：通讯录入口由 view_directory 单独门控；写动作各自按细分动词投票，
   // 不再用「manage_departments / manage_roles / manage_members」三枚粗粒度位一把梭
   // （自定义角色只勾新十二枚时旧位为空，按旧位判会把这些人全部挡在门外）。
-  // 唯一保留的旧位是 manage_members：后端「改某人属于哪个部门」至今仍按它门控，
-  // 十二枚细分里没有对应动词（详见 DeptTree 同名注释）。
+  // manage_members 是唯一保留的旧位：后端「改某人属于哪个部门」至今仍按它门控，
+  // 它也已被加进权限面板（ORG_DIRECTORY_ACTIONS 末位），故自定义角色可勾得出来
+  // （详见 DeptTree 同名注释）。
   const canViewDirectory = actions.has("view_directory");
   const canCreateDepts = actions.has("create_departments");
   const canEditDepts = actions.has("edit_departments");

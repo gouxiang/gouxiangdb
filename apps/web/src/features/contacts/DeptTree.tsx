@@ -36,9 +36,10 @@ interface DeptTreeProps {
   canDeleteDepts?: boolean;
   /**
    * 组织动作 manage_members：部门菜单里的「添加已有成员」（写的是成员归属）。
-   * 十二枚细分动作里没有「改某人属于哪个部门」这一位——后端 POST /org/members/:id/departments
-   * 至今仍按 manage_members 门控，所以这枚旧位不能删，删了就是把一个还能用的能力藏起来。
-   * 它与 delete_users（删账号）是两件事，不要互相串门。
+   * 「改某人属于哪个部门」至今由后端 POST /org/members/:id/departments 按 manage_members 门控；
+   * 十三枚可勾动作里 manage_members 是唯一一枚旧粗粒度位，被保留进权限面板正是为了能让自定义
+   * 角色勾出这个能力（见 shared-types ORG_DIRECTORY_ACTIONS）。它与 delete_users（删账号）
+   * 是两件事，不要互相串门。
    */
   canAssignDepartments?: boolean;
 }

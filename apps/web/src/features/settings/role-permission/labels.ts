@@ -1,5 +1,5 @@
 // apps/web/src/features/settings/role-permission/labels.ts
-// 权限配置界面的中文文案真源：十二枚通讯录动作、字段三档、三条硬规则。
+// 权限配置界面的中文文案真源：十三枚通讯录动作、字段三档、三条硬规则。
 //
 // 单独成文件的原因：同一句话会同时出现在面板标题、勾选框 title、弹窗说明里，
 // 散在各组件里必然出现「改了一处忘了另一处」，而权限文案恰恰是最不能自相矛盾的地方。
@@ -11,8 +11,8 @@ import { ORG_DIRECTORY_ACTIONS } from "@gx/shared-types";
 export const DIRECTORY_ACTIONS: readonly OrgAction[] = ORG_DIRECTORY_ACTIONS;
 
 /**
- * 十二枚动作的大白话短标签（勾选框上那一行）。
- * 用 Partial 而非 Record<OrgAction,string>：这里只需要覆盖面板那十二枚，
+ * 十三枚动作的大白话短标签（勾选框上那一行）。
+ * 用 Partial 而非 Record<OrgAction,string>：这里只需要覆盖面板那十三枚，
  * 写成全集会让「后端新增一枚动作」变成一次无谓的编译失败，而面板本来就不显示它们。
  */
 const LABEL_MAP: Partial<Record<OrgAction, string>> = {
@@ -28,9 +28,11 @@ const LABEL_MAP: Partial<Record<OrgAction, string>> = {
   create_departments: "新建部门",
   edit_departments: "编辑部门",
   delete_departments: "删除部门",
+  // 唯一保留的旧粗粒度位：后端「改某人属于哪个部门」仍按它门控，面板必须能勾。
+  manage_members: "调整成员部门归属",
 };
 
-/** 十二枚动作的一句话解释（挂在 title 上，不占版面）。 */
+/** 十三枚动作的一句话解释（挂在 title 上，不占版面）。 */
 const HINT_MAP: Partial<Record<OrgAction, string>> = {
   view_directory: "能打开通讯录，看到组织里有哪些人、哪些部门。",
   invite_users: "发邀请链接，让新同事自己激活账号进来。",
@@ -44,6 +46,7 @@ const HINT_MAP: Partial<Record<OrgAction, string>> = {
   create_departments: "在通讯录里新建部门。",
   edit_departments: "改部门名称、调整部门归到谁下面。",
   delete_departments: "删除部门。",
+  manage_members: "把成员加进某个部门或从部门里移出（不改这个人属于哪个角色）。",
 };
 
 /** 取标签；未收录的动作回退成动作名本身——显示原始 key 也好过显示空白。 */
