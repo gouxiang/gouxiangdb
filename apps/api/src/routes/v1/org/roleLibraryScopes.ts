@@ -40,6 +40,26 @@ async function libraryNames(rows: Array<{ libraryKind: string; libraryId: string
   return out;
 }
 
+/**
+ * 库存在性校验：整体替换语义下，写进一行指向不存在库的视野 = 一条永远无人可见的脏授权，
+ * 还会在界面上显示成「（这个库你现在看不到）」，让人误以为是自己没权限。
+ * kind 与 id 必须成对匹配（base 的 id 配成 kb 正是这条校验要挡的形态）。
+ */
+async function assertLibrariesExist(items: readonly PutLibraryScopeInput[]): Promise<void> {
+  const baseIds = [...new Set(items.filter((i) => i.libraryKind === "base").map((i) => i.libraryId))];
+  const kbIds = [...new Set(items.filter((i) => i.libraryKind === "kb").map((i) => i.libraryId))];
+  const [bases, kbs] = await Promise.all([
+    baseIds.length ? prisma.base.findMany({ where: { id: { in: baseIds } }, select: { id: true } }) : [],
+    kbIds.length ? prisma.knowledgeBase.findMany({ where: { id: { in: kbIds } }, select: { id: true } }) : [],
+  ]);
+  const known = new Set<string>([
+    ...bases.map((b) => `base:${b.id}`),
+    ...kbs.map((k) => `kb:${k.id}`),
+  ]);
+  const missing = [...new Set(items.map((i) => `${i.libraryKind}:${i.libraryId}`).filter((k) => !known.has(k)))];
+  if (missing.length) throw new HttpError(400, `库不存在：${missing.join("、")}`);
+}
+
 libraryScopeRoutes.get("/library-scopes", requireOrgAction("edit_roles"), async (c) => {
   try {
     const roleId = c.req.query("roleId");
@@ -71,6 +91,7 @@ libraryScopeRoutes.put("/library-scopes", requireOrgAction("edit_roles"), async 
     // 去重：同一 (kind, libraryId) 以最后一条为准（与 PUT 整体替换的语义一致）。
     const byKey = new Map<string, PutLibraryScopeInput>();
     for (const w of wanted) byKey.set(`${w.libraryKind}:${w.libraryId}`, w);
+    await assertLibrariesExist([...byKey.values()]);
 
     const actorId = c.get("auth").userId;
     const saved = await withWriteTx("org.role.libraryScopes", async (tx) => {

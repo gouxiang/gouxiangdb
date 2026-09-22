@@ -26,14 +26,13 @@ import { colors } from "@gx/design-tokens";
 // 阶段 4：删除统一走 L2 确认 + 撤销 toast（R-D-23 / R-I-08 / R-D-22）
 import { confirmSoftDelete } from "../../components/feedback";
 import { toastDeleted } from "../../components/interaction";
-import { DocAclModal } from "./DocAclModal";
 
 type Filter = "all" | KbDocKind;
 
 export default function KbHomePage() {
   const { kbId } = useParams();
   const navigate = useNavigate();
-  const { data: kb } = useKb(kbId);
+  const { data: kb, isLoading: kbLoading } = useKb(kbId);
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
@@ -53,7 +52,6 @@ export default function KbHomePage() {
     menuClosedAtRef.current = Date.now();
     setMenuFor(null);
   };
-  const [aclFor, setAclFor] = useState<KbDocDTO | null>(null);
   // 文档/画布「图标与颜色」入口的下标：存 id 而非快照，改完 invalidation 回来即时跟着变
   const [iconFor, setIconFor] = useState<string | null>(null);
 
@@ -82,9 +80,10 @@ export default function KbHomePage() {
   }
 
   const canCreate = useMemo(() => {
-    const r = kb?.role ?? "owner";
+    // PERM-S2：加载中按 owner 兜底（防闪现禁用形态），失败态按 viewer 收敛（fail-closed）。
+    const r = kbLoading ? "owner" : (kb?.role ?? "viewer");
     return r === "owner" || r === "editor";
-  }, [kb?.role]);
+  }, [kb?.role, kbLoading]);
 
   function openRename(d: KbDocDTO) {
     setMenuFor(null);
@@ -213,37 +212,39 @@ export default function KbHomePage() {
                   {d.kind === "canvas" ? "画布" : "文档"} · 更新于 {formatTime(d.updatedAt)}
                 </span>
                 {d.myRole && d.myRole !== "owner" && <Badge variant="soft">{roleLabel(d.myRole)}</Badge>}
-                <span className="relative">
-                  <button
-                    type="button"
-                    // P3-a11y：KB 列表行尾纯图标菜单，按行类型给具体作用名
-                    aria-label={`${d.title || "未命名"} ${d.kind === "canvas" ? "画布操作菜单" : "文档操作菜单"}`}
-                    aria-haspopup="menu"
-                    aria-expanded={menuFor === d.id}
-                    title={d.kind === "canvas" ? "画布操作菜单" : "文档操作菜单"}
-                    ref={(el) => {
-                      rowMenuRefs.current[d.id] = el;
-                    }}
-                    onClick={() => {
-                      // 抑制「mousedown 关闭 → click 又打开」导致的点了关不掉
-                      if (Date.now() - menuClosedAtRef.current < 250) return;
-                      setMenuFor(menuFor === d.id ? null : d.id);
-                    }}
-                    className="rounded p-1 text-gx-text-tertiary hover:bg-gx-bg hover:text-gx-text-primary"
-                  >
-                    <Icon name="more" size={15} />
-                  </button>
-                  <Popover
-                    open={menuFor === d.id}
-                    onClose={closeRowMenu}
-                    align="right"
-                    width={190}
-                    fixed
-                    anchorEl={rowMenuRefs.current[d.id] ?? null}
-                  >
-                    <Menu width={190}>
-                      <MenuItem icon="edit" label="重命名" onClick={() => openRename(d)} />
-                      {canCreate && (
+                {/* PERM-S2：viewer 无任何行级动作（重命名/删除/独立权限都已被后端 403 拒绝），
+                    整个行菜单入口一并隐藏，避免「打开后是空菜单」 */}
+                {canCreate && (
+                  <span className="relative">
+                    <button
+                      type="button"
+                      // P3-a11y：KB 列表行尾纯图标菜单，按行类型给具体作用名
+                      aria-label={`${d.title || "未命名"} ${d.kind === "canvas" ? "画布操作菜单" : "文档操作菜单"}`}
+                      aria-haspopup="menu"
+                      aria-expanded={menuFor === d.id}
+                      title={d.kind === "canvas" ? "画布操作菜单" : "文档操作菜单"}
+                      ref={(el) => {
+                        rowMenuRefs.current[d.id] = el;
+                      }}
+                      onClick={() => {
+                        // 抑制「mousedown 关闭 → click 又打开」导致的点了关不掉
+                        if (Date.now() - menuClosedAtRef.current < 250) return;
+                        setMenuFor(menuFor === d.id ? null : d.id);
+                      }}
+                      className="rounded p-1 text-gx-text-tertiary hover:bg-gx-bg hover:text-gx-text-primary"
+                    >
+                      <Icon name="more" size={15} />
+                    </button>
+                    <Popover
+                      open={menuFor === d.id}
+                      onClose={closeRowMenu}
+                      align="right"
+                      width={190}
+                      fixed
+                      anchorEl={rowMenuRefs.current[d.id] ?? null}
+                    >
+                      <Menu width={190}>
+                        <MenuItem icon="edit" label="重命名" onClick={() => openRename(d)} />
                         <MenuItem
                           icon="palette"
                           label="图标与颜色"
@@ -252,13 +253,12 @@ export default function KbHomePage() {
                             setIconFor(d.id);
                           }}
                         />
-                      )}
-                      <MenuItem icon="lock" label="独立权限" onClick={() => { setMenuFor(null); setAclFor(d); }} />
-                      <MenuDivider />
-                      <MenuItem icon="trash" label="删除" danger onClick={() => { setMenuFor(null); void doDelete(d); }} />
-                    </Menu>
-                  </Popover>
-                </span>
+                        <MenuDivider />
+                        <MenuItem icon="trash" label="删除" danger onClick={() => { setMenuFor(null); void doDelete(d); }} />
+                      </Menu>
+                    </Popover>
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -317,9 +317,6 @@ export default function KbHomePage() {
           </div>
         )}
       </Modal>
-
-      {/* 独立权限 */}
-      {aclFor && <DocAclModal doc={aclFor} onClose={() => setAclFor(null)} />}
     </div>
   );
 }

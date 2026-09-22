@@ -16,6 +16,7 @@ import type { PermissionSet, TableAccess } from "@gx/shared-types";
 import { authzShadowActive } from "./configAuthz.js";
 import { runShadowCheck } from "./domain/authz/adapter.js";
 import type { LibraryAccessDTO } from "@gx/shared-types";
+import { HttpError, errorCodeForStatus } from "./httpError.js";
 import {
   resolveBaseAccess,
   resolveBaseAccessByRecord,
@@ -24,14 +25,9 @@ import {
   tableAccessOf,
 } from "./domain/authz/libraryPolicy.js";
 
-export class HttpError extends Error {
-  /** 可选机器可读错误码（不传时按状态码回落 BAD_REQUEST/CONFLICT 等）。 */
-  code?: string;
-  constructor(public status: number, message: string, code?: string) {
-    super(message);
-    if (code) this.code = code;
-  }
-}
+// 4xx 错误类与状态码映射在 httpError.ts（零依赖）：domain/** 也要抛 4xx，
+// 但 domain 不能 import 本文件（会拖入 Hono 的 Context）。这里转出保持既有调用点不变。
+export { HttpError };
 
 export async function requireUserId(c: Context): Promise<string> {
   const userId = await getUserId(c);
@@ -264,20 +260,6 @@ export async function baseAccessOfView(userId: string, viewId: string): Promise<
 }
 
 // ============ 统一错误出口 ============
-
-/** 状态码 → 机器可读错误码（仅增补字段，不改变 HTTP 状态码与中文 error 文案）。 */
-function errorCodeForStatus(status: number): string {
-  switch (status) {
-    case 400: return "BAD_REQUEST";
-    case 401: return "UNAUTHORIZED";
-    case 403: return "FORBIDDEN";
-    case 404: return "NOT_FOUND";
-    case 409: return "CONFLICT";
-    case 413: return "PAYLOAD_TOO_LARGE";
-    case 429: return "TOO_MANY_REQUESTS";
-    default: return `HTTP_${status}`;
-  }
-}
 
 /** 统一错误出口 */
 export function errorResponse(c: Context, e: unknown) {

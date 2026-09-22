@@ -17,6 +17,7 @@ import type {
   TableAccess,
 } from "@gx/shared-types";
 import { EMPTY_LIBRARY_SCOPE_CONFIG, EMPTY_TABLE_ACCESS } from "@gx/shared-types";
+import { HttpError } from "../../httpError.js";
 
 /** 坏 JSON 一律当作"没配"：宁可退回库级只读，也不要让整个请求 500。 */
 export function parseConfig(raw: string): LibraryScopeConfig {
@@ -40,7 +41,7 @@ export function parseScopeInput(input: {
   config?: unknown;
 }): PutLibraryScopeInput {
   const libraryId = typeof input.libraryId === "string" ? input.libraryId.trim() : "";
-  if (!libraryId) throw Object.assign(new Error("缺少 libraryId"), { status: 400 });
+  if (!libraryId) throw new HttpError(400, "缺少 libraryId");
   return {
     libraryKind: input.libraryKind === "kb" ? "kb" : "base",
     libraryId,

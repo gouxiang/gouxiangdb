@@ -86,7 +86,9 @@ export default function LoginPage() {
       else navigate(sessionFrom ?? "/");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "操作失败";
-      toast(msg, "error");
+      // 后端 401 的原文是英文（auth.ts「Invalid credentials」），直接透出会中英混排；
+      // 这里翻译成用户能读懂的提示，其余错误仍按原文展示。
+      toast(/Invalid credentials/i.test(msg) ? "邮箱或密码不正确" : msg, "error");
     } finally {
       setBusy(false);
     }

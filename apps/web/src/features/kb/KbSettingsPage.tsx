@@ -9,7 +9,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../../components/icons";
-import { Input, toast } from "../../components/ui";
+import { Input, Spinner, toast } from "../../components/ui";
+import { NoPermissionState } from "../../components/states";
 import { EntityIconPicker } from "../../components/EntityIconPicker";
 import { LibraryAccessPanel } from "../settings/MembersPanel";
 import { useKb, useUpdateKb } from "./kb-hooks";
@@ -17,12 +18,15 @@ import { useKb, useUpdateKb } from "./kb-hooks";
 export default function KbSettingsPage() {
   const { kbId } = useParams();
   const navigate = useNavigate();
-  const { data: kb } = useKb(kbId);
+  // PERM-S1：加载/失败态必须先落定，绝不能在 kb 未知时按 owner 渲染可编辑表单
+  // （原先 `kb?.role ?? "owner"` 是 fail-open：viewer 直输 URL 或库 403 时会看到一个
+  // 看似能改名的设置页，保存却是静默 no-op）。fail-closed：未知角色一律按 viewer。
+  const { data: kb, isLoading, isError } = useKb(kbId);
   const updateKb = useUpdateKb(kbId!);
 
   const [name, setName] = useState(kb?.name ?? "");
 
-  const myRole = kb?.role ?? "owner";
+  const myRole = kb?.role ?? "viewer";
   const isOwner = myRole === "owner";
 
   // 知识库加载 / 切库 / 他人改名后同步名称输入
@@ -38,6 +42,24 @@ export default function KbSettingsPage() {
     } catch (err) {
       toast(err instanceof Error ? err.message : "保存失败", "error");
     }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center bg-gx-bg">
+        <Spinner size={20} />
+      </div>
+    );
+  }
+  if (isError || !kb) {
+    return (
+      <div className="h-full bg-gx-bg">
+        <NoPermissionState
+          description="无法读取这个知识库的设置：你可能没有访问权限，或它已被删除。"
+          onBack={() => navigate("/kb")}
+        />
+      </div>
+    );
   }
 
   return (

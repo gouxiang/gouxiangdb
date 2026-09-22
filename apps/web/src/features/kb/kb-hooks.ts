@@ -144,12 +144,6 @@ export function useSetShare(docId: string, kbId: string) {
   });
 }
 
-export function useSetInternalShare(docId: string) {
-  return useMutation({
-    mutationFn: (role: "viewer" | "editor") => KbApi.setInternalShare(docId, role),
-  });
-}
-
 // ============ 公开分享（匿名） ============
 
 export function usePublicShare(token: string | undefined) {

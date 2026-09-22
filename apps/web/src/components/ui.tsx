@@ -362,16 +362,26 @@ export function Switch({
   checked,
   onChange,
   label,
+  disabled,
+  disabledReason,
+  title,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label?: ReactNode;
+  /** PERM-S3：无管理权时置灰并停发 onChange（浏览器不派发 disabled 控件的点击）。 */
+  disabled?: boolean;
+  disabledReason?: string;
+  title?: string;
 }) {
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={() => onChange(!checked)}
-      className="inline-flex items-center gap-2 text-gx-13 text-gx-text-primary"
+      title={title ?? (disabled ? disabledReason : undefined)}
+      aria-disabled={disabled || undefined}
+      className="inline-flex items-center gap-2 text-gx-13 text-gx-text-primary disabled:cursor-not-allowed disabled:opacity-50"
     >
       <span
         className={clsx(

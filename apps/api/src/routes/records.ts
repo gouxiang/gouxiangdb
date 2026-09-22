@@ -36,6 +36,13 @@ import {
   purgeTableNodeTx,
 } from "../domain/nav/sync.js";
 import { resolveTableMask } from "../domain/authz/maskGate.js";
+import { sanitizeViewConfigForMask } from "../domain/authz/fieldMask.js";
+// 字段权限读侧（库权限 config.fields 的 hidden 档）：与写侧的 fieldWriteGate 同一份裁决。
+import {
+  fieldScopeOf,
+  stripHiddenFromRecords,
+  stripHiddenKeys,
+} from "../domain/authz/fieldScope.js";
 
 export const records = new Hono();
 
@@ -65,7 +72,7 @@ records.get("/", async (c) => {
   const tableId = c.req.query("tableId");
   if (!tableId) return c.json({ error: "缺少 tableId" }, 400);
   const baseId = await baseIdOfTable(tableId);
-  const { userId } = await requireCanView(c, baseId);
+  const { userId, access } = await requireCanView(c, baseId);
 
   const viewId = c.req.query("viewId");
   const limit = Math.min(Number(c.req.query("limit") ?? 200) || 200, 1000);
@@ -77,17 +84,24 @@ records.get("/", async (c) => {
   const cursor = keysetOn ? (c.req.query("cursor") || null) : null;
 
   const fields = await loadTableFields(tableId);
+  // 字段权限读侧：被配成 hidden 的字段连定义都不进查询（定义缺席 → hydrate 不填键 → 记录里没有它）。
+  // 该表没配 hidden 时 scope.active=false，以下三处全部回落原值，响应逐字节不变。
+  const scope = fieldScopeOf(access, tableId, fields);
+  const scopeFields = scope.active ? scope.fields : fields;
   let config = parseViewConfig(null);
 
   if (viewId) {
     const v = await prisma.view.findUnique({ where: { id: viewId } });
     if (v && v.tableId === tableId) config = parseViewConfig(v.config);
   }
+  // 视图配置脱敏：分组/聚合/排序/筛选若引用被隐藏字段，会在响应里把它泄回来（分组键值）。
+  // 复用 M4/S6 的同一份脱敏实现，不另写一套。
+  if (scope.active) config = sanitizeViewConfigForMask(config, scope.visibleIds);
 
   // M4/S6 fieldMask 出口（on 态）：可见字段子集 + 脱敏 config + 注入跨表可见性 hydrate 依赖
   // + compile 掩码外字段兜底。off/shadow mask=null，以下四项全部回落原值，响应与 S0 字节一致。
-  const mask = await resolveTableMask(userId, tableId, fields);
-  const queryFields = mask ? mask.visibleFields : fields;
+  const mask = await resolveTableMask(userId, tableId, scopeFields);
+  const queryFields = mask ? mask.visibleFields : scopeFields;
   const queryConfig = mask ? mask.sanitizeConfig(config) : config;
 
   let result;
@@ -107,8 +121,9 @@ records.get("/", async (c) => {
 
   // additive：仅 keyset 生效路径带 nextCursor/hasMore/degraded；其余路径键集合与 S0 快照一致。
   // fields/allFields 用同一可见子集（掩码后无权字段不出现，前端字段选择器自然不可选）。
+  // 隐藏字段兜底再抹一次键：定义缺席本已不填，但公式/lookup 等计算列可能间接带出，成本是 O(列数)。
   const body: Record<string, unknown> = {
-    records: result.records,
+    records: stripHiddenFromRecords(result.records, scope.hiddenIds),
     total: result.total,
     filteredTotal: result.filteredTotal,
     fields: visibleFields(queryFields, queryConfig),
@@ -217,7 +232,7 @@ records.post("/", async (c) => {
 records.get("/trash", async (c) => {
   const baseId = c.req.query("baseId");
   if (!baseId) return c.json({ error: "缺少 baseId" }, 400);
-  await requireCanView(c, baseId);
+  const { access } = await requireCanView(c, baseId);
 
   const tables = await prisma.table.findMany({
     where: { baseId, deletedAt: null },
@@ -225,6 +240,13 @@ records.get("/trash", async (c) => {
   });
   const tableIds = tables.map((t) => t.id);
   const tableName = new Map(tables.map((t) => [t.id, t.name]));
+  // 字段权限读侧：回收站用「第一个非空值」当记录名，隐藏字段的值不能借这个标题漏出来。
+  // 每库表数有限，逐表取一次字段定义即可（该库一条 hidden 都没配时全部为空集，零行为变化）。
+  const hiddenByTable = new Map<string, ReadonlySet<string>>();
+  for (const t of tables) {
+    const scope = fieldScopeOf(access, t.id, await loadTableFields(t.id));
+    if (scope.active) hiddenByTable.set(t.id, scope.hiddenIds);
+  }
 
   const [deletedRecords, deletedTables, deletedFields] = await Promise.all([
     prisma.record.findMany({
@@ -266,7 +288,7 @@ records.get("/trash", async (c) => {
       ...deletedRecords.map((r) => ({
         kind: "record" as const,
         id: r.id,
-        name: recordTitle(r.fields),
+        name: recordTitle(r.fields, hiddenByTable.get(r.tableId)),
         deletedAt: r.deletedAt!.toISOString(),
         parentName: tableName.get(r.tableId) ?? "",
       })),
@@ -282,7 +304,7 @@ records.get("/search", async (c) => {
   const q = (c.req.query("q") ?? "").trim();
   if (!baseId) return c.json({ error: "缺少 baseId" }, 400);
   if (q === "") return c.json({ results: [] });
-  await requireCanView(c, baseId);
+  const { access } = await requireCanView(c, baseId);
 
   const tables = await prisma.table.findMany({
     where: { baseId, deletedAt: null },
@@ -294,6 +316,9 @@ records.get("/search", async (c) => {
 
   for (const t of tables) {
     const fields = await loadTableFields(t.id);
+    // 字段权限读侧：隐藏字段既不参与匹配，也不许借标题/摘要漏出去。
+    const scope = fieldScopeOf(access, t.id, fields);
+    const matchFields = scope.active ? scope.fields : fields;
     // ADR-0005：每表只取前 SEARCH_PREVIEW_LIMIT 条活记录做内存子串匹配（有界预览，
     // 非全量召回）；M5 统一检索派生库落地后替换。截断事实随响应 boundedPreview 标记返回。
     const recs = await prisma.record.findMany({
@@ -303,12 +328,12 @@ records.get("/search", async (c) => {
     });
     for (const r of recs) {
       const stored = parseStoredFields(r.fields);
-      const primaryValue = stored[t.primaryFieldId];
+      const primaryValue = scope.hiddenIds.has(t.primaryFieldId) ? undefined : stored[t.primaryFieldId];
       let title = primaryValue !== undefined && primaryValue !== null ? String(primaryValue) : "";
 
       let matched = "";
       let snippet = "";
-      for (const f of fields) {
+      for (const f of matchFields) {
         if (isComputedFieldType(f.type)) continue;
         const v = stored[f.id];
         if (v === null || v === undefined) continue;
@@ -331,9 +356,11 @@ records.get("/search", async (c) => {
   return c.json({ results, ...boundedPreviewMarker() });
 });
 
-function recordTitle(raw: unknown): string {
+/** 记录名：第一个非空值。hidden 是被隐藏字段集，跳过它们（未传 = 不跳，与加此参数前同义）。 */
+function recordTitle(raw: unknown, hidden?: ReadonlySet<string>): string {
   const obj = parseStoredFields(raw);
-  for (const v of Object.values(obj)) {
+  for (const [k, v] of Object.entries(obj)) {
+    if (hidden?.has(k)) continue;
     if (v === null || v === undefined || v === "") continue;
     if (Array.isArray(v)) return v.length > 0 ? String(v[0]) : "(空白)";
     return String(v);
@@ -346,23 +373,29 @@ function recordTitle(raw: unknown): string {
 records.get("/:recordId", async (c) => {
   const recordId = c.req.param("recordId");
   const baseId = await baseIdOfRecord(recordId);
-  const { userId } = await requireCanView(c, baseId);
+  const { userId, access } = await requireCanView(c, baseId);
 
   const rec = await prisma.record.findUnique({ where: { id: recordId } });
   if (!rec || rec.deletedAt) throw new HttpError(404, "记录不存在");
 
   const allFields = await loadTableFields(rec.tableId);
+  // 字段权限读侧（与列表同口径）：hidden 字段不进字段定义，hydrate 不填键，详情里也没有它。
+  const scope = fieldScopeOf(access, rec.tableId, allFields);
+  const scopeFields = scope.active ? scope.fields : allFields;
   // M4/S6：on 态详情投影与列表同口径（可见子集 hydrate + 跨表可见性钩子 + fields 清单收窄）。
   // 表级可达性仍由旧成员守卫负责（S6 不新增表级拒绝），本层只做字段维只减不增。
-  const mask = await resolveTableMask(userId, rec.tableId, allFields);
-  const fields = mask ? mask.visibleFields : allFields;
+  const mask = await resolveTableMask(userId, rec.tableId, scopeFields);
+  const fields = mask ? mask.visibleFields : scopeFields;
   // M1/S5：详情只 hydrate 本行（单行主键取数），替代旧 queryRecords(noPaging) 全表回查再 .find。
   const found = await hydrateRecordById(rec.tableId, recordId, mask
     ? { fields: mask.visibleFields, deps: mask.hydrateDeps }
     : undefined);
   if (!found) throw new HttpError(404, "记录不存在");
 
-  return c.json({ record: found, fields });
+  return c.json({
+    record: scope.active ? { ...found, fields: stripHiddenKeys(found.fields, scope.hiddenIds) } : found,
+    fields,
+  });
 });
 
 // ============ 更新 ============
@@ -531,13 +564,17 @@ records.post("/bulk-update", async (c) => {
   const first = await prisma.record.findUnique({ where: { id: parsed.data.ids[0]! } });
   if (!first) throw new HttpError(404, "记录不存在");
   const baseId = await baseIdOfTable(first.tableId);
-  const { userId } = await requireCanEditData(c, baseId);
+  const { userId, access } = await requireCanEditData(c, baseId);
 
   const fields = await loadTableFields(first.tableId);
 
   // M4/S6 写键守卫（事务前）：批量 payload 带掩码外/只读物理键 -> 403 FORBIDDEN_FIELD，整批不写。
   const mask = await resolveTableMask(userId, first.tableId, fields);
   runMaskWriteGate(mask, Object.keys(parsed.data.fields));
+  // 字段级写闸（与单条 create/patch 同源同义）：批量通道不得绕过「仅可见/隐藏字段不可写」。整批拒绝。
+  fieldWriteGate(access, first.tableId, (id) => fields.find((f) => f.id === id)?.name ?? id)(
+    Object.keys(parsed.data.fields),
+  );
 
   // 先收敛出本表真实待更新的记录 id（防止跨表/跨 Base id 混入）。
   const scopedRows = await prisma.record.findMany({
@@ -608,7 +645,7 @@ records.post("/csv-import", async (c) => {
   if (!tableId) return c.json({ error: "缺少 tableId" }, 400);
   const baseId = await baseIdOfTable(tableId);
   // 导入数据本身只需 canEditData；但若 CSV 含需要「新建字段」的列，则必须有 canManageSchema（垂直越权防护）。
-  const { userId, perm } = await requireCanView(c, baseId);
+  const { userId, perm, access } = await requireCanView(c, baseId);
   if (!perm.canEditData) throw new HttpError(403, "当前角色无权编辑数据");
 
   const parsed = importSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -661,6 +698,12 @@ records.post("/csv-import", async (c) => {
 
   const allFields = await loadTableFields(tableId);
   const fieldById = new Map(allFields.map((f) => [f.id, f]));
+
+  // 字段级写闸（与单条 create/patch 同源）：CSV 的列可能按列名/显式 mapping 命中已有字段，
+  // 命中「仅可见/隐藏」字段时整次导入拒绝——批量通道同样不得绕过字段权限。
+  fieldWriteGate(access, tableId, (id) => fieldById.get(id)?.name ?? id)(
+    columnFieldIds.filter((x): x is string => !!x),
+  );
 
   for (let ri = 0; ri < dataRows.length; ri++) {
     const row = dataRows[ri]!;

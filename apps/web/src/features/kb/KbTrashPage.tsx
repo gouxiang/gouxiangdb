@@ -14,11 +14,16 @@ import { ErrorState } from "../../components/states";
 import { confirmIrreversible } from "../../components/feedback";
 import { TruncatedText, useDelayedFlag, useWriteGuard } from "../../components/interaction";
 import type { KbDocDTO } from "../../api/client";
-import { useKbTrash, useRestoreDoc, usePurgeDoc } from "./kb-hooks";
+import { useKb, useKbTrash, useRestoreDoc, usePurgeDoc } from "./kb-hooks";
 import { DocKindIcon, formatTime } from "./kb-ui";
 
 export default function KbTrashPage() {
   const { kbId } = useParams();
+  // PERM-S4：找回需要内容编辑权、彻底删除仅所有者。viewer 打开回收站时（可读列表）
+  // 不渲染这两个写按钮——原先可点再吃后端 403 toast，属于假入口。
+  const { data: kb } = useKb(kbId);
+  const canWrite = kb?.role === "owner" || kb?.role === "editor";
+  const canPurge = kb?.role === "owner";
   const trashQ = useKbTrash(kbId);
   const { data: docs, isLoading, isError, error, refetch } = trashQ;
   const restore = useRestoreDoc(kbId!);
@@ -101,29 +106,33 @@ export default function KbTrashPage() {
                     className="min-w-0 flex-1 text-gx-13 text-gx-text-secondary line-through opacity-70"
                   />
                   <span className="hidden shrink-0 text-gx-11 text-gx-text-hint sm:block">删除于 {formatTime(d.deletedAt)}</span>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    icon="restore"
-                    loading={guard.isBusy(`restore:${d.id}`)}
-                    disabled={busy}
-                    disabledReason="操作进行中，请稍候"
-                    onClick={() => void doRestore(d)}
-                  >
-                    找回
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    icon="trash"
-                    className="text-gx-danger"
-                    loading={guard.isBusy(`purge:${d.id}`)}
-                    disabled={busy}
-                    disabledReason="操作进行中，请稍候"
-                    onClick={() => void askPurge(d)}
-                  >
-                    彻底删除
-                  </Button>
+                  {canWrite && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon="restore"
+                      loading={guard.isBusy(`restore:${d.id}`)}
+                      disabled={busy}
+                      disabledReason="操作进行中，请稍候"
+                      onClick={() => void doRestore(d)}
+                    >
+                      找回
+                    </Button>
+                  )}
+                  {canPurge && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon="trash"
+                      className="text-gx-danger"
+                      loading={guard.isBusy(`purge:${d.id}`)}
+                      disabled={busy}
+                      disabledReason="操作进行中，请稍候"
+                      onClick={() => void askPurge(d)}
+                    >
+                      彻底删除
+                    </Button>
+                  )}
                 </div>
               );
             })}

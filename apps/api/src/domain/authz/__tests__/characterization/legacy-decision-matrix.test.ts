@@ -221,13 +221,13 @@ describe("匿名 public resolveShare 不查成员/ACL/auth_policies", () => {
   it("匿名编辑已关闭：editor / viewer 分享一律 403「只读」，正文未改且零授权查询", async () => {
     const before = await h.prisma.kbDoc.findUniqueOrThrow({ where: { id: childId } });
     const deniedEditor = await h.app.request(`/api/public/s/${editorToken}/doc/${childId}/content`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "anon" }),
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "anon", baseUpdatedAt: new Date().toISOString() }),
     });
     expect(deniedEditor.status).toBe(403);
     expect((await json<{ error: string }>(deniedEditor)).error).toContain("只读");
     assertNoAuthzQuery();
     const deniedViewer = await h.app.request(`/api/public/s/${viewerToken}/doc/x/content`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "z" }),
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "z", baseUpdatedAt: new Date().toISOString() }),
     });
     expect(deniedViewer.status).toBe(403);
     const after = await h.prisma.kbDoc.findUniqueOrThrow({ where: { id: childId } });

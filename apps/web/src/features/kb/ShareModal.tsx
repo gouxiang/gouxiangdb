@@ -1,11 +1,17 @@
 // apps/web/src/features/kb/ShareModal.tsx
-// 分享弹窗：①内部成员（团队）仅可见/可编辑 ②外部链接 开关/复制/权限/级联分享下级。
-// 内部访问以知识库团队角色为准；外部链接以分享设置为准（两套独立）。
+// 分享弹窗：只管【外部链接】——开关/复制/档位/级联分享下级。
+//
+// PERM-S5：原先还有一块「内部成员 仅可见/可编辑」，它写的是
+// POST /api/kb/docs/:docId/share/internal —— 后端从未注册该子路由（apps/api/src/routes/kb/
+// sharing.ts 只有 GET/POST /docs/:docId/share），点保存必 404。且它要落的 kb_doc_acls 在新
+// 权限模型里已不参与放行（放行只读 role_library_scope：domain/authz/libraryPolicy.ts，
+// kb 守卫 requireDocAccess 从不查 kbDocAcl），修成能写也只是「配了不生效」的死开关。
+// 故整块下线：改成一条只读结论——组织内能否编辑由知识库角色配置决定，去权限管理改。
 
 import { useEffect, useRef, useState } from "react";
 import { Modal, Button, Switch, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { useShareState, useSetShare, useSetInternalShare } from "./kb-hooks";
+import { useShareState, useSetShare } from "./kb-hooks";
 import { withBase } from "../../api/client";
 import { COPY_FAIL_HINT_LINK, copyText } from "../../lib/clipboard";
 import { ShareDegradedNote, ShareModeField } from "../sharing/ShareModeField";
@@ -14,12 +20,10 @@ import { shareErrorMessage } from "../sharing/share-hooks";
 export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId: string; kbId: string; kind?: "doc" | "canvas"; open: boolean; onClose: () => void }) {
   const { data, isLoading } = useShareState(open ? docId : undefined);
   const setShare = useSetShare(docId, kbId);
-  const setInternal = useSetInternalShare(docId);
 
   const [enabled, setEnabled] = useState(false);
   const [linkRole, setLinkRole] = useState<"viewer" | "editor">("viewer");
   const [includeChildren, setIncludeChildren] = useState(false);
-  const [internalRole, setInternalRole] = useState<"viewer" | "editor">("editor");
   // 复制失败时用于自动选中链接文本，让用户可直接按 Ctrl/⌘ + C。
   const linkInputRef = useRef<HTMLInputElement>(null);
 
@@ -28,9 +32,6 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
       setEnabled(data.share.shareEnabled);
       setLinkRole(data.share.shareRole);
       setIncludeChildren(data.share.shareIncludeChildren);
-    }
-    if (data?.internal) {
-      setInternalRole(data.internal.membersCanEdit ? "editor" : "viewer");
     }
   }, [data]);
 
@@ -100,48 +101,27 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
     }
   }
 
-  async function applyInternalRole(role: "viewer" | "editor") {
-    const prev = internalRole;
-    setInternalRole(role);
-    try {
-      await setInternal.mutateAsync(role);
-      toast(role === "editor" ? "团队成员已设为可编辑" : "团队成员已设为仅可见", "success");
-    } catch (e) {
-      setInternalRole(prev);
-      toast(e instanceof Error ? e.message : "调整团队权限需知识库所有者", "error");
-    }
-  }
-
   return (
     <Modal open={open} onClose={onClose} title="分享" width={520} footer={<Button onClick={onClose}>完成</Button>}>
       {isLoading || !share ? (
         <div className="py-10 text-center text-gx-13 text-gx-text-hint">加载中…</div>
       ) : (
         <div className="space-y-5">
-          {/* ① 内部成员 */}
+          {/* ① 内部成员：只读结论，不提供写入口（PERM-S5）。
+              组织内成员能否编辑由知识库角色配置决定（后端 GET 现算的 membersCanEdit），
+              这里改动不了也不该改——此前那两个档位打的是不存在的
+              POST /api/kb/docs/:docId/share/internal，点了必 404。 */}
           <section>
             <div className="mb-2 flex items-center gap-1.5 text-gx-13 font-semibold text-gx-text-primary">
               <Icon name="users" size={15} className="text-gx-text-secondary" />
               内部成员
-              {/* 人数不再显示：逐库逐人的成员名册下线后，后端这个接口没有人数可回。 */}
             </div>
-            <div className="rounded-gx-lg border border-gx-separator bg-gx-bg p-1">
-              <RoleOption
-                active={internalRole === "viewer"}
-                title="仅可见"
-                desc="团队成员可查看，不能编辑"
-                disabled={!canManage}
-                onClick={() => applyInternalRole("viewer")}
-              />
-              <RoleOption
-                active={internalRole === "editor"}
-                title="可编辑"
-                desc="团队成员可查看并编辑内容"
-                disabled={!canManage}
-                onClick={() => applyInternalRole("editor")}
-              />
+            <div className="rounded-gx-lg border border-gx-separator bg-gx-bg px-2.5 py-2 text-gx-12 text-gx-text-secondary">
+              组织内成员当前{data?.internal?.membersCanEdit ? "可编辑" : "仅可见"}本篇内容。
             </div>
-            <p className="mt-1.5 text-gx-11 text-gx-text-hint">内部访问以知识库成员角色为准，分享设置不会降低已有权限。</p>
+            <p className="mt-1.5 text-gx-11 text-gx-text-hint">
+              内部访问由知识库的角色配置决定，不在分享设置里调整；分享设置也不会降低成员已有权限。
+            </p>
           </section>
 
           {/* ② 外部链接 */}
@@ -151,7 +131,14 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
                 <Icon name="globe" size={15} className="text-gx-text-secondary" />
                 外部链接
               </div>
-              <Switch checked={enabled} onChange={toggleShare} />
+              {/* PERM-S3：无库管理权者不能点这个总闸——原先可点再靠后端 403 回滚，
+                  属于「该禁用却可点」。置灰原因与内部成员档位同一来源（canManage）。 */}
+              <Switch
+                checked={enabled}
+                onChange={toggleShare}
+                disabled={!canManage || setShare.isPending}
+                disabledReason="你对该知识库没有管理权，不能修改外链分享"
+              />
             </div>
 
             {enabled ? (
@@ -216,42 +203,5 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
         </div>
       )}
     </Modal>
-  );
-}
-
-function RoleOption({
-  active,
-  title,
-  desc,
-  onClick,
-  disabled,
-}: {
-  active: boolean;
-  title: string;
-  desc: string;
-  onClick: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className={`flex w-full items-center gap-2.5 rounded-gx-sm px-2.5 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-        active ? "bg-gx-accent-bg" : "hover:bg-gx-surface"
-      }`}
-    >
-      <span
-        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
-          active ? "border-gx-accent" : "border-gx-border"
-        }`}
-      >
-        {active && <span className="h-2 w-2 rounded-full bg-gx-accent" />}
-      </span>
-      <span className="min-w-0">
-        <span className={`block text-gx-13 ${active ? "font-medium text-gx-text-primary" : "text-gx-text-primary"}`}>{title}</span>
-        <span className="block text-gx-11 text-gx-text-hint">{desc}</span>
-      </span>
-    </button>
   );
 }

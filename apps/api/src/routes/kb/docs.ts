@@ -5,7 +5,10 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { collabRoomId } from "@gx/shared-types";
 import { prisma, withWriteTx } from "../../db.js";
+import { injectDocContent } from "../../collab/docFlush.js";
+import { onlineRoom } from "../../collab/registry.js";
 import { VersionConflictError, changeEntityOfKind, saveDocContentTx } from "../../domain/kbDocWrite.js";
 import { requireUserId, errorResponse, HttpError } from "../../guards.js";
 import { buildSearchText } from "../../domain/kb.js";
@@ -184,6 +187,24 @@ docsRoutes.patch("/docs/:docId", async (c) => {
   }
 });
 
+/**
+ * DESIGN §3.3：房间在线时的整篇覆盖写改走 CRDT 注入。
+ * 返回 null = 不走注入（房间没人在线 / 房间尚未播种 / canvas 尚无 Y 结构），调用方退回直写。
+ */
+async function tryInjectIntoRoom(
+  doc: { id: string; kind: string },
+  content: string,
+  userId: string,
+  title: string | undefined,
+): Promise<{ contentVersion: number | null; snapshotted: boolean } | null> {
+  // canvas 的 Y 结构尚未定义（阶段 3），保持今天的直写路径。
+  if (doc.kind !== "doc") return null;
+  const room = onlineRoom(collabRoomId({ kind: "doc", objectId: doc.id }));
+  if (!room) return null;
+  const res = await injectDocContent(room, content, userId, title);
+  return res.injected ? { contentVersion: res.contentVersion, snapshotted: res.snapshotted } : null;
+}
+
 docsRoutes.put("/docs/:docId/content", async (c) => {
   try {
     const userId = await requireUserId(c);
@@ -199,8 +220,18 @@ docsRoutes.put("/docs/:docId/content", async (c) => {
     const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "内容不合法" }, 400);
     const content = parsed.data.content;
-    const searchText = buildSearchText(doc.kind, content);
     const title = parsed.data.title?.trim();
+    // §3.3：房间有人在线 -> 这次整篇覆盖写作为一次 CRDT 更新注入房间，由房间统一归结落库。
+    //   直接写库会在 30s 后的冷归结里被房间的 Y.Doc 静默覆盖；一律 409 又会打断 MCP / AI 写入。
+    //   房间没人在线 / 房间尚未播种 -> 返回 null，走下面今天的直写路径（行为零变化）。
+    const injected = await tryInjectIntoRoom(doc, content, userId, title);
+    if (injected) {
+      return c.json({
+        ok: true, snapshotted: injected.snapshotted,
+        savedAt: new Date().toISOString(), contentVersion: injected.contentVersion,
+      });
+    }
+    const searchText = buildSearchText(doc.kind, content);
     // M3/S3（baseline 偏差补接）：内容保存会更新 updatedAt（节点 ord 依赖 updatedAt desc），
     // 附带 title 时还要改节点 name；故内容更新+版本快照+nav 同步整体进单事务。
     // 乐观锁不匹配抛 VersionConflictError -> 事务回滚 + catch 内回现网特殊 409 信封。

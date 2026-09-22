@@ -40,6 +40,7 @@ import {
 import { parseConfig } from "./libraryScopeConfig.js";
 import { effectiveRoleRows } from "../org/authorization.js";
 import { ADMIN_ROLE_ID, SUPER_ADMIN_ROLE_ID } from "../org/roles.js";
+import { HttpError } from "../../httpError.js";
 
 /**
  * 通配哨兵：access.tables 里出现这个 key = 对该库【全表】全权限。
@@ -154,7 +155,10 @@ export function fieldWriteGate(
   return (fieldIds) => {
     const bad = firstUnwritableField(access, tableId, fieldIds);
     if (!bad) return;
-    throw Object.assign(new Error(`字段「${fieldNameOf(bad)}」为仅可见或已隐藏，不可编辑`), { status: 403 });
+    // 用 HttpError 而不是 `Object.assign(new Error, {status})`：后者只有 .status 字段，
+    // 统一错误出口按 instanceof 判定，会把它当未知错误吞成 500「服务器内部错误」——
+    // 「管理员配了仅可见/隐藏字段、写入被拒」明明是一次正常拒绝，却报成故障。
+    throw new HttpError(403, `字段「${fieldNameOf(bad)}」为仅可见或已隐藏，不可编辑`);
   };
 }
 

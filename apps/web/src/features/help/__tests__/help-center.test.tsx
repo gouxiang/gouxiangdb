@@ -111,14 +111,21 @@ describe("帮助中心：样式与依赖约束（源码断言）", () => {
       devDependencies: Record<string, string>;
       scripts: Record<string, string>;
     };
-    // 冻结基线：新增任何一项都必须同步更新本表并说明理由
+    // 冻结基线：新增任何一项都必须同步更新本表并说明理由。
+    // 2026-09-23 新增三项（**全部为 Yjs 同步引擎**，按 DESIGN.md §8 第 9 项 + 决策 D2 豁免：
+    // 本功能对「禁新增前端依赖」公约是产品负责人书面例外，D6 只冻结 UI，不禁止引入同步引擎）。
+    //   yjs          CRDT 引擎本体（只有数据模型，不渲染任何界面）
+    //   y-protocols  awareness / sync 协议编解码（服务端认的四种消息码）
+    //   y-websocket  WebSocket 传输提供者（自建并重掌重连，见 collab-provider.ts）
+    // **不含 y-indexeddb**：阶段 2 不做离线持久化（服务端 collab_docs 是真源），已卸载不入表。
     const BASE_DEPS = [
       "@drawnix/drawnix", "@floating-ui/react", "@gx/blocks", "@gx/design-tokens", "@gx/shared-types",
       "@plait-board/markdown-to-drawnix", "@plait-board/mermaid-to-drawnix", "@plait-board/react-board",
       "@plait-board/react-text", "@plait/common", "@plait/core", "@plait/draw", "@plait/layouts",
       "@plait/text-plugins", "@tanstack/react-query", "ahooks", "classnames", "clsx", "laser-pen",
       "lodash", "mobile-detect", "open-color", "react", "react-dom", "react-router-dom",
-      "remark-parse", "roughjs", "slate", "slate-history", "slate-react", "unified", "zustand",
+      "remark-parse", "roughjs", "slate", "slate-history", "slate-react", "unified",
+      "y-protocols", "y-websocket", "yjs", "zustand",
     ];
     const BASE_DEV = [
       "@playwright/test", "@types/react", "@types/react-dom", "@vitejs/plugin-react", "autoprefixer",

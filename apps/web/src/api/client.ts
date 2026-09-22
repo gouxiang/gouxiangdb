@@ -156,6 +156,15 @@ import type {
   ReindexStarted,
   SearchStatusDTO,
 } from "@gx/shared-types";
+// 实时协同（三类内容共享底座）的两个 HTTP 端点。契约真源
+// packages/shared-types/src/collab.ts（房间 / 票据 / presence），设计依据
+// docs/design/2026-09-collab/DESIGN.md §4.2/§4.3。
+// 这里必须写 import type：文件末尾的 export type { ... } from 只是重导出，
+// 不会在本模块产生绑定，缺了它下面的 apiFetch 泛型会报「找不到名称」。
+import type {
+  CollabTicketResponse,
+  CollabPresenceSnapshot,
+} from "@gx/shared-types";
 
 export class ApiError extends Error {
   constructor(
@@ -309,6 +318,29 @@ function qs(params: Record<string, string | number | undefined | null>): string 
   }
   const s = sp.toString();
   return s ? `?${s}` : "";
+}
+
+// ============ Collab（多人实时协同 · 阶段 1 底座） ============
+
+/**
+ * 换一次性连接票据：60s 有效、**单次核销**（服务端accept后才失效）。
+ *
+ * 单次核销 —— y-websocket 内部的自动重连会复用同一个 URL，旧票在首次握手时已被核销，
+ * 第二次必然被拒。故每次「建立 / 重建」WS 连接都必须重新取票，见
+ * features/collab/collab-provider.ts。走 query 而非自定义头：浏览器 WebSocket 不支持
+ * 自定义请求头（DESIGN.md §4.1 方案 C）。
+ */
+export function getCollabTicket(roomId: string): Promise<CollabTicketResponse> {
+  // roomId 形如 "doc:<uuid>"，含 ':' —— 交给 qs/URLSearchParams 统一编码，不手工拼串。
+  return apiFetch<CollabTicketResponse>(`/api/collab/ticket${qs({ roomId })}`);
+}
+
+/**
+ * 在线名单快照：WS 尚未连通时的首屏兜底（DESIGN.md §4.3 第二行）。
+ * 连通后一律以 awareness 为准，两者取同一份 CollabPresenceEntry 形状。
+ */
+export function getCollabPresence(roomId: string): Promise<CollabPresenceSnapshot> {
+  return apiFetch<CollabPresenceSnapshot>(`/api/collab/presence${qs({ roomId })}`);
 }
 
 // ============ Auth ============
@@ -876,11 +908,6 @@ export const KbApi = {
     apiFetch<{ share: KbShareStateDTO }>(`/api/kb/docs/${docId}/share`, {
       method: "POST",
       body: JSON.stringify(data),
-    }),
-  setInternalShare: (docId: string, role: "viewer" | "editor") =>
-    apiFetch<{ ok: true; role: string }>(`/api/kb/docs/${docId}/share/internal`, {
-      method: "POST",
-      body: JSON.stringify({ role }),
     }),
   /**
    * PATCH /api/kb/docs/:docId。

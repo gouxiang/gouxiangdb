@@ -74,6 +74,10 @@ versionsRoutes.post("/docs/:docId/rollback/:vid", async (c) => {
           content: v.content,
           searchText: buildSearchText(doc.kind, v.content),
           updatedBy: userId,
+          // 批次 F/段 0：回滚亦属内容变更，必须 bump contentVersion。
+          // 否则在线协同侧持有的 baseVersion 与库内仍相等，冷归结会带着旧版本号写回，
+          // 把刚回滚掉的内容又盖回去（lost update），且前端无从感知「内容被整体替换」。
+          contentVersion: { increment: 1 },
         },
       });
       await enqueueChangeEventTx(tx, {

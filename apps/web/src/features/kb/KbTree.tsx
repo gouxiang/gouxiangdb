@@ -48,7 +48,7 @@ function buildDocTree(docs: KbDocDTO[]): TreeNode[] {
 export function KbTree({ kbId }: { kbId: string }) {
   const navigate = useNavigate();
   const { docId: activeDocId } = useParams();
-  const { data: kb } = useKb(kbId);
+  const { data: kb, isLoading: kbLoading } = useKb(kbId);
   const { data: docs, isLoading } = useKbDocs(kbId, "all");
   const createDoc = useCreateDoc(kbId);
   const deleteDoc = useDeleteDoc(kbId);
@@ -83,9 +83,11 @@ export function KbTree({ kbId }: { kbId: string }) {
   }, [collapsed, kbId]);
 
   const canEdit = useMemo(() => {
-    const r = kb?.role ?? "owner";
+    // PERM-S2：加载中按 owner 兜底（避免闪现禁用形态），加载失败（403 等）一律按 viewer——
+    // 宁可让无权者短暂多看，不能让无权者在失败态拿到可点的新建/删除入口。
+    const r = kbLoading ? "owner" : (kb?.role ?? "viewer");
     return r === "owner" || r === "editor";
-  }, [kb?.role]);
+  }, [kb?.role, kbLoading]);
 
   const docsList = useMemo(() => (docs ?? []).filter((d) => !d.deletedAt), [docs]);
   // 图标弹窗绑定的实体：按 id 从列表取，改完 invalidation 回来即跟随更新

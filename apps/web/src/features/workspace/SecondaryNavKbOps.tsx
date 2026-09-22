@@ -63,8 +63,9 @@ export function useSecondaryKbOps({
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string | null; zone: "into" | "root" } | null>(null);
 
-  // role 缺省 owner：kb 未加载完时不该先闪出无权限形态（与 KbHomePage 的取值一致）
-  const role = kbQ.data?.role ?? "owner";
+  // PERM-S2：加载中按 owner 兜底（kb 未加载完时不闪无权限形态）；
+  // 加载失败（403 等）一律按 viewer 收敛——失败态不能再给可点的新建/拖拽入口。
+  const role = kbQ.isLoading ? "owner" : (kbQ.data?.role ?? "viewer");
   const canCreate = role === "owner" || role === "editor";
 
   const create = (kind: KbDocKind) => {
