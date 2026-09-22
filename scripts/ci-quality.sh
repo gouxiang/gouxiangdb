@@ -3,9 +3,10 @@
 # 唯一事实源：任何 Linux/本机（Node>=20、pnpm>=9）都可直接 `bash scripts/ci-quality.sh` 复现。
 # Gitee Go / GitHub Actions 只负责拉起运行器并调用本脚本，门禁真相不依赖任何平台 YAML。
 #
-# 步骤：版本断言 → frozen 安装 → prisma 生成 → 三包 typecheck → api 构建 → 全量测试
+# 步骤：版本断言 → frozen 安装 → prisma 生成 → 三包 typecheck → api 构建 + 产物冒烟 → 全量测试
 #       → 真 lint（基线告警卡 max-warnings，注入即红）→ migrate deploy 临时库干跑（动态 N/N，数迁移目录 + integrity）。
 # 任一步失败立即退出（set -e + pipefail），不改业务库、不依赖任何密钥。
+# 产物冒烟（build 后真跑 dist/index.js + 静态扫描）挡「打包过、真机启动崩」类缺陷（ws 事件）。
 
 set -euo pipefail
 
@@ -65,10 +66,14 @@ step "4/8 typecheck（api / web / shared-types）"
 # ---------------------------------------------------------------------------
 # 5) API 生产构建（S2 esbuild 扁平单文件），并断言产物存在
 # ---------------------------------------------------------------------------
-step "5/8 API 生产构建 + 产物断言"
+step "5/8 API 生产构建 + 产物断言 + 产物冒烟"
 "${PNPM}" --filter @gx/api run build
 [[ -f apps/api/dist/index.js ]] || fail "构建产物 apps/api/dist/index.js 不存在"
 printf 'dist/index.js 存在（%s 字节）\n' "$(wc -c < apps/api/dist/index.js | tr -d ' ')"
+# 产物冒烟（S-smoke）：build 只打包不执行，无法发现「CJS 内化进 ESM -> 真机启动崩」这类缺陷
+# （ws 事件，真机 systemd 连炸才暴露）。脚本自带临时库 migrate + 临时端口 + 临时数据目录 +
+# 30s 预算 + 收尸，不碰业务库/不绑 3001/离线；另静态扫描全部 dist/*.js 的动态 require 垫片。
+"${PNPM}" --filter @gx/api exec node scripts/smoke-dist.mjs
 
 # ---------------------------------------------------------------------------
 # 6) 全量测试（api + shared；web 当前 passWithNoTests）

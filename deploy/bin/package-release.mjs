@@ -97,6 +97,12 @@ copyDir(path.join(srcApi, "prisma", "migrations"), path.join(relApi, "prisma", "
 // 同目录 lib.mjs；ESM 从脚本位置向上解析到 api/node_modules，路径 apiRoot=api 自洽）。
 // 只带 backup 三个运行脚本，不带 build.mjs（构建只发生在构建机）。
 copyDir(path.join(srcApi, "scripts", "backup"), path.join(relApi, "scripts", "backup"));
+// 产物冒烟脚本（S-smoke）：下方在精简 prod 安装环境真跑 dist/index.js + 静态扫描全部产物。
+copyFile(
+  path.join(srcApi, "scripts", "smoke-dist.mjs"),
+  path.join(relApi, "scripts", "smoke-dist.mjs"),
+);
+copyDir(path.join(srcApi, "scripts", "smoke"), path.join(relApi, "scripts", "smoke"));
 
 // 精简运行时 package.json：去掉已被 esbuild 内化的 @gx/* workspace 依赖；
 // 把 prisma CLI（源工程在 devDeps）提入 deps，使发布包自带 migrate/generate 能力。
@@ -142,6 +148,12 @@ run("node", [
   path.join(srcApi, "scripts", "native", "copy-vec-native.mjs"),
   "--dest", relApi, "--app-dir", relApi,
 ], { cwd: repoRoot });
+
+// 3.5) 产物冒烟（精简 prod node_modules 真环境）：build 只打包不执行，挡不住 ws 那类
+// 「CJS 内化进 ESM -> 真机启动崩」。脚本自带临时库 migrate + 临时端口 + 临时数据目录（不碰
+// 发布物真实数据）+ 30s 预算 + 收尸，并静态扫描全部产物。失败即终止打包。
+log("产物冒烟：真跑 dist/index.js 到 /readyz + 静态扫描 dist/*.js");
+run("node", [path.join(relApi, "scripts", "smoke-dist.mjs")], { cwd: relApi });
 
 // ---------------------------------------------------------------------------
 // 4) 组装 web/：只拷 vite 产物

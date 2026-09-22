@@ -123,6 +123,12 @@ copyDir(distSrc, path.join(serverDir, "dist"));
 copyFile(path.join(srcApi, "prisma", "schema.prisma"), path.join(serverDir, "prisma", "schema.prisma"));
 copyDir(path.join(srcApi, "prisma", "migrations"), path.join(serverDir, "prisma", "migrations"));
 copyDir(path.join(srcApi, "scripts", "backup"), path.join(serverDir, "scripts", "backup"));
+// 产物冒烟脚本（S-smoke）：下方在 hoisted prod 环境真跑 dist/index.js + 静态扫描全部产物。
+copyFile(
+  path.join(srcApi, "scripts", "smoke-dist.mjs"),
+  path.join(serverDir, "scripts", "smoke-dist.mjs"),
+);
+copyDir(path.join(srcApi, "scripts", "smoke"), path.join(serverDir, "scripts", "smoke"));
 
 const webDist = path.join(repoRoot, "apps", "web", "dist");
 if (!fs.existsSync(path.join(webDist, "index.html"))) fail("缺少 apps/web/dist/index.html");
@@ -218,6 +224,12 @@ run("node", [
   if (hasVec) log("找到 server/native/<triplet>/vec0.so");
   else console.warn("[fnpack-build] 未生成 server/native/<triplet>/vec0.so，运行时降级 fts-only");
 }
+
+// --- 5.4) 产物冒烟（hoisted prod node_modules 真环境） --------------------------------
+// build 只打包不执行，挡不住 ws 那类「CJS 内化进 ESM -> 真机启动崩」。脚本自带临时库 migrate +
+// 临时端口 + 临时数据目录（不碰 server 真实/挂载数据）+ 30s 预算 + 收尸，并静态扫描全部产物。
+log("产物冒烟：真跑 dist/index.js 到 /readyz + 静态扫描 dist/*.js");
+run("node", [path.join(serverDir, "scripts", "smoke-dist.mjs")], { cwd: serverDir });
 
 // --- 5.5) 入口一致性自检（白屏闸门） ----------------------------------------------
 // 空白页最常见的三个来源，全部在这里堵死：

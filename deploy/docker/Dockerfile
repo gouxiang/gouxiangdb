@@ -82,6 +82,9 @@ COPY --from=builder --chown=node:node /app/apps/api/prisma/schema.prisma ./prism
 COPY --from=builder --chown=node:node /app/apps/api/prisma/migrations ./prisma/migrations
 # M5/S2：vec0 白名单拷贝脚本（node:22-bookworm 为 glibc，vec0 有 linux-x64/arm64 子包，无 musl）。
 COPY --from=builder --chown=node:node /app/apps/api/scripts/native ./scripts/native
+# 产物冒烟脚本（S-smoke）：在下方精简 prod 环境真跑 dist/index.js + 静态扫描全部产物。
+COPY --from=builder --chown=node:node /app/apps/api/scripts/smoke-dist.mjs ./scripts/smoke-dist.mjs
+COPY --from=builder --chown=node:node /app/apps/api/scripts/smoke ./scripts/smoke
 COPY --from=builder --chown=node:node /app/apps/web/dist /app/web
 COPY --chown=node:node deploy/docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
@@ -98,6 +101,11 @@ RUN DATABASE_URL=file:./_runner_generate_placeholder.db \
 # --app-dir 致 createRequire 崩溃，使 x64/arm64 镜像 vec0 白名单从不生成）。
 # buildx 每目标架构各自执行；musl/无预编译平台由脚本 SKIP 兜底，不阻断。
 RUN node scripts/native/copy-vec-native.mjs --dest . --app-dir .
+
+# 产物冒烟（在【精简 prod node_modules】真环境，非 builder 完整依赖）：真跑 dist/index.js 到
+# /readyz（临时库 + 临时端口，不碰 /data）+ 静态扫描全部产物。挡住 ws 那类「打包过、真机启动崩」。
+# node_modules 已是 --prod 安装（ws 在 dependencies，必在）；脚本自带 30s 预算与收尸。
+RUN node scripts/smoke-dist.mjs
 
 # 数据卷目录归属内置非 root 用户 node（uid 1000）。
 RUN mkdir -p /data/uploads /data/backups /data/log && chown -R node:node /data /app

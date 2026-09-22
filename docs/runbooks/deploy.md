@@ -75,6 +75,31 @@ scp release/gouxiangdb-release-*.tar.gz user@server:/tmp/
 
 打包采用白名单组装并兜底扫描，发布包不含 `.env`、`*.db*`、`*.log`、`.workbuddy`、`uploads` 内容。
 
+### 5.1 产物冒烟门（必过，构建后自动执行）
+
+`package-release.mjs` 在 `pnpm install --prod` 之后、打 tar 之前，会在**精简生产 node_modules**
+环境真跑一次产物（`node release/api/scripts/smoke-dist.mjs`）。它是为堵住「`pnpm build` 只打包
+不执行，CJS 依赖被 esbuild 内化进 ESM 单文件后真机启动即崩」这类缺陷（`ws` 事件，真机 systemd
+连炸 5 次才暴露）。两道检查：
+
+1. 真跑 `dist/index.js`：脚本自建临时库 `migrate deploy` + 临时端口 + 临时数据目录（**不碰业务库、
+   不绑 3001、离线**），轮询 `/readyz` 且断言 `status==="ready"` 与 `checks` 各项为 true；30s 预算。
+2. 静态扫描全部 `dist/*.js`：不允许出现 esbuild 动态 require 垫片字面量 `Dynamic require of`
+   （`init-admin` / `nav-reconcile` / `mcp-stdio` 不能真跑，这是它们的唯一手段；命中即硬失败）。
+
+退出码：0 通过 / 1 冒烟失败（探针不 ready 或扫描命中）/ 2 进程崩溃。任一步非零都会终止打包。
+
+真机手动复验（升级/部署 restart 前，建议先跑一遍）：
+
+```bash
+# 在解包后的发布目录（含 prod node_modules）内：
+node /srv/gouxiangdb/current/api/scripts/smoke-dist.mjs && echo "SMOKE OK，可 restart"
+# 脚本自带隔离与收尸，不会触碰当前在跑的服务或真实数据；exit 0 才允许 systemctl restart。
+```
+
+> 同样的门也接在 CI（`scripts/ci-quality.sh` 第 5 步 build 之后）、Docker（runner 阶段）、
+> 飞牛 fpk（`build-fpk.mjs` hoisted 安装之后）；三处缺一门等于没有，真机 prod 环境那步最关键。
+
 ## 6. 首次部署【需干净 Linux 机】
 
 ```bash
