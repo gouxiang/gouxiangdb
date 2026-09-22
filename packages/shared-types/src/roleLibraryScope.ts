@@ -92,6 +92,8 @@ export interface RoleLibraryScopeDTO {
   libraryName: string;
   canManage: boolean;
   visible: boolean;
+  /** 能不能把这个库的内容分享出去。独立于 canManage：canManage 为真时后端仍隐式给分享权。 */
+  canShare: boolean;
   tables: Record<string, TableAccess>;
   fields: Record<string, Record<string, FieldAccess>>;
   updatedAt: string;
@@ -103,6 +105,8 @@ export interface PutLibraryScopeInput {
   libraryId: string;
   canManage: boolean;
   visible: boolean;
+  /** 缺省 false：整份替换语义下没带这一位 = 显式不给分享权。 */
+  canShare?: boolean;
   config?: LibraryScopeConfig;
 }
 

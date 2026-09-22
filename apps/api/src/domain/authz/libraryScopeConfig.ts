@@ -38,6 +38,7 @@ export function parseScopeInput(input: {
   libraryId?: unknown;
   canManage?: unknown;
   visible?: unknown;
+  canShare?: unknown;
   config?: unknown;
 }): PutLibraryScopeInput {
   const libraryId = typeof input.libraryId === "string" ? input.libraryId.trim() : "";
@@ -47,6 +48,8 @@ export function parseScopeInput(input: {
     libraryId,
     canManage: input.canManage === true,
     visible: input.visible === true,
+    // 与 canManage/visible 同一口径：只认真值 true，其它一律 false（整份替换下缺省即不给）。
+    canShare: input.canShare === true,
     config: normalizeIncomingConfig(input.config),
   };
 }
@@ -81,7 +84,7 @@ export function normalizeIncomingConfig(raw: unknown): LibraryScopeConfig {
 
 export function toScopeDTO(row: {
   id: string; roleId: string; libraryKind: string; libraryId: string;
-  canManage: number; visible: number; config: string; updatedAt: Date;
+  canManage: number; visible: number; canShare: number; config: string; updatedAt: Date;
 }, libraryName: string): RoleLibraryScopeDTO {
   const cfg = parseConfig(row.config);
   const tables: Record<string, TableAccess> = {};
@@ -96,6 +99,7 @@ export function toScopeDTO(row: {
     libraryName,
     canManage: row.canManage === 1,
     visible: row.visible === 1,
+    canShare: row.canShare === 1,
     tables,
     fields: cfg.fields,
     updatedAt: row.updatedAt.toISOString(),

@@ -78,16 +78,18 @@ function maxFieldAccess(a: FieldAccess, b: FieldAccess): FieldAccess {
 
 /** 由若干条角色视野合成一个人在某个库上的最终裁决（不含超级管理员/管理员短路）。 */
 export function synthesizeAccess(
-  rows: Array<{ canManage: number; visible: number; config: string }>,
+  rows: Array<{ canManage: number; visible: number; canShare: number; config: string }>,
 ): LibraryAccessDTO {
   const tables: Record<string, TableAccess> = {};
   const fields: Record<string, Record<string, FieldAccess>> = {};
   let visible = false;
   let canManage = false;
+  let canShare = false;
 
   for (const row of rows) {
     visible = visible || row.visible === 1;
     canManage = canManage || row.canManage === 1;
+    canShare = canShare || row.canShare === 1;
     const cfg = parseConfig(row.config);
     for (const [tableId, partial] of Object.entries(cfg.tables)) {
       tables[tableId] = permOr(tables[tableId] ?? EMPTY_TABLE_ACCESS, { ...EMPTY_TABLE_ACCESS, ...partial });
@@ -108,7 +110,9 @@ export function synthesizeAccess(
     visible,
     canManage,
     canDeleteLibrary: false, // 硬规则 A：配置永远给不了删库
-    canToggleShare: canManage, // 硬规则 C：管理员之外，谁能管谁能开
+    // 硬规则 C：谁能管谁能开；canShare 是额外的独立授予路径。必须取 || 而非只看
+    // canShare：存量 canShare=0 但 canManage=1 的行升级后不得静默失去分享权。
+    canToggleShare: canManage || canShare,
     source: visible || canManage ? "role_scope" : "none",
     tables,
     fields,
@@ -185,7 +189,7 @@ async function resolve(userId: string, kind: LibraryKind, libraryId: string): Pr
 
   const rows = await prisma.roleLibraryScope.findMany({
     where: { roleId: { in: roleIds }, libraryKind: kind, libraryId },
-    select: { canManage: true, visible: true, config: true },
+    select: { canManage: true, visible: true, canShare: true, config: true },
   });
   const merged = synthesizeAccess(rows);
   // 硬规则短路 2：管理员进得了所有库，管理权仍在配置里，永不持删库权。
@@ -282,9 +286,9 @@ export async function resolveManyAccess(
   }
   const rows = await prisma.roleLibraryScope.findMany({
     where: { roleId: { in: roleIds }, libraryKind: kind, libraryId: { in: [...libraryIds] } },
-    select: { libraryId: true, canManage: true, visible: true, config: true },
+    select: { libraryId: true, canManage: true, visible: true, canShare: true, config: true },
   });
-  const grouped = new Map<string, Array<{ canManage: number; visible: number; config: string }>>();
+  const grouped = new Map<string, Array<{ canManage: number; visible: number; canShare: number; config: string }>>();
   for (const r of rows) {
     const arr = grouped.get(r.libraryId) ?? [];
     arr.push(r);

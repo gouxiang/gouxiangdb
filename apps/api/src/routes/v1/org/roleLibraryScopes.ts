@@ -111,6 +111,7 @@ libraryScopeRoutes.put("/library-scopes", requireOrgAction("edit_roles"), async 
         const data = {
           canManage: w.canManage ? 1 : 0,
           visible: w.visible ? 1 : 0,
+          canShare: w.canShare ? 1 : 0,
           config: JSON.stringify(w.config ?? { tables: {}, fields: {} }),
         };
         if (currentKeys.has(key)) {

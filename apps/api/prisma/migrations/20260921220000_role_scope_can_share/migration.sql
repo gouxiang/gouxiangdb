@@ -1,0 +1,24 @@
+-- 角色 × 库：新增独立的「可分享」位 role_library_scope.canShare。
+--
+-- 它解决什么：分享权目前不是独立维度，是 canManage 的派生
+-- （src/domain/authz/libraryPolicy.ts 的 synthesizeAccess: canToggleShare: canManage）。
+-- 于是「能改结构」必然等于「能把内容放行到组织外」，界面上只能做一个勾选项，
+-- 现实里要的「让他管数据但不许他往外发」做不出来。本迁移把这一位拆成独立列。
+--
+-- 兼容性纪律（硬要求，升级不许静默收权）：
+--   1. 只做 ADD COLUMN，NOT NULL DEFAULT 0：存量行的 canShare 一律为 0，
+--      判定改成 canManage || canShare，故 canManage=1 的存量行分享权照旧为 true，
+--      零行为漂移；不勾选的新行也不会凭空拿到分享权。
+--   2. 不动 canManage / visible / config 的任何取值，不改既有索引与唯一键。
+--   3. 列名 camelCase（与同表 canManage / visible 一致，照 20260921020000_role_library_scope），
+--      表名 snake_case（@@map("role_library_scope") 后的物理表名）。
+--   4. ALTER TABLE ADD COLUMN 在 SQLite 无 IF NOT EXISTS 语法，重复执行的保护
+--      来自 Prisma 的 _prisma_migrations 记录表（migrate deploy 对已应用迁移整体跳过），
+--      与既有裸 DDL 迁移口径一致。
+--
+-- 方言声明：INTEGER + NOT NULL DEFAULT 0 在 SQLite 与 PostgreSQL 均可直接平移，
+-- 本迁移无方言专有语法。
+--
+-- 回滚：prisma/docs/rollback/20260921220000_role_scope_can_share.down.sql
+
+ALTER TABLE "role_library_scope" ADD COLUMN "canShare" INTEGER NOT NULL DEFAULT 0;

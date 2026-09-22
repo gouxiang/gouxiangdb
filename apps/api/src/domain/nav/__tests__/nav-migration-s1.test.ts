@@ -64,9 +64,9 @@ afterAll(() => {
 });
 
 describe("迁移清单", () => {
-  it("迁移目录数为 29（M6-S1 PAT/幂等两表 + init_admin_must_change + 实体 icon/iconColor DDL 后；含 M5-S1 outbox DDL/播种与 M4-S5 owner manage_share 补位），nav DDL 落 applied，重跑 deploy 幂等", () => {
+  it("迁移目录数为 32（M6-S1 PAT/幂等两表 + init_admin_must_change + 实体 icon/iconColor DDL 后；含 M5-S1 outbox DDL/播种、M4-S5 owner manage_share 补位与角色×库 canShare 独立分享位），nav DDL 落 applied，重跑 deploy 幂等", () => {
     const dirs = migDirs();
-    expect(dirs.length).toBe(31);
+    expect(dirs.length).toBe(32);
     expect(dirs).toContain("20260916090000_enterprise_nav_ddl");
     expect(dirs).toContain("20260916130000_owner_manage_share");
     expect(dirs).toContain("20260916140000_m5_search_outbox_ddl");
@@ -74,6 +74,7 @@ describe("迁移清单", () => {
     expect(dirs).toContain("20260916140100_m5_search_outbox_seed");
     expect(dirs).toContain("20260918120000_init_admin_must_change");
     expect(dirs).toContain("20260919102128_entity_icon_ddl");
+    expect(dirs).toContain("20260921220000_role_scope_can_share");
     const applied = db.prepare("SELECT rolled_back_at FROM _prisma_migrations WHERE migration_name=?")
       .get("20260916090000_enterprise_nav_ddl") as { rolled_back_at: string | null } | undefined;
     expect(applied).toBeDefined();

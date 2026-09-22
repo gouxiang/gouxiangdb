@@ -468,6 +468,11 @@ model RoleLibraryScope {
   canManage   Int      @default(0)
   // 1 = 该角色能进这个库。只勾可见不做逐表设置 = 该库全部表只读。
   visible     Int      @default(0)
+  // 1 = 该角色可以把这个库的内容分享出去；独立于 canManage，canManage=1 时依旧隐式有效。
+  // 拆出来的原因：分享权是"能不能把东西放行到组织外"，比"能不能改结构"更敏感，
+  // 现实里需要"让他管数据但不许他往外发"这种组合（反过来 canManage=1 时仍照旧能开分享，
+  // 避免存量授权在升级后静默收权）。
+  canShare    Int      @default(0)
   // JSON.stringify(LibraryScopeConfig)：逐表增删改查勾选 + 逐字段 仅可见/可编辑/隐藏。
   config      String   @default("{\"tables\":{},\"fields\":{}}")
   createdAt   DateTime @default(now())
