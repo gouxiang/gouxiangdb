@@ -100,6 +100,20 @@ node /srv/gouxiangdb/current/api/scripts/smoke-dist.mjs && echo "SMOKE OK，可 
 > 同样的门也接在 CI（`scripts/ci-quality.sh` 第 5 步 build 之后）、Docker（runner 阶段）、
 > 飞牛 fpk（`build-fpk.mjs` hoisted 安装之后）；三处缺一门等于没有，真机 prod 环境那步最关键。
 
+构建期网络依赖（2026-09 精简 prod 环境实测，证据 #487）：
+
+- prod 安装用 `--ignore-scripts`，会跳过 `@prisma/engines` 的 postinstall，装完没有
+  `node_modules/@prisma/engines/` 目录、也无 `migration-engine` 二进制。实测在此状态下
+  `migrate deploy` 与冒烟门仍 exit 0——Prisma CLI 会在需要时自行取用引擎。
+- 代价：**这一步依赖构建/打包机能出网取引擎**。离线构建（含 NAS 离线安装场景）有失败风险，
+  须在离线前于同平台、可出网环境完成 `prisma generate` 并确认引擎就位，或预置 `@prisma/engines`；
+  详见 §10。
+- 证据边界：在精简 prod node_modules（`--prod --ignore-workspace --ignore-scripts`）真跑通的
+  冒烟为【打包态裁剪完整性证据】（含 `ws@8.21.3` 确在精简 deps 内）。在含 devDeps 的全量
+  node_modules 上跑的冒烟仅为【产物级真机证据】，不担保 prod 裁剪后依赖齐全；两类不可混用。
+  真 Docker 镜像（基础镜像库依赖 / 多架构 / 镜像内权限入口）仍需在可达 Docker Hub 的机器上
+  `docker build` 单独举证。
+
 ## 6. 首次部署【需干净 Linux 机】
 
 ```bash
@@ -275,6 +289,10 @@ sudo bash deploy/bin/rollback.sh 20260920-1      # 指定 release
   或在 `schema.prisma` 的 generator 配置 `binaryTargets` 后重新生成（属业务配置变更，M0 不默认改）。
 - `deploy.sh` 在目标机执行 migrate；若 engine 平台不匹配会在迁移步明确失败，且因切换发生在迁移之后，
   现网不受影响。
+- 迁移引擎的取用（2026-09 实测）：`--ignore-scripts` 下即便没有本地 `@prisma/engines` 目录与
+  `migration-engine` 二进制，`migrate deploy` 也能成功（CLI 按需取引擎），但取引擎过程需要网络。
+  故离线机执行迁移前，必须在同平台、可出网环境预跑一次 `prisma migrate deploy`/`generate` 使引擎落盘，
+  否则离线迁移有失败风险。
 
 ## 11. 卸载（完全撤销）
 
