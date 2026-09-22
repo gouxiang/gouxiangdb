@@ -8,8 +8,10 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { renderToString } from "react-dom/server";
+import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { RoleLibraryScopeDTO } from "@gx/shared-types";
+import { LIBRARY_SHARE_SCOPE_NOTE } from "./labels";
 
 let scopes: RoleLibraryScopeDTO[] = [];
 let scopesError = false;
@@ -28,17 +30,11 @@ vi.mock("../../../api/hooks", async (importOriginal) => {
       refetch: vi.fn(),
     }),
     useRoleScopesSave: () => ({ mutateAsync: vi.fn(), isPending: false }),
-    useRoleScopesVisibility: () => ({ data: undefined, isLoading: false, isError: false }),
-    useRoleScopesShareEnabled: () => ({ mutateAsync: vi.fn(), isPending: false }),
   };
 });
 vi.mock("../../kb/kb-hooks", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return { ...actual, useKbList: () => ({ data: kbs, isLoading: false }) };
-});
-vi.mock("./role-permission-hooks", async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, useMyRoleRefs: () => ({ roleIds: new Set<string>(), isSuperOrAdmin: false, isLoading: false }) };
 });
 
 import { LibraryScopePanel } from "./LibraryScopePanel";
@@ -93,6 +89,8 @@ describe("库权限面板 · 一行式新形态", () => {
     // 一个库一行、一行三个勾选
     expect((html.match(/type="checkbox"/g) ?? []).length).toBe(6);
     expect(html).toContain("设置");
+    // 库级「允许分享」总闸不在这里（只在各库设置页），面板必须把这句话说出来
+    expect(html).toContain(LIBRARY_SHARE_SCOPE_NOTE);
   });
 
   it("可管理的库：可见与可分享都勾选且不可单独取消（可管理隐含可见 / 隐含分享权）", () => {
@@ -163,5 +161,20 @@ describe("库权限面板 · 一行式新形态", () => {
     expect(html).toContain("这个角色的库权限没取到");
     expect(html).not.toContain("可分享");
     expect(html).not.toContain("保存库权限");
+  });
+});
+
+describe("库权限面板 · 总闸不在这里（源码级护栏）", () => {
+  const src = readFileSync(new URL("./LibraryScopePanel.tsx", import.meta.url), "utf8");
+
+  it("角色面板不再挂库级「允许分享」开关块（总闸只留在各库设置页）", () => {
+    expect(src).not.toContain("ShareToggleBlock");
+    expect(src).not.toContain("useRoleScopesShareEnabled");
+  });
+
+  it("删掉开关块的位置留一句指引：总闸在库设置页，这里只定角色资格", () => {
+    expect(LIBRARY_SHARE_SCOPE_NOTE).toContain("各库设置页");
+    expect(LIBRARY_SHARE_SCOPE_NOTE).toContain("「允许分享」总闸");
+    expect(src).toContain("LIBRARY_SHARE_SCOPE_NOTE");
   });
 });

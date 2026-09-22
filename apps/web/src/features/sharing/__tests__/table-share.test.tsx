@@ -20,7 +20,12 @@ import { toastSnapshot } from "../../../components/ui";
 import { SHARE_MODE_HINT } from "../../../features/settings/role-permission/labels";
 import { ShareModeField } from "../ShareModeField";
 import { ShareLinkList } from "../ShareLinkList";
-import { shareErrorMessage, submitTableShare } from "../share-hooks";
+import {
+  SHARE_FORBIDDEN_HINT,
+  shareErrorMessage,
+  shareForbiddenMessage,
+  submitTableShare,
+} from "../share-hooks";
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 const noop = () => undefined;
@@ -196,12 +201,34 @@ describe("④ 入口接线（浮层无法 SSR，退源码断言）", () => {
     expect(SHARE_MODE_HINT).toContain("可编辑");
     expect(SHARE_MODE_HINT).toContain("自动回落只读");
     expect(SHARE_MODE_HINT).not.toContain("恒为只读");
-    for (const f of [
-      "../../../features/settings/ShareLinksPanel.tsx",
-      "../../../features/settings/role-permission/ShareToggleBlock.tsx",
-    ]) {
-      expect(read(f)).toContain("SHARE_MODE_HINT");
-      expect(read(f)).not.toContain("SHARE_READONLY_HINT");
-    }
+    // 角色面板里那份库级「允许分享」开关块（ShareToggleBlock）已下线，
+    // 总闸只剩各库设置页一处；SHARE_MODE_HINT 现只剩库设置页的链接面板消费。
+    const panel = read("../../../features/settings/ShareLinksPanel.tsx");
+    expect(panel).toContain("SHARE_MODE_HINT");
+    expect(panel).not.toContain("SHARE_READONLY_HINT");
+  });
+});
+
+describe("⑤ 角色没被授予「可分享」时的 403：弹窗内给权限原因 + 关闭出路", () => {
+  it("shareForbiddenMessage 只认 403，后端原文优先、取不到才用标准文案", () => {
+    expect(shareForbiddenMessage(new ApiError(403, { error: "后端原文" }))).toBe("后端原文");
+    expect(shareForbiddenMessage(new ApiError(403, {}))).toBe(SHARE_FORBIDDEN_HINT);
+    // 404/500 与网络错误都不是权限问题，交给原有兜底，不能伪装成「你没资格」
+    expect(shareForbiddenMessage(new ApiError(404, { error: "不存在" }))).toBeNull();
+    expect(shareForbiddenMessage(new ApiError(500, {}))).toBeNull();
+    expect(shareForbiddenMessage(new Error("网络断了"))).toBeNull();
+    expect(shareForbiddenMessage(null)).toBeNull();
+    // 兜底文案照抄后端口径，不自己另写一套
+    expect(SHARE_FORBIDDEN_HINT).toContain("需要角色被授予「可分享」或对该库有管理权");
+  });
+
+  it("两个分享弹窗都把 403 渲染成弹窗内的说明块（不是裸 toast，也不是空白）", () => {
+    const table = read("../TableShareModal.tsx");
+    expect(table).toContain("ShareForbiddenNote");
+    expect(table).toContain("shareForbiddenMessage(links.error)");
+
+    const doc = read("../../../features/kb/ShareModal.tsx");
+    expect(doc).toContain("ShareForbiddenNote");
+    expect(doc).toContain("shareForbiddenMessage(error)");
   });
 });

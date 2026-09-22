@@ -15,11 +15,15 @@ import { useShareState, useSetShare } from "./kb-hooks";
 import { withBase } from "../../api/client";
 import { COPY_FAIL_HINT_LINK, copyText } from "../../lib/clipboard";
 import { ShareDegradedNote, ShareModeField } from "../sharing/ShareModeField";
-import { shareErrorMessage } from "../sharing/share-hooks";
+import { ShareForbiddenNote } from "../sharing/ShareForbiddenNote";
+import { shareErrorMessage, shareForbiddenMessage } from "../sharing/share-hooks";
 
 export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId: string; kbId: string; kind?: "doc" | "canvas"; open: boolean; onClose: () => void }) {
-  const { data, isLoading } = useShareState(open ? docId : undefined);
+  const { data, isLoading, error } = useShareState(open ? docId : undefined);
   const setShare = useSetShare(docId, kbId);
+  // GET /share 403（角色没被授予「可分享」且无库管理权）时 data 永远为空：
+  // 不特判就会一直停在「加载中…」，看着像产品坏了，其实是你没资格。
+  const forbidden = shareForbiddenMessage(error);
 
   const [enabled, setEnabled] = useState(false);
   const [linkRole, setLinkRole] = useState<"viewer" | "editor">("viewer");
@@ -103,7 +107,11 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
 
   return (
     <Modal open={open} onClose={onClose} title="分享" width={520} footer={<Button onClick={onClose}>完成</Button>}>
-      {isLoading || !share ? (
+      {isLoading ? (
+        <div className="py-10 text-center text-gx-13 text-gx-text-hint">加载中…</div>
+      ) : forbidden ? (
+        <ShareForbiddenNote message={forbidden} onClose={onClose} />
+      ) : !share ? (
         <div className="py-10 text-center text-gx-13 text-gx-text-hint">加载中…</div>
       ) : (
         <div className="space-y-5">

@@ -98,6 +98,25 @@ export function shareErrorMessage(e: unknown, fallback: string): string {
   return fallback;
 }
 
+/**
+ * 「角色没被授予可分享」这条 403 的文案真源。
+ *
+ * 后端（收紧后）对没有「可分享」且无库管理权的成员，GET / POST 分享接口统一 403，
+ * body.error 就是这句话。前端优先原样透出后端原文（后端改口径前端不用跟着改），
+ * 只在 body 里取不到文案时才回落到这句——两个分享弹窗据此渲染「无分享权限」态。
+ */
+export const SHARE_FORBIDDEN_HINT =
+  "你没有这个库的分享权限：需要角色被授予「可分享」或对该库有管理权";
+
+/**
+ * 仅当错误是 403 时返回可读文案，其余状态码一律返回 null（调用方走原有兜底）。
+ * 非 ApiError（网络断、解析失败）也不是权限问题，同样返回 null。
+ */
+export function shareForbiddenMessage(e: unknown): string | null {
+  if (!(e instanceof ApiError) || e.status !== 403) return null;
+  return e.body?.error || SHARE_FORBIDDEN_HINT;
+}
+
 export interface SubmitTableShareArgs {
   tableId: string;
   mode: ShareMode;

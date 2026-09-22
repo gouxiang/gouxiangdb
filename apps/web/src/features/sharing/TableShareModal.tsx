@@ -20,6 +20,7 @@ import { COPY_FAIL_HINT_LINK, copyText } from "../../lib/clipboard";
 import {
   revokeErrorMessage,
   shareErrorMessage,
+  shareForbiddenMessage,
   submitTableShare,
   useCreateTableShareLink,
   useRevokeTableShareLink,
@@ -27,6 +28,7 @@ import {
 } from "./share-hooks";
 import { ShareModeField } from "./ShareModeField";
 import { ShareLinkList, shareUrlOf } from "./ShareLinkList";
+import { ShareForbiddenNote } from "./ShareForbiddenNote";
 
 export interface TableShareModalProps {
   tableId: string;
@@ -48,6 +50,9 @@ export function TableShareModal({ tableId, viewId, open, onClose }: TableShareMo
 
   // 后端现算的「本人能否开可编辑」；数据未到 / 出错时按不能（fail-closed）。
   const canGrantEdit = links.data?.canGrantEdit ?? false;
+  // 角色没被授予「可分享」且无库管理权时，GET 列表直接 403：列表读不出来、链接也建不了，
+  // 弹窗不该停在「正在读取…」，而要把后端那句权限原因摆出来。
+  const forbidden = shareForbiddenMessage(links.error);
 
   // 换表 / 切视图后重开弹窗：默认视图跟着当前视图走（用户多半就想分享眼前这一屏）
   useEffect(() => {
@@ -132,6 +137,8 @@ export function TableShareModal({ tableId, viewId, open, onClose }: TableShareMo
 
           {links.isLoading ? (
             <div className="py-6 text-center text-gx-12 text-gx-text-hint">正在读取分享链接…</div>
+          ) : forbidden ? (
+            <ShareForbiddenNote message={forbidden} onClose={onClose} />
           ) : links.isError ? (
             <div className="flex items-start gap-1.5 rounded-gx-lg border border-dashed border-gx-border bg-gx-bg px-3 py-3 text-gx-12 text-gx-text-tertiary">
               <Icon name="alertCircle" size={13} className="mt-0.5 shrink-0" />

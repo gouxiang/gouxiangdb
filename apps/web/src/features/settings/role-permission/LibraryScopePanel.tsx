@@ -17,11 +17,10 @@ import { Icon } from "../../../components/icons";
 import { useBases, useRoleScopes, useRoleScopesSave } from "../../../api/hooks";
 import { useKbList } from "../../kb/kb-hooks";
 import type { LibraryKind, OrgRoleDTO } from "@gx/shared-types";
-import { LIBRARY_KIND_LABEL, LIBRARY_SCOPE_COLUMNS } from "./labels";
+import { LIBRARY_KIND_LABEL, LIBRARY_SCOPE_COLUMNS, LIBRARY_SHARE_SCOPE_NOTE } from "./labels";
 import { scopeKey } from "./role-permission-hooks";
 import { LibraryScopeModal } from "./LibraryScopeModal";
 import { LibraryScopeRow } from "./LibraryScopeRow";
-import { ShareToggleBlock } from "./ShareToggleBlock";
 import {
   EMPTY_CONFIG,
   draftFromScopes,
@@ -216,7 +215,10 @@ export function LibraryScopePanel({ role, canEdit }: { role: OrgRoleDTO; canEdit
         </div>
       )}
 
-      <ShareToggleBlock rows={rows} />
+      <p className="flex items-start gap-1.5 text-gx-11 text-gx-text-hint">
+        <Icon name="help" size={11} className="mt-0.5 shrink-0" />
+        <span>{LIBRARY_SHARE_SCOPE_NOTE}</span>
+      </p>
 
       {editing && (
         <LibraryScopeModal
