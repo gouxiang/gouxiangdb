@@ -73,6 +73,15 @@ sharingRoutes.post("/docs/:docId/share", async (c) => {
     const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
 
+    // 库级「允许分享」总闸：只在【开启】分享时校验，关闭一律放行。
+    // 关闭也校验是错误的：总闸一关，已经开着的文档分享就再也关不掉，
+    // 反而会留下永远吊销不掉的悬空链接。关闭是收敛操作，必须放行。
+    // （canShare 只回答"这个人能不能外发"，不回答"这个库允不允许外发"——
+    //   两者都要成立才开得出去，与表侧 tableShares 的两级口径一致。）
+    if (parsed.data.shareEnabled && !(await readShareEnabled("kb", doc.kbId))) {
+      throw new HttpError(403, "该知识库未开启分享：请先到知识库设置页打开「允许分享」总闸");
+    }
+
     let token = doc.shareToken;
     if (parsed.data.shareEnabled) {
       if (!token) token = genShareToken();

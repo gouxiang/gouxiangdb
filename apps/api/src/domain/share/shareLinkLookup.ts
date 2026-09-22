@@ -150,10 +150,15 @@ export async function resolveShareTarget(token: string, now: Date = new Date()):
   }
 
   // 文档/画布令牌：沿用改造前的口径（只认 kb_docs.share_token + shareEnabled）。
-  // 知识库级「允许分享」开关目前在消费路径上并未强制（这是迁移前就存在的行为，
-  // 本次不擅自收紧——一旦收紧，所有已发出的存量文档链接会在管理员关开关时集体失效）。
+  // 库级「允许分享」总闸在这里强制，与表侧 tableShareAllowed 同口径：
+  // 库级总闸一关，已发出的存量文档/画布分享链接【当次访问即 403】，不缓存、不宽限。
+  // （代价——关总闸会让该库已发出的文档链接集体失效——产品已明确接受：
+  //   总闸关着，这个知识库就一份都发不出去；表侧早就是这个语义。）
   const doc = await loadSharedDoc(token);
   if (doc) {
+    if (!(await readShareEnabled("kb", doc.kbId))) {
+      throw new HttpError(403, "该知识库已关闭分享");
+    }
     return { type: "kb_doc", doc };
   }
 

@@ -1,7 +1,7 @@
 // apps/api/src/routes/__tests__/public.test.ts
 // 公开分享「引用闭包」接口 GET /s/:token/ref/:docId 单测。
 // 使用内存 fake prisma（不触碰真实 SQLite），直接调 Hono 实例 pub.request。
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 
 // ---- 内存文档夹具类型（仅列出 public.ts 实际用到的字段） ----
 interface FakeDoc {
@@ -50,6 +50,8 @@ function canvasJson(...refs: Array<{ key: "gxDocRef" | "gxLinkRef"; docId: strin
 
 // ---- fake prisma ----
 let docs: FakeDoc[] = [];
+/** 库级「允许分享」总闸：默认开，保证既有用例零改动；只有总闸用例会临时置 0。 */
+let kbShareEnabled = 1;
 
 vi.mock("../../db.js", () => ({
   prisma: {
@@ -57,7 +59,7 @@ vi.mock("../../db.js", () => ({
     // 解析随即回落到 kb_docs.share_token，与改造前逐字节一致。
     shareLink: { findUnique: () => Promise.resolve(null) },
     // 库级「允许分享」开关：文档分享解析会先确认所在知识库仍开着分享。
-    knowledgeBase: { findUnique: () => Promise.resolve({ shareEnabled: 1 }) },
+    knowledgeBase: { findUnique: () => Promise.resolve({ shareEnabled: kbShareEnabled }) },
     kbDoc: {
       // findShareRoot（where 带 shareToken）与目标文档查询（where 带 id）共用
       findFirst: ({ where }: { where: Record<string, unknown> }) => {
@@ -427,5 +429,72 @@ describe("buildShareReferenceClosure 直接覆盖", () => {
       shareIncludeChildren: true,
     });
     expect([...closure].sort()).toEqual(["A", "K1", "K2"]);
+  });
+});
+
+// ============ 库级「允许分享」总闸（知识库单文档分享） ============
+//
+// 产品口径：总闸关着，这个知识库就一份都发不出去——与表侧 tableShareAllowed 同口径。
+// 因此总闸一关，【已发出】的存量文档链接也当次访问即 403（不缓存、不宽限）。
+// 代价（关总闸时该库已发出的文档链接集体失效）产品已知情并接受，这里把它钉死。
+
+describe("库级总闸关闭 -> 已发出的文档分享链接当次访问即失效", () => {
+  beforeEach(() => {
+    docs = [];
+    kbShareEnabled = 1;
+  });
+  afterAll(() => {
+    kbShareEnabled = 1;
+  });
+
+  it("总闸开（默认）：文档令牌 -> 200（总闸未关时不误伤存量链接）", async () => {
+    docs = [
+      doc({ id: "OK", kind: "doc", title: "可访问", shareEnabled: true, shareToken: "tok-open" }),
+    ];
+    const r = await getRoot("tok-open");
+    expect(r.status).toBe(200);
+    expect(r.body.doc?.id).toBe("OK");
+  });
+
+  it("★总闸关：同一枚仍有效的文档令牌 -> 403", async () => {
+    kbShareEnabled = 0;
+    docs = [
+      doc({ id: "OFF", kind: "doc", title: "总闸已关", shareEnabled: true, shareToken: "tok-closed" }),
+    ];
+    const r = await getRoot("tok-closed");
+    expect(r.status).toBe(403);
+    expect(r.body.error).toContain("知识库已关闭分享");
+  });
+
+  it("★总闸关：子文档路径 /s/:token/doc/:docId 同样 403", async () => {
+    kbShareEnabled = 0;
+    docs = [
+      doc({
+        id: "ROOT",
+        kind: "doc",
+        shareEnabled: true,
+        shareToken: "tok-closed",
+        shareIncludeChildren: true,
+      }),
+      doc({ id: "CHILD", kind: "doc", parentId: "ROOT" }),
+    ];
+    const res = await pub.request("/s/tok-closed/doc/CHILD", { method: "GET" });
+    expect(res.status).toBe(403);
+  });
+
+  it("★总闸关：引用闭包路径 /s/:token/ref/:docId 同样 403", async () => {
+    kbShareEnabled = 0;
+    docs = [
+      doc({
+        id: "R",
+        kind: "canvas",
+        shareEnabled: true,
+        shareToken: "tok-closed",
+        content: canvasJson({ key: "gxDocRef", docId: "X" }),
+      }),
+      doc({ id: "X", kind: "doc" }),
+    ];
+    const r = await getRef("tok-closed", "X");
+    expect(r.status).toBe(403);
   });
 });

@@ -82,6 +82,9 @@ vi.mock("../../db.js", () => ({
   prisma: {
     // 全部用例走 kb_docs.share_token（历史文档分享令牌）路径：对象化链接查不到。
     shareLink: { findUnique: () => Promise.resolve(null) },
+    // 库级「允许分享」总闸：文档令牌解析会先确认所在知识库仍开着分享，
+    // 恒开即可——本文件测的是写闸与乐观锁，总闸的开关语义由 kbDocShareGate / public.test 覆盖。
+    knowledgeBase: { findUnique: () => Promise.resolve({ shareEnabled: 1 }) },
     kbDoc: {
       findFirst: ({ where }: { where: Record<string, unknown> }) => {
         if ("shareToken" in where) {
