@@ -50,7 +50,11 @@ beforeAll(async () => {
     data: { id: "u_creator", email: "creator@example.com", displayName: "C", passwordHash: "x" },
   });
   const kb = await prisma.knowledgeBase.create({
-    data: { id: "kb1", name: "kb", createdBy: "u_creator" },
+    // 开库级「允许分享」总闸：访问侧两级开关要求【库级 && 文档级】都为开才放行
+    // （shareLinkLookup.resolveShareTarget -> readShareEnabled("kb", doc.kbId)）。
+    // 本文件验证的是「匿名持票即准入、与用户解耦」，不是总闸行为；不补这一位会被总闸
+    // 先一步拦成 403「该知识库已关闭分享」，四条断言都落在错误的拒绝层上。
+    data: { id: "kb1", name: "kb", createdBy: "u_creator", shareEnabled: 1 },
   });
   const doc = await prisma.kbDoc.create({
     data: {

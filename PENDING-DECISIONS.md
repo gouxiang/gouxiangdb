@@ -205,3 +205,65 @@ mkdir -p ~/gx-trash-20260920
 **该注释已过期/错误**：`features/kb/KbSidebar.tsx:9` 仍在 `import { KbTree } from "./KbTree"`，并在 `:70` 渲染；`KbSidebar` 又被 `KbShell.tsx:8` 引用，`KbShell` 再被 `ShellGate.tsx:10` 引用 → 最终由 `App.tsx:160` 在 `GX_ENTERPRISE_NAV=off` 时挂载。
 
 **执行清理时：只认 import 证据，不认注释。** 同理 `features/shell/*` 与 `features/sidebar/Sidebar.tsx` 是 flag-off 回退壳（PRD 有"双壳保留一个迭代"的回滚承诺），不是旧垃圾。
+
+---
+
+## 11. 库级「允许分享」总闸关闭后，数据共享状态显示与访问结果不一致
+
+> 登记：2026-09-22 · 由 team-lead 指派登记（登记人 `be-share-test-fix`）。
+> ~~登记人已声明未独立验证~~ —— 该声明由 team-lead 2026-09-22 亲自取证后撤销，见下。
+>
+> **team-lead 2026-09-22 亲自取证：现象属实，但接口定位修正如下。**
+> - 不是「列表接口返回链接数」，而是**文档分享状态接口** `apps/api/src/routes/kb/sharing.ts` ——
+>   `:36`（GET）与 `:117`（PATCH 后）返回的 `shareEnabled` 取自**文档级开关** `kb_docs.shareEnabled`，
+>   **不随库级总闸联动**。
+> - 库级总闸关闭后，存量文档的 `shareEnabled` 仍为 1 → 接口仍返回 `true` → UI 显示"已分享"；
+>   但该链接实际访问 `GET /api/public/s/:token` 已被 `shareLinkLookup.ts:159-160` 拦成 403。
+>   即"显示已分享"与"访问已失效"并存。
+> - **只有存量链接会处于此状态**：`kb/sharing.ts:81` 已拦住新建（总闸关着无法新开文档分享），
+>   新增路径不会出现这个不一致。
+> - 结论：本条**不需要再取证**，可直接进入 A/B 决策。
+
+- **问题**：库级「允许分享」总闸关闭后，列表接口的「数据共享状态」仍报告该库有 N 条分享链接，
+  但这些链接实际访问已 403（`apps/api/src/domain/share/shareLinkLookup.ts:159-160` 访问侧强制）。
+  即 UI 显示"已分享"与访问结果"已失效"不一致，用户会以为是 bug。
+- **选项**：
+  - **A.** 列表接口的分享状态随总闸联动（关闸即显示"未分享"，隐藏链接数）—— 显示与行为一致，
+    但管理员看不到"关闸前曾发出过哪些链接"，排障与回收不便。
+  - **B.** 列表接口保留链接数，但状态改为"已分享（总闸关闭，当前不可访问）"，并给回收入口 ——
+    信息完整，但要多做一个状态位与文案。
+  - **C.** 维持现状（显示与访问不一致）。
+- **待决策**：A / B 选哪个。**当前为 C（临时，仅为让遗留测试清零）。**
+- **关联**：产品口径已冻结在 `shareLinkLookup.ts:152-163`（总闸一关，已发出的存量文档/画布外链当次访问即 403，
+  不缓存、不宽限；关总闸会让该库已发出的文档链接集体失效——产品已明确接受）。
+  **该访问侧行为是刻意的产品决策，不在本条的裁决范围内，不得为消除本条不一致去放宽它。**
+
+### 11.1 复核（2026-09-22，`be-share-test-fix` 逐行读码复核）
+
+**结论：team-lead 的三条取证全部属实，无一条需要更正。** 逐条对照如下：
+
+| team-lead 取证 | 复核结果 | 代码证据 |
+|---|---|---|
+| `:36` GET 返回的 `shareEnabled` 是文档级 | **属实** | `sharing.ts:36` `shareEnabled: doc.shareEnabled`（取自 `kbDoc`） |
+| `:117` 返回的 `shareEnabled` 是文档级 | **属实**，但端点动词是 **POST** 不是 PATCH | `sharing.ts:117` `shareEnabled: updated.shareEnabled`，位于 `sharingRoutes.post("/docs/:docId/share")` `:60` |
+| 两者都不随库级总闸联动 | **属实** | 两个 handler 只有 `:29` / `:81` 处读 `readShareEnabled("kb", ...)`，均未回写 `shareEnabled` 字段 |
+| 总闸关 → 接口仍 `true` → 访问却 403 | **属实** | `shareLinkLookup.ts:157-162`：`loadSharedDoc`（要求 `kb_docs.shareEnabled` 仍为 1）之后紧跟 `readShareEnabled("kb", doc.kbId)`，不满足即 403 |
+| `:81` 已拦住新建 | **属实** | `sharing.ts:81` `if (parsed.data.shareEnabled && !(await readShareEnabled("kb", doc.kbId))) throw 403` |
+
+**补两条会影响 A/B 取舍的事实（原条目未包含，建议一并纳入决策）：**
+
+1. **GET 早就同时返回了库级总闸值，但它叫 `shareAllowed` 且在 `:35`（`shareEnabled` 的上一行）。**
+   即接口侧**并不缺数据**——`shareAllowed=false && shareEnabled=true` 这个组合已经能被前端直接读出。
+   真正的缺口是 **POST 响应（`:115-127`）没有回 `shareAllowed`**，所以刚改完状态的那一瞬间客户端拿不到总闸值，
+   只能拿旧的。也就是说：**选项 B 在 GET 路径上不需要新增后端字段**，只需要前端按两个位组合渲染；
+   POST 响应补一个 `shareAllowed` 即可（与 GET 对齐口径，属同一处的小改动）。
+
+2. **关总闸不会清 `kb_docs.shareEnabled`，链接是「休眠」不是「消失」——重开总闸会立刻全部复活。**
+   依据：`shareLinkLookup.ts:157-162` 每次访问**现算** `readShareEnabled`（注释明写"不缓存、不宽限"），
+   而 `kb_docs.shareEnabled` 从未被总闸回写。所以：
+   - **选项 A 会主动误导**：它让管理员以为"未分享/链接已不存在"，但重开总闸的下一秒这些链接原地复活，
+     管理员对自己"已经没有外链"的判断是假的——这是安全相关的误判，不只是文案问题。
+   - **选项 B 与实际行为一致**（休眠 + 当前不可访问），且天然给出"要真正吊销得逐条关掉分享"的回收路径。
+
+**复核倾向（供拍板参考，非结论）：选 B。** 理由：A 会掩盖"链接仍在、可复活"这一事实；B 与
+`shareLinkLookup.ts` 的现算语义一致，且 GET 侧已有 `shareAllowed`，改动量比条目里估的小。

@@ -20,7 +20,9 @@ beforeAll(async () => {
   for (const r of LEGACY_ROLES) await h.createUser(`bu_${r}`);
   await h.createUser("bu_none");
   await h.grantRole("bu_owner"); // 硬规则 B：只有超级管理员/管理员建得起库
-});
+  // 显式超时：setupCharHarness 内含 prisma migrate deploy，机器高负载时很容易超过
+  // vitest 默认 10s 的 hook 超时，整个文件会被判 Failed Suite 而一条用例都跑不到。
+}, 120000);
 afterAll(() => h.cleanup());
 
 async function call(method: string, url: string, userId: string | null, body?: unknown): Promise<Response> {
@@ -165,7 +167,11 @@ describe("匿名 public resolveShare 不查成员/ACL/auth_policies", () => {
   const spies: Array<ReturnType<typeof vi.spyOn>> = [];
 
   beforeAll(async () => {
-    const kb = await h.prisma.knowledgeBase.create({ data: { name: "公开库", createdBy: "bu_owner" } });
+    // 开库级「允许分享」总闸：本 describe 验证的是「匿名通道不查成员/ACL/auth_policies」，
+    // 不是总闸行为。总闸关着会被 shareLinkLookup 先拦成 403「该知识库已关闭分享」，用例就
+    // 断言不到它声称要验证的东西。第三条用例尤其如此——它本就期望 403，但期望的是档位判定的
+    // 「只读」，而不是总闸文案，不开总闸就永远走不到那一步。
+    const kb = await h.prisma.knowledgeBase.create({ data: { name: "公开库", createdBy: "bu_owner", shareEnabled: 1 } });
     const root = await h.prisma.kbDoc.create({
       data: { id: "m4share_root", kbId: kb.id, kind: "doc", title: "分享根", content: "r", createdBy: "bu_owner", updatedBy: "bu_owner" },
     });

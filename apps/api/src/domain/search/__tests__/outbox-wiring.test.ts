@@ -65,10 +65,15 @@ beforeAll(async () => {
   await h.grantRole(OWNER);
   await seedTable();
   await h.prisma.$transaction([
-    h.prisma.knowledgeBase.create({ data: { id: KB, name: "w kb", createdBy: OWNER } }),
+    // 开库级「允许分享」总闸：ANON 公开写同样要先过访问侧两级开关（库级 && 文档级）。
+    // 本组用例验证的是「outbox 同事务产出 upsert 事件」，不是总闸行为；不开这一位，
+    // 请求会停在 403「该知识库已关闭分享」，压根到不了 outbox 写入那一步。
+    h.prisma.knowledgeBase.create({ data: { id: KB, name: "w kb", createdBy: OWNER, shareEnabled: 1 } }),
     h.prisma.kbMember.create({ data: { id: "m5w_km", kbId: KB, userId: OWNER, role: "owner" } }),
   ]);
-});
+  // 显式超时：makeNavHarness 内含建库与迁移播种，机器高负载时容易超过 vitest 默认
+  // 10s 的 hook 超时，整个文件会被判 Failed Suite 而一条用例都跑不到。
+}, 120000);
 
 afterAll(async () => {
   await stopFailing(h).catch(() => undefined);

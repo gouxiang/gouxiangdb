@@ -272,7 +272,9 @@ describe("AC-M2-1 对抗 8：匿名公开外链不受成员停用影响（§5-D.
     await h.grantSystemRole("u_o7");
     const ot = await h.token("u_o7");
 
-    await h.prisma.knowledgeBase.create({ data: { id: "kb_share", name: "kb", createdBy: "u_sharer" } });
+    // 开库级「允许分享」总闸：本用例验证的是「成员停用不影响匿名外链」，不是总闸行为；
+    // 总闸关着会被 shareLinkLookup 先一步拦成 403，断言落在与成员停用无关的拒绝层上。
+    await h.prisma.knowledgeBase.create({ data: { id: "kb_share", name: "kb", createdBy: "u_sharer", shareEnabled: 1 } });
     await h.createUser("u_sharer");
     await h.prisma.kbDoc.create({
       data: {

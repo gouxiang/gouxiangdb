@@ -53,7 +53,7 @@ beforeAll(() => {
   fs.mkdirSync(path.join(tmpRoot, "migrations"));
   fs.copyFileSync(path.resolve("prisma/schema.prisma"), path.join(tmpRoot, "schema.prisma"));
   const dirs = migDirs();
-  expect(dirs.length).toBe(32); // M6 起 22 -> 23（PAT/mcp_idempotency 两表），首次部署管理员初始化 +1，实体 icon/iconColor DDL +1，owner create_library 补位 +1，通讯录五件套 +1，权限核心模型角色升级 +1，角色×库视野表 +1，分享链接对象化 +1，协同 collab_docs 旁路表 +1，角色×库独立「可分享」位 canShare +1
+  expect(dirs.length).toBe(33); // M6 起 22 -> 23（PAT/mcp_idempotency 两表），首次部署管理员初始化 +1，实体 icon/iconColor DDL +1，owner create_library 补位 +1，通讯录五件套 +1，权限核心模型角色升级 +1，角色×库视野表 +1，分享链接对象化 +1，协同 collab_docs 旁路表 +1，角色×库独立「可分享」位 canShare +1，表单设计器布局版本表 form_layout_versions +1
   for (const name of dirs.slice(0, PRE_ORG_COUNT)) {
     fs.cpSync(path.resolve("prisma/migrations", name), path.join(tmpRoot, "migrations", name), { recursive: true });
   }
@@ -99,7 +99,7 @@ describe("旧库（前 12 迁移）升级到 30 迁移", () => {
     const applied = db.prepare(
       "SELECT migration_name FROM _prisma_migrations WHERE rolled_back_at IS NULL ORDER BY finished_at",
     ).all() as Array<{ migration_name: string }>;
-    expect(applied).toHaveLength(32); // 迁移 #31 协同 collab_docs 旁路表 + #32 角色×库 canShare 独立分享位
+    expect(applied).toHaveLength(33); // 迁移 #31 协同 collab_docs 旁路表 + #32 角色×库 canShare 独立分享位 + #33 表单设计器布局版本表
     expect(applied.map((r) => r.migration_name)).toContain("20260915090000_enterprise_org_ddl");
     expect(applied.map((r) => r.migration_name)).toContain("20260915090100_enterprise_org_backfill");
     expect(applied.map((r) => r.migration_name)).toContain("20260916100000_owner_manage_menu");
@@ -154,10 +154,10 @@ describe("旧库（前 12 迁移）升级到 30 迁移", () => {
     expect((db.prepare("SELECT count(*) n FROM kb_members").get() as { n: number }).n).toBe(1);
   });
 
-  it("再 deploy 一次幂等：仍 32 applied，owner 六动作串不变且只一行，legacy 投影不重复增长", async () => {
+  it("再 deploy 一次幂等：仍 33 applied，owner 六动作串不变且只一行，legacy 投影不重复增长", async () => {
     expect(() => deploy(path.resolve("prisma/schema.prisma"))).not.toThrow();
     const n = (db.prepare("SELECT count(*) n FROM _prisma_migrations").get() as { n: number }).n;
-    expect(n).toBe(32);
+    expect(n).toBe(33);
     // 权限核心模型迁移幂等：超级管理员仍恰为全动作串，连跑不被改写/不重复追加。
     const ownerPerms = db.prepare("SELECT permissions FROM roles WHERE id='role_owner'").get() as { permissions: string };
     expect(ownerPerms.permissions).toBe(
