@@ -2,8 +2,9 @@
 // 权限管理 · 下半 (B)：库权限——一个库一行，行内直给「可管理 / 可见 / 可分享」三个勾选 + 最右「设置」。
 //
 // 两条纪律（与旧「两份多选清单」版一致，只是换了呈现）：
-//   1. 可管理隐含可见。后端 visible=false 且 canManage=true 时人根本进不去这个库，
-//      界面就不该允许勾出「管得了但看不见」这种无法解释的状态——勾了可管理，可见自动跟上并锁住。
+//   1. 可管理隐含可见、可分享也隐含可见。后端 visible=false 且 canManage=true 时人根本进不去这个库，
+//      界面就不该允许勾出「管得了但看不见 / 分享得了但看不见」这种无法解释的状态——
+//      勾了可管理或可分享，可见自动跟上并锁住。
 //   2. 清单里的库 = 「当前登录者看得见的库」∪「这个角色已经被授过的库」。
 //      只取前者会让一条已存在的授权从界面上凭空消失（保存时被整份替换掉），
 //      等于悄悄收回权限——宁可显示成一个看得到名字的条目也不能让它消失。
@@ -112,9 +113,15 @@ export function LibraryScopePanel({ role, canEdit }: { role: OrgRoleDTO; canEdit
 
   const toggleShare = (key: string, on: boolean) => {
     const share = new Set(draft.share);
-    if (on) share.add(key);
-    else share.delete(key);
-    patch({ ...draft, share });
+    const visible = new Set(draft.visible);
+    if (on) {
+      share.add(key);
+      // 可分享隐含可见：看不见这个库就谈不上把它的内容分享出去，勾分享时把可见一并带上。
+      visible.add(key);
+    } else {
+      share.delete(key);
+    }
+    patch({ ...draft, share, visible });
   };
 
   async function submit() {

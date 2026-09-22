@@ -80,14 +80,14 @@ describe("canShare 显式分享位", () => {
     expect(items[0]!.canShare).toBe(false);
   });
 
-  it("只显式勾了可分享的库也会输出——整份替换下不能静默丢掉这次授权", () => {
-    const draft = draftFromScopes(
-      [scope({ visible: false, canManage: false, canShare: true })],
+  it("只显式勾了可分享的库也会输出，且可分享隐含可见——既不静默丢授权，也不写出「分享得了却看不见」", () => {
+    const items = draftToItems(
+      draftFromScopes([scope({ visible: false, canManage: false, canShare: true })]),
     );
-    const items = draftToItems(draft);
     expect(items).toHaveLength(1);
+    expect(items[0]!.canManage).toBe(false);
+    expect(items[0]!.visible).toBe(true);
     expect(items[0]!.canShare).toBe(true);
-    expect(items[0]!.visible).toBe(false);
   });
 
   it("三份集合都没提过的库不输出（真·撤销）", () => {

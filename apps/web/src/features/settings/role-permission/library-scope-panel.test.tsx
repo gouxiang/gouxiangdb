@@ -3,7 +3,7 @@
 //
 // 锁新形态与三条界面纪律：
 //   1. 一行式：一行里同时有库名和「可管理 / 可见 / 可分享」三个勾选，列头各带问号说明；
-//   2. 可管理隐含可见 / 隐含分享权：勾了可管理，可见与可分享都勾选且不可单独取消；
+//   2. 可管理隐含可见 / 隐含分享权、可分享隐含可见：勾了可管理或可分享，可见都勾选且不可单独取消；
 //   3. 库视野接口出错时不渲染任何可勾框，也不给保存按钮（整份替换下误保存 = 清空授权）。
 
 import { describe, it, expect, vi } from "vitest";
@@ -109,6 +109,22 @@ describe("库权限面板 · 一行式新形态", () => {
     expect(countAttr(html, "checked")).toBe(3);
     // 可见、可分享各置灰一次（可管理本身仍可取消）；再加上底部「保存库权限」默认无改动即置灰
     expect(countAttr(html, "disabled")).toBe(3);
+  });
+
+  it("只授可分享的库：可见自动勾上并置灰（可分享隐含可见）", () => {
+    bases = [{ id: "b1", name: "客户库" }];
+    kbs = [];
+    scopes = [
+      {
+        id: "s1", roleId: "r1", libraryKind: "base", libraryId: "b1", libraryName: "客户库",
+        canManage: false, visible: false, canShare: true, tables: {}, fields: {}, updatedAt: "",
+      },
+    ];
+    const html = render();
+    // 可见与可分享各勾上（可管理不勾）
+    expect(countAttr(html, "checked")).toBe(2);
+    // 可见置灰不可单独取消；底部「保存库权限」无改动亦置灰
+    expect(countAttr(html, "disabled")).toBe(2);
   });
 
   it("未进库的库：不能配，最右「设置」置灰", () => {

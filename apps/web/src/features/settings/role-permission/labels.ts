@@ -106,7 +106,7 @@ export const LIBRARY_SCOPE_COLUMNS: readonly LibraryScopeColumn[] = [
   {
     key: "share",
     label: "可分享",
-    hint: "能把这个库的内容分享出去。库级「允许分享」总开关打开时才生效；勾了可管理自动就有分享权。",
+    hint: "能把这个库的内容分享出去。库级「允许分享」总开关打开时才生效；勾了可分享就一定能进这个库，勾了可管理自动就有分享权。",
   },
 ];
 

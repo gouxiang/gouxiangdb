@@ -78,9 +78,10 @@ export function draftToItems(draft: LibraryScopeDraft): PutLibraryScopeInput[] {
       libraryKind: parsed.kind,
       libraryId: parsed.libraryId,
       canManage: draft.manage.has(key),
-      // 可管理隐含可见：后端 visible=false 且 canManage=true 时人进不去，
-      // 只会出现「管得了但看不见」这种无法解释的状态。
-      visible: draft.visible.has(key) || draft.manage.has(key),
+      // 可管理隐含可见、可分享也隐含可见：后端收到 visible=false 却 canManage/canShare=true 时
+      // 会出现「管得了/分享得了却看不见」这种无法解释的状态，所以这里把两条隐含关系一起兜住。
+      // 界面上 toggleManage/toggleShare 也已把可见带上，这里是纯函数的第二道防线（逐条 DTO 回写也不破例）。
+      visible: draft.visible.has(key) || draft.manage.has(key) || draft.share.has(key),
       // 只回写显式授予的分享位；可管理带来的分享权由后端 canManage||canShare 现算，不在这里重复。
       canShare: draft.share.has(key),
       config: draft.config.get(key) ?? EMPTY_CONFIG,

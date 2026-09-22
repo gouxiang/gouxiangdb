@@ -1,9 +1,10 @@
 // apps/web/src/features/settings/role-permission/LibraryScopeRow.tsx
 // 库权限一行：库名 + 「可管理 / 可见 / 可分享」三个勾选 + 最右「设置」。
 //
-// 两条派生规则与后端同口径：
+// 三条派生规则与后端同口径：
 //   ① 可管理隐含可见（勾了可管理，可见必为勾选且不可单独取消）；
-//   ② 可管理隐含分享权（canToggleShare = canManage || canShare）——勾了可管理时，
+//   ② 可分享隐含可见（勾了可分享，可见同样锁住）——看不见这个库就分享不了它；
+//   ③ 可管理隐含分享权（canToggleShare = canManage || canShare）——勾了可管理时，
 //      可分享显示为已勾且置灰。这不是「假勾」：后端确实已经给了分享权。
 //
 // 拆出来的原因：整块面板要保住单文件 ≤300 行，行是天然可独立的一部分。
@@ -34,9 +35,10 @@ export function LibraryScopeRow({
   /** 未传（canEdit=false）时「设置」一律置灰。 */
   onConfigure?: () => void;
 }) {
-  // 可管理隐含可见：可见的勾选状态与「能否单独取消」都由可管理决定。
-  const visibleChecked = visible || manageable;
-  const visibleLocked = manageable;
+  // 可见的勾选状态与「能否单独取消」由「可管理」与「可分享」共同决定：
+  //   可管理隐含可见、可分享也隐含可见——看不见这个库，就谈不上管它、也谈不上分享它的内容。
+  const visibleChecked = visible || manageable || share;
+  const visibleLocked = manageable || share;
   // 可管理隐含分享权：必须勾、且锁住。没勾可管理时自由勾。
   const shareChecked = share || manageable;
   const shareLocked = manageable;
