@@ -87,9 +87,10 @@ export async function resolveTableShareCaps(
 
 /**
  * 文档/画布分享的当次档位。
- * 注意：文档正文的匿名写仍关闭（routes/public.ts 的 PUT 一律 403，属既有口径不破坏），
- * 这里的档位用于驱动【文档/画布中嵌入的数据表预览】能不能写（需求 4）。
- * 因此响应里文档的 canEdit 恒 false，mode 才是宿主分享的真实档位。
+ * 口径（2026-09 二版）：**文档正文的匿名写已放开**，但只限「可编辑」档位的链接——
+ * 判定链见 routes/publicDoc.ts 的 PUT /s/:token/doc/:docId/content（可写范围 → 档位 → 乐观锁）。
+ * 因此 canEdit 不再恒 false：它是分享人此刻内容改权的现算结果，他被降权即回落只读。
+ * mode 同时驱动【文档/画布中嵌入的数据表预览】能不能写（publicEmbed.ts）。
  */
 export async function resolveDocShareCaps(docRole: string, kbId: string, sharerId: string | null): Promise<ShareCaps> {
   const requestedMode: ShareMode = docRole === "editor" ? "edit" : "view";

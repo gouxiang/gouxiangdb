@@ -46,7 +46,7 @@ export class DocContentConflictError extends HttpError {
 }
 
 /** 档位不足 / 缺分享人：落审计后 403。与 externalRecords.deny 同口径。 */
-function deny(caps: ShareCaps, input: ExternalDocWriteInput, reason: string): never {
+function deny(caps: ShareCaps, input: ExternalDocDenyContext, reason: string): never {
   auditWrite({
     event: "share_external_denied",
     status: 403,
@@ -57,8 +57,27 @@ function deny(caps: ShareCaps, input: ExternalDocWriteInput, reason: string): ne
   throw new HttpError(403, reason);
 }
 
-/** 写前统一校验：当次能力（分享人此刻是否仍有内容改权）+ 分享人存在性。 */
-function assertDocWritable(caps: ShareCaps, input: ExternalDocWriteInput): string {
+/**
+ * 档位校验所需的上下文。
+ *
+ * 单独拆出来是因为路由层要在**解析请求体之前**先过这一关（判定链 3 档位 早于 4 乐观锁），
+ * 那时 content / baseUpdatedAt 还没解析出来；而 `ExternalDocWriteInput` 是「已解析完整」
+ * 的形状。让校验函数只依赖它真正用到的三个字段，两个调用点才都能复用。
+ */
+export interface ExternalDocDenyContext {
+  docId: string;
+  ip: string;
+  token: string;
+}
+
+/**
+ * 写前统一校验：当次能力（分享人此刻是否仍有内容改权）+ 分享人存在性。
+ *
+ * 对外导出：路由层按「可写范围 → 档位 → 乐观锁」的顺序，在解析请求体之前先过这一关，
+ * 否则「档位不足」的请求会因为 body 缺 baseUpdatedAt 被 schema 抢先打成 400 ——
+ * 权限问题报成参数问题，既误导调用方也掩盖了真实原因。
+ */
+export function assertDocWritable(caps: ShareCaps, input: ExternalDocDenyContext): string {
   if (!caps.canEdit || caps.mode !== "edit") {
     deny(caps, input, "该分享链接为只读");
   }

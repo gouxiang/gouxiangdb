@@ -30,9 +30,10 @@ sharingRoutes.get("/docs/:docId/share", async (c) => {
         shareRole: doc.shareRole,
         shareIncludeChildren: doc.shareIncludeChildren,
         shareUrl: doc.shareToken ? `/s/${doc.shareToken}` : null,
-        // 文档正文的匿名写仍关闭，故 canEdit 恒 false；mode 才是宿主分享的真实档位，
-        // 它决定文档内【嵌入的数据表预览】能不能写（见 publicEmbed.ts）。
-        canEdit: false,
+        // 文档正文的匿名写已按「可编辑链接」口径放开（PUT /api/public/s/:token/doc/:docId/content）。
+        // canEdit 由分享人【此刻】的内容改权现算：他被降权/移出后当场回落只读。
+        // 未开启分享时没有链接可走，一律 false（不因历史档位残留而误报可写）。
+        canEdit: doc.shareEnabled ? caps.canEdit : false,
         mode: caps.mode,
         requestedMode: caps.requestedMode,
         degraded: caps.degraded,
@@ -88,6 +89,9 @@ sharingRoutes.post("/docs/:docId/share", async (c) => {
         updatedBy: userId,
       },
     });
+    // 落库后按新档位重算（与 GET 同一判定 resolveDocShareCaps，不会两套口径）：
+    // 刚把分享人绑成当前用户（shareCreatedBy=userId），故这里算出的就是「本次开关后的真实能力」。
+    const caps = await resolveDocShareCaps(updated.shareRole, updated.kbId, updated.shareCreatedBy);
     return c.json({
       share: {
         shareEnabled: updated.shareEnabled,
@@ -95,8 +99,11 @@ sharingRoutes.post("/docs/:docId/share", async (c) => {
         shareRole: updated.shareRole,
         shareIncludeChildren: updated.shareIncludeChildren,
         shareUrl: updated.shareToken ? `/s/${updated.shareToken}` : null,
-        canEdit: false,
-        mode: updated.shareEnabled && updated.shareRole === "editor" ? "edit" : "view",
+        canEdit: updated.shareEnabled ? caps.canEdit : false,
+        mode: updated.shareEnabled ? caps.mode : "view",
+        requestedMode: caps.requestedMode,
+        degraded: caps.degraded,
+        canGrantEdit: await canSharerGrantDocEdit(userId, doc.kbId),
       },
     });
   } catch (e) {

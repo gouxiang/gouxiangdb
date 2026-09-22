@@ -20,7 +20,7 @@ import { HttpError, errorResponse } from "../guards.js";
 import { sourceIp } from "../utils/client-ip.js";
 import { resolveShareTarget, type ShareDocRow } from "../domain/share/shareLinkLookup.js";
 import { resolveDocShareCaps } from "../domain/share/shareCaps.js";
-import { DocContentConflictError, externalSaveDocContent } from "../domain/share/externalDoc.js";
+import { assertDocWritable, DocContentConflictError, externalSaveDocContent } from "../domain/share/externalDoc.js";
 
 export const publicDocRoutes = new Hono();
 
@@ -268,13 +268,15 @@ publicDocRoutes.put("/s/:token/doc/:docId/content", async (c) => {
       if (!set.has(docId)) throw new HttpError(403, "该内容未包含在本次分享范围内");
     }
 
+    // 3) 档位（分享人当前权限现算）—— 必须早于请求体校验：档位不足是权限问题（403），
+    //    不能被缺 baseUpdatedAt 的 schema 抢先打成 400。
+    const caps = await resolveDocShareCaps(root.shareRole, root.kbId, root.shareCreatedBy);
+    assertDocWritable(caps, { docId, ip: sourceIp(c), token });
+
     const parsed = saveContentSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "参数不合法（content / baseUpdatedAt）", code: "BAD_REQUEST" }, 400);
 
-    // 3) 档位（分享人当前权限现算）
-    const caps = await resolveDocShareCaps(root.shareRole, root.kbId, root.shareCreatedBy);
-
-    // 4) + 5) 乐观锁写入 + 审计（档位不足/缺分享人在此抛 403 并落审计）
+    // 4) + 5) 乐观锁写入 + 审计（版本冲突在此抛 409）
     const saved = await externalSaveDocContent(
       { docId, content: parsed.data.content, baseUpdatedAt: new Date(parsed.data.baseUpdatedAt), ip: sourceIp(c), token },
       caps,

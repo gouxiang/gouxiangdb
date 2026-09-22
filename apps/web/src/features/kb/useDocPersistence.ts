@@ -14,7 +14,14 @@ import { useAuthStore } from "../../store/auth";
 import { authHeaders } from "../../api/authHeader";
 import { saveDraft, loadDraft, clearDraft, hasRecoverableDraft, type Draft } from "./draft";
 
-export type SaveStatus = "saved" | "saving" | "unsaved";
+/**
+ * saved   —— 已整篇 PUT 落库（单机/协同不可用时的路径）。
+ * synced  —— 协同模式：内容已进房间，由服务端统一落库。
+ *   ★ 两者不能混用：协同下握手成功只代表「内容进了房间」，正文落库是服务端 30s 冷归结
+ *     的事，此时写「已保存到云端」是谎报（用户会以为关掉浏览器也没事）。故单独一档，
+ *     文案用「已同步」，与「已保存」的持久化承诺区分开。
+ */
+export type SaveStatus = "saved" | "synced" | "saving" | "unsaved";
 
 export function useDocPersistence(
   docId: string,
@@ -22,7 +29,17 @@ export function useDocPersistence(
   serverContent: string | undefined,
   canEdit: boolean,
   serverVersion?: number,
+  /**
+   * 阶段 2 · 协同分支（**渐进增强，不是替换**）：
+   * 协同连接可用时为 true → 不再整篇 PUT（内容由服务端统一落库，整篇 PUT 会与 CRDT 抢写、
+   * 且撞 DESIGN §3.3 的乐观锁语义）；不可用时为 false → 原样走现有的防抖 1200ms PUT。
+   * 本地草稿照写不误：它是崩溃兜底，与谁负责落库无关。
+   */
+  collabActive = false,
 ) {
+  // 用 ref 读取，避免把 collabActive 变成下面所有回调的依赖（否则每次协同状态变化都会换引用）
+  const collabActiveRef = useRef(collabActive);
+  collabActiveRef.current = collabActive;
   const qc = useQueryClient();
   const [status, setStatus] = useState<SaveStatus>("saved");
   const [recovered, setRecovered] = useState<Draft | null>(null);
@@ -147,8 +164,15 @@ export function useDocPersistence(
       if (!canEdit) return;
       pending.current = content;
       if (content !== lastSaved.current) setStatus("unsaved");
-      // 本地草稿（节流写，崩溃/刷新兜底）
+      // 本地草稿（节流写，崩溃/刷新兜底）—— 协同接通时也照写：草稿是崩溃兜底，不是落库手段
       saveDraft(docIdRef.current, { content, baseContent: baseContent.current });
+      // 协同可用：内容已在房间内，由服务端统一落库，不再整篇 PUT（见参数注释）。
+      // 状态用 synced 而非 saved：此刻只保证"进了房间"，不保证已落进正文表。
+      if (collabActiveRef.current) {
+        if (debounce.current) clearTimeout(debounce.current);
+        setStatus("synced");
+        return;
+      }
       if (debounce.current) clearTimeout(debounce.current);
       debounce.current = setTimeout(() => {
         if (pending.current != null) void persist(pending.current);
@@ -160,6 +184,13 @@ export function useDocPersistence(
   // 手动保存（按钮）
   const saveNow = useCallback(async () => {
     if (debounce.current) clearTimeout(debounce.current);
+    // 协同可用：内容随打随同步，服务端统一落库 —— 不再发整篇 PUT。
+    // 但必须给反馈：按钮点了没反应是"反馈缺失"，用户会怀疑没保存上。
+    if (collabActiveRef.current) {
+      setStatus("synced");
+      toast("已在协同中实时同步，无需手动保存", "success");
+      return;
+    }
     const content = pending.current ?? lastSaved.current;
     await persist(content, { manual: true });
   }, [persist]);
@@ -170,6 +201,8 @@ export function useDocPersistence(
     if (content == null || content === lastSaved.current || !canEdit) return;
     // 先留草稿兜底（即使网络请求没发出去也不丢）
     saveDraft(docIdRef.current, { content, baseContent: baseContent.current });
+    // 协同可用：整篇 PUT 会让本地快照与 CRDT 抢写（DESIGN §3.3），flush 一并让位
+    if (collabActiveRef.current) return;
     try {
       const token = useAuthStore.getState().token;
       void fetch(`${API_BASE_URL}/api/kb/docs/${docIdRef.current}/content`, {

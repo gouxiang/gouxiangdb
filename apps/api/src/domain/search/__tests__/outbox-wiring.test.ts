@@ -242,9 +242,10 @@ describe("文档/画布写点：建/内容/改名/移动/软删恢复/共生死"
 });
 
 describe("ANON 公开写与表级联", () => {
-  // 产品口径变更（M7 / 权限核心模型二）：分享链接对外一律只读，匿名写整体关闭，
-  // 故公开编辑不再产生 upsert 事件。这里改锁"匿名写被拒且不产事件"。
-  it("匿名公开编辑已被关闭：403 且不产生 upsert 事件", async () => {
+  // 产品口径（二版）：分享链接**可编辑档位**下匿名写已放开（PUT /api/public/s/:token/doc/:id/content）。
+  // 但仍不是"有链接就能改"——还要过两关：① 分享人此刻仍有内容改权；② 乐观锁 baseUpdatedAt 一致。
+  // 本用例锁的是【缺分享人】这条拒绝路径：shareCreatedBy 为空 → 档位现算为只读 → 403 且不产事件。
+  it("可编辑链接但缺分享人：403 且不产生 upsert 事件", async () => {
     const docId = "m5w_pub";
     await h.prisma.kbDoc.create({
       data: {
@@ -260,6 +261,31 @@ describe("ANON 公开写与表级联", () => {
     expect(res.status).toBe(403);
     const evs = await eventsFor("doc", docId);
     expect(evs.some((e) => e.op === "upsert" && e.status === "pending")).toBe(false);
+  });
+
+  // 正向：分享人（这里是超级管理员 OWNER）仍有内容改权 + 乐观锁一致 → 匿名写放行并落成 upsert 事件。
+  // 这条是"可编辑链接到底能不能改"的唯一机械证据，删了就只剩拒绝路径，回归时看不出能力被改没。
+  it("可编辑链接且分享人有改权：200 写入并产生 upsert 事件", async () => {
+    const docId = "m5w_pub_edit";
+    const created = await h.prisma.kbDoc.create({
+      data: {
+        id: docId, kbId: KB, kind: "doc", title: "可编辑公开文档", content: "原正文",
+        shareEnabled: true, shareToken: "m5w-pub-edit-token", shareRole: "editor",
+        shareCreatedBy: OWNER, shareIncludeChildren: false, createdBy: OWNER, updatedBy: OWNER,
+      },
+    });
+    const res = await h.app.request("/api/public/s/m5w-pub-edit-token/doc/m5w_pub_edit/content", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content: "# 匿名写入正文 检索词丙",
+        baseUpdatedAt: created.updatedAt.toISOString(),
+      }),
+    });
+    expect(res.status).toBe(200);
+    const after = await h.prisma.kbDoc.findUnique({ where: { id: docId }, select: { content: true } });
+    expect(after?.content).toBe("# 匿名写入正文 检索词丙");
+    const evs = await eventsFor("doc", docId);
+    expect(evs.some((e) => e.op === "upsert" && e.status === "pending")).toBe(true);
   });
 
   it("清空表：被清记录逐条 delete", async () => {
