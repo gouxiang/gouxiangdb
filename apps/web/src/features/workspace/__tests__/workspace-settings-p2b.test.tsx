@@ -93,7 +93,7 @@ function renderAt(location: string, node: React.ReactNode): string {
   ).replace(/<!--[^>]*-->/g, "");
 }
 
-const GENERAL = "权限、语义检索与回收站都在这里配置";
+const GENERAL = "权限与语义检索都在这里配置";
 
 /** 角色清单桩的装填器：顺序即面板顺序，默认选中第一枚（超级管理员第一）。 */
 function setRoles(order: typeof PRESET_ROLES) {

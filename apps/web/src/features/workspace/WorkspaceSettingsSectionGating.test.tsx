@@ -12,7 +12,7 @@ import { renderToString } from "react-dom/server";
 import { StaticRouter } from "react-router-dom/server";
 import { Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 let enterpriseOn = false;
 let isOwner = false;
@@ -57,10 +57,10 @@ const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 const pageSrc = read("./WorkspaceSettingsPage.tsx");
 
 /** 通用分区的锚点文案：右内容「有内容」的判据 */
-const GENERAL = "权限、语义检索与回收站都在这里配置";
+const GENERAL = "权限与语义检索都在这里配置";
 
 function renderPage(location = "/workspace/settings"): string {
-  // 资产/回收站/导航子页内部用 useQuery（SSR 不跑 queryFn），需要 QueryClient 上下文。
+  // 资产/导航子页内部用 useQuery（SSR 不跑 queryFn），需要 QueryClient 上下文。
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderToString(
     <QueryClientProvider client={qc}>
@@ -88,7 +88,7 @@ describe("A. 未知 / 空 splat 一律落通用", () => {
     const html = renderPage("/workspace/settings/not-a-section");
     expect(html).toContain(GENERAL);
     expect(html).not.toContain("智能数据库");
-    expect(html).not.toContain("数据库回收站");
+    expect(html).not.toContain("回收站");
     expect(html).not.toContain("打开通讯录");
   });
 
@@ -138,12 +138,9 @@ describe("B. gated 分区只看 effectiveSection（不看 URL 原始 section）"
     expect(renderPage("/workspace/settings/mcp")).toContain("为 AI 客户端签发访问令牌");
   });
 
-  it("非 gated 分区直戳不受影响（trash）", () => {
-    expect(renderPage("/workspace/settings/trash")).toContain("数据库回收站");
-  });
-
-  // 通讯录与资产分区已移除（一级导航已有通讯录入口；单库设置改由 L1「…」菜单进入）。
-  it("已下线的 /contacts 与 /assets 分区直戳都回落通用，不空白", () => {
+  // 通讯录、资产与回收站分区已移除（一级导航已有通讯录入口；单库设置改由 L1「…」菜单进入；
+  // 回收站与数据库/知识库各自就近的回收站重复）。旧链接一律回落通用，不白屏、不留死链。
+  it("已下线的 /contacts、/assets 与 /trash 分区直戳都回落通用，不空白", () => {
     isOwner = true;
     const contacts = renderPage("/workspace/settings/contacts");
     expect(contacts).toContain(GENERAL);
@@ -151,6 +148,10 @@ describe("B. gated 分区只看 effectiveSection（不看 URL 原始 section）"
     const assets = renderPage("/workspace/settings/assets");
     expect(assets).toContain(GENERAL);
     expect(assets).not.toContain("智能数据库");
+    const trash = renderPage("/workspace/settings/trash");
+    expect(trash).toContain(GENERAL);
+    expect(trash).not.toContain("数据库回收站");
+    expect(trash).not.toContain("知识库回收站");
   });
 
   it("effectiveSection 由 visibleSections 反查得出（单一真源）", () => {
@@ -163,15 +164,25 @@ describe("B. gated 分区只看 effectiveSection（不看 URL 原始 section）"
   });
 });
 
-describe("回收站聚合入口", () => {
-  it("/trash 同时给出数据库与知识库回收站入口", () => {
-    const html = renderPage("/workspace/settings/trash");
-    expect(html).toContain("数据库回收站");
-    expect(html).toContain("知识库回收站");
+// 回收站聚合入口已下线：与数据库、知识库各自就近的回收站重复。
+// 删的是「聚合入口」，两个模块自己的回收站页面与侧边栏入口都不动——
+// 这里锁住的是「不留无效引用」，以及「删聚合 ≠ 删模块回收站」。
+describe("回收站聚合入口已下线（各模块自己的回收站保留）", () => {
+  it("左二级不再有「回收站」分区，通用页也不再出现回收站字样", () => {
+    expect(pageSrc).not.toContain('key: "trash"');
+    expect(pageSrc).not.toContain("TrashSection");
+    expect(renderPage()).not.toContain("回收站");
   });
 
-  it("左二级出现「回收站」分区（且是新增的第 7 个分区，不动原有顺序）", () => {
-    expect(pageSrc).toContain('key: "trash", label: "回收站"');
+  it("聚合入口组件文件已删除，页面不再 import 它", () => {
+    expect(pageSrc).not.toContain("WorkspaceSettingsSections");
+    expect(existsSync(new URL("./WorkspaceSettingsSections.tsx", import.meta.url))).toBe(false);
+  });
+
+  it("数据库与知识库各自的回收站路由仍在（删聚合入口 ≠ 删模块回收站）", () => {
+    const app = read("../../App.tsx");
+    expect(app).toContain("/base/:baseId/trash");
+    expect(app).toContain("/kb/:kbId/trash");
   });
 });
 

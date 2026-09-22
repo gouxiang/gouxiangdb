@@ -15,7 +15,6 @@ import { Icon, type IconName } from "../../components/icons";
 import { useIsWorkspaceOwner, useMyOrgActions } from "../contacts/contacts-hooks";
 import { canSeeAuthz, canSeeWorkspaceSettings } from "./lib/nav-gate";
 import { useAuthzCapability } from "../authz/useAuthzCapability";
-import { TrashSection } from "./WorkspaceSettingsSections";
 import { RolePermissionSection } from "../settings/role-permission/RolePermissionSection";
 import { EmbeddingSearchPanel } from "../search/EmbeddingSearchPanel";
 import { SearchCoveragePanel } from "../search/SearchCoveragePanel";
@@ -30,7 +29,9 @@ import { toast } from "../../components/ui";
 
 // 「通讯录」分区已移除：一级导航底部已有通讯录入口（/workspace/contacts），设置里不再重复。
 // 「资产」分区已移除：单个库/知识库的深度设置改由一级导航条目行尾的「…」菜单进入。
-type Section = "general" | "authz" | "search" | "mcp" | "trash";
+// 「回收站」分区已移除：与数据库（/base/:id/trash）、知识库（/kb/:id/trash）各自的回收站重复，
+//   聚合入口不再列；两个模块自己的回收站页面与其侧边栏就近入口保留不动。
+type Section = "general" | "authz" | "search" | "mcp";
 
 const SECTIONS: {
   key: Section;
@@ -54,7 +55,6 @@ const SECTIONS: {
   //   开/关总门，ownerOnly 会把他们一起挡在外面。口径与 canSeeWorkspaceSettings 同一处，owner 恒可见。
   { key: "search", label: "语义检索", icon: "sparkles", desc: "云端语义检索与索引覆盖度", manageOnly: true },
   { key: "mcp", label: "MCP 接入", icon: "keyRound", desc: "为 AI 客户端签发访问令牌", enterpriseOnly: true },
-  { key: "trash", label: "回收站", icon: "trash", desc: "数据库与知识库回收站入口" },
 ];
 
 const SECTION_KEYS: string[] = SECTIONS.map((s) => s.key);
@@ -242,7 +242,7 @@ export function WorkspaceSettingsPage() {
             <div className="flex flex-col gap-2">
               <h2 className="text-gx-18 font-semibold text-gx-text-primary">工作区设置</h2>
               <p className="text-gx-13 text-gx-text-tertiary">
-                权限、语义检索与回收站都在这里配置。单个数据库或知识库的设置，请在一级导航该条目行尾的「…」菜单里进入。
+                权限与语义检索都在这里配置。单个数据库或知识库的设置，请在一级导航该条目行尾的「…」菜单里进入。
               </p>
 
               {/* 上传限制（原挂知识库设置页）：本机浏览器生效、跨全部知识库 → 归全局层 */}
@@ -281,16 +281,6 @@ export function WorkspaceSettingsPage() {
                 </p>
               </div>
               <PatListPanel />
-            </div>
-          )}
-
-          {effectiveSection === "trash" && (
-            <div className="flex flex-col gap-3">
-              <h2 className="text-gx-18 font-semibold text-gx-text-primary">回收站</h2>
-              <p className="text-gx-13 text-gx-text-tertiary">
-                数据库与知识库的回收站分别从这里进入，恢复或彻底删除都在各自的回收站里完成。
-              </p>
-              <TrashSection />
             </div>
           )}
         </div>

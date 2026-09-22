@@ -33,7 +33,7 @@ vi.mock("../settings/pat-hooks", () => ({
 import { WorkspaceSettingsPage } from "./WorkspaceSettingsPage";
 
 /** 通用分区的锚点文案 */
-const GENERAL = "权限、语义检索与回收站都在这里配置";
+const GENERAL = "权限与语义检索都在这里配置";
 
 function renderPage(location = "/workspace/settings"): string {
   // 资产/导航子页内部用 useQuery（SSR 不跑 queryFn），需要 QueryClient 上下文。
