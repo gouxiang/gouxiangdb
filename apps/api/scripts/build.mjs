@@ -52,6 +52,11 @@ const external = [
   "sqlite-vec",
   // M6/S2：MCP SDK（纯 JS，含 zod/v4 子路径）；随发布包 node_modules 解析。
   "@modelcontextprotocol/sdk",
+  // 协同（批次 F）：ws 是 CJS 包，内化进 ESM 单文件产物后会在运行时执行
+  // require("events")，ESM 下抛 "Dynamic require of \"events\" is not supported"
+  // —— 真机 `node dist/index.js` 启动即崩，systemd 表现为 status=1/FAILURE。
+  // 本机 `pnpm build` 只做打包不执行产物，故这个坑只有真机启动才暴露。
+  "ws",
 ];
 
 fs.rmSync(distDir, { recursive: true, force: true });
