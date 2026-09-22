@@ -24,6 +24,8 @@ import type {
   AssignmentSubjectInput,
 } from "@gx/shared-types";
 
+import { isAdminLevelSystemKey } from "../../lib/role-policy";
+
 /** 成员目录每页大小：取服务端单页上限 100，配合前端窗口化与触底续翻。 */
 export const ORG_MEMBER_PAGE_SIZE = 100;
 
@@ -149,9 +151,8 @@ export function useIsWorkspaceOwner(): { isOwner: boolean; isLoading: boolean } 
   });
   const isOwner = useMemo(
     () =>
-      (query.data?.roles ?? []).some(
-        (r) => r.systemKey === "super_admin" || r.systemKey === "admin" || r.systemKey === "owner",
-      ),
+      // 与权限配置面（role-permission-hooks）同用一把尺子，不再各写一份字面量。
+      (query.data?.roles ?? []).some((r) => isAdminLevelSystemKey(r.systemKey)),
     [query.data],
   );
   return { isOwner, isLoading: query.isLoading };

@@ -9,6 +9,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { OrgMembers } from "../../../api/client";
 import type { LibraryKind } from "@gx/shared-types";
+import { isAdminLevelSystemKey } from "../../../lib/role-policy";
 
 /**
  * 「我属于哪些角色」。
@@ -37,11 +38,9 @@ export function useMyRoleRefs(): {
   );
   const isSuperOrAdmin = useMemo(
     // owner 是超级管理员的旧 systemKey（迁移 20260921010000 起改为 super_admin），
-    // 存量数据里仍可能出现，一并认。
-    () =>
-      (query.data?.roles ?? []).some(
-        (r) => r.systemKey === "super_admin" || r.systemKey === "admin" || r.systemKey === "owner",
-      ),
+    // 存量数据里仍可能出现，一并认。与通讯录（contacts-hooks 的 useIsWorkspaceOwner）
+    // 共用 lib/role-policy 的同一把尺子。
+    () => (query.data?.roles ?? []).some((r) => isAdminLevelSystemKey(r.systemKey)),
     [query.data],
   );
   return { roleIds, isSuperOrAdmin, isLoading: query.isLoading };

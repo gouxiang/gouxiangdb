@@ -165,15 +165,17 @@ describe("B2：设置里不再有通讯录与资产入口", () => {
 });
 
 describe("B3：非 owner / 无能力不渲染，不出 disabled 假入口", () => {
-  it("owner + edit_roles：权限分区上下两块都在，三枚预设角色全列出", () => {
+  it("owner + edit_roles：左栏角色列表与右栏选中角色权限都在，三枚预设角色全列出", () => {
     isOwner = true;
     actions = ["view_directory", "edit_roles"];
     const html = renderAt("/workspace/settings/authz", <WorkspaceSettingsPage />);
-    expect(html).toContain("角色与权限");
+    // 左栏卡片：系统预设 / 自定义 两个分组都要有（此前是上下两块堆叠，改左右两栏后分组仍在）
+    expect(html).toContain("系统预设");
+    expect(html).toContain("自定义");
     for (const r of PRESET_ROLES) expect(html).toContain(r.name);
-    // 下半：选中角色（默认第一枚 = 超级管理员）的权限分段
-    expect(html).toContain("超级管理员」的权限");
+    // 右栏：默认选中第一枚（超级管理员），两段权限分区都要在
     expect(html).toContain("通讯录权限");
+    expect(html).toContain("库权限");
   });
 
   it("三条硬规则里的两条（建库 / 删库）在通讯录权限里写明「勾不出来」", () => {

@@ -231,7 +231,13 @@ export function WorkspaceSettingsPage() {
 
       {/* 右内容 */}
       <div className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        {/* 权限管理是左右两栏（角色列表 + 该角色权限），768px 会把右栏压到 480px 内挤成一团，
+            单独放宽到 1024px；其余小节维持原来的 768px 阅读宽度。 */}
+        <div
+          className={`mx-auto px-4 py-6 sm:px-6 lg:px-8 lg:py-8 ${
+            effectiveSection === "authz" ? "max-w-5xl" : "max-w-3xl"
+          }`}
+        >
           {effectiveSection === "general" && (
             <div className="flex flex-col gap-2">
               <h2 className="text-gx-18 font-semibold text-gx-text-primary">工作区设置</h2>

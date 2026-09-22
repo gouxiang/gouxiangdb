@@ -1,38 +1,21 @@
 // apps/web/src/features/settings/role-permission/RoleListPanel.tsx
-// 权限管理 · 上半：角色与权限。
+// 权限管理 · 左栏：角色列表卡片（系统预设 + 自定义），自定义角色可新建 / 编辑 / 删除。
 //
-// 列出全部角色（三枚预设 + 自定义），自定义角色可新建 / 编辑 / 删除；
-// 超级管理员不可编辑、不可删除——置灰并写明原因，不做「点了才报错」的假入口。
+// 显示哪些角色、哪些能改能删，一律走 lib/role-policy 的同一份判据——通讯录共用它，
+// 两边不再各写一套。
 
-import { Icon, type IconName } from "../../../components/icons";
+import { Icon } from "../../../components/icons";
 import { Button, IconButton } from "../../../components/ui";
 import type { OrgRoleDTO } from "@gx/shared-types";
+import {
+  LOCKED_ROLE_REASON,
+  isCustomOrgRole,
+  isLockedOrgRole,
+  isPresetOrgRole,
+  roleIconName,
+} from "../../../lib/role-policy";
 
-/**
- * 面板要展示的预设角色：三枚权限预设（超级管理员 / 管理员 / 受限成员）+ owner
- * （超级管理员的旧 systemKey，存量库里仍可能挂着）。
- * creator/editor/commenter/viewer 是资源授权策略的主体锚点，组织层零动作，此处不展示。
- */
-const PRESET_KEYS = new Set(["super_admin", "admin", "restricted", "owner"]);
-
-export function isVisibleRole(r: OrgRoleDTO): boolean {
-  return !r.systemKey || PRESET_KEYS.has(r.systemKey);
-}
-
-export function isPresetRole(r: OrgRoleDTO): boolean {
-  return !!r.systemKey && PRESET_KEYS.has(r.systemKey);
-}
-
-function roleIcon(r: OrgRoleDTO): IconName {
-  if (r.systemKey === "super_admin" || r.systemKey === "owner") return "crown";
-  if (r.systemKey === "admin") return "shield";
-  if (r.systemKey === "restricted") return "userSlash";
-  return "shield";
-}
-
-/** 不可编辑 / 不可删除的原因（后端按 roles.immutable 判据，界面口径必须同源）。 */
-export const LOCKED_ROLE_REASON =
-  "超级管理员是系统内置角色，不能改名字和权限，也不能删除——否则可能被摘掉权限位，把真正的管理员锁在系统外面。";
+export { LOCKED_ROLE_REASON };
 
 export function RoleListPanel({
   roles,
@@ -55,16 +38,14 @@ export function RoleListPanel({
   onEdit: (role: OrgRoleDTO) => void;
   onDelete: (role: OrgRoleDTO) => void;
 }) {
-  const presets = roles.filter(isPresetRole);
-  const customs = roles.filter((r) => !isPresetRole(r));
+  const presets = roles.filter(isPresetOrgRole);
+  const customs = roles.filter(isCustomOrgRole);
   const row = { selectedId, onSelect, canEdit, canDelete, onEdit, onDelete };
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-gx-12 text-gx-text-tertiary">
-          角色决定一个人能做什么。选中一个角色，在下面配置它的通讯录权限与库权限。
-        </p>
+    <div className="flex min-h-0 flex-col overflow-hidden rounded-gx-lg border border-gx-separator bg-gx-surface">
+      <div className="flex items-center justify-between gap-2 border-b border-gx-separator px-3 py-2">
+        <span className="text-gx-13 font-semibold text-gx-text-primary">角色与权限</span>
         <Button
           size="sm"
           variant="secondary"
@@ -77,13 +58,15 @@ export function RoleListPanel({
         </Button>
       </div>
 
-      <RoleGroup title="系统预设角色" roles={presets} row={row} />
-      <RoleGroup
-        title="自定义角色"
-        roles={customs}
-        row={row}
-        empty="还没有自定义角色。点右上角「新建角色」加一个，再在下面勾它能做什么。"
-      />
+      <div className="min-h-0 flex-1 overflow-y-auto py-1">
+        <RoleGroup title="系统预设" roles={presets} row={row} />
+        <RoleGroup
+          title="自定义"
+          roles={customs}
+          row={row}
+          empty="还没有自定义角色。点上方「新建角色」加一个，再在右边勾它能做什么。"
+        />
+      </div>
     </div>
   );
 }
@@ -109,18 +92,12 @@ function RoleGroup({
   empty?: string;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <div className="text-gx-12 font-medium text-gx-text-secondary">{title}</div>
+    <div className="flex flex-col pb-1">
+      <div className="px-3 py-1 text-gx-11 font-medium text-gx-text-tertiary">{title}</div>
       {roles.length === 0 ? (
-        <p className="rounded-gx-lg border border-gx-separator px-3 py-2 text-gx-12 text-gx-text-hint">
-          {empty ?? "暂无"}
-        </p>
+        <p className="px-3 pb-1 text-gx-11 text-gx-text-hint">{empty ?? "暂无"}</p>
       ) : (
-        <div className="overflow-hidden rounded-gx-lg border border-gx-separator">
-          {roles.map((r) => (
-            <RoleRow key={r.id} role={r} row={row} />
-          ))}
-        </div>
+        roles.map((r) => <RoleRow key={r.id} role={r} row={row} />)
       )}
     </div>
   );
@@ -128,7 +105,7 @@ function RoleGroup({
 
 function RoleRow({ role, row }: { role: OrgRoleDTO; row: RowProps }) {
   const on = row.selectedId === role.id;
-  const locked = role.immutable;
+  const locked = isLockedOrgRole(role);
   const editBlocked = locked || !row.canEdit;
   const deleteBlocked = locked || !row.canDelete;
   const reason = locked
@@ -145,7 +122,7 @@ function RoleRow({ role, row }: { role: OrgRoleDTO; row: RowProps }) {
   return (
     <div
       className={[
-        "flex items-center gap-2 border-b border-gx-separator px-3 py-2 last:border-0",
+        "group mx-1.5 flex items-center gap-1.5 rounded-gx-lg px-2 py-1.5",
         on ? "bg-gx-accent-bg" : "hover:bg-gx-row-hover",
       ].join(" ")}
     >
@@ -156,51 +133,45 @@ function RoleRow({ role, row }: { role: OrgRoleDTO; row: RowProps }) {
         className="flex min-w-0 flex-1 items-center gap-2 text-left"
       >
         <Icon
-          name={roleIcon(role)}
+          name={roleIconName(role)}
           size={14}
           className={`shrink-0 ${on ? "text-gx-accent" : "text-gx-text-tertiary"}`}
         />
-        <span className="min-w-0 flex-1">
-          <span
-            className={`block truncate text-gx-13 ${on ? "font-semibold text-gx-accent" : "text-gx-text-primary"}`}
-          >
-            {role.name}
-            {locked && (
-              <Icon name="lock" size={11} className="ml-1 inline-block align-[-1px] text-gx-text-hint" />
-            )}
-          </span>
-          {role.description && (
-            <span className="block truncate text-gx-11 text-gx-text-hint">{role.description}</span>
-          )}
+        <span className={`min-w-0 flex-1 truncate text-gx-13 ${on ? "font-semibold text-gx-accent" : "text-gx-text-primary"}`}>
+          {role.name}
         </span>
       </button>
 
       {locked && (
-        <span
-          title={LOCKED_ROLE_REASON}
-          className="shrink-0 rounded-full bg-gx-bg px-2 py-0.5 text-gx-11 text-gx-text-tertiary"
-        >
-          不可编辑、不可删除
+        <span title={LOCKED_ROLE_REASON} className="shrink-0 leading-none">
+          <Icon name="lock" size={11} className="text-gx-text-hint" />
         </span>
       )}
 
-      <IconButton
-        icon="edit"
-        size={14}
-        label="编辑角色"
-        disabled={editBlocked}
-        title={reason}
-        onClick={() => row.onEdit(role)}
-      />
-      <IconButton
-        icon="trash"
-        size={14}
-        danger
-        label="删除角色"
-        disabled={deleteBlocked}
-        title={deleteReason}
-        onClick={() => row.onDelete(role)}
-      />
+      {/* 行内操作默认隐去、悬停/聚焦时浮出：列表主体保持干净，不必每行都挂两颗按钮 */}
+      <div
+        className={`flex shrink-0 items-center gap-0.5 transition-opacity ${
+          on ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover:opacity-100"
+        }`}
+      >
+        <IconButton
+          icon="edit"
+          size={13}
+          label="编辑角色"
+          disabled={editBlocked}
+          title={reason}
+          onClick={() => row.onEdit(role)}
+        />
+        <IconButton
+          icon="trash"
+          size={13}
+          danger
+          label="删除角色"
+          disabled={deleteBlocked}
+          title={deleteReason}
+          onClick={() => row.onDelete(role)}
+        />
+      </div>
     </div>
   );
 }

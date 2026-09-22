@@ -1,4 +1,5 @@
-// M2/S7 通讯录右栏：五系统角色锁定（仅说明）+ 自定义角色 CRUD（三枚组织动作）+ 角色主体维护（选人/选部门节点）。
+// M2/S7 通讯录右栏：角色列表（与权限管理面板同一份口径）+ 角色 CRUD + 角色主体维护（选人/选部门节点）。
+// 角色可见性 / 可否改删全部走 lib/role-policy，本文件不再自带判据。
 import { useEffect, useMemo, useState } from "react";
 import {
   Button,
@@ -25,6 +26,16 @@ import {
 import { buildDeptTree, flattenVisible } from "./lib/tree";
 import { errText } from "./contacts-ui";
 import { confirmIrreversible } from "../../components/feedback";
+// 角色可见性 / 可否改删的判据与权限管理面板同源（lib/role-policy）：
+// 此前这里按 isSystem 判，把「管理员 / 受限成员」挡在通讯录门外，与权限管理对不上。
+import {
+  LOCKED_ROLE_REASON,
+  isCustomOrgRole,
+  isLockedOrgRole,
+  isOrgVisibleRole,
+  isPresetOrgRole,
+  roleIconName,
+} from "../../lib/role-policy";
 
 const ACTION_LABEL: Record<OrgAction, string> = {
   manage_departments: "管理部门",
@@ -51,20 +62,6 @@ const ACTION_LABEL: Record<OrgAction, string> = {
   delete_departments: "删除部门",
 };
 
-/**
- * 通讯录角色面只暴露「超级管理员 + 自定义角色」。
- * creator/editor/commenter/viewer 四枚系统角色在组织层没有任何组织动作（actions 恒空），
- * 它们的真实用途是资源授权策略（auth_policies）的合法主体——从数据库挖掉会让既有策略
- * 变成悬挂主体（reconcile 报 C3_DANGLING_ROLE）。所以这里**只在通讯录 UI 过滤显示**，
- * 不动数据，也不影响 MemberDrawer 的有效角色审计清单。
- *
- * systemKey 认 'super_admin'（现行）与 'owner'（旧值，存量库可能还挂着）：迁移 20260921010000
- * 已把超级管理员行的 systemKey 改成 super_admin，只判 'owner' 会让这一行在通讯录里消失。
- */
-function isDirectoryVisibleRole(r: OrgRoleDTO): boolean {
-  return r.systemKey === "super_admin" || r.systemKey === "owner" || !r.isSystem;
-}
-
 const NO_FILTER: MemberFilter = { q: "", deptId: null, status: null };
 
 export function RoleManager({
@@ -87,8 +84,27 @@ export function RoleManager({
   const [editing, setEditing] = useState<{ role: OrgRoleDTO | null } | null>(null);
 
   const roles = useMemo(() => rolesQ.data ?? [], [rolesQ.data]);
-  // 通讯录视角：只给「超级管理员 + 自定义角色」，四枚资源锚点系统角色不在此显示（见函数注释）。
-  const visibleRoles = useMemo(() => roles.filter(isDirectoryVisibleRole), [roles]);
+  // 与权限管理面板同一份判据：三枚组织层预设 + 旧值 owner + 全部自定义角色。
+  // creator/editor/commenter/viewer 是资源授权策略的主体锚点，组织层零动作，两边都不显示
+  // （只做 UI 过滤，不动数据——挖掉会让既有策略变成悬挂主体）。
+  const visibleRoles = useMemo(() => roles.filter(isOrgVisibleRole), [roles]);
+  // 分组与权限管理面板一致：系统预设在上、自定义在下，两边看到的是同一张角色表。
+  const presetRoles = useMemo(() => visibleRoles.filter(isPresetOrgRole), [visibleRoles]);
+  const customRoles = useMemo(() => visibleRoles.filter(isCustomOrgRole), [visibleRoles]);
+  const renderRole = (r: OrgRoleDTO) => (
+    <button
+      key={r.id}
+      type="button"
+      onClick={() => setSelectedRoleId(r.id)}
+      className={`flex w-full items-center gap-1.5 px-3 py-2 text-left text-gx-13 ${
+        selectedRoleId === r.id ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-primary hover:bg-gx-row-hover"
+      }`}
+    >
+      <Icon name={roleIconName(r)} size={13} className={`shrink-0 ${isPresetOrgRole(r) ? "text-gx-warning" : "opacity-60"}`} />
+      <span className="flex-1 truncate">{r.name}</span>
+      {isLockedOrgRole(r) && <Icon name="lock" size={11} className="shrink-0 text-gx-text-hint" />}
+    </button>
+  );
   useEffect(() => {
     if (!visibleRoles.length) return;
     // 默认选中不必落在 visibleRoles[0]：后端 listRoles 已保证系统角色前置且 owner 居首，
@@ -115,23 +131,18 @@ export function RoleManager({
         <div className="min-h-0 flex-1 overflow-y-auto py-1">
           {visibleRoles.length === 0 ? (
             <p className="px-3 py-4 text-gx-12 text-gx-text-hint">
-              还没有自定义角色。点上方加号新建，按需要勾选通讯录权限。
+              这里现在一个角色都没有。点上方加号新建自定义角色，再勾选它能做什么。
             </p>
           ) : (
-            visibleRoles.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => setSelectedRoleId(r.id)}
-                className={`flex w-full items-center gap-1.5 px-3 py-2 text-left text-gx-13 ${
-                  selectedRoleId === r.id ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-primary hover:bg-gx-row-hover"
-                }`}
-              >
-                {r.isSystem ? <Icon name="crown" size={13} className="shrink-0 text-gx-warning" /> : <Icon name="shield" size={13} className="shrink-0 opacity-60" />}
-                <span className="flex-1 truncate">{r.name}</span>
-                {r.isSystem && <Icon name="lock" size={11} className="shrink-0 text-gx-text-hint" />}
-              </button>
-            ))
+            <>
+              {presetRoles.map(renderRole)}
+              {customRoles.length > 0 && (
+                <div className="mt-1 border-t border-gx-separator px-3 pb-1 pt-2 text-gx-11 font-medium text-gx-text-tertiary">
+                  自定义
+                </div>
+              )}
+              {customRoles.map(renderRole)}
+            </>
           )}
         </div>
       </div>
@@ -145,7 +156,9 @@ export function RoleManager({
             canAssignRoleMembers={canAssignRoleMembers}
             onEdit={() => {
               const r = roles.find((x) => x.id === selectedRoleId) ?? null;
-              if (r && !r.isSystem) setEditing({ role: r });
+              // 能否编辑只按 immutable 判：管理员 / 受限成员 isSystem=1 但后端允许改，
+              // 按 isSystem 挡会把它们误锁成只读。
+              if (r && !isLockedOrgRole(r)) setEditing({ role: r });
             }}
           />
         ) : (
@@ -186,10 +199,25 @@ function RoleDetail({
       <div className="border-b border-gx-separator px-3 py-2">
         <div className="flex items-center gap-2">
           <span className="text-gx-14 font-semibold text-gx-text-primary">{role.name}</span>
-          {role.isSystem && (
-            <span className="rounded-full bg-gx-warning-bg px-2 py-0.5 text-gx-11 font-medium text-gx-warning">系统角色</span>
+          {isPresetOrgRole(role) && (
+            <span className="rounded-full bg-gx-warning-bg px-2 py-0.5 text-gx-11 font-medium text-gx-warning">
+              系统预设
+            </span>
           )}
-          {canEdit && !role.isSystem && (
+          {isLockedOrgRole(role) && (
+            <span
+              title={LOCKED_ROLE_REASON}
+              className="rounded-full bg-gx-bg px-2 py-0.5 text-gx-11 font-medium text-gx-text-tertiary"
+            >
+              不可修改
+            </span>
+          )}
+          {isCustomOrgRole(role) && (
+            <span className="rounded-full bg-gx-success-bg px-2 py-0.5 text-gx-11 font-medium text-gx-success">
+              自定义
+            </span>
+          )}
+          {canEdit && !isLockedOrgRole(role) && (
             <Button size="sm" variant="ghost" icon="edit" className="ml-auto" onClick={onEdit}>编辑</Button>
           )}
         </div>
@@ -417,7 +445,11 @@ function SubjectPicker({
   );
 }
 
-/** 新建/编辑自定义角色 Modal：名称/说明/三枚组织动作（系统角色不由此编辑）。 */
+/**
+ * 新建 / 编辑角色 Modal：名称 / 说明 + 全量组织动作勾选。
+ * 系统预设里 immutable=0 的两枚（管理员、受限成员）也走这里编辑，与权限管理面板口径一致；
+ * 真正锁死的只有 immutable=1 的超级管理员——它在上层就被挡住，进不了这个弹窗。
+ */
 function RoleEditModal({
   role,
   canDeleteRoles,
@@ -468,7 +500,7 @@ function RoleEditModal({
     const ok = await confirmIrreversible({
       title: "删除角色",
       confirmText: "删除角色",
-      description: `自定义角色「${role.name}」会被删除，此操作不可撤销。若仍有成员挂着该角色，删除会失败并提示你先迁移。`,
+      description: `角色「${role.name}」会被删除，此操作不可撤销。若仍有成员挂着该角色，删除会失败并提示你先迁移。`,
     });
     if (!ok) return;
     try {
@@ -485,7 +517,9 @@ function RoleEditModal({
     <Modal
       open
       onClose={onClose}
-      title={role ? "编辑自定义角色" : "新建自定义角色"}
+      // 系统预设里的「管理员 / 受限成员」也能进这个弹窗（后端 immutable=0 允许改），
+      // 标题不再写死「自定义角色」。
+      title={role ? "编辑角色" : "新建自定义角色"}
       width={460}
       footer={
         <FormActions
