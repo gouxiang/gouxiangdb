@@ -156,6 +156,12 @@ export interface LibraryRoleVisibilityDTO {
   systemKey: string | null;
   canManage: boolean;
   visible: boolean;
+  /**
+   * 独立于 canManage 的分享授予位：只勾「可分享」不勾「可管理」的角色也算能开分享开关。
+   * 前端判据是 canManage || canShare（与后端 libraryPolicy 的 canToggleShare 同口径），
+   * 少了这一位就只能认 canManage —— 于是「被单独授予可分享」在界面上是个勾了不生效的假承诺。
+   */
+  canShare: boolean;
   /** 经该角色（含部门继承）落到这个库上的在岗成员数。 */
   memberCount: number;
 }

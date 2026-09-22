@@ -48,7 +48,7 @@ export function ShareToggleBlock({ rows }: { rows: LibraryRow[] }) {
   const vis = visQ.data ?? null;
   const canToggle =
     !visQ.isLoading && !visQ.isError && !myLoading && !!vis
-      ? isSuperOrAdmin || vis.roles.some((r) => r.canManage && roleIds.has(r.roleId))
+      ? isSuperOrAdmin || vis.roles.some((r) => (r.canManage || r.canShare) && roleIds.has(r.roleId))
       : false;
 
   async function flip(next: boolean) {

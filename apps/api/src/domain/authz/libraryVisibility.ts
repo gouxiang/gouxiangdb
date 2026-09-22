@@ -29,11 +29,13 @@ export async function libraryVisibility(
   const [scopes, shareEnabled] = await Promise.all([
     prisma.roleLibraryScope.findMany({
       where: { libraryKind, libraryId },
-      select: { roleId: true, canManage: true, visible: true },
+      select: { roleId: true, canManage: true, visible: true, canShare: true },
     }),
     readShareEnabled(libraryKind, libraryId),
   ]);
 
+  // 「覆盖到这个库」= 能进来（visible）或能管（canManage）。只勾 canShare 而两位皆 0 的行
+  // 不算覆盖：运行时 requireCanToggleShare 先过 visible 闸，它拿不到任何权，列出来只会误导。
   const live = scopes.filter((s) => s.visible === 1 || s.canManage === 1);
   const roles = live.length
     ? await prisma.role.findMany({
@@ -62,6 +64,8 @@ export async function libraryVisibility(
       systemKey: role.systemKey,
       canManage: s.canManage === 1,
       visible: s.visible === 1,
+      // 独立分享位：只勾「可分享」的角色也靠这一位进前端的判定（canManage || canShare）。
+      canShare: s.canShare === 1,
       memberCount: await liveCount(role.id),
     });
   }
