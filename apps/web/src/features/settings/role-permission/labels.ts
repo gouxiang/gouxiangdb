@@ -1,5 +1,5 @@
 // apps/web/src/features/settings/role-permission/labels.ts
-// 权限配置界面的中文文案真源：十三枚通讯录动作、字段三档、三条硬规则。
+// 权限配置界面的中文文案真源：十三枚通讯录动作、字段三档、库权限三列、三条硬规则。
 //
 // 单独成文件的原因：同一句话会同时出现在面板标题、勾选框 title、弹窗说明里，
 // 散在各组件里必然出现「改了一处忘了另一处」，而权限文案恰恰是最不能自相矛盾的地方。
@@ -78,6 +78,38 @@ export const LIBRARY_KIND_LABEL: Record<LibraryKind, string> = {
   kb: "知识库",
 };
 
+/** 库权限一行式面板的三列之一：列头文字 + 问号图标上的说明。 */
+export interface LibraryScopeColumn {
+  key: "manage" | "visible" | "share";
+  /** 列头文字。 */
+  label: string;
+  /** 挂在问号图标（title）上的说明，鼠标移上去可见。 */
+  hint: string;
+}
+
+/**
+ * 库权限面板的三列真源。列头与问号说明放在同一处：
+ * 同一句话会同时出现在表头 title、弹窗说明里，散着写必然出现「改了一处忘了另一处」，
+ * 而权限文案恰恰最不能自相矛盾。
+ */
+export const LIBRARY_SCOPE_COLUMNS: readonly LibraryScopeColumn[] = [
+  {
+    key: "manage",
+    label: "可管理",
+    hint: "能改这个库的结构、增删改数据、开关分享；勾了可管理就一定能进。",
+  },
+  {
+    key: "visible",
+    label: "可见",
+    hint: "能进这个库。不进一步设置的话，库里全部内容都是只读可见。",
+  },
+  {
+    key: "share",
+    label: "可分享",
+    hint: "能把这个库的内容分享出去。库级「允许分享」总开关打开时才生效；勾了可管理自动就有分享权。",
+  },
+];
+
 /**
  * 三条硬规则：后端现算、不落库（见 apps/api/src/domain/authz/libraryPolicy.ts），
  * 配了也不认。界面上必须把话说清楚，否则管理员会一直找那个并不存在的勾选项。
@@ -95,8 +127,8 @@ export const HARD_RULES = {
   },
   share: {
     label: "库级「允许分享」开关",
-    who: "该库管理权角色 + 超级管理员 + 管理员",
-    hint: "谁能管这个库，谁才开得了它的分享；其他人连开关都看不到。",
+    who: "该库管理权角色或被单独授予「可分享」的角色，再加超级管理员与管理员",
+    hint: "谁能管这个库、或被单独授予了这个库的「可分享」，谁才开得了它的分享；其他人连开关都看不到。",
   },
 } as const;
 

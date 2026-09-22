@@ -23,6 +23,7 @@ function scope(over: Partial<RoleLibraryScopeDTO>): RoleLibraryScopeDTO {
     libraryName: "库A",
     canManage: false,
     visible: false,
+    canShare: false,
     tables: {},
     fields: {},
     updatedAt: "2026-09-21T00:00:00.000Z",
@@ -52,6 +53,51 @@ describe("draftFromScopes → draftToItems", () => {
     const items = draftToItems(draftFromScopes([scope({ visible: true })]));
     expect(items[0]!.config?.tables).toEqual({});
     expect(items[0]!.config?.fields).toEqual({});
+  });
+});
+
+describe("canShare 显式分享位", () => {
+  it("DTO 带 canShare 进草稿：显式分享位独立于可管理", () => {
+    const draft = draftFromScopes([scope({ visible: true, canShare: true, canManage: false })]);
+    expect(draft.share.has("base:b1")).toBe(true);
+    expect(draft.manage.has("base:b1")).toBe(false);
+  });
+
+  it("草稿出 PUT 入参带 canShare，与 DTO 一对一回写", () => {
+    const items = draftToItems(
+      draftFromScopes([scope({ visible: true, canShare: true, canManage: false })]),
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0]!.canShare).toBe(true);
+  });
+
+  it("可管理隐含可见仍成立；canManage 不带 canShare 时分享位不被凭空写上", () => {
+    const items = draftToItems(
+      draftFromScopes([scope({ canManage: true, visible: false, canShare: false })]),
+    );
+    expect(items[0]!.canManage).toBe(true);
+    expect(items[0]!.visible).toBe(true);
+    expect(items[0]!.canShare).toBe(false);
+  });
+
+  it("只显式勾了可分享的库也会输出——整份替换下不能静默丢掉这次授权", () => {
+    const draft = draftFromScopes(
+      [scope({ visible: false, canManage: false, canShare: true })],
+    );
+    const items = draftToItems(draft);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.canShare).toBe(true);
+    expect(items[0]!.visible).toBe(false);
+  });
+
+  it("三份集合都没提过的库不输出（真·撤销）", () => {
+    const draft = draftFromScopes([
+      scope({ libraryId: "b1", visible: true }),
+      scope({ id: "s2", libraryId: "b2", visible: true, canShare: true }),
+    ]);
+    draft.visible.delete("base:b1");
+    const items = draftToItems(draft);
+    expect(items.map((i) => i.libraryId)).toEqual(["b2"]);
   });
 });
 

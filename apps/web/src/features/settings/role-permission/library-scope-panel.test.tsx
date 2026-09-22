@@ -1,9 +1,9 @@
 // apps/web/src/features/settings/role-permission/library-scope-panel.test.tsx
 // 库权限面板的 SSR 回归（Modal 走 createPortal，本仓无 jsdom，只测首屏结构）。
 //
-// 锁三条界面纪律：
-//   1. 可管理的库在「可见库」清单里必为勾选且不可取消（可管理隐含可见）；
-//   2. 「设置」按钮只在可见（或可管理）的库行上出现；
+// 锁新形态与三条界面纪律：
+//   1. 一行式：一行里同时有库名和「可管理 / 可见 / 可分享」三个勾选，列头各带问号说明；
+//   2. 可管理隐含可见 / 隐含分享权：勾了可管理，可见与可分享都勾选且不可单独取消；
 //   3. 库视野接口出错时不渲染任何可勾框，也不给保存按钮（整份替换下误保存 = 清空授权）。
 
 import { describe, it, expect, vi } from "vitest";
@@ -56,58 +56,87 @@ const ROLE = {
   deletedAt: null,
 };
 
-function render(): string {
+function render(canEdit = true): string {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderToString(
     <QueryClientProvider client={qc}>
-      <LibraryScopePanel role={ROLE} canEdit />
+      <LibraryScopePanel role={ROLE} canEdit={canEdit} />
     </QueryClientProvider>,
   ).replace(/<!--[^>]*-->/g, "");
 }
 
-describe("库权限面板", () => {
-  it("两份清单都列出库，并按类型分组", () => {
+/** 数出 SSR 里的布尔属性出现次数（React 对 true 渲染成 `attr=""`，false 整条省略）。 */
+function countAttr(html: string, attr: string): number {
+  return (html.match(new RegExp(`${attr}=""`, "g")) ?? []).length;
+}
+
+describe("库权限面板 · 一行式新形态", () => {
+  it("表头给出「可管理 / 可见 / 可分享」三列，各带问号说明；行里库名与三个勾选同现", () => {
     bases = [{ id: "b1", name: "客户库" }];
     kbs = [{ id: "k1", name: "产品知识库" }];
     scopes = [];
     const html = render();
-    expect(html).toContain("可管理库");
-    expect(html).toContain("可见库");
-    expect(html).toContain("数据库");
-    expect(html).toContain("知识库");
+
+    // 三列列头
+    expect(html).toContain("可管理");
+    expect(html).toContain("可见");
+    expect(html).toContain("可分享");
+    // 问号图标的说明走 title（鼠标悬停可见）
+    expect(html).toContain("勾了可管理就一定能进");
+    expect(html).toContain("库里全部内容都是只读可见");
+    expect(html).toContain("勾了可管理自动就有分享权");
+    // 库名 + base/kb 分组
     expect(html).toContain("客户库");
     expect(html).toContain("产品知识库");
+    expect(html).toContain("数据库");
+    expect(html).toContain("知识库");
+    // 一个库一行、一行三个勾选
+    expect((html.match(/type="checkbox"/g) ?? []).length).toBe(6);
+    expect(html).toContain("设置");
   });
 
-  it("可管理的库在可见清单里勾选且禁用（不允许勾出「管得了但看不见」）", () => {
+  it("可管理的库：可见与可分享都勾选且不可单独取消（可管理隐含可见 / 隐含分享权）", () => {
     bases = [{ id: "b1", name: "客户库" }];
     kbs = [];
     scopes = [
       {
         id: "s1", roleId: "r1", libraryKind: "base", libraryId: "b1", libraryName: "客户库",
-        canManage: true, visible: false, tables: {}, fields: {}, updatedAt: "",
+        canManage: true, visible: false, canShare: false, tables: {}, fields: {}, updatedAt: "",
       },
     ];
     const html = render();
-    // 两份清单各一个勾选框：可管理清单里勾选，可见清单里勾选 + 禁用
-    const checked = html.match(/checked=""/g) ?? [];
-    expect(checked.length).toBe(2);
-    expect(html).toContain("disabled=");
+    // 三个勾选框全勾上
+    expect(countAttr(html, "checked")).toBe(3);
+    // 可见、可分享各置灰一次（可管理本身仍可取消）；再加上底部「保存库权限」默认无改动即置灰
+    expect(countAttr(html, "disabled")).toBe(3);
   });
 
-  it("可见的库行上才出现「设置」入口", () => {
+  it("未进库的库：不能配，最右「设置」置灰", () => {
     bases = [{ id: "b1", name: "客户库" }, { id: "b2", name: "未授权库" }];
     kbs = [];
     scopes = [
       {
         id: "s1", roleId: "r1", libraryKind: "base", libraryId: "b1", libraryName: "客户库",
-        canManage: false, visible: true, tables: {}, fields: {}, updatedAt: "",
+        canManage: false, visible: true, canShare: false, tables: {}, fields: {}, updatedAt: "",
       },
     ];
     const html = render();
-    expect(html).toContain("设置");
-    // 只有一个库可见 → 只有一个设置入口
-    expect((html.match(/>设置</g) ?? []).length).toBe(1);
+    // 两个库各一个「设置」按钮，外加表头一处「设置」列名
+    expect((html.match(/>设置</g) ?? []).length).toBe(3);
+    // 只有没进库的那一行出现置灰理由
+    expect(html).toContain("这个库既不可见也不可管理");
+    // b2 的「设置」+ 底部「保存库权限」（尚无改动即置灰）
+    expect(countAttr(html, "disabled")).toBe(2);
+  });
+
+  it("canEdit=false：三个勾选与「设置」全部禁用，且不给保存按钮", () => {
+    bases = [{ id: "b1", name: "客户库" }];
+    kbs = [];
+    scopes = [];
+    const html = render(false);
+    // 三个勾选框 + 一个设置按钮
+    expect(countAttr(html, "disabled")).toBe(4);
+    expect(html).not.toContain("保存库权限");
   });
 
   it("库视野接口出错：不渲染可勾框，也不给保存按钮", () => {
@@ -116,7 +145,7 @@ describe("库权限面板", () => {
     scopesError = true;
     const html = render();
     expect(html).toContain("这个角色的库权限没取到");
-    expect(html).not.toContain("可管理库");
+    expect(html).not.toContain("可分享");
     expect(html).not.toContain("保存库权限");
   });
 });

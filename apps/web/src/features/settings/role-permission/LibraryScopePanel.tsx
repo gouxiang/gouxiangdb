@@ -1,23 +1,25 @@
 // apps/web/src/features/settings/role-permission/LibraryScopePanel.tsx
-// 权限管理 · 下半 (B)：库权限——可管理库 / 可见库两份多选清单，逐个库细配。
+// 权限管理 · 下半 (B)：库权限——一个库一行，行内直给「可管理 / 可见 / 可分享」三个勾选 + 最右「设置」。
 //
-// 两条纪律：
+// 两条纪律（与旧「两份多选清单」版一致，只是换了呈现）：
 //   1. 可管理隐含可见。后端 visible=false 且 canManage=true 时人根本进不去这个库，
-//      界面就不该允许勾出「管得了但看不见」这种无法解释的状态。
+//      界面就不该允许勾出「管得了但看不见」这种无法解释的状态——勾了可管理，可见自动跟上并锁住。
 //   2. 清单里的库 = 「当前登录者看得见的库」∪「这个角色已经被授过的库」。
 //      只取前者会让一条已存在的授权从界面上凭空消失（保存时被整份替换掉），
 //      等于悄悄收回权限——宁可显示成一个看得到名字的条目也不能让它消失。
+//
+// 行组件拆在 LibraryScopeRow.tsx：单文件 ≤300 行是硬规定。
 
 import { useState } from "react";
-import { Button, Checkbox, EmptyState, Spinner, toast } from "../../../components/ui";
+import { Button, EmptyState, Spinner, toast } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
-import { useBases } from "../../../api/hooks";
-import { useRoleScopes, useRoleScopesSave } from "../../../api/hooks";
+import { useBases, useRoleScopes, useRoleScopesSave } from "../../../api/hooks";
 import { useKbList } from "../../kb/kb-hooks";
 import type { LibraryKind, OrgRoleDTO } from "@gx/shared-types";
-import { LIBRARY_KIND_LABEL } from "./labels";
+import { LIBRARY_KIND_LABEL, LIBRARY_SCOPE_COLUMNS } from "./labels";
 import { scopeKey } from "./role-permission-hooks";
 import { LibraryScopeModal } from "./LibraryScopeModal";
+import { LibraryScopeRow } from "./LibraryScopeRow";
 import { ShareToggleBlock } from "./ShareToggleBlock";
 import {
   EMPTY_CONFIG,
@@ -108,6 +110,13 @@ export function LibraryScopePanel({ role, canEdit }: { role: OrgRoleDTO; canEdit
     patch({ ...draft, visible });
   };
 
+  const toggleShare = (key: string, on: boolean) => {
+    const share = new Set(draft.share);
+    if (on) share.add(key);
+    else share.delete(key);
+    patch({ ...draft, share });
+  };
+
   async function submit() {
     try {
       await save.mutateAsync({ roleId: role.id, items: draftToItems(draft) });
@@ -132,25 +141,47 @@ export function LibraryScopePanel({ role, canEdit }: { role: OrgRoleDTO; canEdit
           description="先在一级导航建一个库，再回来给这个角色配它能进哪些库。"
         />
       ) : (
-        <div className="flex flex-col gap-3">
-          <PickList
-            title="可管理库"
-            hint="能改这个库的结构、增删改数据、开关分享。勾了可管理就一定能进。"
-            picked={draft.manage}
-            disabled={!canEdit}
-            onToggle={toggleManage}
-            groups={groups}
-          />
-          <PickList
-            title="可见库"
-            hint="能进这个库。不进一步设置的话，库里全部内容都是只读可见。"
-            picked={draft.visible}
-            locked={draft.manage}
-            disabled={!canEdit}
-            onToggle={toggleVisible}
-            groups={groups}
-            onConfigure={canEdit ? setEditing : undefined}
-          />
+        <div className="max-h-72 overflow-y-auto rounded-gx-lg border border-gx-separator">
+          {/* 表头：库名 + 三列标题（各带问号说明）+ 最右设置列 */}
+          <div className="sticky top-0 z-20 flex items-center gap-2 border-b border-gx-separator bg-gx-bg px-3 py-1.5 text-gx-11 font-medium text-gx-text-secondary">
+            <div className="min-w-0 flex-1">库</div>
+            {LIBRARY_SCOPE_COLUMNS.map((col) => (
+              <div key={col.key} className="flex w-16 items-center justify-center gap-0.5">
+                <span>{col.label}</span>
+                <span
+                  title={col.hint}
+                  aria-label={col.hint}
+                  role="img"
+                  className="inline-flex cursor-help text-gx-text-tertiary"
+                >
+                  <Icon name="help" size={11} />
+                </span>
+              </div>
+            ))}
+            <div className="w-14 text-right">设置</div>
+          </div>
+
+          {groups.map((g) => (
+            <div key={g.kind}>
+              <div className="sticky top-7 z-[1] border-b border-gx-separator bg-gx-bg px-3 py-1 text-gx-11 text-gx-text-tertiary">
+                {LIBRARY_KIND_LABEL[g.kind]}
+              </div>
+              {g.items.map((r) => (
+                <LibraryScopeRow
+                  key={r.key}
+                  row={r}
+                  canEdit={canEdit}
+                  manageable={draft.manage.has(r.key)}
+                  visible={draft.visible.has(r.key)}
+                  share={draft.share.has(r.key)}
+                  onToggleManage={(on) => toggleManage(r.key, on)}
+                  onToggleVisible={(on) => toggleVisible(r.key, on)}
+                  onToggleShare={(on) => toggleShare(r.key, on)}
+                  onConfigure={canEdit ? () => setEditing(r) : undefined}
+                />
+              ))}
+            </div>
+          ))}
         </div>
       )}
 
@@ -195,70 +226,6 @@ export function LibraryScopePanel({ role, canEdit }: { role: OrgRoleDTO; canEdit
           }}
         />
       )}
-    </div>
-  );
-}
-
-function PickList({
-  title,
-  hint,
-  picked,
-  locked,
-  disabled,
-  onToggle,
-  groups,
-  onConfigure,
-}: {
-  title: string;
-  hint: string;
-  picked: Set<string>;
-  /** 这些 key 被别处隐含锁住（可管理隐含可见），不允许单独取消。 */
-  locked?: Set<string>;
-  disabled: boolean;
-  onToggle: (key: string, on: boolean) => void;
-  groups: { kind: LibraryKind; items: LibraryRow[] }[];
-  onConfigure?: (row: LibraryRow) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="text-gx-12 font-medium text-gx-text-secondary">{title}</div>
-      <p className="text-gx-11 text-gx-text-hint">{hint}</p>
-      <div className="max-h-56 overflow-y-auto rounded-gx-lg border border-gx-separator">
-        {groups.map((g) => (
-          <div key={g.kind}>
-            <div className="sticky top-0 bg-gx-bg px-3 py-1 text-gx-11 text-gx-text-tertiary">
-              {LIBRARY_KIND_LABEL[g.kind]}
-            </div>
-            {g.items.map((r) => {
-              const on = picked.has(r.key);
-              const lockedOn = locked?.has(r.key) ?? false;
-              return (
-                <div
-                  key={r.key}
-                  className="flex items-center gap-2 border-t border-gx-separator px-3 py-1.5"
-                >
-                  <Checkbox
-                    checked={on || lockedOn}
-                    disabled={disabled || lockedOn}
-                    onChange={(v) => onToggle(r.key, v)}
-                    label={<span className="text-gx-13">{r.name}</span>}
-                  />
-                  {onConfigure && on && (
-                    <button
-                      type="button"
-                      onClick={() => onConfigure(r)}
-                      className="ml-auto inline-flex items-center gap-1 rounded-gx-lg px-1.5 py-0.5 text-gx-11 text-gx-accent hover:bg-gx-accent-bg"
-                    >
-                      <Icon name="settings" size={12} />
-                      设置
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

@@ -30,6 +30,12 @@ export interface LibraryScopeDraft {
   manage: Set<string>;
   /** 可见库的 key。 */
   visible: Set<string>;
+  /**
+   * 单独授予「可分享」的库 key。
+   * 后端裁决是 canToggleShare = canManage || canShare：可管理为真时已隐式带分享权，
+   * 这份集合只记「显式授予」的那条独立路径——两者别混成一件事，落库时各自原样回写。
+   */
+  share: Set<string>;
   config: Map<string, ScopeConfigDraft>;
 }
 
@@ -38,6 +44,7 @@ export const EMPTY_CONFIG: ScopeConfigDraft = { tables: {}, fields: {} };
 export const EMPTY_DRAFT: LibraryScopeDraft = {
   manage: new Set(),
   visible: new Set(),
+  share: new Set(),
   config: new Map(),
 };
 
@@ -45,12 +52,14 @@ export function draftFromScopes(scopes: RoleLibraryScopeDTO[]): LibraryScopeDraf
   const draft: LibraryScopeDraft = {
     manage: new Set(),
     visible: new Set(),
+    share: new Set(),
     config: new Map(),
   };
   for (const s of scopes) {
     const key = `${s.libraryKind}:${s.libraryId}`;
     if (s.canManage) draft.manage.add(key);
     if (s.visible) draft.visible.add(key);
+    if (s.canShare) draft.share.add(key);
     draft.config.set(key, { tables: s.tables, fields: s.fields });
   }
   return draft;
@@ -58,7 +67,9 @@ export function draftFromScopes(scopes: RoleLibraryScopeDTO[]): LibraryScopeDraf
 
 /** 草稿 → PUT 入参。未出现在草稿里的库不出现，后端按「整份替换」把它删掉。 */
 export function draftToItems(draft: LibraryScopeDraft): PutLibraryScopeInput[] {
-  const keys = new Set<string>([...draft.manage, ...draft.visible]);
+  // 三份集合的并集。只取 manage ∪ visible 会让「只显式勾了可分享」的库在保存时被静默丢掉
+  // （整份替换 = 撤销一次授权），所以 share 也必须参与枚举；谁都没提过的库才不输出。
+  const keys = new Set<string>([...draft.manage, ...draft.visible, ...draft.share]);
   const items: PutLibraryScopeInput[] = [];
   for (const key of keys) {
     const parsed = parseScopeKey(key);
@@ -70,6 +81,8 @@ export function draftToItems(draft: LibraryScopeDraft): PutLibraryScopeInput[] {
       // 可管理隐含可见：后端 visible=false 且 canManage=true 时人进不去，
       // 只会出现「管得了但看不见」这种无法解释的状态。
       visible: draft.visible.has(key) || draft.manage.has(key),
+      // 只回写显式授予的分享位；可管理带来的分享权由后端 canManage||canShare 现算，不在这里重复。
+      canShare: draft.share.has(key),
       config: draft.config.get(key) ?? EMPTY_CONFIG,
     });
   }
