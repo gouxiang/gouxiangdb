@@ -41,6 +41,10 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
 
   const share = data?.share;
   const canManage = share?.canManage ?? true;
+  // 库级「允许分享」总闸（后端 GET 现算）。字段 optional：缺省按「开」处理——
+  // 旧缓存 / 契约回退时若按「关」处理，一个缺失字段就会把正常用户的开关锁死，
+  // 那是比漏放行更糟的假红；真正的防线在后端，这里只是把「该禁用却可点」收掉。
+  const shareAllowed = share?.shareAllowed ?? true;
   // 子路径部署（/app/gouxiangdb）下公开分享链接必须带网关前缀。
   const fullUrl = share?.shareToken ? `${window.location.origin}${withBase(`/s/${share.shareToken}`)}` : "";
 
@@ -140,12 +144,20 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
                 外部链接
               </div>
               {/* PERM-S3：无库管理权者不能点这个总闸——原先可点再靠后端 403 回滚，
-                  属于「该禁用却可点」。置灰原因与内部成员档位同一来源（canManage）。 */}
+                  属于「该禁用却可点」。置灰原因与内部成员档位同一来源（canManage）。
+                  库级总闸关着时（shareAllowed=false）只禁「开」不禁「关」：与后端口径一致
+                  （开要校验、关不校验），若连关都禁掉，已发出的链接就永远吊销不掉了。 */}
               <Switch
                 checked={enabled}
                 onChange={toggleShare}
-                disabled={!canManage || setShare.isPending}
-                disabledReason="你对该知识库没有管理权，不能修改外链分享"
+                disabled={!canManage || setShare.isPending || (!shareAllowed && !enabled)}
+                disabledReason={
+                  !canManage
+                    ? "你对该知识库没有管理权，不能修改外链分享"
+                    : !shareAllowed
+                      ? "该知识库的「允许分享」总闸是关闭的，请先到知识库设置页打开"
+                      : undefined
+                }
               />
             </div>
 
@@ -205,6 +217,13 @@ export function ShareModal({ docId, kbId, kind = "doc", open, onClose }: { docId
             ) : (
               <div className="rounded-gx-lg border border-dashed border-gx-border bg-gx-bg px-3 py-3 text-gx-12 text-gx-text-hint">
                 开启后，任何人通过链接即可访问（无需登录）。关闭后原链接立即失效。
+                {/* 总闸关着时开关是置灰的，光有 title 悬停提示不够——点不动又说不清为什么，
+                    这里补一行常驻说明，指明要先去知识库设置页打开总闸。 */}
+                {!shareAllowed ? (
+                  <div className="mt-1.5 text-gx-11 text-gx-text-hint">
+                    该知识库的「允许分享」总闸当前是关闭的，因此无法开启外链分享；请先在知识库设置页打开总闸。
+                  </div>
+                ) : null}
               </div>
             )}
           </section>
