@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "node scripts/build.mjs",
+    "smoke:dist": "node scripts/build.mjs && node scripts/smoke-dist.mjs",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 5",
