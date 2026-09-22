@@ -192,6 +192,24 @@ model View {
   @@map("views")
 }
 
+// 表单设计器布局版本：每次保存布局自动留快照（label=null），回退前可手动留档（label 非 null）。
+// snapshot 存信封 JSON（{ version, layout, tabs }，见 src/domain/formLayoutVersion.ts）。
+// 物理表由手写迁移 20260924010000_form_layout_versions 建立，列/索引与本 model 一一对应。
+// 不加物理外键：view_id 为软引用（视图删除由应用层在 views.delete 处 deleteMany 清理）。
+model FormLayoutVersion {
+  id        String   @id @default(cuid())
+  viewId    String
+  version   Int
+  label     String?
+  snapshot  String
+  createdBy String
+  createdAt DateTime @default(now())
+
+  @@unique([viewId, version])
+  @@index([viewId])
+  @@map("form_layout_versions")
+}
+
 // ============ Member & RBAC ============
 
 model User {

@@ -32,6 +32,10 @@ interface DetailLayoutEditorProps {
   baseId: string;
   tables: TableDTO[];
   permissions: PermissionSet;
+  /**
+   * 布局版本历史的归属视图 id（版本是视图级的）。缺省时设计器的「历史」入口禁用。
+   */
+  viewId?: string | null;
   onClose: () => void;
   /**
    * 保存布局。**必须返回 Promise，失败必须 reject**（三个调用方统一改用 mutateAsync）。
@@ -43,7 +47,7 @@ interface DetailLayoutEditorProps {
   inline?: boolean;
 }
 
-export function DetailLayoutEditor({ open, fields, layout, tableId, baseId, tables, permissions, onClose, onSave, inline }: DetailLayoutEditorProps) {
+export function DetailLayoutEditor({ open, fields, layout, tableId, baseId, tables, permissions, viewId, onClose, onSave, inline }: DetailLayoutEditorProps) {
   // 只透传 Promise：成功 toast + 关闭面板交给 FormDesigner（它 await 得到结果）。
   const handleSave = (next: DetailLayout): Promise<void> => onSave(next);
 
@@ -57,6 +61,7 @@ export function DetailLayoutEditor({ open, fields, layout, tableId, baseId, tabl
       baseId={baseId}
       tables={tables}
       permissions={permissions}
+      viewId={viewId}
       onClose={onClose}
       onSave={handleSave}
     />

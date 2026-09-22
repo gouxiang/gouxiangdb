@@ -10,6 +10,7 @@
 //   views.ts        — 视图配置 / 排序 / 分组 / 聚合
 //   permissions.ts  — RBAC 角色与权限位
 //   api.ts          — 前后端 HTTP 契约（唯一真源）
+//   layoutVersion.ts — 表单设计器布局版本信封（前后端共用的唯一真源）
 
 export * from "./ids.js";
 export * from "./fields.js";
@@ -30,3 +31,4 @@ export * from "./authz.js";
 export * from "./policy.js";
 export * from "./share.js";
 export * from "./collab.js";
+export * from "./layoutVersion.js";

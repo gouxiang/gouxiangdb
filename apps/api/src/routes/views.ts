@@ -8,6 +8,7 @@ import { requireCanView, requireCanManageSchema, HttpError } from "../guards.js"
 import { parseViewConfig } from "../domain/recordService.js";
 import { permissionsForRole } from "@gx/shared-types";
 import { syncNavFromEntitiesTx, purgeViewNodeTx } from "../domain/nav/sync.js";
+import { maybeAutoSnapshotLayoutTx, purgeVersionsTx } from "../domain/formLayoutVersion.js";
 
 export const views = new Hono();
 
@@ -135,7 +136,7 @@ views.get("/:viewId", async (c) => {
 views.patch("/:viewId", async (c) => {
   const viewId = c.req.param("viewId");
   const baseId = await baseIdOfView(viewId);
-  const { role } = await requireCanView(c, baseId);
+  const { userId, role } = await requireCanView(c, baseId);
 
   const v = await prisma.view.findUnique({ where: { id: viewId } });
   if (!v) throw new HttpError(404, "视图不存在");
@@ -167,22 +168,37 @@ views.patch("/:viewId", async (c) => {
     if (!metaAllowed) throw new HttpError(403, "个人视图的排序只有表结构管理者可修改");
     data["order"] = parsed.data.order;
   }
+  let configChanged = false;
   if (parsed.data.config !== undefined) {
     const current = parseViewConfig(v.config);
     data["config"] = JSON.stringify({ ...current, ...parsed.data.config });
+    configChanged = true;
   }
 
   // M3/S3 #9：仅 name/order 影响 nav 节点（ord 镜像 view.order）；这两类变更收紧进事务
-  // 并同步节点。lockMode/config 不进树，保持原裸写以最小化触碰。
+  // 并同步节点。lockMode/config 不进树。
+  //
+  // 表单设计器版本管理：两条写路径统一收敛进 withWriteTx（原来 config-only 那条是裸写）。
+  // 收敛后不再有"config 单独裸写"这条分支：nav 同步按 affectsNav 条件跑，布局快照按
+  // configChanged 条件跑，二者互不干扰。快照必须在 update 之后取 u.config —— 装进去的
+  // 是刚保存成功的那份布局，不是保存前的旧值。
   const affectsNav = Object.prototype.hasOwnProperty.call(data, "name") ||
     Object.prototype.hasOwnProperty.call(data, "order");
-  const updated = affectsNav
-    ? await withWriteTx("view.update", async (tx) => {
-      const u = await tx.view.update({ where: { id: viewId }, data });
-      await syncNavFromEntitiesTx(tx);
-      return u;
-    })
-    : await prisma.view.update({ where: { id: viewId }, data });
+  const updated = await withWriteTx("view.update", async (tx) => {
+    const u = await tx.view.update({ where: { id: viewId }, data });
+    if (affectsNav) await syncNavFromEntitiesTx(tx);
+    if (configChanged) {
+      await maybeAutoSnapshotLayoutTx(tx, viewId, userId, {
+        tableId: v.tableId,
+        viewType: v.type,
+        viewConfigJson: u.config,
+        // 通用视图更新入口：grid 改个筛选/排序也走这里，内容没变就不留档，否则历史上
+        // 会被一堆跟表单布局无关的噪音版本占满（顺便把真正的布局改动挤出去）。
+        skipIfIdentical: true,
+      });
+    }
+    return u;
+  });
   return c.json({ view: serializeView(updated) });
 });
 
@@ -203,6 +219,8 @@ views.delete("/:viewId", async (c) => {
   // 再删实体与节点（顺序无关紧要，同事务共生死）。
   await withWriteTx("view.purge", async (tx) => {
     await purgeViewNodeTx(tx, viewId);
+    // 布局版本是视图的派生历史：视图物理删了，历史一同清掉（表无物理外键，靠应用层）。
+    await purgeVersionsTx(tx, viewId);
     await tx.view.delete({ where: { id: viewId } });
   });
   return c.json({ ok: true });

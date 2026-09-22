@@ -28,8 +28,19 @@ import { runSaveLayout, errorMessageOf, SAVE_OK_TEXT } from "./save-layout";
 // LayoutItem/LayoutRow、defaultW、segmentToRows 已搬到 ./default-detail-layout，
 // 与 DetailLayoutRenderer 共用同一份「无保存布局时的默认布局」推导，避免两套算法要保存一次才对齐。
 import { defaultW, segmentToRows, collectFieldsInTabs, deriveDefaultDetailLayout, type LayoutItem, type LayoutRow } from "./default-detail-layout";
+// 表单布局版本管理：纯函数层 + 抽屉（回退三步语义见 handleRollback 注释）
+import {
+  AUTO_BACKUP_LABEL,
+  dropUnknownFieldIds,
+  historyBlockReason,
+  type LayoutSnapshot,
+  type LayoutVersionSummary,
+  type TabsSnapshotWire,
+} from "./form-versioning/versioning";
+import { buildTabsSnapshot, isEmptyTabsEntry, restoreTabsConfig, TABS_CLEAR_SUPPORTED } from "./form-versioning/tabs-snapshot";
+import { useCreateLayoutVersion, useSaveDetailLayout } from "./form-versioning/useLayoutVersions";
+import { VersionHistoryDrawer } from "./form-versioning/VersionHistoryDrawer";
 
-export type TopTab = "design" | "flow" | "settings" | "publish";
 export type PreviewDevice = "desktop" | "mobile";
 
 interface FormDesignerProps {
@@ -41,6 +52,11 @@ interface FormDesignerProps {
   baseId: string;
   tables: TableDTO[];
   permissions: PermissionSet;
+  /**
+   * 布局版本历史的归属视图 id。版本是「视图级」的（布局存在 view.config.detailLayout），
+   * 没有它就无法读写 /api/views/:viewId/layout-versions，此时历史入口禁用。
+   */
+  viewId?: string | null;
   onClose: () => void;
   /**
    * 保存布局。**必须返回 Promise 且失败时 reject**（调用方统一用 mutateAsync）。
@@ -49,13 +65,6 @@ interface FormDesignerProps {
    */
   onSave: (next: DetailLayout) => Promise<void>;
 }
-
-const TABS: { key: TopTab; label: string }[] = [
-  { key: "design", label: "表单设计" },
-  { key: "flow", label: "添加流程" },
-  { key: "settings", label: "拓展设置" },
-  { key: "publish", label: "应用发布" },
-];
 
 const fid = (s: string): FieldIdT => s as FieldIdT;
 
@@ -270,7 +279,7 @@ function initialRows(layout: DetailLayout | null, fields: FieldDTO[]): LayoutRow
 }
 
 /** 收集所有 tabs 字段的初始配置，并立即规整为内部行模型（TabInternal） */
-function initialTabsConfig(fields: FieldDTO[]): Record<string, TabInternal[]> {
+export function initialTabsConfig(fields: FieldDTO[]): Record<string, TabInternal[]> {
   const out: Record<string, TabInternal[]> = {};
   for (const f of fields) {
     if (f.type === "tabs") {
@@ -290,6 +299,14 @@ function initialTabsConfig(fields: FieldDTO[]): Record<string, TabInternal[]> {
     }
   }
   return out;
+}
+
+/**
+ * 是否需要补灌一次初始状态：pending = 首屏没数据（见 needsHydrateRef）。
+ * 数据仍没到 → 继续等；已补过或首屏就有数据（用户可能已经动过手）→ 一律不补。
+ */
+export function shouldHydrateOnce(pending: boolean, fields: FieldDTO[], layout: DetailLayout | null): boolean {
+  return pending && !(fields.length === 0 && layout == null);
 }
 
 /** 字段是否归属任一选项卡容器 */
@@ -317,6 +334,7 @@ export function FormDesigner({
   baseId,
   tables,
   permissions,
+  viewId,
   onClose,
   onSave,
 }: FormDesignerProps) {
@@ -328,6 +346,18 @@ export function FormDesigner({
     for (const [k, cfg] of Object.entries(initialTabsConfig(fields))) init[k] = cfg[0]?.id ?? "";
     return init;
   });
+  // ?design=1 那条入口下，首屏 fields 还没到（异步），惰性初始化会拿到空数组，
+  // 之后 state 不会自动重灌 → 已保存的选项卡不渲染，再保存就会把真实 tabsConfig 覆盖掉。
+  // 这里只在「首屏确实没数据、后来数据到了」时补灌一次；用户已经动过手的情况绝不覆盖。
+  const needsHydrateRef = useRef(fields.length === 0 || layout == null);
+  useEffect(() => {
+    if (!shouldHydrateOnce(needsHydrateRef.current, fields, layout)) return;
+    needsHydrateRef.current = false;
+    setRows(initialRows(layout, fields));
+    const nextTabs = initialTabsConfig(fields);
+    setTabsConfigMap(nextTabs);
+    setActiveTabMap(Object.fromEntries(Object.entries(nextTabs).map(([k, cfg]) => [k, cfg[0]?.id ?? ""])));
+  }, [fields, layout]);
   const [selectedFieldId, setSelectedFieldId] = useState<FieldIdT | null>(null);
   const [dragFieldId, setDragFieldId] = useState<FieldIdT | null>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -335,7 +365,6 @@ export function FormDesigner({
   /** 当前落点是否为禁放区（null=可放）；禁放时渲染禁止样式且松手不移动 */
   const [dropReject, setDropReject] = useState<string | null>(null);
   const [previewDevice, setPreviewDevice] = useState<PreviewDevice>("desktop");
-  const [topTab, setTopTab] = useState<TopTab>("design");
   const [creating, setCreating] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -871,6 +900,114 @@ export function FormDesigner({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // ============ 布局版本历史（回退三步语义） ============
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [rollingBack, setRollingBack] = useState(false);
+  const createLayoutVersion = useCreateLayoutVersion(viewId);
+  // 布局 + 选项卡「一次事务」保存（取代串行的 PATCH views + N 个 PATCH fields，避免半回滚）
+  const saveDetailLayout = useSaveDetailLayout(viewId, tableId);
+  const historyReason = historyBlockReason(viewId);
+
+  /** 当前编辑器草稿 -> 快照信封（自动备份 / 手动留档两种写入共用） */
+  const draftSnapshot = (): { layout: DetailLayout; tabs: Record<string, TabsSnapshotWire> } => ({
+    layout: toSaved(rowsRef.current),
+    // 结构化入信封：容器 id -> TabConfig[]，页名 / 宽度 / 行边界一起存，回退时才能原样还原
+    // （扁平 cards 会把宽度与行边界丢掉，回来的是平铺版，等于假回退）。
+    tabs: buildTabsSnapshot(syncTabs(tabsRef.current)),
+  });
+
+  /** 抽屉里「存为新版本」：把当前草稿存成一个带备注的版本 */
+  const handleCreateVersion = async (label: string) => {
+    try {
+      await createLayoutVersion.mutateAsync({ snapshot: draftSnapshot(), label });
+      toast("已把当前草稿存为新版本", "success");
+    } catch (err) {
+      toast(errorMessageOf(err, "保存版本失败"), "error");
+      throw err; // 抽屉据此不清空输入框
+    }
+  };
+
+  /**
+   * 回退三步（产品语义，顺序不可改）：
+   *   ① 先把编辑器里**当前未保存的草稿**存成一个版本（备注「回退前自动备份」）—— 保护起来；
+   *   ② 再把选中历史版本的 rows 与 tabs 填回编辑器草稿区；
+   *   ③ **不落库**：不碰 onSave / 不写 view.config，由用户看完点「保存布局」才真正写入。
+   *
+   * ① 失败就整体中止：宁可让用户手动重试，也不能在草稿没保住的情况下覆盖它。
+   */
+  const handleRollback = async ({ summary, snapshot }: { summary: LayoutVersionSummary; snapshot: LayoutSnapshot }) => {
+    if (rollingBack) return;
+    setRollingBack(true);
+    try {
+      // ① 自动备份当前草稿
+      try {
+        await createLayoutVersion.mutateAsync({ snapshot: draftSnapshot(), label: AUTO_BACKUP_LABEL });
+      } catch (err) {
+        const reason = errorMessageOf(err, "备份当前草稿失败");
+        // 保护机制的语义必须说满：备份失败 = 这次回退**不可撤销**，所以是"已取消回退"，
+        // 不是"回退完成但备份没成"。只抛后端原因用户会以为回退已经做完了。
+        const msg = `未能创建回退前的备份，已取消本次回退，草稿未改动（${reason}）`;
+        setSaveError(msg);
+        toast(msg, "error");
+        return; // 草稿没保住 —— 中止，不覆盖
+      }
+
+      // ② 填回草稿区
+      //    - rows：快照里已被删掉的字段直接跳过（不能凭快照复活字段）
+      const known = new Set(fields.map((f) => f.id));
+      // 该版本本来就没排字段 -> 忠实清空画布；不能退化成「默认布局」（那就不是回退了）
+      const target = dropUnknownFieldIds(snapshot.layout, known);
+      setRows(target && target.rows.length > 0 ? initialRows(target, fields) : []);
+      //    - tabs：快照里有、但当前表上这个 tabs 字段已经被删了 -> 跳过，不中断整个回退
+      let unclearable = 0;
+      if (snapshot.tabs) {
+        // 骨架取**编辑器本地**的选项卡配置（含未保存的改名/改宽），而不是 props.fields 的落库快照，
+        // 这样重建出来的页 id / 页名与用户此刻看到的一致。
+        const currentSynced = syncTabs(tabsRef.current);
+        const next: Record<string, TabInternal[]> = { ...tabsRef.current };
+        for (const [containerId, entry] of Object.entries(snapshot.tabs)) {
+          const f = fields.find((x) => x.id === containerId);
+          if (!f || f.type !== "tabs") continue; // 已删 / 类型变了 -> 跳过
+          // 目标版本里这个容器是 0 页（真实信封里长这样：`{ cards: [], lazyTouched: [] }`，
+          // **没有 tabs 键** —— 后端只在非空时才落这个键，所以判据不能写成 tabs.length===0，
+          // 那样永远 false）。可达性见 TABS_CLEAR_SUPPORTED 的注释：UI 今天造不出 0 页容器，
+          // 这里是给"API 造出来的 / 将来的清空入口 / 外来快照"兜的防线，不是功能开关。
+          // 后端写不进空数组（见 TABS_CLEAR_SUPPORTED），照常"清空"会得到「UI 上干净、点了保存、
+          // 刷新后旧分页原样回来」的假象 —— 比不清空更糟；故保留原样并明确告知，
+          // A1 裁决支持清空后闸门翻 true，这里自动放开成真清空。
+          if (isEmptyTabsEntry(entry) && !TABS_CLEAR_SUPPORTED) {
+            unclearable += 1;
+            continue;
+          }
+          next[containerId] = restoreTabsConfig(entry, currentSynced[containerId] ?? []).map((t) => ({
+            id: t.id,
+            name: t.name,
+            rows: t.rows && t.rows.length > 0
+              ? t.rows.map((r) => ({ items: r.items.map((it) => ({ fieldId: fid(it.fieldId), widthPct: it.widthPct as FieldWidthPct })) }))
+              : segmentToRows((t.fieldIds ?? []).map((id) => {
+                  const cf = fields.find((x) => x.id === id);
+                  return { fieldId: fid(id), widthPct: ((t.widths?.[id] as FieldWidthPct) ?? (cf ? defaultW(cf.type) : 50)) as FieldWidthPct };
+                })),
+          }));
+        }
+        setTabsConfigMap(next);
+      }
+
+      // ③ 不落库：这里**故意不调用** doSave / onSave
+      const notes: string[] = [];
+      if (unclearable > 0) notes.push(`${unclearable} 个容器在目标版本里是 0 页，但当前版本无法清空（服务端限制），已保留原样`);
+      toast(
+        notes.length > 0
+          ? `已把 v${summary.version} 填回编辑器；${notes.join("；")}。确认后点「保存布局」生效`
+          : `已把 v${summary.version} 填回编辑器，确认后点「保存布局」生效`,
+        "success",
+      );
+      setHistoryOpen(false);
+    } finally {
+      setRollingBack(false);
+    }
+  };
+
   const handleSave = async () => {
     if (savingRef.current) return; // 防重复提交（快速连点）
     savingRef.current = true;
@@ -888,30 +1025,46 @@ export function FormDesigner({
     // 注意：必须遍历**本地 tabsConfigMap 的 key**，而不是 props.fields —— 设计器内新建的 tabs
     // 容器可能还没异步加载进 fields 快照，用快照会漏掉新容器，导致它的 tab 内字段不保存（P0）。
     const synced = syncTabs(tabsConfigMap);
-    try {
-      await Promise.all(
-        Object.keys(synced).map((containerId) => {
-          const f = fieldById.get(fid(containerId));
-          return m.updateField.mutateAsync({
-            fieldId: containerId,
-            tableId,
-            data: { name: f?.name ?? "选项卡分组", type: "tabs", tabsConfig: synced[containerId]! },
-          });
-        }),
-      );
-    } catch (err) {
-      // 选项卡配置落库失败：同样保持面板打开，不谎报成功
-      const msg = errorMessageOf(err, "保存选项卡配置失败");
-      setSaveError(msg);
-      toast(msg, "error");
-      return;
-    }
+    const layout = toSaved(rows);
+
+    // 服务端在落库前会剔除「布局里引用了、但表里已删除」的字段。静默剔除 = 静默数据丢失，
+    // 必须由 UI 说出来（见 useLayoutVersions 的 useSaveDetailLayout 注释）。
+    // 注：后端对「引用已删字段」是 fail-closed 直接 400，所以正常情况下这里恒为空数组；
+    // 留着是纵深防御 —— 真触发了（并发删字段 / 后端将来放宽校验）就是真丢字段，正该提示。
+    let removed: string[] = [];
+    // 发了但服务端没写进去的容器键 —— 又一处静默 no-op，同样要说出来
+    let skipped: string[] = [];
+
     // 只有 await 成功才提示成功并关闭；失败保持面板打开（P1 静默数据丢失修复）
-    const ok = await runSaveLayout(toSaved(rows), {
-      persist: (layout) => onSave(layout),
+    const ok = await runSaveLayout(layout, {
+      persist: async (next) => {
+        if (viewId) {
+          // 一次事务写布局 + 所有选项卡配置：中途失败不会留下「布局回去了、选项卡没回去」
+          // 的半回滚状态（那比完全不保存更糟）。服务端写完统一触发自动留档。
+          const res = await saveDetailLayout.mutateAsync({ detailLayout: next, tabs: synced });
+          removed = res.removedFieldIds ?? [];
+          // 契约上 skipped 恒为数组；留 `?? []` 只防"新前端 + 旧接口"跨版本部署时炸在成功回调里
+          skipped = res.skipped ?? [];
+          return;
+        }
+        // 没有 viewId 的宿主（理论上当前两个宿主都传了）：退回老的多请求串联，
+        // 至少还能保存，不因为拿不到视图 id 就整个存不了。
+        await Promise.all(
+          Object.keys(synced).map((containerId) =>
+            // 只提交 tabsConfig 这一个字段：PATCH 是部分更新，把 name / type / options 一起
+            // 盖回去属于误伤（会覆盖别人在此期间改过的字段名）。
+            m.updateField.mutateAsync({ fieldId: containerId, tableId, data: { tabsConfig: synced[containerId]! } }),
+          ),
+        );
+        await onSave(next);
+      },
       onSuccess: () => {
         setSaveError(null);
-        toast(SAVE_OK_TEXT, "success");
+        // 版本列表的失效由 useSaveDetailLayout 的 onSuccess 统一做（那里还一并失效 views/fields）
+        const caveats: string[] = [];
+        if (removed.length > 0) caveats.push(`其中 ${removed.length} 个字段在表里已不存在，已从布局中移除`);
+        if (skipped.length > 0) caveats.push(`有 ${skipped.length} 个选项卡容器没能写入，请检查后重试`);
+        toast(caveats.length > 0 ? `${SAVE_OK_TEXT}；${caveats.join("；")}` : SAVE_OK_TEXT, "success");
         onClose();
       },
       onError: (message) => {
@@ -956,14 +1109,14 @@ export function FormDesigner({
   const body = (
     <div className="flex h-full flex-col bg-gx-surface">
       <FormDesignerToolbar
-        activeTab={topTab}
-        onTabChange={setTopTab}
         device={previewDevice}
         onDeviceChange={setPreviewDevice}
         onClose={onClose}
         onSave={handleSave}
         saving={saving}
         saveError={saveError}
+        onOpenHistory={() => setHistoryOpen(true)}
+        historyReason={historyReason}
       />
       <div className="flex flex-1 overflow-hidden">
         {/* 移动端：字段库与设置面板收起为底部/抽屉，画布单列堆叠 */}
@@ -972,122 +1125,114 @@ export function FormDesigner({
         {/* 中间：一整块表单画布（仅此区域与左右栏各自独立滚动，弹窗本身不滚动） */}
         <div className="flex-1 overflow-y-auto bg-gx-bg/50 p-4">
           <div className={clsx("mx-auto transition-all", previewDevice === "mobile" ? "max-w-[420px]" : "w-full max-w-3xl")}>
-            {topTab === "design" ? (
-              <div
-                ref={canvasRef}
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-                className={clsx(
-                  "relative rounded-gx-lg border bg-gx-surface shadow-sm transition-colors",
-                  dragActive && !dropReject && "border-gx-accent ring-1 ring-gx-accent/30",
-                  // 当前落点是禁放区：整块画布转红，用户松手前就知道放不进去
-                  dragActive && dropReject && "border-gx-danger ring-1 ring-gx-danger/30",
-                  !dragActive && "border-gx-border",
-                )}
-              >
-                <div className="flex items-center justify-between gap-2 border-b border-gx-separator px-4 py-2.5">
-                  <span className="shrink-0 text-gx-13 font-semibold text-gx-text-primary">表单</span>
-                  <span className="truncate text-gx-11 text-gx-text-hint max-md:hidden">
-                    {rows.reduce((s, r) => s + r.items.length, 0)} 个字段 · 拖入添加，▲ 并入上一行 / ▼ 向下新建一行，悬停字段可交换·复制·删除
-                  </span>
-                  <span className="truncate text-gx-11 text-gx-text-hint md:hidden">
-                    {rows.reduce((s, r) => s + r.items.length, 0)} 个字段
-                  </span>
-                </div>
+            <div
+              ref={canvasRef}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              className={clsx(
+                "relative rounded-gx-lg border bg-gx-surface shadow-sm transition-colors",
+                dragActive && !dropReject && "border-gx-accent ring-1 ring-gx-accent/30",
+                // 当前落点是禁放区：整块画布转红，用户松手前就知道放不进去
+                dragActive && dropReject && "border-gx-danger ring-1 ring-gx-danger/30",
+                !dragActive && "border-gx-border",
+              )}
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-gx-separator px-4 py-2.5">
+                <span className="shrink-0 text-gx-13 font-semibold text-gx-text-primary">表单</span>
+                <span className="truncate text-gx-11 text-gx-text-hint max-md:hidden">
+                  {rows.reduce((s, r) => s + r.items.length, 0)} 个字段 · 拖入添加，▲ 并入上一行 / ▼ 向下新建一行，悬停字段可交换·复制·删除
+                </span>
+                <span className="truncate text-gx-11 text-gx-text-hint md:hidden">
+                  {rows.reduce((s, r) => s + r.items.length, 0)} 个字段
+                </span>
+              </div>
 
-                {rows.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center gap-2 py-20 text-center">
-                    <Icon name="form" size={28} className="text-gx-text-hint" />
-                    <div className="text-gx-13 text-gx-text-secondary">从左侧字段库拖拽字段类型到此处</div>
-                    <div className="text-gx-11 text-gx-text-hint">字段会按宽度自动排列成行</div>
-                  </div>
-                ) : (
-                  <div className="p-3">
-                    {rows.map((row, ri) => (
-                      <div key={ri}>
-                        <RowGap rowIndex={ri} state={gapState(ri)} rejectReason={dropReject} onDragOver={handleGapDragOver(ri)} />
-                        {/* 移动端：所有字段强制单列堆叠（忽略桌面行内多列宽度） */}
-                        <div className={clsx("flex", previewDevice === "mobile" ? "flex-col" : "flex-wrap")}>
-                          {row.items.map((item, ii) => {
-                            const f = fieldById.get(item.fieldId);
-                            if (!f) return null;
-                            // 选项卡分组：全宽横向容器（所见即所得），独占一行
-                            if (f.type === "tabs") {
-                              const cfg = tabsCfg(f.id);
-                              const activeId = activeTabMap[f.id] ?? cfg[0]?.id ?? "";
-                              const activeTab = cfg.find((t) => t.id === activeId) ?? cfg[0];
-                              const activeRows = activeTab?.rows ?? [];
-                              return (
-                                <div key={item.fieldId} className="w-full min-w-0 px-2 py-2">
-                                  <TabsDesignerCard
-                                    field={f}
-                                    tabs={cfg}
-                                    activeTabId={activeTab?.id ?? ""}
-                                    activeRows={activeRows}
-                                    selectedFieldId={selectedFieldId}
-                                    isSelected={selectedFieldId === f.id}
-                                    device={previewDevice}
-                                    bodyState={activeTab ? dropInTab(f.id, activeTab.id) : "none"}
-                                    gapState={(gri) => (activeTab ? tabGapState(f.id, activeTab.id, gri) : "none")}
-                                    dropRejectReason={dropReject}
-                                    fieldById={fieldById}
-                                    dragFieldId={dragFieldId}
-                                    onSelectContainer={() => setSelectedFieldId(f.id)}
-                                    onSelectField={(id) => setSelectedFieldId(id)}
-                                    onActiveTab={(tid) => setActiveTab(f.id, tid)}
-                                    onAddTab={() => addTab(f.id)}
-                                    onRemoveTab={(tid) => removeTab(f.id, tid)}
-                                    onRenameTab={(tid, name) => renameTab(f.id, tid, name)}
-                                    onRemoveContainer={() => void deleteTabsContainer(f.id)}
-                                    onRemoveField={(id) => removeField(id)}
-                                    onDuplicateField={(id) => void duplicateField(id)}
-                                    onJoinUp={joinUp}
-                                    onSplitDown={splitDown}
-                                    onSwapLeft={swapWithLeft}
-                                    onBeginDrag={beginDragFromRow}
-                                    onEndDrag={endDrag}
-                                  />
-                                </div>
-                              );
-                            }
-                            const canJoin = canJoinUp(rows, ri, item);
-                            const canSplit = row.items.length > 1;
+              {rows.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-20 text-center">
+                  <Icon name="form" size={28} className="text-gx-text-hint" />
+                  <div className="text-gx-13 text-gx-text-secondary">从左侧字段库拖拽字段类型到此处</div>
+                  <div className="text-gx-11 text-gx-text-hint">字段会按宽度自动排列成行</div>
+                </div>
+              ) : (
+                <div className="p-3">
+                  {rows.map((row, ri) => (
+                    <div key={ri}>
+                      <RowGap rowIndex={ri} state={gapState(ri)} rejectReason={dropReject} onDragOver={handleGapDragOver(ri)} />
+                      {/* 移动端：所有字段强制单列堆叠（忽略桌面行内多列宽度） */}
+                      <div className={clsx("flex", previewDevice === "mobile" ? "flex-col" : "flex-wrap")}>
+                        {row.items.map((item, ii) => {
+                          const f = fieldById.get(item.fieldId);
+                          if (!f) return null;
+                          // 选项卡分组：全宽横向容器（所见即所得），独占一行
+                          if (f.type === "tabs") {
+                            const cfg = tabsCfg(f.id);
+                            const activeId = activeTabMap[f.id] ?? cfg[0]?.id ?? "";
+                            const activeTab = cfg.find((t) => t.id === activeId) ?? cfg[0];
+                            const activeRows = activeTab?.rows ?? [];
                             return (
-                              <CanvasFieldCard
-                                key={item.fieldId}
-                                field={f}
-                                item={item}
-                                forceStack={previewDevice === "mobile"}
-                                isSelected={selectedFieldId === item.fieldId}
-                                isDragging={dragFieldId === item.fieldId}
-                                canSwapLeft={ii > 0}
-                                canJoinUp={canJoin}
-                                canSplitDown={canSplit}
-                                onSelect={() => setSelectedFieldId(item.fieldId)}
-                                onRemove={() => removeField(item.fieldId)}
-                                onDuplicate={() => void duplicateField(item.fieldId)}
-                                onSwapLeft={() => swapWithLeft(item.fieldId)}
-                                onJoinUp={() => joinUp(item.fieldId)}
-                                onSplitDown={() => splitDown(item.fieldId)}
-                                onBeginDrag={(e) => beginDragFromRow(item.fieldId, e)}
-                                onEndDrag={endDrag}
-                              />
+                              <div key={item.fieldId} className="w-full min-w-0 px-2 py-2">
+                                <TabsDesignerCard
+                                  field={f}
+                                  tabs={cfg}
+                                  activeTabId={activeTab?.id ?? ""}
+                                  activeRows={activeRows}
+                                  selectedFieldId={selectedFieldId}
+                                  isSelected={selectedFieldId === f.id}
+                                  device={previewDevice}
+                                  bodyState={activeTab ? dropInTab(f.id, activeTab.id) : "none"}
+                                  gapState={(gri) => (activeTab ? tabGapState(f.id, activeTab.id, gri) : "none")}
+                                  dropRejectReason={dropReject}
+                                  fieldById={fieldById}
+                                  dragFieldId={dragFieldId}
+                                  onSelectContainer={() => setSelectedFieldId(f.id)}
+                                  onSelectField={(id) => setSelectedFieldId(id)}
+                                  onActiveTab={(tid) => setActiveTab(f.id, tid)}
+                                  onAddTab={() => addTab(f.id)}
+                                  onRemoveTab={(tid) => removeTab(f.id, tid)}
+                                  onRenameTab={(tid, name) => renameTab(f.id, tid, name)}
+                                  onRemoveContainer={() => void deleteTabsContainer(f.id)}
+                                  onRemoveField={(id) => removeField(id)}
+                                  onDuplicateField={(id) => void duplicateField(id)}
+                                  onJoinUp={joinUp}
+                                  onSplitDown={splitDown}
+                                  onSwapLeft={swapWithLeft}
+                                  onBeginDrag={beginDragFromRow}
+                                  onEndDrag={endDrag}
+                                />
+                              </div>
                             );
-                          })}
-                        </div>
+                          }
+                          const canJoin = canJoinUp(rows, ri, item);
+                          const canSplit = row.items.length > 1;
+                          return (
+                            <CanvasFieldCard
+                              key={item.fieldId}
+                              field={f}
+                              item={item}
+                              forceStack={previewDevice === "mobile"}
+                              isSelected={selectedFieldId === item.fieldId}
+                              isDragging={dragFieldId === item.fieldId}
+                              canSwapLeft={ii > 0}
+                              canJoinUp={canJoin}
+                              canSplitDown={canSplit}
+                              onSelect={() => setSelectedFieldId(item.fieldId)}
+                              onRemove={() => removeField(item.fieldId)}
+                              onDuplicate={() => void duplicateField(item.fieldId)}
+                              onSwapLeft={() => swapWithLeft(item.fieldId)}
+                              onJoinUp={() => joinUp(item.fieldId)}
+                              onSplitDown={() => splitDown(item.fieldId)}
+                              onBeginDrag={(e) => beginDragFromRow(item.fieldId, e)}
+                              onEndDrag={endDrag}
+                            />
+                          );
+                        })}
                       </div>
-                    ))}
-                    <RowGap rowIndex={rows.length} state={gapState(rows.length)} rejectReason={dropReject} onDragOver={handleGapDragOver(rows.length)} />
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="flex h-64 items-center justify-center rounded-gx-lg border border-dashed border-gx-border bg-gx-surface text-gx-13 text-gx-text-hint">
-                {topTab === "flow" && "流程功能敬请期待"}
-                {topTab === "settings" && "拓展设置敬请期待"}
-                {topTab === "publish" && "应用发布敬请期待"}
-              </div>
-            )}
+                    </div>
+                  ))}
+                  <RowGap rowIndex={rows.length} state={gapState(rows.length)} rejectReason={dropReject} onDragOver={handleGapDragOver(rows.length)} />
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1135,7 +1280,29 @@ export function FormDesigner({
     </div>
   );
 
-  if (inline) return <div className="relative h-full">{body}</div>;
+  const historyDrawer = historyOpen ? (
+    <VersionHistoryDrawer
+      viewId={viewId ?? null}
+      tableId={tableId}
+      fields={fields}
+      permissions={permissions}
+      currentTabs={syncTabs(tabsRef.current)}
+      // 建版本（POST）与落库 tabs（PATCH /api/fields）都要求 canManageSchema，
+      // 故写入口按它开，而不是按 canEditData —— 否则点了才 403。浏览 / 预览不受此限。
+      readOnly={!permissions.canManageSchema}
+      busy={rollingBack || createLayoutVersion.isPending}
+      onCreateVersion={handleCreateVersion}
+      onRollback={handleRollback}
+      onClose={() => setHistoryOpen(false)}
+    />
+  ) : null;
+
+  if (inline) return (
+    <div className="relative h-full">
+      {body}
+      {historyDrawer}
+    </div>
+  );
   // 全屏抽屉式设计器（⑤）：近全屏、弹窗本身不滚动，三栏各自独立滚动。
   // Portal 到 body：抽屉（RecordDrawer）带 transform 会破坏内部 fixed 定位与层叠上下文。
   if (!open) return null;
@@ -1145,6 +1312,7 @@ export function FormDesigner({
       <div className="relative flex w-full max-w-[1500px] flex-col overflow-hidden rounded-gx-xl bg-gx-surface shadow-2xl">
         {body}
       </div>
+      {historyDrawer}
     </div>,
     document.body,
   );
@@ -1250,14 +1418,16 @@ export function RowGap({
 // ============ 顶部工具栏 ============
 
 interface FormDesignerToolbarProps {
-  activeTab: TopTab;
-  onTabChange: (t: TopTab) => void;
   device: PreviewDevice;
   onDeviceChange: (d: PreviewDevice) => void;
   onClose: () => void;
   onSave: () => void;
   /** 保存中：按钮转 loading 且禁用，避免连点重复提交 */
   saving?: boolean;
+  /** 打开布局版本历史抽屉 */
+  onOpenHistory?: () => void;
+  /** 历史入口的禁用原因（null = 可用），渲染为 title */
+  historyReason?: string | null;
   /**
    * 上一次保存的真实失败原因（后端 message 优先，兜底「保存失败，请重试」）。
    * 非空时常驻在工具栏下方：面板此时**没有关闭**，用户改完可直接重试。
@@ -1266,34 +1436,23 @@ interface FormDesignerToolbarProps {
 }
 
 export function FormDesignerToolbar({
-  activeTab,
-  onTabChange,
   device,
   onDeviceChange,
   onClose,
   onSave,
   saving = false,
   saveError = null,
+  onOpenHistory,
+  historyReason = null,
 }: FormDesignerToolbarProps) {
   return (
     <div className="shrink-0 border-b border-gx-separator bg-gx-surface">
       <div className="flex items-center gap-4 px-4 py-2">
-        <div className="flex items-center gap-1">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => onTabChange(t.key)}
-              className={clsx(
-                "rounded-gx-sm px-3 py-1.5 text-gx-13 transition-colors",
-                activeTab === t.key ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-secondary hover:bg-gx-bg",
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
         <div className="ml-auto flex items-center gap-2">
+          {/* 布局版本历史：ghost 小按钮，禁用时 title 带原因（R-D-09） */}
+          <Button size="sm" variant="ghost" icon="history" disabled={!!historyReason} disabledReason={historyReason ?? undefined} onClick={onOpenHistory}>
+            历史
+          </Button>
           <div className="flex items-center rounded-gx-lg border border-gx-border p-0.5">
             <button
               type="button"

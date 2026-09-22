@@ -22,6 +22,7 @@ import { tables } from "./routes/tables.js";
 import { fields } from "./routes/fields.js";
 import { records } from "./routes/records.js";
 import { views } from "./routes/views.js";
+import { layoutVersions } from "./routes/layoutVersions.js";
 import { tableShares } from "./routes/tableShares.js";
 import { linkable } from "./routes/linkable.js";
 import { collab } from "./routes/collab.js";
@@ -147,6 +148,10 @@ function createMount(webRoot: string | null): Hono {
   api.route("/fields", fields);
   api.route("/records", records);
   api.route("/views", views);
+  // 表单设计器布局版本（同 /api/views 前缀，单独成文件避免 views.ts 超长）。
+  // 两次 route("/views") 是 Hono 支持的叠加挂载：子路由路径不重叠（/:viewId 与
+  // /:viewId/layout-versions 深度不同），与 tableShares 挂在 /tables 的既有先例一致。
+  api.route("/views", layoutVersions);
   // 数据表分享链接（同一 /api/tables 前缀，单独成文件避免 tables.ts 超长）
   api.route("/tables", tableShares);
   // 关联插入选择器（后端按 libraryPolicy 过滤可见对象）

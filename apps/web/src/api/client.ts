@@ -19,6 +19,8 @@ import type {
   ViewType,
   LockMode,
   CellValue,
+  DetailLayout,
+  TabConfig,
   LinkRefDTO,
   AttachmentDTO,
   CSVImportResult,
@@ -775,7 +777,52 @@ export const Views = {
   remove: (viewId: string) =>
     apiFetch<{ ok: true }>(`/api/views/${viewId}`, { method: "DELETE", timeoutMs: WRITE_TIMEOUT_MS }),
   duplicate: (viewId: string) => apiFetch<{ view: ViewDTO }>(`/api/views/${viewId}/duplicate`, { method: "POST" }),
+  /**
+   * 详情布局「一次事务」保存：view.config.detailLayout + 所有选项卡容器的 tabsConfig
+   * 在同一事务里写，写完由服务端触发自动留档。
+   *
+   * 为什么不能前端串行走 `PATCH /api/views/:id` + N 个 `PATCH /api/fields/:id`：
+   * 中途失败会留下**半回滚**状态（布局回去了、选项卡没回去），比完全不保存更糟 ——
+   * 用户看到的是一个"既不是旧版也不是新版"的表单。事务端点把这个窗口彻底关掉。
+   */
+  /**
+   * 响应里的 `version` 是**本次保存顺带产出的版本号**；`null` 表示「内容与上一版相同，
+   * 后端判重后没留新版本」—— 这是正常结果不是失败，调用方照常提示已保存，不要报错。
+   */
+  saveDetailLayout: (
+    viewId: string,
+    data: { detailLayout: DetailLayout | null; tabs: Record<string, TabConfig[]> },
+  ) =>
+    apiFetch<SaveDetailLayoutResult>(`/api/views/${encodeURIComponent(viewId)}/detail-layout`, {
+      method: "POST",
+      body: JSON.stringify(data),
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
 };
+
+/** POST /api/views/:viewId/detail-layout 的响应 */
+export interface SaveDetailLayoutResult {
+  ok: true;
+  /**
+   * 本次保存顺带产出的版本号。`null` = 内容与上一版相同，后端判重后没留新版本 ——
+   * 这是正常结果不是失败，调用方照常提示「已保存」，**不要**当成错误。
+   */
+  version: number | null;
+  /**
+   * 本次保存被剔除的已删字段 id：布局里引用了表里已经不存在的字段，服务端在落库前
+   * 静默移除。**不能静默给用户** —— 调用方必须提示「有 N 个字段已不存在，已从布局中
+   * 移除」，否则用户会以为字段还在，只是暂时没渲染出来。
+   */
+  removedFieldIds: string[];
+  /** 本次真正写入 tabsConfig 的选项卡容器字段 id（UI 当前不展示，留作排查与后续埋点） */
+  tabsUpdated: string[];
+  /**
+   * **发了但没写进去**的容器键（键找不到对应的 tabs 字段 / 环境缺 tabsConfig 列）。
+   * 这是另一处静默 no-op：请求 200、布局存了、只有这几个容器没生效，不提示用户永远不知道。
+   * 契约上**恒存在**（没跳过时是 `[]`），调用方照常消费即可。
+   */
+  skipped: string[];
+}
 
 // ============ 知识库（Knowledge Base，与数据表完全独立） ============
 

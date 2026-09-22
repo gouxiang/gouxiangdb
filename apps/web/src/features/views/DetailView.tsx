@@ -120,6 +120,7 @@ export default function DetailView({
           baseId={baseId}
           tables={tables ?? []}
           permissions={permissions}
+          viewId={viewId}
           onClose={() => setEditingLayout(false)}
           // 必须是 mutateAsync 并让 reject 冒泡：失败时 FormDesigner 会保持面板打开
           // 并展示真实错误；这里不能再无条件 setEditingLayout(false)（P1 静默数据丢失）。

@@ -73,6 +73,7 @@ function TableFormDesignerHost({
       baseId={baseId}
       tables={tables ?? []}
       permissions={permissions}
+      viewId={targetView.id}
       onClose={onClose}
       // 必须是 mutateAsync：mutate 不返回 Promise 也不抛错，会让设计器在断网/409/500
       // 时照样提示「已保存布局」并关闭面板（P1 静默数据丢失）。
