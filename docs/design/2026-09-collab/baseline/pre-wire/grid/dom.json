@@ -1,0 +1,4658 @@
+{
+ "url": "/base/cmuazigmr0005bcnbdtyn0edb/table/cmuazigmx000bbcnbrv0orw91/view/cmuazign3000nbcnbtbgjn2fb",
+ "title": "构想工作台",
+ "nodeCount": 595,
+ "nodes": [
+  {
+   "t": "html",
+   "d": 0,
+   "a": {
+    "lang": "zh-CN"
+   }
+  },
+  {
+   "t": "head",
+   "d": 1
+  },
+  {
+   "t": "title",
+   "d": 2,
+   "x": "构想工作台"
+  },
+  {
+   "t": "body",
+   "d": 1,
+   "c": "antialiased bg-gx-bg font-sans text-gx-text-primary"
+  },
+  {
+   "t": "div",
+   "d": 2
+  },
+  {
+   "t": "div",
+   "d": 3,
+   "c": "bg-gx-bg flex flex-col h-screen"
+  },
+  {
+   "t": "header",
+   "d": 4,
+   "c": "bg-gx-surface border-b border-gx-hairline flex gap-3 h-14 items-center px-5"
+  },
+  {
+   "t": "button",
+   "d": 5,
+   "c": "flex gap-1.5 hover:bg-gx-bg items-center px-1 py-1 rounded-gx-sm",
+   "a": {
+    "type": "button",
+    "title": "构想工作台"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 6,
+   "c": "text-gx-accent",
+   "a": {
+    "width": "16",
+    "height": "16",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 7,
+   "a": {
+    "d": "M12 8c4.4 0 8-1.3 8-3s-3.6-3-8-3-8 1.3-8 3 3.6 3 8 3z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 7,
+   "a": {
+    "d": "M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"
+   }
+  },
+  {
+   "t": "path",
+   "d": 7,
+   "a": {
+    "d": "M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"
+   }
+  },
+  {
+   "t": "span",
+   "d": 6,
+   "c": "font-semibold hidden lg:inline text-gx-text-primary",
+   "x": "构想工作台"
+  },
+  {
+   "t": "button",
+   "d": 5,
+   "c": "bg-gx-bg border border-gx-border flex h-8 hover:bg-gx-row-hover items-center justify-center md:gap-2 md:justify-start md:max-w-md md:px-2.5 md:w-full mx-auto rounded-gx-lg text-gx-text-tertiary transition-colors w-8",
+   "a": {
+    "type": "button",
+    "aria-label": "搜索记录、文档与画布",
+    "title": "搜索（⌘K）"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 6,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 7,
+   "a": {
+    "d": "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 7,
+   "a": {
+    "d": "M21 21l-4.3-4.3"
+   }
+  },
+  {
+   "t": "span",
+   "d": 6,
+   "c": "hidden md:block text-left truncate whitespace-nowrap",
+   "x": "搜索记录、文档与画布"
+  },
+  {
+   "t": "span",
+   "d": 6,
+   "c": "bg-gx-surface hidden md:inline-block px-1 rounded text-gx-text-hint",
+   "x": "⌘K"
+  },
+  {
+   "t": "button",
+   "d": 5,
+   "c": "flex gap-2 hover:bg-gx-bg items-center lg:ml-0 ml-auto pl-1 pr-2 py-1 rounded-gx-sm",
+   "a": {
+    "type": "button",
+    "title": "打开个人中心",
+    "aria-label": "打开个人中心"
+   }
+  },
+  {
+   "t": "span",
+   "d": 6,
+   "c": "flex font-semibold h-6 items-center justify-center rounded-full text-white w-6",
+   "a": {
+    "style": "background-color: rgb(186, 117, 23);"
+   },
+   "x": "端"
+  },
+  {
+   "t": "div",
+   "d": 4,
+   "c": "flex relative"
+  },
+  {
+   "t": "aside",
+   "d": 5,
+   "c": "border-gx-hairline border-r flex flex-col h-full",
+   "a": {
+    "data-l1": "expanded",
+    "style": "width: 224px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 6
+  },
+  {
+   "t": "div",
+   "d": 7,
+   "c": "flex flex-col h-full"
+  },
+  {
+   "t": "div",
+   "d": 8,
+   "c": "pt-2 px-1.5"
+  },
+  {
+   "t": "div",
+   "d": 9,
+   "c": "flex flex-col"
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "c": "relative"
+  },
+  {
+   "t": "button",
+   "d": 11,
+   "c": "flex gap-2 hover:bg-gx-row-hover items-center px-2 py-1.5 rounded-gx-lg text-left w-full",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "span",
+   "d": 12,
+   "c": "h-4 rounded-full w-4",
+   "a": {
+    "style": "background-color: rgb(55, 138, 221);"
+   }
+  },
+  {
+   "t": "span",
+   "d": 12,
+   "c": "font-medium text-gx-text-primary truncate",
+   "x": "E2E验证库"
+  },
+  {
+   "t": "svg",
+   "d": 12,
+   "c": "text-gx-text-tertiary",
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 13,
+   "a": {
+    "d": "M6 9l6 6 6-6"
+   }
+  },
+  {
+   "t": "button",
+   "d": 10,
+   "c": "ease-out flex gap-2 h-8 hover:bg-gx-row-hover items-center px-2 rounded-gx-lg text-gx-text-primary transition-colors w-full",
+   "a": {
+    "type": "button",
+    "aria-label": "新建库",
+    "data-nav-row": "library-create"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 11,
+   "c": "text-gx-accent",
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 12,
+   "a": {
+    "d": "M12 5v14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 12,
+   "a": {
+    "d": "M5 12h14"
+   }
+  },
+  {
+   "t": "span",
+   "d": 11,
+   "c": "text-left truncate",
+   "x": "新建库"
+  },
+  {
+   "t": "div",
+   "d": 8,
+   "c": "overflow-y-auto"
+  },
+  {
+   "t": "nav",
+   "d": 9,
+   "c": "flex flex-col px-1.5",
+   "a": {
+    "style": "padding-top: 8px; padding-bottom: 8px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "c": "flex font-medium items-center px-2 rounded-gx-lg text-gx-text-hint w-full",
+   "a": {
+    "data-nav-row": "group",
+    "style": "height: 24px; margin-bottom: 2px;"
+   }
+  },
+  {
+   "t": "span",
+   "d": 11,
+   "c": "truncate",
+   "x": "数据库"
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "a": {
+    "style": "margin-bottom: 2px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "flex gap-1 group items-center"
+  },
+  {
+   "t": "button",
+   "d": 12,
+   "c": "bg-white ease-out flex font-semibold gap-2 h-8 items-center px-2 rounded-gx-lg text-gx-accent transition-colors w-full",
+   "a": {
+    "type": "button",
+    "aria-label": "E2E验证库",
+    "data-nav-row": "item",
+    "data-nav-entity": "base"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 13,
+   "c": "text-gx-accent",
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 8c4.4 0 8-1.3 8-3s-3.6-3-8-3-8 1.3-8 3 3.6 3 8 3z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"
+   }
+  },
+  {
+   "t": "span",
+   "d": 13,
+   "c": "text-left truncate",
+   "x": "E2E验证库"
+  },
+  {
+   "t": "span",
+   "d": 12,
+   "c": "flex gx-row-more h-5 items-center justify-center w-5",
+   "a": {
+    "data-open": "false"
+   }
+  },
+  {
+   "t": "button",
+   "d": 13,
+   "c": "after:-inset-1.5 after:absolute after:content-[''] flex h-5 hover:bg-gx-row-hover hover:text-gx-text-primary items-center justify-center relative rounded-gx-sm text-gx-text-tertiary transition-colors w-5",
+   "a": {
+    "type": "button",
+    "aria-label": "数据库操作 E2E验证库",
+    "aria-haspopup": "menu",
+    "aria-expanded": "false",
+    "title": "数据库操作 E2E验证库"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 14,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "a": {
+    "style": "margin-bottom: 2px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "flex gap-1 group items-center"
+  },
+  {
+   "t": "button",
+   "d": 12,
+   "c": "ease-out flex gap-2 h-8 hover:bg-gx-row-hover items-center px-2 rounded-gx-lg text-gx-text-primary transition-colors w-full",
+   "a": {
+    "type": "button",
+    "aria-label": "E2E验证库",
+    "data-nav-row": "item",
+    "data-nav-entity": "base"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 13,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 8c4.4 0 8-1.3 8-3s-3.6-3-8-3-8 1.3-8 3 3.6 3 8 3z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"
+   }
+  },
+  {
+   "t": "span",
+   "d": 13,
+   "c": "text-left truncate",
+   "x": "E2E验证库"
+  },
+  {
+   "t": "span",
+   "d": 12,
+   "c": "flex gx-row-more h-5 items-center justify-center w-5",
+   "a": {
+    "data-open": "false"
+   }
+  },
+  {
+   "t": "button",
+   "d": 13,
+   "c": "after:-inset-1.5 after:absolute after:content-[''] flex h-5 hover:bg-gx-row-hover hover:text-gx-text-primary items-center justify-center relative rounded-gx-sm text-gx-text-tertiary transition-colors w-5",
+   "a": {
+    "type": "button",
+    "aria-label": "数据库操作 E2E验证库",
+    "aria-haspopup": "menu",
+    "aria-expanded": "false",
+    "title": "数据库操作 E2E验证库"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 14,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "a": {
+    "style": "margin-bottom: 2px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "flex gap-1 group items-center"
+  },
+  {
+   "t": "button",
+   "d": 12,
+   "c": "ease-out flex gap-2 h-8 hover:bg-gx-row-hover items-center px-2 rounded-gx-lg text-gx-text-primary transition-colors w-full",
+   "a": {
+    "type": "button",
+    "aria-label": "E2E验证库",
+    "data-nav-row": "item",
+    "data-nav-entity": "base"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 13,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 8c4.4 0 8-1.3 8-3s-3.6-3-8-3-8 1.3-8 3 3.6 3 8 3z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"
+   }
+  },
+  {
+   "t": "span",
+   "d": 13,
+   "c": "text-left truncate",
+   "x": "E2E验证库"
+  },
+  {
+   "t": "span",
+   "d": 12,
+   "c": "flex gx-row-more h-5 items-center justify-center w-5",
+   "a": {
+    "data-open": "false"
+   }
+  },
+  {
+   "t": "button",
+   "d": 13,
+   "c": "after:-inset-1.5 after:absolute after:content-[''] flex h-5 hover:bg-gx-row-hover hover:text-gx-text-primary items-center justify-center relative rounded-gx-sm text-gx-text-tertiary transition-colors w-5",
+   "a": {
+    "type": "button",
+    "aria-label": "数据库操作 E2E验证库",
+    "aria-haspopup": "menu",
+    "aria-expanded": "false",
+    "title": "数据库操作 E2E验证库"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 14,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "c": "flex font-medium items-center px-2 rounded-gx-lg text-gx-text-hint w-full",
+   "a": {
+    "data-nav-row": "group",
+    "style": "height: 24px; margin-bottom: 2px;"
+   }
+  },
+  {
+   "t": "span",
+   "d": 11,
+   "c": "truncate",
+   "x": "知识库"
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "a": {
+    "style": "margin-bottom: 2px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "flex gap-1 group items-center"
+  },
+  {
+   "t": "button",
+   "d": 12,
+   "c": "ease-out flex gap-2 h-8 hover:bg-gx-row-hover items-center px-2 rounded-gx-lg text-gx-text-primary transition-colors w-full",
+   "a": {
+    "type": "button",
+    "aria-label": "E2E知识库",
+    "data-nav-row": "item",
+    "data-nav-entity": "kb"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 13,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 6.5C10.5 5 8 4.5 5.5 4.5v14c2.5 0 5 .5 6.5 2"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 6.5C13.5 5 16 4.5 18.5 4.5v14c-2.5 0-5 .5-6.5 2"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 6.5v14"
+   }
+  },
+  {
+   "t": "span",
+   "d": 13,
+   "c": "text-left truncate",
+   "x": "E2E知识库"
+  },
+  {
+   "t": "span",
+   "d": 12,
+   "c": "flex gx-row-more h-5 items-center justify-center w-5",
+   "a": {
+    "data-open": "false"
+   }
+  },
+  {
+   "t": "button",
+   "d": 13,
+   "c": "after:-inset-1.5 after:absolute after:content-[''] flex h-5 hover:bg-gx-row-hover hover:text-gx-text-primary items-center justify-center relative rounded-gx-sm text-gx-text-tertiary transition-colors w-5",
+   "a": {
+    "type": "button",
+    "aria-label": "知识库操作 E2E知识库",
+    "aria-haspopup": "menu",
+    "aria-expanded": "false",
+    "title": "知识库操作 E2E知识库"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 14,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "a": {
+    "style": "margin-bottom: 2px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "flex gap-1 group items-center"
+  },
+  {
+   "t": "button",
+   "d": 12,
+   "c": "ease-out flex gap-2 h-8 hover:bg-gx-row-hover items-center px-2 rounded-gx-lg text-gx-text-primary transition-colors w-full",
+   "a": {
+    "type": "button",
+    "aria-label": "E2E知识库",
+    "data-nav-row": "item",
+    "data-nav-entity": "kb"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 13,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 6.5C10.5 5 8 4.5 5.5 4.5v14c2.5 0 5 .5 6.5 2"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 6.5C13.5 5 16 4.5 18.5 4.5v14c-2.5 0-5 .5-6.5 2"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 6.5v14"
+   }
+  },
+  {
+   "t": "span",
+   "d": 13,
+   "c": "text-left truncate",
+   "x": "E2E知识库"
+  },
+  {
+   "t": "span",
+   "d": 12,
+   "c": "flex gx-row-more h-5 items-center justify-center w-5",
+   "a": {
+    "data-open": "false"
+   }
+  },
+  {
+   "t": "button",
+   "d": 13,
+   "c": "after:-inset-1.5 after:absolute after:content-[''] flex h-5 hover:bg-gx-row-hover hover:text-gx-text-primary items-center justify-center relative rounded-gx-sm text-gx-text-tertiary transition-colors w-5",
+   "a": {
+    "type": "button",
+    "aria-label": "知识库操作 E2E知识库",
+    "aria-haspopup": "menu",
+    "aria-expanded": "false",
+    "title": "知识库操作 E2E知识库"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 14,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 15,
+   "a": {
+    "d": "M12 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "div",
+   "d": 6,
+   "c": "border-gx-hairline border-t flex flex-col gap-0.5 p-1.5"
+  },
+  {
+   "t": "div",
+   "d": 7
+  },
+  {
+   "t": "button",
+   "d": 8,
+   "c": "ease-out flex gap-2 h-8 hover:bg-gx-row-hover items-center px-2 rounded-gx-lg text-gx-text-primary transition-colors w-full",
+   "a": {
+    "type": "button",
+    "aria-label": "通讯录"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 9,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M14 21V9a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v12"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M3 21h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M7 7h2"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M7 11h2"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M7 15h2"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M17 11h.01"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M17 15h.01"
+   }
+  },
+  {
+   "t": "span",
+   "d": 9,
+   "c": "text-left truncate",
+   "x": "通讯录"
+  },
+  {
+   "t": "div",
+   "d": 7
+  },
+  {
+   "t": "button",
+   "d": 8,
+   "c": "ease-out flex gap-2 h-8 hover:bg-gx-row-hover items-center px-2 rounded-gx-lg text-gx-text-primary transition-colors w-full",
+   "a": {
+    "type": "button",
+    "aria-label": "工作区设置"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 9,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M19.4 15a1.7 1.7 0 0 0 .33 1.8l.6.1a2 2 0 1 1-2.8 2.8l-.06-.06a1.7 1.7 0 0 0-1.8-.33 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.33l-.6.1a2 2 0 1 1-2.8-2.8l.06-.06a1.7 1.7 0 0 0 .33-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.33-1.8l-.06-.06a2 2 0 1 1 2.8-2.8l.6.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.33l.06-.06a2 2 0 1 1 2.8 2.8l-.6.1A1.7 1.7 0 0 0 19.4 9v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.5 1z"
+   }
+  },
+  {
+   "t": "span",
+   "d": 9,
+   "c": "text-left truncate",
+   "x": "工作区设置"
+  },
+  {
+   "t": "div",
+   "d": 7
+  },
+  {
+   "t": "button",
+   "d": 8,
+   "c": "ease-out flex gap-2 h-8 hover:bg-gx-row-hover items-center px-2 rounded-gx-lg text-gx-text-primary transition-colors w-full",
+   "a": {
+    "type": "button",
+    "aria-label": "帮助中心"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 9,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.7v.5"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M12 17.5h.01"
+   }
+  },
+  {
+   "t": "span",
+   "d": 9,
+   "c": "text-left truncate",
+   "x": "帮助中心"
+  },
+  {
+   "t": "div",
+   "d": 6,
+   "c": "border-gx-hairline border-t p-1.5"
+  },
+  {
+   "t": "button",
+   "d": 7,
+   "c": "flex gap-2 h-8 hover:bg-gx-row-hover hover:text-gx-text-primary items-center px-2 rounded-gx-lg text-gx-text-tertiary transition-colors w-full",
+   "a": {
+    "type": "button",
+    "title": "收起导航",
+    "aria-label": "收起导航",
+    "aria-expanded": "true"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 8,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 9,
+   "a": {
+    "d": "M15 6l-6 6 6 6"
+   }
+  },
+  {
+   "t": "span",
+   "d": 8,
+   "c": "text-left truncate",
+   "x": "收起导航"
+  },
+  {
+   "t": "aside",
+   "d": 5,
+   "c": "border-gx-hairline border-r flex flex-col h-full",
+   "a": {
+    "data-l2-scope": "base",
+    "style": "width: 240px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 6,
+   "c": "border-b border-gx-hairline flex gap-2 h-[52px] items-center px-3.5"
+  },
+  {
+   "t": "svg",
+   "d": 7,
+   "a": {
+    "width": "15",
+    "height": "15",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 8,
+   "a": {
+    "d": "M12 8c4.4 0 8-1.3 8-3s-3.6-3-8-3-8 1.3-8 3 3.6 3 8 3z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 8,
+   "a": {
+    "d": "M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"
+   }
+  },
+  {
+   "t": "path",
+   "d": 8,
+   "a": {
+    "d": "M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"
+   }
+  },
+  {
+   "t": "span",
+   "d": 7,
+   "c": "font-semibold text-gx-text-primary truncate",
+   "a": {
+    "title": "E2E验证库"
+   },
+   "x": "E2E验证库"
+  },
+  {
+   "t": "button",
+   "d": 7,
+   "c": "hover:bg-gx-row-hover hover:text-gx-text-primary p-1 rounded-gx-sm text-gx-text-tertiary",
+   "a": {
+    "type": "button",
+    "aria-label": "收起二级面板",
+    "title": "收起二级面板",
+    "aria-expanded": "true"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 8,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 9,
+   "a": {
+    "d": "M18 6L6 18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 9,
+   "a": {
+    "d": "M6 6l12 12"
+   }
+  },
+  {
+   "t": "div",
+   "d": 6,
+   "c": "border-b border-gx-separator px-2 py-2"
+  },
+  {
+   "t": "div",
+   "d": 7,
+   "c": "bg-gx-surface border border-gx-separator flex gap-1.5 items-center px-2 py-1 rounded-gx-sm"
+  },
+  {
+   "t": "svg",
+   "d": 8,
+   "c": "text-gx-text-hint",
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 9,
+   "a": {
+    "d": "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 9,
+   "a": {
+    "d": "M21 21l-4.3-4.3"
+   }
+  },
+  {
+   "t": "input",
+   "d": 8,
+   "c": "bg-transparent outline-none placeholder:text-gx-text-hint text-gx-text-primary",
+   "a": {
+    "placeholder": "筛选当前列表…",
+    "value": ""
+   }
+  },
+  {
+   "t": "div",
+   "d": 7,
+   "c": "mt-2"
+  },
+  {
+   "t": "button",
+   "d": 8,
+   "c": "flex gap-1 hover:bg-gx-row-hover hover:text-gx-text-primary items-center px-1.5 py-1 rounded-gx-sm text-gx-text-tertiary text-left w-full",
+   "a": {
+    "type": "button",
+    "title": "新建数据表"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 9,
+   "a": {
+    "width": "12",
+    "height": "12",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M12 5v14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M5 12h14"
+   }
+  },
+  {
+   "t": "span",
+   "d": 9,
+   "x": "新建数据表"
+  },
+  {
+   "t": "div",
+   "d": 6,
+   "c": "overflow-y-auto py-1.5"
+  },
+  {
+   "t": "div",
+   "d": 7,
+   "c": "px-1.5",
+   "a": {
+    "style": "padding-top: 0px; padding-bottom: 0px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 8,
+   "c": "flex font-medium items-center px-2 text-gx-text-hint",
+   "a": {
+    "style": "height: 31px;"
+   },
+   "x": "数据表 1"
+  },
+  {
+   "t": "div",
+   "d": 8,
+   "c": "bg-white flex font-semibold gap-1 group items-center pr-1 py-1.5 relative rounded-gx-lg text-gx-accent transition-colors",
+   "a": {
+    "draggable": "false",
+    "style": "height: 31px; padding-left: 6px;"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 9,
+   "c": "text-gx-accent",
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M3 5h18v14H3z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M3 10h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M9 10v9"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M15 10v9"
+   }
+  },
+  {
+   "t": "button",
+   "d": 9,
+   "c": "font-medium text-gx-text-primary text-left truncate",
+   "a": {
+    "type": "button",
+    "aria-current": "page",
+    "title": "数据表 1"
+   },
+   "x": "数据表 1"
+  },
+  {
+   "t": "span",
+   "d": 9,
+   "c": "flex gx-row-more h-5 items-center justify-center w-5",
+   "a": {
+    "data-open": "false"
+   }
+  },
+  {
+   "t": "button",
+   "d": 10,
+   "c": "after:-inset-1.5 after:absolute after:content-[''] flex h-5 hover:bg-gx-row-hover hover:text-gx-text-primary items-center justify-center relative rounded-gx-sm text-gx-text-tertiary transition-colors w-5",
+   "a": {
+    "type": "button",
+    "aria-label": "数据表 1 表操作菜单",
+    "aria-haspopup": "menu",
+    "aria-expanded": "false",
+    "title": "数据表 1 表操作菜单"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 11,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 12,
+   "a": {
+    "d": "M12 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 12,
+   "a": {
+    "d": "M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 12,
+   "a": {
+    "d": "M12 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "div",
+   "d": 7,
+   "c": "pt-1 px-1.5"
+  },
+  {
+   "t": "button",
+   "d": 8,
+   "c": "flex gap-1 hover:bg-gx-row-hover items-center px-1.5 py-1.5 rounded-gx-lg text-gx-text-primary transition-colors w-full",
+   "a": {
+    "type": "button",
+    "title": "回收站",
+    "data-l2-trash": "base"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 9,
+   "c": "text-gx-text-tertiary",
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M3 6h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M8 6V4h8v2"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M6 6l1 14h10l1-14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M10 11v5"
+   }
+  },
+  {
+   "t": "path",
+   "d": 10,
+   "a": {
+    "d": "M14 11v5"
+   }
+  },
+  {
+   "t": "span",
+   "d": 9,
+   "c": "truncate",
+   "x": "回收站"
+  },
+  {
+   "t": "main",
+   "d": 5,
+   "c": "overflow-hidden"
+  },
+  {
+   "t": "div",
+   "d": 6,
+   "c": "h-full relative"
+  },
+  {
+   "t": "div",
+   "d": 7,
+   "c": "bg-gx-surface flex flex-col h-full"
+  },
+  {
+   "t": "div",
+   "d": 8,
+   "c": "bg-gx-surface border-b border-gx-separator"
+  },
+  {
+   "t": "div",
+   "d": 9,
+   "c": "flex gap-1 h-9 items-center pt-1 px-2",
+   "a": {
+    "data-gx-toolbar-view-row": ""
+   }
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "c": "flex gap-1 items-center"
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "align-middle inline-flex relative"
+  },
+  {
+   "t": "button",
+   "d": 12,
+   "c": "bg-gx-surface border border-gx-border ease-out flex focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gx-accent/50 focus-visible:ring-inset hover:bg-gx-row-hover items-center justify-center rounded-gx-lg text-gx-text-primary transition-colors",
+   "a": {
+    "type": "button",
+    "aria-haspopup": "dialog",
+    "aria-expanded": "false",
+    "aria-label": "数据表图标与颜色",
+    "title": "数据表图标与颜色",
+    "data-entity-icon-trigger": "closed",
+    "style": "width: 20px; height: 20px;"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 13,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M3 5h18v14H3z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M3 10h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M9 10v9"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M15 10v9"
+   }
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "flex items-center"
+  },
+  {
+   "t": "div",
+   "d": 12,
+   "c": "flex gap-0.5 items-center overflow-x-auto",
+   "a": {
+    "style": "scrollbar-width: none;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 13,
+   "c": "flex items-center relative"
+  },
+  {
+   "t": "button",
+   "d": 14,
+   "c": "bg-gx-accent-bg flex font-medium gap-1.5 h-7 items-center max-w-[168px] px-2 rounded-gx-lg text-gx-accent transition-colors",
+   "a": {
+    "type": "button",
+    "data-gx-view-tab": "active",
+    "aria-current": "page",
+    "title": "网格视图"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 15,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 16,
+   "a": {
+    "d": "M3 5h18v14H3z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 16,
+   "a": {
+    "d": "M3 10h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 16,
+   "a": {
+    "d": "M3 15h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 16,
+   "a": {
+    "d": "M9 5v14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 16,
+   "a": {
+    "d": "M15 5v14"
+   }
+  },
+  {
+   "t": "span",
+   "d": 15,
+   "c": "truncate",
+   "x": "网格视图"
+  },
+  {
+   "t": "button",
+   "d": 14,
+   "c": "flex h-6 hover:bg-gx-bg hover:text-gx-text-primary items-center justify-center ml-0.5 rounded-gx-sm text-gx-text-hint w-5",
+   "a": {
+    "type": "button",
+    "data-gx-view-more": "true",
+    "aria-label": "视图操作：网格视图",
+    "aria-haspopup": "menu",
+    "aria-expanded": "false",
+    "title": "重命名 / 删除视图"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 15,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 16,
+   "a": {
+    "d": "M12 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 16,
+   "a": {
+    "d": "M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 16,
+   "a": {
+    "d": "M12 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "button",
+   "d": 12,
+   "c": "flex h-7 hover:bg-gx-bg hover:text-gx-accent items-center justify-center ml-1 rounded-gx-lg text-gx-text-secondary w-7",
+   "a": {
+    "type": "button",
+    "data-gx-view-new": "true",
+    "aria-label": "新建视图",
+    "title": "新建视图"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 13,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 5v14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M5 12h14"
+   }
+  },
+  {
+   "t": "div",
+   "d": 9,
+   "c": "flex gap-1 h-11 items-center px-2"
+  },
+  {
+   "t": "span",
+   "d": 10,
+   "c": "inline-flex",
+   "a": {
+    "title": "新建记录"
+   }
+  },
+  {
+   "t": "button",
+   "d": 11,
+   "c": "bg-gx-accent disabled:cursor-not-allowed disabled:hover:brightness-100 disabled:opacity-50 duration-[120ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gx-accent/50 focus-visible:ring-offset-0 font-medium gap-1 h-7 hover:brightness-95 inline-flex items-center justify-center px-2 rounded-gx-lg select-none text-white transition-[background-color,filter,opacity,box-shadow]",
+   "x": "新建记录"
+  },
+  {
+   "t": "svg",
+   "d": 12,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 13,
+   "a": {
+    "d": "M12 5v14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 13,
+   "a": {
+    "d": "M5 12h14"
+   }
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "c": "flex gap-1 items-center justify-end md:flex-none ml-auto"
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "md:w-[170px] relative w-full w-full"
+  },
+  {
+   "t": "svg",
+   "d": 12,
+   "c": "-translate-y-1/2 absolute pointer-events-none text-gx-text-hint top-1/2",
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 13,
+   "a": {
+    "d": "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 13,
+   "a": {
+    "d": "M21 21l-4.3-4.3"
+   }
+  },
+  {
+   "t": "input",
+   "d": 12,
+   "c": "bg-gx-control border border-gx-border duration-[120ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gx-accent/50 focus-visible:ring-offset-0 focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50 h-8 pl-7 placeholder:text-gx-text-hint pr-2 rounded-gx-lg text-gx-text-primary transition-colors w-full",
+   "a": {
+    "placeholder": "搜索此视图…",
+    "aria-label": "搜索此视图…",
+    "value": ""
+   }
+  },
+  {
+   "t": "button",
+   "d": 10,
+   "c": "gap-1.5 h-8 hover:bg-gx-bg inline-flex items-center px-2.5 rounded-gx-lg text-gx-text-secondary transition-colors whitespace-nowrap",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 11,
+   "a": {
+    "width": "15",
+    "height": "15",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 12,
+   "a": {
+    "d": "M12 21V9"
+   }
+  },
+  {
+   "t": "path",
+   "d": 12,
+   "a": {
+    "d": "M7 14l5-5 5 5"
+   }
+  },
+  {
+   "t": "path",
+   "d": 12,
+   "a": {
+    "d": "M4 3h16"
+   }
+  },
+  {
+   "t": "span",
+   "d": 11,
+   "x": "导入"
+  },
+  {
+   "t": "button",
+   "d": 10,
+   "c": "gap-1.5 h-8 hover:bg-gx-bg inline-flex items-center px-2.5 rounded-gx-lg text-gx-text-secondary transition-colors whitespace-nowrap",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 11,
+   "a": {
+    "width": "15",
+    "height": "15",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 12,
+   "a": {
+    "d": "M12 3v12"
+   }
+  },
+  {
+   "t": "path",
+   "d": 12,
+   "a": {
+    "d": "M7 10l5 5 5-5"
+   }
+  },
+  {
+   "t": "path",
+   "d": 12,
+   "a": {
+    "d": "M4 21h16"
+   }
+  },
+  {
+   "t": "span",
+   "d": 11,
+   "x": "导出"
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "c": "relative"
+  },
+  {
+   "t": "button",
+   "d": 11,
+   "c": "gap-1.5 h-8 hover:bg-gx-bg inline-flex items-center px-2.5 rounded-gx-lg text-gx-text-secondary transition-colors whitespace-nowrap",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 12,
+   "a": {
+    "width": "15",
+    "height": "15",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 13,
+   "a": {
+    "d": "M12 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 13,
+   "a": {
+    "d": "M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 13,
+   "a": {
+    "d": "M12 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "span",
+   "d": 12,
+   "x": "更多"
+  },
+  {
+   "t": "div",
+   "d": 8,
+   "c": "flex flex-col"
+  },
+  {
+   "t": "div",
+   "d": 9,
+   "c": "bg-gx-surface flex flex-col h-full"
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "c": "bg-gx-surface border-b border-gx-separator flex gap-1 h-10 items-center pb-1 px-2"
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "hidden lg:block relative"
+  },
+  {
+   "t": "button",
+   "d": 12,
+   "c": "gap-1.5 h-8 hover:bg-gx-bg inline-flex items-center px-2.5 rounded-gx-lg text-gx-text-secondary transition-colors whitespace-nowrap",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 13,
+   "a": {
+    "width": "15",
+    "height": "15",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M3 5h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M3 12h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M3 19h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M8 3v4"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M8 17v4"
+   }
+  },
+  {
+   "t": "span",
+   "d": 13,
+   "x": "行高"
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "hidden lg:block relative"
+  },
+  {
+   "t": "button",
+   "d": 12,
+   "c": "gap-1.5 h-8 hover:bg-gx-bg inline-flex items-center px-2.5 rounded-gx-lg text-gx-text-secondary transition-colors whitespace-nowrap",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 13,
+   "a": {
+    "width": "15",
+    "height": "15",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"
+   }
+  },
+  {
+   "t": "span",
+   "d": 13,
+   "x": "字段"
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "bg-gx-separator h-5 hidden lg:block w-px"
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "hidden md:block relative"
+  },
+  {
+   "t": "button",
+   "d": 12,
+   "c": "gap-1.5 h-8 hover:bg-gx-bg inline-flex items-center px-2.5 rounded-gx-lg text-gx-text-secondary transition-colors whitespace-nowrap",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 13,
+   "a": {
+    "width": "15",
+    "height": "15",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M3 5h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M6 12h12"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M10 19h4"
+   }
+  },
+  {
+   "t": "span",
+   "d": 13,
+   "x": "筛选"
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "hidden md:block relative"
+  },
+  {
+   "t": "button",
+   "d": 12,
+   "c": "gap-1.5 h-8 hover:bg-gx-bg inline-flex items-center px-2.5 rounded-gx-lg text-gx-text-secondary transition-colors whitespace-nowrap",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 13,
+   "a": {
+    "width": "15",
+    "height": "15",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M3 5h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M6 10h12"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M9 15h6"
+   }
+  },
+  {
+   "t": "span",
+   "d": 13,
+   "x": "分组"
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "hidden md:block relative"
+  },
+  {
+   "t": "button",
+   "d": 12,
+   "c": "gap-1.5 h-8 hover:bg-gx-bg inline-flex items-center px-2.5 rounded-gx-lg text-gx-text-secondary transition-colors whitespace-nowrap",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 13,
+   "a": {
+    "width": "15",
+    "height": "15",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M4 7h10"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M4 12h7"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M4 17h4"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M17 17V7"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M17 7l-3 3"
+   }
+  },
+  {
+   "t": "span",
+   "d": 13,
+   "x": "排序"
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "hidden lg:block relative"
+  },
+  {
+   "t": "button",
+   "d": 12,
+   "c": "gap-1.5 h-8 hover:bg-gx-bg inline-flex items-center px-2.5 rounded-gx-lg text-gx-text-secondary transition-colors whitespace-nowrap",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 13,
+   "a": {
+    "width": "15",
+    "height": "15",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 21a9 9 0 1 1 9-9c0 2-1.5 3-3 3h-1.5a2 2 0 0 0-1.4 3.4A2 2 0 0 1 12 21z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M7.5 10.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M10.5 7.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M15.5 7.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+   }
+  },
+  {
+   "t": "span",
+   "d": 13,
+   "x": "行颜色"
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "c": "outline-none overflow-auto",
+   "a": {
+    "tabindex": "0"
+   }
+  },
+  {
+   "t": "table",
+   "d": 11,
+   "c": "border-separate table-fixed",
+   "a": {
+    "style": "width: 876px; min-width: 100%;"
+   }
+  },
+  {
+   "t": "thead",
+   "d": 12,
+   "c": "sticky top-0 z-10"
+  },
+  {
+   "t": "tr",
+   "d": 13
+  },
+  {
+   "t": "th",
+   "d": 14,
+   "c": "bg-gx-table-header border-b border-gx-hairline border-r sticky z-30",
+   "a": {
+    "style": "width: 56px; min-width: 56px; height: 36px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex h-full items-center justify-center"
+  },
+  {
+   "t": "input",
+   "d": 16,
+   "c": "accent-gx-accent h-4 w-4",
+   "a": {
+    "type": "checkbox",
+    "aria-label": "选择本页全部记录",
+    "title": "选择本页全部记录"
+   }
+  },
+  {
+   "t": "th",
+   "d": 14,
+   "c": "bg-gx-table-header border-b border-gx-hairline border-gx-hairline border-r px-3 relative sticky text-left",
+   "a": {
+    "style": "width: 200px; min-width: 200px; height: 36px; left: 56px; z-index: 20;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center"
+  },
+  {
+   "t": "svg",
+   "d": 16,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true",
+    "style": "color: rgb(127, 119, 221);"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M5 6h14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M12 6v14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M9 20h6"
+   }
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "block font-medium text-gx-text-tertiary truncate",
+   "a": {
+    "title": "名称",
+    "data-gx-truncated": "true"
+   },
+   "x": "名称"
+  },
+  {
+   "t": "button",
+   "d": 16,
+   "c": "hover:bg-gx-bg hover:text-gx-text-primary p-0.5 rounded text-gx-text-hint",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 17,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M6 9l6 6 6-6"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "absolute cursor-col-resize h-full hover:bg-gx-accent-bg top-0 w-1.5"
+  },
+  {
+   "t": "th",
+   "d": 14,
+   "c": "bg-gx-table-header border-b border-gx-hairline px-3 relative text-right",
+   "a": {
+    "style": "width: 120px; min-width: 120px; height: 36px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-end"
+  },
+  {
+   "t": "svg",
+   "d": 16,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true",
+    "style": "color: rgb(55, 138, 221);"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M10 4L8 20"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M16 4l-2 16"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M4 9h16"
+   }
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "block font-medium text-gx-text-tertiary truncate",
+   "a": {
+    "title": "数量",
+    "data-gx-truncated": "true"
+   },
+   "x": "数量"
+  },
+  {
+   "t": "button",
+   "d": 16,
+   "c": "hover:bg-gx-bg hover:text-gx-text-primary p-0.5 rounded text-gx-text-hint",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 17,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M6 9l6 6 6-6"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "absolute cursor-col-resize h-full hover:bg-gx-accent-bg top-0 w-1.5"
+  },
+  {
+   "t": "th",
+   "d": 14,
+   "c": "bg-gx-table-header border-b border-gx-hairline px-3 relative text-left",
+   "a": {
+    "style": "width: 160px; min-width: 160px; height: 36px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center"
+  },
+  {
+   "t": "svg",
+   "d": 16,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true",
+    "style": "color: rgb(29, 158, 117);"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0l-7.2-7.2A2 2 0 0 1 3 12V4h8a2 2 0 0 1 1.4.6l7.2 7.2a2 2 0 0 1 0 1.6z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M7.5 7.5h.01"
+   }
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "block font-medium text-gx-text-tertiary truncate",
+   "a": {
+    "title": "状态",
+    "data-gx-truncated": "true"
+   },
+   "x": "状态"
+  },
+  {
+   "t": "button",
+   "d": 16,
+   "c": "hover:bg-gx-bg hover:text-gx-text-primary p-0.5 rounded text-gx-text-hint",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 17,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M6 9l6 6 6-6"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "absolute cursor-col-resize h-full hover:bg-gx-accent-bg top-0 w-1.5"
+  },
+  {
+   "t": "th",
+   "d": 14,
+   "c": "bg-gx-table-header border-b border-gx-hairline px-3 relative text-left",
+   "a": {
+    "style": "width: 140px; min-width: 140px; height: 36px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center"
+  },
+  {
+   "t": "svg",
+   "d": 16,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true",
+    "style": "color: rgb(153, 53, 86);"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M3 6h18v15H3z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M3 11h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M8 3v4"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M16 3v4"
+   }
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "block font-medium text-gx-text-tertiary truncate",
+   "a": {
+    "title": "日期",
+    "data-gx-truncated": "true"
+   },
+   "x": "日期"
+  },
+  {
+   "t": "button",
+   "d": 16,
+   "c": "hover:bg-gx-bg hover:text-gx-text-primary p-0.5 rounded text-gx-text-hint",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 17,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M6 9l6 6 6-6"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "absolute cursor-col-resize h-full hover:bg-gx-accent-bg top-0 w-1.5"
+  },
+  {
+   "t": "th",
+   "d": 14,
+   "c": "bg-gx-table-header border-b border-gx-hairline px-3 relative text-left",
+   "a": {
+    "style": "width: 200px; min-width: 200px; height: 36px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center"
+  },
+  {
+   "t": "svg",
+   "d": 16,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true",
+    "style": "color: rgb(127, 119, 221);"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M4 6h16"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M4 12h16"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M4 18h10"
+   }
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "block font-medium text-gx-text-tertiary truncate",
+   "a": {
+    "title": "备注",
+    "data-gx-truncated": "true"
+   },
+   "x": "备注"
+  },
+  {
+   "t": "button",
+   "d": 16,
+   "c": "hover:bg-gx-bg hover:text-gx-text-primary p-0.5 rounded text-gx-text-hint",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 17,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M6 9l6 6 6-6"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "absolute cursor-col-resize h-full hover:bg-gx-accent-bg top-0 w-1.5"
+  },
+  {
+   "t": "tbody",
+   "d": 12
+  },
+  {
+   "t": "tr",
+   "d": 13,
+   "c": "bg-gx-surface cursor-pointer hover:bg-gx-row-hover"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "bg-inherit border-b border-gx-hairline border-r sticky z-20",
+   "a": {
+    "style": "width: 56px; min-width: 56px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center px-1.5"
+  },
+  {
+   "t": "label",
+   "d": 16,
+   "c": "gap-2 inline-flex items-center text-gx-text-primary"
+  },
+  {
+   "t": "input",
+   "d": 17,
+   "c": "accent-gx-accent h-4 w-4",
+   "a": {
+    "type": "checkbox"
+   }
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-center text-gx-text-hint w-5"
+  },
+  {
+   "t": "button",
+   "d": 16,
+   "c": "hover:bg-gx-bg hover:text-gx-text-primary p-0.5 rounded text-gx-text-hint",
+   "a": {
+    "type": "button",
+    "title": "展开记录"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 17,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M15 3h6v6"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M9 21H3v-6"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M21 3l-7 7"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M3 21l7-7"
+   }
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle bg-inherit border-b border-gx-hairline border-gx-hairline border-r relative sticky z-10",
+   "a": {
+    "style": "width: 200px; min-width: 200px; height: 44px; left: 56px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex font-medium gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "truncate",
+   "x": "基线行-一"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 120px; min-width: 120px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-end px-3 py-1 tabular-nums text-gx-text-primary text-right w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "truncate",
+   "x": "1"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 160px; min-width: 160px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "x": "—"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 140px; min-width: 140px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "x": "—"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 200px; min-width: 200px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "div",
+   "d": 16,
+   "c": "md-cell-inline truncate w-full",
+   "x": "第一条固定数据"
+  },
+  {
+   "t": "tr",
+   "d": 13,
+   "c": "bg-gx-surface cursor-pointer hover:bg-gx-row-hover"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "bg-inherit border-b border-gx-hairline border-r sticky z-20",
+   "a": {
+    "style": "width: 56px; min-width: 56px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center px-1.5"
+  },
+  {
+   "t": "label",
+   "d": 16,
+   "c": "gap-2 inline-flex items-center text-gx-text-primary"
+  },
+  {
+   "t": "input",
+   "d": 17,
+   "c": "accent-gx-accent h-4 w-4",
+   "a": {
+    "type": "checkbox"
+   }
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-center text-gx-text-hint w-5"
+  },
+  {
+   "t": "button",
+   "d": 16,
+   "c": "hover:bg-gx-bg hover:text-gx-text-primary p-0.5 rounded text-gx-text-hint",
+   "a": {
+    "type": "button",
+    "title": "展开记录"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 17,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M15 3h6v6"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M9 21H3v-6"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M21 3l-7 7"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M3 21l7-7"
+   }
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle bg-inherit border-b border-gx-hairline border-gx-hairline border-r relative sticky z-10",
+   "a": {
+    "style": "width: 200px; min-width: 200px; height: 44px; left: 56px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex font-medium gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "truncate",
+   "x": "基线行-二"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 120px; min-width: 120px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-end px-3 py-1 tabular-nums text-gx-text-primary text-right w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "truncate",
+   "x": "2"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 160px; min-width: 160px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "x": "—"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 140px; min-width: 140px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "x": "—"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 200px; min-width: 200px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "div",
+   "d": 16,
+   "c": "md-cell-inline truncate w-full",
+   "x": "第二条固定数据"
+  },
+  {
+   "t": "tr",
+   "d": 13,
+   "c": "bg-gx-surface cursor-pointer hover:bg-gx-row-hover"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "bg-inherit border-b border-gx-hairline border-r sticky z-20",
+   "a": {
+    "style": "width: 56px; min-width: 56px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center px-1.5"
+  },
+  {
+   "t": "label",
+   "d": 16,
+   "c": "gap-2 inline-flex items-center text-gx-text-primary"
+  },
+  {
+   "t": "input",
+   "d": 17,
+   "c": "accent-gx-accent h-4 w-4",
+   "a": {
+    "type": "checkbox"
+   }
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-center text-gx-text-hint w-5"
+  },
+  {
+   "t": "button",
+   "d": 16,
+   "c": "hover:bg-gx-bg hover:text-gx-text-primary p-0.5 rounded text-gx-text-hint",
+   "a": {
+    "type": "button",
+    "title": "展开记录"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 17,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M15 3h6v6"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M9 21H3v-6"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M21 3l-7 7"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M3 21l7-7"
+   }
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle bg-inherit border-b border-gx-hairline border-gx-hairline border-r relative sticky z-10",
+   "a": {
+    "style": "width: 200px; min-width: 200px; height: 44px; left: 56px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex font-medium gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "truncate",
+   "x": "基线行-三"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 120px; min-width: 120px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-end px-3 py-1 tabular-nums text-gx-text-primary text-right w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "truncate",
+   "x": "3"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 160px; min-width: 160px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "x": "—"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 140px; min-width: 140px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "x": "—"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 200px; min-width: 200px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "div",
+   "d": 16,
+   "c": "md-cell-inline truncate w-full",
+   "x": "第三条固定数据"
+  },
+  {
+   "t": "tr",
+   "d": 13,
+   "c": "bg-gx-surface cursor-pointer hover:bg-gx-row-hover"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "bg-inherit border-b border-gx-hairline border-r sticky z-20",
+   "a": {
+    "style": "width: 56px; min-width: 56px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center px-1.5"
+  },
+  {
+   "t": "label",
+   "d": 16,
+   "c": "gap-2 inline-flex items-center text-gx-text-primary"
+  },
+  {
+   "t": "input",
+   "d": 17,
+   "c": "accent-gx-accent h-4 w-4",
+   "a": {
+    "type": "checkbox"
+   }
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-center text-gx-text-hint w-5"
+  },
+  {
+   "t": "button",
+   "d": 16,
+   "c": "hover:bg-gx-bg hover:text-gx-text-primary p-0.5 rounded text-gx-text-hint",
+   "a": {
+    "type": "button",
+    "title": "展开记录"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 17,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M15 3h6v6"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M9 21H3v-6"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M21 3l-7 7"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M3 21l7-7"
+   }
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle bg-inherit border-b border-gx-hairline border-gx-hairline border-r relative sticky z-10",
+   "a": {
+    "style": "width: 200px; min-width: 200px; height: 44px; left: 56px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex font-medium gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "truncate",
+   "x": "基线行-四"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 120px; min-width: 120px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-end px-3 py-1 tabular-nums text-gx-text-primary text-right w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "truncate",
+   "x": "4"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 160px; min-width: 160px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "x": "—"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 140px; min-width: 140px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "x": "—"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 200px; min-width: 200px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "div",
+   "d": 16,
+   "c": "md-cell-inline truncate w-full",
+   "x": "第四条固定数据"
+  },
+  {
+   "t": "tr",
+   "d": 13,
+   "c": "bg-gx-surface cursor-pointer hover:bg-gx-row-hover"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "bg-inherit border-b border-gx-hairline border-r sticky z-20",
+   "a": {
+    "style": "width: 56px; min-width: 56px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center px-1.5"
+  },
+  {
+   "t": "label",
+   "d": 16,
+   "c": "gap-2 inline-flex items-center text-gx-text-primary"
+  },
+  {
+   "t": "input",
+   "d": 17,
+   "c": "accent-gx-accent h-4 w-4",
+   "a": {
+    "type": "checkbox"
+   }
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-center text-gx-text-hint w-5"
+  },
+  {
+   "t": "button",
+   "d": 16,
+   "c": "hover:bg-gx-bg hover:text-gx-text-primary p-0.5 rounded text-gx-text-hint",
+   "a": {
+    "type": "button",
+    "title": "展开记录"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 17,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M15 3h6v6"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M9 21H3v-6"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M21 3l-7 7"
+   }
+  },
+  {
+   "t": "path",
+   "d": 18,
+   "a": {
+    "d": "M3 21l7-7"
+   }
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle bg-inherit border-b border-gx-hairline border-gx-hairline border-r relative sticky z-10",
+   "a": {
+    "style": "width: 200px; min-width: 200px; height: 44px; left: 56px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex font-medium gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "truncate",
+   "x": "基线行-五"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 120px; min-width: 120px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-end px-3 py-1 tabular-nums text-gx-text-primary text-right w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "truncate",
+   "x": "5"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 160px; min-width: 160px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "x": "—"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 140px; min-width: 140px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "span",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "x": "—"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "align-middle border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 200px; min-width: 200px; height: 44px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex gap-1 h-full items-center justify-start px-3 py-1 text-gx-text-primary text-left w-full"
+  },
+  {
+   "t": "div",
+   "d": 16,
+   "c": "md-cell-inline truncate w-full",
+   "x": "第五条固定数据"
+  },
+  {
+   "t": "tfoot",
+   "d": 12
+  },
+  {
+   "t": "tr",
+   "d": 13,
+   "c": "bg-gx-bg"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "bg-gx-bg border-b border-gx-hairline border-r sticky z-20",
+   "a": {
+    "style": "width: 56px; min-width: 56px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 15,
+   "c": "flex h-8 items-center px-2 text-gx-text-hint",
+   "x": "聚合"
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "bg-gx-bg border-b border-gx-hairline border-gx-hairline border-r relative sticky z-10",
+   "a": {
+    "style": "width: 200px; min-width: 200px; left: 56px;"
+   }
+  },
+  {
+   "t": "button",
+   "d": 15,
+   "c": "flex gap-1 h-8 hover:bg-gx-row-hover items-center justify-end px-3 tabular-nums text-gx-text-secondary text-right w-full",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "a": {
+    "width": "12",
+    "height": "12",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M12 5v14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M5 12h14"
+   }
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 120px; min-width: 120px;"
+   }
+  },
+  {
+   "t": "button",
+   "d": 15,
+   "c": "flex gap-1 h-8 hover:bg-gx-row-hover items-center justify-end px-3 tabular-nums text-gx-text-secondary text-right w-full",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "a": {
+    "width": "12",
+    "height": "12",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M12 5v14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M5 12h14"
+   }
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 160px; min-width: 160px;"
+   }
+  },
+  {
+   "t": "button",
+   "d": 15,
+   "c": "flex gap-1 h-8 hover:bg-gx-row-hover items-center justify-end px-3 tabular-nums text-gx-text-secondary text-right w-full",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "a": {
+    "width": "12",
+    "height": "12",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M12 5v14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M5 12h14"
+   }
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 140px; min-width: 140px;"
+   }
+  },
+  {
+   "t": "button",
+   "d": 15,
+   "c": "flex gap-1 h-8 hover:bg-gx-row-hover items-center justify-end px-3 tabular-nums text-gx-text-secondary text-right w-full",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "a": {
+    "width": "12",
+    "height": "12",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M12 5v14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M5 12h14"
+   }
+  },
+  {
+   "t": "td",
+   "d": 14,
+   "c": "border-b border-gx-hairline relative",
+   "a": {
+    "style": "width: 200px; min-width: 200px;"
+   }
+  },
+  {
+   "t": "button",
+   "d": 15,
+   "c": "flex gap-1 h-8 hover:bg-gx-row-hover items-center justify-end px-3 tabular-nums text-gx-text-secondary text-right w-full",
+   "a": {
+    "type": "button"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 16,
+   "c": "text-gx-text-hint",
+   "a": {
+    "width": "12",
+    "height": "12",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M12 5v14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 17,
+   "a": {
+    "d": "M5 12h14"
+   }
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "c": "bg-gx-bg border-gx-separator border-t flex gap-3 h-7 items-center px-3 text-gx-text-hint"
+  },
+  {
+   "t": "span",
+   "d": 11,
+   "x": "共 5 条"
+  },
+  {
+   "t": "span",
+   "d": 11,
+   "x": "已加载 5 条"
+  },
+  {
+   "t": "span",
+   "d": 11
+  },
+  {
+   "t": "span",
+   "d": 11,
+   "x": "网格视图"
+  },
+  {
+   "t": "div",
+   "d": 7,
+   "c": "bg-gx-surface fixed flex flex-col h-full max-w-full pointer-events-none top-0 transition-transform translate-x-full z-40",
+   "a": {
+    "style": "width: 560px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 8,
+   "c": "absolute cursor-col-resize h-full top-0 w-2 z-10",
+   "a": {
+    "title": "拖拽调整宽度",
+    "aria-label": "调整抽屉宽度",
+    "role": "separator",
+    "aria-orientation": "vertical"
+   }
+  },
+  {
+   "t": "div",
+   "d": 8,
+   "c": "border-b border-gx-separator flex gap-2 items-center px-4 py-2.5"
+  },
+  {
+   "t": "button",
+   "d": 9,
+   "c": "disabled:cursor-not-allowed disabled:opacity-50 duration-[120ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gx-accent/50 focus-visible:ring-offset-0 h-7 hover:bg-gx-row-hover hover:text-gx-text-primary inline-flex items-center justify-center rounded-gx-lg text-gx-text-tertiary transition-colors w-7",
+   "a": {
+    "title": "上一条",
+    "aria-label": "上一条",
+    "disabled": ""
+   }
+  },
+  {
+   "t": "svg",
+   "d": 10,
+   "a": {
+    "width": "16",
+    "height": "16",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M15 6l-6 6 6 6"
+   }
+  },
+  {
+   "t": "button",
+   "d": 9,
+   "c": "disabled:cursor-not-allowed disabled:opacity-50 duration-[120ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gx-accent/50 focus-visible:ring-offset-0 h-7 hover:bg-gx-row-hover hover:text-gx-text-primary inline-flex items-center justify-center rounded-gx-lg text-gx-text-tertiary transition-colors w-7",
+   "a": {
+    "title": "下一条",
+    "aria-label": "下一条",
+    "disabled": ""
+   }
+  },
+  {
+   "t": "svg",
+   "d": 10,
+   "a": {
+    "width": "16",
+    "height": "16",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M9 6l6 6-6 6"
+   }
+  },
+  {
+   "t": "div",
+   "d": 9,
+   "c": "flex flex-col"
+  },
+  {
+   "t": "span",
+   "d": 10,
+   "c": "text-gx-text-tertiary",
+   "x": "数据表 1"
+  },
+  {
+   "t": "span",
+   "d": 10,
+   "c": "font-semibold text-gx-text-primary truncate",
+   "x": "未命名"
+  },
+  {
+   "t": "button",
+   "d": 9,
+   "c": "bg-gx-surface border border-gx-border flex h-6 hover:bg-gx-bg hover:text-gx-text-primary items-center justify-center rounded text-gx-text-tertiary w-6",
+   "a": {
+    "type": "button",
+    "aria-label": "编辑字段布局",
+    "title": "编辑字段布局（拖拽换序 / 行内 1-4 列）"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 10,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M3 5h18v14H3z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M3 10h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M3 15h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M9 5v14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M15 5v14"
+   }
+  },
+  {
+   "t": "button",
+   "d": 9,
+   "c": "disabled:cursor-not-allowed disabled:opacity-50 duration-[120ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gx-accent/50 focus-visible:ring-offset-0 h-7 hover:bg-gx-row-hover hover:text-gx-text-primary inline-flex items-center justify-center rounded-gx-lg text-gx-text-tertiary transition-colors w-7",
+   "a": {
+    "title": "关闭",
+    "aria-label": "关闭"
+   }
+  },
+  {
+   "t": "svg",
+   "d": 10,
+   "a": {
+    "width": "16",
+    "height": "16",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M18 6L6 18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M6 6l12 12"
+   }
+  },
+  {
+   "t": "div",
+   "d": 8,
+   "c": "overflow-y-auto"
+  },
+  {
+   "t": "div",
+   "d": 9,
+   "c": "flex h-32 items-center justify-center"
+  },
+  {
+   "t": "span",
+   "d": 10,
+   "c": "animate-spin border-gx-border border-t-gx-accent inline-block rounded-full",
+   "a": {
+    "style": "width: 16px; height: 16px;"
+   }
+  },
+  {
+   "t": "div",
+   "d": 9,
+   "c": "border-gx-separator border-t"
+  },
+  {
+   "t": "button",
+   "d": 10,
+   "c": "flex font-medium gap-2 hover:bg-gx-bg items-center px-4 py-2 text-gx-text-secondary w-full",
+   "a": {
+    "type": "button"
+   },
+   "x": "评论"
+  },
+  {
+   "t": "svg",
+   "d": 11,
+   "a": {
+    "width": "14",
+    "height": "14",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true",
+    "style": "color: rgb(91, 103, 133);"
+   }
+  },
+  {
+   "t": "path",
+   "d": 12,
+   "a": {
+    "d": "M4 5h16v14H4z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 12,
+   "a": {
+    "d": "M9 5v14"
+   }
+  },
+  {
+   "t": "span",
+   "d": 11,
+   "c": "ml-auto text-gx-text-hint",
+   "x": "收起"
+  },
+  {
+   "t": "div",
+   "d": 10,
+   "c": "pb-4 px-4"
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "flex flex-col gap-2 mb-3"
+  },
+  {
+   "t": "textarea",
+   "d": 12,
+   "c": "bg-gx-surface border border-gx-border disabled:cursor-not-allowed disabled:hover:border-gx-border disabled:opacity-50 duration-[120ms] focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50 hover:border-gx-border-strong placeholder:text-gx-text-hint px-2.5 py-1.5 resize-y rounded-gx-lg text-gx-text-primary transition-colors w-full",
+   "a": {
+    "placeholder": "写下评论…",
+    "rows": "2",
+    "disabled": ""
+   }
+  },
+  {
+   "t": "div",
+   "d": 12,
+   "c": "flex gap-1.5 items-center text-gx-text-hint",
+   "x": "请先选择一条记录后再发表评论"
+  },
+  {
+   "t": "svg",
+   "d": 13,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 8v5"
+   }
+  },
+  {
+   "t": "path",
+   "d": 14,
+   "a": {
+    "d": "M12 16h.01"
+   }
+  },
+  {
+   "t": "div",
+   "d": 12,
+   "c": "flex justify-end"
+  },
+  {
+   "t": "button",
+   "d": 13,
+   "c": "bg-gx-accent disabled:cursor-not-allowed disabled:hover:brightness-100 disabled:opacity-50 duration-[120ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gx-accent/50 focus-visible:ring-offset-0 font-medium gap-1 h-7 hover:brightness-95 inline-flex items-center justify-center px-2 rounded-gx-lg select-none text-white transition-[background-color,filter,opacity,box-shadow]",
+   "a": {
+    "disabled": ""
+   },
+   "x": "发表"
+  },
+  {
+   "t": "div",
+   "d": 11,
+   "c": "py-2 text-gx-text-hint",
+   "x": "暂无评论"
+  },
+  {
+   "t": "div",
+   "d": 8,
+   "c": "border-gx-separator border-t flex gap-2 items-center px-4 py-2.5"
+  },
+  {
+   "t": "button",
+   "d": 9,
+   "c": "bg-gx-danger disabled:cursor-not-allowed disabled:hover:brightness-100 disabled:opacity-50 duration-[120ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gx-accent/50 focus-visible:ring-offset-0 font-medium gap-1 h-7 hover:brightness-95 inline-flex items-center justify-center px-2 rounded-gx-lg select-none text-white transition-[background-color,filter,opacity,box-shadow]",
+   "x": "删除记录"
+  },
+  {
+   "t": "svg",
+   "d": 10,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M3 6h18"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M8 6V4h8v2"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M6 6l1 14h10l1-14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M10 11v5"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M14 11v5"
+   }
+  },
+  {
+   "t": "div",
+   "d": 9
+  },
+  {
+   "t": "button",
+   "d": 9,
+   "c": "bg-gx-control border border-gx-border disabled:cursor-not-allowed disabled:hover:brightness-100 disabled:opacity-50 duration-[120ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gx-accent/50 focus-visible:ring-offset-0 font-medium gap-1 h-7 hover:bg-gx-row-hover inline-flex items-center justify-center px-2 rounded-gx-lg select-none text-gx-text-secondary transition-[background-color,filter,opacity,box-shadow]",
+   "x": "新建记录"
+  },
+  {
+   "t": "svg",
+   "d": 10,
+   "a": {
+    "width": "13",
+    "height": "13",
+    "viewBox": "0 0 24 24",
+    "fill": "none",
+    "stroke": "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M12 5v14"
+   }
+  },
+  {
+   "t": "path",
+   "d": 11,
+   "a": {
+    "d": "M5 12h14"
+   }
+  }
+ ],
+ "capturedAt": "2026-09-21T15:57:10.972Z"
+}

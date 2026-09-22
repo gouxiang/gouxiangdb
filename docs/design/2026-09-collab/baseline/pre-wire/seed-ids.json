@@ -1,0 +1,23 @@
+{
+  "docId": "cmubetwae0019ed30m006cpgl",
+  "canvasId": "cmubetwfv001ged3056kmbh88",
+  "recordIds": [
+    "cmubetwh2001med30pf3rnswv",
+    "cmubetwhx001qed3081cy58w3",
+    "cmubetwip001ued30o3a8snw1",
+    "cmubetwjf001yed303n6u38hp",
+    "cmubetwk50022ed30qr51ac8t"
+  ],
+  "routes": {
+    "doc": "/kb/cmuazmt0t000sed30azpsdcol/doc/cmubetwae0019ed30m006cpgl",
+    "canvas": "/kb/cmuazmt0t000sed30azpsdcol/canvas/cmubetwfv001ged3056kmbh88",
+    "grid": "/base/cmuazigmr0005bcnbdtyn0edb/table/cmuazigmx000bbcnbrv0orw91/view/cmuazign3000nbcnbtbgjn2fb"
+  },
+  "actions": [
+    "复用文档 基线-文档 → cmubetwae0019ed30m006cpgl",
+    "文档内容已一致，跳过写入",
+    "复用画布 基线-画布 → cmubetwfv001ged3056kmbh88",
+    "画布内容已一致，跳过写入",
+    "表格行共 5 条（复用/新建完成）"
+  ]
+}

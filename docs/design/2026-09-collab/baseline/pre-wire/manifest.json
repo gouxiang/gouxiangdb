@@ -1,0 +1,65 @@
+{
+  "tool": "apps/web/scripts/dom-snapshot.mjs",
+  "seedTool": "apps/web/scripts/dom-snapshot-seed.mjs",
+  "scriptVersion": "1.0.0",
+  "denoiseVersion": "v1",
+  "baseUrl": "http://192.168.31.167",
+  "capturedAt": "2026-09-21T15:57:10.972Z",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "authSource": "内置默认（测试机 dev secret + e2e 用户）",
+  "seed": {
+    "kbId": "cmuazmt0t000sed30azpsdcol",
+    "baseId": "cmuazigmr0005bcnbdtyn0edb",
+    "tableId": "cmuazigmx000bbcnbrv0orw91",
+    "viewId": "cmuazign3000nbcnbtbgjn2fb",
+    "docId": "cmubetwae0019ed30m006cpgl",
+    "canvasId": "cmubetwfv001ged3056kmbh88",
+    "rowNames": [
+      "基线行-一",
+      "基线行-二",
+      "基线行-三",
+      "基线行-四",
+      "基线行-五"
+    ]
+  },
+  "operationSequence": "先打开库首页，再点击固定条目落到目标路由；点击未命中时回退为直达 URL（会在 manifest 标注 navFallback）",
+  "pages": [
+    {
+      "key": "doc",
+      "label": "文档编辑器（Markdown 富文本）",
+      "route": "/kb/cmuazmt0t000sed30azpsdcol/doc/cmubetwae0019ed30m006cpgl",
+      "ok": true,
+      "settledUrl": "http://192.168.31.167/kb/cmuazmt0t000sed30azpsdcol/doc/cmubetwae0019ed30m006cpgl",
+      "nodeCount": 361,
+      "url": "/kb/cmuazmt0t000sed30azpsdcol/doc/cmubetwae0019ed30m006cpgl",
+      "screenshot": "doc/screenshot.png",
+      "domJson": "doc/dom.json"
+    },
+    {
+      "key": "canvas",
+      "label": "画布（4 个图形：矩形/椭圆/三角/文本）",
+      "route": "/kb/cmuazmt0t000sed30azpsdcol/canvas/cmubetwfv001ged3056kmbh88",
+      "ok": true,
+      "settledUrl": "http://192.168.31.167/kb/cmuazmt0t000sed30azpsdcol/canvas/cmubetwfv001ged3056kmbh88",
+      "nodeCount": 374,
+      "url": "/kb/cmuazmt0t000sed30azpsdcol/canvas/cmubetwfv001ged3056kmbh88",
+      "screenshot": "canvas/screenshot.png",
+      "domJson": "canvas/dom.json"
+    },
+    {
+      "key": "grid",
+      "label": "数据表（网格视图 5 行）",
+      "route": "/base/cmuazigmr0005bcnbdtyn0edb/table/cmuazigmx000bbcnbrv0orw91/view/cmuazign3000nbcnbtbgjn2fb",
+      "ok": true,
+      "settledUrl": "http://192.168.31.167/base/cmuazigmr0005bcnbdtyn0edb/table/cmuazigmx000bbcnbrv0orw91/view/cmuazign3000nbcnbtbgjn2fb",
+      "nodeCount": 595,
+      "url": "/base/cmuazigmr0005bcnbdtyn0edb/table/cmuazigmx000bbcnbrv0orw91/view/cmuazign3000nbcnbtbgjn2fb",
+      "screenshot": "grid/screenshot.png",
+      "domJson": "grid/dom.json"
+    }
+  ],
+  "consoleErrors": []
+}
