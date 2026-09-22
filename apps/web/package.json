@@ -46,6 +46,9 @@
     "slate-history": "^0.115.0",
     "slate-react": "^0.116.0",
     "unified": "^11.0.5",
+    "y-protocols": "1.0.7",
+    "y-websocket": "3.1.0",
+    "yjs": "13.6.32",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

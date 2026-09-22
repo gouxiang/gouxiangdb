@@ -39,7 +39,16 @@ import { slugify } from "@gx/blocks";
 import { loadUploadLimits, validateUpload } from "./upload-limits";
 import { createEditorHistory } from "./editor-history";
 import { ATOMIC_TYPES, needsEmptyPair, zoneFlags } from "./wy-zones";
+// 阶段 2 · 协同接线（只动数据同步点，不动渲染与交互 —— D6 UI 冻结）
+import { applyPatchToText, type TextPatchGroup } from "./collab/blocksYjs";
+import { applyPatchesToDom, visibleTextOf } from "./collab/domHotPatch";
+import { useCollabDoc } from "./collab/useCollabDoc";
+import type { UseCollabSessionResult } from "../collab/useCollabSession";
+import type { CollabPresenceEntry } from "@gx/shared-types";
 import "./kb.css";
+
+/** 稳定的空名单：避免每次渲染都造新数组，把下游 useMemo/effect 全部打翻。 */
+const NO_PRESENCE: readonly CollabPresenceEntry[] = [];
 
 /* ---------------- 文件 -> data URL ---------------- */
 function fileToDataUrl(file: File): Promise<string> {
@@ -149,6 +158,7 @@ const Editable = memo(function Editable({
   readOnly,
   focused,
   isComposing,
+  managed,
   className,
   onInput,
   onFocus,
@@ -160,6 +170,11 @@ const Editable = memo(function Editable({
   focused: boolean;
   /** IME 组词中：修复 Issue 3（快速输入中文时 IME 提前消失）。组词期间浏览器管 DOM，外层不得覆写 innerHTML */
   isComposing: boolean;
+  /**
+   * 阶段 2：协同接通时本块的 innerHTML 回写权交给 Yjs —— 远端变更由 applyRemoteText 做
+   * **最小热补**（Range 删除 + 就地插入 + 修正光标），这里不再整块重写。
+   */
+  managed?: boolean;
   className?: string;
   onInput: (id: string) => void;
   onFocus: (id: string) => void;
@@ -172,8 +187,12 @@ const Editable = memo(function Editable({
     // 聚焦中由浏览器管理 DOM（避免光标跳动）；失焦后或内容外部变化时同步为最新 html
     // IME 组词中绝不覆写：覆写会摧毁浏览器维护的 composition span，IME 会话立即终止
     if (focused || isComposing) return;
+    // ★ 阶段 2：已被热补的块，只要"看得见的文本"与最新 html 一致就不再动它的 innerHTML ——
+    //   整块重写会换掉文本节点，远端光标定位与本地选区一起失效。可见文本不一致（本地结构性
+    //   改动如回车分裂/合并块）时照旧重写，保证本地交互与引入前完全一致。
+    if (managed && el.innerHTML !== "" && el.textContent === visibleTextOf(html)) return;
     if (el.innerHTML !== html) el.innerHTML = html;
-  }, [html, focused, isComposing]);
+  }, [html, focused, isComposing, managed]);
   return (
     <div
       ref={ref}
@@ -193,16 +212,34 @@ export function WysiwygEditor({
   onChange,
   readOnly = false,
   docId,
+  collab,
 }: {
   initialMarkdown: string;
   onChange: (md: string) => void;
   readOnly?: boolean;
   /** 当前编辑文档 id——传给 MentionPicker 排除自身引用 */
   docId?: string;
+  /** 阶段 2：协同会话（不传 / 未连通 = 单机模式，行为与引入前逐字一致） */
+  collab?: UseCollabSessionResult;
 }) {
   const [blocks, setBlocks] = useState<Block[]>(() => mdToBlocks(initialMarkdown));
   const blocksRef = useRef(blocks);
   blocksRef.current = blocks;
+  // 阶段 2 · 协同中间层：编辑器与 Yjs 之间**唯一**的通道。未启用协同时它是空壳（写入口全部
+  // no-op），所以下面的接线不需要任何 if —— 单机模式与引入前完全一致。
+  const initialBlocksRef = useRef(blocks);
+  const collabDoc = useCollabDoc({
+    doc: collab?.doc ?? null,
+    active: collab?.status === "connected",
+    entries: collab?.entries ?? NO_PRESENCE,
+    selfId: collab?.selfId ?? null,
+    initialBlocks: initialBlocksRef.current,
+  });
+  const collabRef = useRef(collabDoc);
+  collabRef.current = collabDoc;
+  // 拆出引用稳定的成员（binding 走 useMemo、两个订阅口走 useCallback），供 effect 直接依赖
+  const { binding: collabBinding, onRemoteText, onRemoteStructure } = collabDoc;
+  const collabManaged = collabBinding !== null;
   // 撤销/重做栈：Cmd/Ctrl+Z / Cmd+Shift+Z / Cmd+Y 走 historyRef.undo()/redo()。
   // 挂载时推入一次 initial state，确保 canUndo() 在用户首次输入后才返回 true。
   const historyRef = useRef(createEditorHistory());
@@ -277,6 +314,8 @@ export function WysiwygEditor({
       blocksRef.current = next;
       setBlocks(next);
       historyRef.current.push(next);
+      // 阶段 2：本地结构（增删块 / 换类型 / 元数据 / 正文）同步进 Y；未启用协同时是 no-op
+      collabRef.current.syncStructure(next);
       onChange(blocksToMd(next));
     },
     [onChange],
@@ -294,6 +333,7 @@ export function WysiwygEditor({
     (next: Block[]) => {
       blocksRef.current = next;
       setBlocks(next);
+      collabRef.current.syncStructure(next); // 撤销/重做也是一次结构变更，同样要进 Y
       onChange(blocksToMd(next));
       // 强制刷新所有文本块 editable 的 DOM，与新的 blocks 状态对齐。
       // 用 rAF 等 React commit 完成后再刷，避免被随后 render 的 !focused 守卫覆盖。
@@ -330,13 +370,18 @@ export function WysiwygEditor({
 
   const syncBlock = useCallback(
     (blockId: string) => {
-      // 修复 Issue 3（IME 组词丢失）：IME 期间浏览器管 DOM（包括 composition span），
-      // 读 DOM → htmlToInlineMd → mutate ref.text → onChange 会把未提交的拼音当成已落字，
-      // 紧接着的父级 setMd 重渲染会通过 Editable 的 effect 把 innerHTML 覆写，摧毁 IME composition 会话。
-      if (isComposingRef.current) return;
       const el = editableEl(blockId);
       if (!el) return;
       const md = htmlToInlineMd(el);
+      // ★ 阶段 2：本地文本的**唯一入口**（只在协同接通时有效，否则 no-op）。
+      //   基准是绑定层的 shadow，不是 Y 当前值 —— 这是 §13.1-② 的硬要求。
+      //   组词期间它只把最新文本排队，不落 Y；等 compositionend 由 commitComposition 提交。
+      //   读 DOM 是只读操作，不触发任何重渲染，因此不会中断 IME（Issue 3）。
+      collabRef.current.writeText(blockId, md);
+      // 修复 Issue 3（IME 组词丢失）：IME 期间浏览器管 DOM（包括 composition span），
+      // mutate ref.text → onChange 会把未提交的拼音当成已落字，
+      // 紧接着的父级 setMd 重渲染会通过 Editable 的 effect 把 innerHTML 覆写，摧毁 IME composition 会话。
+      if (isComposingRef.current) return;
       const b = blocksRef.current.find((x) => x.id === blockId);
       if (b && b.text !== md) {
         // 直接改 ref 文本但不触发重渲染（避免光标跳动）；延迟到结构操作才 setState
@@ -349,20 +394,73 @@ export function WysiwygEditor({
   );
 
   /**
+   * 远端文本补丁 → **最小热补** DOM（Range 删除 + 就地插入 + 修正光标），绝不整块重写。
+   * 热补不可信（补丁砍在 `**` 这类格式标记上）时回落到整块重写 —— 宁可重写，也不写歪。
+   * 之后只把新正文并回 Block[] 与 Markdown（不顺手推进撤销栈：撤销不该撤销别人的输入）。
+   */
+  const applyRemoteText = useCallback(
+    (groups: TextPatchGroup[]) => {
+      for (const g of groups) {
+        const el = editableEl(g.blockId);
+        const b = blocksRef.current.find((x) => x.id === g.blockId);
+        if (!el || !b) continue;
+        const prev = b.text ?? "";
+        let next = prev;
+        for (const p of g.patches) next = applyPatchToText(next, p);
+        if (!applyPatchesToDom(el, g.patches, prev)) {
+          const html = inlineMdToHtml(next);
+          if (el.innerHTML !== html) el.innerHTML = html;
+        }
+        if (b.text !== next) {
+          b.text = next;
+          onChange(blocksToMd(blocksRef.current));
+        }
+      }
+    },
+    [onChange],
+  );
+
+  // 远端文本 / 远端结构的订阅：协同未接通时不订阅（D6：单机零额外行为）
+  useEffect(() => {
+    if (!collabBinding) return;
+    return onRemoteText(applyRemoteText);
+  }, [collabBinding, onRemoteText, applyRemoteText]);
+
+  useEffect(() => {
+    if (!collabBinding) return;
+    return onRemoteStructure((next) => {
+      // 组词中绝不动 DOM（会把浏览器维护的 composition span 冲掉）
+      if (isComposingRef.current) return;
+      blocksRef.current = next;
+      setBlocks(next);
+      onChange(blocksToMd(next));
+    });
+  }, [collabBinding, onRemoteStructure, onChange]);
+
+  /**
    * IME 组词结束回调：合成 ref + 同步 setState 标记解除，
    * 并对当前聚焦块重放一次 syncBlock 把 IME 期间"被浏览器暂存"的最终字符落地。
    * 修复 Issue 3：纯异步 setState 会有 1 帧延迟，期间下一次 input 可能命中错误的 isComposing 值。
+   *
+   * ★ 阶段 2 收口顺序（§13.1-①③，顺序反了 DOM 与 Y 会漂移）：
+   *   ① commitComposition 拿到 { local, remote }（local 已沿期间到达的远端补丁做过 OT 位移）
+   *   ② 先把 remote 补丁补到 DOM
+   *   ③ 解除组词标记，再把最终 DOM 文本回喂一次（syncBlock → enqueuePatch）
    */
   const onCompositionEnd = useCallback(() => {
+    const commit = collabRef.current.commitComposition();
+    if (commit && commit.remote.length > 0) applyRemoteText(commit.remote);
     isComposingRef.current = false;
     setIsComposingState(false);
     const fid = focusedIdRef.current;
     if (fid) syncBlock(fid);
-  }, [syncBlock]);
+  }, [syncBlock, applyRemoteText]);
 
   const onCompositionStart = useCallback(() => {
     isComposingRef.current = true;
     setIsComposingState(true);
+    // 阶段 2：组词期间该块的补丁排队不落 Y（绑定层内部实现）
+    collabRef.current.beginComposition(focusedIdRef.current);
   }, []);
 
   /* ---------------- 斜杠菜单检测（在块 input 后） ---------------- */
@@ -1917,6 +2015,7 @@ export function WysiwygEditor({
       readOnly={readOnly}
       focused={focusedId === b.id}
       isComposing={isComposingState}
+      managed={collabManaged}
       className={`kb-wy-editable${className ? " " + className : ""}`}
       onInput={onBlockInput}
       onFocus={(id) => setFocusedId(id)}
@@ -2155,6 +2254,7 @@ export function WysiwygEditor({
                 readOnly={readOnly}
                 focused={focusedId === b.id}
                 isComposing={isComposingState}
+                managed={collabManaged}
                 className="kb-wy-editable kb-wy-toggle-editable"
                 onInput={onBlockInput}
                 onFocus={(id) => setFocusedId(id)}
@@ -2192,6 +2292,7 @@ export function WysiwygEditor({
               readOnly={readOnly}
               focused={focusedId === b.id}
               isComposing={isComposingState}
+              managed={collabManaged}
               className="kb-wy-editable kb-wy-callout-editable"
               onInput={onBlockInput}
               onFocus={(id) => setFocusedId(id)}

@@ -4,3 +4,5 @@
 // （blocksToMd 是唯一写出口），否则两端语义必然漂移。搬运为纯移动，web 侧行为零变化。
 export * from "./blocks";
 export * from "./markdown";
+// 行内 Markdown ↔ 渲染 HTML 的偏移映射（协同阶段 2 用：光标在源码偏移与 DOM 偏移之间互转）
+export * from "./inlineOffsets";

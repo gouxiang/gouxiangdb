@@ -26,9 +26,9 @@
     "check:link-source": "node scripts/check-link-source-integrity.mjs"
   },
   "dependencies": {
-    "@gx/design-tokens": "workspace:*",
     "@gx/blocks": "workspace:*",
     "@gx/canvas": "workspace:*",
+    "@gx/design-tokens": "workspace:*",
     "@gx/shared-types": "workspace:*",
     "@hono/node-server": "^1.13.0",
     "@modelcontextprotocol/sdk": "1.30.0",
@@ -37,6 +37,9 @@
     "better-sqlite3": "^13.0.3",
     "hono": "^4.10.3",
     "jose": "^5.9.0",
+    "ws": "8.21.3",
+    "y-protocols": "1.0.7",
+    "yjs": "13.6.32",
     "zod": "^3.23.0"
   },
   "devDependencies": {
@@ -44,6 +47,7 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.10.0",
     "@types/supertest": "^6.0.2",
+    "@types/ws": "8",
     "esbuild": "0.28.2",
     "prisma": "^5.22.0",
     "supertest": "^7.0.0",

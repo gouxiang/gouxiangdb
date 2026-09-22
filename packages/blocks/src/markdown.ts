@@ -327,14 +327,14 @@ export function renderMarkdown(src: string): string {
       continue;
     }
 
-    // 标题
-    const h = /^(#{1,6})\s+(.*)$/.exec(line);
+    // 标题（`#` 后允许无正文：blocksToMd 出口的 .trim() 会把空标题 "## " 削成 "##"）
+    const h = /^(#{1,6})(?:\s+(.*))?$/.exec(line);
     if (h) {
       closeLists();
       const level = h[1]!.length;
       // B3: 标题锚点 id——基于文本生成稳定 slug（中文保留），用于 URL hash 跳转
       const slug = `h-${slugify(h[2] ?? "")}`;
-      out.push(`<h${level} class="md-h md-h${level}" data-heading-id="${escapeHtml(slug)}"${alignAttr()}>${inline(h[2]!)}</h${level}>`);
+      out.push(`<h${level} class="md-h md-h${level}" data-heading-id="${escapeHtml(slug)}"${alignAttr()}>${inline(h[2] ?? "")}</h${level}>`);
       i++;
       continue;
     }

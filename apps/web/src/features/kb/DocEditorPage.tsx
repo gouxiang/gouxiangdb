@@ -3,10 +3,17 @@
 // 高级用户可直接写 Markdown 并一键预览。保存与画布统一走 useDocPersistence：
 // 防抖自动存档到云端 + 本地草稿兜底 + 手动"保存"按钮 + 离开/刷新 flush + 草稿恢复提示。
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { Spinner, toast } from "../../components/ui";
+import { htmlToInlineMd } from "@gx/blocks";
+// 阶段 2 · 协同：会话 + 三个叠加层（在线头像 / 他人光标 / 块占用遮罩）
+import { useCollabSession } from "../collab/useCollabSession";
+import { PresenceAvatars } from "../collab/PresenceAvatars";
+import { CollabCursorLayer } from "../collab/CollabCursorLayer";
+import { CollabLeaseLayer } from "../collab/CollabLeaseLayer";
+import { cssEscape } from "../collab/block-cursor-locator";
 // 阶段 4：409 冲突就地提示（R-D-18），组件在阶段 3 已就绪，此处接上真实调用点
 import { ConflictNotice } from "../../components/states";
 import { useDoc, useRenameDoc } from "./kb-hooks";
@@ -15,15 +22,30 @@ import { ApiError } from "../../api/client";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { VersionHistoryDrawer } from "./VersionHistoryDrawer";
 import { useDocPersistence } from "./useDocPersistence";
+// 阶段 2 · 本地光标/占用的发布口（远端光标的水源；协同关闭时内部零副作用）
+import { useDocPresence } from "./collab/useDocPresence";
 import { ShareModal } from "./ShareModal";
 import { DocOutline } from "./DocOutline";
 import { useShortcuts } from "./hooks/useShortcuts";
+
+/**
+ * 阶段 2 协同总闸。**默认关闭**：未开启时房间 id 为 null → 连接层不建连、三个叠加层一律返回
+ * null，单机行为与引入前逐字一致（D6 UI 冻结的机械判据）。
+ *
+ * 开启前必须确认后端已具备文档冷归结能力（房间的 Y.Doc 内容并回 kb_docs）：当前
+ * `apps/api/src/collab/room.ts` 的 doc flusher 尚未注册，开启后内容只会热持久化到
+ * collab_docs，不会并回正文表 —— 那时"保存"看起来正常、实际没落库。
+ */
+const COLLAB_ENABLED = import.meta.env.VITE_COLLAB === "1";
 
 export default function DocEditorPage() {
   const { kbId, docId } = useParams();
   const navigate = useNavigate();
   const { data: doc, isLoading, isError, error, refetch } = useDoc(docId);
   const rename = useRenameDoc(docId!, kbId!);
+  // 会话建在页面层：三态切换会重挂载编辑器，会话跟着建断会频繁掉线
+  const collab = useCollabSession(COLLAB_ENABLED && docId ? `doc:${docId}` : null);
+  const collabActive = collab.status === "connected";
 
   const [title, setTitle] = useState("");
   const [showVersions, setShowVersions] = useState(false);
@@ -32,9 +54,22 @@ export default function DocEditorPage() {
   const [overrideContent, setOverrideContent] = useState<string | null>(null);
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const pendingRafRef = useRef<number[]>([]);
+  /** 当前整篇 Markdown：源码态下把 textarea 的字符偏移换算成块坐标要用（只写 ref，不触发重渲染）。 */
+  const mdRef = useRef("");
+  const getMarkdown = useCallback(() => mdRef.current, []);
 
   const canEdit = doc?.canEdit ?? true;
-  const persist = useDocPersistence(docId!, kbId!, doc?.content, canEdit, doc?.contentVersion);
+  const persist = useDocPersistence(docId!, kbId!, doc?.content, canEdit, doc?.contentVersion, collabActive);
+
+  /**
+   * 协同光标层要的是「块正文的行内 Markdown **源码**」（正文存的是 `**粗**` 这种带标记的原文，
+   * 屏幕上是渲染后的样子，两者偏移不一样）。源码由宿主从编辑器 DOM 现场反解：不新增任何
+   * 编辑器对外接口，也不改编辑器内部结构（D6）。
+   */
+  const getBlockSource = useCallback((blockId: string): string | null => {
+    const el = editorAreaRef.current?.querySelector<HTMLElement>(`[data-editable="${cssEscape(blockId)}"]`);
+    return el ? htmlToInlineMd(el) : null;
+  }, []);
 
   // 跨平台快捷键 Cmd/Ctrl+S：触发立即云端保存（跳过 1200ms 防抖）。
   // 作用域限定在 editorAreaRef 内，避免劫持搜索对话框 / 版本历史抽屉 / 标题输入框。
@@ -89,8 +124,23 @@ export default function DocEditorPage() {
     };
   }, [doc?.id, doc?.content]);
 
+  /**
+   * 阶段 2：广播本地光标与占用。**协同未开启 / 未连通时 hook 内部直接返回**（不挂监听、
+   * 不发包），单机模式与引入前逐元素一致（D6）。
+   */
+  useDocPresence({
+    containerRef: editorAreaRef,
+    publish: collab.publish,
+    enabled: COLLAB_ENABLED && collabActive,
+    doc: collab.doc,
+    getMarkdown,
+    // 文档切换 / 版本回滚会换掉整棵编辑器，用它触发重新绑定
+    revision: `${docId ?? ""}:${editorKey}`,
+  });
+
   // 编辑器每次内容变更实时上抛 → 防抖自动保存 + 草稿
   function handleChange(md: string) {
+    mdRef.current = md;
     persist.markDirty(md);
   }
 
@@ -148,6 +198,7 @@ export default function DocEditorPage() {
   }
 
   const initialContent = overrideContent ?? doc.content ?? "";
+  mdRef.current = initialContent; // 首次进源码态、还没敲过字时也要有基准正文
 
   return (
     <div className="kb-page flex h-full flex-col bg-gx-bg">
@@ -181,6 +232,12 @@ export default function DocEditorPage() {
             <>
               <Icon name="check" size={13} className="text-gx-success" />
               已保存到云端
+            </>
+          )}
+          {persist.status === "synced" && (
+            <>
+              <Icon name="check" size={13} className="text-gx-success" />
+              已同步（协同中）
             </>
           )}
           {persist.status === "unsaved" && (
@@ -262,7 +319,22 @@ export default function DocEditorPage() {
           onSave={() => void persist.saveNow()}
           readOnly={!canEdit}
           docId={doc.id}
+          collab={collab}
         />
+        {/* 阶段 2 叠加层：都是编辑器的**兄弟节点**，不进编辑器内部 DOM（D6）。
+            三者在没有他人时一律返回 null，单机模式下零 DOM 增量。 */}
+        <PresenceAvatars
+          entries={collab.entries}
+          selfId={collab.selfId}
+          className="absolute right-3 top-2 z-30"
+        />
+        <CollabCursorLayer
+          containerRef={editorAreaRef}
+          entries={collab.entries}
+          selfId={collab.selfId}
+          getBlockSource={getBlockSource}
+        />
+        <CollabLeaseLayer containerRef={editorAreaRef} entries={collab.entries} selfId={collab.selfId} />
         <DocOutline rootRef={editorAreaRef} />
       </div>
 

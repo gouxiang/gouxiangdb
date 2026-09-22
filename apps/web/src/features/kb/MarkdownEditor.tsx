@@ -16,6 +16,7 @@ import { mediaKindOf } from "@gx/blocks";
 import { loadUploadLimits, validateUpload } from "./upload-limits";
 import { makeLinkClickHandler } from "../../lib/internal-links";
 import { WysiwygEditor } from "./WysiwygEditor";
+import type { UseCollabSessionResult } from "../collab/useCollabSession";
 import { MentionPicker, type MentionEmbedKind } from "./MentionPicker";
 import { enhanceCanvasEmbeds } from "./enhanceEmbeds";
 import { chainWithSelf } from "./embed-depth";
@@ -97,7 +98,13 @@ export function MarkdownEditor({
   publicToken,
   docId,
   embedCanEdit,
+  collab,
 }: {
+  /**
+   * 阶段 2：协同会话（DocEditorPage 透传，保证会话在页面层只建一次 —— 三态切换会重挂载
+   * 编辑器，若在编辑器内部建会话，切一次模式就断一次连接）。不传 = 单机。
+   */
+  collab?: UseCollabSessionResult;
   initialMarkdown: string;
   /** 内容变化回调；只读场景（readOnly）无需上报改动，可不传。 */
   onChange?: (md: string) => void;
@@ -179,7 +186,7 @@ export function MarkdownEditor({
       )}
 
       {mode === "wysiwyg" && (
-        <WysiwygEditor key="wy" initialMarkdown={md} onChange={emit} readOnly={readOnly} docId={docId} />
+        <WysiwygEditor key="wy" initialMarkdown={md} onChange={emit} readOnly={readOnly} docId={docId} collab={collab} />
       )}
       {mode === "source" && (
         <SourceEditor value={md} onChange={emit} onSave={onSave} readOnly={readOnly} kbId={kbId} />

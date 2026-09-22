@@ -29,3 +29,4 @@ export * from "./nav.js";
 export * from "./authz.js";
 export * from "./policy.js";
 export * from "./share.js";
+export * from "./collab.js";

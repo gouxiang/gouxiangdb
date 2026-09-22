@@ -14,6 +14,8 @@ import { config, effectiveAuthzMode } from "./config.js";
 import { createApp } from "./app.js";
 import { prisma } from "./db.js";
 import { startSearchWorker, stopSearchWorker } from "./domain/search/workerRuntime.js";
+// 协同：WS 通道挂在每个 http.Server 的 upgrade 上，两处 createServer 都要挂（§8-1）。
+import { attachCollab, flushAllAndClose } from "./collab/index.js";
 
 /**
  * M5 内嵌索引 worker 的启动依赖（门控在 workerRuntime 内：m5Search!=="on" 或
@@ -44,6 +46,7 @@ const port = config.port;
 
 function startTcp(): void {
   const server: Server = createServer(getRequestListener(app.fetch));
+  attachCollab(server);
   server.listen(port, () => {
     const prefixNote = config.basePath ? ` basePath=${config.basePath}` : "";
     const webNote = webRoot ? ` web=${webRoot}` : "";
@@ -60,17 +63,26 @@ function startTcp(): void {
     console.log(`[GouXiangDB API] 收到 ${signal}，开始优雅关闭`);
     const forceTimer = setTimeout(() => process.exit(0), 10_000);
     forceTimer.unref();
-    server.close(async () => {
-      // 先停 worker 再断 Prisma：worker 循环可能正在用 prisma 认领/回写 change_events，
-      // 先断连接会让在途那一条抛错并被判 failed（下次启动还得重跑）。
-      stopSearchWorker();
+    // 协同：先落盘所有房间并断开长连接，再 server.close —— 否则 close 的回调会被
+    // 在线的 WS 长连接一直阻塞（10s 兜底一到就是硬退，最后一段编辑会丢）。
+    void (async () => {
       try {
-        await prisma.$disconnect();
-      } catch {
-        // best-effort：即使 disconnect 异常也必须退出。
+        await flushAllAndClose();
+      } catch (e) {
+        console.warn("[collab] flushAllAndClose failed", e);
       }
-      process.exit(0);
-    });
+      server.close(async () => {
+        // 先停 worker 再断 Prisma：worker 循环可能正在用 prisma 认领/回写 change_events，
+        // 先断连接会让在途那一条抛错并被判 failed（下次启动还得重跑）。
+        stopSearchWorker();
+        try {
+          await prisma.$disconnect();
+        } catch {
+          // best-effort：即使 disconnect 异常也必须退出。
+        }
+        process.exit(0);
+      });
+    })();
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
@@ -84,6 +96,7 @@ function startUnixSocket(socketPath: string): void {
   fs.rmSync(socketPath, { force: true });
 
   const server: Server = createServer(getRequestListener(app.fetch));
+  attachCollab(server);
   server.listen(socketPath, () => {
     // 0660：同组（网关运行账户）可读写，其他账户不可达。
     try {
@@ -105,16 +118,24 @@ function startUnixSocket(socketPath: string): void {
     console.log(`[GouXiangDB API] 收到 ${signal}，开始优雅关闭`);
     const forceTimer = setTimeout(() => process.exit(0), 10_000);
     forceTimer.unref();
-    server.close(async () => {
-      stopSearchWorker(); // 同上：先停 worker 再断 Prisma。
+    // 同上：协同先 flush 并断开长连接，否则 server.close 会被在线 WS 阻塞。
+    void (async () => {
       try {
-        fs.rmSync(socketPath, { force: true });
-        await prisma.$disconnect();
-      } catch {
-        // best-effort
+        await flushAllAndClose();
+      } catch (e) {
+        console.warn("[collab] flushAllAndClose failed", e);
       }
-      process.exit(0);
-    });
+      server.close(async () => {
+        stopSearchWorker(); // 同上：先停 worker 再断 Prisma。
+        try {
+          fs.rmSync(socketPath, { force: true });
+          await prisma.$disconnect();
+        } catch {
+          // best-effort
+        }
+        process.exit(0);
+      });
+    })();
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));

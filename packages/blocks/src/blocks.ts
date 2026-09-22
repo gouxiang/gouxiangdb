@@ -526,7 +526,9 @@ export function shiftTableSpans(
 
 /* ------------------------- Markdown -> 块 ------------------------- */
 
-const HEADING_RE = /^(#{1,6})\s+(.*)$/;
+// `#` 后允许无正文：blocksToMd 出口的 .trim() 会把行尾空标题 "## " 削成 "##"，
+// 若此处强制要求 \s+，空标题往返一次就退化为字面 "##" 段落（CommonMark 亦视 "#" 为标题）。
+const HEADING_RE = /^(#{1,6})(?:\s+(.*))?$/;
 const UL_RE = /^(\s*)[-*+]\s+(.*)$/;
 const OL_RE = /^(\s*)(\d+)\.\s+(.*)$/;
 const QUOTE_RE = /^\s*>\s?(.*)$/;
@@ -716,7 +718,7 @@ export function mdToBlocks(src: string): Block[] {
     // 标题
     const h = HEADING_RE.exec(line);
     if (h) {
-      pushBlock(newBlock(`h${h[1]!.length}` as BlockType, { text: h[2]! }));
+      pushBlock(newBlock(`h${h[1]!.length}` as BlockType, { text: h[2] ?? "" }));
       i++;
       continue;
     }

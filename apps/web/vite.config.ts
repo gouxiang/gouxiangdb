@@ -32,10 +32,15 @@ export default defineConfig({
     proxy: (() => {
       // 严格回归：5 个根前缀与改造前完全一致（均带 changeOrigin: true）。
       const rootPrefixes = ["/api", "/health", "/healthz", "/readyz", "/uploads"];
-      const proxy: Record<string, { target: string; changeOrigin: true }> = {};
+      const proxy: Record<string, { target: string; changeOrigin: true; ws?: boolean }> = {};
       for (const p of rootPrefixes) {
         proxy[p] = { target: API_TARGET, changeOrigin: true };
       }
+      // 协同 WebSocket：/ws/collab/<roomId> 必须显式开 ws 才会转发 upgrade
+      // （http-proxy 默认不代理 WebSocket）。缺了这一条，dev 下前端算出的
+      // ws://127.0.0.1:5173/ws/collab/... 打不到后端，协同状态机永远停在 connecting，
+      // 页面会静默退化成单机整篇 PUT —— 表现为"界面显示已保存、实际在丢内容"。
+      proxy["/ws"] = { target: API_TARGET, changeOrigin: true, ws: true };
       // 子路径本地模拟网关：整段前缀透传到 :3001（/app/gouxiangdb/api、
       // /app/gouxiangdb/healthz 等自然命中）。不改写路径，与生产网关 + 后端双形态一致。
       if (BASE_PATH !== "/") {

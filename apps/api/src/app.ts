@@ -24,6 +24,7 @@ import { records } from "./routes/records.js";
 import { views } from "./routes/views.js";
 import { tableShares } from "./routes/tableShares.js";
 import { linkable } from "./routes/linkable.js";
+import { collab } from "./routes/collab.js";
 import { kb } from "./routes/kb/index.js";
 import { pub } from "./routes/public.js";
 import { search } from "./routes/search.js";
@@ -150,6 +151,8 @@ function createMount(webRoot: string | null): Hono {
   api.route("/tables", tableShares);
   // 关联插入选择器（后端按 libraryPolicy 过滤可见对象）
   api.route("/linkable", linkable);
+  // 实时协同：票据与 presence 两个 HTTP 端点（WS 通道在 index.ts 里挂 upgrade）
+  api.route("/collab", collab);
   api.route("/kb", kb);
   api.route("/public", pub);
   api.route("/search", search);

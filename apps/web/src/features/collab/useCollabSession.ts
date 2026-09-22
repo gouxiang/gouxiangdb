@@ -1,0 +1,114 @@
+// apps/web/src/features/collab/useCollabSession.ts
+// 阶段 1 · 协同会话 hook：把连接层的状态机与在线名单接到 React，供**阶段 2 起**的
+// 头像列表 / 远端光标接线使用。本阶段不渲染任何 UI（D6 UI 冻结）。
+//
+// 职责边界：
+//   1. roomId 变化 / 组件卸载 → 必须 disconnect（Vite 热重载与路由切换都会重跑 effect，
+//      漏关闭会泄漏长连接）。
+//   2. WS 尚未连通时，先用 getCollabPresence 拉一次服务端名单兜底（DESIGN.md §4.3）。
+//   3. awareness 载荷按白名单裁剪后才进 state（toPresenceEntries）。
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Doc } from "yjs";
+import { getCollabPresence } from "../../api/client";
+import { createCollabConnection, type CollabConnection, type CollabStatus } from "./collab-provider";
+import { toPresenceEntries } from "./collab-presence";
+import type { CollabDenyReason, CollabPresenceEntry } from "@gx/shared-types";
+
+export interface UseCollabSessionResult {
+  status: CollabStatus;
+  entries: CollabPresenceEntry[];
+  /**
+   * 本连接的身份 id；与 entries[].id 同源（包含在 entries 里）。
+   * 叠加层用它把自己从「他人」里剔除（DESIGN.md §5.1：同账号多标签页算多个参与者）。
+   */
+  selfId: string | null;
+  /** 协同文档实例（尚未连通时也已存在，可供后续绑定本地内容）；未启用协同时为 null。 */
+  doc: Doc | null;
+  /** denied 时的可展示原因文案；其余状态为 null。 */
+  error: string | null;
+  /**
+   * 发布本地 awareness 字段（阶段 2：`{ selection }` / `{ leases }`；传 null 清除）。
+   * 未启用协同（roomId 为 null）或连接已销毁时是 no-op。
+   *
+   * **引用必须稳定**：页面层会把 publish 放进 effect 依赖数组（光标上报是长驻监听），
+   * 每次 render 换一个函数就会带着监听反复解绑重绑。故这里只持有连接引用、用空依赖
+   * useCallback 固定自身。
+   */
+  publish: (fields: Record<string, unknown>) => void;
+}
+
+const DENY_TEXT: Record<CollabDenyReason, string> = {
+  ticket_invalid: "协同连接凭据无效",
+  ticket_expired: "协同连接凭据已过期",
+  no_access: "没有该内容的协同访问权限",
+  readonly: "当前为只读，无法参与编辑",
+  handshake_timeout: "协同握手超时",
+  downgraded: "权限已降级，已转为只读",
+};
+
+export function useCollabSession(roomId: string | null): UseCollabSessionResult {
+  const [status, setStatus] = useState<CollabStatus>("idle");
+  const [entries, setEntries] = useState<CollabPresenceEntry[]>([]);
+  const [selfId, setSelfId] = useState<string | null>(null);
+  const [doc, setDoc] = useState<Doc | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  /** 当前连接（发布口的实际落点）；用 ref 而非 state，避免 publish 因重渲染而换引用。 */
+  const connRef = useRef<CollabConnection | null>(null);
+  const publish = useCallback((fields: Record<string, unknown>) => {
+    connRef.current?.setLocalFields(fields);
+  }, []);
+
+  useEffect(() => {
+    if (!roomId) {
+      connRef.current = null;
+      setEntries([]);
+      setSelfId(null);
+      setDoc(null);
+      setError(null);
+      setStatus("idle");
+      return;
+    }
+    let alive = true;
+    let connectedOnce = false;
+    setEntries([]);
+    setError(null);
+
+    // WS 未连通时的首屏兜底名单：一旦连通即让位给 awareness（见下面的 connectedOnce）。
+    void getCollabPresence(roomId)
+      .then((snapshot) => {
+        if (!alive || connectedOnce) return;
+        setEntries(snapshot.entries ?? []);
+      })
+      .catch(() => {
+        /* 兜底失败不影响主链路：连上后 awareness 会给出完整名单 */
+      });
+
+    const conn = createCollabConnection(roomId, {
+      onStatus: (next, reason) => {
+        if (!alive) return;
+        if (next === "connected") connectedOnce = true;
+        setStatus(next);
+        setError(next === "denied" ? (reason ? DENY_TEXT[reason] : "协同连接被拒绝") : null);
+      },
+    });
+    connRef.current = conn;
+    setSelfId(conn.selfId);
+    setDoc(conn.doc);
+
+    const unsubscribe = conn.onAwarenessChange((states) => {
+      if (!alive) return;
+      setEntries(toPresenceEntries(states));
+    });
+
+    return () => {
+      alive = false;
+      connRef.current = null;
+      unsubscribe();
+      conn.disconnect();
+    };
+  }, [roomId]);
+
+  return { status, entries, selfId, doc, error, publish };
+}

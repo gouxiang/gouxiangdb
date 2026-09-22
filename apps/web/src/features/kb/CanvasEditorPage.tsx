@@ -130,6 +130,12 @@ export default function CanvasEditorPage() {
               已保存到云端
             </>
           )}
+          {persist.status === "synced" && (
+            <>
+              <Icon name="check" size={13} className="text-gx-success" />
+              已同步（协同中）
+            </>
+          )}
           {persist.status === "unsaved" && (
             <>
               <span className="kb-tree-unsaved" />
