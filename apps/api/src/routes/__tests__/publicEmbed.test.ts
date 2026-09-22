@@ -58,11 +58,11 @@ vi.mock("../../db.js", () => ({
 
 vi.mock("../../domain/authz/libraryPolicy.js", () => ({
   resolveBaseAccessByTable: () => Promise.resolve({
-    visible: true, canManage: false, canDeleteLibrary: false, canToggleShare: false,
+    visible: true, canManage: false, canDeleteLibrary: false, canToggleShare: false, canShare: false,
     source: "role_scope", tables: { t1: state.table }, fields: {},
   } as unknown as LibraryAccessDTO),
   resolveKbAccess: () => Promise.resolve({
-    visible: true, canManage: false, canDeleteLibrary: false, canToggleShare: false,
+    visible: true, canManage: false, canDeleteLibrary: false, canToggleShare: false, canShare: false,
     source: "role_scope", tables: { content: state.kbContent }, fields: {},
   } as unknown as LibraryAccessDTO),
   tableAccessOf: (access: LibraryAccessDTO, tableId: string) =>

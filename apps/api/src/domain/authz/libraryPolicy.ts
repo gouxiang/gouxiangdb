@@ -18,6 +18,11 @@
 //   B 建库/建知识库 —— 超级管理员、管理员。
 //   C 允许分享开关 —— 对该库有管理权者 + 超级管理员 + 管理员。
 //   D 分享链接进来的外部人 —— 恒只读（实现在 routes/public.ts，与本模块的"内部成员"无关）。
+//
+// 分享这件事在本模块里拆成两个彼此独立的判定，别再混用：
+//   canToggleShare —— 库级「允许分享」总闸的开关权，硬规则 C，只跟 canManage 走。
+//   canShare       —— 总闸开着时能不能建/管这个库的分享链接，等于 canManage ∪ canShare 位。
+//   "让他发链接"不等于"让他决定这个库能不能对外"，两者分开授权、分开判定。
 
 import { prisma } from "../../db.js";
 import type {
@@ -53,7 +58,8 @@ const SUPER_ACCESS: LibraryAccessDTO = {
   visible: true,
   canManage: true,
   canDeleteLibrary: true, // 硬规则 A：唯一一处把删库置 true 的地方
-  canToggleShare: true,
+  canToggleShare: true, // 硬规则 C：总闸开关权
+  canShare: true, // 建/管分享链接权；与总闸权在此同源，但语义上是两件事
   source: "super_admin",
   tables: { [WILDCARD_TABLE]: FULL_TABLE_ACCESS },
   fields: {},
@@ -110,9 +116,12 @@ export function synthesizeAccess(
     visible,
     canManage,
     canDeleteLibrary: false, // 硬规则 A：配置永远给不了删库
-    // 硬规则 C：谁能管谁能开；canShare 是额外的独立授予路径。必须取 || 而非只看
-    // canShare：存量 canShare=0 但 canManage=1 的行升级后不得静默失去分享权。
-    canToggleShare: canManage || canShare,
+    // 硬规则 C：库级总闸的开关权只跟管理权走。canShare 位【不参与】——
+    // "让他发链接"不等于"让他决定这个库能不能对外"，两者分开授权、分开判定。
+    canToggleShare: canManage,
+    // 建/管分享链接权：能管自然能发（存量 canManage=1 / canShare=0 的行升级后不得静默失去
+    // 分享权，故取 || 而非只看 canShare），再加上被显式授予 canShare 的角色。
+    canShare: canManage || canShare,
     source: visible || canManage ? "role_scope" : "none",
     tables,
     fields,
@@ -194,7 +203,8 @@ async function resolve(userId: string, kind: LibraryKind, libraryId: string): Pr
   const merged = synthesizeAccess(rows);
   // 硬规则短路 2：管理员进得了所有库，管理权仍在配置里，永不持删库权。
   if (roleIds.includes(ADMIN_ROLE_ID)) {
-    return { ...merged, visible: true, canToggleShare: true, source: "admin" };
+    // 硬规则 C：管理员也能动总闸，故 canToggleShare 直接置 true；建链接权同理给到。
+    return { ...merged, visible: true, canToggleShare: true, canShare: true, source: "admin" };
   }
   return merged;
 }
@@ -296,7 +306,12 @@ export async function resolveManyAccess(
   }
   for (const id of libraryIds) {
     const merged = synthesizeAccess(grouped.get(id) ?? []);
-    out.set(id, isAdmin ? { ...merged, visible: true, canToggleShare: true, source: "admin" } : merged);
+    out.set(
+      id,
+      isAdmin
+        ? { ...merged, visible: true, canToggleShare: true, canShare: true, source: "admin" }
+        : merged,
+    );
   }
   return out;
 }

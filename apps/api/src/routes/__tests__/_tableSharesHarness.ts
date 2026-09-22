@@ -34,6 +34,12 @@ export interface TablePerm {
 export interface UserScope {
   visible: boolean;
   canManage: boolean;
+  /**
+   * 角色 × 库的「可分享」位。本轮收紧后建/看/吊销分享链接都要过 access.canShare
+   * （= canManage ∪ 这一位）。夹具默认给 true：这些用例的靶子是档位现算 / 降级 / 吊销，
+   * 默认带分享权才能让它们继续测原本的东西；「没有分享权」的情形由新增用例显式构造。
+   */
+  canShare: boolean;
   tablePerm: TablePerm;
 }
 
@@ -83,11 +89,18 @@ export const state = {
 
 let seq = 0;
 
-/** 造一份库视野。默认：可见 + 只读（update=false 是"建不了可编辑链接"的常态）。 */
-export function scope(visible: boolean, canManage: boolean, perm: Partial<TablePerm> = {}): UserScope {
+/** 造库视野时的可选项：表四动作 + canShare 位（缺省 true，见 UserScope.canShare 注释）。 */
+export interface ScopeOpts extends Partial<TablePerm> {
+  canShare?: boolean;
+}
+
+/** 造一份库视野。默认：可见 + 可分享 + 只读（update=false 是"建不了可编辑链接"的常态）。 */
+export function scope(visible: boolean, canManage: boolean, opts: ScopeOpts = {}): UserScope {
+  const { canShare = true, ...perm } = opts;
   return {
     visible,
     canManage,
+    canShare,
     tablePerm: { read: true, create: false, update: false, delete: false, ...perm },
   };
 }
@@ -214,10 +227,14 @@ export const fakePrisma = {
           return {
             canManage: s.canManage ? 1 : 0,
             visible: s.visible ? 1 : 0,
+            canShare: s.canShare ? 1 : 0,
             config: JSON.stringify({ tables: { [TABLE]: s.tablePerm } }),
           };
         })
-        .filter((r): r is { canManage: number; visible: number; config: string } => r !== null);
+        .filter(
+          (r): r is { canManage: number; visible: number; canShare: number; config: string } =>
+            r !== null,
+        );
       return Promise.resolve(rows);
     },
   },

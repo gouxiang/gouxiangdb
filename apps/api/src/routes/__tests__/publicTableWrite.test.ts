@@ -56,6 +56,7 @@ vi.mock("../../domain/authz/libraryPolicy.js", () => ({
     canManage: false,
     canDeleteLibrary: false,
     canToggleShare: false,
+    canShare: false,
     source: "role_scope",
     tables: { t1: state.table },
     fields: { t1: state.fields },

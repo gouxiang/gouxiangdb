@@ -121,8 +121,16 @@ export interface LibraryAccessDTO {
   canManage: boolean;
   /** 能不能删库——只有超级管理员。 */
   canDeleteLibrary: boolean;
-  /** 能不能开/关这个库的「允许分享」开关。 */
+  /**
+   * 库级「允许分享」总闸的开关权 = canManage（硬规则 C，另加超级管理员/管理员）。
+   * 只管「这个库允不允许被外发」这一刀，不代表能建链接——建/管链接看 canShare。
+   */
   canToggleShare: boolean;
+  /**
+   * 总闸开着时，能不能建/管这个库的分享链接 = canManage ∪ 角色的 canShare 位。
+   * 与 canToggleShare 已分家：被单独授予 canShare 的人能发链接，但动不了总闸。
+   */
+  canShare: boolean;
   /** 库藏命中的原因，供排障与「为什么我看不到」的自助排查。 */
   source: LibraryAccessSource;
   /** tableId -> 四枚数据动作（知识库里恒用单一 key "content" 表示文档/画布）。 */
@@ -157,9 +165,10 @@ export interface LibraryRoleVisibilityDTO {
   canManage: boolean;
   visible: boolean;
   /**
-   * 独立于 canManage 的分享授予位：只勾「可分享」不勾「可管理」的角色也算能开分享开关。
-   * 前端判据是 canManage || canShare（与后端 libraryPolicy 的 canToggleShare 同口径），
-   * 少了这一位就只能认 canManage —— 于是「被单独授予可分享」在界面上是个勾了不生效的假承诺。
+   * 独立于 canManage 的分享授予位：只勾「可分享」不勾「可管理」的角色也能建/管这个库的
+   * 分享链接（判据 canManage || canShare，与后端 LibraryAccessDTO.canShare 同口径）。
+   * 少了这一位，被单独授予「可分享」在界面上就是个勾了不生效的假承诺。
+   * 注意：这一位【不等于】库级总闸开关权——动总闸要看 canToggleShare（硬规则 C）。
    */
   canShare: boolean;
   /** 经该角色（含部门继承）落到这个库上的在岗成员数。 */

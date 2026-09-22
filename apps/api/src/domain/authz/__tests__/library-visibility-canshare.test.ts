@@ -2,14 +2,17 @@
 // 锁住「这个库谁能进来」台账必须把独立的「可分享」位 canShare 一路带回前端。
 //
 // 为什么值得单独一个测试文件：d308a77 把分享权拆成独立列后，后端裁决改成
-// `canToggleShare = canManage || canShare`，权限管理页也据此把文案写成
-// 「被单独授予『可分享』的角色也能开」。但 GET /libraries/:kind/:id/visibility 的
+// `canShare = canManage || canShare`（建/管分享链接），权限管理页也据此把文案写成
+// 「被单独授予『可分享』的角色也能发」。但 GET /libraries/:kind/:id/visibility 的
 // DTO 里根本没有 canShare，前端只能拿 canManage 判——于是给某个角色单勾「可分享」
 // 在界面上是个勾了不生效的假承诺：开关不出现，且没有任何测试会红。
 //
 // 本文件钉两件事：
 //   1. 取数不能漏：findMany 的 select 必须带 canShare（漏了就会静默回退成 canManage 口径）；
-//   2. 口径要一致：台账每行的 canManage || canShare 必须等于后端 synthesizeAccess 的裁决。
+//   2. 口径要一致：台账每行的 canManage || canShare 必须等于后端 synthesizeAccess 的 canShare
+//      判定（页面据此承诺"这个角色能发链接"）。
+//   注：库级总闸开关权 canToggleShare 已于本轮收归硬规则 C（只看 canManage），与台账这一位
+//      不再是同一件事；台账展示该按哪个口径取，由前端 worker 决定，后端只保证字段本身正确。
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
@@ -52,8 +55,8 @@ const { synthesizeAccess } = await import("../libraryPolicy.js");
 
 const EMPTY_CFG = '{"tables":{},"fields":{}}';
 
-/** 台账里的角色行 -> 前端据它判「我能不能开分享开关」的同一条式子。 */
-const canToggleShareOf = (r: { canManage: boolean; canShare: boolean }): boolean =>
+/** 台账里的角色行 -> 前端据它判「这个角色能不能发本库的分享链接」的同一条式子。 */
+const canShareOf = (r: { canManage: boolean; canShare: boolean }): boolean =>
   r.canManage || r.canShare;
 
 function seed(scopes: ScopeRow[]) {
@@ -84,10 +87,10 @@ describe("库视野台账的 canShare 位", () => {
     expect(row, "只勾可分享的角色必须先出现在台账里，否则前端无从判定").toBeTruthy();
     expect(row!.canManage).toBe(false);
     expect(row!.canShare).toBe(true);
-    expect(canToggleShareOf(row!), "被单独授予可分享的角色必须能开分享开关").toBe(true);
+    expect(canShareOf(row!), "被单独授予可分享的角色必须能建/管分享链接").toBe(true);
   });
 
-  it("台账口径与后端裁决一致：每行的 canManage || canShare 等于 synthesizeAccess 的 canToggleShare", async () => {
+  it("台账口径与后端裁决一致：每行的 canManage || canShare 等于 synthesizeAccess 的 canShare", async () => {
     seed([
       { roleId: "r_manage", visible: 1, canManage: 1, canShare: 0 },
       { roleId: "r_share", visible: 1, canManage: 0, canShare: 1 },
@@ -100,9 +103,9 @@ describe("库视野台账的 canShare 位", () => {
       const row = res.roles.find((r) => r.roleId === s.roleId)!;
       const verdict = synthesizeAccess([
         { canManage: s.canManage, visible: s.visible, canShare: s.canShare, config: EMPTY_CFG },
-      ]).canToggleShare;
+      ]).canShare;
       expect(
-        canToggleShareOf(row),
+        canShareOf(row),
         `角色 ${s.roleId}：台账口径与后端裁决分裂会让界面承诺与实际放行不一致`,
       ).toBe(verdict);
     }
@@ -115,7 +118,7 @@ describe("库视野台账的 canShare 位", () => {
     const row = res.roles.find((r) => r.roleId === "r_manage")!;
     expect(row.canManage).toBe(true);
     expect(row.canShare).toBe(false);
-    expect(canToggleShareOf(row)).toBe(true);
+    expect(canShareOf(row)).toBe(true);
   });
 
   it("只勾 canShare 而 visible=0：不构成覆盖，不进台账（运行时 visible 闸先拦，它拿不到权）", async () => {

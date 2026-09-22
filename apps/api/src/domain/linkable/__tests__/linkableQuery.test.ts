@@ -65,6 +65,7 @@ vi.mock("../../authz/libraryPolicy.js", () => {
     canManage: false,
     canDeleteLibrary: false,
     canToggleShare: false,
+    canShare: false,
     source: "role_scope",
     tables: Object.fromEntries(
       Object.entries(scenario.tableRead).map(([k, v]) => [k, { read: v, create: v, update: false, delete: false } as TableAccess]),

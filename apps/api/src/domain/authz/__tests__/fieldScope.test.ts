@@ -11,7 +11,7 @@ import { fieldScopeOf, stripHiddenFromRecords, stripHiddenKeys } from "../fieldS
 
 function access(fields: Record<string, Record<string, "editable" | "visible" | "hidden">>): LibraryAccessDTO {
   return {
-    visible: true, canManage: false, canDeleteLibrary: false, canToggleShare: false,
+    visible: true, canManage: false, canDeleteLibrary: false, canToggleShare: false, canShare: false,
     source: "role_scope", tables: {}, fields,
   };
 }

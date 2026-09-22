@@ -110,7 +110,7 @@ vi.mock("../../domain/authz/libraryPolicy.js", () => ({
     Promise.resolve(
       state.kbVisible
         ? ({
-            visible: true, canManage: false, canDeleteLibrary: false, canToggleShare: false,
+            visible: true, canManage: false, canDeleteLibrary: false, canToggleShare: false, canShare: false,
             source: "role_scope", tables: { content: state.content }, fields: {},
           } as unknown as LibraryAccessDTO)
         : null,

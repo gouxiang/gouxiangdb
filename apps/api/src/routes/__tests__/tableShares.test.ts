@@ -130,6 +130,63 @@ describe("两级「允许分享」开关（库级 && 表级）", () => {
   });
 });
 
+// ============ 1.5) ★第三道闸：本人对这个库的分享权 canShare ============
+
+describe("建/看分享链接的本人分享权 canShare（总闸开了也不等于人人能发）", () => {
+  it("★仅有可见权（无 canShare、无 canManage）-> POST 403 含「分享权限」，且未落库", async () => {
+    state.scopes[MEMBER] = scope(true, false, { canShare: false });
+    const r = await create({ mode: "view" });
+    expect(r.status).toBe(403);
+    expect(r.body.error).toContain("你没有这个库的分享权限");
+    expect(state.links).toHaveLength(0);
+    expect(auditCalls).toHaveLength(0);
+  });
+
+  it("★仅有可见权 -> GET 同样 403（不是只挡创建）", async () => {
+    state.scopes[MEMBER] = scope(true, false, { canShare: false });
+    state.links = [link({ id: "l1", mode: "view", createdBy: MEMBER })];
+    const r = await getList();
+    expect(r.status).toBe(403);
+    expect(r.body.error).toContain("你没有这个库的分享权限");
+    expect(r.body.links).toBeUndefined();
+  });
+
+  it("★授 canShare 位后 -> POST 201、GET 200（收紧是精确的，不是一刀切封死）", async () => {
+    state.scopes[MEMBER] = scope(true, false, { canShare: false });
+    expect((await create({ mode: "view" })).status).toBe(403);
+
+    state.scopes[MEMBER] = scope(true, false, { canShare: true });
+    const created = await create({ mode: "view" });
+    expect(created.status).toBe(201);
+    expect(state.links).toHaveLength(1);
+    expect((await getList()).status).toBe(200);
+  });
+
+  it("对本库有管理权的人不靠 canShare 位也能建（放权方向不许回退）", async () => {
+    state.userId = MANAGER;
+    state.scopes[MANAGER] = scope(true, true, { canShare: false, update: true });
+    const r = await create({ mode: "edit" });
+    expect(r.status).toBe(201);
+  });
+
+  it("有 canShare 但本人无该表 update -> 可建只读档，申请 edit 仍被挡（两道闸各自独立）", async () => {
+    state.scopes[MEMBER] = scope(true, false, { canShare: true });
+    expect((await create({ mode: "view" })).status).toBe(201);
+    const r = await create({ mode: "edit" });
+    expect(r.status).toBe(403);
+    expect(r.body.error).toContain("只有本人对该数据表有编辑权时才能创建可编辑分享");
+    expect(state.links).toHaveLength(1);
+  });
+
+  it("库级总闸关时仍报「未开启分享」：两道闸各报各的原因，不互相遮蔽", async () => {
+    state.scopes[MEMBER] = scope(true, false, { canShare: false });
+    state.baseShareEnabled = 0;
+    const r = await create({ mode: "view" });
+    expect(r.status).toBe(403);
+    expect(r.body.error).toContain("未开启分享");
+  });
+});
+
 // ============ 2) ★核心防线一：可编辑档位必须由后端自判 ============
 
 describe("POST mode:edit 的分享人编辑权硬约束", () => {

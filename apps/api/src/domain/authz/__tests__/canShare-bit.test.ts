@@ -1,14 +1,15 @@
 // apps/api/src/domain/authz/__tests__/canShare-bit.test.ts
-// 锁住「可分享」独立位 canShare 与旧派生规则的关系。
+// 锁住「可分享」独立位 canShare 与库级总闸开关权 canToggleShare 的【分家】语义。
 //
-// 为什么值得单独一个测试文件：分享权原先是 canManage 的派生（canToggleShare: canManage），
-// 拆成独立列后判定改成 canManage || canShare。这个改动有两个方向都会出事，
-// 且两个方向都不会有人立刻发现：
-//   1. 写反成只看 canShare → 存量 canManage=1 / canShare=0 的行在升级后静默失去分享权。
-//      收权方向错了没人会来报，只会表现为"我以前能开分享现在不能了"的零星困惑。
-//   2. 顺手让 canShare 也带出 canManage / 通配表权限 → 等于凭空放权，
-//      "让他分享"被实现成"让他改结构改数据"。
-// 故本文件同时钉住放权方向（canManage 照旧有效）与收权方向（canShare 不给别的权）。
+// 为什么值得单独一个测试文件：这两枚判定都从同一个 canShare 列派生，一旦混用就会出现
+// 两种都不会有人立刻发现的错：
+//   1. 收权方向：写反成只看 canShare → 存量 canManage=1 / canShare=0 的行在升级后静默失去
+//      分享权。收权方向错了没人会来报，只会表现为"我以前能发链接现在不能了"的零星困惑。
+//   2. 放权方向：让 canShare 位带出总闸开关权 → "让他发链接"被实现成"让他决定这个库能不能
+//      对外"，与硬规则 C（总闸权 = canManage）冲突；或让 canShare 带出 canManage / 通配表
+//      权限 → 凭空放权成"能改结构改数据"。
+// 故本文件同时钉住：放权方向（canManage 照旧有效）、收权方向（canShare 不给别的权）、
+// 以及两枚判定各自独立的那一条分界线。
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -27,21 +28,45 @@ const row = (over: Partial<Row> = {}): Row => ({
 });
 
 describe("canShare 独立分享位", () => {
-  it("canManage=1 且 canShare=0 仍可开分享：存量授权升级后不许静默收权", () => {
-    expect(synthesizeAccess([row({ canManage: 1 })]).canToggleShare).toBe(true);
+  it("canManage=1 且 canShare=0 仍可发链接：存量授权升级后不许静默收权", () => {
+    const a = synthesizeAccess([row({ canManage: 1 })]);
+    expect(a.canShare).toBe(true);
+    expect(a.canToggleShare).toBe(true);
   });
 
-  it("canManage=0 且 canShare=1 可开分享：这是本次新增的显式授予路径", () => {
-    expect(synthesizeAccess([row({ canShare: 1 })]).canToggleShare).toBe(true);
+  it("canManage=0 且 canShare=1 可发链接：这是本次新增的显式授予路径", () => {
+    const a = synthesizeAccess([row({ canShare: 1 })]);
+    expect(a.canShare).toBe(true);
   });
 
-  it("两位都为 0 时不可开分享", () => {
-    expect(synthesizeAccess([row()]).canToggleShare).toBe(false);
-    expect(synthesizeAccess([row({ visible: 1 })]).canToggleShare).toBe(false);
+  it("★仅有 canShare 位时：canShare=true 但 canToggleShare=false（发链接 ≠ 动总闸）", () => {
+    const a = synthesizeAccess([row({ visible: 1, canShare: 1 })]);
+    expect(a.canShare, "被单独授予可分享的人必须能建/管分享链接").toBe(true);
+    expect(a.canToggleShare, "总闸开关权归硬规则 C：只有 canManage 能带来它").toBe(false);
   });
 
-  it("多角色取并集：任一条带 canShare=1 即成立", () => {
+  it("★仅有可见权（无 canShare、无 canManage）：两枚判定都为 false", () => {
+    const a = synthesizeAccess([row({ visible: 1 })]);
+    expect(a.visible).toBe(true);
+    expect(a.canShare).toBe(false);
+    expect(a.canToggleShare).toBe(false);
+  });
+
+  it("两位都为 0 时不可发链接也不可动总闸", () => {
+    const a = synthesizeAccess([row()]);
+    expect(a.canShare).toBe(false);
+    expect(a.canToggleShare).toBe(false);
+  });
+
+  it("多角色取并集：任一条带 canShare=1 即能发链接，但仍动不了总闸", () => {
     const merged = synthesizeAccess([row({ visible: 1 }), row({ canShare: 1 })]);
+    expect(merged.canShare).toBe(true);
+    expect(merged.canToggleShare).toBe(false);
+  });
+
+  it("多角色取并集：任一条带 canManage=1 则两枚判定都成立", () => {
+    const merged = synthesizeAccess([row({ visible: 1 }), row({ canManage: 1 })]);
+    expect(merged.canShare).toBe(true);
     expect(merged.canToggleShare).toBe(true);
   });
 

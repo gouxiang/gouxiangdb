@@ -34,6 +34,7 @@ function access(tables: Record<string, { read: boolean; create: boolean; update:
     canManage: false,
     canDeleteLibrary: false,
     canToggleShare: false,
+    canShare: false,
     source: "role_scope",
     tables,
     fields: fields as LibraryAccessDTO["fields"],

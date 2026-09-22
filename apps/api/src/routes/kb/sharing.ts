@@ -1,11 +1,16 @@
 // apps/api/src/routes/kb/sharing.ts
 // 单文档外链分享开关/令牌 + 内部成员权限批量调整。
 // M4/S5 commit ① 从 routes/kb.ts 机械拆出，零行为变化。
+//
+// 建/管分享的第三道闸（与数据表侧 tableShares.assertCanShareTable 同口径）：
+// 进得来这个库（requireDocAccess）不等于能外发它——还必须有 access.canShare
+// （= canManage ∪ 角色的 canShare 位）。本端点会把 shareToken / 分享链接原样回给调用方，
+// 拿到链接等于拿到"对外发布这篇文档"的能力，故查与改两道都必须过这道闸。
 
 import { Hono } from "hono";
 import { z } from "zod";
 import { prisma } from "../../db.js";
-import { requireUserId, errorResponse } from "../../guards.js";
+import { requireUserId, errorResponse, HttpError } from "../../guards.js";
 import { readShareEnabled } from "../../domain/authz/libraryVisibility.js";
 import { assertSharerCanGrantDocEdit, canSharerGrantDocEdit, resolveDocShareCaps } from "../../domain/share/shareCaps.js";
 import { genShareToken, requireDocAccess } from "./shared.js";
@@ -17,6 +22,9 @@ sharingRoutes.get("/docs/:docId/share", async (c) => {
     const userId = await requireUserId(c);
     const docId = c.req.param("docId");
     const { doc, access } = await requireDocAccess(userId, docId);
+    if (!access.canShare) {
+      throw new HttpError(403, "你没有这个库的分享权限：需要角色被授予「可分享」或对该库有管理权");
+    }
     // 能否外发取决于所在知识库的「允许分享」开关（库级；知识库没有表这一级）。
     const shareAllowed = await readShareEnabled("kb", doc.kbId);
     // 档位现算：分享人（开分享的人）被降权后，可编辑链接当场回落只读。
@@ -53,7 +61,10 @@ sharingRoutes.post("/docs/:docId/share", async (c) => {
   try {
     const userId = await requireUserId(c);
     const docId = c.req.param("docId");
-    const { doc } = await requireDocAccess(userId, docId, true);
+    const { doc, access } = await requireDocAccess(userId, docId, true);
+    if (!access.canShare) {
+      throw new HttpError(403, "你没有这个库的分享权限：需要角色被授予「可分享」或对该库有管理权");
+    }
     const schema = z.object({
       shareEnabled: z.boolean(),
       shareRole: z.enum(["viewer", "editor"]).optional(),

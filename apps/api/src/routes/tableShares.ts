@@ -5,7 +5,10 @@
 //   POST   /api/tables/:tableId/share              建链接 { mode: "view"|"edit", viewId?, expiresAt? }
 //   DELETE /api/tables/:tableId/share/:linkId      吊销
 //
-// 谁能建：看得见这张表 + 该表两级分享开关都开（库级 shareEnabled && 表级 shareEnabled）。
+// 谁能建：看得见这张表 + 该表两级分享开关都开（库级 shareEnabled && 表级 shareEnabled）
+//        + 本人对这个库有分享权（access.canShare = canManage ∪ 角色的 canShare 位）。
+//          两级总闸说的是"这个库/这张表允不允许被外发"，canShare 说的是"你这个人能不能发"，
+//          两道闸各管一半，缺一个都不能建——只看总闸的话，库里每个只读成员都能随手发链接。
 // 谁能建【可编辑】：额外要求【分享人本人】此刻对该表有改权（assertSharerCanGrantEdit）。
 //   前端会把可编辑选项置灰，但置灰不是防线——后端这里必须自己判一次，否则抓包即可绕过。
 // 建出来之后：可编辑不是一锤子买卖，每次访问按分享人当前权限重算（shareCaps.ts）。
@@ -30,7 +33,7 @@ const createSchema = z.object({
   expiresAt: z.string().datetime().optional(),
 });
 
-/** 建链接的两道前置门：表可见 + 两级开关都开。 */
+/** 建/看/吊销链接的三道前置门：表可见 + 两级开关都开 + 本人有分享权。 */
 async function assertCanShareTable(userId: string, tableId: string) {
   const table = await prisma.table.findFirst({ where: { id: tableId, deletedAt: null }, select: { id: true } });
   if (!table) throw new HttpError(404, "数据表不存在");
@@ -38,6 +41,10 @@ async function assertCanShareTable(userId: string, tableId: string) {
   if (!access || !access.visible) throw new HttpError(403, "无权访问该数据表");
   if (!(await tableShareAllowed(tableId))) {
     throw new HttpError(403, "该数据表未开启分享（需库级与表级「允许分享」开关都打开）");
+  }
+  // 第三道闸：总闸开了不代表人人都能发。能管这个库的自然能发，其余要有角色显式的 canShare 位。
+  if (!access.canShare) {
+    throw new HttpError(403, "你没有这个库的分享权限：需要角色被授予「可分享」或对该库有管理权");
   }
   return access;
 }
