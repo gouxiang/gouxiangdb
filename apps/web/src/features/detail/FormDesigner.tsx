@@ -25,6 +25,9 @@ import { FieldInput } from "../views/field-controls";
 import { useFields, useGXMutations } from "../../api/hooks";
 import { FieldSettingsPanel } from "./FieldSettingsPanel";
 import { runSaveLayout, errorMessageOf, SAVE_OK_TEXT } from "./save-layout";
+// LayoutItem/LayoutRow、defaultW、segmentToRows 已搬到 ./default-detail-layout，
+// 与 DetailLayoutRenderer 共用同一份「无保存布局时的默认布局」推导，避免两套算法要保存一次才对齐。
+import { defaultW, segmentToRows, collectFieldsInTabs, deriveDefaultDetailLayout, type LayoutItem, type LayoutRow } from "./default-detail-layout";
 
 export type TopTab = "design" | "flow" | "settings" | "publish";
 export type PreviewDevice = "desktop" | "mobile";
@@ -58,14 +61,6 @@ const fid = (s: string): FieldIdT => s as FieldIdT;
 
 const DT_SOURCE = "application/x-gx-form-designer-source";
 
-interface LayoutItem {
-  fieldId: FieldIdT;
-  widthPct: FieldWidthPct;
-}
-interface LayoutRow {
-  items: LayoutItem[];
-}
-
 /** 设计器内部使用的选项卡结构：rows 为显式行模型（与顶层同构） */
 interface TabInternal {
   id: string;
@@ -80,14 +75,6 @@ import { TABS_NEST_MESSAGE, evaluateDrop, isTabDrop, targetKey } from "./drop-ta
 
 /** 落点槽位的三种视觉状态：未命中 / 可放（高亮）/ 禁放（红色禁止） */
 export type DropSlotState = "none" | "allowed" | "rejected";
-
-// 宽字段：独占一行（内容长 / 容器）
-const WIDE_TYPES: ReadonlySet<FieldType> = new Set<FieldType>(["longText", "richText", "attachment", "links", "tabs", "subtable"]);
-// 紧凑字段：默认 1/4 宽，一行自然排 4 个（数字/勾选/评分等短内容）
-const COMPACT_TYPES: ReadonlySet<FieldType> = new Set<FieldType>(["number", "currency", "percent", "duration", "checkbox", "rating", "autoNumber"]);
-const isWide = (t: FieldType): boolean => WIDE_TYPES.has(t);
-/** 新建字段的默认宽度：宽字段 100%，紧凑字段 25%（一行 4 个），其余 50%（一行 2 个） */
-const defaultW = (t: FieldType): FieldWidthPct => (isWide(t) ? 100 : COMPACT_TYPES.has(t) ? 25 : 50);
 
 /** 一行最多容纳的字段数（与 25% 最小列宽对应：4 列） */
 const MAX_FIELDS_PER_ROW = 4;
@@ -110,25 +97,7 @@ function packRowItems(items: LayoutItem[]): LayoutItem[] {
 
 // ============ 行模型纯函数（顶层与选项卡内共用） ============
 
-/** 扁平 items 按宽度累加切行（初始默认布局用） */
-function segmentToRows(items: LayoutItem[]): LayoutRow[] {
-  const rows: LayoutRow[] = [];
-  let cur: LayoutItem[] = [];
-  let sum = 0;
-  for (const it of items) {
-    if (cur.length > 0 && sum + it.widthPct > 100) {
-      rows.push({ items: cur });
-      cur = [];
-      sum = 0;
-    }
-    cur.push(it);
-    sum += it.widthPct;
-  }
-  if (cur.length > 0) rows.push({ items: cur });
-  return rows;
-}
-
-/** 宽度变化后的保守回流：只把超过 100% 的行拆到下一行，绝不合并用户显式拆出的行 */
+/** 保守回流：只把超过 100% 的行拆到下一行，绝不合并用户显式拆出的行 */
 function reflowRows(rows: LayoutRow[]): LayoutRow[] {
   const out: LayoutRow[] = [];
   for (const r of rows) {
@@ -256,6 +225,16 @@ function syncTabs(m: Record<string, TabInternal[]>): Record<string, TabConfig[]>
   return Object.fromEntries(Object.entries(m).map(([k, tabs]) => [k, tabs.map((t) => tabWithRows({ id: t.id, name: t.name }, t.rows))]));
 }
 
+/** DetailLayoutRow[] -> 行模型（默认布局推导结果还原为设计器内部表示） */
+function rowsFromLayout(layout: DetailLayout): LayoutRow[] {
+  return layout.rows.map((r) => ({
+    items: r.fieldIds.map((id) => ({
+      fieldId: fid(id),
+      widthPct: (r.widths?.[id] as FieldWidthPct) ?? 50,
+    })),
+  }));
+}
+
 /**
  * 从已保存布局还原显式行模型：逐行还原，**保留行边界**。
  * 用户用 ▼ 拆出的独立行、用拖放新建的行，保存后必须原样还原，不能被按宽度重新合并。
@@ -263,11 +242,11 @@ function syncTabs(m: Record<string, TabInternal[]>): Record<string, TabConfig[]>
  * **选项卡（tabs）字段**：本身作为全宽容器项；其 tabsConfig 内承载的字段归属 tab，不进顶层行。
  */
 function initialRows(layout: DetailLayout | null, fields: FieldDTO[]): LayoutRow[] {
+  // 没保存过布局（或布局为空）：与详情页渲染器共用 deriveDefaultDetailLayout，
+  // 保证「第一次打开设计器看到的」就是「详情页渲染的」，不需要先保存一次才对齐。
+  if (!layout || layout.rows.length === 0) return rowsFromLayout(deriveDefaultDetailLayout(fields));
   const typeById = new Map<string, FieldType>(fields.map((f) => [f.id, f.type]));
-  const inTabs = new Set<string>();
-  for (const f of fields) {
-    if (f.type === "tabs") for (const t of f.tabsConfig ?? []) for (const id of t.fieldIds ?? []) inTabs.add(id);
-  }
+  const inTabs = collectFieldsInTabs(fields);
   const seen = new Set<string>();
   const rows: LayoutRow[] = [];
   for (const r of layout?.rows ?? []) {

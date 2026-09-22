@@ -70,7 +70,11 @@ export function LibraryScopeModal({
     delete: false,
   };
 
-  const fieldsQ = useFields(kind === "base" && checked && current ? current : null);
+  // 取数只看 kind 和当前表：勾没勾这张表不该决定「要不要拉它的字段」。
+  // 之前这里还带上 checked，而 config.tables 在刚打开弹窗时是空的 → checked=false → 请求根本不发，
+  // 右栏显示「这张表还没有字段。」，用户以为表里真没字段（后端 GET /api/fields 一直是返回全量字段的）。
+  // 没勾选时右栏照旧禁用（见下方 SegmentedControl 分支），只是字段列表要先列出来。
+  const fieldsQ = useFields(kind === "base" && current ? current : null);
   const fields = kind === "base" ? (fieldsQ.data ?? []) : [];
 
   const body =
@@ -152,7 +156,15 @@ export function LibraryScopeModal({
                 <div className="flex h-16 items-center justify-center">
                   <Spinner size={16} />
                 </div>
+              ) : fieldsQ.isError ? (
+                <div className="flex flex-col items-center gap-1.5 rounded-gx-lg border border-gx-separator py-3">
+                  <p className="text-gx-11 text-gx-text-hint">字段列表加载失败。</p>
+                  <Button variant="ghost" size="sm" onClick={() => void fieldsQ.refetch()}>
+                    重试
+                  </Button>
+                </div>
               ) : fields.length === 0 ? (
+                // 取到空数组才这么说——「没勾这张表」不再被误报成「这张表没有字段」
                 <p className="text-gx-11 text-gx-text-hint">这张表还没有字段。</p>
               ) : (
                 <div className="max-h-52 overflow-y-auto rounded-gx-lg border border-gx-separator">

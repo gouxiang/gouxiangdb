@@ -16,6 +16,7 @@ import { useLinkCandidates } from "../../api/records-paging-hooks";
 import { ResultNotice, LINK_NARROW_TEXT } from "../common/ResultNotice";
 import { FieldInput, FieldValue, isReadonlyField } from "../views/field-controls";
 import { FormDesigner } from "./FormDesigner";
+import { deriveDefaultDetailLayout } from "./default-detail-layout";
 
 // 宽字段类型（与 v1 DrawerLayoutStore.isWide 一致）：独占一行
 const WIDE_TYPES: ReadonlySet<FieldType> = new Set<FieldType>(["longText", "richText", "attachment", "links", "tabs", "subtable"]);
@@ -80,35 +81,12 @@ export function DetailLayoutRenderer({ fields, values, layout, tableId, recordId
   for (const f of fields) {
     if (f.type === "tabs") for (const t of f.tabsConfig ?? []) for (const id of t.fieldIds ?? []) inTabs.add(id);
   }
-  if (!layout || layout.rows.length === 0) {
-    return (
-      <div className="space-y-3">
-        {fields.map((f) => {
-          if (f.type === "tabs") {
-            return <TabsPanel key={f.id} field={f} allFields={fields} values={values} tableId={tableId} recordId={recordId} canEdit={canEdit} />;
-          }
-          if (inTabs.has(f.id)) return null; // 归属选项卡，避免重复渲染
-          if (f.type === "subtable") {
-            return (
-              <SubtablePanel
-                key={f.id}
-                field={f}
-                allFields={fields}
-                values={values}
-                tableId={tableId}
-                recordId={recordId}
-                canEdit={canEdit}
-              />
-            );
-          }
-          return <DetailCell key={f.id} field={f} value={values[f.id]} tableId={tableId} recordId={recordId} canEdit={canEdit} />;
-        })}
-      </div>
-    );
-  }
+  // 没保存过布局（或布局为空）时用与设计器同一份推导，避免「详情页看到的」与
+  // 「第一次打开设计器看到的」不一致、必须先保存一次才生效。
+  const effective = !layout || layout.rows.length === 0 ? deriveDefaultDetailLayout(fields) : layout;
   return (
     <div className="space-y-4 p-3">
-      {layout.rows.map((row, idx) => {
+      {effective.rows.map((row, idx) => {
         const rowFields = row.fieldIds.map((id) => fields.find((f) => f.id === id)).filter((f): f is FieldDTO => !!f);
         const tabFields = rowFields.filter((f) => f.type === "tabs");
         const subtableFields = rowFields.filter((f) => f.type === "subtable");

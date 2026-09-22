@@ -1,6 +1,6 @@
 // apps/web/src/features/views/DetailView.tsx
 // 详情视图：每条记录一张卡片，按 detailLayout（detailLayout）自由布局
-//  - 无 layout 时：单列纵排（默认）
+//  - 无 layout 时：走 deriveDefaultDetailLayout（与设计器首次打开同源，按字段类型默认宽度自动切行）
 //  - 有 layout 时：按 rows 渲染（每行 colCount 决定 1-4 列，长字段跨整行）
 //  - 顶部工具栏：编辑布局按钮（可拖拽换序、行内分栏）
 
