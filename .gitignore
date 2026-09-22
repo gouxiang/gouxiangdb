@@ -13,6 +13,7 @@ dist/
 
 # ============ 数据库与本地备份 ============
 *.db
+*.db.bak-*
 *.db-journal
 *.db-wal
 *.db-shm
