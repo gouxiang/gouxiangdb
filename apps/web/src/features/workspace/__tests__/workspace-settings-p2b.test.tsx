@@ -181,13 +181,31 @@ describe("B3：非 owner / 无能力不渲染，不出 disabled 假入口", () =
   it("三条硬规则里的两条（建库 / 删库）在通讯录权限里写明「勾不出来」", () => {
     isOwner = true;
     actions = ["view_directory", "edit_roles"];
-    // 超级管理员锁死，不渲染勾选网格；把可编辑的管理员排到第一枚才能看到十二枚与硬规则行
-    setRoles([PRESET_ROLES[1]!, ...PRESET_ROLES.filter((r) => r.id !== "role_admin")]);
+    // 三枚预设角色现在都不再赋权（超级管理员锁死；管理员同权、受限成员最低权限，也只有只读
+    // 说明），只有自定义角色会渲染勾选网格；硬规则行长在网格里，所以用自定义角色顶到第一枚。
+    setRoles([PRESET_ROLES[3]!, ...PRESET_ROLES.filter((r) => r.id !== "role_c_finance")]);
     const html = renderAt("/workspace/settings/authz", <WorkspaceSettingsPage />);
     expect(html).toContain("建库 / 建知识库");
     expect(html).toContain("仅超级管理员与管理员");
     expect(html).toContain("删除库");
     expect(html).toContain("仅超级管理员");
+  });
+
+  it("管理员 / 受限成员不再渲染权限网格，只给一句为什么不能配", () => {
+    isOwner = true;
+    actions = ["view_directory", "edit_roles"];
+    for (const [id, reason] of [
+      ["role_admin", "管理员与超级管理员同权"],
+      ["role_restricted", "受限成员是系统预设的最低权限角色"],
+    ] as const) {
+      const picked = PRESET_ROLES.find((r) => r.id === id)!;
+      setRoles([picked, ...PRESET_ROLES.filter((r) => r.id !== id)]);
+      const html = renderAt("/workspace/settings/authz", <WorkspaceSettingsPage />);
+      expect(html, `${picked.name} 应给出不可赋权的原因`).toContain(reason);
+      // 勾不出来的硬证据：网格整体没渲染——连网格里的硬规则行和保存按钮都不在
+      expect(html, `${picked.name} 不该出现硬规则行`).not.toContain("建库 / 建知识库");
+      expect(html, `${picked.name} 不该出现保存按钮`).not.toContain("保存通讯录权限");
+    }
   });
 
   it("超级管理员角色不可编辑、不可删除，且给出原因", () => {

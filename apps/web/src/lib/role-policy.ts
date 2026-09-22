@@ -66,3 +66,33 @@ export function roleIconName(r: OrgRoleDTO): IconName {
 /** 不可编辑 / 不可删除的原因（界面文案同源，不各写一份）。 */
 export const LOCKED_ROLE_REASON =
   "超级管理员是系统内置角色，不能改名字和权限，也不能删除——否则可能被摘掉权限位，把真正的管理员锁在系统外面。";
+
+// 「不能赋权」是第三把尺子，独立于上面两把：
+//   immutable 只管「能不能改名字、能不能删」（管理员 / 受限成员 immutable=0，名字和说明照改）；
+//   「能不能勾权限格」看的是角色本身的系统语义——预设席位的权限集合由系统写死，不给配。
+const ADMIN_GRANT_BLOCK_REASON =
+  "管理员与超级管理员同权：天然能进全部库、管全部库，也能管通讯录和角色。这套权限是系统写死的，不需要配、也不能摘掉其中任何一项。";
+const RESTRICTED_GRANT_BLOCK_REASON =
+  "受限成员是系统预设的最低权限角色：只看得到显式分享给它的内容，不参与赋权。要给它权限请新建一个自定义角色，再把成员放进去。";
+
+/** 超级管理员在「库权限」段的专属说明，比通用文案多一句「唯一能删库」——别用上面的通用文案覆盖它。 */
+export const SUPER_ADMIN_LIBRARY_GRANT_REASON =
+  "超级管理员不用配库权限：它天然能进全部库、管全部库，也是唯一能删库的角色。";
+
+/**
+ * 这个角色为什么不能被赋权（通讯录权限 / 库权限 两段共用的判据）。返回 null 表示可以赋权。
+ * 档位顺序不能调换：owner 是超级管理员的旧 systemKey 且 immutable=1，必须落在第一档，
+ * 不能被后面的 admin 分支认领走。
+ */
+export function roleGrantBlockReason(r: OrgRoleDTO): string | null {
+  if (isLockedOrgRole(r)) return LOCKED_ROLE_REASON;
+  if (r.systemKey === "admin") return ADMIN_GRANT_BLOCK_REASON;
+  if (r.systemKey === "restricted") return RESTRICTED_GRANT_BLOCK_REASON;
+  return null;
+}
+
+/** 库权限段的版本：仅超级管理员换成更具体的那句（保留「唯一能删库」），其余同 {@link roleGrantBlockReason}。 */
+export function roleLibraryGrantBlockReason(r: OrgRoleDTO): string | null {
+  if (isLockedOrgRole(r)) return SUPER_ADMIN_LIBRARY_GRANT_REASON;
+  return roleGrantBlockReason(r);
+}

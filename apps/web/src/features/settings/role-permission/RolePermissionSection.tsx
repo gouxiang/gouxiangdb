@@ -24,7 +24,9 @@ import {
   isLockedOrgRole,
   isOrgVisibleRole,
   isPresetOrgRole,
+  roleGrantBlockReason,
   roleIconName,
+  roleLibraryGrantBlockReason,
 } from "../../../lib/role-policy";
 
 export function RolePermissionSection() {
@@ -39,6 +41,12 @@ export function RolePermissionSection() {
   // 选中项由「pickedId 命中可见集合」推导，不做双向同步：
   // 列表异步到达、或选中的角色被删掉时自然收敛到第一项，不留指向已删角色的残留 id。
   const selected = roles.find((r) => r.id === pickedId) ?? roles[0] ?? null;
+
+  // 「能不能赋权」和「能不能改名」是两把尺子，别合并：管理员 / 受限成员 immutable=0，
+  // 名字和说明照改（编辑按钮仍用 isLockedOrgRole 判），但它们是系统预设席位，
+  // 权限集合由系统写死——两段配置网格一律降级成只读说明，不给任何可勾的选项。
+  const grantReason = selected ? roleGrantBlockReason(selected) : null;
+  const libraryGrantReason = selected ? roleLibraryGrantBlockReason(selected) : null;
 
   // 动作探针没回来一律当没有写权限（fail-closed）。
   const canCreate = !actionsLoading && actions.has("create_roles");
@@ -183,18 +191,16 @@ export function RolePermissionSection() {
               title="通讯录权限"
               desc="这个角色对通讯录与组织管理能做什么。"
             >
-              {isLockedOrgRole(selected) ? (
-                <p className="text-gx-12 text-gx-text-hint">{LOCKED_ROLE_REASON}</p>
+              {grantReason ? (
+                <p className="text-gx-12 text-gx-text-hint">{grantReason}</p>
               ) : (
                 <DirectoryPermGrid key={selected.id} role={selected} canEdit={canEdit} />
               )}
             </PermBlock>
 
             <PermBlock icon="database" title="库权限" desc="这个角色能进哪些库、在库里能做什么。">
-              {isLockedOrgRole(selected) ? (
-                <p className="text-gx-12 text-gx-text-hint">
-                  超级管理员不用配库权限：它天然能进全部库、管全部库，也是唯一能删库的角色。
-                </p>
+              {libraryGrantReason ? (
+                <p className="text-gx-12 text-gx-text-hint">{libraryGrantReason}</p>
               ) : (
                 <LibraryScopePanel key={selected.id} role={selected} canEdit={canEdit} />
               )}

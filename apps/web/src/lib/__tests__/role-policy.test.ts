@@ -6,10 +6,14 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { OrgRoleDTO } from "@gx/shared-types";
 import {
+  LOCKED_ROLE_REASON,
+  SUPER_ADMIN_LIBRARY_GRANT_REASON,
   isCustomOrgRole,
   isLockedOrgRole,
   isOrgVisibleRole,
   isPresetOrgRole,
+  roleGrantBlockReason,
+  roleLibraryGrantBlockReason,
 } from "../role-policy";
 
 function role(p: Partial<OrgRoleDTO> & { id: string }): OrgRoleDTO {
@@ -122,5 +126,81 @@ describe("isLockedOrgRole", () => {
   it("资源锚点 immutable=1 但它们根本不显示，不参与改删判定", () => {
     expect(isLockedOrgRole(creator)).toBe(true);
     expect(isOrgVisibleRole(creator)).toBe(false);
+  });
+});
+
+// 「能不能赋权」是独立于 immutable 的第三把尺子：管理员 / 受限成员 immutable=0，名字照改，
+// 但它们是系统预设席位，权限集合写死——不给勾任何一格的权限网格。
+describe("roleGrantBlockReason（系统预设角色不给赋权）", () => {
+  it("管理员不可赋权，且它不是自定义角色", () => {
+    expect(isCustomOrgRole(admin)).toBe(false);
+    expect(roleGrantBlockReason(admin)).toBeTruthy();
+  });
+
+  it("受限成员同样不可赋权，且它不是自定义角色", () => {
+    expect(isCustomOrgRole(restricted)).toBe(false);
+    expect(roleGrantBlockReason(restricted)).toBeTruthy();
+  });
+
+  it("超级管理员返回 LOCKED_ROLE_REASON", () => {
+    expect(roleGrantBlockReason(superAdmin)).toBe(LOCKED_ROLE_REASON);
+  });
+
+  // owner 是超级管理员的旧 systemKey，必须落在第一档，不能被 admin 分支认领走
+  it("旧值 owner 归入超级管理员那一档，不返回管理员档文案", () => {
+    expect(roleGrantBlockReason(legacyOwner)).toBe(LOCKED_ROLE_REASON);
+    expect(roleGrantBlockReason(legacyOwner)).not.toBe(roleGrantBlockReason(admin));
+  });
+
+  it("三档文案互不相同，各自说清楚自己的原因", () => {
+    const reasons = [superAdmin, admin, restricted].map(roleGrantBlockReason);
+    expect(new Set(reasons).size).toBe(3);
+  });
+
+  it("自定义角色返回 null —— 只有自定义角色能配权限", () => {
+    expect(roleGrantBlockReason(custom)).toBeNull();
+  });
+});
+
+describe("roleLibraryGrantBlockReason（库权限段）", () => {
+  it("超级管理员保留专属文案（唯一能删库），不被通用文案覆盖", () => {
+    expect(roleLibraryGrantBlockReason(superAdmin)).toBe(SUPER_ADMIN_LIBRARY_GRANT_REASON);
+    expect(roleLibraryGrantBlockReason(superAdmin)).toContain("唯一能删库");
+    expect(roleLibraryGrantBlockReason(legacyOwner)).toBe(SUPER_ADMIN_LIBRARY_GRANT_REASON);
+  });
+
+  it("其余角色与通用判据一致：管理员 / 受限成员仍不可赋权，自定义可赋权", () => {
+    expect(roleLibraryGrantBlockReason(admin)).toBe(roleGrantBlockReason(admin));
+    expect(roleLibraryGrantBlockReason(admin)).toBeTruthy();
+    expect(roleLibraryGrantBlockReason(restricted)).toBe(roleGrantBlockReason(restricted));
+    expect(roleLibraryGrantBlockReason(restricted)).toBeTruthy();
+    expect(roleLibraryGrantBlockReason(custom)).toBeNull();
+  });
+});
+
+// 同理：光有函数不够，两个配置块必须真的用它做降级判据，而不是退回裸的 isLockedOrgRole
+// （那样管理员 / 受限成员又会变成能勾能存的开放口子）。
+describe("权限管理两段配置都走赋权门控（源码级护栏）", () => {
+  const dir = new URL("../../features/", import.meta.url).pathname;
+  const src = readFileSync(`${dir}settings/role-permission/RolePermissionSection.tsx`, "utf8");
+  // 每段截到自己 </PermBlock> 之前：第 0 段是通讯录权限，第 1 段是库权限
+  const blocks = src.split("<PermBlock").slice(1).map((b) => b.split("</PermBlock>")[0]);
+
+  it("两个 PermBlock 都不再用裸的 isLockedOrgRole 做降级判据", () => {
+    expect(blocks).toHaveLength(2);
+    for (const block of blocks) {
+      expect(block, "PermBlock 内不许出现 isLockedOrgRole").not.toContain("isLockedOrgRole");
+    }
+  });
+
+  it("降级原因来自 role-policy 的赋权门控函数，不是组件里另算一套", () => {
+    expect(src).toMatch(/const grantReason = [^\n;]*roleGrantBlockReason\(/);
+    expect(src).toMatch(/const libraryGrantReason = [^\n;]*roleLibraryGrantBlockReason\(/);
+    expect(blocks[0]).toContain("grantReason");
+    expect(blocks[1]).toContain("libraryGrantReason");
+  });
+
+  it("超级管理员库权限专属文案收在 role-policy，组件里不重写一份", () => {
+    expect(src).not.toContain("唯一能删库");
   });
 });
