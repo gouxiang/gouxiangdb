@@ -186,3 +186,42 @@ describe("源码回归：新建走 POST、编辑脏检查、切换确认（F-01�
     expect(src).toContain("data.lookupFieldId = idOrNull(subFieldId)");
   });
 });
+
+describe("源码回归：字段名称长度上限（后端 name 最大 80，超限 400 too_big）", () => {
+  const sheet = readFileSync(join(__dirname, "FieldEditorSheet.tsx"), "utf8");
+  const panel = readFileSync(join(__dirname, "../detail/FieldSettingsPanel.tsx"), "utf8");
+
+  /** 取「字段名称/标题」FormField 起始后的 600 字符窗口，避免断言落到别的 Input 上。 */
+  function nameFieldWindow(src: string, marker: string): string {
+    const i = src.indexOf(marker);
+    expect(i).toBeGreaterThan(-1);
+    return src.slice(i, i + 600);
+  }
+
+  it("字段名称输入框带 maxLength 且上限是 80（能证伪：去掉 maxLength 或改数字即红）", () => {
+    // 上限常量本身
+    expect(sheet).toContain("export const FIELD_NAME_MAX = 80;");
+    // 该常量的引用必须出现在「字段名称」这个 FormField 里，而不是别处的同名属性
+    const win = nameFieldWindow(sheet, 'label="字段名称"');
+    expect(win).toContain("maxLength={FIELD_NAME_MAX}");
+    // 字数提示（12/80 形态）也在同一处
+    expect(win).toContain("{name.length}/{FIELD_NAME_MAX}");
+  });
+
+  it("表单设计器右栏（FieldSettingsPanel）的字段改名输入框同源加上限", () => {
+    const win = nameFieldWindow(panel, 'label="标题"');
+    expect(win).toContain("maxLength={FIELD_NAME_MAX}");
+    expect(win).toContain("{name.length}/{FIELD_NAME_MAX}");
+    // 上限常量必须与 FieldEditorSheet 同源导入，不允许各写一份数字
+    expect(panel).toContain('import { FIELD_NAME_MAX } from "../designer/FieldEditorSheet"');
+  });
+
+  it("超长名称走既有 danger 错误样式 token，且保存按钮被禁用并给出原因", () => {
+    // 错误样式只用 gx-* 令牌（不新造颜色）
+    expect(sheet).toContain('"!text-gx-danger"');
+    expect(sheet).toContain("nameTooLong");
+    // 禁用 + R-D-09 的 title 原因说明
+    expect(sheet).toContain("!nameTooLong");
+    expect(sheet).toContain("字段名称最多 ${FIELD_NAME_MAX} 个字符");
+  });
+});

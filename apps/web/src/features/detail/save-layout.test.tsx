@@ -149,6 +149,29 @@ describe("回退接线回归：备份失败必须中止，且说清「没回退�
     expect(read("./form-versioning/VersionHistoryDrawer.tsx")).toMatch(guard); // 预览
   });
 
+  /**
+   * 记录详情抽屉（网格视图 → 编辑字段布局）这条入口必须把 viewId 传进编辑器：
+   * 不传的话编辑器走兜底分支，历史入口被正确禁用但**完全没有版本功能**。
+   * 传的值必须和 onSave 写入的视图一致，否则版本会记到别的视图上。
+   */
+  it("RecordDrawer 必须把 viewId 传给 DetailLayoutEditor（与 onSave 写入的视图一致）", () => {
+    const src = read("../drawer/RecordDrawer.tsx");
+    expect(src).toMatch(/viewId=\{currentView\?\.id \?\? null\}/);
+    // 版本归属的视图 必须与 onSave 写入的视图一致
+    expect(src).toMatch(/viewId=\{currentView\?\.id \?\? null\}[\s\S]{0,900}updateView\.mutateAsync\(\{\s*viewId: currentView\.id/);
+  });
+
+  /**
+   * mutation 层不得对空 viewId 用非空断言硬来 —— `viewId!` 会拼出
+   * `/api/views/undefined/...` 这种注定失败、且失败原因对用户毫无意义的请求。
+   */
+  it("保存/建版 mutation 不得用 viewId! 硬拼 URL（缺 id 时抛人话错误）", () => {
+    const src = read("./form-versioning/useLayoutVersions.ts");
+    expect(src).not.toMatch(/saveDetailLayout\(viewId!/);
+    expect(src).not.toMatch(/LayoutVersionsApi\.create\(viewId!/);
+    expect(src).toContain("NO_VIEW_ID_TEXT");
+  });
+
   it("无 viewId：历史入口显式禁用 + title 给出原因，不静默隐藏", () => {
     const src = read("./FormDesigner.tsx");
     expect(src).toContain("historyBlockReason(viewId)");

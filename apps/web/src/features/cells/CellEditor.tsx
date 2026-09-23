@@ -171,6 +171,13 @@ function NumericEditor({ value, field, onCommit, onCancel }: CellEditorProps) {
   const ref = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(value == null || value === "" ? "" : String(value));
   const doneRef = useRef(false);
+  // 最后一次输入动作的 inputType，用于区分「用户主动删除」与「非法输入被浏览器清空」。
+  // 真机实测（Chromium 133 / WebKit 均一致）：
+  //   - 敲 abc（全选后）：input 事件 inputType="insertText"、data=""、value=""、badInput=false
+  //   - 敲 1e / - 等半成品数字：inputType="insertText"、value=""、badInput=true
+  //   - 按 Backspace/Delete：inputType="deleteContentBackward"/"deleteContentForward"
+  // 即 badInput 只在半成品数字上为 true，纯字母场景靠它拦不住，必须用 inputType 判。
+  const lastInputTypeRef = useRef("");
   const finish = (fn: () => void) => {
     if (doneRef.current) return;
     doneRef.current = true;
@@ -183,6 +190,25 @@ function NumericEditor({ value, field, onCommit, onCancel }: CellEditorProps) {
   }, []);
 
   const submit = (move: "down" | "right" | "none" = "none") => {
+    // Enter 提交后再触发 blur 时不再重复提交（doneRef 只在真正落地后才置位）
+    if (doneRef.current) return;
+    // 非法输入保护：`<input type="number">` 会吞掉不成数字的输入 —— 选中原值后敲 abc，
+    // 浏览器把选区替换成空（value 变 ""），若照下面的「空串 → null」提交，就会把原来的
+    // 42 静默清成「—」且毫无提示，用户会以为数据丢了。
+    // 判定口径：当前为空 + 原本有值 + 最后一次动作不是删除 ⇒ 是被浏览器吞掉的非法输入。
+    // 命中时按 Esc 语义放弃本次编辑（保留原值）并给出提示；主动删除清空则照旧放行。
+    const hadValue = !(value == null || value === "");
+    const emptiedByBadInput =
+      draft.trim() === "" &&
+      hadValue &&
+      lastInputTypeRef.current !== "" &&
+      !lastInputTypeRef.current.startsWith("delete");
+    if (emptiedByBadInput) {
+      finish(onCancel);
+      toast("请输入数字，已保留原值", "error");
+      return;
+    }
+    doneRef.current = true;
     // 空串 → null（清空）
     if (draft.trim() === "") {
       onCommit(null, move);
@@ -198,14 +224,17 @@ function NumericEditor({ value, field, onCommit, onCancel }: CellEditorProps) {
       type="number"
       value={draft}
       className="text-right tabular-nums"
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => {
+        lastInputTypeRef.current = (e.nativeEvent as InputEvent).inputType ?? "";
+        setDraft(e.target.value);
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          finish(() => submit("down"));
+          submit("down");
         } else if (e.key === "Tab") {
           e.preventDefault();
-          finish(() => submit("right"));
+          submit("right");
         } else if (e.key === "Escape") {
           e.preventDefault();
           finish(onCancel);

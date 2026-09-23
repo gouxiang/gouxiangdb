@@ -50,8 +50,16 @@ export function formatDateValue(value: CellValue, withTime: boolean): string {
 export function formatNumber(value: CellValue, precision: number | null): string {
   const n = Number(value);
   if (isNaN(n)) return "0";
-  const p = precision ?? 0;
-  return n.toLocaleString("zh-CN", { minimumFractionDigits: p, maximumFractionDigits: p });
+  // 与 cells/format.ts 的 fmtPrecision 同口径：precision 未配置（null/undefined）时
+  // **不补位也不截位**，按数字自然形式展示。兜底成 0 会把 -3.5 显示成 -4，
+  // 而后端实存的就是 -3.5，用户会以为自己存的数被改了。
+  if (precision == null || !Number.isFinite(precision)) {
+    return n.toLocaleString("zh-CN", { maximumFractionDigits: 20 });
+  }
+  return n.toLocaleString("zh-CN", {
+    minimumFractionDigits: precision,
+    maximumFractionDigits: precision,
+  });
 }
 
 /** 计算字段（formula/rollup/count/lookup）或系统字段只读 */

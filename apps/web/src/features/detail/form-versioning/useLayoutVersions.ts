@@ -9,6 +9,7 @@ import { apiFetch, Views, WRITE_TIMEOUT_MS } from "../../../api/client";
 import { QK } from "../../../api/hooks";
 import type { DetailLayout, TabConfig } from "@gx/shared-types";
 import {
+  NO_VIEW_ID_TEXT,
   parseSnapshot,
   sortVersionsDesc,
   type LayoutVersionDetail,
@@ -124,7 +125,12 @@ export function useLayoutVersion(viewId: string | null | undefined, versionRowId
 export function useCreateLayoutVersion(viewId: string | null | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateLayoutVersionInput) => LayoutVersionsApi.create(viewId!, body),
+    // 不能用 `viewId!` 硬来：那会拿 undefined 去拼 URL（/api/views/undefined/...），
+    // 请求注定失败且失败原因对用户毫无意义。缺 id 时直接抛，由调用方 toast 出人话。
+    mutationFn: (body: CreateLayoutVersionInput) => {
+      if (!viewId) throw new Error(NO_VIEW_ID_TEXT);
+      return LayoutVersionsApi.create(viewId, body);
+    },
     onSuccess: () => {
       if (!viewId) return;
       void qc.invalidateQueries({ queryKey: layoutVersionKeys.list(viewId) });
@@ -141,11 +147,18 @@ export function useCreateLayoutVersion(viewId: string | null | undefined) {
  *
  * 响应里的 `removedFieldIds` 不在这里消费：缓存失效是无差别刷新，而「有字段被剔除了」
  * 是一次性的、必须被用户看见的信息，由调用方（FormDesigner）读返回值 toast 出来。
+ *
+ * 保存路径同样**不得**用 `viewId!`：FormDesigner 里虽然已有 `if (viewId)` 分支，但那只是
+ * 调用方守住了，hook 本身仍是个"传 null 就打坏 URL"的陷阱。这里在 mutationFn 内挡住，
+ * 抛出的错误会被 runSaveLayout 捕获 → 面板保持打开 + toast 出人话（不会谎报已保存）。
  */
 export function useSaveDetailLayout(viewId: string | null | undefined, tableId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: SaveDetailLayoutInput) => Views.saveDetailLayout(viewId!, body),
+    mutationFn: (body: SaveDetailLayoutInput) => {
+      if (!viewId) throw new Error(NO_VIEW_ID_TEXT);
+      return Views.saveDetailLayout(viewId, body);
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: QK.views(tableId) });
       void qc.invalidateQueries({ queryKey: QK.fields(tableId) });

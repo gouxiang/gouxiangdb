@@ -297,6 +297,11 @@ function RecordDrawer({
             <div className="p-4">
               <DetailLayoutEditor
                 open
+                // 必须传：布局版本是**视图级**的，编辑器拿不到 viewId 时历史入口会被
+                // 兜底分支正确拦成禁用（用户可见），但结果是这条入口完全没有版本功能。
+                // 这里传的必须和下面 onSave 写入的视图一致（currentView.id），
+                // 否则版本会被记到另一个视图上，回退时按错的视图取历史。
+                viewId={currentView?.id ?? null}
                 fields={fields}
                 layout={currentView.config.detailLayout ?? null}
                 tableId={tableId}

@@ -200,7 +200,13 @@ export function rollbackBlockReason(gate: RollbackGate): string | null {
   return null;
 }
 
+/**
+ * 缺 viewId 的统一人话：历史入口的禁用原因、保存/建版 mutation 的失败原因共用一条，
+ * 免得同一个"拿不到视图 id"在界面上长出三种说法。
+ */
+export const NO_VIEW_ID_TEXT = "当前视图缺少 id，无法使用版本功能";
+
 /** 工具栏「历史」按钮的禁用原因；null = 可用。 */
 export function historyBlockReason(viewId: string | null | undefined): string | null {
-  return viewId ? null : "当前视图缺少 id，无法打开版本历史";
+  return viewId ? null : NO_VIEW_ID_TEXT;
 }

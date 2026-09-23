@@ -50,6 +50,13 @@ export interface FieldEditorSheetProps {
   onClose: () => void;
 }
 
+/**
+ * 字段名称长度上限（与后端 createSchema/updateSchema 的 Zod 校验一致：
+ * 超限返回 400 {"code":"too_big","maximum":80,"path":["name"]}）。
+ * 前端先按此长度限制输入，避免用户填完才被服务端笼统地拒掉。
+ */
+export const FIELD_NAME_MAX = 80;
+
 // 28 种字段类型分组
 export const TYPE_GROUPS: { group: string; items: { type: FieldType; label: string }[] }[] = [
   {
@@ -271,7 +278,9 @@ function FieldEditorSheet({
     setOptions((prev) => [...prev, { id: `opt_${Date.now()}_${prev.length}`, name: "新选项", color: COLOR_PALETTE[prev.length % COLOR_PALETTE.length]! }]);
   const removeOption = (i: number) => setOptions((prev) => prev.filter((_, j) => j !== i));
 
-  const canSave = permissions.canManageSchema && !!name.trim();
+  // 名称超长：新建时 maxLength 已经拦住，只有改存量长名（>80，后端本就会 400）才可能命中
+  const nameTooLong = name.length > FIELD_NAME_MAX;
+  const canSave = permissions.canManageSchema && !!name.trim() && !nameTooLong;
   const isSystem = ["createdTime", "lastModifiedTime", "createdBy", "lastModifiedBy"].includes(type);
   // F-01 守卫：把当前表单状态投影成可比较的草稿（与 buildPayload 读取的状态一一对应）
   const collectDraft = (): FieldDraft => ({
@@ -421,7 +430,9 @@ function FieldEditorSheet({
                 ? "无表结构管理权限"
                 : !name.trim()
                   ? "请先填写字段名称"
-                  : undefined
+                  : nameTooLong
+                    ? `字段名称最多 ${FIELD_NAME_MAX} 个字符`
+                    : undefined
           }
           onCancel={onClose}
           leading={
@@ -454,8 +465,22 @@ function FieldEditorSheet({
           </FormRow>
 
           <FormRow>
-            <FormField label="字段名称" required>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：任务名称" />
+            <FormField
+              label="字段名称"
+              required
+              error={nameTooLong ? `字段名称最多 ${FIELD_NAME_MAX} 个字符，请精简后再保存` : undefined}
+              labelExtra={
+                <span className={nameTooLong ? "!text-gx-danger" : undefined}>
+                  {name.length}/{FIELD_NAME_MAX}
+                </span>
+              }
+            >
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={FIELD_NAME_MAX}
+                placeholder="例如：任务名称"
+              />
             </FormField>
           </FormRow>
 

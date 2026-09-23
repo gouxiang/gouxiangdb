@@ -124,6 +124,29 @@ function fmtNumber(num: number, decimals: number): string {
   });
 }
 
+/**
+ * 千分位但**不补位、不截断**：数字的自然形式。
+ * -3.5 → "-3.5"，42 → "42"，1234567.25 → "1,234,567.25"。
+ * maximumFractionDigits 取上限 20（JS 允许的最大值），即不对 JS Number 自带的
+ * 有效数字做任何人为截位。
+ */
+function fmtNumberNatural(num: number): string {
+  return num.toLocaleString("en-US", { maximumFractionDigits: 20 });
+}
+
+/**
+ * 数值显示口径（number/rating/duration/percent 共用）：
+ *   - precision 为数字（含 0）→ 按该精度补位/截位，行为与改造前一致；
+ *   - precision 为 null/undefined（用户没配精度）→ 按数字自然形式展示。
+ *
+ * 为什么不能把 null 兜底成 0：字段没配精度时存 -3.5 会显示成 -4，而后端实存的
+ * 就是 -3.5，用户会以为自己存的数被改了（显示层取整，非存储问题）。
+ */
+function fmtPrecision(num: number, precision: number | null | undefined): string {
+  if (precision == null || !Number.isFinite(precision)) return fmtNumberNatural(num);
+  return fmtNumber(num, precision);
+}
+
 /** 从字段 options 中按 id 或 name 解析出选项对象 */
 export function resolveSelectOption(
   field: FieldDTO,
@@ -175,7 +198,7 @@ export function formatCell(
     case "percent": {
       const num = Number(value);
       if (isNaN(num)) return String(value);
-      return `${fmtNumber(num, field.precision ?? 0)}%`;
+      return `${fmtPrecision(num, field.precision)}%`;
     }
 
     case "number":
@@ -183,7 +206,7 @@ export function formatCell(
     case "duration": {
       const num = Number(value);
       if (isNaN(num)) return "";
-      return fmtNumber(num, field.precision ?? 0);
+      return fmtPrecision(num, field.precision);
     }
 
     case "date":

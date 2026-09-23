@@ -23,6 +23,8 @@ import { Button, Checkbox, FieldIcon, Input, Select, toast } from "../../compone
 import { COLOR_PALETTE } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { draftFromField, isDirty, type FieldDraft } from "../designer/field-editor-dirty";
+// 字段名称长度上限与 FieldEditorSheet 同源（后端 Zod 也是 80，超限 400 too_big）
+import { FIELD_NAME_MAX } from "../designer/FieldEditorSheet";
 import { Form, FormActions, FormField, FormRow, FormSection } from "../../components/form";
 import { FilterRuleField } from "../designer/FilterRuleModal";
 import FormulaEditorModal from "../designer/FormulaEditorModal";
@@ -171,7 +173,9 @@ export function FieldSettingsPanel({
   // 改表会导致反向字段与 link_row 仍指旧表而数据断链。需改表请删除重建。
   const isLinkLocked = (isRelated || isSubtable) && !!field?.linkFieldId;
   const isLookupLike = type === "lookup" || type === "rollup" || type === "count";
-  const canSave = permissions.canManageSchema && !!name.trim() && field != null;
+  // 名称超长：新建时 maxLength 已拦住，只有改存量长名（>80，后端本就会 400）才可能命中
+  const nameTooLong = name.length > FIELD_NAME_MAX;
+  const canSave = permissions.canManageSchema && !!name.trim() && field != null && !nameTooLong;
   // 与 FieldEditorSheet 同源的脏检查投影（F-01 收口）：本面板可额外编辑提示/必填/唯一/长度
   const collectDraft = (): FieldDraft => ({
     name,
@@ -321,8 +325,20 @@ export function FieldSettingsPanel({
               label="标题"
               required={!isSystem}
               help={isSystem ? SYSTEM_DESC[type] : undefined}
+              error={nameTooLong ? `字段名称最多 ${FIELD_NAME_MAX} 个字符，请精简后再保存` : undefined}
+              labelExtra={
+                <span className={nameTooLong ? "!text-gx-danger" : undefined}>
+                  {name.length}/{FIELD_NAME_MAX}
+                </span>
+              }
             >
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="字段标题" disabled={isSystem} />
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={FIELD_NAME_MAX}
+                placeholder="字段标题"
+                disabled={isSystem}
+              />
             </FormField>
           </FormRow>
 
@@ -627,7 +643,9 @@ export function FieldSettingsPanel({
                 ? "无表结构管理权限"
                 : !name.trim()
                   ? "请先填写字段标题"
-                  : undefined
+                  : nameTooLong
+                    ? `字段名称最多 ${FIELD_NAME_MAX} 个字符`
+                    : undefined
           }
         />
       </div>
