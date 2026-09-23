@@ -130,7 +130,18 @@ export function TableShareModal({ tableId, viewId, open, onClose }: TableShareMo
         <section>
           <div className="mb-1.5 flex items-center justify-between">
             <div className="text-gx-12 text-gx-text-secondary">已生成的链接</div>
-            <Button size="sm" variant="primary" icon="plus" loading={create.isPending} onClick={() => void generate()}>
+            {/* 两级「允许分享」开关没开 / 本人没有分享权时，GET 就已经 403：这时点这个按钮
+                必然被后端同一道闸挡回（只会弹一个红色 toast），属于「该禁用却可点」。
+                置灰并把后端口径那句原因挂到 title 上——置灰不是防线，后端 POST 仍会再判一次。 */}
+            <Button
+              size="sm"
+              variant="primary"
+              icon="plus"
+              loading={create.isPending}
+              disabled={!!forbidden}
+              disabledReason={forbidden ?? undefined}
+              onClick={() => void generate()}
+            >
               生成链接
             </Button>
           </div>

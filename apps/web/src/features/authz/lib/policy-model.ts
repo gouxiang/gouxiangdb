@@ -5,12 +5,14 @@ import type {
   FieldMaskDTO,
   InheritanceImpactDTO,
   LegacyUnmappableItemDTO,
+  OrgRoleDTO,
   PolicyRowDTO,
   PolicySubjectType,
   PolicyUpsertDTO,
   PolicyDeleteDTO,
 } from "@gx/shared-types";
 import { ApiError } from "../../../api/client";
+import { roleGrantBlockReason } from "../../../lib/role-policy";
 import type { NavKind } from "@gx/shared-types";
 
 /** 七枚资源动作（字典序即规范串序）+ 中文标签/说明。 */
@@ -32,6 +34,27 @@ export const ACTION_META: ReadonlyArray<{
 export function canAssignAction(action: ResourceAction, kind: NavKind | string): boolean {
   if (action === "manage_schema") return kind === "table" || kind === "base";
   return true;
+}
+
+/**
+ * 一条授权行「能不能被勾权限」的判据（只有角色主体需要判，成员/部门恒可配）。
+ *
+ * 判据不在这里另写，直接复用 lib/role-policy 的 roleGrantBlockReason——工作区设置
+ * 「权限管理」里用的是同一个函数：系统预设席位（管理员 / 受限成员 / 超级管理员）的权限
+ * 集合由系统写死，两个界面必须得出同一个结论。这里漏判就会变回「设置页不给配、
+ * 资源授权面板却能勾」的口径分裂。
+ *
+ * 角色不在清单里（角色已被删除 / 列表还没回来）返回 null：不因为读不到就顺手把人挡在
+ * 外面——真正拦住预设角色的仍是后端，前端只是把「该禁用却可点」收掉。
+ */
+export function roleSubjectGrantBlockReason(
+  subjectType: PolicySubjectType,
+  subjectId: string,
+  rolesById: ReadonlyMap<string, OrgRoleDTO>,
+): string | null {
+  if (subjectType !== "role") return null;
+  const role = rolesById.get(subjectId);
+  return role ? roleGrantBlockReason(role) : null;
 }
 
 /** 只有 doc/canvas 叶子可中断/恢复继承（其他 kind 后端 400 NODE_NOT_INHERITABLE）。 */

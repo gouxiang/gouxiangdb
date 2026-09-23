@@ -29,8 +29,10 @@ import type {
   InheritanceImpactDTO,
   NavNodeDTO,
   NodePoliciesViewDTO,
+  OrgRoleDTO,
   PolicyRowDTO,
 } from "@gx/shared-types";
+import { roleGrantBlockReason } from "../../lib/role-policy";
 
 // ---- mock 请求层（SubjectPicker/FieldMaskEditor 顶层依赖，queryFn 首次即被引用） ----
 vi.mock("../../api/client", () => ({
@@ -51,6 +53,12 @@ vi.mock("../../api/client", () => ({
 let canManage = false;
 let selfActions: string[] = [];
 let policiesView: NodePoliciesViewDTO | null = null;
+// 角色清单驱动「这个主体是不是系统预设角色」的判定（roleGrantBlockReason 的入参）。
+let orgRoles: OrgRoleDTO[] = [];
+
+vi.mock("../contacts/contacts-hooks", () => ({
+  useOrgRoles: () => ({ data: orgRoles, isLoading: false, isError: false, error: null }),
+}));
 
 vi.mock("./useAuthzCapability", () => ({
   useAuthzCapability: () => ({ canManage, gate: canManage ? "on" : "off", isLoading: false, meta: null }),
@@ -138,10 +146,40 @@ const editableRow: EditableRow = {
   original: policyRow(),
 };
 
+function role(over: Partial<OrgRoleDTO> & { id: string }): OrgRoleDTO {
+  return {
+    workspaceId: "ws",
+    systemKey: null,
+    name: over.id,
+    description: "",
+    isSystem: false,
+    immutable: false,
+    actions: [],
+    createdAt: TS,
+    deletedAt: null,
+    ...over,
+  } as OrgRoleDTO;
+}
+
+/** 三枚组织层角色：两枚系统预设（管理员 / 受限成员）+ 一枚自定义。 */
+const ADMIN_ROLE = role({ id: "r_admin", name: "管理员", systemKey: "admin", isSystem: true });
+const RESTRICTED_ROLE = role({ id: "r_restricted", name: "受限成员", systemKey: "restricted", isSystem: true });
+const CUSTOM_ROLE = role({ id: "r_custom", name: "运营小组" });
+
+/** 取出含某段文案的按钮的**属性串**（只看到第一个 ">"）：class 里的 disabled: 前缀不算禁用。 */
+function buttonAttrs(html: string, label: string): string {
+  const i = html.indexOf(label);
+  if (i < 0) throw new Error(`未找到含「${label}」的按钮`);
+  const start = html.lastIndexOf("<button", i);
+  return html.slice(start, html.indexOf(">", start) + 1);
+}
+const isBtnDisabled = (html: string, label: string) => /\sdisabled(=|\s)/.test(buttonAttrs(html, label));
+
 beforeEach(() => {
   canManage = false;
   selfActions = [];
   policiesView = view();
+  orgRoles = [ADMIN_ROLE, RESTRICTED_ROLE, CUSTOM_ROLE];
 });
 
 describe("PermNodeEditor 门控 fail-closed 三态", () => {
@@ -230,6 +268,76 @@ describe("七动作矩阵 kind 置灰（manage_schema 仅 table/base）", () => 
     expect(inputs.length).toBe(7);
     expect(inputs.every((i) => i.includes("disabled"))).toBe(true);
     expect(html).not.toContain("移除该主体授权");
+  });
+});
+
+describe("系统预设角色不可赋权（资源授权面板与设置页「权限管理」同一把尺子）", () => {
+  // 直接授权行里只有角色主体需要判；actions 置空是为了让 buildPolicyWrite 出一张非空单
+  // （actions=[] + original 存在 → 走 deletes），这样「保存权限」是否 disabled 只由本次门控决定，
+  // 不会因为「没改动」而本来就灰着——门控一撤这两条就该红。
+  const roleRow = (subjectId: string, subjectName: string) =>
+    policyRow({ subjectType: "role", subjectId, subjectName, actions: [] });
+
+  it("管理员行：七个勾选框与「保存权限」都禁用，禁用原因 = roleGrantBlockReason 的返回值", () => {
+    canManage = true;
+    selfActions = ["r", "manage_share"];
+    policiesView = view({ direct: [roleRow("r_admin", "管理员")] });
+    const html = renderToString(<PermNodeEditor node={node({ id: "t1", kind: "table" })} />);
+
+    const boxes = html.match(/<input[^>]*type="checkbox"[^>]*>/g) ?? [];
+    expect(boxes.length).toBe(7);
+    expect(boxes.every((b) => b.includes("disabled"))).toBe(true);
+
+    const reason = roleGrantBlockReason(ADMIN_ROLE)!;
+    expect(reason).toBeTruthy();
+    expect(html).toContain(reason); // 行内说明与 title 同源，不另写一句
+    expect(isBtnDisabled(html, "保存权限")).toBe(true);
+    expect(buttonAttrs(html, "保存权限")).toContain(`title="${reason}"`);
+  });
+
+  it("受限成员行同样禁用，且用的是受限成员自己的那句原因（不与管理员文案混用）", () => {
+    canManage = true;
+    selfActions = ["r", "manage_share"];
+    policiesView = view({ direct: [roleRow("r_restricted", "受限成员")] });
+    const html = renderToString(<PermNodeEditor node={node({ id: "t1", kind: "table" })} />);
+
+    const boxes = html.match(/<input[^>]*type="checkbox"[^>]*>/g) ?? [];
+    expect(boxes.length).toBe(7);
+    expect(boxes.every((b) => b.includes("disabled"))).toBe(true);
+    const reason = roleGrantBlockReason(RESTRICTED_ROLE)!;
+    expect(reason).not.toBe(roleGrantBlockReason(ADMIN_ROLE));
+    expect(buttonAttrs(html, "保存权限")).toContain(`title="${reason}"`);
+    expect(isBtnDisabled(html, "保存权限")).toBe(true);
+  });
+
+  it("自定义角色行不受影响：七个勾选框可勾、保存按钮可点、不出现预设席位的说明", () => {
+    canManage = true;
+    selfActions = ["r", "manage_share"];
+    policiesView = view({ direct: [roleRow("r_custom", "运营小组")] });
+    const html = renderToString(<PermNodeEditor node={node({ id: "t1", kind: "table" })} />);
+
+    const boxes = html.match(/<input[^>]*type="checkbox"[^>]*>/g) ?? [];
+    expect(boxes.length).toBe(7);
+    expect(boxes.every((b) => !b.includes("disabled"))).toBe(true);
+    expect(isBtnDisabled(html, "保存权限")).toBe(false);
+    expect(html).not.toContain("由系统写死");
+  });
+
+  it("PolicyMatrixRow 传了 grantBlockReason 就整行禁用（纯组件层，不依赖 hook）", () => {
+    const reason = roleGrantBlockReason(ADMIN_ROLE)!;
+    const blocked = renderToString(
+      <PolicyMatrixRow
+        row={editableRow}
+        nodeKind="table"
+        readonly={false}
+        grantBlockReason={reason}
+        onChange={() => undefined}
+        onRemove={() => undefined}
+      />,
+    );
+    const boxes = blocked.match(/<input[^>]*type="checkbox"[^>]*>/g) ?? [];
+    expect(boxes.length).toBe(7);
+    expect(boxes.every((b) => b.includes("disabled") && b.includes(`title="${reason}"`))).toBe(true);
   });
 });
 

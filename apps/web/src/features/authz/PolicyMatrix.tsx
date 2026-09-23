@@ -20,6 +20,7 @@ export function PolicyMatrixRow({
   row,
   nodeKind,
   readonly,
+  grantBlockReason,
   onChange,
   onRemove,
   onEditFields,
@@ -27,6 +28,13 @@ export function PolicyMatrixRow({
   row: EditableRow;
   nodeKind: NavKind;
   readonly: boolean;
+  /**
+   * 该主体不可被赋权的原因（系统预设角色：权限由系统写死，不给配）。
+   * 非 null 时七个勾选框与字段入口一律置灰并带这条原因——与工作区设置「权限管理」
+   * 同一判据（lib/role-policy.roleGrantBlockReason）。移除按钮不受影响：
+   * 挡的是「勾选权限」，不是「清掉这条授权」。
+   */
+  grantBlockReason?: string | null;
   onChange: (next: EditableRow) => void;
   onRemove: () => void;
   /** table 节点显示字段三态编辑入口；其它节点不传。 */
@@ -37,6 +45,7 @@ export function PolicyMatrixRow({
       ? "已删除主体"
       : subjectDisplay(row.original.subjectName);
   const isLegacy = !!row.original?.reason && row.original.reason.startsWith("legacy:");
+  const grantBlocked = !!grantBlockReason;
 
   return (
     <div className="flex flex-col gap-1 rounded-gx-lg border border-gx-separator bg-gx-surface px-2.5 py-2">
@@ -53,10 +62,10 @@ export function PolicyMatrixRow({
         {onEditFields && (
           <button
             type="button"
-            disabled={readonly}
+            disabled={readonly || grantBlocked}
             onClick={onEditFields}
             className="shrink-0 rounded-gx-sm px-1.5 py-0.5 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover disabled:cursor-not-allowed disabled:opacity-50"
-            title="编辑字段可见/只读范围"
+            title={grantBlocked ? (grantBlockReason as string) : "编辑字段可见/只读范围"}
           >
             字段
             {row.fieldMask && (
@@ -86,7 +95,10 @@ export function PolicyMatrixRow({
             <Checkbox
               key={action}
               checked={checked}
-              disabled={readonly || !enabled}
+              disabled={readonly || !enabled || grantBlocked}
+              disabledReason={
+                grantBlocked ? (grantBlockReason as string) : enabled ? undefined : "该资源类型不支持此动作"
+              }
               onChange={(on) => {
                 const set = new Set(row.actions);
                 if (on) set.add(action);
@@ -103,6 +115,12 @@ export function PolicyMatrixRow({
           );
         })}
       </div>
+      {grantBlocked && (
+        <div className="flex items-start gap-1 text-gx-11 text-gx-text-hint">
+          <Icon name="lock" size={11} className="mt-0.5 shrink-0" />
+          <span>系统预设席位的权限由系统写死，不给配：{grantBlockReason}</span>
+        </div>
+      )}
     </div>
   );
 }

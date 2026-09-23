@@ -209,6 +209,36 @@ describe("④ 入口接线（浮层无法 SSR，退源码断言）", () => {
   });
 });
 
+describe("⑥ 两级「允许分享」开关关着时：「生成链接」置灰并带原因（不是点了才报错）", () => {
+  const SWITCH_OFF_HINT = "该数据表未开启分享（需库级与表级「允许分享」开关都打开）";
+
+  /**
+   * 取「生成链接」按钮的**开标签源码**。
+   * 弹窗走 createPortal，node 环境下渲染不出内容（见文件头），故按仓库既有范式退到源码断言。
+   */
+  function genBtnSrc(): string {
+    const modal = read("../TableShareModal.tsx");
+    const at = modal.indexOf("生成链接");
+    return modal.slice(modal.lastIndexOf("<Button", at), at);
+  }
+
+  it("按钮带 disabled + disabledReason，两者都由 forbidden 驱动（撤掉门控即红）", () => {
+    const btn = genBtnSrc();
+    expect(btn).toContain("<Button");
+    expect(btn).toMatch(/disabled=\{[^}]*forbidden/);
+    expect(btn).toMatch(/disabledReason=\{[^}]*forbidden/);
+  });
+
+  it("置灰原因是弹窗里已有的那句口径：后端 403 原文，前端不另写一份", () => {
+    // 总闸没开时 GET /share 就 403，body.error 原样进 forbidden → 按钮 title 用的就是它，
+    // 与弹窗内 ShareForbiddenNote 显示的是同一句（不再等点了 POST 才 toast 出来）。
+    expect(shareForbiddenMessage(new ApiError(403, { error: SWITCH_OFF_HINT }))).toBe(SWITCH_OFF_HINT);
+    const modal = read("../TableShareModal.tsx");
+    expect(modal).toContain("const forbidden = shareForbiddenMessage(links.error)");
+    expect(modal).toContain("disabled={!!forbidden}");
+  });
+});
+
 describe("⑤ 角色没被授予「可分享」时的 403：弹窗内给权限原因 + 关闭出路", () => {
   it("shareForbiddenMessage 只认 403，后端原文优先、取不到才用标准文案", () => {
     expect(shareForbiddenMessage(new ApiError(403, { error: "后端原文" }))).toBe("后端原文");

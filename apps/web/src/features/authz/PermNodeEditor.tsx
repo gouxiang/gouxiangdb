@@ -10,6 +10,7 @@ import { Button, Spinner } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { useNodePolicies, useSavePolicies, useEffective } from "./authz-hooks";
 import { useAuthzCapability } from "./useAuthzCapability";
+import { useOrgRoles } from "../contacts/contacts-hooks";
 import { PolicyMatrixRow, AncestorSummary } from "./PolicyMatrix";
 import { SubjectPicker, type PickedSubject } from "./SubjectPicker";
 import { FieldMaskEditor } from "./FieldMaskEditor";
@@ -17,6 +18,7 @@ import { InheritanceToggle } from "./InheritanceToggle";
 import {
   buildPolicyWrite,
   formatLegacyUnmappable,
+  roleSubjectGrantBlockReason,
   toEditableRows,
   type EditableRow,
 } from "./lib/policy-model";
@@ -29,6 +31,17 @@ export function PermNodeEditor({ node }: { node: NavNodeDTO }) {
 
   // 惰性初值保证首帧/SSR 即按服务端 direct 渲染（父级以 node.id 作 key 切换节点会整体重挂）；
   // effect 仅处理同节点下 policyVersion 刷新后的重置。
+  // 角色清单只用来判「这条授权的主体是不是系统预设角色」：预设席位（管理员 / 受限成员 /
+  // 超级管理员）的权限由系统写死，不给配——判据与工作区设置「权限管理」是同一个函数，
+  // 不在这里另写一把尺子。
+  const rolesQ = useOrgRoles();
+  const rolesById = useMemo(
+    () => new Map((rolesQ.data ?? []).map((r) => [r.id, r] as const)),
+    [rolesQ.data],
+  );
+  const blockReasonOf = (row: EditableRow) =>
+    roleSubjectGrantBlockReason(row.subjectType, row.subjectId, rolesById);
+
   const [rows, setRows] = useState<EditableRow[]>(() =>
     policies.view ? toEditableRows(policies.view.direct) : [],
   );
@@ -45,6 +58,11 @@ export function PermNodeEditor({ node }: { node: NavNodeDTO }) {
   // 本人是否持该节点 manage_share（后端 effective 判定；门控关则一律只读）。
   const canShare = !!selfEffective.view?.actions.includes("manage_share");
   const editable = canManage && canShare;
+
+  // 挂着任一预设角色行的单子整单都不合法（保存是整单提交，任一不合法全部不生效），
+  // 故保存按钮一并置灰；移除该行后即恢复（removed 行不计）。
+  const grantBlockReason =
+    rows.filter((r) => !r.removed).map(blockReasonOf).find((r) => !!r) ?? null;
 
   const write = useMemo(() => buildPolicyWrite(rows), [rows]);
   const existingKeys = useMemo(
@@ -123,11 +141,24 @@ export function PermNodeEditor({ node }: { node: NavNodeDTO }) {
         <>
           <SubjectPicker exclude={existingKeys} onPick={addSubject} />
           <div className="flex items-center gap-2">
-            <Button variant="primary" size="sm" disabled={!write || save.isPending} loading={save.isPending} onClick={onSave}>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!write || save.isPending || !!grantBlockReason}
+              loading={save.isPending}
+              disabledReason={grantBlockReason ?? undefined}
+              onClick={onSave}
+            >
               保存权限
             </Button>
-            {!write && <span className="text-gx-12 text-gx-text-hint">有改动后可保存（整单提交，任一不合法全部不生效）</span>}
+            {!write && !grantBlockReason && <span className="text-gx-12 text-gx-text-hint">有改动后可保存（整单提交，任一不合法全部不生效）</span>}
           </div>
+          {grantBlockReason && (
+            <div className="flex items-start gap-1.5 rounded-gx-lg bg-gx-row-hover px-2.5 py-1.5 text-gx-12 text-gx-text-hint">
+              <Icon name="lock" size={13} className="mt-0.5 shrink-0" />
+              <span>系统预设席位的权限由系统写死，不给配：{grantBlockReason}</span>
+            </div>
+          )}
         </>
       )}
 
@@ -157,6 +188,7 @@ export function PermNodeEditor({ node }: { node: NavNodeDTO }) {
                 row={r}
                 nodeKind={node.kind}
                 readonly={!editable}
+                grantBlockReason={blockReasonOf(r)}
                 onChange={patchRow}
                 onRemove={() => removeRow(r)}
                 onEditFields={isTable ? () => setFieldsFor(r) : undefined}
