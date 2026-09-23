@@ -8,17 +8,22 @@
 // 复用而非复制：全部走 api/hooks 的 useGXMutations（createTable / updateTable /
 // duplicateTable / clearTable / deleteTable / restoreTrash）与 useBase 的权限，
 // 与旧壳 Sidebar、现役 TopBar 同源；确认弹窗复用 feedback.tsx 的既有危险分级
-// （confirmSoftDelete L2 / confirmClearTable L3），不新造一套。
+// （confirm-firewall: feedback 的 L2 通用确认；表级动作走 confirm-table 的 L3 预设），不新造一套。
 //
 // 权限口径：canManageSchema 为假时**不渲染**入口（不是 disabled 假装禁用）——
 // 与 KbHomePage「新建文档/画布」、GridView「表图标与颜色」同一套口径。
+//
+// 表名同库唯一（产品拍板）：输入侧即时校验是第一道，后端 409「表名「X」已存在」是第二道。
+// 判重逻辑抽到 lib/table-name.ts（纯函数、可单测），本文件只负责接线与渲染；
+// 列表取 useTables(baseId) —— 与 L2 行列表同一 queryKey，不新增请求。
 
 import { useState, type ReactNode } from "react";
-import { useBase, useGXMutations } from "../../api/hooks";
+import { useBase, useGXMutations, useTables } from "../../api/hooks";
 import { Icon } from "../../components/icons";
 import { Input, Modal, toast } from "../../components/ui";
-import { confirmClearTable, confirmSoftDelete } from "../../components/feedback";
+import { confirmClearTable, confirmDeleteTable } from "../../components/confirm-table";
 import { toastDeleted } from "../../components/interaction";
+import { findTableNameConflict, tableNameConflictMessage } from "./lib/table-name";
 import type { RowMoreItem } from "./SecondaryNavSections";
 
 /** 行菜单只需要 id + 名字（表行的其它字段不参与这些动作）。 */
@@ -47,12 +52,20 @@ export function useSecondaryTableOps({
   navigate: (to: string) => void;
 }): SecondaryTableOps {
   const baseQ = useBase(baseId);
+  // 与 L2 行列表（SecondaryNav）同一份查询：queryKey 相同 → react-query 复用，不重复发请求。
+  const tablesQ = useTables(baseId);
   const m = useGXMutations();
   const canManageSchema = baseQ.data?.permissions?.canManageSchema ?? false;
 
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+
+  // 即时判重：建表看全库；改名排除自己（同后端 assertTableNameFree 的 excludeTableId）。
+  const newConflict = findTableNameConflict(tablesQ.data, newName);
+  const renameConflict = renaming
+    ? findTableNameConflict(tablesQ.data, renaming.name, renaming.id)
+    : null;
 
   /**
    * 「编辑表单」：与旧壳 / DetailView 的既有能力同源 —— 带 ?design=1 跳目标表，
@@ -67,6 +80,8 @@ export function useSecondaryTableOps({
 
   const createTable = () => {
     if (!baseId || !newName.trim()) return;
+    // Enter 键走的是 Input 的 onKeyDown，不经过按钮的 disabled —— 这里必须再挡一次。
+    if (newConflict) return;
     void m.createTable
       .mutateAsync({ baseId, name: newName.trim(), withDefaults: true })
       .then((t) => {
@@ -79,6 +94,8 @@ export function useSecondaryTableOps({
 
   const renameTable = () => {
     if (!renaming || !renaming.name.trim()) return;
+    // 同上：弹窗里 Enter 提交不经过按钮的 disabled。
+    if (renameConflict) return;
     void m.updateTable
       .mutateAsync({ tableId: renaming.id, data: { name: renaming.name.trim() } })
       .then(() => setRenaming(null))
@@ -104,18 +121,15 @@ export function useSecondaryTableOps({
   };
 
   /**
-   * 删除表：L2（软删进回收站，30 天可恢复）+ 撤销 toast（R-D-23 / R-I-08）。
-   * 与 TopBar 同一套文案与分级；成功后跳回库首页，不能停在已删除表的死路由上。
+   * 删除表：L3（需原样输入表名）——与同菜单里「清空数据」同一口径（见 confirm-table.ts 文件头）。
+   * 恢复侧不变：仍是软删进回收站 + 撤销 toast（R-D-23 / R-I-08）；
+   * 成功后跳回库首页，不停在已删除表的死路由上。
    */
   const deleteTable = (row: SecondaryTableRowRef) => {
     if (!baseId) return;
     // 闭包（撤销回调）里要用窄化后的非空值：参数在嵌套函数里不保留窄化。
     const bid = baseId;
-    void confirmSoftDelete({
-      title: `删除数据表「${row.name}」`,
-      confirmText: "删除数据表",
-      description: "数据表会移入回收站，30 天内可恢复。",
-    }).then((ok) => {
+    void confirmDeleteTable({ tableName: row.name }).then((ok) => {
       if (!ok) return;
       void m.deleteTable
         .mutateAsync({ tableId: row.id, baseId: bid })
@@ -158,43 +172,52 @@ export function useSecondaryTableOps({
         {canManageSchema && (
           <div className="mt-2">
             {showNew ? (
-              <div className="flex items-center gap-1 rounded-gx-sm border border-gx-separator bg-gx-surface px-1 py-1">
-                <Input
-                  autoFocus
-                  placeholder="表名（Enter 创建 / Esc 取消）"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") createTable();
-                    if (e.key === "Escape") {
+              <div>
+                <div className="flex items-center gap-1 rounded-gx-sm border border-gx-separator bg-gx-surface px-1 py-1">
+                  <Input
+                    autoFocus
+                    placeholder="表名（Enter 创建 / Esc 取消）"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") createTable();
+                      if (e.key === "Escape") {
+                        setShowNew(false);
+                        setNewName("");
+                      }
+                    }}
+                    className="min-w-0 flex-1 border-0 bg-transparent px-1 py-0 text-gx-12 focus:outline-none focus:ring-0"
+                  />
+                  <button
+                    type="button"
+                    aria-label="创建数据表"
+                    // R-D-09：禁用必须说明原因（挂 title，鼠标悬停即得）
+                    title={newConflict ? tableNameConflictMessage(newConflict) : "创建（Enter）"}
+                    disabled={!newName.trim() || !!newConflict}
+                    onClick={createTable}
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-gx-sm text-gx-accent hover:bg-gx-row-hover disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Icon name="check" size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="取消新建"
+                    title="取消（Esc）"
+                    onClick={() => {
                       setShowNew(false);
                       setNewName("");
-                    }
-                  }}
-                  className="min-w-0 flex-1 border-0 bg-transparent px-1 py-0 text-gx-12 focus:outline-none focus:ring-0"
-                />
-                <button
-                  type="button"
-                  aria-label="创建数据表"
-                  title="创建（Enter）"
-                  disabled={!newName.trim()}
-                  onClick={createTable}
-                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-gx-sm text-gx-accent hover:bg-gx-row-hover disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <Icon name="check" size={13} />
-                </button>
-                <button
-                  type="button"
-                  aria-label="取消新建"
-                  title="取消（Esc）"
-                  onClick={() => {
-                    setShowNew(false);
-                    setNewName("");
-                  }}
-                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-gx-sm text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary"
-                >
-                  <Icon name="close" size={13} />
-                </button>
+                    }}
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-gx-sm text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary"
+                  >
+                    <Icon name="close" size={13} />
+                  </button>
+                </div>
+                {/* 即时重名提示：红字口径同 CreatePatForm / DeptTree 的行内报错（text-gx-12 text-gx-danger） */}
+                {newConflict && (
+                  <p className="px-1 pt-1 text-gx-12 text-gx-danger">
+                    {tableNameConflictMessage(newConflict)}
+                  </p>
+                )}
               </div>
             ) : (
               <button
@@ -224,7 +247,9 @@ export function useSecondaryTableOps({
               </button>
               <button
                 className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
-                disabled={!renaming?.name.trim()}
+                // R-D-09：禁用必须说明原因；同名（非自己）时挂到 title
+                title={renameConflict ? tableNameConflictMessage(renameConflict) : undefined}
+                disabled={!renaming?.name.trim() || !!renameConflict}
                 onClick={renameTable}
               >
                 保存
@@ -238,6 +263,12 @@ export function useSecondaryTableOps({
             onChange={(e) => setRenaming((r) => (r ? { ...r, name: e.target.value } : r))}
             onKeyDown={(e) => e.key === "Enter" && renameTable()}
           />
+          {/* 同上口径：改名命中别的已存在表名时即时提示（排除自己，见 lib/table-name） */}
+          {renameConflict && (
+            <p className="pt-1.5 text-gx-12 text-gx-danger">
+              {tableNameConflictMessage(renameConflict)}
+            </p>
+          )}
         </Modal>
       </>
     ),

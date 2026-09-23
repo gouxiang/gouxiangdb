@@ -3,7 +3,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { prisma, withWriteTx } from "../db.js";
+import { prisma, withWriteTx, type DbTx } from "../db.js";
 import {
   requireCanView,
   requireCanManageSchema,
@@ -47,6 +47,59 @@ async function baseIdOf(tableId: string): Promise<string> {
   return b;
 }
 
+// ============ 表名唯一性（同库 + 未软删 + trim 后精确匹配）============
+//
+// 口径与字段名重名（routes/fields.ts 创建端点）一致：409 + `表名「X」已存在`。
+// 不加数据库唯一索引：存量库里已有重复表名，加索引会让迁移失败、老库起不来——
+// 唯一性只在应用层保证，且只在「新建 / 改名 / 显式命名复制」三条写路径拦，存量重复不动。
+// 查重必须在 withWriteTx 回调内用 tx 做：外部查会有「两个请求都读到没重复→双双写入」的
+// 竞态，而 withWriteTx 是并发度 1 的串行写队列，事务内查重可杜绝它（回调内禁止再入队）。
+
+/**
+ * 断言名称在该库内未被占用；占用则抛 409（调用方所在事务随之回滚）。
+ * excludeTableId：改名场景排除自己，避免「只改图标」或「改名成自己现在的名字」被误判。
+ */
+async function assertTableNameFree(
+  tx: DbTx,
+  baseId: string,
+  name: string,
+  excludeTableId?: string,
+): Promise<void> {
+  const trimmed = name.trim();
+  const dup = await tx.table.findFirst({
+    where: {
+      baseId,
+      name: trimmed,
+      deletedAt: null,
+      ...(excludeTableId ? { id: { not: excludeTableId } } : {}),
+    },
+    select: { id: true },
+  });
+  if (dup) throw new HttpError(409, `表名「${trimmed}」已存在`);
+}
+
+/**
+ * 复制表未显式命名时的自动排号：base → `${base} 2` → `${base} 3` …
+ * 每次候选都在事务内实查（逐个编号），存量库里已存在的同名副本会被自动绕开。
+ * 超过 maxTries 仍全部冲突才抛错——正常不会走到，避免无限循环。
+ */
+async function resolveCopyTableName(
+  tx: DbTx,
+  baseId: string,
+  base: string,
+  maxTries = 50,
+): Promise<string> {
+  for (let i = 1; i <= maxTries; i += 1) {
+    const candidate = i === 1 ? base : `${base} ${i}`;
+    const dup = await tx.table.findFirst({
+      where: { baseId, name: candidate, deletedAt: null },
+      select: { id: true },
+    });
+    if (!dup) return candidate;
+  }
+  throw new HttpError(409, `表名「${base}」及其后 ${maxTries} 个编号均已被占用`);
+}
+
 // ============ Base 下的表列表 ============
 
 tables.get("/", async (c) => {
@@ -83,10 +136,17 @@ tables.post("/", async (c) => {
 
   const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
+  // 表名统一以 trim 后为准落库（「 客户表 」与「客户表」视为同名）。
+  // trim 后为空 → 400 拦在事务之前：放行会落库一张看不到名字的表，而且第二次会被
+  // assertTableNameFree 拦成 `409 表名「」已存在`——用户既看不到表名也看不懂这句报错。
+  const name = parsed.data.name.trim();
+  if (!name) return c.json({ error: "表名不能为空" }, 400);
 
   // U-9：建表多步写事务化——任何一步失败整体回滚，
   // 不再留下无 primaryField / 无视图的半截表。
   const { table, primaryFieldId } = await withWriteTx("table.create", async (tx) => {
+    // 表名同库唯一：事务内查重（见 assertTableNameFree 注释），命中则整体回滚，不留半截表。
+    await assertTableNameFree(tx, baseId, name);
     // shareEnabled 继承当前库级总闸：表级开关是库级「允许分享」的快照，
     // tableShareAllowed() 两级都判。不继承的话，管理员打开库开关之后新建的表依旧是 0，
     // 又是一张「库已允许、却没入口能开」的死表（表级没有写端点）。
@@ -94,7 +154,7 @@ tables.post("/", async (c) => {
     const t = await tx.table.create({
       data: {
         baseId,
-        name: parsed.data.name,
+        name,
         primaryFieldId: "",
         createdBy: userId,
         shareEnabled: owner?.shareEnabled ?? 0,
@@ -204,10 +264,21 @@ tables.patch("/:tableId", async (c) => {
   const parsed = updateSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
 
+  // 表名同库唯一：只有显式传了 name 才校验（本端点也用于改 icon/iconColor，那时不得查重）；
+  // 排除自己（id: not tableId）——只改图标、或改名成自己现在的名字都不该报 409。
+  const trimmedName = parsed.data.name?.trim();
+  // 同上：改名塞纯空格会把表改成空串名（看不见），且下次改名还会撞「表名「」已存在」。
+  // 只挡显式传了 name 且 trim 后为空的情况——不带 name 的只改图标请求继续放行。
+  if (trimmedName !== undefined && !trimmedName) {
+    return c.json({ error: "表名不能为空" }, 400);
+  }
+
   // M3/S3 #5：改名收紧进事务（原 runWrite 非事务），同事务同步节点 name。
   // icon / iconColor 不进 nav_nodes（实体图标走读取时解析），故只有改名才触发 nav 同步。
   const t = await withWriteTx("table.update", async (tx) => {
-    const updated = await tx.table.update({ where: { id: tableId }, data: parsed.data });
+    const data = trimmedName === undefined ? parsed.data : { ...parsed.data, name: trimmedName };
+    if (trimmedName !== undefined) await assertTableNameFree(tx, baseId, trimmedName, tableId);
+    const updated = await tx.table.update({ where: { id: tableId }, data });
     if (parsed.data.name !== undefined) await syncNavFromEntitiesTx(tx);
     return updated;
   });
@@ -263,12 +334,22 @@ tables.post("/:tableId/duplicate", async (c) => {
   const fields = await loadTableFields(tableId);
 
   const body = await c.req.json().catch(() => ({}));
-  const name = typeof body?.name === "string" && body.name ? body.name : `${src.name} 副本`;
+  // trim 后为空串视同「没传」——避免显式塞一串空格绕过默认名、落库一张看不见名字的表。
+  const explicitName = typeof body?.name === "string" ? body.name.trim() : "";
   const withData = body?.withData === true;
 
   // M3/S3 #7：复制表原 runWrite（非事务）收紧进 withWriteTx；nav 同步 upsert 新表/视图节点。
   // 计划 §4.4-7：复制产生的新表【不自动加菜单 shortcut】，以"未收纳"态等用户编排（菜单层不动）。
   const { copy, primary } = await withWriteTx("table.duplicate", async (tx) => {
+  // 表名同库唯一：客户端显式命名 → 冲突直接 409（与建表/改名同口径）；
+  // 客户端没传（走默认「X 副本」）→ 不打断流程，事务内自动排号绕开已存在的同名副本。
+  let name: string;
+  if (explicitName) {
+    await assertTableNameFree(tx, baseId, explicitName);
+    name = explicitName;
+  } else {
+    name = await resolveCopyTableName(tx, baseId, `${src.name} 副本`);
+  }
   const copy = await tx.table.create({
     // 视觉标识（自定义图标/颜色）随副本继承，避免复制后莫名回退到默认图标。
     // shareEnabled 一并继承源表（它本身是库级「允许分享」总闸的快照）——
