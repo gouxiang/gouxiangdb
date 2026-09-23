@@ -10,6 +10,7 @@
 // 事务回调内再次入队会自死锁）。对外开事务、提交后失效缓存由 fieldService.ts 负责。
 
 import type { DbTx } from "../db.js";
+import { HttpError } from "../guards.js";
 import { toFieldMeta } from "./prismaDeps.js";
 import type { CreateFieldInput, UpdateFieldInput } from "./fieldService.js";
 
@@ -41,6 +42,13 @@ export async function createSimpleFieldTx(
     select: { order: true },
   });
   const order = maxOrder ? maxOrder.order + 1 : 0;
+
+  // 重名校验在写事务内、用 tx 做（消除事务前查重的 TOCTOU）；名字已在 service 层 trim。
+  const dup = await tx.field.findFirst({
+    where: { tableId: input.tableId, name: input.name, deletedAt: null },
+    select: { id: true },
+  });
+  if (dup) throw new HttpError(409, `字段名「${input.name}」已存在`);
 
   const created = await tx.field.create({
     data: {
@@ -80,6 +88,13 @@ export async function createLinkFieldPairTx(
   const kind = input.relationKind!;
   const reverseKind = reverseRelation(kind);
   const relatedTableId = input.relatedTableId!;
+
+  // 重名校验在写事务内、用 tx 做（links/subtable 建字段同样要守名字唯一）。
+  const dup = await tx.field.findFirst({
+    where: { tableId: input.tableId, name: input.name, deletedAt: null },
+    select: { id: true },
+  });
+  if (dup) throw new HttpError(409, `字段名「${input.name}」已存在`);
 
   const maxOrder = await tx.field.findFirst({
     where: { tableId: input.tableId, deletedAt: null },
@@ -148,6 +163,21 @@ export async function updateFieldTx(
   data: Record<string, unknown>,
   isLinkLike: boolean,
 ): Promise<ExistingFieldRow> {
+  // 改名查重在写事务内、用 tx 做：同表、同名、未删、排除自己；只在本次带 name 时校验，
+  // 只改其它字段不受影响。名字已在 service 层 trim。
+  if (patch.name !== undefined) {
+    const dup = await tx.field.findFirst({
+      where: {
+        tableId: existing.tableId,
+        name: patch.name,
+        deletedAt: null,
+        id: { not: fieldId },
+      },
+      select: { id: true },
+    });
+    if (dup) throw new HttpError(409, `字段名「${patch.name}」已存在`);
+  }
+
   const updated = await tx.field.update({ where: { id: fieldId }, data });
 
   // links/subtable 首次从「无关联表」补配关联表：此时字段还是孤立占位（无 linkFieldId、

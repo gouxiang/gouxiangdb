@@ -72,7 +72,7 @@ async function liveTableNames(baseId: string): Promise<string[]> {
 
 describe("T-1 回收站恢复同名去歧义", () => {
   it("字段：删除后重建同名字段再恢复旧的 -> 旧的自动改名，表内无重名活字段", async () => {
-    const baseId = await h.makeBase();
+    const baseId = await h.makeBase(`t1b_${Math.random().toString(36).slice(2, 8)}`);
     const { id: tableId } = await h.makeTable(baseId, "t");
     const oldField = await makeField(tableId, "待删字段");
     await softDeleteField(oldField);
@@ -95,7 +95,7 @@ describe("T-1 回收站恢复同名去歧义", () => {
   });
 
   it("表：删除后重建同名表再恢复旧的 -> 旧的自动改名，库内无重名活表", async () => {
-    const baseId = await h.makeBase();
+    const baseId = await h.makeBase(`t1b_${Math.random().toString(36).slice(2, 8)}`);
     const oldTable = await h.makeTable(baseId, "回收走查");
     await softDeleteTable(oldTable.id);
     await h.makeTable(baseId, "回收走查");
@@ -114,7 +114,7 @@ describe("T-1 回收站恢复同名去歧义", () => {
   });
 
   it("无同名冲突 -> 字段与表的名字一字不动，renamed=false", async () => {
-    const baseId = await h.makeBase();
+    const baseId = await h.makeBase(`t1b_${Math.random().toString(36).slice(2, 8)}`);
     const { id: tableId } = await h.makeTable(baseId, "t");
 
     const f = await makeField(tableId, "唯一字段");
@@ -135,7 +135,7 @@ describe("T-1 回收站恢复同名去歧义", () => {
   });
 
   it("连续恢复多个同名字段 -> 序号递增不撞车", async () => {
-    const baseId = await h.makeBase();
+    const baseId = await h.makeBase(`t1b_${Math.random().toString(36).slice(2, 8)}`);
     const { id: tableId } = await h.makeTable(baseId, "t");
 
     const f1 = await makeField(tableId, "同名");
@@ -157,7 +157,7 @@ describe("T-1 回收站恢复同名去歧义", () => {
   });
 
   it("连续恢复多个同名表 -> 序号递增不撞车", async () => {
-    const baseId = await h.makeBase();
+    const baseId = await h.makeBase(`t1b_${Math.random().toString(36).slice(2, 8)}`);
     const t1 = await h.makeTable(baseId, "同名表");
     await softDeleteTable(t1.id);
     const t2 = await h.makeTable(baseId, "同名表");
@@ -175,7 +175,7 @@ describe("T-1 回收站恢复同名去歧义", () => {
   });
 
   it("软删的同名实体不算冲突 -> 不误改名", async () => {
-    const baseId = await h.makeBase();
+    const baseId = await h.makeBase(`t1b_${Math.random().toString(36).slice(2, 8)}`);
     const { id: tableId } = await h.makeTable(baseId, "t");
     const f1 = await makeField(tableId, "X");
     await softDeleteField(f1);
@@ -189,7 +189,7 @@ describe("T-1 回收站恢复同名去歧义", () => {
   });
 
   it("无 canManageSchema（editor）恢复字段/表仍 403，且不改名不复活", async () => {
-    const baseId = await h.makeBase();
+    const baseId = await h.makeBase(`t1b_${Math.random().toString(36).slice(2, 8)}`);
     // 权限核心模型（二）：members.role 已不参与放行，"改结构"资格只来自 role_library_scope
     // 的 canManage。故把 u1 从超级管理员摘下来，改挂一枚只带可见（canManage=0）的角色。
     await prisma.roleAssignment.deleteMany({ where: { subjectId: OWNER_ID } });

@@ -21,10 +21,12 @@ beforeAll(async () => {
 afterAll(() => h.cleanup());
 
 async function makeBase(): Promise<{ baseId: string; tableId: string }> {
+  // A4 后数据库名全局唯一：每次用随机后缀，避免同一 harness 内多库撞部分唯一索引。
+  const name = `形状库_${Math.random().toString(36).slice(2, 8)}`;
   const b = await h.app.request("/api/bases", {
     method: "POST",
     headers: { ...(await h.auth("owner")), "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "形状库" }),
+    body: JSON.stringify({ name }),
   });
   const baseId = (await json<{ base: { id: string } }>(b)).base.id;
   const t = await h.app.request(`/api/tables?baseId=${baseId}`, { headers: await h.auth("owner") });

@@ -189,21 +189,23 @@ function timeBucket(format: string, createdAt: Date): string {
   return `${y}${m}${d}`;
 }
 
+/** 计数器行 id：不依赖外部 cuid 包，随机+时间即可（参照 fieldService.ts newId）。 */
+function newCounterId(): string {
+  return `anc_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
+}
+
 /** 生成自动编号字符串 */
 async function resolveAutoNumber(
   rule: NumberRule,
   tableId: string,
   recordCreatedAt: Date,
   self: Record<string, unknown>,
+  hostFieldId: string,
 ): Promise<string> {
-  const allRecs = await prisma.record.findMany({
-    where: { tableId, deletedAt: null },
-    orderBy: { createdAt: "asc" },
-    select: { id: true, createdAt: true, fields: true },
-  });
-  // 同表所有记录（用于 period 计数）；field 分组按存储值比对
+  const segments = rule.segments as NumberSegment[];
   const parts: string[] = [];
-  for (const seg of rule.segments as NumberSegment[]) {
+  for (let segIndex = 0; segIndex < segments.length; segIndex += 1) {
+    const seg = segments[segIndex]!;
     if (seg.type === "fixed") {
       parts.push(seg.text ?? "");
     } else if (seg.type === "time") {
@@ -213,22 +215,38 @@ async function resolveAutoNumber(
       parts.push(v === null || v === undefined ? "" : Array.isArray(v) ? v.join(",") : String(v));
     } else if (seg.type === "counter") {
       const digits = seg.digits ?? 4;
-      let count: number;
-      // 注意：allRecs 已包含当前新建记录（在 applyCreateDefaults 中创建后再计数），
-      // 故桶内记录数即为当前序号，不再 +1。
-      if (seg.reset === "year" || seg.reset === "month" || seg.reset === "day") {
-        const fmt = seg.reset === "year" ? "yyyy" : seg.reset === "month" ? "yyyyMM" : "yyyyMMdd";
-        const myBucket = timeBucket(fmt, recordCreatedAt);
-        count = allRecs.filter((r) => timeBucket(fmt, r.createdAt) === myBucket).length;
-      } else if (seg.reset === "field" && seg.resetFieldId) {
-        const myVal = toComparable(self[seg.resetFieldId]);
-        count = allRecs.filter((r) => toComparable(parseStored(r.fields)[seg.resetFieldId!]) === myVal).length;
+      // 桶由 reset 决定：never→global；year/month/day→按 recordCreatedAt；field→按重置字段值。
+      let resetKind: string;
+      let bucket: string;
+      if (seg.reset === "year") {
+        resetKind = "year";
+        bucket = timeBucket("yyyy", recordCreatedAt);
+      } else if (seg.reset === "month") {
+        resetKind = "month";
+        bucket = timeBucket("yyyyMM", recordCreatedAt);
+      } else if (seg.reset === "day") {
+        resetKind = "day";
+        bucket = timeBucket("yyyyMMdd", recordCreatedAt);
+      } else if (seg.reset === "field") {
+        resetKind = "field";
+        bucket = seg.resetFieldId ? toComparable(self[seg.resetFieldId]) : "";
       } else {
-        // never
-        count = allRecs.length;
+        resetKind = "global";
+        bucket = "global";
       }
-      // 兜底：计数为 0（理论上不会，至少含当前记录）时给 1
-      parts.push(padCounter(Math.max(1, count), digits));
+      const key = `${hostFieldId}:${segIndex}:${resetKind}:${bucket}`;
+      // 原子认领下一个序号（SQLite UPSERT）：不存在从 1 起，存在 value+1。
+      // 本函数运行在 applyCreateDefaults 的 runWrite 串行上下文（records.ts:198），
+      // 单进程安全；不要在此再排队 withWriteTx。
+      const rows = await prisma.$queryRawUnsafe<{ value: bigint | number }[]>(
+        "INSERT INTO auto_number_counters (id,tableId,key,value) VALUES (?,?,?,1) "
+          + "ON CONFLICT(tableId,key) DO UPDATE SET value=value+1 RETURNING value",
+        newCounterId(),
+        tableId,
+        key,
+      );
+      const next = Number(rows[0]!.value);
+      parts.push(padCounter(next, digits));
     }
   }
   return parts.join("");
@@ -267,7 +285,7 @@ export async function applyCreateDefaults(
     if (f.type === "autoNumber") {
       const rule = (f.numberRule as NumberRule | null) ?? null;
       if (rule && !isNumberRuleEmpty(rule)) {
-        writes[f.id] = await resolveAutoNumber(rule, tableId, rec.createdAt, self);
+        writes[f.id] = await resolveAutoNumber(rule, tableId, rec.createdAt, self, f.id);
       }
       continue;
     }

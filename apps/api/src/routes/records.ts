@@ -729,6 +729,9 @@ records.post("/csv-import", async (c) => {
           data: { tableId, fields: "{}", createdBy: userId, updatedBy: userId },
         });
         await applyFieldWrites(tableId, rec.id, payload, allFields, tx);
+        // 唯一校验在同一行事务内、用 tx 做：unique 字段与存量记录（含本次导入此前各行）
+        // 冲突即抛 409，被外层 catch 转为该行错误、继续后续行（部分导入语义不变）。
+        await assertUnique(tableId, allFields, payload, rec.id, undefined, tx);
         // M5/S1：导入新建记录同事务登记 upsert。
         await enqueueChangeEventTx(tx, {
           entityType: "record", entityId: rec.id, op: "upsert", version: BigInt(Date.now()),

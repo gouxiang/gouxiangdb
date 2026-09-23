@@ -736,6 +736,23 @@ model McpIdempotency {
   @@map("mcp_idempotency")
 }
 
+// ---------------------------------------------------------------------------
+// autoNumber 持久化高水位计数器：counter 段每认领一个序号 value+1，只增不复用，
+// 软删记录不再导致重号。key 按「编号字段:段索引:重置方式:桶」区分，多 counter 段独立。
+// 建表迁移 migrations/20260925010000_auto_number_counters；
+// 存量活记录高水位用 scripts/backfill-auto-number-counters.mjs 幂等回填。
+// ---------------------------------------------------------------------------
+model AutoNumberCounter {
+  id      String @id @default(cuid())
+  tableId String
+  key     String
+  value   Int    @default(0)
+
+  @@unique([tableId, key])
+  @@index([tableId])
+  @@map("auto_number_counters")
+}
+
 // ============================================================================
 // 手写维护表（不经 Prisma 管理，禁止在此添加 model）
 // ============================================================================

@@ -153,10 +153,12 @@ describe("M3 现状：Base/Table/View 删除语义", () => {
 
 describe("M3 现状：KB / KbDoc 删除与移动语义", () => {
   async function createKbWithDoc(kind: "doc" | "canvas" = "doc") {
+    // A4 后知识库名全局唯一：随机后缀，避免多用例重复建库撞索引。
+    const kbName = `知识库_${Math.random().toString(36).slice(2, 8)}`;
     const kbRes = await h.app.request("/api/kb", {
       method: "POST",
       headers: { ...(await h.auth(u)), "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "知识库" }),
+      body: JSON.stringify({ name: kbName }),
     });
     const { knowledgeBase } = await json<{ knowledgeBase: { id: string } }>(kbRes);
     const docRes = await h.app.request(`/api/kb/${knowledgeBase.id}/docs`, {
@@ -249,10 +251,12 @@ describe("M3 现状：KB / KbDoc 删除与移动语义", () => {
 });
 
 async function createBaseWithTable(): Promise<{ baseId: string; tableId: string }> {
+  // A4 后数据库名全局唯一：随机后缀，避免多用例重复建库撞索引。
+  const name = `库_${Math.random().toString(36).slice(2, 8)}`;
   const res = await h.app.request("/api/bases", {
     method: "POST",
     headers: { ...(await h.auth(u)), "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "库" }),
+    body: JSON.stringify({ name }),
   });
   const body = await json<{ base: { id: string } }>(res);
   const baseId = body.base.id;

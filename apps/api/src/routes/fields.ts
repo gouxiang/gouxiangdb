@@ -106,9 +106,8 @@ fields.post("/", async (c) => {
   const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法", details: parsed.error.issues }, 400);
 
-  // 重名校验
-  const dup = await prisma.field.findFirst({ where: { tableId, name: parsed.data.name, deletedAt: null } });
-  if (dup) return c.json({ error: `字段名「${parsed.data.name}」已存在` }, 409);
+  // 重名/空名校验已收口进 createField 事务体内（domain/fieldServiceTx.ts），
+  // 事务前查重存在 TOCTOU，且无法 trim 拦截纯空格。
 
   // 跨 Base 越权防护：关联/子表字段的目标表必须与本表属于同一 Base。
   if (parsed.data.relatedTableId) {

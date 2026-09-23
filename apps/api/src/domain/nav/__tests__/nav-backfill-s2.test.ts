@@ -37,7 +37,7 @@ beforeAll(async () => {
   fs.mkdirSync(path.join(tmpRoot, "migrations"));
   fs.copyFileSync(path.resolve("prisma/schema.prisma"), path.join(tmpRoot, "schema-legacy.prisma"));
   const dirs = migDirs();
-  expect(dirs.length).toBe(33); // M6 起 PAT/mcp_idempotency 使 22 -> 23，首次部署管理员初始化再 +1，实体 icon/iconColor DDL 再 +1，owner create_library 补位再 +1，通讯录五件套再 +1，权限核心模型角色升级再 +1，角色×库视野表再 +1，分享链接对象化再 +1，协同 collab_docs 旁路表再 +1，角色×库独立「可分享」位 canShare 再 +1，表单设计器布局版本表 form_layout_versions 再 +1
+  expect(dirs.length).toBe(36); // M6 起 PAT/mcp_idempotency 使 22 -> 23，首次部署管理员初始化再 +1，实体 icon/iconColor DDL 再 +1，owner create_library 补位再 +1，通讯录五件套再 +1，权限核心模型角色升级再 +1，角色×库视野表再 +1，分享链接对象化再 +1，协同 collab_docs 旁路表再 +1，角色×库独立「可分享」位 canShare 再 +1，表单设计器布局版本表再 +1，A3 autoNumber 高水位计数表 +1，A4 库名部分唯一索引 +1，A6 shareEnabled 回填 +1
   for (const name of dirs.slice(0, PRE_ORG_COUNT)) {
     fs.cpSync(path.resolve("prisma/migrations", name), path.join(tmpRoot, "migrations", name), { recursive: true });
   }
@@ -84,10 +84,10 @@ afterAll(async () => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-describe("12 -> 25 直升回填（nav 迁移 B SQL 首跑；首次部署管理员初始化 + 实体 icon DDL 后总数 25）", () => {
-  it("迁移全 applied（32，含角色×库 canShare 独立分享位），活实体节点数精确，软删/无视图表不产生悬挂", async () => {
+describe("12 -> 36 直升回填（nav 迁移 B SQL 首跑；含 A3/A4/A6 三条新迁移后总数 36）", () => {
+  it("迁移全 applied（36，含角色×库 canShare 独立分享位与 A3/A4/A6），活实体节点数精确，软删/无视图表不产生悬挂", async () => {
     const applied = await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) n FROM _prisma_migrations WHERE rolled_back_at IS NULL`;
-    expect(Number(applied[0].n)).toBe(33);
+    expect(Number(applied[0].n)).toBe(36);
 
     const nodes = await prisma.navNode.findMany({ where: { deletedAt: null } });
     // 活实体：b1 + t1 + t2 + v1 + k1 + d1 + d2 + c1 = 8（b2 软删不回填）。

@@ -10,6 +10,7 @@
 // 事务体内的多步结构写全部在 fieldServiceTx.ts，且回调内只用传入的 tx（RC-10 写路径全事务化）。
 
 import { prisma, withWriteTx } from "../db.js";
+import { HttpError } from "../guards.js";
 import type { FieldMeta, SelectOption, TabConfig } from "./types.js";
 import { toFieldMeta, invalidateOrdinalCache } from "./prismaDeps.js";
 import {
@@ -102,6 +103,11 @@ export async function createField(input: CreateFieldInput): Promise<CreateFieldR
     input.relationKind = "hm";
   }
 
+  // 名字写库前 trim：纯空格名不允许（zod min(1) 拦不住 "   "）。
+  const trimmedName = input.name.trim();
+  if (trimmedName === "") throw new HttpError(400, "字段名不能为空");
+  input.name = trimmedName;
+
   const isLinkPair =
     (input.type === "links" || input.type === "subtable") &&
     !!input.relatedTableId &&
@@ -151,6 +157,14 @@ export async function updateField(fieldId: string, patch: UpdateFieldInput): Pro
   // 子表格关系固定 hm：忽略任何其它关系类型（UI 已隐藏选择，服务端兜底）
   if (existing.type === "subtable" && patch.relationKind !== undefined) {
     patch = { ...patch, relationKind: "hm" };
+  }
+
+  // 改名：trim 后写库；纯空格 400。提前到构造 data 之前，使 data、事务内查重、
+  // partner 反向字段同步（fieldServiceTx.ts）统一拿到 trim 后的值。
+  if (patch.name !== undefined) {
+    const trimmed = patch.name.trim();
+    if (trimmed === "") throw new HttpError(400, "字段名不能为空");
+    patch = { ...patch, name: trimmed };
   }
 
   const data: Record<string, unknown> = {};

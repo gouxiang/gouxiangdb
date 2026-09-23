@@ -162,12 +162,19 @@ bases.post("/", async (c) => {
   // M6 权限门：建库不是登录即有的能力，须由管理员按角色授予 create_library（写库之前拦）。
   await assertCanCreateLibrary(userId);
 
+  // 名字写库前 trim：纯空格名 400（zod min(1) 拦不住 "   "）。
+  const name = parsed.data.name.trim();
+  if (name === "") return c.json({ error: "数据库名不能为空" }, 400);
+
   // M3/S3 #1：建 base 多步写（base+owner 成员+starter 表/字段/视图）收紧进单事务，
   // 同事务同步 nav_nodes（base + table + view 节点）。nav 写失败整体回滚（裁决 9）。
   const base = await withWriteTx("base.create", async (tx) => {
+    // 全局重名校验在写事务内、用 tx 做（deletedAt:null）。
+    const dup = await tx.base.findFirst({ where: { name, deletedAt: null }, select: { id: true } });
+    if (dup) throw new HttpError(409, `数据库名「${name}」已存在`);
     const b = await tx.base.create({
       data: {
-        name: parsed.data.name,
+        name,
         iconColor: parsed.data.iconColor ?? "#378ADD",
         icon: parsed.data.icon ?? null,
         createdBy: userId,
@@ -241,14 +248,30 @@ bases.patch("/:baseId", async (c) => {
   await requireCanManageBase(c, baseId);
   const parsed = updateSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
+
+  // 改名：trim 后写库，纯空格 400；不传 name（只改 icon 等）不触发。
+  let nextName: string | undefined;
+  if (parsed.data.name !== undefined) {
+    nextName = parsed.data.name.trim();
+    if (nextName === "") throw new HttpError(400, "数据库名不能为空");
+  }
+
   // M3/S3 #2：改名同事务同步节点 name（iconColor / icon 都不影响节点——实体图标走读取时解析，
   // 不同步进 nav_nodes，故 syncNavFromEntitiesTx 语义不动）。
   const base = await withWriteTx("base.rename", async (tx) => {
+    // 全局重名校验在写事务内、用 tx 做并排除自己；只在带 name 时校验。
+    if (nextName !== undefined) {
+      const dup = await tx.base.findFirst({
+        where: { name: nextName, deletedAt: null, id: { not: baseId } },
+        select: { id: true },
+      });
+      if (dup) throw new HttpError(409, `数据库名「${nextName}」已存在`);
+    }
     const b = await tx.base.update({
       where: { id: baseId },
       // 三态映射：缺省 → 不写列（保持原值）；#RRGGBB → 原样；null → 系统默认色。
       data: {
-        name: parsed.data.name,
+        name: nextName,
         iconColor:
           parsed.data.iconColor === undefined
             ? undefined

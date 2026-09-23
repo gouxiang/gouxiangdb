@@ -214,6 +214,8 @@ export function PrimaryNav({
       <PrimaryNavRenameModal
         key={renaming?.id ?? ""}
         target={renaming}
+        bases={bases}
+        kbs={kbs}
         onClose={() => setRenaming(null)}
         onRename={onRename}
       />

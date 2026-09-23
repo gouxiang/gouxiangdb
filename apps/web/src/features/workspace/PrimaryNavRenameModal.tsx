@@ -3,16 +3,16 @@
 // 单独成文件只为守住「单文件 ≤300 行」：PrimaryNav 已经是窗口化 + 行渲染 + 折叠档
 // 三件事的聚合体，再把弹窗内联进去会把它顶过上限。
 //
-// 写库动作由壳层以 `onRename` 注入（PrimaryNav 内不能 useMutation —— 多份 SSR 回归
-// 不带 QueryClientProvider），失败在这里统一 toast，不吞异常。
+// 保持【纯受控】：本弹窗不自己调 useBases/useKbList —— 多份 SSR 回归用
+// renderToStaticMarkup 渲染 PrimaryNav（不带 QueryClientProvider），任何数据 hook
+// 都会在服务端抛错。库列表与写库动作一律由壳层经 props 注入。
 
 import { useState } from "react";
-import { useBases } from "../../api/hooks";
-import { useKbList } from "../kb/kb-hooks";
 import { Input, Modal, toast } from "../../components/ui";
 import {
   findLibraryNameConflict,
   libraryNameConflictMessage,
+  type LibraryNameRef,
 } from "./lib/library-name";
 
 export interface RenameTarget {
@@ -23,28 +23,31 @@ export interface RenameTarget {
 
 export function PrimaryNavRenameModal({
   target,
+  bases,
+  kbs,
   onClose,
   onRename,
 }: {
   target: RenameTarget | null;
+  /** 壳层注入的活库列表（判重用）；未注入时按无冲突处理（后端 409 兜底）。 */
+  bases?: readonly LibraryNameRef[] | null;
+  kbs?: readonly LibraryNameRef[] | null;
   onClose: () => void;
   onRename?: (kind: "base" | "kb", id: string, name: string) => Promise<void>;
 }) {
-  const basesQ = useBases();
-  const kbsQ = useKbList();
   const [name, setName] = useState(target?.name ?? "");
   const [busy, setBusy] = useState(false);
 
   // A4：两类合并判重，改名排除自己（target.id，base/kb 同口径按 id 排除）。
   const conflict = target
-    ? findLibraryNameConflict(basesQ.data, kbsQ.data, name, target.id)
+    ? findLibraryNameConflict(bases, kbs, name, target.id)
     : null;
 
   const submit = async () => {
     if (!target || !onRename) return;
     const next = name.trim();
     // Enter 提交不经过按钮的 disabled：入口再挡一次冲突。
-    const hit = findLibraryNameConflict(basesQ.data, kbsQ.data, name, target.id);
+    const hit = findLibraryNameConflict(bases, kbs, name, target.id);
     if (!next || hit || busy) return;
     setBusy(true);
     try {

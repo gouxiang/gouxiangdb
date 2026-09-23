@@ -89,11 +89,18 @@ kb.post("/", async (c) => {
     // 抛出的 HttpError(403) 由下方 catch 的 errorResponse 映射为 {error, code} + 403。
     await assertCanCreateLibrary(userId);
 
+    // 名字写库前 trim：纯空格名 400（zod min(1) 拦不住 "   "）。
+    const name = parsed.data.name.trim();
+    if (name === "") return c.json({ error: "知识库名不能为空" }, 400);
+
     // M3/S3 #11：建 kb（含 owner 成员）收紧进事务，同事务 upsert kb 节点。
     const created = await withWriteTx("kb.create", async (tx) => {
+      // 全局重名校验在写事务内、用 tx 做（deletedAt:null）。
+      const dup = await tx.knowledgeBase.findFirst({ where: { name, deletedAt: null }, select: { id: true } });
+      if (dup) throw new HttpError(409, `知识库名「${name}」已存在`);
       const k = await tx.knowledgeBase.create({
         data: {
-          name: parsed.data.name,
+          name,
           iconColor: parsed.data.iconColor ?? "#0F6E56",
           createdBy: userId,
           members: { create: { userId, role: "owner" } },
@@ -153,13 +160,29 @@ kb.patch("/:kbId", async (c) => {
     });
     const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
+
+    // 改名：trim 后写库，纯空格 400；不传 name（只改 icon 等）不触发。
+    let nextName: string | undefined;
+    if (parsed.data.name !== undefined) {
+      nextName = parsed.data.name.trim();
+      if (nextName === "") throw new HttpError(400, "知识库名不能为空");
+    }
+
     // M3/S3 #12a：改名收紧进事务同步 kb 节点 name（iconColor / icon 不进树，也一并同事务）。
     const updated = await withWriteTx("kb.rename", async (tx) => {
+      // 全局重名校验在写事务内、用 tx 做并排除自己；只在带 name 时校验。
+      if (nextName !== undefined) {
+        const dup = await tx.knowledgeBase.findFirst({
+          where: { name: nextName, deletedAt: null, id: { not: kbId } },
+          select: { id: true },
+        });
+        if (dup) throw new HttpError(409, `知识库名「${nextName}」已存在`);
+      }
       const u = await tx.knowledgeBase.update({
         where: { id: kbId },
         // 三态映射：缺省 → 不写列（保持原值）；#RRGGBB → 原样；null → 系统默认色。
         data: {
-          name: parsed.data.name,
+          name: nextName,
           iconColor:
             parsed.data.iconColor === undefined
               ? undefined
@@ -167,7 +190,7 @@ kb.patch("/:kbId", async (c) => {
           icon: parsed.data.icon,
         },
       });
-      if (parsed.data.name !== undefined) await syncNavFromEntitiesTx(tx);
+      if (nextName !== undefined) await syncNavFromEntitiesTx(tx);
       return u;
     });
     return c.json({
