@@ -337,11 +337,16 @@ export function Checkbox({
   checked,
   onChange,
   disabled,
+  disabledReason,
+  title,
   label,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   disabled?: boolean;
+  /** R-D-09：禁用态必须说明原因（渲染为 title），与 Input/Switch 同一口径。 */
+  disabledReason?: string;
+  title?: string;
   label?: ReactNode;
 }) {
   return (
@@ -350,6 +355,7 @@ export function Checkbox({
         type="checkbox"
         checked={checked}
         disabled={disabled}
+        title={title ?? (disabled ? disabledReason : undefined)}
         onChange={(e) => onChange(e.target.checked)}
         className="h-4 w-4 accent-gx-accent"
       />

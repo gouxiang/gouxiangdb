@@ -17,9 +17,13 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ViewDTO } from "@gx/shared-types";
 import { ViewSwitcher, nextViewAfterDelete } from "./ViewSwitcher";
+import { VIEW_TYPE_DEFAULT_NAME, defaultViewName, nextDefaultViewName } from "./view-default-name";
+import { VIEW_TYPES, VIEW_TYPE_LABEL } from "@gx/shared-types";
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 const countOf = (s: string, needle: string) => s.split(needle).length - 1;
+/** 去掉块注释与行注释，避免注释里举的例子被源码字符串断言误伤（或蒙混过关）。 */
+const codeOf = (p: string) => read(p).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
 
 const TABLE_ID = "t1";
 const BASE_ID = "b1";
@@ -109,6 +113,48 @@ describe("③ 末尾「+」新建视图选项卡常驻", () => {
     const html = renderSwitcher("v2", true);
     expect(html).toContain("overflow-x-auto");
     expect(html).toContain("scrollbar-width:none");
+  });
+});
+
+// ⑥ 新建视图的默认名跟着所选类型走。
+//
+// 缺陷背景：openNew 里写死 `${VIEW_TYPE_LABEL.grid}视图`，选了「看板」名字框里仍是
+// 「网格视图」。证伪方式：把默认值改回写死的常量，本组前两条就会红。
+describe("⑥ 新建视图默认名随所选类型变化", () => {
+  it("六个 UI 类型全覆盖，且名字 = 类型标签 + 视图", () => {
+    expect(Object.keys(VIEW_TYPE_DEFAULT_NAME).sort()).toEqual([...VIEW_TYPES].sort());
+    for (const t of VIEW_TYPES) {
+      expect(defaultViewName(t)).toBe(`${VIEW_TYPE_LABEL[t]}视图`);
+    }
+  });
+
+  it("选了看板就叫「看板视图」，不再永远是「网格视图」", () => {
+    expect(defaultViewName("kanban")).toBe("看板视图");
+    expect(defaultViewName("gallery")).toBe("画廊视图");
+    expect(defaultViewName("form")).toBe("表单视图");
+    expect(defaultViewName("detail")).toBe("详情视图");
+    expect(defaultViewName("calendar")).toBe("日历视图");
+    expect(defaultViewName("grid")).toBe("网格视图");
+  });
+
+  it("弹窗里换类型：没手改过的名字跟着变，手改过的保留", () => {
+    expect(nextDefaultViewName("网格视图", "kanban")).toBe("看板视图");
+    expect(nextDefaultViewName("看板视图", "calendar")).toBe("日历视图");
+    // 用户已自行命名 → 不抢他的输入
+    expect(nextDefaultViewName("Q3 排期", "kanban")).toBe("Q3 排期");
+  });
+
+  it("openNew 走默认名函数，且不再写死任何视图名", () => {
+    // 剥掉注释再断言：注释里举例子会带「视图」二字，不能让它蒙混过关
+    const src = codeOf("./ViewSwitcher.tsx");
+    const body = src.slice(src.indexOf("const openNew"), src.indexOf("const openRename"));
+    expect(body).toContain("defaultViewName(");
+    expect(body).not.toContain("VIEW_TYPE_LABEL.grid");
+    // 更进一步：不允许出现任何写死的视图名（写回固定字符串的「网格视图」就该红）
+    expect(body).not.toContain("视图");
+    // 换类型的入口必须同步改名字，不能只 setType
+    expect(src).toContain("onType={pickType}");
+    expect(src).toContain("nextDefaultViewName(cur, t)");
   });
 });
 

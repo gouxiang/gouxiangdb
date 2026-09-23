@@ -23,7 +23,7 @@ import type { PermissionSet, ViewConfig, ViewDTO } from "@gx/shared-types";
 import { useGXMutations, useTables } from "../../api/hooks";
 import { toast } from "../../components/ui";
 import { useWriteGuard } from "../../components/interaction";
-import { confirmClearTable } from "../../components/feedback";
+import { confirmClearTable } from "../../components/confirm-table";
 import { EntityIconPicker } from "../../components/EntityIconPicker";
 import { ViewSwitcher } from "../grid/ViewSwitcher";
 import { GridToolbar } from "../grid/GridToolbar";

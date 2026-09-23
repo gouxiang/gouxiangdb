@@ -8,8 +8,8 @@ import { Tables } from "../../api/client";
 import { useBase, useGXMutations, useTables, useViews } from "../../api/hooks";
 import { IconButton, Input, Menu, MenuItem, Modal, Popover, toast } from "../../components/ui";
 import { Icon, VIEW_ICON } from "../../components/icons";
-// 阶段 4：删除统一走 L2 确认 + 撤销 toast（R-D-23 / R-I-08 / R-D-22）
-import { confirmSoftDelete, confirmClearTable } from "../../components/feedback";
+// 表级危险确认（清空数据 / 删除数据表，同为 L3 需输入表名）
+import { confirmClearTable, confirmDeleteTable } from "../../components/confirm-table";
 import { toastDeleted } from "../../components/interaction";
 import { VIEW_TYPES, VIEW_TYPE_LABEL, type ViewType } from "@gx/shared-types";
 import { csvFileName } from "../../lib/file-name";
@@ -112,16 +112,13 @@ export function TopBar() {
     }
   }
 
-  // 阶段 4 · R-D-23 L2（软删除进回收站，可恢复）+ R-I-08（toast 带撤销）
+  // R-D-23 L3（需原样输入表名）+ R-I-08（toast 带撤销）：
+  // 与同菜单里「清空数据」同一强度——删表不比清空轻，不能点两下就走。
   async function deleteTable() {
     setMore(false);
     if (!tableId || !baseId) return;
     const tableName = (tables ?? []).find((t) => t.id === tableId)?.name ?? "该数据表";
-    const ok = await confirmSoftDelete({
-      title: `删除数据表「${tableName}」`,
-      confirmText: "删除数据表",
-      description: "数据表会移入回收站，30 天内可恢复。",
-    });
+    const ok = await confirmDeleteTable({ tableName });
     if (!ok) return;
     try {
       await m.deleteTable.mutateAsync({ tableId, baseId });

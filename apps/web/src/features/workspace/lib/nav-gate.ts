@@ -69,7 +69,7 @@ export function canSeeAuthz(actions: ReadonlySet<OrgAction>, authzManage: boolea
 }
 
 /**
- * 工作区设置（资产入口）与「语义检索」分区共用的兜底口径：没有专属能力信号时，
+ * 工作区设置（底部区入口现在直指「通用」分区）与「语义检索」分区共用的兜底口径：没有专属能力信号时，
  * 按「是否持任一枚组织管理动作」判可见——持任一枚即参与组织管理，
  * 一枚都没有的成员（viewer/commenter）不该从这个位置进到工作区配置页。
  */
@@ -100,7 +100,9 @@ export function isFooterNavVisible(path: string, caps: FooterNavCapabilities): b
     // 未知路径一律落 default return false，不猜不放行。它的可见性判定搬到
     // canSeeAuthz 的两处真实调用方（PermPanel 直访门控、设置页权限分区）。
     // /workspace/settings/nav（导航编排）第三批已下线，同样落默认分支。
-    case "/workspace/settings/assets":
+    // 路径与 nav-footer.ts 的入口一致（「资产」分区下线后改为直指「通用」）；
+    // 两处不同步会让这个入口从门控表里掉出去（未知路径一律不可见）。
+    case "/workspace/settings/general":
       return canSeeWorkspaceSettings(actions);
     default:
       // 未知入口不猜、不兜底放行；说不清判定的入口不该出现在管理区。

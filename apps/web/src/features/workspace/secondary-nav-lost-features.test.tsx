@@ -95,11 +95,13 @@ describe("① 表行菜单：旧壳 Sidebar 失联的五项能力回挂 L2", () 
     expect(ops).toContain("?design=1");
   });
 
-  it("清空走 L3『输入表名』、删除走 L2 软删 + 撤销，都是 feedback 的既有危险确认", () => {
+  it("清空与删除都是 L3『输入表名』的同一口径（删除不再比清空松），并提供撤销", () => {
     expect(ops).toContain("confirmClearTable(");
-    expect(ops).toContain("confirmSoftDelete(");
+    expect(ops).toContain("confirmDeleteTable(");
     expect(ops).toContain("toastDeleted(");
     expect(ops).toContain("m.restoreTrash.mutateAsync");
+    // 强度倒挂护栏：删表不得退回 L2 的通用软删确认（此前误触删表比误触清空更容易得手）
+    expect(ops).not.toContain("confirmSoftDelete(");
     // 删完不能停在死路由：当前就在这张表上 → 回跳库首页
     expect(ops).toContain('navigate(`/base/${bid}`)');
   });

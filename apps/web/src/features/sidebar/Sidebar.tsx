@@ -12,8 +12,8 @@ import {
 } from "../../api/hooks";
 import { Badge, Input, Menu, MenuDivider, MenuItem, Modal, Popover, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
-// 阶段 4：删除统一走 L2 确认 + 撤销 toast（R-D-23 / R-I-08 / R-D-22）
-import { confirmSoftDelete } from "../../components/feedback";
+// 表级危险确认（删除数据表走 L3 需输入表名，与「清空数据」同一口径）
+import { confirmDeleteTable } from "../../components/confirm-table";
 import { toastDeleted } from "../../components/interaction";
 import { LibrarySwitcher } from "../../components/LibrarySwitcher";
 import { EntityIconPicker, resolvedEntityColor, resolveEntityIcon } from "../../components/EntityIconPicker";
@@ -93,15 +93,11 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     }
   }
 
-  // 阶段 4 · R-D-23 L2（软删除进回收站，可恢复）+ R-I-08（toast 带撤销）
+  // R-D-23 L3（需原样输入表名，与「清空数据」同一口径）+ R-I-08（toast 带撤销）
   async function deleteTable(id: string) {
     if (!baseId) return;
     const name = (tables ?? []).find((t) => t.id === id)?.name ?? "该数据表";
-    const ok = await confirmSoftDelete({
-      title: `删除数据表「${name}」`,
-      confirmText: "删除数据表",
-      description: "数据表会移入回收站，30 天内可恢复。",
-    });
+    const ok = await confirmDeleteTable({ tableName: name });
     if (!ok) return;
     try {
       await m.deleteTable.mutateAsync({ tableId: id, baseId });

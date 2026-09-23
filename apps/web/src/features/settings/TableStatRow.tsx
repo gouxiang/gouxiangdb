@@ -8,7 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { useFields, useGXMutations } from "../../api/hooks";
 import { Button, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { confirmSoftDelete, confirmClearTable } from "../../components/feedback";
+import { confirmClearTable, confirmDeleteTable } from "../../components/confirm-table";
 import { toastDeleted } from "../../components/interaction";
 
 export function TableStatRow({ baseId, tableId, name, recordCount, canManageSchema }: {
@@ -22,14 +22,11 @@ export function TableStatRow({ baseId, tableId, name, recordCount, canManageSche
   const { data: fields } = useFields(tableId);
   const m = useGXMutations();
 
-  // 阶段 4 · R-D-23 L2（软删除进回收站，可恢复）+ R-I-08（toast 带撤销）
+  // R-D-23 L3（需原样输入表名）+ R-I-08（toast 带撤销）：
+  // 与同一行的「清空」同一强度——删表不比清空轻，不能点两下就走。
   async function removeTable() {
     if (!baseId) return;
-    const ok = await confirmSoftDelete({
-      title: `删除数据表「${name}」`,
-      confirmText: "删除数据表",
-      description: "数据表会移入回收站，30 天内可恢复。",
-    });
+    const ok = await confirmDeleteTable({ tableName: name });
     if (!ok) return;
     try {
       await m.deleteTable.mutateAsync({ tableId, baseId });

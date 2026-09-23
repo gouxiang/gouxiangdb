@@ -199,7 +199,7 @@ describe("图标语义映射（L1 全站）", () => {
     // 帮助中心是内容型静态入口：不看角色（门控见 lib/nav-gate.ts 的 STATIC_FOOTER_PATHS）。
     expect(FOOTER_NAV_ITEMS).toEqual([
       { path: "/workspace/contacts", icon: "building", label: "通讯录" },
-      { path: "/workspace/settings/assets", icon: "settings", label: "工作区设置" },
+      { path: "/workspace/settings/general", icon: "settings", label: "工作区设置" },
       { path: "/help", icon: "help", label: "帮助中心" },
     ]);
   });

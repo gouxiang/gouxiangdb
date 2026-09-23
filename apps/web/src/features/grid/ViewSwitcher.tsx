@@ -22,11 +22,12 @@ import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useViews, useGXMutations } from "../../api/hooks";
-import { VIEW_TYPE_LABEL, type ViewType } from "@gx/shared-types";
+import { type ViewType } from "@gx/shared-types";
 import { Icon, VIEW_ICON } from "../../components/icons";
 import { confirmIrreversible } from "../../components/feedback";
 import { Menu, MenuItem, Popover, toast } from "../../components/ui";
 import ViewNameModal from "./ViewNameModal";
+import { defaultViewName, nextDefaultViewName } from "./view-default-name";
 
 export interface ViewSwitcherProps {
   baseId: string;
@@ -91,9 +92,16 @@ export function ViewSwitcher({ baseId, tableId, viewId, canManageSchema }: ViewS
 
   const openNew = () => {
     setType("grid");
-    setName(`${VIEW_TYPE_LABEL.grid}视图`);
+    // 默认名跟着类型走（不要写死成「网格视图」：选了看板，名字就得叫「看板视图」）
+    setName(defaultViewName("grid"));
     setModal("new");
     closeMenu();
+  };
+
+  /** 弹窗里换类型：类型变了默认名跟着变；用户自己改过的名字原样保留。 */
+  const pickType = (t: ViewType) => {
+    setType(t);
+    setName((cur) => nextDefaultViewName(cur, t));
   };
 
   const openRename = (id: string) => {
@@ -260,7 +268,7 @@ export function ViewSwitcher({ baseId, tableId, viewId, canManageSchema }: ViewS
         type={type}
         busy={busy}
         onName={setName}
-        onType={setType}
+        onType={pickType}
         onClose={() => setModal(null)}
         onSubmit={() => void (modal === "new" ? submitNew() : submitRename())}
       />

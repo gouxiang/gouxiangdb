@@ -24,9 +24,13 @@ export interface FooterNavItem {
  * 帮助中心：内容型静态入口——任何角色都可见，**不参与能力门控**（门控表见
  * lib/nav-gate.ts 的 STATIC_FOOTER_PATHS）。它跟管理类入口不同：读文档不需要任何
  * 组织能力，按能力过滤反而会让普通成员找不到说明入口。
+ *
+ * 入口分区必须指向 WorkspaceSettingsPage 的**现存**分区（现为 /workspace/settings/general）：
+ * 「资产」分区已下线，指向它只能靠「未知 splat 落通用」的兜底渲染才不白屏，
+ * 结果是地址栏与左栏高亮的分区对不上。改动这里请同步 lib/nav-gate.ts 的门控 case。
  */
 export const FOOTER_NAV_ITEMS: readonly FooterNavItem[] = [
   { path: "/workspace/contacts", icon: "building", label: "通讯录" },
-  { path: "/workspace/settings/assets", icon: "settings", label: "工作区设置" },
+  { path: "/workspace/settings/general", icon: "settings", label: "工作区设置" },
   { path: "/help", icon: "help", label: "帮助中心" },
 ];

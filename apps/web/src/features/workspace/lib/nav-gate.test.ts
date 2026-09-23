@@ -77,7 +77,7 @@ describe("visibleFooterNav：过滤即剔除，且保持定稿顺序", () => {
     const visible = visibleFooterNav(FOOTER_NAV_ITEMS, { actions: OWNER, authzManage: false });
     expect(visible.map((i) => i.path)).toEqual([
       "/workspace/contacts",
-      "/workspace/settings/assets",
+      "/workspace/settings/general",
       "/help",
     ]);
   });
@@ -113,7 +113,7 @@ describe("visibleFooterNav：过滤即剔除，且保持定稿顺序", () => {
       actions: setOf("manage_menu"),
       authzManage: false,
     });
-    expect(visible.map((i) => i.path)).toEqual(["/workspace/settings/assets", "/help"]);
+    expect(visible.map((i) => i.path)).toEqual(["/workspace/settings/general", "/help"]);
   });
 
   it("探针未完成（loading）：管理入口一律按无能力，静态入口不受影响", () => {
@@ -128,6 +128,33 @@ describe("visibleFooterNav：过滤即剔除，且保持定稿顺序", () => {
     const before = FOOTER_NAV_ITEMS.map((i) => i.path);
     visibleFooterNav(FOOTER_NAV_ITEMS, { actions: setOf(), authzManage: false });
     expect(FOOTER_NAV_ITEMS.map((i) => i.path)).toEqual(before);
+  });
+});
+
+describe("底部「工作区设置」入口指向现存分区（「资产」分区已下线）", () => {
+  const here = (p: string) => new URL(p, import.meta.url);
+  /** 剥离注释后判代码本体（注释里允许讲述历史，代码里不许再出现）。 */
+  const code = (p: string) =>
+    readFileSync(here(p), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^[ \t]*\/\/.*$/gm, "");
+
+  it("入口的分区在设置页现存分区清单内，且门控表登记了同一条路径", () => {
+    // 分区清单由设置页的 SECTIONS 现读（现存：通用 / 权限管理 / 语义检索 / MCP 接入）。
+    // 「资产」分区已下线：入口指向它时只是靠「未知 splat 落通用」的兜底才不白屏，
+    // 结果地址栏的分区与左栏高亮的分区对不上——这条断言防止再把入口指回已下线的分区。
+    const keys = (code("../WorkspaceSettingsPage.tsx").match(/key: "(\w+)"/g) ?? []).map((s) =>
+      s.slice(6, -1),
+    );
+    expect(keys).toContain("general");
+    expect(keys).not.toContain("assets");
+
+    const entry = FOOTER_NAV_ITEMS.find((i) => i.path.startsWith("/workspace/settings/"));
+    expect(entry).toBeTruthy();
+    const section = entry!.path.replace("/workspace/settings/", "");
+    expect(keys).toContain(section);
+    // 门控表必须同步登记同一条路径，否则入口会从可见判定里掉出去（未知路径一律不可见）
+    expect(isFooterNavVisible(entry!.path, { actions: OWNER, authzManage: false })).toBe(true);
   });
 });
 

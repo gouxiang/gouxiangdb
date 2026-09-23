@@ -21,13 +21,17 @@ describe("H-01：配图静态路径不得与 SPA 路由 /help 重名", () => {
   });
 
   it("vite 静态目录 public/ 下不存在名为 help 的一级目录（会原样落进部署根撞路由）", () => {
-    // public/ 由 scripts/sync-help-center.mjs 重建，未跑过脚本时可能不存在 → 视为空
+    // 路径层级别改：__tests__ → help → features → src → web，所以 public/ 是 **四级** 上溯。
+    // 曾经写成五级（解析到 apps/public/，不存在 → catch 成空数组），于是断言恒真、假绿，
+    // 2026-09-22 线上 /help 403 就是这么漏过去的。下面那条 toContain 是"解析正确"的自证，
+    // 别删——删了这条测试又会退化成"读不到就当没问题"。
     let names: string[] = [];
     try {
-      names = readdirSync(new URL("../../../../../public/", import.meta.url));
+      names = readdirSync(new URL("../../../../public/", import.meta.url));
     } catch {
       names = [];
     }
+    expect(names).toContain("help-assets"); // 先证明目录真读到了，否则下面的断言是空集恒真
     expect(names).not.toContain("help");
   });
 

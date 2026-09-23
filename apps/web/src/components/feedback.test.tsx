@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { confirmAction, confirmGateFor, ConfirmHost } from "./feedback";
+import { clearTableConfirm, deleteTableConfirm } from "./confirm-table";
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 
@@ -110,5 +111,45 @@ describe("阶段3 · 文案不得与后端恢复能力相悖", () => {
     expect(settings).toContain("confirmIrreversible({");
     expect(settings).not.toContain("confirmAction({");
     expect(settings).not.toContain("将被移入回收站");
+  });
+});
+
+// 删表与清空表都是「对整张表下手」的破坏性入口，此前强度倒挂：
+// 清空要求原样输入表名（L3），更重的删除却只有「取消 / 删除数据表」两个按钮（L2），
+// 误触删表比误触清空更容易得手。这里两者都跑真实的 confirmGateFor（组件内部同一个函数），
+// 退回 L2 或漏传 confirmName 就会红。
+describe("表级破坏性确认：清空与删除同强度（R-D-23 L3）", () => {
+  it("删除数据表要求原样输入表名才放行", () => {
+    const req = deleteTableConfirm("需求池");
+    expect(req.level).toBe(3);
+    expect(req.confirmName).toBe("需求池");
+    const gate = confirmGateFor(req.level, req);
+    expect(gate.modal).toBe(true);
+    expect(gate.needName).toBe(true);
+  });
+
+  it("清空数据是同一套口径：两者同级同名才可放行", () => {
+    const clear = clearTableConfirm("需求池");
+    const del = deleteTableConfirm("需求池");
+    expect(clear.level).toBe(del.level);
+    expect(confirmGateFor(clear.level, clear).needName).toBe(true);
+    expect(confirmGateFor(del.level, del).needName).toBe(true);
+    // R-D-24：主按钮仍是各自的具体动词，两条动作不共用同一句文案
+    expect(clear.confirmText).toBe("清空数据");
+    expect(del.confirmText).toBe("删除数据表");
+  });
+
+  it("四个删表入口全部走同一个预设，没有漏网的 L2 删表", () => {
+    for (const p of [
+      "../features/shell/TopBar.tsx",
+      "../features/workspace/SecondaryNavTableOps.tsx",
+      "../features/settings/TableStatRow.tsx",
+      "../features/sidebar/Sidebar.tsx",
+    ]) {
+      const src = read(p);
+      expect(src).toContain("confirmDeleteTable(");
+      // 同一份表里不允许还留着通用 L2 软删确认去干删表这件事
+      expect(src).not.toContain("confirmSoftDelete(");
+    }
   });
 });
