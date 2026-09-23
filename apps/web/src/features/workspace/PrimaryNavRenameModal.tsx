@@ -7,7 +7,13 @@
 // 不带 QueryClientProvider），失败在这里统一 toast，不吞异常。
 
 import { useState } from "react";
+import { useBases } from "../../api/hooks";
+import { useKbList } from "../kb/kb-hooks";
 import { Input, Modal, toast } from "../../components/ui";
+import {
+  findLibraryNameConflict,
+  libraryNameConflictMessage,
+} from "./lib/library-name";
 
 export interface RenameTarget {
   kind: "base" | "kb";
@@ -24,13 +30,22 @@ export function PrimaryNavRenameModal({
   onClose: () => void;
   onRename?: (kind: "base" | "kb", id: string, name: string) => Promise<void>;
 }) {
+  const basesQ = useBases();
+  const kbsQ = useKbList();
   const [name, setName] = useState(target?.name ?? "");
   const [busy, setBusy] = useState(false);
+
+  // A4：两类合并判重，改名排除自己（target.id，base/kb 同口径按 id 排除）。
+  const conflict = target
+    ? findLibraryNameConflict(basesQ.data, kbsQ.data, name, target.id)
+    : null;
 
   const submit = async () => {
     if (!target || !onRename) return;
     const next = name.trim();
-    if (!next || busy) return;
+    // Enter 提交不经过按钮的 disabled：入口再挡一次冲突。
+    const hit = findLibraryNameConflict(basesQ.data, kbsQ.data, name, target.id);
+    if (!next || hit || busy) return;
     setBusy(true);
     try {
       await onRename(target.kind, target.id, next);
@@ -60,7 +75,7 @@ export function PrimaryNavRenameModal({
           <button
             type="button"
             className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
-            disabled={!name.trim() || busy}
+            disabled={!name.trim() || !!conflict || busy}
             onClick={() => void submit()}
           >
             保存
@@ -68,13 +83,21 @@ export function PrimaryNavRenameModal({
         </>
       }
     >
-      <Input
-        autoFocus
-        value={name}
-        aria-label="新名称"
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && void submit()}
-      />
+      <div>
+        <Input
+          autoFocus
+          value={name}
+          aria-label="新名称"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void submit()}
+        />
+        {/* 即时重名提示：红字口径同 SecondaryNavTableOps 的行内报错 */}
+        {conflict && (
+          <p className="px-1 pt-1 text-gx-12 text-gx-danger">
+            {libraryNameConflictMessage(conflict)}
+          </p>
+        )}
+      </div>
     </Modal>
   );
 }

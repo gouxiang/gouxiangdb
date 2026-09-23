@@ -38,6 +38,10 @@ import { DefaultValueEditor, sanitizeDefaultConfig } from "./DefaultValueEditor"
 import { NumberRuleEditor } from "./NumberRuleEditor";
 import { confirmDiscardChanges } from "../../components/feedback";
 import { draftFromField, isDirty, emptyDraft, type FieldDraft } from "./field-editor-dirty";
+import {
+  findFieldNameConflict,
+  fieldNameConflictMessage,
+} from "../workspace/lib/field-name";
 
 export interface FieldEditorSheetProps {
   open: boolean;
@@ -280,7 +284,20 @@ function FieldEditorSheet({
 
   // 名称超长：新建时 maxLength 已经拦住，只有改存量长名（>80，后端本就会 400）才可能命中
   const nameTooLong = name.length > FIELD_NAME_MAX;
-  const canSave = permissions.canManageSchema && !!name.trim() && !nameTooLong;
+  // A2：同表字段名 trim 后精确唯一；编辑现有字段时排除自己，新建不排除。
+  const conflict = findFieldNameConflict(
+    allFields,
+    name,
+    isNew ? undefined : managedField!.id,
+  );
+  const canSave =
+    permissions.canManageSchema && !!name.trim() && !nameTooLong && !conflict;
+  // 错误优先级：超长先报超长，其次报重名（同一行只给一条，不叠加）。
+  const nameError = nameTooLong
+    ? `字段名称最多 ${FIELD_NAME_MAX} 个字符，请精简后再保存`
+    : conflict
+      ? fieldNameConflictMessage(conflict)
+      : undefined;
   const isSystem = ["createdTime", "lastModifiedTime", "createdBy", "lastModifiedBy"].includes(type);
   // F-01 守卫：把当前表单状态投影成可比较的草稿（与 buildPayload 读取的状态一一对应）
   const collectDraft = (): FieldDraft => ({
@@ -372,6 +389,13 @@ function FieldEditorSheet({
 
   const handleSave = async () => {
     if (!canSave || isSystem) return;
+    // 提交入口再挡一次重名（防御渲染间隙列表刷新导致的旧 canSave）。
+    const hit = findFieldNameConflict(
+      allFields,
+      name,
+      isNew ? undefined : managedField!.id,
+    );
+    if (hit) return;
     // F-01 守卫：编辑模式下没有任何修改时不再假装保存成功（此前会发一条 no-op PATCH、
     // 提示「已保存字段」并关闭弹窗——走查中用户把「编辑关联字段」误当「新建查阅」保存，
     // 网络里只有一条打到 link 字段的 PATCH，与「新建成功」从外部完全无法区分）。
@@ -432,7 +456,9 @@ function FieldEditorSheet({
                   ? "请先填写字段名称"
                   : nameTooLong
                     ? `字段名称最多 ${FIELD_NAME_MAX} 个字符`
-                    : undefined
+                    : conflict
+                      ? fieldNameConflictMessage(conflict)
+                      : undefined
           }
           onCancel={onClose}
           leading={
@@ -468,7 +494,7 @@ function FieldEditorSheet({
             <FormField
               label="字段名称"
               required
-              error={nameTooLong ? `字段名称最多 ${FIELD_NAME_MAX} 个字符，请精简后再保存` : undefined}
+              error={nameError}
               labelExtra={
                 <span className={nameTooLong ? "!text-gx-danger" : undefined}>
                   {name.length}/{FIELD_NAME_MAX}

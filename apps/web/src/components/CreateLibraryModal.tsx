@@ -11,9 +11,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { useGXMutations } from "../api/hooks";
-import { useCreateKb } from "../features/kb/kb-hooks";
+import { useBases, useGXMutations } from "../api/hooks";
+import { useCreateKb, useKbList } from "../features/kb/kb-hooks";
 import { NAV_QK } from "../features/workspace/nav-hooks";
+import {
+  findLibraryNameConflict,
+  libraryNameConflictMessage,
+} from "../features/workspace/lib/library-name";
 import { Input, Modal, toast } from "./ui";
 import { Icon, type IconName } from "./icons";
 import { AVATAR_PALETTE } from "@gx/design-tokens";
@@ -49,10 +53,15 @@ export function CreateLibraryModal({
   const qc = useQueryClient();
   const m = useGXMutations();
   const createKb = useCreateKb();
+  const basesQ = useBases();
+  const kbsQ = useKbList();
 
   const [name, setName] = useState("");
   const [type, setType] = useState<LibType>(initialType);
   const [creating, setCreating] = useState(false);
+
+  // A4：库名 / 知识库名全局唯一，两类合并判重（新建无自身可排除）。
+  const conflict = findLibraryNameConflict(basesQ.data, kbsQ.data, name);
 
   // 每次打开都从干净态开始：类型跟随入口，名称不留上次残值。
   useEffect(() => {
@@ -69,7 +78,9 @@ export function CreateLibraryModal({
 
   async function create() {
     const trimmed = name.trim();
-    if (!trimmed || creating) return;
+    // Enter 提交不经过按钮的 disabled：入口再挡一次（并防御异步列表到达前的旧闭包）。
+    const hit = findLibraryNameConflict(basesQ.data, kbsQ.data, name);
+    if (!trimmed || hit || creating) return;
     setCreating(true);
     try {
       if (type === "base") {
@@ -105,7 +116,7 @@ export function CreateLibraryModal({
           </button>
           <button
             className="rounded-gx-lg bg-gx-accent px-3 py-1.5 text-gx-13 font-medium text-white hover:brightness-95 disabled:opacity-50"
-            disabled={!name.trim() || creating}
+            disabled={!name.trim() || !!conflict || creating}
             onClick={create}
           >
             创建
@@ -114,13 +125,21 @@ export function CreateLibraryModal({
       }
     >
       <div className="flex flex-col gap-3">
-        <Input
-          autoFocus
-          placeholder="库名称，如：客户管理 / 产品资料库"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && create()}
-        />
+        <div>
+          <Input
+            autoFocus
+            placeholder="库名称，如：客户管理 / 产品资料库"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && create()}
+          />
+          {/* 即时重名提示：红字口径同 SecondaryNavTableOps 的行内报错 */}
+          {conflict && (
+            <p className="px-1 pt-1 text-gx-12 text-gx-danger">
+              {libraryNameConflictMessage(conflict)}
+            </p>
+          )}
+        </div>
         {fixedType ? null : (
           <div>
             <div className="mb-1.5 text-gx-12 text-gx-text-tertiary">库类型</div>
