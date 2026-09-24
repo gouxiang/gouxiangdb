@@ -67,6 +67,21 @@ function FieldValueInput({ selfFields, valueFieldId, onChange }: { selfFields: F
   );
 }
 
+/** 人相关系统字段：createdBy / lastModifiedBy（currentUser 仅对这些字段可选）。 */
+function isPersonFieldType(type: string): boolean {
+  return type === "createdBy" || type === "lastModifiedBy";
+}
+
+// 「当前用户」值控件：不可编辑的提示（实际 userId 由后端按登录态注入）。
+function CurrentUserValue() {
+  return (
+    <div className="flex items-center gap-1.5 rounded-gx-sm border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 text-gx-text-secondary">
+      <Icon name="user" size={13} />
+      <span>当前登录用户</span>
+    </div>
+  );
+}
+
 export function FilterPanel({ fields, value, filteredTotal, onChange }: FilterPanelProps) {
   // 本地副本 + 防抖写入
   const [local, setLocal] = useState<FilterNode | null>(value);
@@ -213,6 +228,8 @@ function ConditionRow({
   // 同表可作为「匹配字段」来源的字段：物理标量 且 与当前字段类型同组（文本对文本、数字对数字…）
   const selfFields = fields.filter((f) => isFilterMatchSourceType(f.type) && isTypeComparable(field.type, f.type));
   const isFieldMode = cond.valueType === "field";
+  const isDynamicMode = cond.valueType === "dynamic";
+  const personField = isPersonFieldType(field.type);
   const needVal = operatorNeedsValue(cond.op);
 
   const setField = (fieldId: string) => {
@@ -241,25 +258,38 @@ function ConditionRow({
           onChange={(e) => onChange({ ...cond, op: e.target.value as FilterOp })}
           options={ops.map((o) => ({ value: o.id, label: o.label }))}
         />
-        {needVal && selfFields.length > 0 && (
+        {needVal && (selfFields.length > 0 || personField) && (
           <div className="flex overflow-hidden rounded-gx-sm border border-gx-border self-start">
             <button
               type="button"
               onClick={() => onChange({ ...cond, valueType: "literal" })}
-              className={clsx("px-2 py-1 text-gx-11", !isFieldMode ? "bg-gx-accent text-white" : "bg-gx-surface text-gx-text-secondary hover:bg-gx-bg")}
+              className={clsx("px-2 py-1 text-gx-11", !isFieldMode && !isDynamicMode ? "bg-gx-accent text-white" : "bg-gx-surface text-gx-text-secondary hover:bg-gx-bg")}
             >
               自定义
             </button>
-            <button
-              type="button"
-              onClick={() => onChange({ ...cond, valueType: "field" })}
-              className={clsx("px-2 py-1 text-gx-11", isFieldMode ? "bg-gx-accent text-white" : "bg-gx-surface text-gx-text-secondary hover:bg-gx-bg")}
-            >
-              匹配字段
-            </button>
+            {selfFields.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onChange({ ...cond, valueType: "field" })}
+                className={clsx("px-2 py-1 text-gx-11", isFieldMode ? "bg-gx-accent text-white" : "bg-gx-surface text-gx-text-secondary hover:bg-gx-bg")}
+              >
+                匹配字段
+              </button>
+            )}
+            {personField && (
+              <button
+                type="button"
+                onClick={() => onChange({ ...cond, valueType: "dynamic", dynamicValue: "currentUser" })}
+                className={clsx("px-2 py-1 text-gx-11", isDynamicMode ? "bg-gx-accent text-white" : "bg-gx-surface text-gx-text-secondary hover:bg-gx-bg")}
+              >
+                当前用户
+              </button>
+            )}
           </div>
         )}
-        {needVal && (isFieldMode && selfFields.length > 0 ? (
+        {needVal && (isDynamicMode && personField ? (
+          <CurrentUserValue />
+        ) : isFieldMode && selfFields.length > 0 ? (
           <FieldValueInput
             selfFields={selfFields}
             valueFieldId={cond.valueFieldId ?? ""}

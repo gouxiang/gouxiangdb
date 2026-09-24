@@ -41,6 +41,8 @@ export interface KeysetInput {
   hydrateDeps?: HydrateDeps;
   /** M4/S6：掩码外字段集（编译期物理下推兜底，缺省空集）。 */
   deniedFieldIds?: ReadonlySet<string> | null;
+  /** 当前登录用户 id（动态 currentUser 真源）；分享外链/未登录缺省 → fail-closed。 */
+  currentUserId?: string | null;
 }
 
 export type KeysetPageMode = "keyset-created" | "keyset-sorted" | "keyset-wide";
@@ -81,7 +83,7 @@ export async function runKeysetPaging(
   }
 
   const { plan } = await buildViewPlan(
-    tableId, fields, config.filters ?? null, sorts, input.deniedFieldIds ?? null,
+    tableId, fields, config.filters ?? null, sorts, input.deniedFieldIds ?? null, input.currentUserId ?? null,
   );
   const total = q.countPhysical({ tableId, filterSql: null, filterParams: [] });
   const hasSearch = input.search.trim() !== "";
@@ -195,7 +197,7 @@ async function pageWide(
   const { tableId, fields, config, search, limit, offset } = input;
   const rawAll = await fetchRawByIds(tableId, candidateIds);
   let hydrated = await hydrateRecords(rawAll, fields, input.hydrateDeps ?? prismaDeps);
-  hydrated = applyViewQuery(hydrated, fields, config, search);
+  hydrated = applyViewQuery(hydrated, fields, config, search, input.currentUserId ?? null);
 
   const needsMemSort = sorts.length > 0 && plan.sortJoins === null;
   const computedInMem =

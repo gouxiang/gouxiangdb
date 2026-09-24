@@ -19,6 +19,7 @@ export async function runKeysetQuery(opts: QueryOptions): Promise<QueryResult> {
     cursor: opts.cursor ?? null,
     hydrateDeps: opts.hydrateDeps,
     deniedFieldIds: opts.compileDeniedFieldIds ?? null,
+    currentUserId: opts.currentUserId ?? null,
   });
   return {
     records: r.records,

@@ -28,6 +28,7 @@ export async function buildViewPlan(
   filters: ViewConfig["filters"],
   sorts: ViewConfig["sorts"],
   deniedFieldIds?: ReadonlySet<string> | null,
+  currentUserId?: string | null,
 ): Promise<BuiltPlan> {
   const table = await prisma.table.findUnique({
     where: { id: tableId },
@@ -39,7 +40,14 @@ export async function buildViewPlan(
     type: f.type,
     isPrimary: f.id === primaryFieldId || undefined,
   }));
-  const plan = compilePlan(tableId, planFields, filters ?? null, sorts ?? [], deniedFieldIds ?? null);
+  const plan = compilePlan(
+    tableId,
+    planFields,
+    filters ?? null,
+    sorts ?? [],
+    deniedFieldIds ?? null,
+    currentUserId ?? null,
+  );
   return { planFields, plan, primaryFieldId };
 }
 

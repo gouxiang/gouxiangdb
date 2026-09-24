@@ -519,7 +519,8 @@ tables.get("/:tableId/export.csv", async (c) => {
       visibleFields: mask.visibleFields,
       sanitizeConfig: mask.sanitizeConfig,
       hydrateDeps: mask.hydrateDeps,
-    });
+    },
+    userId);
 
   c.header("Content-Type", "text/csv; charset=utf-8");
   c.header("Content-Disposition", `attachment; filename="table-${tableId}.csv"`);

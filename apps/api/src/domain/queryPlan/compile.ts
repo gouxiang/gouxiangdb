@@ -20,6 +20,7 @@
 //   5) 排序空值恒排后（ORDER BY (v IS NULL)），tie-break 固定 createdAt ASC,id ASC。
 
 import type { FilterNode, FilterCondition, SortSpec } from "@gx/shared-types";
+import { filterReferencesCurrentUser } from "@gx/shared-types";
 import type { SqlBindValue } from "../../db/rawRead.js";
 import {
   SHORT_TEXT,
@@ -210,10 +211,32 @@ export function compilePlan(
   filters: FilterNode | null | undefined,
   sorts: SortSpec[] | null | undefined,
   deniedFieldIds?: ReadonlySet<string> | null,
+  currentUserId?: string | null,
 ): CompiledPlan {
   const byId = new Map(fields.map((f) => [f.id, f]));
   const denied = deniedFieldIds ?? null;
-  const b: Builder = { tableId, params: [], byId, bind(v) { this.params.push(v); return "?"; } };
+  const b: Builder = {
+    tableId,
+    params: [],
+    byId,
+    currentUserId: currentUserId ?? null,
+    bind(v) { this.params.push(v); return "?"; },
+  };
+
+  // fail-closed 树顶层短路：树引用 currentUser 而当前无登录用户（未登录 / 分享外链 / 空
+  // userId）时，整棵过滤恒假。不能只让叶子回退 —— 叶子可能被 NOT 包裹，!(false)=true
+  // 会放开全表（与内存 evalFilter 的顶层短路同源，见 filterReferencesCurrentUser）。
+  // 产出 filterSql=(1=0)、无残余：物理候选/计数/取页在任何档位都为空集。
+  if (filterReferencesCurrentUser(filters ?? null) && !(currentUserId ?? null)) {
+    return {
+      filterSql: "(1=0)",
+      filterParams: [],
+      residual: null,
+      sortJoins: null,
+      filtersFullyPhysical: true,
+      countPlan: null,
+    };
+  }
 
   // 计数快速计划独立累积绑定（不写 b.params），只在过滤树可安全改写为 rfi JOIN 时产出。
   const countPlan = compileCountPlan(b, filters ?? null, denied);

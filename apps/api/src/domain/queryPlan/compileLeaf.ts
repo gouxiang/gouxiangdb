@@ -32,6 +32,8 @@ export interface Builder {
   tableId: string;
   params: SqlBindValue[];
   byId: Map<string, PlanField>;
+  /** 当前登录用户 id（valueType=dynamic/currentUser 物理绑定用；缺省=无登录态，fail-closed）。 */
+  currentUserId?: string | null;
   bind(v: SqlBindValue): string;
 }
 
@@ -89,6 +91,23 @@ export function compileLeaf(b: Builder, c: FilterCondition): string | null {
   if (!f) return null;
   const t = f.type;
   const op = c.op;
+
+  // ---- 人名字段「当前用户」：createdBy/lastModifiedBy 不入 rfi，是主表 records 的物理列
+  //      （r.createdBy / r.updatedBy 存 userId）。直接对主表列生成参数化谓词，口径与内存
+  //      getActorId===currentUserId 一致。无登录态的 fail-closed 已在 compilePlan 树顶层短路，
+  //      此处只处理已登录场景。无法表达的算符（contains 等）返回 null 走残余内存。
+  if (c.valueType === "dynamic" && c.dynamicValue === "currentUser") {
+    if (t !== "createdBy" && t !== "lastModifiedBy") return null;
+    const col = t === "createdBy" ? `r."createdBy"` : `r."updatedBy"`;
+    if (op === "is" || op === "eq") {
+      return `${col} = ${b.bind(b.currentUserId as SqlBindValue)}`;
+    }
+    if (op === "isNot" || op === "neq") {
+      return `${col} != ${b.bind(b.currentUserId as SqlBindValue)}`;
+    }
+    // 其余文本算符（contains/startsWith/…）对 userId 无意义且内存路径语义不同 → 回退内存。
+    return null;
+  }
 
   // autoNumber 恒回退（含 isEmpty）：sidecar 存原始空（hydrate 却现算编号），任何谓词都不一致。
   if (t === "autoNumber") return null;

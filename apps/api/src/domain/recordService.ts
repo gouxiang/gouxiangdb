@@ -34,6 +34,12 @@ export interface QueryOptions {
    */
   hydrateDeps?: HydrateDeps;
   compileDeniedFieldIds?: ReadonlySet<string> | null;
+  /**
+   * 当前登录用户 id（动态筛选 currentUser 的唯一真源）。
+   * 由路由从请求上下文透传；分享外链 / 未登录场景缺省（null/undefined）——
+   * 此时含 currentUser 的条件 fail-closed（见 shared-types/filter.ts），不放开任何行。
+   */
+  currentUserId?: string | null;
 }
 
 export interface QueryResult {
@@ -79,12 +85,28 @@ export function applyViewQuery(
   fields: FieldMeta[],
   config: ViewConfig,
   search: string,
+  currentUserId?: string | null,
 ): HydratedRecord[] {
   let out = hydrated;
 
   // 过滤
   if (config.filters) {
-    out = out.filter((r) => evalFilter(config.filters as FilterNode | null, (fid) => r.fields[fid]));
+    // currentUser 在内存路径按 userId 精确匹配（非显示名）：人名字段 hydrate 后 fields[]
+    // 里是 resolveUserName() 的显示名，而 actor userId 在 HydratedRecord 顶层物理列
+    // （createdBy / updatedBy）。getActorId 按字段类型把左值解析回 userId，
+    // 与物理 records.createdBy = :uid 口径逐值一致（见 shared-types/filter.ts 注释）。
+    const typeById = new Map(fields.map((f) => [f.id, f.type]));
+    out = out.filter((r) =>
+      evalFilter(config.filters as FilterNode | null, (fid) => r.fields[fid], undefined, {
+        vars: { currentUserId: currentUserId ?? null },
+        getActorId: (fid) => {
+          const t = typeById.get(fid);
+          if (t === "createdBy") return r.createdBy;
+          if (t === "lastModifiedBy") return r.updatedBy;
+          return r.fields[fid];
+        },
+      }),
+    );
   }
 
   // 搜索（全部可见字段文本化后 contains）
@@ -202,6 +224,7 @@ async function runPlannerOnce(opts: QueryOptions) {
     noPaging: opts.noPaging ?? false,
     hydrateDeps: opts.hydrateDeps,
     deniedFieldIds: opts.compileDeniedFieldIds ?? null,
+    currentUserId: opts.currentUserId ?? null,
   });
   return {
     records: r.records,
@@ -265,7 +288,7 @@ export async function queryRecordsLegacy(opts: QueryOptions): Promise<QueryResul
   );
 
   // 3-5. 视图过滤 / 搜索 / 排序（纯内存，导出与列表共用同一后处理，口径零漂移）
-  hydrated = applyViewQuery(hydrated, fields, config, search);
+  hydrated = applyViewQuery(hydrated, fields, config, search, opts.currentUserId ?? null);
 
   const filteredTotal = hydrated.length;
 

@@ -21,7 +21,12 @@ const fields: PlanField[] = [
   { id: "auto", type: "autoNumber" },
   { id: "calc", type: "formula" },
   { id: "link", type: "links" },
+  { id: "creator", type: "createdBy" },
+  { id: "editor", type: "lastModifiedBy" },
 ];
+
+const dynCond = (fieldId: string, op: string): FilterNode =>
+  ({ kind: "condition", fieldId, op, value: "", valueType: "dynamic", dynamicValue: "currentUser" }) as FilterNode;
 
 const cond = (fieldId: string, op: string, value = "x", extra: Record<string, unknown> = {}): FilterNode =>
   ({ kind: "condition", fieldId, op, value, ...extra }) as FilterNode;
@@ -380,5 +385,68 @@ describe("deniedFieldIds：掩码字段禁止物理 filter/sort 下推", () => {
     // 空 denied 集（visibleAll 口径）行为与不传一致
     const empty = compileMasked(cond("age", "gt", "0"), [{ fieldId: "stars", direction: "desc" }], new Set());
     expect(empty.sortJoins).not.toBeNull();
+  });
+});
+
+// ============ currentUser 物理下推 ============
+describe("currentUser 人名字段物理下推", () => {
+  it("createdBy is → r.createdBy 绑定当前 userId（不走 rfi EXISTS）", () => {
+    const p = compilePlan("T1", fields, dynCond("creator", "is"), [], null, "u1");
+    expect(p.filterSql).toBe(`r."createdBy" = ?`);
+    expect(p.filterParams).toEqual(["u1"]);
+    expect(p.residual).toBeNull();
+    expect(p.filtersFullyPhysical).toBe(true);
+  });
+
+  it("lastModifiedBy is → r.updatedBy 绑定 userId", () => {
+    const p = compilePlan("T1", fields, dynCond("editor", "is"), [], null, "u9");
+    expect(p.filterSql).toBe(`r."updatedBy" = ?`);
+    expect(p.filterParams).toEqual(["u9"]);
+  });
+
+  it("isNot/neq 编译为 != 参数化谓词", () => {
+    const p = compilePlan("T1", fields, dynCond("creator", "isNot"), [], null, "u1");
+    expect(p.filterSql).toBe(`r."createdBy" != ?`);
+    expect(p.filterParams).toEqual(["u1"]);
+  });
+
+  it("contains 等无法干净表达的算符 → 回退 residual（不硬塞错误 SQL）", () => {
+    const p = compilePlan("T1", fields, dynCond("creator", "contains"), [], null, "u1");
+    expect(p.filterSql).toBeNull();
+    expect(p.residual).toEqual(dynCond("creator", "contains"));
+  });
+
+  it("无登录态（currentUserId=null）：树顶层 fail-closed，filterSql=(1=0)", () => {
+    const p = compilePlan("T1", fields, dynCond("creator", "is"), [], null, null);
+    expect(p.filterSql).toBe("(1=0)");
+    expect(p.filterParams).toEqual([]);
+    expect(p.residual).toBeNull();
+  });
+
+  it("fail-closed 对 NOT 包裹同样生效 —— 不得 !(false)=true 放开全表", () => {
+    const tree: FilterNode = { kind: "not", child: dynCond("creator", "is") };
+    const p = compilePlan("T1", fields, tree, [], null, null);
+    expect(p.filterSql).toBe("(1=0)");
+  });
+
+  it("fail-closed 对深层 OR 内的 currentUser 也整树关闭", () => {
+    const tree: FilterNode = {
+      kind: "and",
+      children: [
+        cond("age", "gt", "1"),
+        { kind: "or", children: [cond("age", "lt", "9"), dynCond("creator", "is")] },
+      ],
+    };
+    const p = compilePlan("T1", fields, tree, [], null, null);
+    expect(p.filterSql).toBe("(1=0)");
+  });
+
+  it("已登录且与其他物理条件 AND：createdBy 谓词与 rfi EXISTS 共存", () => {
+    const tree: FilterNode = { kind: "and", children: [cond("age", "gt", "1"), dynCond("creator", "is")] };
+    const p = compilePlan("T1", fields, tree, [], null, "u1");
+    expect(p.filterSql).toContain("valueNum");
+    expect(p.filterSql).toContain(`r."createdBy" = ?`);
+    expect(p.filterParams).toContain("u1");
+    expect(p.residual).toBeNull();
   });
 });

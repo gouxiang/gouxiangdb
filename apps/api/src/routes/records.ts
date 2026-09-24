@@ -110,6 +110,7 @@ records.get("/", async (c) => {
       tableId, fields: queryFields, config: queryConfig, limit, offset, search, cursor,
       hydrateDeps: mask?.hydrateDeps,
       compileDeniedFieldIds: mask?.deniedIds ?? null,
+      currentUserId: userId,
     });
   } catch (e) {
     // keyset 客户端错误统一转 400（错误类定义不牵 db.js，这里桥接到 HttpError 信封）。

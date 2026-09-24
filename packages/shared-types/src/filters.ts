@@ -38,11 +38,21 @@ export interface FilterCondition {
    * 比较值来源：
    *   "literal"（缺省，旧数据）—— 用 value 字面量
    *   "field"               —— 用 valueFieldId 指向的「本表字段」当前值进行匹配（两字段值比较）
+   *   "dynamic"             —— 用 dynamicValue 指定的运行期动态变量（如当前登录用户），由求值/编译期注入
    */
-  valueType?: "literal" | "field";
+  valueType?: "literal" | "field" | "dynamic";
   /** valueType=field 时：本表字段 id（被比较的参照字段） */
   valueFieldId?: string;
+  /**
+   * valueType=dynamic 时：动态变量枚举。
+   *   "currentUser" —— 当前登录用户（人名字段按 userId 精确匹配，见 filter.ts / compile.ts）
+   * 枚举保留扩展口：将来可加入 currentDate 等，本轮仅实现 currentUser。
+   */
+  dynamicValue?: DynamicFilterValue;
 }
+
+/** 运行期动态筛选变量（可扩展枚举，本轮仅 "currentUser"） */
+export type DynamicFilterValue = "currentUser";
 
 export interface FilterGroup {
   kind: "and" | "or";
@@ -55,6 +65,35 @@ export interface FilterNot {
 }
 
 export type FilterNode = FilterCondition | FilterGroup | FilterNot;
+
+/** 操作符是否需要引用比较值（无值操作符不引用 currentUser） */
+function opNeedsRef(op: string): boolean {
+  return !["isEmpty", "isNotEmpty", "checked", "unchecked"].includes(op);
+}
+
+/**
+ * 过滤树是否引用了「当前登录用户」动态值（valueType=dynamic / currentUser），
+ * 且该条件确实需要比较值（无值操作符 isEmpty 等不算）。
+ *
+ * 用途（fail-closed 安全）：当树引用 currentUser 而当前无登录用户（未登录 / 分享外链 /
+ * 空 userId）时，内存求值与 SQL 编译都必须把【整棵过滤】判定为不匹配 —— 不能只让叶子
+ * 返回 false，因为该叶子可能被 NOT 包裹，!(false)=true 会放开全表。故在整棵树顶层短路。
+ */
+export function filterReferencesCurrentUser(node: FilterNode | null | undefined): boolean {
+  if (!node) return false;
+  switch (node.kind) {
+    case "condition":
+      return (
+        node.valueType === "dynamic" &&
+        node.dynamicValue === "currentUser" &&
+        opNeedsRef(node.op)
+      );
+    case "not":
+      return filterReferencesCurrentUser(node.child);
+    default:
+      return (node.children ?? []).some((ch) => filterReferencesCurrentUser(ch));
+  }
+}
 
 export interface FilterOperatorDef {
   id: FilterOp;

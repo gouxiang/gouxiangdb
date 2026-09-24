@@ -41,6 +41,8 @@ export interface PlannerInput {
   hydrateDeps?: HydrateDeps;
   /** M4/S6：掩码外字段集（编译期物理下推兜底，缺省空集）。 */
   deniedFieldIds?: ReadonlySet<string> | null;
+  /** 当前登录用户 id（动态 currentUser 真源）；分享外链/未登录缺省 → fail-closed。 */
+  currentUserId?: string | null;
 }
 
 export interface PlannerResult {
@@ -90,7 +92,7 @@ export async function runQueryPlan(
   const sorts = (config.sorts ?? []) as SortSpec[];
   const hydrateDeps = input.hydrateDeps ?? prismaDeps;
   const denied = input.deniedFieldIds ?? null;
-  const { plan } = await buildViewPlan(tableId, fields, filters, sorts, denied);
+  const { plan } = await buildViewPlan(tableId, fields, filters, sorts, denied, input.currentUserId ?? null);
 
   const total = q.countPhysical({ tableId, filterSql: null, filterParams: [] });
   const hasSearch = input.search.trim() !== "";
@@ -163,7 +165,7 @@ export async function runQueryPlan(
   const raw = await fetchRawByIds(tableId, candidateIds);
   let hydrated = await hydrateRecords(raw, fields, hydrateDeps);
   // 与 S5 完全相同的后处理（完整 evalFilter/search/sort），物理候选是超集，精修后逐值一致。
-  hydrated = applyViewQuery(hydrated, fields, config, input.search);
+  hydrated = applyViewQuery(hydrated, fields, config, input.search, input.currentUserId ?? null);
   const filteredTotal = hydrated.length;
   const groups = assembleGroups(hydrated, fields, config);
   const aggregations = assembleAggregations(hydrated, config.aggregations ?? {});

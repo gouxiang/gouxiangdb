@@ -74,6 +74,7 @@ export async function exportTableCsv(
   searchOverride?: string,
   reader?: RawReader,
   mask?: CsvMaskContext | null,
+  currentUserId?: string | null,
 ): Promise<CsvExportResult> {
   const allFields = await loadTableFields(tableId);
   // M4/S6：on 态仅导出可见列（表头/数据/hydrate 入参同源）；off/shadow 全字段。
@@ -121,7 +122,7 @@ export async function exportTableCsv(
     cursor = page.nextCursor;
     if (!cursor) break;
   }
-  const finalRows = applyViewQuery(accumulated, fields, config, search);
+  const finalRows = applyViewQuery(accumulated, fields, config, search, currentUserId ?? null);
   rowCount = finalRows.length;
   const body = rowsToCSVBody(finalRows.map((x) => recordToRow(x, fields)));
   const csv = body === "" ? header : [header, body].join("\r\n");

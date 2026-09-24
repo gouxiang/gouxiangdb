@@ -89,6 +89,8 @@ async function readPage(ctx: ToolCtx, args: ReadArgs, withFilter: boolean): Prom
       limit: args.limit ?? 50, cursor: args.cursor ?? null, search: args.search,
       // 掩码外字段在编译期禁止物理下推（纵深防御，与 REST 同口径）
       compileDeniedFieldIds: visibleIds === null ? null : new Set(fields.filter((f) => !visibleIds.includes(f.id)).map((f) => f.id)),
+      // 当前签发用户（动态 currentUser 真源；无签发者缺省 -> fail-closed）
+      currentUserId: ctx.subject.userId,
     });
   } catch (e) {
     const code = (e as { name?: string }).name;
