@@ -18,6 +18,7 @@ import {
   type CharHarness,
 } from "../../../domain/nav/__tests__/navRouteHarness.js";
 import { nodeId } from "../../../domain/nav/backfill.js";
+import { RESOURCE_ACTIONS } from "@gx/shared-types";
 
 let h: CharHarness;
 let baseNode = "";
@@ -118,7 +119,7 @@ describe("GET /nodes/:id/effective 三身份快照", () => {
       expect(res.status, user).toBe(200);
       const body = await json<{ userId: string; perAction: unknown[] }>(res);
       expect(body.userId).toBe(user);
-      expect(body.perAction.length).toBe(7);
+      expect(body.perAction.length).toBe(RESOURCE_ACTIONS.length);
     }
   });
 

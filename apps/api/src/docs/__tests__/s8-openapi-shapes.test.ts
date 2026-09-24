@@ -16,6 +16,7 @@ import {
   type CharHarness,
 } from "../../domain/nav/__tests__/navRouteHarness.js";
 import { nodeId } from "../../domain/nav/backfill.js";
+import { RESOURCE_ACTIONS } from "@gx/shared-types";
 
 let h: CharHarness;
 let baseNode = "";
@@ -147,7 +148,7 @@ describe("S8 policies GET/PUT 形状对拍 NodePoliciesView / PolicyWriteResult"
 });
 
 describe("S8 effective 形状对拍 EffectiveView / DiagSource", () => {
-  it("GET effective 缺省本人 = {node{4},userId,actions[],policyVersion,perAction[7]}；source 9 键齐", async () => {
+  it("GET effective 缺省本人 = {node{4},userId,actions[],policyVersion,perAction[8]}；source 9 键齐", async () => {
     const res = await h.app.request(`/api/v1/nodes/${baseNode}/effective`, { headers: await h.auth("owner") });
     expect(res.status).toBe(200);
     const body = await json<Record<string, unknown>>(res);
@@ -155,7 +156,7 @@ describe("S8 effective 形状对拍 EffectiveView / DiagSource", () => {
     expect(Object.keys(body.node as object).sort()).toEqual([...KEYS.effectiveNode].sort());
     expect(body.userId).toBe("owner");
     const perAction = body.perAction as Array<Record<string, unknown>>;
-    expect(perAction.length).toBe(7);
+    expect(perAction.length).toBe(RESOURCE_ACTIONS.length);
     for (const pa of perAction) {
       expect(Object.keys(pa).sort()).toEqual(["action", "allowed", "sources"]);
       expect(typeof pa.allowed).toBe("boolean");

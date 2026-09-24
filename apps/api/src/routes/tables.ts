@@ -6,11 +6,15 @@ import { z } from "zod";
 import { prisma, withWriteTx, type DbTx } from "../db.js";
 import {
   requireCanView,
-  requireCanManageSchema,
   requireCanEditData,
   resolveBaseIdByTable,
   HttpError,
 } from "../guards.js";
+import {
+  requireCreateTable,
+  requireTableManage,
+  requireSchemaDesign,
+} from "../domain/authz/tableManageGuards.js";
 import { makeOptions } from "../domain/fieldService.js";
 import { loadTableFields } from "../domain/recordService.js";
 import { exportTableCsv } from "../domain/csvExport.js";
@@ -132,7 +136,7 @@ tables.get("/", async (c) => {
 tables.post("/", async (c) => {
   const baseId = c.req.query("baseId");
   if (!baseId) return c.json({ error: "缺少 baseId" }, 400);
-  const { userId } = await requireCanManageSchema(c, baseId);
+  const { userId } = await requireCreateTable(c, baseId);
 
   const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
@@ -259,7 +263,7 @@ tables.get("/:tableId", async (c) => {
 tables.patch("/:tableId", async (c) => {
   const tableId = c.req.param("tableId");
   const baseId = await baseIdOf(tableId);
-  await requireCanManageSchema(c, baseId);
+  await requireTableManage(c, tableId);
 
   const parsed = updateSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
@@ -295,8 +299,8 @@ tables.patch("/:tableId", async (c) => {
 
 tables.delete("/:tableId", async (c) => {
   const tableId = c.req.param("tableId");
-  const baseId = await baseIdOf(tableId);
-  await requireCanManageSchema(c, baseId);
+  await baseIdOf(tableId);
+  await requireTableManage(c, tableId);
 
   const now = new Date();
   // M3/S3 #6：原 withWriteBatch 数组事务无法承载 nav async 原语，收紧为 withWriteTx 回调；
@@ -327,7 +331,7 @@ tables.delete("/:tableId", async (c) => {
 tables.post("/:tableId/duplicate", async (c) => {
   const tableId = c.req.param("tableId");
   const baseId = await baseIdOf(tableId);
-  const { userId } = await requireCanManageSchema(c, baseId);
+  const { userId } = await requireSchemaDesign(c, tableId);
 
   const src = await prisma.table.findUnique({ where: { id: tableId } });
   if (!src || src.deletedAt) throw new HttpError(404, "数据表不存在");

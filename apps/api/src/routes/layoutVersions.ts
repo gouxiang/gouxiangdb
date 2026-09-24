@@ -14,7 +14,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { permissionsForRole } from "@gx/shared-types";
 import { prisma, withWriteTx } from "../db.js";
-import { requireCanView, requireCanManageSchema, HttpError } from "../guards.js";
+import { requireCanView, HttpError } from "../guards.js";
+import { requireSchemaDesign } from "../domain/authz/tableManageGuards.js";
 import {
   buildSnapshotEnvelope,
   coerceTabConfigs,
@@ -103,8 +104,10 @@ layoutVersions.get("/:viewId/layout-versions/:id", async (c) => {
 
 layoutVersions.post("/:viewId/layout-versions", async (c) => {
   const viewId = c.req.param("viewId");
-  const baseId = await baseIdOfView(viewId);
-  const { userId } = await requireCanManageSchema(c, baseId);
+  await baseIdOfView(viewId);
+  const viewRow = await prisma.view.findUnique({ where: { id: viewId }, select: { tableId: true } });
+  if (!viewRow) throw new HttpError(404, "视图不存在");
+  const { userId } = await requireSchemaDesign(c, viewRow.tableId);
 
   const parsed = createSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: "参数不合法", details: parsed.error.issues }, 400);

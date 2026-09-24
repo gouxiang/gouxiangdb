@@ -17,6 +17,7 @@ import {
   type CharHarness,
 } from "../../../domain/nav/__tests__/navRouteHarness.js";
 import { nodeId } from "../../../domain/nav/backfill.js";
+import { RESOURCE_ACTIONS } from "@gx/shared-types";
 
 let h: CharHarness;
 let baseId = "";
@@ -225,14 +226,14 @@ describe("GET policies 主体解析与继承摘要", () => {
 });
 
 describe("GET effective 决策解释器", () => {
-  it("缺省查本人返回七动作判定与来源链；查他人无 manage_share 403", async () => {
+  it("缺省查本人返回八动作判定与来源链；查他人无 manage_share 403", async () => {
     const own = await h.app.request(`/api/v1/nodes/${baseNode}/effective`, { headers: await h.auth("sharer") });
     expect(own.status).toBe(200);
     const body = await json<{
       actions: string[];
       perAction: Array<{ action: string; allowed: boolean; sources: unknown[] }>;
     }>(own);
-    expect(body.perAction.length).toBe(7);
+    expect(body.perAction.length).toBe(RESOURCE_ACTIONS.length);
     expect(body.actions).toContain("r");
     expect(body.actions).toContain("manage_share");
     // sharer 的 manage_share 来自直授 policy（direct）。

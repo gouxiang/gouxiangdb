@@ -4,7 +4,8 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { prisma, withWriteTx } from "../db.js";
-import { requireCanView, requireCanManageSchema, HttpError } from "../guards.js";
+import { requireCanView, HttpError } from "../guards.js";
+import { requireSchemaDesign } from "../domain/authz/tableManageGuards.js";
 import { parseViewConfig } from "../domain/recordService.js";
 import { permissionsForRole } from "@gx/shared-types";
 import { syncNavFromEntitiesTx, purgeViewNodeTx } from "../domain/nav/sync.js";
@@ -84,8 +85,8 @@ views.get("/", async (c) => {
 views.post("/", async (c) => {
   const tableId = c.req.query("tableId");
   if (!tableId) return c.json({ error: "缺少 tableId" }, 400);
-  const baseId = await baseIdOfTable(tableId);
-  await requireCanManageSchema(c, baseId);
+  await baseIdOfTable(tableId);
+  await requireSchemaDesign(c, tableId);
 
   const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法", details: parsed.error.issues }, 400);
@@ -206,8 +207,12 @@ views.patch("/:viewId", async (c) => {
 
 views.delete("/:viewId", async (c) => {
   const viewId = c.req.param("viewId");
-  const baseId = await baseIdOfView(viewId);
-  await requireCanManageSchema(c, baseId);
+  const viewRow = await prisma.view.findUnique({
+    where: { id: viewId },
+    select: { tableId: true, table: { select: { baseId: true } } },
+  });
+  if (!viewRow) throw new HttpError(404, "视图不存在");
+  await requireSchemaDesign(c, viewRow.tableId);
 
   const v = await prisma.view.findUnique({ where: { id: viewId } });
   if (!v) throw new HttpError(404, "视图不存在");
@@ -230,8 +235,12 @@ views.delete("/:viewId", async (c) => {
 
 views.post("/:viewId/duplicate", async (c) => {
   const viewId = c.req.param("viewId");
-  const baseId = await baseIdOfView(viewId);
-  await requireCanManageSchema(c, baseId);
+  const viewRow = await prisma.view.findUnique({
+    where: { id: viewId },
+    select: { tableId: true, table: { select: { baseId: true } } },
+  });
+  if (!viewRow) throw new HttpError(404, "视图不存在");
+  await requireSchemaDesign(c, viewRow.tableId);
 
   const v = await prisma.view.findUnique({ where: { id: viewId } });
   if (!v) throw new HttpError(404, "视图不存在");

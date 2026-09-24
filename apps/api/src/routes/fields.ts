@@ -4,7 +4,8 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { prisma, withWriteBatch } from "../db.js";
-import { requireCanView, requireCanManageSchema, HttpError } from "../guards.js";
+import { requireCanView, HttpError } from "../guards.js";
+import { requireSchemaDesign } from "../domain/authz/tableManageGuards.js";
 import { createField, updateField, deleteField, lookupTargetFields, relationDisplayName, relationIsMultiple } from "../domain/fieldService.js";
 import { loadTableFields } from "../domain/recordService.js";
 import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
@@ -76,15 +77,6 @@ async function baseIdOfTable(tableId: string): Promise<string> {
   return t.baseId;
 }
 
-async function baseIdOfField(fieldId: string): Promise<string> {
-  const f = await prisma.field.findUnique({
-    where: { id: fieldId },
-    select: { table: { select: { baseId: true } }, tableId: true },
-  });
-  if (!f) throw new HttpError(404, "字段不存在");
-  return f.table.baseId;
-}
-
 // ============ 列表 ============
 
 fields.get("/", async (c) => {
@@ -101,7 +93,7 @@ fields.post("/", async (c) => {
   const tableId = c.req.query("tableId");
   if (!tableId) return c.json({ error: "缺少 tableId" }, 400);
   const baseId = await baseIdOfTable(tableId);
-  await requireCanManageSchema(c, baseId);
+  await requireSchemaDesign(c, tableId);
 
   const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法", details: parsed.error.issues }, 400);
@@ -170,8 +162,12 @@ fields.post("/", async (c) => {
 
 fields.patch("/:fieldId", async (c) => {
   const fieldId = c.req.param("fieldId");
-  const baseId = await baseIdOfField(fieldId);
-  await requireCanManageSchema(c, baseId);
+  const fieldRow = await prisma.field.findUnique({
+    where: { id: fieldId },
+    select: { tableId: true, table: { select: { baseId: true } } },
+  });
+  if (!fieldRow) throw new HttpError(404, "字段不存在");
+  await requireSchemaDesign(c, fieldRow.tableId);
 
   const parsed = updateSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法", details: parsed.error.issues }, 400);
@@ -234,8 +230,12 @@ fields.patch("/:fieldId", async (c) => {
 
 fields.delete("/:fieldId", async (c) => {
   const fieldId = c.req.param("fieldId");
-  const baseId = await baseIdOfField(fieldId);
-  await requireCanManageSchema(c, baseId);
+  const fieldRow = await prisma.field.findUnique({
+    where: { id: fieldId },
+    select: { tableId: true, table: { select: { baseId: true } } },
+  });
+  if (!fieldRow) throw new HttpError(404, "字段不存在");
+  await requireSchemaDesign(c, fieldRow.tableId);
   const { deleted } = await deleteField(fieldId);
   return c.json({ ok: true, deleted });
 });
@@ -246,8 +246,12 @@ const moveSchema = z.object({ toIndex: z.number().int().min(0) });
 
 fields.post("/:fieldId/move", async (c) => {
   const fieldId = c.req.param("fieldId");
-  const baseId = await baseIdOfField(fieldId);
-  await requireCanManageSchema(c, baseId);
+  const f0 = await prisma.field.findUnique({
+    where: { id: fieldId },
+    select: { tableId: true, table: { select: { baseId: true } } },
+  });
+  if (!f0) throw new HttpError(404, "字段不存在");
+  await requireSchemaDesign(c, f0.tableId);
 
   const parsed = moveSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
