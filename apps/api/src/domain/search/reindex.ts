@@ -22,6 +22,7 @@ import {
   resolveSearchDbPath, type SearchStore,
 } from "./searchStore.js";
 import { META_KEYS, setMeta, getMeta } from "./schema.js";
+import { EmbeddingConfigStore } from "./embeddingConfig.js";
 import { suspendSearchWorker, resumeSearchWorker } from "./workerRuntime.js";
 import { buildContext, listLiveEntities, pumpOne } from "./reindexPump.js";
 import type { ReindexDeps, ReindexEntityType, ReindexResult, ReindexScope } from "./reindexTypes.js";
@@ -194,6 +195,12 @@ async function runFull(d: ReindexDeps): Promise<ReindexResult> {
         { cause: err },
       );
     }
+
+    // 双库切换完全成功（POSIX rename 完成、新库已生效）后，清主库 AppSetting 的
+    // search.reindex_required 全局标志；写的是主库而非 search.db。catch 分支会 rethrow，
+    // 故失败/回退绝不会执行到这里。
+    const cfgStore = new EmbeddingConfigStore(d.prisma, d.jwtSecret);
+    await cfgStore.setReindexRequired(false);
 
     return {
       scope: {}, mode: "full", entities, chunksWritten, vecWritten, vecDebt,

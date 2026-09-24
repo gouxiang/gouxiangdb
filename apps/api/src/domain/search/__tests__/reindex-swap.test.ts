@@ -18,6 +18,7 @@ import {
 import { SearchIndexer } from "../indexer.js";
 import { getSearchStore, closeSearchStore, type SearchStore } from "../searchStore.js";
 import { startReindex, ReindexInProgressError, currentReindex } from "../reindex.js";
+import { EmbeddingConfigStore } from "../embeddingConfig.js";
 
 const JWT = "m5-s9-reindex-secret-at-least-16-chars";
 
@@ -200,6 +201,50 @@ describe("M5/S9 reindex 双库原子切换（真机演练）", () => {
     // 现役文件仍是旧快照（新实体未进入，rename 未发生）。
     expect(readOnlyCount(searchPath).ids).toEqual(beforeIds);
     expect(readOnlyCount(searchPath).ids).not.toContain("ri_second");
+  });
+
+  it("全量成功后清 search.reindex_required；失败/单实体保持原值", async () => {
+    // 成功路径：预置 true，runFull 切换成功后变 false。
+    await seedRecord(h, "ri_t", "ri_flag_ok", { ri_f0: "清零路径" });
+    const okPath = h.searchPathFor("flag-ok");
+    const okStore = h.openStore("flag-ok", false);
+    const cfg = new EmbeddingConfigStore(h.prisma, JWT);
+    await cfg.setReindexRequired(true);
+    expect(await cfg.isReindexRequired()).toBe(true);
+
+    await startReindex(
+      {
+        prisma: h.prisma, env: { ...process.env, GX_SEARCH_DB_PATH: okPath },
+        dataDir: h.tmpDir, appDir: process.cwd(), jwtSecret: JWT, searchPath: okPath, activeStore: okStore,
+      },
+      {},
+    );
+    expect(await cfg.isReindexRequired()).toBe(false);
+
+    // 失败路径：灌库炸时标志保持原值（true），不被清零。
+    await seedRecord(h, "ri_t", "ri_flag_fail", { ri_f0: "保留标志" });
+    const failPath = h.searchPathFor("flag-fail");
+    const failStore = h.openStore("flag-fail", false);
+    await cfg.setReindexRequired(true);
+    await expect(startReindex(
+      {
+        prisma: h.prisma, env: { ...process.env, GX_SEARCH_DB_PATH: failPath },
+        dataDir: h.tmpDir, appDir: process.cwd(), jwtSecret: JWT, searchPath: failPath, activeStore: failStore,
+        onProgress: () => { throw new Error("boom before clear"); },
+      },
+      {},
+    )).rejects.toThrow(/active index untouched/);
+    expect(await cfg.isReindexRequired()).toBe(true);
+
+    // 单实体原地重建不清零全局标志。
+    await seedRecord(h, "ri_t", "ri_flag_single", { ri_f0: "单实体不动标志" });
+    const singlePath = h.searchPathFor("flag-single");
+    const singleStore = h.openStore("flag-single", false);
+    await startReindex(
+      { prisma: h.prisma, env: { ...process.env, GX_SEARCH_DB_PATH: singlePath }, dataDir: h.tmpDir, appDir: process.cwd(), jwtSecret: JWT, searchPath: singlePath, activeStore: singleStore },
+      { type: "record", entityId: "ri_flag_single" },
+    );
+    expect(await cfg.isReindexRequired()).toBe(true);
   });
 
   it("真实进程单例路径：全量切换后 close->惰性重开，新单例读到新内容", async () => {

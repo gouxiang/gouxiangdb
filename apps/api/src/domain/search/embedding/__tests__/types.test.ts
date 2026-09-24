@@ -25,14 +25,32 @@ describe("parseEmbeddingMode", () => {
   });
 });
 
-describe("buildEmbeddingsEndpoint /v1 归一（不拼双 /v1）", () => {
+describe("buildEmbeddingsEndpoint 版本段归一（/v1 保留、/v3 含 /api/plan/v3、无版本兜底 /v1）", () => {
   it.each([
+    // 既有 /v1 行为不回归
     ["https://h/v1", "https://h/v1/embeddings"],
     ["https://h/v1/", "https://h/v1/embeddings"],
     ["https://h", "https://h/v1/embeddings"],
     ["https://h/", "https://h/v1/embeddings"],
     ["https://h/v1//", "https://h/v1/embeddings"],
     ["  https://gw/v1/ ", "https://gw/v1/embeddings"],
+    // 火山方舟 /api/v3：末段是版本段，原样保留
+    [
+      "https://ark.cn-beijing.volces.com/api/v3",
+      "https://ark.cn-beijing.volces.com/api/v3/embeddings",
+    ],
+    // /api/plan/v3：只看末段，中间路径不干扰
+    [
+      "https://ark.cn-beijing.volces.com/api/plan/v3",
+      "https://ark.cn-beijing.volces.com/api/plan/v3/embeddings",
+    ],
+    // /v2 同样识别；非版本段 /api/plan 兜底补 /v1
+    ["https://h/api/v2", "https://h/api/v2/embeddings"],
+    ["https://h/api/plan", "https://h/api/plan/v1/embeddings"],
+    // 尾斜杠 + query/hash 健壮保留
+    ["https://ark.cn-beijing.volces.com/api/v3/", "https://ark.cn-beijing.volces.com/api/v3/embeddings"],
+    ["https://h/v1?proxy=1", "https://h/v1/embeddings?proxy=1"],
+    ["https://h/api/v3#frag", "https://h/api/v3/embeddings#frag"],
   ])("%s -> %s", (base, want) => {
     expect(buildEmbeddingsEndpoint(base)).toBe(want);
   });

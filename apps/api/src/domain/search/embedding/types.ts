@@ -101,17 +101,27 @@ export function cloudConfigUsable(cfg: Partial<CloudProviderConfig> | undefined)
 }
 
 /**
- * 归一 baseURL + path，杜绝双 /v1（§1.7/§4.4）：
+ * 归一 baseURL + path（§1.7/§4.4），兼容火山方舟 /api/v3 等版本段：
  *   - 去掉末尾斜杠；
- *   - 已以 /v1 结尾则直接用，否则补 /v1；
+ *   - pathname 末段若是版本段（/v1、/v2、/v3…，正则 /^\/v\d+$/）则原样保留；
+ *   - 末段不是版本段（根域名、/api/plan 等）则兜底补 /v1；
  *   - 再拼 /embeddings。
- * 例：https://h/v1/ -> https://h/v1/embeddings；https://h -> https://h/v1/embeddings。
- * 纯字符串函数，不校验可达性。
+ * 例：
+ *   https://h/v1/                       -> https://h/v1/embeddings
+ *   https://h                          -> https://h/v1/embeddings
+ *   https://ark.../api/v3              -> https://ark.../api/v3/embeddings
+ *   https://ark.../api/plan/v3         -> https://ark.../api/plan/v3/embeddings
+ * query/hash（?x=1#f）原样保留在末尾。纯字符串函数，不校验可达性。
  */
 export function buildEmbeddingsEndpoint(baseURL: string): string {
-  const trimmed = baseURL.trim().replace(/\/+$/, "");
-  const root = /\/v1$/i.test(trimmed) ? trimmed : `${trimmed}/v1`;
-  return `${root}/embeddings`;
+  const raw = baseURL.trim();
+  const sep = raw.search(/[?#]/);
+  const cut = sep === -1 ? raw.length : sep;
+  const pathPart = raw.slice(0, cut).replace(/\/+$/, "");
+  const suffix = raw.slice(cut);
+  const lastSeg = pathPart.slice(pathPart.lastIndexOf("/") + 1);
+  const root = /^v\d+$/.test(lastSeg) ? pathPart : `${pathPart}/v1`;
+  return `${root}/embeddings${suffix}`;
 }
 
 /** provider/网络失败的错误分类，驱动重试与 unhealthy 决策。 */
