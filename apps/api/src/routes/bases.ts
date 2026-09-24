@@ -21,11 +21,7 @@ import { permissionsForRole, type Role, type ViewConfig } from "@gx/shared-types
 import { makeOptions } from "../domain/fieldService.js";
 import { syncNavFromEntitiesTx, softDeleteSubtreeTx } from "../domain/nav/sync.js";
 import { nodeId } from "../domain/nav/backfill.js";
-import {
-  syncBaseMemberTx,
-  removeLegacyProjectionTx,
-  LEGACY_REASONS,
-} from "../domain/authz/projection.js";
+import { syncBaseMemberTx } from "../domain/authz/projection.js";
 import { assertCanCreateLibrary } from "../domain/org/createLibraryGuard.js";
 import { resolveManyAccess, visibleLibraryIds } from "../domain/authz/libraryPolicy.js";
 import { libraryVisibility, setShareEnabled } from "../domain/authz/libraryVisibility.js";
@@ -186,7 +182,7 @@ bases.post("/", async (c) => {
     await syncBaseMemberTx(tx, { oldRowId: ownerMember.id, baseId: b.id, userId, role: "owner" });
     // 取消库主后，库权限一律走「角色 × 库」：建库同事务给超级管理员/管理员补视野行，
     // 否则管理员建完库连一张表都加不上（管理权只来自 role_library_scope.canManage）。
-    await seedAdminScopeTx(tx, "base", b.id);
+    await seedAdminScopeTx(tx, "base", b.id, userId);
     await createStarterTableTx(tx, b.id, userId);
     await syncNavFromEntitiesTx(tx);
     // 第三批导航重构后一级导航直接读 bases/knowledge_bases，不再读 menu_items，

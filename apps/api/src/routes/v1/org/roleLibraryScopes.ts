@@ -21,6 +21,7 @@ import { requireOrgAction } from "../../../middleware/authActive.js";
 import type { LibraryKind, PutLibraryScopeInput } from "@gx/shared-types";
 import { parseScopeInput, toScopeDTO } from "../../../domain/authz/libraryScopeConfig.js";
 import { libraryVisibility } from "../../../domain/authz/libraryVisibility.js";
+import { rebuildScopePoliciesTx } from "../../../domain/authz/scopeDoubleWrite.js";
 
 export const libraryScopeRoutes = new Hono();
 
@@ -128,8 +129,12 @@ libraryScopeRoutes.put("/library-scopes", requireOrgAction("edit_roles"), async 
           });
         }
       }
-      void actorId;
-      return tx.roleLibraryScope.findMany({ where: { roleId }, orderBy: { updatedAt: "desc" } });
+      // P1/S5：scope 行落定后，同事务按写后完整行集重建 auth_policies 投影（引擎仍 off，只写不读）。
+      const finalRows = await tx.roleLibraryScope.findMany({
+        where: { roleId }, orderBy: { updatedAt: "desc" },
+      });
+      await rebuildScopePoliciesTx(tx, roleId, finalRows, actorId);
+      return finalRows;
     });
     const names = await libraryNames(saved);
     return c.json({

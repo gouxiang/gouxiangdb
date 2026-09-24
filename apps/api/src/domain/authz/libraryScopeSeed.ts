@@ -13,12 +13,17 @@
 import type { Prisma } from "@prisma/client";
 import type { LibraryKind } from "@gx/shared-types";
 import { ADMIN_ROLE_ID, SUPER_ADMIN_ROLE_ID } from "../org/roles.js";
+import { projectAdminForNewLibraryTx } from "./scopeDoubleWrite.js";
 
-/** 建库/建知识库事务内调用；已存在则不动（PUT 语义与管理员手工勾选的旧值都不覆盖）。 */
+/**
+ * 建库/建知识库事务内调用；已存在则不动（PUT 语义与管理员手工勾选的旧值都不覆盖）。
+ * 同时为 role_admin 投影【仅此新库】初始策略（只 upsert 不删除）；operatorUserId 记 createdBy。
+ */
 export async function seedAdminScopeTx(
   tx: Prisma.TransactionClient,
   kind: LibraryKind,
   libraryId: string,
+  operatorUserId: string,
 ): Promise<void> {
   for (const roleId of [SUPER_ADMIN_ROLE_ID, ADMIN_ROLE_ID]) {
     await tx.roleLibraryScope.upsert({
@@ -27,4 +32,5 @@ export async function seedAdminScopeTx(
       update: {},
     });
   }
+  await projectAdminForNewLibraryTx(tx, kind, libraryId, operatorUserId);
 }

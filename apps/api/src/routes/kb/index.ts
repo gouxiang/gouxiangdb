@@ -26,7 +26,7 @@ import {
 } from "../../validators/entity-icon.js";
 import { requireKb, shadowKbAction } from "./shared.js";
 import { resolveKbAccess, resolveManyAccess, visibleLibraryIds } from "../../domain/authz/libraryPolicy.js";
-import { libraryVisibility, setShareEnabled } from "../../domain/authz/libraryVisibility.js";
+import { setShareEnabled } from "../../domain/authz/libraryVisibility.js";
 import { seedAdminScopeTx } from "../../domain/authz/libraryScopeSeed.js";
 import { assertCanCreateLibrary } from "../../domain/org/createLibraryGuard.js";
 import { membersRoutes } from "./members.js";
@@ -107,7 +107,7 @@ kb.post("/", async (c) => {
         },
       });
       // 取消库主后同建库：给超级管理员/管理员补「角色 × 知识库」视野行（管理权唯一来源）。
-      await seedAdminScopeTx(tx, "kb", k.id);
+      await seedAdminScopeTx(tx, "kb", k.id, userId);
       await syncNavFromEntitiesTx(tx);
       // 与建库同理：一级导航已改为直接读 knowledge_bases，不再靠 menu_items shortcut，
       // 自动写入随「导航编排」一并下线（ensureEntityShortcutTx 已从 domain/nav/menu.ts 摘除）。
