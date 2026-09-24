@@ -174,6 +174,8 @@ function SideRail({
   header,
   /** L1 行尾「…」菜单里的「重命名」：需要 QueryClient，故在壳层实现后注入。 */
   onRename,
+  /** 透传给 PrimaryNav：浮出/抽屉档 L2 收起时，点当前容器临时唤出 L2。 */
+  onPeekCurrent,
 }: {
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -186,6 +188,7 @@ function SideRail({
   navError?: boolean;
   header?: ReactNode;
   onRename?: (kind: "base" | "kb", id: string, name: string) => Promise<void>;
+  onPeekCurrent?: () => void;
 }) {
   return (
     <aside
@@ -203,6 +206,7 @@ function SideRail({
           collapsed={collapsed}
           header={header}
           onRename={onRename}
+          onPeekCurrent={onPeekCurrent}
         />
       </div>
       <FooterNav collapsed={collapsed} />
@@ -299,6 +303,12 @@ export function WorkspaceShell() {
     writeL2Collapsed(false);
   }, []);
 
+  /**
+   * 临时唤出（peek）：会话态，只置 l2Peeked，不写盘、不改 l2Intent；
+   * 换路由由既有 effect 复位。浮出/抽屉档 L2 收起时点当前容器使用。
+   */
+  const peekL2 = useCallback(() => setL2Peeked(true), []);
+
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
@@ -338,6 +348,12 @@ export function WorkspaceShell() {
   const drawer = isDrawerTier(tier);
   // R-D-31 / R-D-32：768–1279 L2 是覆盖内容区左侧的浮出面板
   const floatingL2 = isFloatingL2Tier(tier);
+
+  // 仅浮出/抽屉档且 L2 当前收起、确有容器时，才给 PrimaryNav 注入 peek 口；
+  // 常驻静态档或已展开时不传（点击仍为普通导航）。
+  const peekCurrent =
+    (floatingL2 || drawer) && !showL2 && activeContainer ? peekL2 : undefined;
+
   // R-D-32：768–1023 L1 锁定 56 图标档（用户手动折叠态仍然保留，回到 ≥1024 时还原）
   const l1Collapsed = tier === "md" || collapsed;
   const l1Width = l1Collapsed ? L1_WIDTH_COLLAPSED : L1_WIDTH_EXPANDED;
@@ -396,6 +412,7 @@ export function WorkspaceShell() {
                   navError={basesError || kbsError}
                   header={<NavLibraryBlock active={activeLibrary} collapsed={collapsed} />}
                   onRename={renameLibrary}
+                  onPeekCurrent={peekCurrent}
                 />
                 {showL2 && secondary && (
                   <div className="absolute left-0 top-0 bottom-0 gx-z-drawer shadow-gx-lg">
@@ -424,6 +441,7 @@ export function WorkspaceShell() {
                 : null
             }
             onRename={renameLibrary}
+            onPeekCurrent={peekCurrent}
           />
         )}
 

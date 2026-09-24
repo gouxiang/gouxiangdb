@@ -657,7 +657,8 @@ function FieldEditorSheet({
                       }}
                       options={[
                         { value: "", label: "请选择目标表" },
-                        ...tables.filter((t) => t.id !== tableId).map((t) => ({ value: t.id, label: t.name })),
+                        // 后端允许同表自引用关联，普通关联字段不再排除本表（subtable 段仍排除）
+                        ...tables.map((t) => ({ value: t.id, label: t.name })),
                       ]}
                     />
                   </FormField>

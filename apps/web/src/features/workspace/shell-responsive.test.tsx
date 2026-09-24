@@ -83,3 +83,30 @@ describe("R-D-30/31/32/33 壳层断点接线", () => {
     expect(isFloatingL2Tier("2xl")).toBe(false);
   });
 });
+
+describe("l2Peeked 接线：点当前一级容器临时唤出 L2", () => {
+  const shell = read("./WorkspaceShell.tsx");
+  const primary = read("./PrimaryNav.tsx");
+
+  it("壳层把 peek 置为会话态（setL2Peeked(true)、不写盘），并在浮出/抽屉档且 L2 收起时注入", () => {
+    // 真正的接线点：peekL2 调 setL2Peeked(true)
+    expect(shell).toContain("const peekL2 = useCallback(() => setL2Peeked(true), []);");
+    // 仅浮出/抽屉档 + L2 收起 + 有容器才给口
+    expect(shell).toContain("(floatingL2 || drawer) && !showL2 && activeContainer ? peekL2 : undefined");
+    // 两份 SideRail（抽屉内 / 常规）都透传
+    expect(shell).toContain("onPeekCurrent={peekCurrent}");
+  });
+
+  it("PrimaryNav 点当前已激活行调 onPeekCurrent 唤出而不重复导航；点别的库仍跳转", () => {
+    expect(primary).toContain("onPeekCurrent?: () => void;");
+    // 点击分支：active 且有 peek 口 → peek 并 return，否则 onNavigate(href)
+    expect(primary).toContain("if (active && onPeekCurrent) {");
+    expect(primary).toContain("onPeekCurrent();");
+    expect(primary).toContain("onNavigate(href);");
+  });
+
+  it("换路由复位 peek（复用既有 effect，会话态不跨路由残留）", () => {
+    expect(shell).toContain("setL2Peeked(false);");
+    expect(shell).toContain("}, [location.pathname]);");
+  });
+});

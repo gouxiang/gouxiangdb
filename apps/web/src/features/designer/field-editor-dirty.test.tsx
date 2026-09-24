@@ -185,6 +185,24 @@ describe("源码回归：新建走 POST、编辑脏检查、切换确认（F-01�
     expect(src).toContain("data.linkFieldId = idOrNull(linkFieldId)");
     expect(src).toContain("data.lookupFieldId = idOrNull(subFieldId)");
   });
+
+  it("普通关联字段目标表下拉放开本表（同表自引用），subtable 段仍排除本表", () => {
+    // 普通 link 段：{isRelated && ( 到 {isLookupLike && ( 之间
+    const iLink = src.indexOf("{isRelated && (");
+    const iLookup = src.indexOf("{isLookupLike && (");
+    expect(iLink).toBeGreaterThan(-1);
+    expect(iLookup).toBeGreaterThan(iLink);
+    const linkSection = src.slice(iLink, iLookup);
+    // 放开本表：不再 filter 掉 tableId，直接 map 全部表
+    expect(linkSection).not.toContain(".filter((t) => t.id !== tableId)");
+    expect(linkSection).toContain("...tables.map((t) => ({ value: t.id, label: t.name }))");
+
+    // subtable 段：从 {type === "subtable" && ( 起取窗口，仍排除本表
+    const iSub = src.indexOf('{type === "subtable" && (');
+    expect(iSub).toBeGreaterThan(-1);
+    const subSection = src.slice(iSub, iSub + 4000);
+    expect(subSection).toContain(".filter((t) => t.id !== tableId)");
+  });
 });
 
 describe("源码回归：字段名称长度上限（后端 name 最大 80，超限 400 too_big）", () => {

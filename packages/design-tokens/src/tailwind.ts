@@ -9,6 +9,16 @@ import { colors, spacing, radius, fontSize, fontWeight, shadow, zIndex } from ".
 export const gxTailwindConfig: Partial<Config> = {
   theme: {
     extend: {
+      // 显式断点，与 apps/web/src/lib/breakpoint.ts 的 JS 档位对齐：
+      // 2xl=1440（此前未声明，走 Tailwind 默认 1536，导致 1440–1535 区间 CSS/JS 口径不一致）。
+      // 放在 extend.screens：与默认 screens 浅合并，五键齐全即整体覆盖默认值。
+      screens: {
+        sm: "640px",
+        md: "768px",
+        lg: "1024px",
+        xl: "1280px",
+        "2xl": "1440px",
+      },
       colors: {
         gx: {
           accent: colors.accent,

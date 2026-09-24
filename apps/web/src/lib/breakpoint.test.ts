@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { tierOfWidth, isDrawerTier, isFloatingL2Tier, TIER_MIN_WIDTH } from "./breakpoint";
 import { L2_WIDTH, L2_WIDTH_COMPACT } from "../features/workspace/lib/l1-collapse";
+import { gxTailwindConfig } from "@gx/design-tokens/tailwind";
 
 describe("R-D-29~33 五档判定（QA 走查档位）", () => {
   it("QA 五档：1600 / 1366 / 1152 / 900 / 390 分别落到 2xl / xl / lg / md / sm", () => {
@@ -52,5 +53,20 @@ describe("档位语义（壳层据此切换结构）", () => {
   it("R-D-30：1280–1439 档 L2 压缩宽 = 208，常驻宽仍为 240", () => {
     expect(L2_WIDTH).toBe(240);
     expect(L2_WIDTH_COMPACT).toBe(208);
+  });
+});
+
+describe("Tailwind screens 与 JS 档位同源", () => {
+  it("gxTailwindConfig 的 screens 五档与 TIER_MIN_WIDTH 对齐，2xl=1440（非默认 1536）", () => {
+    const screens = gxTailwindConfig.theme?.extend?.screens as
+      | Record<string, string>
+      | undefined;
+    expect(screens).toEqual({
+      sm: "640px",
+      md: "768px",
+      lg: "1024px",
+      xl: "1280px",
+      "2xl": "1440px",
+    });
   });
 });

@@ -101,6 +101,7 @@ export function PrimaryNav({
   collapsed = false,
   header,
   onRename,
+  onPeekCurrent,
 }: {
   /** 数据库列表（壳层 useBases() 的结果）。 */
   bases?: readonly LibraryEntity[];
@@ -124,6 +125,11 @@ export function PrimaryNav({
    * 不传时菜单里只保留「设置」一项。
    */
   onRename?: (kind: "base" | "kb", id: string, name: string) => Promise<void>;
+  /**
+   * 浮出/抽屉档且 L2 收起时，点击「当前所在容器」临时唤出 L2（会话态、换路由复位）。
+   * 由壳层在满足条件时注入；不传或点的不是当前行则仍是纯导航。纯 UI 状态，无数据查询。
+   */
+  onPeekCurrent?: () => void;
 }) {
   const navigate = useNavigate();
   // 重命名弹窗挂在导航这一层（而不是每行各挂一个）：同一时刻只会有一个在改，
@@ -195,6 +201,7 @@ export function PrimaryNav({
               iconOnly={collapsed}
               onNavigate={navigate}
               onRename={onRename ? (r) => setRenaming({ kind: r.entityKind, id: r.entityId, name: r.label }) : undefined}
+              onPeekCurrent={onPeekCurrent}
             />
           ))}
         </nav>
@@ -240,6 +247,7 @@ function LibraryRow({
   iconOnly,
   onNavigate,
   onRename,
+  onPeekCurrent,
 }: {
   row: LibraryNavRow;
   active: boolean;
@@ -247,6 +255,8 @@ function LibraryRow({
   onNavigate: (href: string) => void;
   /** 不传（壳层没注入重命名回调）时菜单里只有「设置」。 */
   onRename?: (row: Extract<LibraryNavRow, { kind: "item" }>) => void;
+  /** 仅壳层处于浮出/抽屉档且 L2 收起时注入：点当前行临时唤出 L2，不导航。 */
+  onPeekCurrent?: () => void;
 }) {
   if (row.kind === "group") {
     return <GroupHeaderRow label={row.label} iconOnly={iconOnly} />;
@@ -274,7 +284,15 @@ function LibraryRow({
       <div className={cx("group flex items-center gap-1", iconOnly && "justify-center")}>
         <button
           type="button"
-          onClick={() => onNavigate(href)}
+          onClick={() => {
+            // 点当前所在容器且壳层给了 peek 口 → 临时唤出 L2（不重复导航到同一路由）；
+            // 点别的库仍是普通跳转。
+            if (active && onPeekCurrent) {
+              onPeekCurrent();
+              return;
+            }
+            onNavigate(href);
+          }}
           title={iconOnly ? row.label : undefined}
           aria-label={row.label}
           data-nav-row="item"
