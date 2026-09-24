@@ -29,30 +29,25 @@ import type {
   FieldAccess,
   LibraryAccessDTO,
   LibraryKind,
-  LibraryScopeConfig,
-  PutLibraryScopeInput,
-  RoleLibraryScopeDTO,
   TableAccess,
 } from "@gx/shared-types";
 import {
-  EMPTY_LIBRARY_SCOPE_CONFIG,
   EMPTY_TABLE_ACCESS,
-  FIELD_ACCESS_RANK,
   FULL_TABLE_ACCESS,
   KB_CONTENT_KEY,
   READONLY_TABLE_ACCESS,
 } from "@gx/shared-types";
-import { parseConfig } from "./libraryScopeConfig.js";
 import { effectiveRoleRows } from "../org/authorization.js";
 import { ADMIN_ROLE_ID, SUPER_ADMIN_ROLE_ID } from "../org/roles.js";
 import { HttpError } from "../../httpError.js";
+// P1/S4 纯提取：合成部分（零 IO）搬到 scopeSynthesize.ts；在此 import 并 re-export，
+// 既有从 libraryPolicy 引用 synthesizeAccess 的调用点保持不变。
+import {
+  WILDCARD_TABLE,
+  synthesizeAccess,
+} from "./scopeSynthesize.js";
 
-/**
- * 通配哨兵：access.tables 里出现这个 key = 对该库【全表】全权限。
- * 由「可管理库」推导而来——管理权是库级的，不逐表展开，"勾了可管理却管不了第五张表"
- * 只会制造无法解释的洞。
- */
-const WILDCARD_TABLE = "*";
+export { permOr, maxFieldAccess, synthesizeAccess, WILDCARD_TABLE } from "./scopeSynthesize.js";
 
 const SUPER_ACCESS: LibraryAccessDTO = {
   visible: true,
@@ -66,70 +61,7 @@ const SUPER_ACCESS: LibraryAccessDTO = {
 };
 
 // ---------------------------------------------------------------------------
-// 纯合成（不碰库，可直接单测）
-// ---------------------------------------------------------------------------
-
-function permOr(a: TableAccess, b: TableAccess): TableAccess {
-  return {
-    read: a.read || b.read,
-    create: a.create || b.create,
-    update: a.update || b.update,
-    delete: a.delete || b.delete,
-  };
-}
-
-function maxFieldAccess(a: FieldAccess, b: FieldAccess): FieldAccess {
-  return FIELD_ACCESS_RANK[a] >= FIELD_ACCESS_RANK[b] ? a : b;
-}
-
-/** 由若干条角色视野合成一个人在某个库上的最终裁决（不含超级管理员/管理员短路）。 */
-export function synthesizeAccess(
-  rows: Array<{ canManage: number; visible: number; canShare: number; config: string }>,
-): LibraryAccessDTO {
-  const tables: Record<string, TableAccess> = {};
-  const fields: Record<string, Record<string, FieldAccess>> = {};
-  let visible = false;
-  let canManage = false;
-  let canShare = false;
-
-  for (const row of rows) {
-    visible = visible || row.visible === 1;
-    canManage = canManage || row.canManage === 1;
-    canShare = canShare || row.canShare === 1;
-    const cfg = parseConfig(row.config);
-    for (const [tableId, partial] of Object.entries(cfg.tables)) {
-      tables[tableId] = permOr(tables[tableId] ?? EMPTY_TABLE_ACCESS, { ...EMPTY_TABLE_ACCESS, ...partial });
-    }
-    for (const [tableId, perField] of Object.entries(cfg.fields)) {
-      const merged = fields[tableId] ?? {};
-      for (const [fieldId, mode] of Object.entries(perField)) {
-        if (typeof mode !== "string") continue;
-        merged[fieldId] = merged[fieldId] ? maxFieldAccess(merged[fieldId]!, mode) : mode;
-      }
-      fields[tableId] = merged;
-    }
-  }
-
-  if (canManage) tables[WILDCARD_TABLE] = FULL_TABLE_ACCESS;
-
-  return {
-    visible,
-    canManage,
-    canDeleteLibrary: false, // 硬规则 A：配置永远给不了删库
-    // 硬规则 C：库级总闸的开关权只跟管理权走。canShare 位【不参与】——
-    // "让他发链接"不等于"让他决定这个库能不能对外"，两者分开授权、分开判定。
-    canToggleShare: canManage,
-    // 建/管分享链接权：能管自然能发（存量 canManage=1 / canShare=0 的行升级后不得静默失去
-    // 分享权，故取 || 而非只看 canShare），再加上被显式授予 canShare 的角色。
-    canShare: canManage || canShare,
-    source: visible || canManage ? "role_scope" : "none",
-    tables,
-    fields,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// 读取器：路由/守卫一律通过这些函数取裁决结果
+// 读取器：路由/守卫一律通过这些函数取裁决结果（合成见 scopeSynthesize.ts）
 // ---------------------------------------------------------------------------
 
 /** 某张表的四枚数据动作。通配优先 → 精确配置 → 库级默认（可见即只读）。 */

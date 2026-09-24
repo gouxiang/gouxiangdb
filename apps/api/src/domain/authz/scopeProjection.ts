@@ -10,6 +10,10 @@ import type { FieldMask, ResourceAction } from "@gx/shared-types";
 import { KB_CONTENT_KEY, toActionString } from "@gx/shared-types";
 import { nodeId } from "../nav/backfill.js";
 import { parseConfig } from "./libraryScopeConfig.js";
+import { synthesizeAccess } from "./scopeSynthesize.js";
+
+/** 系统管理员角色 id（org/roles.ts ADMIN_ROLE_ID，本地常量避免 import 其 prisma 模块）。 */
+const ADMIN_ROLE_ID = "role_admin";
 
 /** 一条 auth_policies 投影（actions/fieldMask 已序列化为存储串）。 */
 export interface ProjectedPolicy {
@@ -162,4 +166,91 @@ export function projectScopeRow(
   shape: LiveSchemaShape,
 ): ProjectedPolicy[] {
   return row.libraryKind === "kb" ? projectKb(row) : projectBase(row, shape);
+}
+
+// ---------- P1/S4：管理员隐含投影 ----------
+
+export interface ImplicitAdminInput {
+  bases: ReadonlyArray<{ libraryId: string; shape: LiveSchemaShape }>;
+  kbs: ReadonlyArray<{ libraryId: string }>;
+  /** role_admin 现有全部 scope 行（纯函数不查库，由调用方传入；缺省空数组）。 */
+  adminScopeRows: ReadonlyArray<ScopeProjectionInput>;
+}
+
+/**
+ * 由 scope 行合成 dto 并施加【第二代 admin 覆盖】：只强制 visible/canShare/canToggleShare，
+ * 不强制 canManage，不给删库（libraryPolicy.resolve 的管理员分支逐字复现）。
+ */
+function adminDtoFor(
+  rows: ReadonlyArray<ScopeProjectionInput>,
+): ReturnType<typeof synthesizeAccess> {
+  const dto = synthesizeAccess(
+    rows.map((r) => ({
+      canManage: r.canManage, visible: r.visible, canShare: r.canShare, config: r.config,
+    })),
+  );
+  return { ...dto, visible: true, canToggleShare: true, canShare: true };
+}
+
+const rowsFor = (
+  adminScopeRows: ReadonlyArray<ScopeProjectionInput>,
+  libraryKind: "base" | "kb", libraryId: string,
+): ScopeProjectionInput[] =>
+  adminScopeRows.filter(
+    (r) => r.libraryKind === libraryKind && r.libraryId === libraryId,
+  );
+
+/** 由 tableAccessOf 语义（wildcard→精确→visible 默认）推出动作集，comment 跟随 c/u/d。 */
+function actionsFromTableAccess(ta: {
+  read: boolean; create: boolean; update: boolean; delete: boolean;
+}): ResourceAction[] {
+  const actions: ResourceAction[] = [];
+  if (ta.read) actions.push("r");
+  if (ta.create) actions.push("c");
+  if (ta.update) actions.push("u");
+  if (ta.delete) actions.push("d");
+  if (ta.create || ta.update || ta.delete) actions.push("comment");
+  return actions;
+}
+
+/**
+ * 管理员（role_admin）对全部活库/活表的隐含授权投影，逐字节对齐第二代 admin 口径：
+ * 进所有库默认只读；管理权仍只来自其 scope 行 canManage；永不投影删库。
+ * subjectId=role_admin、reason=scope:role（与 scope 同源，便于 replaceScopePoliciesTx 对账）。
+ * 绝不生成 role_owner（超级管理员全权含删库，只走硬短路）。
+ */
+export function projectImplicitAdmin(input: ImplicitAdminInput): ProjectedPolicy[] {
+  const out: ProjectedPolicy[] = [];
+
+  for (const { libraryId, shape } of input.bases) {
+    const dto = adminDtoFor(rowsFor(input.adminScopeRows, "base", libraryId));
+    for (const tableId of shape.tableIds) {
+      const ta = dto.tables["*"] ?? dto.tables[tableId]
+        ?? { read: dto.visible, create: false, update: false, delete: false };
+      const actions = actionsFromTableAccess(ta);
+      if (dto.canManage) actions.push("manage_schema");
+      if (actions.length === 0) continue;
+      const adminRow = rowsFor(input.adminScopeRows, "base", libraryId)[0];
+      const mask = buildFieldMask(
+        tableId, shape.fieldIdsByTable.get(tableId) ?? [],
+        parseConfig(adminRow?.config ?? "{}").fields as FieldsConfig,
+      );
+      out.push(scopePolicy(nodeId("table", tableId), ADMIN_ROLE_ID, actions, mask));
+    }
+    const libActs: ResourceAction[] = ["manage_share"]; // admin canShare 恒真
+    if (dto.canManage) libActs.push("manage_table");
+    out.push(scopePolicy(nodeId("base", libraryId), ADMIN_ROLE_ID, libActs, null));
+  }
+
+  for (const { libraryId } of input.kbs) {
+    const dto = adminDtoFor(rowsFor(input.adminScopeRows, "kb", libraryId));
+    const ta = dto.tables["*"] ?? dto.tables[KB_CONTENT_KEY]
+      ?? { read: dto.visible, create: false, update: false, delete: false };
+    const actions = actionsFromTableAccess(ta);
+    actions.push("manage_share"); // admin canShare 恒真
+    if (dto.canManage) actions.push("manage_table");
+    out.push(scopePolicy(nodeId("kb", libraryId), ADMIN_ROLE_ID, actions, null));
+  }
+
+  return out;
 }
