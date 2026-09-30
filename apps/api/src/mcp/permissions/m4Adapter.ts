@@ -11,6 +11,7 @@
 // 评审纪律（§3-3）：本文件是 mcp/** 内唯一的 M4 边界；只把 prisma 客户端**作为参数**传给 M4 函数，
 // 自身不做资源裸查（无 `prisma.<model>` 调用）；资源判定全部经 M4。
 
+import { canCreateLibraryNow } from "../../domain/org/createLibraryGuard.js";
 import { prisma } from "../../db.js";
 import type { AuthzClient } from "../../domain/authz/types.js";
 import { nodeVisibleInPrepared, prepareScope, type PreparedScope } from "../../domain/authz/scope.js";
@@ -104,6 +105,11 @@ export function createMcpPermissionPort(
         writableAll: cap.writableAll,
         writableFields: [...cap.writableFields].sort(),
       };
+    },
+
+    async canCreateLibrary(): Promise<boolean> {
+      // 与 REST createLibraryGuard 同一判定真源（含无授予实例兜底）
+      return canCreateLibraryNow(subject.userId);
     },
   };
 }

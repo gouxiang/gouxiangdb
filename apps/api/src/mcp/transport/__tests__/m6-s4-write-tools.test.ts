@@ -145,8 +145,9 @@ describe("S4 record.delete_record", () => {
 });
 
 describe("S4 裁决 (b)：动作敏感闸门一（只写身份）", () => {
-  it("只写身份 tools/list **恰为写工具**（无任何读工具）——注册集 == 有效动作集", async () => {
+  it("只写身份 tools/list == 写工具 + 实例搭建工具（无读工具）——注册集 == 有效动作集", async () => {
     expect(await names(woToken)).toEqual([
+      "base.create_base", "kb.create_kb",
       "ping_echo", "record.create_record", "record.delete_record", "record.update_record",
     ]);
   });

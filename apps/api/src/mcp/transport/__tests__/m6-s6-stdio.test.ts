@@ -186,7 +186,7 @@ describe("S6 stdio 合法 PAT 握手（真 spawn + JSON-RPC）", () => {
     expect(tools, `tools/list 无响应；stderr=${stderr}`).toBeTruthy();
     const names = (tools!.result.tools as Array<{ name: string }>).map((t) => t.name).sort();
     // canvas:read 只读 PAT：恰为连接性工具 + canvas 读工具（写工具不注册）
-    expect(names).toEqual(["canvas.get_board", "ping_echo"]);
+    expect(names).toEqual(["base.create_base", "canvas.get_board", "kb.create_kb", "ping_echo"]);
 
     const res = lines.find((l) => l.id === 3);
     expect(res, `resources/list 无响应；stderr=${stderr}`).toBeTruthy();

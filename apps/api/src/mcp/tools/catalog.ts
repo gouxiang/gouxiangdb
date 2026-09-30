@@ -11,6 +11,7 @@ import { tableCreateTable, tableUpdateTable, tableDeleteTable } from "./tableBui
 import { fieldCreateField, fieldUpdateField, fieldDeleteField } from "./fieldBuild.tools.js";
 import { viewCreateView, viewUpdateView, viewDeleteView } from "./viewBuild.tools.js";
 import { docCreateDoc, canvasCreateCanvas } from "./contentBuild.tools.js";
+import { baseCreateBase, kbCreateKb } from "./libraryBuild.tools.js";
 import { recordCreateRecord, recordDeleteRecord, recordUpdateRecord, recordListRecords, recordQueryRecords, recordSearch } from "./record.tools.js";
 import { canvasGetBoard } from "./canvas.tools.js";
 import { canvasCommitElements } from "./canvasWrite.tools.js";
@@ -26,6 +27,7 @@ import {
   createFieldShape, updateFieldShape, deleteFieldShape,
   createViewShape, updateViewShape, deleteViewShape,
   createDocShape, createCanvasShape,
+  createBaseShape, createKbShape,
 } from "./buildSchemas.js";
 import { text, type ToolSpec } from "./types.js";
 
@@ -279,5 +281,29 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     },
     inputShape: commitElementsShape,
     run: canvasCommitElements,
+  },
+  {
+    meta: {
+      name: "base.create_base", title: "新建数据库",
+      description: "在实例下新建一个数据库（Base）：实例级 create_library 权限，单事务创建库、owner 投影与默认数据表。",
+      scopes: [],
+      family: null,
+      gate: async (port) => (port ? port.canCreateLibrary() : false),
+      readOnly: false,
+    },
+    inputShape: createBaseShape,
+    run: baseCreateBase,
+  },
+  {
+    meta: {
+      name: "kb.create_kb", title: "新建知识库",
+      description: "在实例下新建一个知识库：实例级 create_library 权限，单事务创建知识库与 owner 投影。",
+      scopes: [],
+      family: null,
+      gate: async (port) => (port ? port.canCreateLibrary() : false),
+      readOnly: false,
+    },
+    inputShape: createKbShape,
+    run: kbCreateKb,
   },
 ];

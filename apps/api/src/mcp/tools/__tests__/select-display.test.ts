@@ -69,6 +69,7 @@ function portWith(visibleFields: string[] | null): McpPermissionPort {
       visible: true, visibleAll: visibleFields === null, visibleFields, writableAll: true,
     })),
     writeFieldCapabilityOf: vi.fn(async () => ({ matched: true, writableAll: true, writableFields: [] })),
+    canCreateLibrary: vi.fn(async () => true),
   };
 }
 

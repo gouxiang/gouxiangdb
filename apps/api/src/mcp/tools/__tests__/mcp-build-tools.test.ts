@@ -46,6 +46,7 @@ function portFor(opts: { allow: string[]; canRead?: boolean }): McpPermissionPor
     fieldCapability: vi.fn(),
     fieldCapabilityOf: vi.fn(),
     writeFieldCapabilityOf: vi.fn(),
+    canCreateLibrary: vi.fn(async () => true),
   };
 }
 const ctx = (port: McpPermissionPort) => ({

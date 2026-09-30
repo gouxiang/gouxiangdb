@@ -97,14 +97,15 @@ describe("S3 四身份 tools/list 快照", () => {
   // 无论 scope 如何，注册集都一样且含写工具。
   const FULL_SET = [
     "field.create_field", "field.delete_field", "field.update_field",
+    "base.create_base",
     "ping_echo", "record.create_record", "record.delete_record", "record.list_records",
     "record.query_records", "record.update_record", "table.create_table",
     "table.delete_table", "table.get_schema", "table.list_bases", "table.update_table",
-    "view.create_view", "view.delete_view", "view.update_view",
-  ];
+    "view.create_view", "view.delete_view", "view.update_view", "kb.create_kb",
+  ].sort();
 
-  it("① 无权（族为空）-> 仅连接性工具（族可见集闸门，与令牌 scope 无关）", async () => {
-    expect(await toolNames(tokens.none!)).toEqual(["ping_echo"]);
+  it("① 无权（族为空）-> 连接性 + 实例搭建工具（本夹具无角色授予，canCreateLibrary 兜底放行）", async () => {
+    expect(await toolNames(tokens.none!)).toEqual(["base.create_base", "kb.create_kb", "ping_echo"]);
   });
 
   it("② 只读身份（有可见 base）-> 注册集由签发者动作决定（创建者兜底故含写工具）", async () => {

@@ -49,6 +49,7 @@ function portFor(write: McpWriteFieldCapability): McpPermissionPort {
     fieldCapability: vi.fn(),
     fieldCapabilityOf: vi.fn(),
     writeFieldCapabilityOf: vi.fn(async () => write),
+    canCreateLibrary: vi.fn(async () => true),
   };
 }
 

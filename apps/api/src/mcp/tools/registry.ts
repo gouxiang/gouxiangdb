@@ -202,6 +202,14 @@ export async function registerTools(server: McpServer, subject: { userId: string
       const vis = await familyVisible(deps.port ?? null, spec.meta.family, spec.meta, deps.onMetric);
       if (!vis.ok) continue; // 闸门一后半：族可见集为空/引擎故障 -> 不入册
       if (vis.truncated) deps.onMetric?.({ event: "mcp.gate1.scope_truncated", family: spec.meta.family, tool: spec.meta.name });
+    } else if (spec.meta.gate) {
+      // 实例级工具（family=null）：显式门按本请求端口判定；抛错按引擎故障缺席处理
+      try {
+        if (!(await spec.meta.gate(deps.port ?? null))) continue;
+      } catch (err) {
+        deps.onMetric?.({ event: "mcp.gate1.engine_error", tool: spec.meta.name, error: err instanceof Error ? err.message : String(err) });
+        continue;
+      }
     }
     registered.push(spec.meta.name);
     server.registerTool(

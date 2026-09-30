@@ -152,3 +152,27 @@ export const createCanvasShape = {
   confirm: z.literal(true).describe("写入确认；必须是字面量 true"),
   requestId,
 };
+
+// ---------- 实例搭建（create_library 实例动作，family=null） ----------
+
+/** base.create_base：新建 Base（实例级 create_library；默认带「数据表 1」）。 */
+export const createBaseShape = {
+  name: z.string().min(1).max(80).describe("数据库名（trim 后落库；全局唯一）"),
+  iconColor: z.string().optional(),
+  icon: z.string().nullable().optional().describe("自定义图标名（白名单）；null=默认"),
+  withStarter: z
+    .boolean()
+    .optional()
+    .describe("是否同时创建默认数据表（名称/数量/状态/日期/备注 + 网格视图）；缺省 true"),
+  confirm: z.literal(true).describe("写入确认；必须是字面量 true"),
+  requestId,
+};
+
+/** kb.create_kb：新建知识库（实例级 create_library）。 */
+export const createKbShape = {
+  name: z.string().min(1).max(80).describe("知识库名（trim 后落库；全局唯一）"),
+  iconColor: z.string().optional(),
+  icon: z.string().nullable().optional(),
+  confirm: z.literal(true).describe("写入确认；必须是字面量 true"),
+  requestId,
+};

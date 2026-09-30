@@ -105,18 +105,21 @@ afterAll(async () => {
 });
 
 describe("S5 doc 族注册与 scope 粗筛", () => {
-  it("读写 PAT：tools/list 恰含 4 个 doc 工具；无权限族工具不越界", async () => {
+  it("读写 PAT：tools/list 含 4 个 doc 工具 + 实例搭建工具（无角色授予，create_library 兜底）", async () => {
     expect(await names(rwToken)).toEqual([
-      "doc.append_blocks", "doc.delete_blocks", "doc.get_doc_blocks", "doc.update_block", "ping_echo",
+      "base.create_base", "doc.append_blocks", "doc.delete_blocks", "doc.get_doc_blocks",
+      "doc.update_block", "kb.create_kb", "ping_echo",
     ]);
   });
 
-  it("只读 PAT：仅 get_doc_blocks（写工具不入册）", async () => {
-    expect(await names(roToken)).toEqual(["doc.get_doc_blocks", "ping_echo"]);
+  it("只读 PAT：get_doc_blocks + ping + 实例工具（写工具不入册；create_library 与读身份无关）", async () => {
+    expect(await names(roToken)).toEqual(["base.create_base", "doc.get_doc_blocks", "kb.create_kb", "ping_echo"]);
   });
 
-  it("action 敏感闸门一：只写身份 tools/list 恰为写工具（无 get_doc_blocks）", async () => {
-    expect(await names(woToken)).toEqual(["doc.append_blocks", "doc.delete_blocks", "doc.update_block", "ping_echo"]);
+  it("action 敏感闸门一：只写身份 tools/list 为写工具 + 实例工具（无 get_doc_blocks）", async () => {
+    expect(await names(woToken)).toEqual([
+      "base.create_base", "doc.append_blocks", "doc.delete_blocks", "doc.update_block", "kb.create_kb", "ping_echo",
+    ]);
   });
 
   it("只读 PAT 直调写工具 -> UNKNOWN_TOOL（未注册，不泄漏存在性）", async () => {

@@ -5,7 +5,6 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import { prisma, withWriteTx } from "../db.js";
-import type { DbTx } from "../db.js";
 import {
   requireUserId,
   requireCanView,
@@ -17,15 +16,13 @@ import {
   permit,
   HttpError,
 } from "../guards.js";
-import { permissionsForRole, type Role, type ViewConfig } from "@gx/shared-types";
-import { makeOptions } from "../domain/fieldService.js";
-import { syncNavFromEntitiesTx, softDeleteSubtreeTx } from "../domain/nav/sync.js";
+import { permissionsForRole, type Role } from "@gx/shared-types";
+import { softDeleteSubtreeTx, syncNavFromEntitiesTx } from "../domain/nav/sync.js";
 import { nodeId } from "../domain/nav/backfill.js";
-import { syncBaseMemberTx } from "../domain/authz/projection.js";
 import { assertCanCreateLibrary } from "../domain/org/createLibraryGuard.js";
 import { resolveManyAccess, visibleLibraryIds } from "../domain/authz/libraryPolicy.js";
 import { libraryVisibility, setShareEnabled } from "../domain/authz/libraryVisibility.js";
-import { seedAdminScopeTx } from "../domain/authz/libraryScopeSeed.js";
+import { createBase } from "../domain/libraryService.js";
 import { entityIconSchema, entityIconColorSchema } from "../validators/entity-icon.js";
 
 export const bases = new Hono();
@@ -53,74 +50,7 @@ const shareSchema = z.object({
   expiresAt: z.string().nullable().optional(),
 });
 
-// ============ 默认表结构 ============
-
-async function createStarterTableTx(tx: DbTx, baseId: string, userId: string, name = "数据表 1") {
-  const table = await tx.table.create({
-    data: { baseId, name, primaryFieldId: "", createdBy: userId },
-  });
-
-  const nameField = await tx.field.create({
-    data: { tableId: table.id, name: "名称", type: "singleLineText", order: 0 },
-  });
-  await tx.field.create({
-    data: { tableId: table.id, name: "数量", type: "number", order: 1, precision: 0 },
-  });
-  await tx.field.create({
-    data: {
-      tableId: table.id,
-      name: "状态",
-      type: "singleSelect",
-      order: 2,
-      options: JSON.stringify(makeOptions(["未开始", "进行中", "已完成"])),
-    },
-  });
-  await tx.field.create({
-    data: { tableId: table.id, name: "日期", type: "date", order: 3 },
-  });
-  await tx.field.create({
-    data: { tableId: table.id, name: "备注", type: "longText", order: 4 },
-  });
-
-  await tx.table.update({
-    where: { id: table.id },
-    data: { primaryFieldId: nameField.id },
-  });
-
-  const defaultConfig: ViewConfig = {
-    hiddenFieldIds: [],
-    fieldOrder: [],
-    rowHeight: "medium",
-    filters: null,
-    sorts: [],
-    search: "",
-    groupByFieldId: null,
-    collapsedGroupKeys: [],
-    aggregations: {},
-    rowColor: { mode: "none", conditions: [] },
-    coverFieldId: null,
-    cardFieldIds: [],
-    kanbanFieldId: null,
-    dateFieldId: null,
-    treeParentFieldId: null,
-    ganttStartFieldId: null,
-    ganttEndFieldId: null,
-    ganttProgressFieldId: null,
-    ganttDependencyFieldId: null,
-    ganttZoom: "day",
-    formFields: [],
-    formTitle: "",
-    formDescription: "",
-    detailFieldIds: [],
-    detailLayout: null,
-  };
-
-  await tx.view.create({
-    data: { tableId: table.id, name: "网格视图", type: "grid", order: 0, config: JSON.stringify(defaultConfig) },
-  });
-
-  return table;
-}
+// 默认表结构（建 Base 时的「数据表 1」）唯一真源在 domain/starterTable.ts（libraryService 调用，MCP 共用）。
 
 // ============ 列表 ============
 
@@ -161,40 +91,23 @@ bases.post("/", async (c) => {
   const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法", details: parsed.error.issues }, 400);
 
-  // M6 权限门：建库不是登录即有的能力，须由管理员按角色授予 create_library（写库之前拦）。
+  // M6 权限门：建库须由管理员按角色授予 create_library（写库之前拦）。
   await assertCanCreateLibrary(userId);
 
   // 名字写库前 trim：纯空格名 400（zod min(1) 拦不住 "   "）。
   const name = parsed.data.name.trim();
   if (name === "") return c.json({ error: "数据库名不能为空" }, 400);
 
-  // M3/S3 #1：建 base 多步写（base+owner 成员+starter 表/字段/视图）收紧进单事务，
-  // 同事务同步 nav_nodes（base + table + view 节点）。nav 写失败整体回滚（裁决 9）。
-  const base = await withWriteTx("base.create", async (tx) => {
-    // 全局重名校验在写事务内、用 tx 做（deletedAt:null）。
-    const dup = await tx.base.findFirst({ where: { name, deletedAt: null }, select: { id: true } });
-    if (dup) throw new HttpError(409, `数据库名「${name}」已存在`);
-    const b = await tx.base.create({
-      data: {
-        name,
-        iconColor: parsed.data.iconColor ?? "#378ADD",
-        icon: parsed.data.icon ?? null,
-        createdBy: userId,
-      },
-    });
-    // M4/S5 同事务投影 owner 到 base 节点 user 策略行（auth_policies 无 FK，先于 sync 建节点亦安全）。
-    // 注意：members 行在权限核心模型（二）之后【不再参与放行】，仅作导航旧表的投影源与台账。
-    const ownerMember = await tx.member.create({ data: { baseId: b.id, userId, role: "owner" } });
-    await syncBaseMemberTx(tx, { oldRowId: ownerMember.id, baseId: b.id, userId, role: "owner" });
-    // 取消库主后，库权限一律走「角色 × 库」：建库同事务给超级管理员/管理员补视野行，
-    // 否则管理员建完库连一张表都加不上（管理权只来自 role_library_scope.canManage）。
-    await seedAdminScopeTx(tx, "base", b.id, userId);
-    await createStarterTableTx(tx, b.id, userId);
-    await syncNavFromEntitiesTx(tx);
-    // 第三批导航重构后一级导航直接读 bases/knowledge_bases，不再读 menu_items，
-    // 故这里不再补 shortcut（原 ensureEntityShortcutTx 调用已连同该函数一并摘除）。
-    return b;
-  });
+  // 多步写（base+owner 投影+默认表+nav 同步）的单一真源在 domain/libraryService（MCP 共用）；
+  // 重名 HttpError(409) 由全局 onError 统一映射。
+  const base = await createBase(
+    {
+      name,
+      iconColor: parsed.data.iconColor,
+      icon: parsed.data.icon,
+    },
+    userId,
+  );
 
   return c.json({
     base: {
@@ -202,7 +115,7 @@ bases.post("/", async (c) => {
       name: base.name,
       iconColor: base.iconColor,
       icon: base.icon,
-      createdAt: base.createdAt.toISOString(),
+      createdAt: base.createdAt,
       createdBy: base.createdBy,
       role: "owner" as Role,
       permissions: permissionsForRole("owner"),

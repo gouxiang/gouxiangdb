@@ -19,6 +19,10 @@ export const TABLE_LANGUAGE_MD = `# 表与记录语言
 - record.delete_record：软删除一条记录，需 confirm=true。入参 tableId、recordId、confirm。
 - record.search：统一关键词与向量检索。入参 q、mode（auto 或 fts 或 vector）、limit。
 
+## 实例搭建工具
+- base.create_base：在实例下新建一个数据库（含 owner 投影与默认数据表），需 create_library 权限与 confirm=true。入参 name、iconColor、icon、withStarter、confirm。
+- kb.create_kb：在实例下新建一个知识库（含 owner 投影），需 create_library 权限与 confirm=true。入参 name、iconColor、icon、confirm。
+
 ## 结构搭建工具
 - table.create_table：在某基础库下新建一张表（含「名称」主字段与默认网格视图），需 confirm=true。入参 baseId、name、withDefaults、confirm。
 - table.update_table：修改表名或主字段或图标；仅传 name 时改名。入参 tableId、name、primaryFieldId、icon、iconColor。

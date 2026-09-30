@@ -83,6 +83,12 @@ export interface McpPermissionPort {
    * 字段写白名单；creator/owner 与 REST maskSession 同口径追加不裁剪宽来源。
    */
   writeFieldCapabilityOf(resource: McpResource, action: "c" | "u"): Promise<McpWriteFieldCapability>;
+  /**
+   * 实例级动作判定（不绑定具体资源节点）：create_library（建 Base / 建知识库）。
+   * 口径与 REST 的 createLibraryGuard.canCreateLibraryNow 完全一致
+   * （无角色授予的实例兜底放行；否则按 create_library 组织动作）。
+   */
+  canCreateLibrary(): Promise<boolean>;
 }
 
 /** 族 -> 该族工具可作用的资源类型（list_bases 取 base、get_schema 取 table…）。 */

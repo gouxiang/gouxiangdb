@@ -37,6 +37,12 @@ export interface ToolMeta extends Record<string, unknown> {
    * 允许异步（判定要读 app_settings）；缺省恒可用。
    */
   available?: () => boolean | Promise<boolean>;
+  /**
+   * 可选注册期显式门（family=null 的实例级工具，如 base.create_base / kb.create_kb）。
+   * 接收本请求的权限端口；返回 false 则不入册。族门（family）与本门互斥：family 非空走族可见集，
+   * family 为 null 且 gate 存在时走 gate。
+   */
+  gate?: (port: ToolCtx["port"]) => boolean | Promise<boolean>;
 }
 
 export interface ToolSpec {

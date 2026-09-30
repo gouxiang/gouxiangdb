@@ -109,14 +109,16 @@ afterAll(async () => {
 });
 
 describe("S6b scope 粗筛与未注册直调", () => {
-  it("canvas:read-only 看不到 commit_elements（tools/list 恰为读工具+ping）", async () => {
-    expect(await names(roToken)).toEqual(["canvas.get_board", "ping_echo"]);
+  it("canvas:read-only：读工具 + 实例工具（无 commit_elements）", async () => {
+    expect(await names(roToken)).toEqual(["base.create_base", "canvas.get_board", "kb.create_kb", "ping_echo"]);
   });
-  it("canvas:write 只写身份看得到 commit_elements 且恰含 commit+ping（无读工具）", async () => {
-    expect(await names(woToken)).toEqual(["canvas.commit_elements", "ping_echo"]);
+  it("canvas:write 只写身份：commit + 实例工具 + ping（无读工具）", async () => {
+    expect(await names(woToken)).toEqual(["base.create_base", "canvas.commit_elements", "kb.create_kb", "ping_echo"]);
   });
-  it("读写身份 tools/list 含两件 canvas 工具", async () => {
-    expect(await names(rwToken)).toEqual(["canvas.commit_elements", "canvas.get_board", "ping_echo"]);
+  it("读写身份 tools/list 含两件 canvas 工具 + 实例工具", async () => {
+    expect(await names(rwToken)).toEqual([
+      "base.create_base", "canvas.commit_elements", "canvas.get_board", "kb.create_kb", "ping_echo",
+    ]);
   });
   it("只读 PAT 直调写工具 -> UNKNOWN_TOOL（-32602）", async () => {
     const r = await commit({ docId: c1, ops: [{ op: "element.create", element: rect() }], confirm: true }, roToken);

@@ -27,7 +27,7 @@ import {
 import { requireKb, shadowKbAction } from "./shared.js";
 import { resolveKbAccess, resolveManyAccess, visibleLibraryIds } from "../../domain/authz/libraryPolicy.js";
 import { setShareEnabled } from "../../domain/authz/libraryVisibility.js";
-import { seedAdminScopeTx } from "../../domain/authz/libraryScopeSeed.js";
+import { createKb } from "../../domain/libraryService.js";
 import { assertCanCreateLibrary } from "../../domain/org/createLibraryGuard.js";
 import { membersRoutes } from "./members.js";
 import { docsRoutes } from "./docs.js";
@@ -93,27 +93,15 @@ kb.post("/", async (c) => {
     const name = parsed.data.name.trim();
     if (name === "") return c.json({ error: "知识库名不能为空" }, 400);
 
-    // M3/S3 #11：建 kb（含 owner 成员）收紧进事务，同事务 upsert kb 节点。
-    const created = await withWriteTx("kb.create", async (tx) => {
-      // 全局重名校验在写事务内、用 tx 做（deletedAt:null）。
-      const dup = await tx.knowledgeBase.findFirst({ where: { name, deletedAt: null }, select: { id: true } });
-      if (dup) throw new HttpError(409, `知识库名「${name}」已存在`);
-      const k = await tx.knowledgeBase.create({
-        data: {
-          name,
-          iconColor: parsed.data.iconColor ?? "#0F6E56",
-          createdBy: userId,
-          members: { create: { userId, role: "owner" } },
-        },
-      });
-      // 取消库主后同建库：给超级管理员/管理员补「角色 × 知识库」视野行（管理权唯一来源）。
-      await seedAdminScopeTx(tx, "kb", k.id, userId);
-      await syncNavFromEntitiesTx(tx);
-      // 与建库同理：一级导航已改为直接读 knowledge_bases，不再靠 menu_items shortcut，
-      // 自动写入随「导航编排」一并下线（ensureEntityShortcutTx 已从 domain/nav/menu.ts 摘除）。
-      return k;
-    });
-    return c.json({ knowledgeBase: { id: created.id, name: created.name, iconColor: created.iconColor, role: "owner" } }, 201);
+    // 多步写（kb+owner 成员+视野 seed+nav 同步）的单一真源在 domain/libraryService（MCP 共用）。
+    const created = await createKb(
+      { name, iconColor: parsed.data.iconColor },
+      userId,
+    );
+    return c.json(
+      { knowledgeBase: { id: created.id, name: created.name, iconColor: created.iconColor, role: "owner" } },
+      201,
+    );
   } catch (e) {
     return errorResponse(c, e);
   }
