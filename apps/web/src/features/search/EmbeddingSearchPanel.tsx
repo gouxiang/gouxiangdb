@@ -7,7 +7,7 @@
 //   - 检索总门 db 覆盖（search.enabled）：检索接口即时生效，索引 worker 需重启（界面如实标注）
 // 非 owner 由父级不挂载本面板；403 在各 hook 静默（不刷错误）。
 import { useEffect, useRef, useState } from "react";
-import { Button, Spinner, toast } from "../../components/ui";
+import { Spinner, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import {
   errorCode,
@@ -22,7 +22,7 @@ import {
 import { adminErrorMessage, SEARCH_NOT_ENABLED } from "./search-admin-copy";
 import { SearchEnableGuide } from "./SearchEnableGuide";
 import { buildConfigPatch, validateConfigForm, type ConfigForm } from "./search-config";
-import type { EmbeddingMode, EmbeddingProviderKind, SearchEnabledOverride } from "@gx/shared-types";
+import type { EmbeddingMode, SearchEnabledOverride } from "@gx/shared-types";
 import { RemoteServiceSection, type RemoteFormValues } from "./EmbeddingRemoteSection";
 import {
   ApiKeySection,

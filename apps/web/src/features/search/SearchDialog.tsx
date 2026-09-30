@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useUnifiedSearch } from "./search-hooks";
 import { hitHref, type UnifiedHit } from "./search-adapter";
+import { SearchImageBar, MAX_SEARCH_IMAGES } from "./SearchImageBar";
 import { EmptyState, Spinner } from "../../components/ui";
 import { Icon } from "../../components/icons";
 
@@ -36,6 +37,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
   const navigate = useNavigate();
   const [raw, setRaw] = useState("");
   const [q, setQ] = useState("");
+  const [images, setImages] = useState<string[]>([]);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -43,18 +45,19 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
     if (open) {
       setRaw("");
       setQ("");
+      setImages([]);
       setActive(0);
       setTimeout(() => inputRef.current?.focus(), 0);
     }
   }, [open]);
 
-  // debounce 280ms
+  // debounce 280ms（仅文本）；图片变化立即生效，不被文本防抖拖住。
   useEffect(() => {
     const t = setTimeout(() => setQ(raw.trim()), 280);
     return () => clearTimeout(t);
   }, [raw]);
 
-  const { data, isFetching } = useUnifiedSearch(q);
+  const { data, isFetching } = useUnifiedSearch(q, images);
 
   const hits: UnifiedHit[] = useMemo(() => data?.hits ?? [], [data]);
   // doc/canvas 在前、record 在后（与旧版分组顺序一致）
@@ -64,6 +67,18 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
   useEffect(() => {
     setActive(0);
   }, [q]);
+
+  // 图片增删也复位高亮。
+  useEffect(() => {
+    setActive(0);
+  }, [images]);
+
+  function addImages(urls: string[]) {
+    setImages((prev) => [...prev, ...urls].slice(0, MAX_SEARCH_IMAGES));
+  }
+  function removeImage(index: number) {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+  }
 
   // 键盘上下选择时，高亮项自动滚动跟随到可视区域内
   const listRef = useRef<HTMLDivElement>(null);
@@ -176,6 +191,11 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
           {isFetching && <Spinner size={14} />}
         </div>
 
+        {/* 以图搜图图片条 */}
+        <div className="border-b border-gx-separator px-3 py-2">
+          <SearchImageBar images={images} onAdd={addImages} onRemove={removeImage} />
+        </div>
+
         {/* M5 中性状态条：仅在 v1 返回截断/降级文案时出现，不暴露任何实现细节 */}
         {q && data?.notice && (
           <div className="border-b border-gx-separator bg-gx-warning-bg px-4 py-1.5 text-gx-11 text-gx-text-secondary">
@@ -184,15 +204,16 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
         )}
 
         <div ref={listRef} className="flex-1 overflow-y-auto">
-          {!q && (
+          {!q && images.length === 0 && (
             <div className="px-4 py-10 text-center text-gx-13 text-gx-text-hint">
-              输入关键词，跨智能表格与知识库全局搜索
+              输入关键词，或上传图片以图搜图
             </div>
           )}
 
-          {q && !isFetching && hits.length === 0 && (
-            // R-D-14 筛选空态：三要素齐备（图标 + 主文案 + 次文案），不再只剩一句灰字
-            <EmptyState kind="filtered" title="没有找到匹配的记录或文档" description="换个关键词试试，或改用更短的关键词。" />
+          {(q || images.length > 0) && !isFetching && hits.length === 0 && (
+            images.length > 0 && !q
+              ? <EmptyState kind="filtered" title="没有找到相似的记录或图片" description="换一张图片，或补充关键词再试。" />
+              : <EmptyState kind="filtered" title="没有找到匹配的记录或文档" description="换个关键词试试，或改用更短的关键词。" />
           )}
 
           {docs.length > 0 && (

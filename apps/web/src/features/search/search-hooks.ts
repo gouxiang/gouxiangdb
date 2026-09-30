@@ -7,15 +7,18 @@ import { fetchUnifiedSearch } from "./search-query";
 export const UNIFIED_SEARCH_QK = ["unified-search"] as const;
 
 /**
- * 全局统一搜索。空 q 不发请求（与旧对话框引导态一致）；
- * v1 off 自动回退旧 /api/search；非 404（401/403/500 等）照常抛出。
+ * 全局统一搜索。
+ * @param qRaw 文本查询；
+ * @param images 以图搜图图片（data:image/...）。
+ * 文本与图片至少一个非空才发请求；v1 off 时纯文本自动回退旧链。
  */
-export function useUnifiedSearch(qRaw: string) {
+export function useUnifiedSearch(qRaw: string, images: readonly string[] = []) {
   const q = qRaw.trim();
+  const imgs = images.length > 0 ? images : undefined;
   return useQuery<UnifiedSearchResult>({
-    queryKey: [...UNIFIED_SEARCH_QK, q],
-    enabled: q.length > 0,
+    queryKey: [...UNIFIED_SEARCH_QK, q, imgs?.length ?? 0, imgs?.[0]?.slice(0, 32) ?? ""],
+    enabled: q.length > 0 || (imgs !== undefined && imgs.length > 0),
     staleTime: 5_000,
-    queryFn: () => fetchUnifiedSearch(q),
+    queryFn: () => fetchUnifiedSearch(q, imgs ?? []),
   });
 }

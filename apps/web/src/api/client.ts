@@ -148,6 +148,7 @@ export type {
 import type {
   V1SearchResponse,
   V1SearchQuery,
+  V1SearchPostBody,
   EmbeddingConfigDTO,
   EmbeddingConfigPatch,
   EmbeddingConfigPatchResult,
@@ -1527,6 +1528,12 @@ export const SearchV1Api = {
         limit: params.limit,
       })}`,
     ),
+  /** 以图搜图：POST JSON body（含 data:image 图片），响应与 GET 同契约。 */
+  searchByImage: (body: V1SearchPostBody) =>
+    apiFetch<V1SearchResponse>("/api/v1/search", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };
 
 export const EmbeddingAdminApi = {

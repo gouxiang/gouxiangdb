@@ -27,8 +27,9 @@ const doc: GlobalDocHit = { type: "doc", kbId: "k", kbName: "K", docId: "d", tit
 
 describe("fetchUnifiedSearch 404 回退旧链", () => {
   it("v1 200 → 归一 v1 结果（fromV1=true）", async () => {
-    const res = await fetchUnifiedSearch("q", {
+    const res = await fetchUnifiedSearch("q", [], {
       searchV1: async () => v1Res({ mode: "fts" }),
+      searchByImage: async () => { throw new Error("不应走 POST"); },
       searchLegacy: async () => {
         throw new Error("不应回退旧链");
       },
@@ -38,10 +39,11 @@ describe("fetchUnifiedSearch 404 回退旧链", () => {
 
   it("v1 404 NOT_FOUND → 回退旧 /api/search 形状（fromV1=false, notice=null）", async () => {
     let legacyCalled = false;
-    const res = await fetchUnifiedSearch("q", {
+    const res = await fetchUnifiedSearch("q", [], {
       searchV1: async () => {
         throw new ApiError(404, { error: "接口不存在", details: { code: "NOT_FOUND" } });
       },
+      searchByImage: async () => { throw new Error("不应走 POST"); },
       searchLegacy: async () => {
         legacyCalled = true;
         return { records: [rec], docs: [doc] };
@@ -54,10 +56,11 @@ describe("fetchUnifiedSearch 404 回退旧链", () => {
   });
 
   it("v1 404 无 code（整个 /api/v1 未挂兜底）也回退", async () => {
-    const res = await fetchUnifiedSearch("q", {
+    const res = await fetchUnifiedSearch("q", [], {
       searchV1: async () => {
         throw new ApiError(404, { error: "Not Found" });
       },
+      searchByImage: async () => { throw new Error("不应走 POST"); },
       searchLegacy: async () => ({ records: [], docs: [] }),
     });
     expect(res.fromV1).toBe(false);
@@ -73,10 +76,11 @@ describe("fetchUnifiedSearch 404 回退旧链", () => {
     ];
     for (const e of cases) {
       await expect(
-        fetchUnifiedSearch("q", {
+        fetchUnifiedSearch("q", [], {
           searchV1: async () => {
             throw e;
           },
+          searchByImage: async () => { throw new Error("不应走 POST"); },
           searchLegacy: async () => {
             throw new Error("不应回退");
           },
@@ -90,6 +94,23 @@ describe("fetchUnifiedSearch 404 回退旧链", () => {
     expect(isV1NotFound(404)).toBe(true);
     expect(isV1NotFound(404, "X")).toBe(false);
     expect(isV1NotFound(500, "NOT_FOUND")).toBe(false);
+  });
+
+  it("带图片：走 searchByImage（POST），归一 v1 结果", async () => {
+    const seen: { images: string[] } = { images: [] };
+    const res = await fetchUnifiedSearch("", ["data:image/png;base64,AA"], {
+      searchV1: async () => { throw new Error("不应走 GET"); },
+      searchByImage: async (body) => {
+        seen.images = body.images ?? [];
+        return v1Res({ mode: "vector", items: [
+          { type: "record", entityId: "r1", nodeId: "n1", title: "相似", snippet: "s", score: 0.1, matchedVia: ["vec"], chunkSeq: null, matchedField: null },
+        ] });
+      },
+      searchLegacy: async () => { throw new Error("不应回退旧链"); },
+    });
+    expect(seen.images).toEqual(["data:image/png;base64,AA"]);
+    expect(res.fromV1).toBe(true);
+    expect(res.hits.map((h) => h.entityId)).toEqual(["r1"]);
   });
 });
 
