@@ -3,7 +3,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import type { FilterNode } from "@gx/shared-types";
+import { resolveViewConfig, type FilterNode } from "@gx/shared-types";
 import { andFilters, evaluateRowFilter } from "../domain/authz/rowFilter.js";
 import { SEARCH_PREVIEW_LIMIT, boundedPreviewMarker } from "./searchBounds.js";
 import { prisma, withWriteTx, runWrite, type DbTx } from "../db.js";
@@ -40,6 +40,7 @@ import {
   purgeTableNodeTx,
 } from "../domain/nav/sync.js";
 import { resolveTableMask } from "../domain/authz/maskGate.js";
+import { parseViewAdminConfig } from "../domain/viewAdminConfig.js";
 import { sanitizeViewConfigForMask } from "../domain/authz/fieldMask.js";
 // 字段权限读侧（库权限 config.fields 的 hidden 档）：与写侧的 fieldWriteGate 同一份裁决。
 import {
@@ -96,7 +97,11 @@ records.get("/", async (c) => {
 
   if (viewId) {
     const v = await prisma.view.findUnique({ where: { id: viewId } });
-    if (v && v.tableId === tableId) config = parseViewConfig(v.config);
+    if (v && v.tableId === tableId) {
+      const userCfg = parseViewConfig(v.config);
+      const adminCfg = parseViewAdminConfig(v.adminConfig ?? null);
+      config = resolveViewConfig(adminCfg, userCfg);
+    }
   }
   // 视图配置脱敏：分组/聚合/排序/筛选若引用被隐藏字段，会在响应里把它泄回来（分组键值）。
   // 复用 M4/S6 的同一份脱敏实现，不另写一套。

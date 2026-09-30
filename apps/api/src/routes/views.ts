@@ -1,5 +1,7 @@
 // apps/api/src/routes/views.ts
 // 视图 CRUD + 配置更新 + 复制
+//
+// 管理员配置层（#560）端点已拆到 viewAdmin.ts 挂在同 /api/views 前缀，避免本文件超长。
 
 import { Hono } from "hono";
 import { z } from "zod";
@@ -7,6 +9,7 @@ import { prisma, withWriteTx } from "../db.js";
 import { requireCanView, HttpError } from "../guards.js";
 import { requireSchemaDesign } from "../domain/authz/tableManageGuards.js";
 import { parseViewConfig } from "../domain/recordService.js";
+import { parseViewAdminConfig } from "../domain/viewAdminConfig.js";
 import { permissionsForRole } from "@gx/shared-types";
 import { syncNavFromEntitiesTx, purgeViewNodeTx } from "../domain/nav/sync.js";
 import { maybeAutoSnapshotLayoutTx, purgeVersionsTx } from "../domain/formLayoutVersion.js";
@@ -43,7 +46,8 @@ async function baseIdOfView(viewId: string): Promise<string> {
   return v.table.baseId;
 }
 
-function serializeView(v: {
+/** 序列化 View 行（Prisma 全字段返回，含可空 adminConfig）。供本文件与 viewAdmin.ts 共用。 */
+export function serializeView(v: {
   id: string;
   tableId: string;
   name: string;
@@ -51,6 +55,7 @@ function serializeView(v: {
   lockMode: string;
   order: number;
   config: string;
+  adminConfig?: string | null;
   createdAt: Date;
 }) {
   return {
@@ -61,6 +66,7 @@ function serializeView(v: {
     lockMode: v.lockMode,
     order: v.order,
     config: parseViewConfig(v.config),
+    adminConfig: parseViewAdminConfig(v.adminConfig ?? null),
     createdAt: v.createdAt.toISOString(),
   };
 }
@@ -132,7 +138,7 @@ views.get("/:viewId", async (c) => {
   return c.json({ view: serializeView(v) });
 });
 
-// ============ 更新（含配置）============
+// ============ 更新（用户态 config；不碰 adminConfig）============
 
 views.patch("/:viewId", async (c) => {
   const viewId = c.req.param("viewId");
