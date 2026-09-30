@@ -64,9 +64,9 @@ afterAll(() => {
 });
 
 describe("迁移清单", () => {
-  it("迁移目录数为 36（M6-S1 PAT/幂等两表 + init_admin_must_change + 实体 icon/iconColor DDL 后；含 M5-S1 outbox DDL/播种、M4-S5 owner manage_share 补位与角色×库 canShare 独立分享位、表单设计器布局版本表；A3 autoNumber 高水位计数表、A4 库名部分唯一索引、A6 shareEnabled 回填再 +3），nav DDL 落 applied，重跑 deploy 幂等", () => {
+  it("迁移目录数为 37（M6-S1 PAT/幂等两表 + init_admin_must_change + 实体 icon/iconColor DDL 后；含 M5-S1 outbox DDL/播种、M4-S5 owner manage_share 补位与角色×库 canShare 独立分享位、表单设计器布局版本表；A3 autoNumber 高水位计数表、A4 库名部分唯一索引、A6 shareEnabled 回填再 +3；视图管理员配置层 adminConfig 列 +1），nav DDL 落 applied，重跑 deploy 幂等", () => {
     const dirs = migDirs();
-    expect(dirs.length).toBe(36);
+    expect(dirs.length).toBe(37);
     expect(dirs).toContain("20260916090000_enterprise_nav_ddl");
     expect(dirs).toContain("20260916130000_owner_manage_share");
     expect(dirs).toContain("20260916140000_m5_search_outbox_ddl");
