@@ -159,6 +159,43 @@ describe("S3 存在性不泄漏二分口径（golden）", () => {
   });
 });
 
+describe("S3 实例搭建工具 gate（体系启用后）", () => {
+  // 兜底放行只在「全表无任何角色授予」时成立。一旦出现第一条授予（体系启用），
+  // 无 create_library 的用户经真实 m4Adapter.canCreateLibrary -> gate=false：
+  // 两件实例工具必须从 tools/list 消失，直调同 not found 口径（真实安全边界端到端）。
+  it("有角色授予 + uNone 无 create_library -> 实例工具不可见、直调 not found；清理后恢复兜底", async () => {
+    const roleId = "s3_role_no_create";
+    await prisma.role.create({
+      data: {
+        id: roleId, workspaceId: "ws_default", systemKey: null, name: roleId,
+        description: "", isSystem: 0, permissions: JSON.stringify(["manage_members"]),
+      },
+    });
+    // 授予给 uOther（不是 uNone）；全表 grantCount 因此 >0，体系即启用。
+    await prisma.roleAssignment.create({
+      data: { roleId, subjectType: "user", subjectId: "uOther", scopeType: "workspace" },
+    });
+    try {
+      expect(await prisma.roleAssignment.count()).toBeGreaterThan(0);
+      // uNone：无任何组织动作 -> gate=false，实例工具消失，仅剩连接性 ping
+      expect(await toolNames(tokens.none!)).toEqual(["ping_echo"]);
+      const gated = await call(
+        { jsonrpc: "2.0", id: 21, method: "tools/call", params: { name: "base.create_base", arguments: { name: "X", confirm: true } } },
+        tokens.none!,
+      );
+      const body = await gated.json() as { result: { isError?: boolean; content: Array<{ text: string }> } };
+      expect(body.result.isError).toBe(true);
+      expect(body.result.content[0]!.text).toContain("Tool base.create_base not found");
+    } finally {
+      // 自包含清理：恢复「全表无授予」状态，不污染同夹具其它用例的兜底口径。
+      await prisma.roleAssignment.deleteMany({ where: { roleId } });
+      await prisma.role.deleteMany({ where: { id: roleId } });
+    }
+    expect(await prisma.roleAssignment.count()).toBe(0);
+    expect(await toolNames(tokens.none!)).toEqual(["base.create_base", "kb.create_kb", "ping_echo"]);
+  });
+});
+
 describe("S3 IDOR：结果只含可见资源", () => {
   it("uFull 调 table.list_bases -> 仅 b1（b2 属他人可见集）", async () => {
     const res = await call({ jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: "table.list_bases", arguments: {} } }, tokens.readonly!);
