@@ -26,6 +26,7 @@ export * from "./permissions.js";
 export * from "./formula-functions.js";
 export * from "./defaults.js";
 export * from "./api.js";
+export * from "./embeddingMultimodal.js";
 export * from "./org.js";
 export * from "./roleLibraryScope.js";
 export * from "./nav.js";
