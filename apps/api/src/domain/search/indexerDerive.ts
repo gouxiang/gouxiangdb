@@ -34,6 +34,8 @@ interface PreparedRow {
   chunk: ProducedChunk;
   /** 送向量化的文本：body 空时回退 title（避免零长向量无法落 float[D]）。 */
   embedText: string;
+  /** 随该行向量化的图片（#563）。 */
+  images: string[];
 }
 
 /** vec_chunks 仅在 cloud 首次成功 embed 后才建（§4.2）；fts-only/off 形态下不存在，删前必判。 */
@@ -102,7 +104,12 @@ function writeBaseRows(
       if (chunk.chunkKind === "field" && chunk.fieldId) {
         insGrant.run(rowid, chunk.nodeId, chunk.fieldId); // nodeId=tableNodeId（record）
       }
-      prepared.push({ rowid, chunk, embedText: chunk.body.trim() || chunk.title });
+      prepared.push({
+        rowid,
+        chunk,
+        embedText: chunk.body.trim() || chunk.title,
+        images: chunk.images ?? [],
+      });
     }
     return prepared;
   });
@@ -154,7 +161,16 @@ export async function applyUpsert(
   if (!wantVec || rows.length === 0) return summary;
 
   try {
-    const vectors = await opts.provider!.embed(rows.map((r) => r.embedText));
+    // #563：provider 支持多模态时图片随条目一起向量化；否则回退纯文本（老行为不变）。
+    const anyImages = rows.some((r) => r.images.length > 0);
+    let vectors: Float32Array[];
+    if (anyImages && opts.provider!.embedMultimodal) {
+      vectors = await opts.provider!.embedMultimodal(
+        rows.map((r) => ({ text: r.embedText, images: r.images })),
+      );
+    } else {
+      vectors = await opts.provider!.embed(rows.map((r) => r.embedText));
+    }
     const dim = vectors.find((v) => v && v.length > 0)?.length ?? 0;
     if (dim > 0) {
       const existing = getMeta(store.db, META_KEYS.embeddingDim);

@@ -13,12 +13,13 @@
 import type { PrismaClient } from "@prisma/client";
 import {
   buildRecordChunks,
-  buildCanvasIdentityChunks,
   splitMarkdownHeadings,
   windowText,
   type ProducedChunk,
   type ChunkEntityType,
 } from "./chunks.js";
+import { buildCanvasIdentityChunks } from "./chunks-canvas.js";
+import { extractMarkdownImages } from "./image-extract.js";
 import { FIELD_CHUNK_CAP, DOC_TARGET_MAX, DOC_OVERLAP } from "./chunks.js";
 
 /** nav 节点 id 与 domain/nav/backfill.nodeId 保持同一形态 nav_<kind>_<resourceId>（本地镜像，避免跨域静态依赖）。 */
@@ -105,10 +106,13 @@ async function buildDocChunks(
 ): Promise<ProducedChunk[]> {
   const { markdownToSearchText } = await import("../kb.js");
   const out: ProducedChunk[] = [];
+  // #563：整篇文档图片提取一次，挂到首个 chunk（图片无章节归属，先保证全部入索引）。
+  const docImages = extractMarkdownImages(markdown);
   for (const section of splitMarkdownHeadings(markdown)) {
     const plain = markdownToSearchText(section.text);
     for (const w of windowText(plain, DOC_TARGET_MAX, DOC_OVERLAP)) {
       const path = section.headingPath.join(" / ");
+      const isFirst = out.length === 0;
       out.push({
         chunkKind: "identity",
         chunkId: `doc:${docId}:${out.length}`,
@@ -119,6 +123,7 @@ async function buildDocChunks(
         title: path ? `${title} / ${path}` : title,
         body: w,
         seq: out.length,
+        ...(isFirst && docImages.length > 0 ? { images: docImages } : {}),
       });
     }
   }

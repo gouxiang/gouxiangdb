@@ -14,6 +14,9 @@ import { EmbeddingError, type EmbedErrorKind } from "./embedding/types.js";
 
 /** 探活文本（单条、极短，只为换回一个真实向量与耗时）。 */
 const PROBE_TEXT = "连接自检";
+/** 多模态探活用 1x1 PNG（极小，只为验证 vision 端点可用并拿到真实维度）。 */
+const PROBE_IMAGE =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
 /** 探活超时上限：配置里填 60s 也不让按钮等 60s。 */
 const PROBE_TIMEOUT_CAP_MS = 8000;
 
@@ -77,7 +80,13 @@ export async function testEmbeddingConnection(d: ProbeDeps): Promise<EmbeddingCo
 
   const t0 = Date.now();
   try {
-    await provider.embed([PROBE_TEXT]);
+    // vision 多模态模型：纯文本端点可能不支持，优先用多模态探活（图+文）拿真实维度。
+    const isVision = /vision/i.test(view.model);
+    if (isVision && provider.embedMultimodal) {
+      await provider.embedMultimodal([{ text: PROBE_TEXT, images: [PROBE_IMAGE] }]);
+    } else {
+      await provider.embed([PROBE_TEXT]);
+    }
     const dim = provider.dim || null;
     return {
       ok: true,

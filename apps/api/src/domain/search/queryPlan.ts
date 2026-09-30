@@ -71,6 +71,8 @@ export interface VectorRoutePlan {
   /** H4 铁律：KNN 必须带 k（= LIMIT），无上限的计划不允许产出。 */
   k: number;
   entityTypeCodes: number[];
+  /** 纯以图搜图（无文本、仅图片）：无关键词路，只规划向量 KNN。 */
+  imageOnly: boolean;
 }
 
 export interface SearchQueryPlan {
@@ -100,6 +102,8 @@ export interface BuildPlanOptions {
   limit?: number;
   /** 每路召回上限，默认 100（§4.5 步骤 4）。 */
   perRoute?: number;
+  /** 以图搜图：是否携带至少一张可用图片（用于无文本时仍规划向量路）。 */
+  hasImages?: boolean;
 }
 
 const DEFAULT_PER_ROUTE = 100;
@@ -197,7 +201,6 @@ export function buildSearchQueryPlan(rawQuery: string, options: BuildPlanOptions
 
   const strategy: KeywordStrategy = len === 0 ? "browse" : len >= FTS_CODEPOINT_MIN ? "fts" : "like";
   const allowed = buildAllowedPredicate();
-
   const fts: FtsPlan | null =
     strategy === "fts"
       ? {
@@ -229,12 +232,17 @@ export function buildSearchQueryPlan(rawQuery: string, options: BuildPlanOptions
         }
       : null;
 
-  // vector 路：空查询不规划向量；强制 vector 也必须非空（无查询向量可算）。
-  const vectorEnabled = len > 0 && (requestedMode === "auto" || requestedMode === "vector");
+  // vector 路：有文本按 mode 规划；纯以图搜图（无文本但带图）也规划向量 KNN。
+  // 纯图仅在 auto/vector 下启用；强制 fts 不走向量。
+  const imageOnly = len === 0 && options.hasImages === true;
+  const vectorEnabled =
+    (len > 0 || imageOnly) &&
+    (requestedMode === "auto" || requestedMode === "vector");
   const vector: VectorRoutePlan = {
     enabled: vectorEnabled,
     k: perRoute,
     entityTypeCodes: entityTypes.codes,
+    imageOnly,
   };
 
   const routes = {

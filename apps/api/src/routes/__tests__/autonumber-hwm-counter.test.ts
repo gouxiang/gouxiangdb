@@ -97,9 +97,11 @@ describe("autoNumber 高水位计数器", () => {
 
   it("reset=year：回填后今年桶 2 条→新号 003，去年桶独立为 1；脚本幂等", async () => {
     const fid = await makeAutoNumber("编号year", "year");
-    await seedRecordAt(fid, new Date(2026, 0, 10), "LEG-Y-A");
-    await seedRecordAt(fid, new Date(2026, 1, 10), "LEG-Y-B");
-    await seedRecordAt(fid, new Date(2025, 5, 10), "LEG-Y-LAST");
+    // 相对当前：今年两条、去年一条（不写死年份）。
+    const y = new Date().getFullYear();
+    await seedRecordAt(fid, new Date(y, 0, 10), "LEG-Y-A");
+    await seedRecordAt(fid, new Date(y, 1, 10), "LEG-Y-B");
+    await seedRecordAt(fid, new Date(y - 1, 5, 10), "LEG-Y-LAST");
 
     const out1 = runBackfill();
     expect(out1).toContain("回填完成");
@@ -108,11 +110,11 @@ describe("autoNumber 高水位计数器", () => {
     runBackfill();
     expect(await h.prisma.autoNumberCounter.count({ where: { tableId } })).toBe(countersBefore);
 
-    // 当前（2026）年桶高水位 2 → 新号 003
+    // 当前年桶高水位 2 → 新号 003
     expect(await createWithNumber(fid)).toBe("003");
     // 去年桶计数器仍为 1（未被本次发号影响）
     const lastYear = await h.prisma.autoNumberCounter.findFirst({
-      where: { tableId, key: `${fid}:0:year:2025` },
+      where: { tableId, key: `${fid}:0:year:${y - 1}` },
       select: { value: true },
     });
     expect(lastYear?.value).toBe(1);
@@ -120,14 +122,21 @@ describe("autoNumber 高水位计数器", () => {
 
   it("reset=month：回填后本月桶 2 条→新号 003，历史月份桶独立", async () => {
     const fid = await makeAutoNumber("编号month", "month");
-    await seedRecordAt(fid, new Date(2026, 8, 2), "LEG-M-A");
-    await seedRecordAt(fid, new Date(2026, 8, 10), "LEG-M-B");
-    await seedRecordAt(fid, new Date(2026, 6, 10), "LEG-M-OLD");
+    // 不写死月份（跨月会挂）：相对【当前】构造本月两条与上月一条。
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    await seedRecordAt(fid, new Date(y, m, 2), "LEG-M-A");
+    await seedRecordAt(fid, new Date(y, m, 10), "LEG-M-B");
+    await seedRecordAt(fid, new Date(y, m - 1, 10), "LEG-M-OLD");
 
     runBackfill();
     expect(await createWithNumber(fid)).toBe("003");
+    // 上月桶 key 动态算（Date month=-1 自动回退到去年 12 月）。
+    const prev = new Date(y, m - 1, 10);
+    const prevBucket = `${prev.getFullYear()}${String(prev.getMonth() + 1).padStart(2, "0")}`;
     const old = await h.prisma.autoNumberCounter.findFirst({
-      where: { tableId, key: `${fid}:0:month:202607` },
+      where: { tableId, key: `${fid}:0:month:${prevBucket}` },
       select: { value: true },
     });
     expect(old?.value).toBe(1);

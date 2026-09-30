@@ -228,6 +228,25 @@ describe("vector 路计划：KNN 必带 k（H4）", () => {
     expect(plan.strategy).toBe("browse");
   });
 
+  it("纯以图搜图（空 q + hasImages）：imageOnly、vector 启用、无关键词路", () => {
+    const plan = buildSearchQueryPlan("", { hasImages: true });
+    expect(plan.vector.imageOnly).toBe(true);
+    expect(plan.vector.enabled).toBe(true);
+    expect(plan.fts).toBeNull();
+    expect(plan.like).toBeNull();
+  });
+
+  it("纯图 + mode=fts：不走向量（强制关键词对图无效）", () => {
+    const plan = buildSearchQueryPlan("", { mode: "fts", hasImages: true });
+    expect(plan.vector.enabled).toBe(false);
+  });
+
+  it("有文本时 hasImages 不改变 imageOnly（仍按文本策略）", () => {
+    const plan = buildSearchQueryPlan("语义检索", { hasImages: true });
+    expect(plan.vector.imageOnly).toBe(false);
+    expect(plan.vector.enabled).toBe(true);
+  });
+
   it("自定义 perRoute 透传给 KNN k 与 browse 绑定", () => {
     const plan = buildSearchQueryPlan("abc", { perRoute: 25 });
     expect(plan.vector.k).toBe(25);

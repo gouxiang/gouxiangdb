@@ -99,9 +99,15 @@ export interface QueryRuntimeDeps {
   onMetric?: (m: QueryMetric) => void;
 }
 
+/** 查询向量请求：text=文本查询；images=可选图片（data:image/... 或 https），带图即"以图搜图"。 */
+export interface VectorEmbedRequest {
+  text: string;
+  images?: readonly string[];
+}
+
 export interface QueryVectorGate {
   /** dim 与 index_meta.embeddingDim 一致性由实现内判；返回 null=该路不可用（理由见 reason）。 */
-  embedQuery(q: string, typeCodes: readonly number[]): Promise<VectorQueryOutcome>;
+  embedQuery(req: VectorEmbedRequest, typeCodes: readonly number[]): Promise<VectorQueryOutcome>;
 }
 
 export interface VectorQueryOutcome {

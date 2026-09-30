@@ -6,6 +6,8 @@
 // 每元素 1 chunk（后两者本期纯函数骨架，TODO S5 indexer 接去标记文本/真实画布数据）。
 // 不 import db/fs/net，也不 import 会传递加载 prisma 的模块（内联最小文本规则）。
 
+import { extractAttachmentImages } from "./image-extract.js";
+
 /** Q7 单记录 field chunk 确定性软上限默认值（可被参数覆盖，admin 可配另在 S4/S9）。 */
 export const FIELD_CHUNK_CAP = 50;
 export const DOC_TARGET_MIN = 300;
@@ -16,13 +18,14 @@ export const CANVAS_MAX_VALUES = 2000;
 
 export type ChunkEntityType = "record" | "doc" | "canvas";
 export type ChunkKind = "identity" | "field";
-
 // 白名单对齐旧 search.ts:76（isComputedFieldType 六型不入）+ 无标量文本类型不入
-// （attachment/tabs/json）；autoNumber 旧检索可命中编号值，保留。
+// （tabs/json）；attachment 作为【图片来源】入选（文本贡献文件名，images 贡献图片）；
+// autoNumber 旧检索可命中编号值，保留。
 const TEXT_TYPES = new Set(["singleLineText", "longText", "richText"]);
 const SEARCHABLE_TYPES = new Set([
   ...TEXT_TYPES, "singleSelect", "multiSelect", "email", "url", "phone",
   "number", "currency", "percent", "duration", "date", "datetime", "checkbox", "rating", "autoNumber",
+  "attachment",
 ]);
 
 function typePriority(type: string): number {
@@ -78,6 +81,8 @@ export interface RecordChunkInput {
 export interface ProducedChunk {
   chunkKind: ChunkKind; chunkId: string; entityType: ChunkEntityType; entityId: string;
   nodeId: string; fieldId: string | null; title: string; body: string; seq: number;
+  /** 随该 chunk 一起向量化的图片（#563）：附件字段/文档图片。缺省空。 */
+  images?: string[];
 }
 
 export interface RecordChunkMeta {
@@ -121,8 +126,19 @@ export function buildRecordChunks(input: RecordChunkInput, cap: number = FIELD_C
   };
 
   const candidates = input.fields
-    .filter((f) => isSearchableFieldType(f.type) && hasFieldValue(f.value))
-    .map((f) => ({ f, text: extractFieldText(f.value) }))
+    .filter((f) => isSearchableFieldType(f.type))
+    .map((f) => {
+      if (f.type === "attachment") {
+        // 附件：文本取文件名（name；缺失退回 url），images 取可用图片 URL。
+        const list = Array.isArray(f.value) ? (f.value as Array<{ name?: unknown; url?: unknown }>) : [];
+        const text = list
+          .map((a) => (typeof a.name === "string" && a.name) || (typeof a.url === "string" ? a.url : ""))
+          .filter(Boolean).join(", ");
+        return { f, text, images: extractAttachmentImages(f.value) };
+      }
+      return { f, text: extractFieldText(f.value), images: [] };
+    })
+    .filter((c) => hasFieldValue(c.text) || c.images.length > 0)
     .sort((a, b) => {
       const pa = typePriority(a.f.type);
       const pb = typePriority(b.f.type);
@@ -145,6 +161,7 @@ export function buildRecordChunks(input: RecordChunkInput, cap: number = FIELD_C
     title: c.f.name,
     body: c.text,
     seq: idx + 1,
+    images: c.images,
   }));
 
   const meta: RecordChunkMeta = {
@@ -233,66 +250,4 @@ export function buildDocChunksFromMarkdown(input: DocMarkdownChunkInput): Produc
     }
   }
   return out;
-}
-
-// ============ canvas：按含文本元素 1 chunk（骨架；TODO S5 接真实画布） ============
-
-const CANVAS_TEXT_KEYS = new Set(["text", "label"]);
-
-/**
- * 遍历画布 JSON，按元素收集 text/label（附 gxNote）；深度 12、最多 2000 值（与
- * domain/kb.canvasToSearchText 同保护阈），超限 truncated=true。非法 JSON 返回 null。
- */
-export function collectCanvasTextElements(json: string): { texts: string[]; truncated: boolean } | null {
-  if (!json || !json.trim()) return { texts: [], truncated: false };
-  let data: unknown;
-  try {
-    data = JSON.parse(json);
-  } catch {
-    return null;
-  }
-  const texts: string[] = [];
-  let truncated = false;
-  const walk = (node: unknown, depth: number): void => {
-    if (truncated || depth > CANVAS_MAX_DEPTH || typeof node === "string") return;
-    if (Array.isArray(node)) {
-      for (const x of node) walk(x, depth + 1);
-      return;
-    }
-    if (node && typeof node === "object") {
-      const obj = node as Record<string, unknown>;
-      const parts: string[] = [];
-      for (const key of CANVAS_TEXT_KEYS) {
-        if (typeof obj[key] === "string" && obj[key].trim()) parts.push(obj[key].trim());
-      }
-      if (typeof obj.gxNote === "string" && obj.gxNote.trim()) parts.push(obj.gxNote.trim());
-      if (parts.length) {
-        if (texts.length >= CANVAS_MAX_VALUES) {
-          truncated = true;
-          return;
-        }
-        texts.push(parts.join(" "));
-      }
-      for (const [k, v] of Object.entries(obj)) {
-        if (CANVAS_TEXT_KEYS.has(k) || k === "gxNote") continue;
-        walk(v, depth + 1);
-      }
-    }
-  };
-  walk(data, 0);
-  return { texts, truncated };
-}
-
-export interface CanvasChunkInput { canvasId: string; nodeId: string; title: string; contentJson: string; }
-
-/** canvas 每个含文本元素 1 identity chunk（§4.6）；非法 JSON 返回 null 由接线片记账。 */
-export function buildCanvasIdentityChunks(input: CanvasChunkInput): { chunks: ProducedChunk[]; truncated: boolean } | null {
-  const collected = collectCanvasTextElements(input.contentJson);
-  if (!collected) return null;
-  const chunks: ProducedChunk[] = collected.texts.map((t, idx) => ({
-    chunkKind: "identity" as const, chunkId: `canvas:${input.canvasId}:${idx}`, entityType: "canvas" as const,
-    entityId: input.canvasId, nodeId: input.nodeId, fieldId: null,
-    title: idx === 0 ? input.title : `${input.title} #${idx + 1}`, body: t, seq: idx,
-  }));
-  return { chunks, truncated: collected.truncated };
 }

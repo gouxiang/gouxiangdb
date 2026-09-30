@@ -22,6 +22,7 @@ import {
   type RequestedMode,
   type EntityTypeFilter,
 } from "./queryPlan.js";
+import { isUsableImageUrl } from "@gx/shared-types";
 import { reciprocalRankFusion, type RouteHit } from "./rrf.js";
 import { buildFieldGrantRows } from "./fieldGrant.js";
 import { runRecall, type RouteRow, type RecallResult } from "./queryRecall.js";
@@ -114,6 +115,8 @@ export async function executeUnifiedSearch(
     type?: EntityTypeFilter;
     mode?: RequestedMode;
     limit?: number;
+    /** 以图搜图图片（data:image/... 或 https）；空/缺省=纯文本检索。 */
+    images?: readonly string[];
   },
   explain = false,
 ): Promise<UnifiedSearchResponse> {
@@ -121,9 +124,15 @@ export async function executeUnifiedSearch(
   const requestedMode: RequestedMode = input.mode ?? "auto";
 
   // 步骤 1：trim + 空 q 短路（§4.5 步骤 1 / §9）。
-  const plan = buildSearchQueryPlan(input.q, { mode: requestedMode, type, limit: input.limit });
+  const usableImages = (input.images ?? []).filter((u) => isUsableImageUrl(u));
+  const plan = buildSearchQueryPlan(input.q, {
+    mode: requestedMode, type, limit: input.limit, hasImages: usableImages.length > 0,
+  });
   const limit = plan.limits.finalTopN;
-  if (plan.strategy === "browse") return emptySearchResponse(limit);
+  // 真空（无文本也无图）才浏览短路；纯以图搜图仍要走向量 KNN。
+  if (plan.strategy === "browse" && !plan.vector.imageOnly) {
+    return emptySearchResponse(limit);
+  }
 
   // 步骤 2：M4 scope 收敛（kinds 映射；r 动作）。nodeIds 空直接空结果，不跑召回（EMPTY_SCOPE）。
   const scope = await deps.resolveScope();
@@ -138,7 +147,10 @@ export async function executeUnifiedSearch(
   let queryVector: Buffer | null = null;
   let vectorReason: DegradedReason | null = null;
   if (plan.vector.enabled && deps.vector) {
-    const out = await deps.vector.embedQuery(plan.query, plan.vector.entityTypeCodes);
+    const out = await deps.vector.embedQuery(
+      { text: plan.query, images: input.images },
+      plan.vector.entityTypeCodes,
+    );
     if (out.ok && out.blob) queryVector = out.blob;
     else vectorReason = out.reason ?? "vec_unavailable";
   } else if (plan.vector.enabled && !deps.vector) {

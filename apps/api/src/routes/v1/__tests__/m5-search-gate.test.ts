@@ -224,6 +224,53 @@ describe("GX_M5_SEARCH=on", () => {
     const res = await app.request("/api/search?q=", { headers: authHeaders() });
     expect(res.status).toBe(200);
   });
+
+  it("POST /api/v1/search 挂载：空 q 无图回 §9 空壳", async () => {
+    const { app } = await buildApp("on");
+    const res = await app.request("/api/v1/search", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ q: "" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[]; mode: string };
+    expect(body.items).toEqual([]);
+    expect(body.mode).toBe("like");
+  });
+
+  it("POST 非法 body（非 JSON 对象）-> 400 SEARCH_BAD_BODY", async () => {
+    const { app } = await buildApp("on");
+    const res = await app.request("/api/v1/search", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: "not-json",
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("SEARCH_BAD_BODY");
+  });
+
+  it("POST images 非数组 -> 400 SEARCH_BAD_IMAGES", async () => {
+    const { app } = await buildApp("on");
+    const res = await app.request("/api/v1/search", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ images: "data:image/png;base64,AA" }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("SEARCH_BAD_IMAGES");
+  });
+
+  it("POST 纯图（无文本）走真实新链（gate-user scope 空 -> 200 §9 形，非 404/500）", async () => {
+    const { app } = await buildApp("on");
+    const res = await app.request("/api/v1/search", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ q: "", images: ["data:image/png;base64,AA"] }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[]; mode: string };
+    expect(Array.isArray(body.items)).toBe(true);
+  });
 });
 
 describe("GX_M5_SEARCH=shadow", () => {

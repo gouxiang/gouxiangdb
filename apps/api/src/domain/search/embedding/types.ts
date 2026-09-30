@@ -3,7 +3,10 @@
 // 权威依据：M5-implementation-plan §4.4（接口与配置表）、§1.7（cloud 单一 OpenAI 兼容契约）。
 // 本文件只放接口/类型/纯常量/纯解析：不触网、不读库、不做加解密（加解密在 embeddingConfig.ts）。
 
-import type { EmbeddingProviderKind } from "@gx/shared-types";
+import type {
+  EmbeddingProviderKind,
+  MultimodalEmbedItem,
+} from "@gx/shared-types";
 //
 // 形态纪律（§0.3 C-EMB-1 已裁决：回归 cloud/off，取消 local）：
 //   - 本期只实现 offProvider 与 cloudProvider；不引本地推理/transformers/onnx/模型权重。
@@ -75,6 +78,13 @@ export interface EmbeddingProvider {
   readonly dim: number;
   readonly batchSize: number;
   embed(texts: readonly string[]): Promise<Float32Array[]>;
+  /**
+   * 多模态向量化（#563）：cloud（doubao-embedding-vision）实现；off 无此方法。
+   * 每个 MultimodalEmbedItem（文本 + 图片）返回【一个】向量；不支持时由调用方回退纯文本 embed。
+   */
+  embedMultimodal?(
+    items: readonly MultimodalEmbedItem[],
+  ): Promise<Float32Array[]>;
   health(): Promise<EmbeddingHealth>;
   dispose?(): Promise<void>;
 }

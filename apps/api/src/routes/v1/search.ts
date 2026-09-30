@@ -18,15 +18,8 @@ import { writeAudit } from "../../audit/audit.js";
 import { sourceIp } from "../../utils/client-ip.js";
 import { executeUnifiedSearch } from "../../domain/search/query.js";
 import { buildQueryRuntime } from "../../domain/search/queryRuntime.js";
-import { resolveSearchDbPath } from "../../domain/search/searchStore.js";
 import { loadSearchGateFlag } from "../../domain/search/searchGate.js";
-import { isCorruptionError } from "../../domain/search/searchCorruption.js";
-import {
-  recoverCorruptSearchStore,
-  repopulateRecoveredStore,
-  isRepopulating,
-} from "../../domain/search/searchRecovery.js";
-import { executeEmergencyLike } from "../../domain/search/emergencyLike.js";
+import { runOnSearch } from "../../domain/search/searchRun.js";
 import { observeDegrade } from "../../domain/search/degradeAudit.js";
 import { runLegacyGlobalSearch } from "../../domain/search/legacySearch.js";
 import {
@@ -139,52 +132,72 @@ searchRoutes.get("/", async (c) => {
     return c.json(legacy); // 响应永远是旧结果
   }
 
-  // on 态：先收敛后召回。search.db 物理损坏时自愈——隔离坏库三件、重开空库、当次回主库
-  // 参数化 LIKE 应急（scope 仍每查实时收敛，绝不放宽授权），后台重播活实体补齐。
-  //
-  // 恢复窗口（isRepopulating）：新空库 schema 有效但内容未补齐，派生召回会静默返回半空结果。
-  // 此时不读 search.db 召回，直接走主库应急 LIKE（scope 只依赖主库 authz），避免二次损坏后
-  // 在重播完成前漏召回；窗口结束自动回到正常路径，默认健康路径仅一次内存布尔读、零额外查询。
-  if (isRepopulating()) {
-    const { deps } = await buildQueryRuntime(userId, type, {
-      prisma, env: process.env, dataDir: config.dataDir, appDir: config.appDir,
-      jwtSecret: config.jwtSecret,
-    });
-    unified = await executeEmergencyLike(prisma, await deps.resolveScope(), rawQ.trim(), limit);
-    sampleDegrade(unified);
-    return c.json(unified);
-  }
-
-  try {
-    const { deps } = await buildQueryRuntime(userId, type, {
-      prisma, env: process.env, dataDir: config.dataDir, appDir: config.appDir,
-      jwtSecret: config.jwtSecret,
-    });
-    unified = await executeUnifiedSearch(deps, { q: rawQ, type, mode, limit }, false);
-  } catch (err) {
-    if (!isCorruptionError(err)) throw err; // 非损坏：维持既有错误信封，不改变契约
-    const searchPath = resolveSearchDbPath(process.env, config.dataDir);
-    const recovered = await recoverCorruptSearchStore(searchPath, {
-      appDir: config.appDir,
-      ...(process.env.GX_VEC_EXT_PATH?.trim() ? { vecExtPath: process.env.GX_VEC_EXT_PATH.trim() } : {}),
-    });
-    console.warn(`[search] search.db 损坏已隔离至 ${recovered.quarantinedPath}，当次回主库 LIKE 应急并重播`);
-    // 全新 runtime 指向重开的空库；scope 只走主库 authz，不受空 search.db 影响。
-    const { deps: freshDeps } = await buildQueryRuntime(userId, type, {
-      prisma, env: process.env, dataDir: config.dataDir, appDir: config.appDir,
-      jwtSecret: config.jwtSecret, store: recovered.store,
-    });
-    const scope = await freshDeps.resolveScope();
-    unified = await executeEmergencyLike(prisma, scope, rawQ.trim(), limit);
-    // 后台重播（fire-and-forget）：复用 reindex 抽取/灌库真源；cloud embed 失败按欠账后补。
-    // vecExtPath 透传：运维覆盖加载的 vec0 在重建库必须保持可用（否则 cloud 静默退成 fts-only）。
-    void repopulateRecoveredStore({
-      prisma, env: process.env, dataDir: config.dataDir, appDir: config.appDir,
-      jwtSecret: config.jwtSecret, searchPath,
-      ...(process.env.GX_VEC_EXT_PATH?.trim() ? { vecExtPath: process.env.GX_VEC_EXT_PATH.trim() } : {}),
-    });
-  }
+  // on 态：复用共享执行段（GET 纯文本；images 缺省）。损坏自愈/repopulating 应急都在其中。
+  unified = await runOnSearch({
+    userId, prisma, rawQ, type, mode, limit,
+    requestPath: c.req.path, sourceIp: sourceIp(c),
+  });
 
   sampleDegrade(unified);
+  return c.json(unified);
+});
+
+// ---- POST /api/v1/search：以图搜图（GET 装不下 dataURL，故同路径提供 POST）----
+// 仅比 GET 多一个 images（data:image/...）。响应契约与 GET 逐字段一致；GET 行为零变化。
+
+const MAX_IMAGES = 4;
+
+searchRoutes.post("/", async (c) => {
+  const userId = c.get("auth").userId;
+
+  // 总门与 GET 同一真源；off 同样 404。
+  const gateFlag = await loadSearchGateFlag(prisma, config.jwtSecret, process.env, config.m5Search);
+  if (gateFlag === "off") {
+    throw new HttpError(404, "统一检索未启用", "NOT_FOUND");
+  }
+
+  const body = await c.req.json().catch(() => null) as {
+    q?: unknown; type?: unknown; mode?: unknown; limit?: unknown; images?: unknown;
+  } | null;
+  if (!body || typeof body !== "object") {
+    throw new HttpError(400, "请求体必须是 JSON 对象", "SEARCH_BAD_BODY");
+  }
+
+  const rawQ = typeof body.q === "string" ? body.q : "";
+  const type = (TYPES.has(body.type as EntityTypeFilter) ? body.type : "all") as EntityTypeFilter;
+  const mode = (MODES.has(body.mode as RequestedMode) ? body.mode : "auto") as RequestedMode;
+  let limit = DEFAULT_LIMIT;
+  if (body.limit !== undefined && body.limit !== null) {
+    const n = Number(body.limit);
+    if (!Number.isInteger(n) || n < 1 || n > MAX_LIMIT) {
+      throw new HttpError(400, "limit 必须是 1..50 的整数", "SEARCH_BAD_LIMIT");
+    }
+    limit = n;
+  }
+
+  // 图片：仅接受 data:image/* 内联数据（用户本地上传）；过滤非法项，限 4 张。
+  let images: string[] = [];
+  if (body.images !== undefined) {
+    if (!Array.isArray(body.images)) {
+      throw new HttpError(400, "images 必须是数组", "SEARCH_BAD_IMAGES");
+    }
+    images = body.images.filter(
+      (u): u is string => typeof u === "string" && u.startsWith("data:image/"),
+    );
+    if (images.length > MAX_IMAGES) images = images.slice(0, MAX_IMAGES);
+  }
+
+  const hasText = rawQ.trim().length > 0;
+  if (!hasText && images.length === 0) {
+    // 无文本也无图：与 GET 空 q 一致回空壳。
+    return c.json(emptySearchResponse(limit));
+  }
+
+  // shadow 态 POST 不做对拍（多模态为新增能力，GET shadow 对拍仅限可比纯文本集），
+  // 直接走 on 执行链；响应以新链路为准。
+  const unified = await runOnSearch({
+    userId, prisma, rawQ, type, mode, limit, images,
+    requestPath: c.req.path, sourceIp: sourceIp(c),
+  });
   return c.json(unified);
 });

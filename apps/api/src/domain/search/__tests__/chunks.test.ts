@@ -11,11 +11,9 @@ import {
   DOC_TARGET_MAX,
   DOC_TARGET_MIN,
   FIELD_CHUNK_CAP,
-  buildCanvasIdentityChunks,
   buildDocChunksFromMarkdown,
   buildDocIdentityChunks,
   buildRecordChunks,
-  collectCanvasTextElements,
   extractFieldText,
   isSearchableFieldType,
   splitMarkdownHeadings,
@@ -23,6 +21,10 @@ import {
   type RecordChunkInput,
   type RecordFieldInput,
 } from "../chunks.js";
+import {
+  buildCanvasIdentityChunks,
+  collectCanvasTextElements,
+} from "../chunks-canvas.js";
 
 function padId(n: number): string {
   return `f${String(n).padStart(2, "0")}`;
@@ -69,10 +71,10 @@ describe("isSearchableFieldType：可搜索白名单", () => {
   const searchable = [
     "singleLineText", "longText", "richText", "number", "currency", "percent",
     "duration", "date", "datetime", "checkbox", "rating", "singleSelect",
-    "multiSelect", "email", "url", "phone", "autoNumber",
+    "multiSelect", "email", "url", "phone", "autoNumber", "attachment",
   ];
   const excluded = [
-    "attachment", "formula", "lookup", "rollup", "count", "links", "subtable",
+    "formula", "lookup", "rollup", "count", "links", "subtable",
     "tabs", "json", "createdTime", "lastModifiedTime", "createdBy", "lastModifiedBy",
   ];
   for (const t of searchable) {
@@ -185,14 +187,15 @@ describe("buildRecordChunks：field chunk 产出与剔除", () => {
     expect(result.fieldChunks).toHaveLength(0);
   });
 
-  it("附件/tabs/json 剔除，普通文本保留", () => {
+  it("tabs/json 剔除；附件贡献文件名/图片，普通文本保留", () => {
     const result = buildRecordChunks(makeRecord([
       { fieldId: "att", name: "附件", type: "attachment", order: 1, value: [{ name: "a.pdf" }] },
       { fieldId: "tabs", name: "分页", type: "tabs", order: 2, value: { x: 1 } },
       { fieldId: "js", name: "JSON", type: "json", order: 3, value: { a: 1 } },
       { fieldId: "txt", name: "文本", type: "singleLineText", order: 4, value: "保留" },
     ]));
-    expect(result.fieldChunks.map((c) => c.fieldId)).toEqual(["txt"]);
+    // attachment 优先级为末档（typePriority=2），故排在 singleLineText(txt) 之后。
+    expect(result.fieldChunks.map((c) => c.fieldId)).toEqual(["txt", "att"]);
   });
 });
 

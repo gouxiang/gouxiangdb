@@ -6,6 +6,7 @@
 // 不启 worker（S5 默认 off 纪律延续）；只在本模块惰性取 searchStore/构造 provider，import 不连库。
 
 import type { PrismaClient } from "@prisma/client";
+import { isUsableImageUrl } from "@gx/shared-types";
 import { getSearchStore, resolveSearchDbPath, type SearchStore } from "./searchStore.js";
 import { META_KEYS, getMeta, vecChunksExists } from "./schema.js";
 import { vecBlob } from "./vecLoader.js";
@@ -72,15 +73,21 @@ function makeVectorGate(
   provider: EmbeddingProvider | null,
 ): QueryVectorGate {
   return {
-    async embedQuery(q): Promise<VectorQueryOutcome> {
+    async embedQuery(req): Promise<VectorQueryOutcome> {
       // 配置态：mode=off、或 cloud 缺配置回落到的 off provider -> 不走向量，不算 degraded。
       if (mode !== "cloud" || !provider || provider.mode !== "cloud") return { ok: false };
       // vec0 扩展不可用 -> vec_unavailable（强制 vector 据此回退关键词并标注）。
       if (!store.vecAvailable) return { ok: false, reason: "vec_unavailable" };
       // 向量虚表尚未建（cloud 已开但尚无实体完成向量化）：无向量可搜，非故障，安静跳过。
       if (!vecChunksExists(store.db)) return { ok: false };
+      const images = (req.images ?? []).filter((u) => isUsableImageUrl(u));
+      // 以图搜图：带可用图片且 provider 实现了多模态方法 -> 走多模态向量化（图文合一个向量）；
+      // 带图但 provider 无多模态能力 -> 安静退回纯文本（不构成故障，不标 degraded）。
+      const multimodal = images.length > 0 && provider.embedMultimodal;
       try {
-        const vectors = await provider.embed([q]);
+        const vectors = multimodal
+          ? await provider.embedMultimodal!([{ text: req.text, images }])
+          : await provider.embed([req.text]);
         const v = vectors.find((x) => x && x.length > 0);
         if (!v || v.length === 0) return { ok: false, reason: "embedding_unhealthy" };
         // dim 必须与 vec_chunks 建表维度一致（model 变更未 reindex），否则拒向量路（AC-M5-6）。

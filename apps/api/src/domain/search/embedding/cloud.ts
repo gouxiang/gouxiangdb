@@ -29,6 +29,9 @@ import {
   MAX_TEXT_CHARS,
 } from "./types.js";
 import { createOffProvider } from "./off.js";
+import { buildMultimodalEndpoint } from "@gx/shared-types";
+import type { MultimodalEmbedItem } from "@gx/shared-types";
+import { embedMultimodalBatch } from "./cloud-multimodal.js";
 
 /** 仅本文件需要的注入依赖（测试替换 fetch/sleep/时钟，不触真外网）。 */
 export interface CloudDeps {
@@ -191,6 +194,23 @@ export function createCloudProvider(cfg: CloudProviderConfig, deps: CloudDeps = 
         }
       }));
       return out;
+    },
+
+    async embedMultimodal(
+      items: readonly MultimodalEmbedItem[],
+    ): Promise<Float32Array[]> {
+      if (items.length === 0) return [];
+      return await embedMultimodalBatch(
+        items,
+        {
+          endpoint: buildMultimodalEndpoint(cfg.baseURL),
+          apiKey: cfg.apiKey,
+          model: cfg.model,
+          timeoutMs: cfg.timeoutMs,
+          fetchImpl,
+        },
+        clampInt(deps.concurrency ?? cfg.concurrency, DEFAULT_CONCURRENCY, CONCURRENCY_MAX),
+      );
     },
 
     async health(): Promise<EmbeddingHealth> {
