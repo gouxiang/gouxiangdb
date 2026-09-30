@@ -3,6 +3,8 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import type { FilterNode } from "@gx/shared-types";
+import { andFilters, evaluateRowFilter } from "../domain/authz/rowFilter.js";
 import { SEARCH_PREVIEW_LIMIT, boundedPreviewMarker } from "./searchBounds.js";
 import { prisma, withWriteTx, runWrite, type DbTx } from "../db.js";
 import {
@@ -104,7 +106,15 @@ records.get("/", async (c) => {
   // + compile 掩码外字段兜底。off/shadow mask=null，以下四项全部回落原值，响应与 S0 字节一致。
   const mask = await resolveTableMask(userId, tableId, scopeFields);
   const queryFields = mask ? mask.visibleFields : scopeFields;
-  const queryConfig = mask ? mask.sanitizeConfig(config) : config;
+  let queryConfig = mask ? mask.sanitizeConfig(config) : config;
+  // P1-S8b-2 行级条件（on 态）：与视图自身 config.filters AND 组合后交给 queryRecords，
+  // legacy 内存路径与 queryPlan 物理下推路径共用同一份 config，recordService 内部零改动。
+  if (mask?.rowFilter) {
+    queryConfig = {
+      ...queryConfig,
+      filters: andFilters((queryConfig.filters as FilterNode | null) ?? null, mask.rowFilter),
+    };
+  }
 
   let result;
   try {
@@ -394,6 +404,10 @@ records.get("/:recordId", async (c) => {
     ? { fields: mask.visibleFields, deps: mask.hydrateDeps }
     : undefined);
   if (!found) throw new HttpError(404, "记录不存在");
+  // P1-S8b-2：对操作前当前行求行级条件（与列表同口径）；不满足按不存在处理。
+  if (mask && !evaluateRowFilter(mask.rowFilter, found, fields, userId)) {
+    throw new HttpError(404, "记录不存在");
+  }
 
   return c.json({
     record: scope.active ? { ...found, fields: stripHiddenKeys(found.fields, scope.hiddenIds) } : found,
@@ -421,6 +435,17 @@ records.patch("/:recordId", async (c) => {
   // M4/S6 写键守卫（事务前）：payload 带掩码外/只读物理键 -> 403 FORBIDDEN_FIELD，整行未改。
   const mask = await resolveTableMask(userId, rec.tableId, fields);
   runMaskWriteGate(mask, Object.keys(parsed.data.fields));
+
+  // P1-S8b-2：开写事务前对操作前当前行求行级条件（与列表/详情同口径）；不满足 403，整行未改。
+  if (mask?.rowFilter) {
+    const before = await hydrateRecordById(rec.tableId, recordId, {
+      fields: mask.visibleFields,
+      deps: mask.hydrateDeps,
+    });
+    if (!before || !evaluateRowFilter(mask.rowFilter, before, fields, userId)) {
+      throw new HttpError(403, "无权操作该记录");
+    }
+  }
 
   // 事务：unique 校验 + 物理字段写入 + link_row 写入 + updatedBy 落库，
   // 任一步失败整体回滚，避免「链接写了一半、文本没写」的中间态。
@@ -481,6 +506,19 @@ records.delete("/:recordId", async (c) => {
 
   const rec = await prisma.record.findUnique({ where: { id: recordId } });
   if (!rec || rec.deletedAt) throw new HttpError(404, "记录不存在");
+
+  // P1-S8b-2：DELETE 出口此前未取 mask；on 态对操作前当前行求行级条件，不满足 403，行未删。
+  const dfields = await loadTableFields(rec.tableId);
+  const dmask = await resolveTableMask(userId, rec.tableId, dfields);
+  if (dmask?.rowFilter) {
+    const before = await hydrateRecordById(rec.tableId, recordId, {
+      fields: dmask.visibleFields,
+      deps: dmask.hydrateDeps,
+    });
+    if (!before || !evaluateRowFilter(dmask.rowFilter, before, dfields, userId)) {
+      throw new HttpError(403, "无权操作该记录");
+    }
+  }
 
   // M1/S4：软删同事务撤掉该记录 sidecar 行（派生索引不保留软删记录，恢复时重建）。
   // M3/S1：原 $transaction([...]) 数组批收紧为交互事务，以承载 outbox 同事务登记。

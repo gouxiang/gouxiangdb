@@ -11,7 +11,7 @@
 
 import { prisma } from "../../db.js";
 import { fieldMaskEnforceEffective } from "../../configAuthz.js";
-import type { ViewConfig } from "@gx/shared-types";
+import type { FilterNode, ViewConfig } from "@gx/shared-types";
 import type { FieldMeta } from "../types.js";
 import type { HydrateDeps } from "../hydrate.js";
 import { prismaDeps } from "../prismaDeps.js";
@@ -31,6 +31,8 @@ export interface MaskContext {
   sanitizeConfig: (config: ViewConfig) => ViewConfig;
   /** 写键守卫（create/patch/bulk-update 事务前）。 */
   assertWritable: (keys: readonly string[]) => void;
+  /** 合并后的行级过滤器；null=不做行级过滤。 */
+  rowFilter: FilterNode | null;
 }
 
 /**
@@ -56,5 +58,6 @@ export async function resolveTableMask(
     hydrateDeps: session.withHydrateDeps(prismaDeps),
     sanitizeConfig: (config) => session.sanitizeConfig(config, mask),
     assertWritable: (keys) => session.assertWritable(keys, fields, mask),
+    rowFilter: mask.rowFilter,
   };
 }

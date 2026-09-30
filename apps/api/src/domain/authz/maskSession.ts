@@ -16,8 +16,9 @@
 //   不由 S6 判定（旧成员守卫已保证进得来出口），本层只做字段维收窄（只减不增）。off/shadow 时
 //   路由不构造本层（零引擎 SQL）；creator/workspace owner 经合成宽来源兜底全可见（与 decide 同源）。
 
-import type { ViewConfig } from "@gx/shared-types";
+import type { FilterNode, ViewConfig } from "@gx/shared-types";
 import type { AuthzClient, ScopedPolicy } from "./types.js";
+import { combineRowConditions } from "./rowFilter.js";
 import type { FieldMeta } from "../types.js";
 import type { HydrateDeps } from "../hydrate.js";
 import { nodeId } from "../nav/backfill.js";
@@ -40,6 +41,8 @@ export interface TableMask {
   cap: FieldCapability;
   /** 可见字段 id 集；null=不裁剪（visibleAll：宽来源/creator/owner）。 */
   visibleIds: ReadonlySet<string> | null;
+  /** 合并后的行级过滤器；null=不做行级过滤（无 r 来源或命中宽来源）。 */
+  rowFilter: FilterNode | null;
 }
 
 /**
@@ -98,7 +101,11 @@ export class FieldMaskSession {
         if (p.fieldMask?.allowFields) for (const f of p.fieldMask.allowFields) visibleIds.add(f);
       }
     }
-    const mask: TableMask = { cap, visibleIds };
+    // 行级条件与 fieldMask 同源：同一 effective（含 creator/owner syntheticWidePolicy）
+    // 中动作含 r 的来源；syntheticWidePolicy.rowConditions=null，其命中即宽（rowFilter=null）。
+    const rPoliciesForRows = effective.filter((p) => p.actions.includes("r"));
+    const rowFilter = combineRowConditions(rPoliciesForRows);
+    const mask: TableMask = { cap, visibleIds, rowFilter };
     this.cache.set(tableId, mask);
     return mask;
   }

@@ -24,6 +24,7 @@ function pol(partial: Partial<ScopedPolicy> & { actions: string[] }): ScopedPoli
     subjectId: partial.subjectId ?? "u1",
     actions: partial.actions as ScopedPolicy["actions"],
     fieldMask: partial.fieldMask === undefined ? null : partial.fieldMask,
+    rowConditions: partial.rowConditions === undefined ? null : partial.rowConditions,
     viaAncestor: partial.viaAncestor ?? false,
   };
 }

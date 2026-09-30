@@ -29,6 +29,8 @@ export interface ScopedPolicy {
   actions: ResourceAction[];
   /** 解析后的 fieldMask（无掩码为 null）。 */
   fieldMask: import("@gx/shared-types").FieldMask | null;
+  /** 解析后的行级可见条件（无条件为 null=宽）。 */
+  rowConditions: import("@gx/shared-types").RowConditions | null;
   /** 该策略所在节点是否经祖先链继承命中（false=节点直接策略）。 */
   viaAncestor: boolean;
 }

@@ -18,7 +18,7 @@ export function syntheticWidePolicy(userId: string, tableNodeId: string): Scoped
   return {
     id: "__owner_fallback__", nodeId: tableNodeId, subjectType: "user",
     subjectId: userId, actions: ["r", "c", "u"] as ResourceAction[],
-    fieldMask: null, viaAncestor: false,
+    fieldMask: null, rowConditions: null, viaAncestor: false,
   };
 }
 

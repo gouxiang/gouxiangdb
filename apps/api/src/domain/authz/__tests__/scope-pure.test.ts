@@ -39,6 +39,7 @@ function mkPolicy(overrides: Partial<ScopedPolicy> & Pick<ScopedPolicy, "id" | "
     subjectId: "u1",
     actions: ["r"],
     fieldMask: null,
+    rowConditions: null,
     viaAncestor: false,
     ...overrides,
   };

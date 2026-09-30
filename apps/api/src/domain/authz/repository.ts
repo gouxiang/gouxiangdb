@@ -4,7 +4,13 @@
 // kb_doc_acls（影子旧决策由适配层传入，引擎不读旧三表——权威单一边界）。
 // 动作包含判定在内存（解析 actions 串），不用 SQL LIKE，避免转义与前缀误命中。
 
-import { parseActionString, type FieldMask, type ResourceAction } from "@gx/shared-types";
+import {
+  parseActionString,
+  parseRowConditions,
+  type FieldMask,
+  type ResourceAction,
+  type RowConditions,
+} from "@gx/shared-types";
 import type { AuthzClient, ResolvedSubject, ScopedPolicy } from "./types.js";
 
 const POLICY_SELECT = {
@@ -14,6 +20,7 @@ const POLICY_SELECT = {
   subjectId: true,
   actions: true,
   fieldMask: true,
+  conditions: true,
 } as const;
 
 type PolicyRow = {
@@ -23,7 +30,17 @@ type PolicyRow = {
   subjectId: string;
   actions: string;
   fieldMask: string | null;
+  conditions: string | null;
 };
+
+/**
+ * 解析行级条件存储串：空 -> null（宽）；坏 JSON/结构 -> shared-types PolicyValidationError
+ * 自然冒泡（on 态 fail-closed，调用方不吞）。
+ */
+function parseRowConditionsForPolicy(raw: string | null): RowConditions | null {
+  if (!raw) return null;
+  return parseRowConditions(raw);
+}
 
 function parseFieldMask(raw: string | null): FieldMask | null {
   if (!raw) return null;
@@ -79,6 +96,7 @@ export async function policiesOnNodesTx(
       subjectId: row.subjectId,
       actions: parseActionString(row.actions) as ResourceAction[],
       fieldMask: parseFieldMask(row.fieldMask),
+      rowConditions: parseRowConditionsForPolicy(row.conditions),
       viaAncestor: false, // 由 engine 按决策节点 vs 策略节点标注
     });
   }
@@ -130,6 +148,7 @@ export async function policiesForSubjectTx(
       subjectId: row.subjectId,
       actions: parseActionString(row.actions) as ResourceAction[],
       fieldMask: parseFieldMask(row.fieldMask),
+      rowConditions: parseRowConditionsForPolicy(row.conditions),
       viaAncestor: false,
     });
   }
