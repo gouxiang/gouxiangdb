@@ -8,6 +8,7 @@
 //   语义等价（计算字段的 key 同样是 fieldId）。
 
 import type { ViewConfig, ViewType, LockMode } from "./views.js";
+import type { ViewAdminConfig } from "./viewAdmin.js";
 import type { Role, PermissionSet } from "./permissions.js";
 import type { FieldType, TabConfig } from "./fields.js";
 import type { TableIdT, BaseIdT, FieldIdT, RecordIdT, ViewIdT } from "./ids.js";
@@ -315,6 +316,8 @@ export interface ViewDTO {
   lockMode: LockMode;
   order: number;
   config: ViewConfig;
+  /** 管理员配置层（无管理员配置时为 null）。 */
+  adminConfig: ViewAdminConfig | null;
   createdAt: string;
 }
 
@@ -329,6 +332,11 @@ export interface UpdateViewRequest {
   lockMode?: LockMode;
   order?: number;
   config?: Partial<ViewConfig>;
+}
+
+/** 管理员配置层写请求（仅表结构管理者可用，走独立端点，不与用户 config 混通道）。 */
+export interface UpdateViewAdminRequest {
+  adminConfig: Partial<Omit<ViewAdminConfig, "version">>;
 }
 
 // ============ Member / 权限 ============
