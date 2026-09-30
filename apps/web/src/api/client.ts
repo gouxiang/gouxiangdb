@@ -17,6 +17,7 @@ import type {
   ViewDTO,
   ViewConfig,
   ViewAdminConfig,
+  ViewUserPrefs,
   ViewType,
   LockMode,
   DetailLayout,
@@ -809,6 +810,22 @@ export const Views = {
     apiFetch<{ view: ViewDTO }>(`/api/views/${encodeURIComponent(viewId)}/admin`, {
       method: "PATCH",
       body: JSON.stringify({ adminConfig }),
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
+  /**
+   * 视图「用户个性化层」写入（#561）：任何成员都可写自己的偏好，不触碰共享 config。
+   * 请求体只发变化键，后端按 UpdateViewUserPrefsRequest 浅合并。
+   */
+  savePrefs: (viewId: string, prefs: Partial<Omit<ViewUserPrefs, "version">>) =>
+    apiFetch<{ userPrefs: ViewUserPrefs }>(`/api/views/${encodeURIComponent(viewId)}/prefs`, {
+      method: "PUT",
+      body: JSON.stringify({ prefs }),
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
+  /** 清除当前用户在该视图上的个性化覆盖，恢复为视图默认 config。 */
+  resetPrefs: (viewId: string) =>
+    apiFetch<{ ok: true }>(`/api/views/${encodeURIComponent(viewId)}/prefs`, {
+      method: "DELETE",
       timeoutMs: WRITE_TIMEOUT_MS,
     }),
 };

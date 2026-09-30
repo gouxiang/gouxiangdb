@@ -24,6 +24,7 @@ import { useGXMutations, useTables } from "../../api/hooks";
 import { toast } from "../../components/ui";
 import { useWriteGuard } from "../../components/interaction";
 import { confirmClearTable } from "../../components/confirm-table";
+import { isUseStatePatch, pickUseState } from "./view-config-route";
 import { EntityIconPicker } from "../../components/EntityIconPicker";
 import { ViewSwitcher } from "../grid/ViewSwitcher";
 import { GridToolbar } from "../grid/GridToolbar";
@@ -82,11 +83,29 @@ export function ViewShell({
     (partial: Partial<ViewConfig>) => {
       const next = { ...config, ...partial };
       setConfig(next);
+
+      // #561：纯「使用态」改动（搜索/筛选/排序/行高/分组折叠/分组字段/聚合）且当前用户
+      // 无结构管理权时，只写他自己的 prefs，不覆盖共享 views.config；
+      // canSchema 或任何结构层键（字段范围/顺序/封面/详情/行颜色…）仍走原共享通道。
+      if (isUseStatePatch(partial) && !permissions.canManageSchema) {
+        m.saveViewPrefs
+          .mutateAsync({ viewId, tableId, prefs: pickUseState(next) })
+          .catch((e: unknown) => {
+            // 乐观失败：回滚到本次写入前的快照，避免界面停在没存住的状态。
+            setConfig(config);
+            toast((e as Error)?.message ?? "保存视图偏好失败", "error");
+          });
+        return;
+      }
+
       m.updateView
         .mutateAsync({ viewId, tableId, data: { config: next } })
-        .catch((e: unknown) => toast((e as Error)?.message ?? "保存视图配置失败", "error"));
+        .catch((e: unknown) => {
+          setConfig(config);
+          toast((e as Error)?.message ?? "保存视图配置失败", "error");
+        });
     },
-    [config, m, viewId, tableId],
+    [config, m, viewId, tableId, permissions.canManageSchema],
   );
 
   const onNewRecord = useCallback(() => {

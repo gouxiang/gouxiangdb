@@ -26,6 +26,7 @@ import type {
   ViewDTO,
   ViewConfig,
   ViewAdminConfig,
+  ViewUserPrefs,
   ViewType,
   LockMode,
   CommentDTO,
@@ -556,6 +557,27 @@ export function useGXMutations() {
       }) => (await Views.updateAdmin(p.viewId, p.adminConfig)).view,
       onSuccess: (_d, v) => {
         void qc.invalidateQueries({ queryKey: QK.views(v.tableId) });
+        void qc.invalidateQueries({ queryKey: ["records", v.tableId] });
+      },
+    }),
+    // #561：当前用户视图个性化层。只写自己的 prefs，不触碰共享 config；
+    // 生效后合成的 ViewDTO.config 会变，因此 views + records 都要失效。
+    saveViewPrefs: useMutation({
+      mutationFn: async (p: {
+        viewId: string;
+        tableId: string;
+        prefs: Partial<Omit<ViewUserPrefs, "version">>;
+      }) => (await Views.savePrefs(p.viewId, p.prefs)).userPrefs,
+      onSuccess: (_d, v) => {
+        void qc.invalidateQueries({ queryKey: ["views", v.tableId] });
+        void qc.invalidateQueries({ queryKey: ["records", v.tableId] });
+      },
+    }),
+    resetViewPrefs: useMutation({
+      mutationFn: async (p: { viewId: string; tableId: string }) =>
+        (await Views.resetPrefs(p.viewId)).ok,
+      onSuccess: (_d, v) => {
+        void qc.invalidateQueries({ queryKey: ["views", v.tableId] });
         void qc.invalidateQueries({ queryKey: ["records", v.tableId] });
       },
     }),

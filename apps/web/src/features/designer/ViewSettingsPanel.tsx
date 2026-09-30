@@ -61,6 +61,18 @@ export default function ViewSettingsPanel({ view, tableId, permissions, onClose,
     }
   };
 
+  // #561：清除当前用户在该视图上的使用态覆盖（搜索/筛选/排序/行高/分组/聚合），
+  // 恢复为视图默认。所有成员都可用；已经是默认视图（userPrefs===null）时按钮禁用。
+  const resetPrefs = async () => {
+    if (view.userPrefs === null) return;
+    try {
+      await m.resetViewPrefs.mutateAsync({ viewId: view.id, tableId });
+      toast("已恢复视图默认设置", "success");
+    } catch (err) {
+      toast((err as Error).message || "重置失败", "error");
+    }
+  };
+
   const remove = async () => {
     if (onlyOne) return;
     // R-D-23 L4（视图删除不可恢复，回收站只收 record/table/field）+ R-D-24 主按钮必须是具体动词
@@ -133,6 +145,17 @@ export default function ViewSettingsPanel({ view, tableId, permissions, onClose,
 
       {/* 操作 */}
       <div className="flex flex-col gap-2 border-t border-gx-separator pt-3">
+        {/* #561：恢复视图默认设置。走当前用户 prefs 删除通道，与结构管理权无关，
+            普通成员也可用；userPrefs===null 表示本来就是默认视图，无需重置。 */}
+        <Button
+          variant="secondary"
+          block
+          disabled={view.userPrefs === null}
+          onClick={() => void resetPrefs()}
+          title={view.userPrefs === null ? "当前为默认视图" : undefined}
+        >
+          重置为默认视图
+        </Button>
         <Button
           variant="secondary"
           block
