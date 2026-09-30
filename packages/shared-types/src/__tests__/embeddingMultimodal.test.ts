@@ -30,7 +30,7 @@ describe("toMultimodalInputParts", () => {
       images: ["data:image/png;base64,AA"],
     });
     expect(parts).toEqual([
-      { type: "image", imageUrl: "data:image/png;base64,AA" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,AA" } },
       { type: "text", text: "说明" },
     ]);
   });

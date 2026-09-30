@@ -9,11 +9,11 @@
 // 设计：纯文本通道（embedding/types.ts EmbeddingProvider.embed）保持不变，
 // 本文件只【新增】多模态能力与结构，老视图/老测试行为一字不变。
 
-/** 一条送多模态向量化的内容片段：图片 或 文本。 */
-export interface MultimodalContentPart {
-  type: "image" | "text";
-  /** type=image：图片 URL，可为 https 链接或 data:image/...;base64,... 内联。 */
-  imageUrl?: string;
+/** 方舟多模态 input 片段（请求线格式）：图片 或 文本。 */
+export interface MultimodalInputPart {
+  type: "image_url" | "text";
+  /** type=image_url：{ url }，url 可为 https 链接或 data:image/...;base64,... 内联。 */
+  image_url?: { url: string };
   /** type=text：文本内容。 */
   text?: string;
 }
@@ -29,10 +29,10 @@ export interface MultimodalEmbedItem {
 /** 把一个条目转成方舟多模态 input 片段数组（图片在前、文本在后）。 */
 export function toMultimodalInputParts(
   item: MultimodalEmbedItem,
-): MultimodalContentPart[] {
-  const parts: MultimodalContentPart[] = [];
+): MultimodalInputPart[] {
+  const parts: MultimodalInputPart[] = [];
   for (const url of item.images) {
-    parts.push({ type: "image", imageUrl: url });
+    parts.push({ type: "image_url", image_url: { url } });
   }
   if (item.text.trim() !== "") {
     parts.push({ type: "text", text: item.text });
