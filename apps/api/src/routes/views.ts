@@ -18,7 +18,16 @@ import { maybeAutoSnapshotLayoutTx, purgeVersionsTx } from "../domain/formLayout
 
 export const views = new Hono();
 
-const VIEW_TYPE_ENUM = z.enum(["grid", "gallery", "form", "detail", "kanban", "calendar"]);
+const VIEW_TYPE_ENUM = z.enum([
+  "grid",
+  "gallery",
+  "form",
+  "detail",
+  "kanban",
+  "calendar",
+  "tree",
+  "gantt",
+]);
 
 const createSchema = z.object({
   name: z.string().min(1).max(60),

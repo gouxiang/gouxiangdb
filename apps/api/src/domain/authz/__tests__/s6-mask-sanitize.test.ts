@@ -5,35 +5,14 @@
 //  - 可见引用原样保留（含 value/op 不被改动）；visible=全可见集时配置恒等。
 
 import { describe, expect, it } from "vitest";
-import type { FilterNode, ViewConfig } from "@gx/shared-types";
+import { defaultViewConfig, type FilterNode, type ViewConfig } from "@gx/shared-types";
 import { sanitizeViewConfigForMask } from "../fieldMask.js";
 
 const cond = (fieldId: string, op = "is", value = "x"): FilterNode =>
   ({ kind: "condition", fieldId, op, value }) as FilterNode;
 
 function baseConfig(over: Partial<ViewConfig>): ViewConfig {
-  return {
-    hiddenFieldIds: [],
-    fieldOrder: [],
-    rowHeight: "medium",
-    filters: null,
-    sorts: [],
-    search: "",
-    groupByFieldId: null,
-    collapsedGroupKeys: [],
-    aggregations: {},
-    rowColor: { mode: "none", conditions: [] },
-    coverFieldId: null,
-    cardFieldIds: [],
-    kanbanFieldId: null,
-    dateFieldId: null,
-    formFields: [],
-    formTitle: "",
-    formDescription: "",
-    detailFieldIds: [],
-    detailLayout: null,
-    ...over,
-  };
+  return defaultViewConfig(over);
 }
 
 const VISIBLE = new Set(["f1", "f2", "f3"]);
