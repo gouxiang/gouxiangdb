@@ -10,6 +10,8 @@ import { requireCanView, HttpError } from "../guards.js";
 import { requireSchemaDesign } from "../domain/authz/tableManageGuards.js";
 import { parseViewConfig } from "../domain/recordService.js";
 import { parseViewAdminConfig } from "../domain/viewAdminConfig.js";
+import { loadUserPrefs, parseViewUserPrefs } from "../domain/viewUserPrefsStore.js";
+import type { ViewUserPrefs } from "@gx/shared-types";
 import { permissionsForRole } from "@gx/shared-types";
 import { syncNavFromEntitiesTx, purgeViewNodeTx } from "../domain/nav/sync.js";
 import { maybeAutoSnapshotLayoutTx, purgeVersionsTx } from "../domain/formLayoutVersion.js";
@@ -46,18 +48,19 @@ async function baseIdOfView(viewId: string): Promise<string> {
   return v.table.baseId;
 }
 
-/** 序列化 View 行（Prisma 全字段返回，含可空 adminConfig）。供本文件与 viewAdmin.ts 共用。 */
-export function serializeView(v: {
-  id: string;
-  tableId: string;
-  name: string;
-  type: string;
-  lockMode: string;
-  order: number;
-  config: string;
-  adminConfig?: string | null;
-  createdAt: Date;
-}) {
+/**
+ * 序列化 View 行（含可空 adminConfig），供 views/viewAdmin/viewUserPrefs 三处共用。
+ * userPrefs 默认 null：序列化器无"当前用户"上下文，由各 handler 查出后传入
+ * （列表批量映射，单资源走 loadUserPrefs）。
+ */
+export function serializeView(
+  v: {
+    id: string; tableId: string; name: string; type: string;
+    lockMode: string; order: number; config: string;
+    adminConfig?: string | null; createdAt: Date;
+  },
+  userPrefs: ViewUserPrefs | null = null,
+) {
   return {
     id: v.id,
     tableId: v.tableId,
@@ -67,6 +70,7 @@ export function serializeView(v: {
     order: v.order,
     config: parseViewConfig(v.config),
     adminConfig: parseViewAdminConfig(v.adminConfig ?? null),
+    userPrefs,
     createdAt: v.createdAt.toISOString(),
   };
 }
@@ -77,13 +81,26 @@ views.get("/", async (c) => {
   const tableId = c.req.query("tableId");
   if (!tableId) return c.json({ error: "缺少 tableId" }, 400);
   const baseId = await baseIdOfTable(tableId);
-  await requireCanView(c, baseId);
+  const { userId } = await requireCanView(c, baseId);
 
   const rows = await prisma.view.findMany({
     where: { tableId },
     orderBy: { order: "asc" },
   });
-  return c.json({ views: rows.map(serializeView) });
+
+  // #561：批量取当前用户在这些视图上的偏好（一次查询，避免逐视图 N+1）。
+  const prefRows = await prisma.viewUserPref.findMany({
+    where: { userId, viewId: { in: rows.map((r) => r.id) } },
+    select: { viewId: true, prefs: true },
+  });
+  const prefByView = new Map(prefRows.map((r) => [r.viewId, r.prefs]));
+
+  return c.json({
+    views: rows.map((v) => {
+      const raw = prefByView.get(v.id);
+      return serializeView(v, raw === undefined ? null : parseViewUserPrefs(raw));
+    }),
+  });
 });
 
 // ============ 创建 ============
@@ -132,10 +149,11 @@ views.post("/", async (c) => {
 views.get("/:viewId", async (c) => {
   const viewId = c.req.param("viewId");
   const baseId = await baseIdOfView(viewId);
-  await requireCanView(c, baseId);
+  const { userId } = await requireCanView(c, baseId);
   const v = await prisma.view.findUnique({ where: { id: viewId } });
   if (!v) throw new HttpError(404, "视图不存在");
-  return c.json({ view: serializeView(v) });
+  const userPrefs = await loadUserPrefs(prisma, viewId, userId);
+  return c.json({ view: serializeView(v, userPrefs) });
 });
 
 // ============ 更新（用户态 config；不碰 adminConfig）============
@@ -206,7 +224,9 @@ views.patch("/:viewId", async (c) => {
     }
     return u;
   });
-  return c.json({ view: serializeView(updated) });
+  // #561：PATCH 返回也带当前用户的个性化（视图默认 config 被改不影响该用户已固化的偏好）。
+  const userPrefs = await loadUserPrefs(prisma, viewId, userId);
+  return c.json({ view: serializeView(updated, userPrefs) });
 });
 
 // ============ 删除 ============

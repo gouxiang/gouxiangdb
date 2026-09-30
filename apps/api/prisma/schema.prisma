@@ -189,6 +189,9 @@ model View {
 
   table     Table    @relation(fields: [tableId], references: [id], onDelete: Cascade)
 
+  // #561：视图的每用户使用态覆盖（view_user_prefs.viewId ON DELETE CASCADE）。
+  viewUserPrefs ViewUserPref[]
+
   @@index([tableId])
   @@map("views")
 }
@@ -209,6 +212,24 @@ model FormLayoutVersion {
   @@unique([viewId, version])
   @@index([viewId])
   @@map("form_layout_versions")
+}
+
+// #561：视图每用户使用态覆盖。prefs 存 ViewUserPrefs JSON（排序/筛选/分组/行高/搜索/聚合等），
+// 仅覆盖使用态，不覆盖字段范围/顺序/封面/卡片/详情。每 (viewId,userId) 唯一行，无行即跟随默认。
+// 物理表由手写迁移 <ts>_view_user_prefs 建立，列/索引与本 model 一一对应。
+model ViewUserPref {
+  id        String   @id @default(cuid())
+  viewId    String
+  userId    String
+  prefs     String
+  updatedAt DateTime @updatedAt
+
+  view      View     @relation(fields: [viewId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([viewId, userId])
+  @@index([viewId])
+  @@map("view_user_prefs")
 }
 
 // ============ Member & RBAC ============
@@ -254,6 +275,8 @@ model User {
   // M6/S1：个人访问令牌（personal_access_tokens.userId 对 users(id) ON DELETE CASCADE，
   // 删除用户级联清 PAT；停用用户走 lifecycle.disableUser 同事务批量吊销，见 §5.1/C-4）。
   personalAccessTokens PersonalAccessToken[]
+  // #561：用户的视图个性化覆盖（view_user_prefs.userId ON DELETE CASCADE，删用户级联清理）。
+  viewUserPrefs ViewUserPref[]
 
   @@index([workspaceId])
   @@index([status])

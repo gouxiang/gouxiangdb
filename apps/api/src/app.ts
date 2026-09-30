@@ -23,6 +23,7 @@ import { fields } from "./routes/fields.js";
 import { records } from "./routes/records.js";
 import { views } from "./routes/views.js";
 import { viewAdmin } from "./routes/viewAdmin.js";
+import { viewUserPrefs } from "./routes/viewUserPrefs.js";
 import { layoutVersions } from "./routes/layoutVersions.js";
 import { tableShares } from "./routes/tableShares.js";
 import { linkable } from "./routes/linkable.js";
@@ -155,6 +156,8 @@ function createMount(webRoot: string | null): Hono {
   api.route("/views", layoutVersions);
   // 视图管理员配置层（同 /api/views 前缀，拆出避免 views.ts 超长；路径 /:viewId/admin）。
   api.route("/views", viewAdmin);
+  // 视图每用户个性化（同 /api/views 前缀；路径 /:viewId/prefs，任意可见者只写自己的偏好）。
+  api.route("/views", viewUserPrefs);
   // 数据表分享链接（同一 /api/tables 前缀，单独成文件避免 tables.ts 超长）
   api.route("/tables", tableShares);
   // 关联插入选择器（后端按 libraryPolicy 过滤可见对象）

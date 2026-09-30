@@ -14,6 +14,7 @@ import { prisma, withWriteTx } from "../db.js";
 import { HttpError } from "../guards.js";
 import { requireSchemaDesign } from "../domain/authz/tableManageGuards.js";
 import { parseViewAdminConfig } from "../domain/viewAdminConfig.js";
+import { loadUserPrefs } from "../domain/viewUserPrefsStore.js";
 import {
   defaultViewAdminConfig,
   type ViewAdminConfig,
@@ -22,8 +23,11 @@ import { serializeView } from "./views.js";
 
 export const viewAdmin = new Hono();
 
-/** 浅校验 FilterNode：kind 限定为 condition/and/or/not，组节点带合法子树。 */
-function isFilterNode(value: unknown): value is NonNullable<ViewAdminConfig["filters"]> {
+/**
+ * 浅校验 FilterNode：kind 限定为 condition/and/or/not，组节点带合法子树。
+ * #561：导出供 viewUserPrefs.ts 复用，同一 /api/views 子树不重复一份。
+ */
+export function isFilterNode(value: unknown): value is NonNullable<ViewAdminConfig["filters"]> {
   if (typeof value !== "object" || value === null) return false;
   const node = value as Record<string, unknown>;
   switch (node.kind) {
@@ -60,7 +64,7 @@ viewAdmin.patch("/:viewId/admin", async (c) => {
   const tableId = viewRow0.tableId;
 
   // 表结构管理者守卫；普通成员不可改管理员配置。
-  await requireSchemaDesign(c, tableId);
+  const { userId } = await requireSchemaDesign(c, tableId);
 
   const parsed = updateAdminSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
@@ -94,5 +98,7 @@ viewAdmin.patch("/:viewId/admin", async (c) => {
       data: { adminConfig: JSON.stringify(next) },
     }),
   );
-  return c.json({ view: serializeView(updated) });
+  // #561：补当前管理员自己的个性化（管理员强制层变更不影响其个人使用态）。
+  const userPrefs = await loadUserPrefs(prisma, viewId, userId);
+  return c.json({ view: serializeView(updated, userPrefs) });
 });

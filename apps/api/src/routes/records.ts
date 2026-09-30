@@ -3,7 +3,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { resolveViewConfig, type FilterNode } from "@gx/shared-types";
+import { applyUserPrefs, resolveViewConfig, type FilterNode } from "@gx/shared-types";
 import { andFilters, evaluateRowFilter } from "../domain/authz/rowFilter.js";
 import { SEARCH_PREVIEW_LIMIT, boundedPreviewMarker } from "./searchBounds.js";
 import { prisma, withWriteTx, runWrite, type DbTx } from "../db.js";
@@ -41,6 +41,7 @@ import {
 } from "../domain/nav/sync.js";
 import { resolveTableMask } from "../domain/authz/maskGate.js";
 import { parseViewAdminConfig } from "../domain/viewAdminConfig.js";
+import { loadUserPrefs } from "../domain/viewUserPrefsStore.js";
 import { sanitizeViewConfigForMask } from "../domain/authz/fieldMask.js";
 // 字段权限读侧（库权限 config.fields 的 hidden 档）：与写侧的 fieldWriteGate 同一份裁决。
 import {
@@ -100,7 +101,10 @@ records.get("/", async (c) => {
     if (v && v.tableId === tableId) {
       const userCfg = parseViewConfig(v.config);
       const adminCfg = parseViewAdminConfig(v.adminConfig ?? null);
-      config = resolveViewConfig(adminCfg, userCfg);
+      // #561：三层合成 —— 视图默认先被当前用户的使用态覆盖，再由管理员强制层收口。
+      // 未自定义（无 prefs 行）时 myPrefs=null，applyUserPrefs 原样放行，跟随最新默认。
+      const myPrefs = await loadUserPrefs(prisma, v.id, userId);
+      config = resolveViewConfig(adminCfg, applyUserPrefs(userCfg, myPrefs));
     }
   }
   // 视图配置脱敏：分组/聚合/排序/筛选若引用被隐藏字段，会在响应里把它泄回来（分组键值）。
