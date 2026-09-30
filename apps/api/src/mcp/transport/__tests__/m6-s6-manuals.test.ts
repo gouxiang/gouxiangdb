@@ -132,7 +132,7 @@ describe("S6 说明书与 TOOL_CATALOG 一致性护栏", () => {
   /** 抽取说明书中的工具名（仅 table/record/doc/canvas 前缀，避免误抓 element.create 等操作名）。 */
   function extractToolNames(text: string): string[] {
     const out = new Set<string>();
-    const re = /(?:^|[^A-Za-z0-9_])((?:table|record|doc|canvas|field)\.[a-z][a-z_]*)/g;
+    const re = /(?:^|[^A-Za-z0-9_])((?:table|record|doc|canvas|field|view)\.[a-z][a-z_]*)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) out.add(m[1]!);
     return [...out];

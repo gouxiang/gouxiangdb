@@ -22,7 +22,7 @@ let raw: Database.Database;
 const THREE = '["manage_departments","manage_members","manage_roles"]';
 const FOUR = '["manage_departments","manage_members","manage_roles","manage_menu"]';
 const FIVE = '["manage_departments","manage_members","manage_roles","manage_menu","manage_share"]';
-const SIX = '["manage_departments","manage_members","manage_roles","manage_menu","manage_share","create_library"]';
+const _SIX = '["manage_departments","manage_members","manage_roles","manage_menu","manage_share","create_library"]';
 // 企业化定位（迁移 20260920220000_org_directory_actions）：owner 再追加通讯录五件套。
 const EIGHTEEN = '["manage_departments","manage_members","manage_roles","manage_menu","manage_share","create_library","view_directory","invite_users","create_users","disable_users","delete_users","create_roles","edit_roles","delete_roles","assign_role_members","create_departments","edit_departments","delete_departments"]';
 const migrationSql = fs.readFileSync(

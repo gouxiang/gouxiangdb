@@ -213,7 +213,7 @@ describe("文档冷归结", () => {
 
   it("T3 房间在线时 PUT -> 走 CRDT 注入（ rooms 的 Y 收到这次更新），不直接写库", async () => {
     const docId = await makeDoc(MD_A);
-    const { room, b } = await onlineRoomWithEdit(docId, MD_A, 1, "（协同改）");
+    const { room: _room, b } = await onlineRoomWithEdit(docId, MD_A, 1, "（协同改）");
     const before = mdOf(b);
     expect(before).toContain("（协同改）");
 

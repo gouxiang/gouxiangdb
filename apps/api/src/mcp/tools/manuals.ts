@@ -26,6 +26,9 @@ export const TABLE_LANGUAGE_MD = `# 表与记录语言
 - field.create_field：在某表新建字段（关联字段会自动建双向对），需 confirm=true。入参 tableId、name、type 及其配置、confirm。
 - field.update_field：更新字段配置（部分提交；关联字段改名会同步反向字段）。入参 fieldId 及要改的配置。
 - field.delete_field：软删字段（关联字段对称删反向字段、级联查阅/聚合/计数字段），需 confirm=true。入参 fieldId、confirm。
+- view.create_view：在某表新建视图（grid/gallery/form/detail/kanban/calendar/tree/gantt，含默认配置），需 confirm=true。入参 tableId、name、type、config、confirm。
+- view.update_view：更新视图名或锁定模式或排序或配置（部分提交；config 与现有配置合并，布局变更自动留快照）。入参 viewId、name、lockMode、order、config。
+- view.delete_view：物理删除视图（清布局版本，至少保留一个视图），需 confirm=true。入参 viewId、confirm。
 
 ## 记录与字段语义
 - 记录以 recordId 标识；字段值以 fieldId 到 value 的映射表示。
@@ -52,6 +55,7 @@ export const BLOCK_LANGUAGE_MD = `# 文档块语言
 读取与写入共用同一套转换规则。
 
 ## 工具
+- doc.create_doc：在指定知识库下新建文档（可带 parentId 建层级），需 confirm=true。入参 kbId、title、parentId、confirm。
 - doc.get_doc_blocks：读取文档块（format=blocks）或原始 Markdown（format=markdown）；range 按块序号以 0 起始的闭区间切片。
 - doc.append_blocks：在指定块之后（缺省为末尾）追加若干块。
 - doc.update_block：更新单个块的 text 或 checked 或 align。
@@ -94,6 +98,7 @@ export const CANVAS_LANGUAGE_MD = `# 画布图元语言
 本说明书说明画布正文的元素结构，以及当前经 MCP 支持的写入最小集。
 
 ## 工具
+- canvas.create_canvas：在指定知识库下新建画布（恒挂知识库下、不支持层级），需 confirm=true。入参 kbId、title、confirm。
 - canvas.get_board：只读读取画布元素与内容版本。入参 docId。
 - canvas.commit_elements：在画布末尾追加图元（写入）。入参 docId、ops、confirm=true、可选 baseVersion。
 

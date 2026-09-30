@@ -9,6 +9,8 @@ import { isUnifiedSearchEnabled } from "../../domain/search/searchGateRuntime.js
 import { tableGetSchema, tableListBases } from "./table.tools.js";
 import { tableCreateTable, tableUpdateTable, tableDeleteTable } from "./tableBuild.tools.js";
 import { fieldCreateField, fieldUpdateField, fieldDeleteField } from "./fieldBuild.tools.js";
+import { viewCreateView, viewUpdateView, viewDeleteView } from "./viewBuild.tools.js";
+import { docCreateDoc, canvasCreateCanvas } from "./contentBuild.tools.js";
 import { recordCreateRecord, recordDeleteRecord, recordUpdateRecord, recordListRecords, recordQueryRecords, recordSearch } from "./record.tools.js";
 import { canvasGetBoard } from "./canvas.tools.js";
 import { canvasCommitElements } from "./canvasWrite.tools.js";
@@ -22,6 +24,8 @@ import {
 import {
   createTableShape, updateTableShape, deleteTableShape,
   createFieldShape, updateFieldShape, deleteFieldShape,
+  createViewShape, updateViewShape, deleteViewShape,
+  createDocShape, createCanvasShape,
 } from "./buildSchemas.js";
 import { text, type ToolSpec } from "./types.js";
 
@@ -116,6 +120,33 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
   },
   {
     meta: {
+      name: "view.create_view", title: "创建视图",
+      description: "在指定表创建视图（grid/gallery/form/detail/kanban/calendar/tree/gantt；含默认配置；需 confirm=true）。",
+      scopes: ["record:write"], family: "table", actions: ["manage_schema"], readOnly: false,
+    },
+    inputShape: createViewShape,
+    run: viewCreateView,
+  },
+  {
+    meta: {
+      name: "view.update_view", title: "更新视图",
+      description: "更新视图名/锁定模式/排序/配置（部分提交；config 与现有配置合并，布局变更自动留快照）。",
+      scopes: ["record:write"], family: "table", actions: ["manage_schema"], readOnly: false,
+    },
+    inputShape: updateViewShape,
+    run: viewUpdateView,
+  },
+  {
+    meta: {
+      name: "view.delete_view", title: "删除视图",
+      description: "物理删除视图（清布局版本；至少保留一个视图；需 confirm=true）。",
+      scopes: ["record:write"], family: "table", actions: ["manage_schema"], readOnly: false,
+    },
+    inputShape: deleteViewShape,
+    run: viewDeleteView,
+  },
+  {
+    meta: {
       name: "record.list_records", title: "列出记录",
       description: "按 keyset 游标分页读取表内记录（limit≤200；不可见字段物理缺席）。"
         + "单选/多选字段在 fields 里的值是选项 id（回写请仍用 id）；可读名称见同一条记录的 fieldsDisplay"
@@ -173,6 +204,24 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     },
     inputShape: recordSearchShape,
     run: recordSearch,
+  },
+  {
+    meta: {
+      name: "doc.create_doc", title: "创建文档",
+      description: "在指定知识库下创建文档（可带 parentId 建层级；需 confirm=true）。doc 与 canvas 共用知识库 content 档位。",
+      scopes: ["doc:write"], family: "doc", actions: ["c"], readOnly: false,
+    },
+    inputShape: createDocShape,
+    run: docCreateDoc,
+  },
+  {
+    meta: {
+      name: "canvas.create_canvas", title: "创建画布",
+      description: "在指定知识库下创建画布（恒挂知识库下、不支持层级；需 confirm=true）。",
+      scopes: ["doc:write"], family: "doc", actions: ["c"], readOnly: false,
+    },
+    inputShape: createCanvasShape,
+    run: canvasCreateCanvas,
   },
   {
     meta: {

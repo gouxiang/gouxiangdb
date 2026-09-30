@@ -10,6 +10,7 @@ import { prisma, withWriteTx } from "../../db.js";
 import { injectDocContent } from "../../collab/docFlush.js";
 import { onlineRoom } from "../../collab/registry.js";
 import { VersionConflictError, changeEntityOfKind, saveDocContentTx } from "../../domain/kbDocWrite.js";
+import { createContent } from "../../domain/contentService.js";
 import { requireUserId, errorResponse, HttpError } from "../../guards.js";
 import { buildSearchText } from "../../domain/kb.js";
 import {
@@ -80,42 +81,16 @@ docsRoutes.post("/:kbId/docs", async (c) => {
     });
     const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "类型不合法（doc 或 canvas）" }, 400);
-    const title = parsed.data.title?.trim() || (parsed.data.kind === "canvas" ? "未命名画布" : "未命名文档");
-    // 父文档校验：仅文档参与级联；父级必须同库且未删除
-    let parentId: string | null = null;
-    if (parsed.data.kind === "doc" && parsed.data.parentId) {
-      const parent = await prisma.kbDoc.findFirst({
-        where: { id: parsed.data.parentId, kbId, deletedAt: null, kind: "doc" },
-        select: { id: true },
-      });
-      if (!parent) throw new HttpError(400, "父文档不存在或已被删除");
-      parentId = parent.id;
-    }
-    // M3/S3 #13a：建 doc/canvas + 首版本收紧进单事务；同事务 upsert nav 节点
-    // （doc 父=parent doc 节点或 kb 节点；canvas 父=kb 节点，由期望集统一算）。
-    const doc = await withWriteTx("doc.create", async (tx) => {
-      const d = await tx.kbDoc.create({
-        data: {
-          kbId,
-          kind: parsed.data.kind,
-          title,
-          content: parsed.data.kind === "canvas" ? "[]" : "",
-          searchText: "",
-          createdBy: userId,
-          updatedBy: userId,
-          ...(parentId ? { parentId } : {}),
-        },
-      });
-      await tx.kbDocVersion.create({
-        data: { docId: d.id, version: 1, label: "创建", title: d.title, content: d.content, createdBy: userId },
-      });
-      // M5/S1：文档/画布建，同事务登记 upsert（version 取新内容版本 0，worker 抽当前内容）。
-      await enqueueChangeEventTx(tx, {
-        entityType: changeEntityOfKind(d.kind), entityId: d.id, op: "upsert", version: BigInt(d.contentVersion),
-      });
-      await syncNavFromEntitiesTx(tx);
-      return d;
-    });
+    // 建 doc/canvas + 首版本 + outbox + 同步 nav：统一由领域服务承载（单一真源，MCP 共用）。
+    const doc = await createContent(
+      {
+        kbId,
+        kind: parsed.data.kind,
+        title: parsed.data.title,
+        parentId: parsed.data.parentId,
+      },
+      userId,
+    );
     return c.json({ doc }, 201);
   } catch (e) {
     return errorResponse(c, e);

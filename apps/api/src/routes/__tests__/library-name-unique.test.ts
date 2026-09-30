@@ -64,7 +64,7 @@ describe("建数据库：全局名字唯一 + trim", () => {
 
 describe("数据库改名：全局查重排除自己 + trim", () => {
   it("改名撞上另一库 → 409，原名保持不变", async () => {
-    const a = await json(await h.request("POST", "/bases", { name: "库A" }));
+    const _a = await json(await h.request("POST", "/bases", { name: "库A" }));
     const b = await json(await h.request("POST", "/bases", { name: "库B" }));
     const res = await h.request("PATCH", `/bases/${b.base.id}`, { name: "库A" });
     expect(res.status).toBe(409);
@@ -123,7 +123,7 @@ describe("建知识库：全局名字唯一 + trim", () => {
 
 describe("知识库改名：全局查重排除自己 + trim", () => {
   it("改名撞上另一 KB → 409，原名保持不变", async () => {
-    const a = await json(await h.request("POST", "/kb", { name: "K-A" }));
+    const _a = await json(await h.request("POST", "/kb", { name: "K-A" }));
     const b = await json(await h.request("POST", "/kb", { name: "K-B" }));
     const res = await h.request("PATCH", `/kb/${b.knowledgeBase.id}`, { name: "K-A" });
     expect(res.status).toBe(409);

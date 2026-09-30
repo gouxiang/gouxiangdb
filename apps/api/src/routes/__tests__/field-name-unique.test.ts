@@ -71,7 +71,7 @@ describe("建字段：同表名字唯一 + trim", () => {
 
 describe("改字段名：事务内查重排除自己 + trim", () => {
   it("改名撞上同表另一字段 → 409，原名保持不变（事务回滚）", async () => {
-    const a = await json(await createField("字段A"));
+    const _a = await json(await createField("字段A"));
     const b = await json(await createField("字段B"));
     const res = await h.request("PATCH", `/fields/${b.field.id}`, { name: "字段A" });
     expect(res.status).toBe(409);

@@ -47,8 +47,7 @@ export async function baseExists(baseId: string): Promise<boolean> {
   return !!b && !b.deletedAt;
 }
 
-/** 单记录最小投影（MCP 写前存在性/归属校验用；不做授权判定）。 */
-export async function recordBriefById(recordId: string): Promise<{ id: string; tableId: string; deletedAt: Date | null } | null> {
+/** 单记录最小投影（MCP 写前存在性/归属校验用；不做授权判定）。 */export async function recordBriefById(recordId: string): Promise<{ id: string; tableId: string; deletedAt: Date | null } | null> {
   const r = await prisma.record.findUnique({
     where: { id: recordId },
     select: { id: true, tableId: true, deletedAt: true },
@@ -82,4 +81,24 @@ export async function fieldConfigById(
     },
   });
   return f ?? null;
+}
+
+/** 单视图最小投影：由 viewId 反查 tableId/类型/现有配置（视图搭建工具权限判定用）。 */
+export async function viewBriefById(
+  viewId: string,
+): Promise<{ id: string; tableId: string; type: string; config: string; lockMode: string } | null> {
+  const v = await prisma.view.findUnique({
+    where: { id: viewId },
+    select: { id: true, tableId: true, type: true, config: true, lockMode: true },
+  });
+  return v ?? null;
+}
+
+/** 单知识库最小投影：由 kbId 确认存在（内容创建工具前置用）。 */
+export async function kbBriefById(kbId: string): Promise<{ id: string } | null> {
+  const k = await prisma.knowledgeBase.findFirst({
+    where: { id: kbId, deletedAt: null },
+    select: { id: true },
+  });
+  return k ?? null;
 }

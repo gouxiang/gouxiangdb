@@ -100,6 +100,7 @@ describe("S3 四身份 tools/list 快照", () => {
     "ping_echo", "record.create_record", "record.delete_record", "record.list_records",
     "record.query_records", "record.update_record", "table.create_table",
     "table.delete_table", "table.get_schema", "table.list_bases", "table.update_table",
+    "view.create_view", "view.delete_view", "view.update_view",
   ];
 
   it("① 无权（族为空）-> 仅连接性工具（族可见集闸门，与令牌 scope 无关）", async () => {

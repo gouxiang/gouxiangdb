@@ -100,3 +100,55 @@ export const deleteFieldShape = {
   confirm: z.literal(true).describe("删除确认；必须是字面量 true（破坏性操作强制显式确认）"),
   requestId,
 };
+
+// ---------- 视图结构写（table 族，manage_schema） ----------
+
+const VIEW_TYPE_VALUES = [
+  "grid", "gallery", "form", "detail", "kanban", "calendar", "tree", "gantt",
+] as const;
+
+/** view.create_view：建视图（table 节点 manage_schema + confirm）。 */
+export const createViewShape = {
+  tableId: z.string().min(1),
+  name: z.string().min(1).max(60),
+  type: z.enum(VIEW_TYPE_VALUES),
+  config: z.record(z.string(), z.unknown()).optional().describe("视图配置；与默认配置合并"),
+  confirm: z.literal(true).describe("写入确认；必须是字面量 true"),
+  requestId,
+};
+
+/** view.update_view：更新视图（需 manage_schema；部分提交，config 走合并）。 */
+export const updateViewShape = {
+  viewId: z.string().min(1),
+  name: z.string().min(1).max(60).optional(),
+  lockMode: z.enum(["collaborative", "locked", "personal"]).optional(),
+  order: z.number().int().min(0).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
+  requestId,
+};
+
+/** view.delete_view：删视图（需 manage_schema + confirm；至少保留一个）。 */
+export const deleteViewShape = {
+  viewId: z.string().min(1),
+  confirm: z.literal(true).describe("删除确认；必须是字面量 true"),
+  requestId,
+};
+
+// ---------- 知识库内容创建（doc 族，kb 节点 c） ----------
+
+/** doc.create_doc：在知识库下建文档（kb 节点 c + confirm；可带 parentId 建层级）。 */
+export const createDocShape = {
+  kbId: z.string().min(1).describe("知识库 id（须在该令牌有 kb 节点 c 权限）"),
+  title: z.string().max(120).optional(),
+  parentId: z.string().nullable().optional().describe("父文档 id；仅文档支持层级"),
+  confirm: z.literal(true).describe("写入确认；必须是字面量 true"),
+  requestId,
+};
+
+/** canvas.create_canvas：在知识库下建画布（kb 节点 c + confirm；恒挂 kb 下）。 */
+export const createCanvasShape = {
+  kbId: z.string().min(1),
+  title: z.string().max(120).optional(),
+  confirm: z.literal(true).describe("写入确认；必须是字面量 true"),
+  requestId,
+};

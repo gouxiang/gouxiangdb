@@ -9,12 +9,12 @@ import { prisma, withWriteTx } from "../db.js";
 import { requireCanView, HttpError } from "../guards.js";
 import { requireSchemaDesign } from "../domain/authz/tableManageGuards.js";
 import { parseViewConfig } from "../domain/recordService.js";
+import { createView, updateView, purgeView } from "../domain/viewService.js";
 import { parseViewAdminConfig } from "../domain/viewAdminConfig.js";
 import { loadUserPrefs, parseViewUserPrefs } from "../domain/viewUserPrefsStore.js";
 import type { ViewUserPrefs } from "@gx/shared-types";
 import { permissionsForRole } from "@gx/shared-types";
-import { syncNavFromEntitiesTx, purgeViewNodeTx } from "../domain/nav/sync.js";
-import { maybeAutoSnapshotLayoutTx, purgeVersionsTx } from "../domain/formLayoutVersion.js";
+import { syncNavFromEntitiesTx } from "../domain/nav/sync.js";
 
 export const views = new Hono();
 
@@ -123,34 +123,14 @@ views.post("/", async (c) => {
   const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法", details: parsed.error.issues }, 400);
 
-  const maxOrder = await prisma.view.findFirst({
-    where: { tableId },
-    orderBy: { order: "desc" },
-    select: { order: true },
+  const v = await createView({
+    tableId,
+    name: parsed.data.name,
+    type: parsed.data.type,
+    config: parsed.data.config,
   });
-  const order = maxOrder ? maxOrder.order + 1 : 0;
-
-  const merged = {
-    ...parseViewConfig(null),
-    ...(parsed.data.config ?? {}),
-  };
-
-  // M3/S3 #8：原裸写收紧进事务，同事务 upsert view 节点。
-  const v = await withWriteTx("view.create", async (tx) => {
-    const created = await tx.view.create({
-      data: {
-        tableId,
-        name: parsed.data.name,
-        type: parsed.data.type,
-        order,
-        config: JSON.stringify(merged),
-        lockMode: "collaborative",
-      },
-    });
-    await syncNavFromEntitiesTx(tx);
-    return created;
-  });
-  return c.json({ view: serializeView(v) }, 201);
+  const row = await prisma.view.findUniqueOrThrow({ where: { id: v.id } });
+  return c.json({ view: serializeView(row) }, 201);
 });
 
 // ============ 详情 ============
@@ -218,20 +198,14 @@ views.patch("/:viewId", async (c) => {
   // 是刚保存成功的那份布局，不是保存前的旧值。
   const affectsNav = Object.prototype.hasOwnProperty.call(data, "name") ||
     Object.prototype.hasOwnProperty.call(data, "order");
-  const updated = await withWriteTx("view.update", async (tx) => {
-    const u = await tx.view.update({ where: { id: viewId }, data });
-    if (affectsNav) await syncNavFromEntitiesTx(tx);
-    if (configChanged) {
-      await maybeAutoSnapshotLayoutTx(tx, viewId, userId, {
-        tableId: v.tableId,
-        viewType: v.type,
-        viewConfigJson: u.config,
-        // 通用视图更新入口：grid 改个筛选/排序也走这里，内容没变就不留档，否则历史上
-        // 会被一堆跟表单布局无关的噪音版本占满（顺便把真正的布局改动挤出去）。
-        skipIfIdentical: true,
-      });
-    }
-    return u;
+  // 事务体单一真源（domain/viewService -> viewServiceTx）；personal/锁定等权限分支留在路由。
+  // 快照必须在 update 之后取 u.config（事务体内照此口径）。
+  const updated = await updateView(viewId, {
+    data,
+    affectsNav,
+    snapshot: configChanged
+      ? { userId, tableId: v.tableId, viewType: v.type, skipIfIdentical: true }
+      : null,
   });
   // #561：PATCH 返回也带当前用户的个性化（视图默认 config 被改不影响该用户已固化的偏好）。
   const userPrefs = await loadUserPrefs(prisma, viewId, userId);
@@ -244,25 +218,13 @@ views.delete("/:viewId", async (c) => {
   const viewId = c.req.param("viewId");
   const viewRow = await prisma.view.findUnique({
     where: { id: viewId },
-    select: { tableId: true, table: { select: { baseId: true } } },
+    select: { tableId: true },
   });
   if (!viewRow) throw new HttpError(404, "视图不存在");
   await requireSchemaDesign(c, viewRow.tableId);
 
-  const v = await prisma.view.findUnique({ where: { id: viewId } });
-  if (!v) throw new HttpError(404, "视图不存在");
-
-  const count = await prisma.view.count({ where: { tableId: v.tableId } });
-  if (count <= 1) throw new HttpError(400, "至少保留一个视图");
-
-  // M3/S3 #10：物理删收紧进事务；先 RESTRICT 守卫（节点被菜单引用则 409，不静默级联删菜单），
-  // 再删实体与节点（顺序无关紧要，同事务共生死）。
-  await withWriteTx("view.purge", async (tx) => {
-    await purgeViewNodeTx(tx, viewId);
-    // 布局版本是视图的派生历史：视图物理删了，历史一同清掉（表无物理外键，靠应用层）。
-    await purgeVersionsTx(tx, viewId);
-    await tx.view.delete({ where: { id: viewId } });
-  });
+  // 至少保留一个视图 + 清 nav 节点/布局版本 + 物理删：统一由领域服务承载（单一真源）。
+  await purgeView(viewId);
   return c.json({ ok: true });
 });
 
