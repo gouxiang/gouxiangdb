@@ -79,6 +79,7 @@ export function toggleAction(
     comment: 4,
     manage_share: 5,
     manage_schema: 6,
+    manage_table: 7,
   };
   return [...set].sort((a, b) => order[a] - order[b]);
 }
