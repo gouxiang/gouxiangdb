@@ -26,6 +26,7 @@ export type IconName =
   | "gallery"
   | "kanban"
   | "calendar"
+  | "gantt"
   | "form"
   | "detail"
   | "link"
@@ -153,6 +154,7 @@ const PATHS: Record<IconName, string[]> = {
   gallery: ["M3 5h8v8H3z", "M13 5h8v8h-8z", "M3 15h8v4H3z", "M13 15h8v4h-8z"],
   kanban: ["M4 4h4v16H4z", "M10 4h4v10h-4z", "M16 4h4v13h-4z"],
   calendar: ["M3 6h18v15H3z", "M3 11h18", "M8 3v4", "M16 3v4"],
+  gantt: ["M3 4h18v16H3z", "M6 7h8v2H6z", "M6 11h12v2H6z", "M6 15h6v2H6z"],
   form: ["M5 3h14v18H5z", "M9 8h6", "M9 12h6", "M9 16h3"],
   detail: ["M4 6h16", "M4 12h16", "M4 18h10"],
   link: ["M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71", "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"],
@@ -368,4 +370,6 @@ export const VIEW_ICON: Record<string, IconName> = {
   detail: "detail",
   kanban: "kanban",
   calendar: "calendar",
+  tree: "sitemap",
+  gantt: "gantt",
 };
