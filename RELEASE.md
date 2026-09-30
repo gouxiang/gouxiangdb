@@ -2,12 +2,43 @@
 
 - **版本号**：`0.1.7`（版本单一真源 = 根 `package.json` 的 `version` 字段；运行时禁止再出现硬编码版本字面）
 - **展示名**：构想工作台（技术标识 `gouxiangdb` / `gouxiangdb-v2`，仅包名/目录使用）
-- **本轮变更区间**：2026-09-19 ~ 2026-09-20，**39 个提交**
-- **上游阶段**：M0–M6 全部收口，**M7 企业版总验收进行中**（门⑦⑧未完成）
+- **本轮变更区间**：2026-09-19 ~ 2026-10-01
+- **上游阶段**：M0–M6 全部收口，**六项产品需求（响应式/表级权限/视图管理员/层级视图甘特/多模态语义检索/MCP 全功能）全部完成**；四门回归、生产部署冒烟、五档真机验收、飞牛 x86 fpk 构建均通过。唯一待办：飞牛真机安装冒烟（需设备凭证）、多模态真召回（需真 ARK key）
+
+> **2026-10-01 增补**：六项需求收口情况见下方「〇、六项产品需求收口（2026-10-01）」。
 
 > 本文件是 **0.1.7 的发版说明**。2026-09-04 那份「第二轮 6 类问题修复自测报告」已被归档为
 > `docs/_archive/originals/release-2026-09-04-self-test-report.md`（登记见根目录 `ARCHIVE-LOG.md` 第 15 项），
 > 不再作为当前部署 / 配置依据。
+
+---
+
+## 〇、六项产品需求收口（2026-10-01）
+
+| # | 需求 | 状态 | 关键证据 |
+|---|---|---|---|
+| 1 | 响应式布局 | ✅ 完成 | 五档真机验收（sm/md/lg/xl/2xl），截图 `docs/acceptance/2026-10-01-responsive/`：sm 单栏抽屉、md 卡片化+浮面板、lg 收 L2、xl/2xl 三栏完整 |
+| 2 | 数据表表级管理权限 | ✅ 完成 | P1-S1～S9 全套；`manage_table` 动作 + 行级条件 + 新守卫；翻 `AUTHZ_ENFORCE_READY=true` 仍须戴总专门点头 |
+| 3 | 视图管理员配置 | ✅ 完成 | #560 admin/user 分层 + 封面/字段/筛选 UI + 脱敏 |
+| 4 | 用户视图个性化 | ✅ 完成 | #561 `view_user_prefs` 表 + store + 路由 + 列表合成 |
+| 5 | 层级视图 + 甘特图 | ✅ 完成 | #562 TreeView/GanttView 组件注册 + 契约/后端透传 |
+| 6 | 多模态语义检索 | ⚠️ 代码完成，真 key 待补 | #563 doubao-embedding-vision：查询侧图片向量化、`POST /api/v1/search` 以图搜图、前端 UI；待取得真 ARK key 后全量 reindex + 真召回 + 权限对抗 + 结束删 key |
+| 7 | MCP 全功能 | ✅ 完成 | #564 #620–#623：table/field/view/doc/canvas 搭建工具 + canvas update/move/delete/connect + base.create_base/kb.create_kb；工具总数 **28**；三身份矩阵 + gate=false 安全边界全验 |
+
+**质量门实数**
+
+- api：本地 **2803 通过 / 零失败**（权威）；VM15 交叉复验 2801 通过 / 3 flaky（departments/lifecycle/docFlush，隔离单跑均全绿）
+- web 1527 / shared-types 103 / canvas 51，三包类型检查零错误
+- eslint：api 零告警；web/packages 0 error（100 warning 均历史既有）
+- api + web 生产构建成功（GX_VERSION 0.1.7，迁移 applied=38）
+- 生产部署冒烟（VM15）：readyz 五探针全 true、登录→强制改密→建 Base/KB（回执含完整字段）→默认表随事务建好，全链路通过
+- 飞牛 x86 fpk：`deploy/fnos/dist/gouxiangdb-0.1.7-x86.fpk`（59.61 MiB，hoisted 零软链、vec0.so、产物冒烟全绿）
+
+**仍待外部凭证（非代码缺口）**
+
+1. 飞牛真机 192.168.31.183 安装冒烟：需设备 SSH 密码（用户「戴静」），或由戴总在 fnOS 应用中心手动安装 fpk
+2. 多模态真召回：需真 ARK API key
+3. 权限总闸：`AUTHZ_ENFORCE_READY=true` 须戴总专门点头，当前仍为 off
 
 ---
 
@@ -99,7 +130,7 @@
 ## 四、升级注意
 
 1. **迁移必须停服务执行**：`pnpm --filter @gx/api run db:deploy`（`prisma migrate deploy`）。`migrate dev` 为交互式，非交互环境禁用。
-2. **迁移纪律：只增不删**（不删列、不改列类型），回填幂等可重跑。当前迁移目录 **25 个**（本轮新增 `20260919102128_entity_icon_ddl`）。
+2. **迁移纪律：只增不删**（不删列、不改列类型），回填幂等可重跑。当前迁移目录 **38 个**（含 entity_icon / 组织 / nav / view_admin_config / view_user_prefs 等）。
 3. **升级前先做在线快照**：`pnpm --filter @gx/api run backup:online`，并用 `backup:verify` 验证可恢复；回滚窗口 30 分钟内。
 4. **升级后须跑 nav path 重算**：部署链路在 `migrate deploy` 之后接 `dist/cli/nav-reconcile.js`，失败必须在切换前 die —— 否则升级后导航失效（M7 AC-UPG-1 前置）。
 5. **权限引擎默认不生效**：`AUTHZ_ENFORCE_READY = false` 且 `GX_AUTHZ_ENGINE` 默认 `off`，实际走旧三表决策，权限管理页只读。生产建议由部署侧显式设 `shadow`；翻 `on` 需满足五条前置且**仅由项目总监下令**。详见 README 文首警示与 `docs/runbooks/authz-engine-flip-on.md`。
