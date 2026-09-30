@@ -9,6 +9,7 @@
 
 import type { ViewConfig, ViewType, LockMode } from "./views.js";
 import type { ViewAdminConfig } from "./viewAdmin.js";
+import type { ViewUserPrefs } from "./viewUserPrefs.js";
 import type { Role, PermissionSet } from "./permissions.js";
 import type { FieldType, TabConfig } from "./fields.js";
 import type { TableIdT, BaseIdT, FieldIdT, RecordIdT, ViewIdT } from "./ids.js";
@@ -318,6 +319,8 @@ export interface ViewDTO {
   config: ViewConfig;
   /** 管理员配置层（无管理员配置时为 null）。 */
   adminConfig: ViewAdminConfig | null;
+  /** 当前登录用户在该视图上的个性化偏好（未自定义为 null）。 */
+  userPrefs: ViewUserPrefs | null;
   createdAt: string;
 }
 
@@ -337,6 +340,11 @@ export interface UpdateViewRequest {
 /** 管理员配置层写请求（仅表结构管理者可用，走独立端点，不与用户 config 混通道）。 */
 export interface UpdateViewAdminRequest {
   adminConfig: Partial<Omit<ViewAdminConfig, "version">>;
+}
+
+/** 用户个性化偏好写请求（#561，覆盖该用户使用态键）。 */
+export interface UpdateViewUserPrefsRequest {
+  prefs: Partial<Omit<ViewUserPrefs, "version">>;
 }
 
 // ============ Member / 权限 ============

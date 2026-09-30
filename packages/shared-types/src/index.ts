@@ -21,6 +21,7 @@ export * from "./filters.js";
 export * from "./filter.js";
 export * from "./views.js";
 export * from "./viewAdmin.js";
+export * from "./viewUserPrefs.js";
 export * from "./permissions.js";
 export * from "./formula-functions.js";
 export * from "./defaults.js";
