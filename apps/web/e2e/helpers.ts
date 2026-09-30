@@ -173,7 +173,11 @@ export interface CommitReceipt {
   ok: boolean;
   contentVersion: number;
   elementCount: number;
-  appendedIds: string[];
+  createdIds: string[];
+  connectedIds?: string[];
+  updatedIds?: string[];
+  movedIds?: string[];
+  deletedIds?: string[];
 }
 
 export interface BoardElement {

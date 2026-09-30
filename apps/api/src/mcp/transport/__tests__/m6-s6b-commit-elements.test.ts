@@ -141,14 +141,14 @@ describe("S6b 三矩形 element.create 成功链路", () => {
     });
     expect(r.result.isError ?? false, `commit -> ${r.result.content[0]!.text}`).toBe(false);
     const receipt = JSON.parse(r.result.content[0]!.text) as {
-      ok: boolean; contentVersion: number; elementCount: number; appendedIds: string[];
+      ok: boolean; contentVersion: number; elementCount: number; createdIds: string[];
     };
     expect(receipt.contentVersion).toBe(before.contentVersion + 1);
     // 有 canvas r 的回执：带元素总数与服务端新 id（入参无 id，id 与入参无关）
     expect(receipt.elementCount).toBe(4);
-    expect(receipt.appendedIds).toHaveLength(3);
-    expect(new Set(receipt.appendedIds).size).toBe(3);
-    expect(receipt.appendedIds.every((id) => typeof id === "string" && id !== "seed0")).toBe(true);
+    expect(receipt.createdIds).toHaveLength(3);
+    expect(new Set(receipt.createdIds).size).toBe(3);
+    expect(receipt.createdIds.every((id) => typeof id === "string" && id !== "seed0")).toBe(true);
 
     const after = await row();
     expect(after.contentVersion).toBe(before.contentVersion + 1);
@@ -212,7 +212,7 @@ describe("S6b 六类坏输入：各自 code 且 DB 逐字节未变（原子）",
     { name: "gxDocRef 文档引用（二期）", element: rect({ gxDocRef: { docId: "d", kind: "doc", title: "t" } }), code: "UNSUPPORTED_OPERATION" },
     { name: "data-gx-* DOM 键", element: rect({ "data-gx-link-fo": "1" }), code: "INVALID_PARAMS" },
     { name: "gx* 越界键", element: rect({ gxEvil: 1 }), code: "INVALID_PARAMS" },
-    { name: "不支持操作名 element.delete", op: { op: "element.delete", element: { id: "x" } }, code: "UNSUPPORTED_OPERATION", supported: true },
+    { name: "不支持操作名 zorder", op: { op: "zorder", id: "x" }, code: "UNSUPPORTED_OPERATION", supported: true },
   ];
   for (const c of cases) {
     it(`${c.name} -> ${c.code}（原子，未落库）`, async () => {
@@ -222,7 +222,15 @@ describe("S6b 六类坏输入：各自 code 且 DB 逐字节未变（原子）",
       expect(r.result.isError, `应失败：${c.name}`).toBe(true);
       const body = JSON.parse(r.result.content[0]!.text) as { code: string; supported?: string[] };
       expect(body.code).toBe(c.code);
-      if (c.supported) expect(body.supported).toEqual(["element.create"]);
+      if (c.supported) {
+        expect(body.supported).toEqual([
+          "element.create",
+          "element.update",
+          "element.move",
+          "element.delete",
+          "element.connect",
+        ]);
+      }
       const after = await row();
       expect(after.content, `${c.name} 不得半应用`).toBe(before.content);
       expect(after.contentVersion).toBe(before.contentVersion);

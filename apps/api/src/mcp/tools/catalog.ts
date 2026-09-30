@@ -271,8 +271,10 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
   {
     meta: {
       name: "canvas.commit_elements", title: "写入画布图元",
-      description: "在画布末尾追加图元（当前最小集仅 op element.create 创建 geometry/rectangle；服务端生成 id、尾插、单事务版本+1）。"
-        + "其它操作名/箭头/关联块整批拒绝 UNSUPPORTED_OPERATION；需 confirm=true 与 baseVersion 乐观锁（缺省=last-write-wins）。",
+      description: "原子应用一批图元操作（单事务、版本+1）：element.create 尾插 geometry/rectangle；"
+        + "element.update 改位置/样式（禁改 type/shape）；element.move 位移；element.delete 删形状（绑定它的 arrow-line 级联删除）；"
+        + "element.connect 建连线（arrow-line 两端绑定既有形状 / vector-line 两端自由点）。"
+        + "服务端为新元素生成 id；未知操作名整批拒绝 UNSUPPORTED_OPERATION；需 confirm=true 与可选 baseVersion 乐观锁（缺省=last-write-wins）。",
       scopes: ["canvas:write"], family: "canvas", actions: ["u"], readOnly: false,
     },
     inputShape: commitElementsShape,

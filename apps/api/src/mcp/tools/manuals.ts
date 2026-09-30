@@ -95,30 +95,37 @@ p、h1、h2、h3、h4、h5、h6、ul、ol、task、quote、callout、toggle、co
 /** 画布图元语言：元素结构 + 当前支持的写入最小集 + 二期操作声明。 */
 export const CANVAS_LANGUAGE_MD = `# 画布图元语言
 
-本说明书说明画布正文的元素结构，以及当前经 MCP 支持的写入最小集。
+本说明书说明画布正文的元素结构，以及当前经 MCP 支持的全部图元写入操作。
 
 ## 工具
 - canvas.create_canvas：在指定知识库下新建画布（恒挂知识库下、不支持层级），需 confirm=true。入参 kbId、title、confirm。
 - canvas.get_board：只读读取画布元素与内容版本。入参 docId。
-- canvas.commit_elements：在画布末尾追加图元（写入）。入参 docId、ops、confirm=true、可选 baseVersion。
+- canvas.commit_elements：原子应用一批图元操作（写入；单事务版本+1）。入参 docId、ops、confirm=true、可选 baseVersion。
 
 ## 元素结构
 - 画布正文是一段 JSON，顶层为元素数组（不是包含 children 的对象）。
-- 每个元素至少含 type 与 points；几何图元另含 shape。
-- 元素可携带自定义键（注释等）；读取时原样返回，不会被裁剪或剥离。
+- 形状节点至少含 type 与 points（几何图元另含 shape）；连线 arrow-line 另含 source/target 绑定。
+- 元素可携带自定义键（注释 gxNote 等）；读取时原样返回，不会被裁剪或剥离。
 
-## 当前支持的写入最小集（已上线）
-- canvas.commit_elements 的每个 op 形如 {op:"element.create", element:{...}}。
-- element.create 仅支持几何矩形，即 type 为 geometry 且 shape 为 rectangle；points 为左上角与右下角两个点，宽高必须为正。
-- 只允许在元素数组尾部追加自足图元，元素 id 由服务端生成（调用方不得自带 id、不得带 zIndex 或选区/DOM 态键）。
-- 自定义扩展键当前仅 gxNote（字符串）可用；关联文档 gxDocRef / 关联块 gxLinkRef 为二期能力，出现即报 UNSUPPORTED_OPERATION。
-  非 gx 前缀的普通自定义键（如 fill/strokeColor 等图元样式键）原样保留；未登记的 gx* 保留键会被拒绝。
+## 当前支持的操作（均在 canvas.commit_elements 的 ops 中，可混批）
+- element.create：{op:"element.create", element:{...}}，仅支持几何矩形 geometry/rectangle；
+  points 为左上角与右下角两个点，宽高必须为正；新元素 id 由服务端生成、尾插到数组末尾。
+- element.update：{op:"element.update", id, patch}，修改既有形状的位置/样式
+  （如 points、fill、strokeColor、strokeWidth、opacity）；不得改 type/shape 或绑定关系（请删除后重连）。
+- element.move：{op:"element.move", id, dx, dy}，把该元素全部 points 平移 (dx,dy)；
+  绑定它的连线无需随动，渲染时按连接点自动重算。
+- element.delete：{op:"element.delete", id}，删除形状节点；**任一端绑定该形状的 arrow-line 一并级联删除**。
+- element.connect：创建连线，尾插、id 由服务端生成。两种形态：
+  - 箭头线 {op:"element.connect", type:"arrow-line", sourceId, targetId, 可选 sourceConnection/targetConnection（默认中点 [0.5,0.5]，分量取 [0,1]）、sourceMarker/targetMarker、shape}，两端必须绑定既有形状节点；
+  - 自由线 {op:"element.connect", type:"vector-line", sourcePoint, targetPoint}，两端为自由坐标、不绑定节点。
+- 所有 op 的目标 id 引用按「批开始时」的画布判定；不存在即整批失败。
+- 自定义扩展键当前仅 gxNote（字符串）可用；关联文档 gxDocRef / 关联块 gxLinkRef 当前不支持，出现即报 UNSUPPORTED_OPERATION。
+  非 gx 前缀的普通自定义键（如 fill/strokeColor 等样式键）原样保留；未登记的 gx* 保留键、id/zIndex/选区/DOM 态键会被拒绝。
 - 单批 op 上限 100，批文本上限 100KB，写入后整板上限 10MB（均按 UTF-8 字节计）。
 
-## 二期操作（当前仍不支持，调用将明确报 UNSUPPORTED_OPERATION，不会静默成功）
-- element.update / move / delete / connect、zorder、关联块（gxLinkRef）插入、思维导图布局等操作。
-- 连线（箭头 arrow-line/vector-line）图元依赖两端绑定到既有节点，属于绑定关系而非自足图元，故不纳入写入最小集。
-- 收到 UNSUPPORTED_OPERATION 时响应附 supported:["element.create"]，表示当前唯一支持的操作名。
+## 仍不支持的操作（调用将明确报 UNSUPPORTED_OPERATION，不会静默成功）
+- zorder 层级调整、脑图/图片/文本创建、非矩形形状、关联块（gxLinkRef）插入等。
+- 收到 UNSUPPORTED_OPERATION 时响应附 supported 列表，表示当前支持的全部操作名。
 `;
 
 /** 说明书资源规格（不含 URI 之外的业务数据）；由 server.ts 注册为 MCP Resources。 */

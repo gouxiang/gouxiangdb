@@ -52,8 +52,8 @@ test.describe("canvas.commit_elements 真实 PlaitBoard 加载 golden", () => {
     ]);
     expect(seedCommit.ok).toBe(true);
     expect(seedCommit.contentVersion).toBe(1);
-    expect(seedCommit.appendedIds).toHaveLength(1);
-    const seedId = seedCommit.appendedIds[0]!;
+    expect(seedCommit.createdIds).toHaveLength(1);
+    const seedId = seedCommit.createdIds[0]!;
 
     // —— 第 2 步：经真 MCP 尾插 3 个矩形（朴素 / 普通样式键 / gxNote） ——
     const commit = await commitElements(seed.pat, seed.docId, [
@@ -83,9 +83,9 @@ test.describe("canvas.commit_elements 真实 PlaitBoard 加载 golden", () => {
     ]);
     expect(commit.ok, `commit 回执应成功`).toBe(true);
     expect(commit.contentVersion).toBe(2);
-    expect(commit.appendedIds).toHaveLength(3);
-    expect(new Set(commit.appendedIds).size).toBe(3);
-    const [plainId, styledId, notedId] = commit.appendedIds as [string, string, string];
+    expect(commit.createdIds).toHaveLength(3);
+    expect(new Set(commit.createdIds).size).toBe(3);
+    const [plainId, styledId, notedId] = commit.createdIds as [string, string, string];
     expect([plainId, styledId, notedId]).not.toContain(seedId);
 
     // —— 第 3 步：真实登录 + 真实打开画布页 ——

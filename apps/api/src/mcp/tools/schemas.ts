@@ -235,9 +235,10 @@ export const getBoardShape = {
  * canvas.commit_elements：op 数 ≤100；confirm 必须字面量 true。
  *
  * **刻意只在 zod 描述信封（docId/ops 条数/confirm），不描述 ops 元素内部结构**——
- * 元素六不变量（geometry/rectangle 形状、points 有限正宽高、禁键、gx* 保留命名空间、字节上限）
- * 权威判定在 @gx/canvas 的 validateCreateOps（纯函数，Node/浏览器同构，未来前端可同一真源）。
- * 若在此再写一份元素 schema，两份规则必然漂移；故元素用 z.unknown() 透传。
+ * 图元规则（create 的 geometry/rectangle 六不变量、update 的 patch 可写键、move 位移、
+ * delete 存在性与连线级联、connect 的 arrow-line/vector-line 绑定与连接点、字节上限）
+ * 权威判定在 @gx/canvas 的 commitElements（纯函数，Node/浏览器同构）。
+ * 若在此再写一份元素 schema，两份规则必然漂移；故 op 用 z.unknown() 透传。
  * baseVersion 与 doc 写工具同口径**可选**（缺省 LWW，使只写身份可用；陈旧版本仍走条件更新冲突）。
  */
 export const commitElementsShape = {
@@ -246,7 +247,15 @@ export const commitElementsShape = {
     .array(z.unknown())
     .min(1)
     .max(MCP_LIMITS.WRITE_OPS_MAX)
-    .describe(`图元操作批（≤${MCP_LIMITS.WRITE_OPS_MAX}）；当前仅支持 op:"element.create" 创建 geometry/rectangle，其它操作名整批拒绝`),
+    .describe(
+      `图元操作批（≤${MCP_LIMITS.WRITE_OPS_MAX}），支持 ` +
+        "element.create（geometry/rectangle 尾插）、" +
+        "element.update（id + patch，禁改 type/shape/绑定）、" +
+        "element.move（id + dx/dy）、" +
+        "element.delete（id；绑定该形状的 arrow-line 级联删除）、" +
+        "element.connect（arrow-line：sourceId/targetId 两端绑定既有形状；vector-line：sourcePoint/targetPoint 自由点）；" +
+        "未知操作名整批拒绝",
+    ),
   baseVersion: z.number().int().min(0).optional().describe("读取时的 contentVersion（乐观锁）；缺省=last-write-wins，与 REST PUT 同口径"),
   confirm: z.literal(true).describe("写入确认；必须是字面量 true"),
   requestId,

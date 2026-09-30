@@ -10,7 +10,7 @@ import {
   parseBoardContent,
   validateCreateOps,
   type CanvasLimits,
-} from "../validate.js";
+} from "../index.js";
 
 const rect = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
   type: "geometry",
