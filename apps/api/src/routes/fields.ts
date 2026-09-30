@@ -93,7 +93,7 @@ fields.post("/", async (c) => {
   const tableId = c.req.query("tableId");
   if (!tableId) return c.json({ error: "缺少 tableId" }, 400);
   const baseId = await baseIdOfTable(tableId);
-  await requireSchemaDesign(c, tableId);
+  const { userId } = await requireSchemaDesign(c, tableId);
 
   const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法", details: parsed.error.issues }, 400);
@@ -153,7 +153,7 @@ fields.post("/", async (c) => {
       visibleFieldIds: parsed.data.visibleFieldIds ?? null,
       defaultConfig: parsed.data.defaultConfig ?? null,
       numberRule: parsed.data.numberRule ?? null,
-    });
+    }, userId);
 
   return c.json({ field: result.field, reverseField: result.reverseField ?? null }, 201);
 });
@@ -167,7 +167,7 @@ fields.patch("/:fieldId", async (c) => {
     select: { tableId: true, table: { select: { baseId: true } } },
   });
   if (!fieldRow) throw new HttpError(404, "字段不存在");
-  await requireSchemaDesign(c, fieldRow.tableId);
+  const { userId } = await requireSchemaDesign(c, fieldRow.tableId);
 
   const parsed = updateSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法", details: parsed.error.issues }, 400);
@@ -221,7 +221,7 @@ fields.patch("/:fieldId", async (c) => {
     visibleFieldIds: parsed.data.visibleFieldIds,
     defaultConfig: parsed.data.defaultConfig,
     numberRule: parsed.data.numberRule,
-  });
+  }, userId);
   if (!updated) throw new HttpError(404, "字段不存在");
   return c.json({ field: updated });
 });
@@ -235,8 +235,8 @@ fields.delete("/:fieldId", async (c) => {
     select: { tableId: true, table: { select: { baseId: true } } },
   });
   if (!fieldRow) throw new HttpError(404, "字段不存在");
-  await requireSchemaDesign(c, fieldRow.tableId);
-  const { deleted } = await deleteField(fieldId);
+  const { userId } = await requireSchemaDesign(c, fieldRow.tableId);
+  const { deleted } = await deleteField(fieldId, userId);
   return c.json({ ok: true, deleted });
 });
 

@@ -14,6 +14,7 @@ import {
   type ScopeProjectionInput,
 } from "./scopeProjection.js";
 import { loadLiveShape, replaceScopePoliciesTx } from "./scopeProjectionTx.js";
+import { nodeId } from "../nav/backfill.js";
 
 /** scope 行快照（写后 role_library_scope 行的形状）。 */
 export interface SavedScopeRow {
@@ -139,4 +140,37 @@ export async function projectAdminForNewLibraryTx(
       createdBy: operatorUserId,
     });
   }
+}
+
+/**
+ * 建表 seed：为 role_admin 仅补这张新表节点的隐含策略，只 upsert 这一条、不删除任何行。
+ * 建库时 base 节点策略已建，建表只需补表节点——漏补会让管理员对新表 OVERDENY。
+ * role_admin 可能没有该库 scope 行（管理员覆盖本就不依赖行存在），空行集也能跑：
+ * projectImplicitAdmin 对空行给出隐含只读。
+ */
+export async function projectAdminForNewTableTx(
+  client: AuthzClient,
+  baseId: string,
+  newTableId: string,
+  operatorUserId: string,
+): Promise<void> {
+  const adminScopeRows = await client.roleLibraryScope.findMany({
+    where: { libraryKind: "base", libraryId: baseId, roleId: ADMIN_ROLE_ID },
+  });
+  const projected = projectImplicitAdmin({
+    bases: [{ libraryId: baseId, shape: await loadLiveShape(client, baseId) }],
+    kbs: [],
+    adminScopeRows: adminScopeRows.map(toProjectionInput),
+  });
+  const one = projected.find((p) => p.nodeId === nodeId("table", newTableId));
+  if (!one) return;
+  await upsertPolicyTx(client, {
+    nodeId: one.nodeId,
+    subjectType: "role",
+    subjectId: ADMIN_ROLE_ID,
+    actions: one.actions,
+    fieldMask: one.fieldMask,
+    reason: one.reason,
+    createdBy: operatorUserId,
+  });
 }

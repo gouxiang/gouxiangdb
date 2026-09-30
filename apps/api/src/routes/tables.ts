@@ -27,6 +27,8 @@ import {
   softDeleteSubtreeTx,
 } from "../domain/nav/sync.js";
 import { nodeId } from "../domain/nav/backfill.js";
+import { syncTableForAllScopesTx } from "../domain/authz/scopeProjectionTx.js";
+import { projectAdminForNewTableTx } from "../domain/authz/scopeDoubleWrite.js";
 import { entityIconSchema, entityIconColorSchema } from "../validators/entity-icon.js";
 
 export const tables = new Hono();
@@ -213,6 +215,9 @@ tables.post("/", async (c) => {
     });
     // M3/S3 #4：同事务同步 table + view 节点（field 不建节点）。
     await syncNavFromEntitiesTx(tx);
+    // P1/S7 #3：为该库每条命中 scope 角色补新表节点 scope:role 策略 + role_admin 隐含策略。
+    await syncTableForAllScopesTx(tx, "base", baseId, t.id, "add", userId);
+    await projectAdminForNewTableTx(tx, baseId, t.id, userId);
     return { table: t, primaryFieldId: nameField.id };
   });
 
@@ -489,6 +494,9 @@ tables.post("/:tableId/duplicate", async (c) => {
   }
 
   await syncNavFromEntitiesTx(tx);
+  // P1/S7 #4：复制产生的新表按 scope 现配重算投影（源表字段 mask 不跨复制继承）。
+  await syncTableForAllScopesTx(tx, "base", baseId, copy.id, "add", userId);
+  await projectAdminForNewTableTx(tx, baseId, copy.id, userId);
   return { copy, primary };
   });
 

@@ -159,7 +159,7 @@ async function fieldCount(tableId: string): Promise<number> {
 async function makePairWithLink(): Promise<{ forwardId: string; reverseId: string }> {
   const created = await fieldService.createField({
     tableId: tableA, name: "关联B", type: "links", relatedTableId: tableB, relationKind: "hm",
-  });
+  }, "u");
   const forwardId = created.field.id;
   const reverseId = created.reverseField!.id;
   const recA = await prisma.record.create({
@@ -185,7 +185,7 @@ describe("RC-10 createField 建 links 对原子性", () => {
         type: "links",
         relatedTableId: tableB,
         relationKind: "hm",
-      }),
+      }, "u"),
     ).rejects.toThrow(/INJECTED/);
 
     // 三写全部回滚：两张表都不留新字段
@@ -203,7 +203,7 @@ describe("RC-10 createField 建 links 对原子性", () => {
         type: "links",
         relatedTableId: tableB,
         relationKind: "mm",
-      }),
+      }, "u"),
     ).rejects.toThrow(/INJECTED/);
 
     expect(await fieldCount(tableA)).toBe(0);
@@ -216,7 +216,7 @@ describe("RC-10 createField 建 links 对原子性", () => {
       type: "links",
       relatedTableId: tableB,
       relationKind: "hm",
-    });
+    }, "u");
     expect(res.reverseField).toBeTruthy();
     const forward = res.field;
     const reverse = res.reverseField!;
@@ -249,7 +249,7 @@ describe("RC-10 deleteField links 对原子性", () => {
 
     // delete 序列（links）：field.update(本字段) → field.update(partner) → linkRow.updateMany
     armFault({ model: "linkRow", op: "updateMany", failAt: 1 });
-    await expect(fieldService.deleteField(forwardId)).rejects.toThrow(/INJECTED/);
+    await expect(fieldService.deleteField(forwardId, "u")).rejects.toThrow(/INJECTED/);
 
     const fwdAfter = await prisma.field.findUnique({ where: { id: forwardId } });
     const revAfter = await prisma.field.findUnique({ where: { id: reverseId } });
@@ -263,7 +263,7 @@ describe("RC-10 deleteField links 对原子性", () => {
   it("T4 happy path：删除时两个字段都软删、linkRow 打标", async () => {
     const { forwardId, reverseId } = await makePairWithLink();
 
-    const { deleted } = await fieldService.deleteField(forwardId);
+    const { deleted } = await fieldService.deleteField(forwardId, "u");
     expect(deleted.sort()).toEqual([forwardId, reverseId].sort());
 
     const fwdAfter = await prisma.field.findUnique({ where: { id: forwardId } });
@@ -282,13 +282,13 @@ describe("RC-10 updateField 首次补配双向对原子性", () => {
       tableId: tableA,
       name: "待补配",
       type: "links",
-    });
+    }, "u");
     const fieldId = placeholder.field.id;
 
     // 补配序列：update(主) → create(反向) → update(正向回填) → update(反向互指)；在第 2 次 update 注入。
     armFault({ model: "field", op: "update", failAt: 2 });
     await expect(
-      fieldService.updateField(fieldId, { relatedTableId: tableB, relationKind: "hm" }),
+      fieldService.updateField(fieldId, { relatedTableId: tableB, relationKind: "hm" }, "u"),
     ).rejects.toThrow(/INJECTED/);
 
     // 主字段回未配对，B 表无孤立反向字段

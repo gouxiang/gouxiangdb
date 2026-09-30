@@ -19,6 +19,7 @@ import {
   updateFieldTx,
   deleteFieldTx,
 } from "./fieldServiceTx.js";
+import { resyncTableMaskTx } from "./authz/scopeProjectionTx.js";
 
 export type { RelationKind } from "./fieldServiceTx.js";
 export { reverseRelation } from "./fieldServiceTx.js";
@@ -96,7 +97,10 @@ export interface CreateFieldResult {
   reverseField?: FieldMeta;
 }
 
-export async function createField(input: CreateFieldInput): Promise<CreateFieldResult> {
+export async function createField(
+  input: CreateFieldInput,
+  operatorUserId: string,
+): Promise<CreateFieldResult> {
   // 子表格内部固定为「一对多（hm）」：一条主数据拥有多条子行（反向自动为多对一 bt）。
   // UI 隐藏关系类型选择；服务端强制，避免数据交叉混乱。
   if (input.type === "subtable" && input.relationKind) {
@@ -115,9 +119,15 @@ export async function createField(input: CreateFieldInput): Promise<CreateFieldR
 
   // 全部结构写（普通字段一写；links/subtable 的反向占位→正向→回填互指三写）收进单个
   // 交互事务：任一步失败整体回滚，绝不留孤立反向占位字段或单向链。RC-10 写路径全事务化。
-  const result = await withWriteTx("field.create", (tx) =>
-    isLinkPair ? createLinkFieldPairTx(tx, input) : createSimpleFieldTx(tx, input),
-  );
+  // P1/S7 #7/#8：结构写后重算受影响表 scope:role mask（反向字段建在 relatedTableId）。
+  const result = await withWriteTx("field.create", async (tx) => {
+    const r = isLinkPair
+      ? await createLinkFieldPairTx(tx, input)
+      : await createSimpleFieldTx(tx, input);
+    await resyncTableMaskTx(tx, input.tableId, operatorUserId);
+    if (isLinkPair) await resyncTableMaskTx(tx, input.relatedTableId!, operatorUserId);
+    return r;
+  });
 
   // 缓存失效只能在事务提交成功后做（纯同步内存操作，不经写队列）。
   invalidateOrdinalCache(input.tableId);
@@ -150,7 +160,11 @@ export interface UpdateFieldInput {
   numberRule?: unknown | null;
 }
 
-export async function updateField(fieldId: string, patch: UpdateFieldInput): Promise<FieldMeta | null> {
+export async function updateField(
+  fieldId: string,
+  patch: UpdateFieldInput,
+  operatorUserId: string,
+): Promise<FieldMeta | null> {
   const existing = await prisma.field.findUnique({ where: { id: fieldId } });
   if (!existing || existing.deletedAt) return null;
 
@@ -207,9 +221,13 @@ export async function updateField(fieldId: string, patch: UpdateFieldInput): Pro
 
   // 主 update + links/subtable 首次补配三写 + 尾部 partner 同步全部收进同一个交互事务：
   // 中途失败整体回滚，不留孤立反向字段/单向链。RC-10 写路径全事务化。
-  const finalRow = await withWriteTx("field.update", (tx) =>
-    updateFieldTx(tx, fieldId, existing, patch, data, isLinkLike),
-  );
+  // P1/S7 #9：结构写后重算本表 mask；首次 backfill 补配了对表新字段，对表也重算。
+  const finalRow = await withWriteTx("field.update", async (tx) => {
+    const r = await updateFieldTx(tx, fieldId, existing, patch, data, isLinkLike);
+    await resyncTableMaskTx(tx, existing.tableId, operatorUserId);
+    if (backfilled) await resyncTableMaskTx(tx, patch.relatedTableId!, operatorUserId);
+    return r;
+  });
 
   // 缓存失效在提交成功后（纯同步内存操作）。
   invalidateOrdinalCache(existing.tableId);
@@ -222,13 +240,27 @@ export async function updateField(fieldId: string, patch: UpdateFieldInput): Pro
  * - links 字段：对称软删配对反向字段
  * - 被 lookup/rollup/count 依赖的字段：级联软删依赖它的计算字段
  */
-export async function deleteField(fieldId: string): Promise<{ deleted: string[] }> {
+export async function deleteField(
+  fieldId: string,
+  operatorUserId: string,
+): Promise<{ deleted: string[] }> {
   const field = await prisma.field.findUnique({ where: { id: fieldId } });
   if (!field || field.deletedAt) return { deleted: [] };
 
   // 本字段软删 + partner 对称软删 + linkRow 打标 + lookup/rollup/count 级联软删全部收进
   // 单个交互事务：中途失败整体回滚，不出现「本字段已删、partner/关联未删」的半删态。
-  const deleted = await withWriteTx("field.delete", (tx) => deleteFieldTx(tx, field));
+  // P1/S7 #10：deleteFieldTx 返回被删字段 id（含 partner/级联、可能跨表），
+  // 收集去重受影响表逐个重算 scope:role mask。
+  const deleted = await withWriteTx("field.delete", async (tx) => {
+    const deletedIds = await deleteFieldTx(tx, field);
+    const tableIds = new Set<string>([field.tableId]);
+    for (const did of deletedIds) {
+      const f = await tx.field.findUnique({ where: { id: did }, select: { tableId: true } });
+      if (f) tableIds.add(f.tableId);
+    }
+    for (const tid of tableIds) await resyncTableMaskTx(tx, tid, operatorUserId);
+    return deletedIds;
+  });
 
   // 缓存失效在提交成功后（纯同步内存操作）。
   invalidateOrdinalCache(field.tableId);
