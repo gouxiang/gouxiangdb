@@ -140,6 +140,7 @@ export async function applyPolicyBatch(
         subjectId: u.subjectId,
         actions: normalized[i]!,
         fieldMask: u.fieldMask ? JSON.stringify(u.fieldMask) : null,
+        conditions: u.conditions ? JSON.stringify(u.conditions) : null,
         reason: "policy:v1",
         createdBy: actorId,
       });

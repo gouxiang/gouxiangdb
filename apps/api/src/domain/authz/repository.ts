@@ -145,6 +145,8 @@ export interface PolicyUpsertInput {
   /** 已规范化的存储串（字典序逗号分隔）。 */
   actions: string;
   fieldMask?: string | null;
+  /** 行级条件存储串；undefined＝不改，null＝显式清空。 */
+  conditions?: string | null;
   reason?: string | null;
   createdBy: string;
   workspaceId?: string;
@@ -165,6 +167,7 @@ export async function upsertPolicyTx(
       data: {
         actions: input.actions,
         ...(input.fieldMask !== undefined ? { fieldMask: input.fieldMask } : {}),
+        ...(input.conditions !== undefined ? { conditions: input.conditions } : {}),
         ...(input.reason !== undefined ? { reason: input.reason } : {}),
       },
     });
@@ -178,6 +181,7 @@ export async function upsertPolicyTx(
       subjectId: input.subjectId,
       actions: input.actions,
       fieldMask: input.fieldMask ?? null,
+      conditions: input.conditions ?? null,
       reason: input.reason ?? null,
       createdBy: input.createdBy,
     },

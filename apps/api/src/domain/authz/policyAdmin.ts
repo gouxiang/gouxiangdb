@@ -4,17 +4,17 @@
 // HTTP 鉴权/信封见 routes/v1/policies.ts。这里是整单"全合法才提交"的唯一校验真源。
 
 import {
-  RESOURCE_ACTIONS,
   normalizeActions,
   toActionString,
   resourceActionsForLegacyRole,
   type FieldMask,
   type LegacyRoleFamily,
+  type RowConditions,
 } from "@gx/shared-types";
 import type { AuthzClient, AuthzNode } from "./types.js";
+import { SUBJECT_TYPES, parseUpsert, BatchItemError } from "./policyBatchParse.js";
 
 export type PolicySubjectType = "user" | "dept" | "role";
-const SUBJECT_TYPES: readonly PolicySubjectType[] = ["user", "dept", "role"];
 
 export interface PolicyUpsertInput {
   subjectType: PolicySubjectType;
@@ -22,6 +22,8 @@ export interface PolicyUpsertInput {
   /** 原始动作 token（域内规范化 + 白名单校验）。 */
   actions: string[];
   fieldMask?: FieldMask | null;
+  /** 行级可见行条件；null 语义＝不设/清空（配合整单全量替换）。 */
+  conditions: RowConditions | null;
 }
 export interface PolicyDeleteInput {
   subjectType: PolicySubjectType;
@@ -136,41 +138,14 @@ export function parsePolicyBatch(body: unknown): {
   }
 
   for (const [i, u] of rawUpserts.entries()) {
-    if (!isObject(u)) {
-      throw new PolicyValidationError("POLICY_BAD_INPUT", [{ index: i, message: "upserts 每项须为对象" }]);
-    }
-    const subjectType = u.subjectType;
-    if (typeof subjectType !== "string" || !(SUBJECT_TYPES as readonly string[]).includes(subjectType)) {
-      throw new PolicyValidationError("POLICY_SUBJECT_INVALID", [
-        { index: i, message: "subjectType 只能是 user/dept/role" },
-      ]);
-    }
-    if (typeof u.subjectId !== "string" || !u.subjectId.trim()) {
-      throw new PolicyValidationError("POLICY_SUBJECT_INVALID", [{ index: i, message: "缺少 subjectId" }]);
-    }
-    if (!Array.isArray(u.actions) || u.actions.length === 0) {
-      throw new PolicyValidationError("POLICY_ACTION_INVALID", [{ index: i, message: "actions 必须是非空数组" }]);
-    }
-    for (const a of u.actions) {
-      if (typeof a !== "string" || !(RESOURCE_ACTIONS as readonly string[]).includes(a)) {
-        throw new PolicyValidationError("POLICY_ACTION_INVALID", [
-          { index: i, subject: String(u.subjectId), message: `非法资源动作: ${String(a)}` },
-        ]);
+    try {
+      upserts.push(parseUpsert(i, u));
+    } catch (err) {
+      if (err instanceof BatchItemError) {
+        throw new PolicyValidationError(err.code, [err.detail]);
       }
+      throw err;
     }
-    let fieldMask: FieldMask | null = null;
-    if (u.fieldMask !== undefined && u.fieldMask !== null) {
-      if (!isObject(u.fieldMask)) {
-        throw new PolicyValidationError("POLICY_FIELD_INVALID", [{ index: i, message: "fieldMask 必须是对象" }]);
-      }
-      fieldMask = u.fieldMask as FieldMask;
-    }
-    upserts.push({
-      subjectType: subjectType as PolicySubjectType,
-      subjectId: u.subjectId.trim(),
-      actions: u.actions as string[],
-      fieldMask,
-    });
   }
 
   for (const [i, d] of rawDeletes.entries()) {
@@ -277,6 +252,18 @@ export async function validateBatch(
     const fieldCheck = await maskFieldsBelongToTable(client, node, u.fieldMask);
     if (!fieldCheck.ok) {
       throw new PolicyValidationError("POLICY_FIELD_INVALID", [{ index: i, subject: u.subjectId, message: fieldCheck.bad }]);
+    }
+    if (u.conditions !== null) {
+      if (node.resourceType !== "table") {
+        throw new PolicyValidationError("POLICY_NODE_KIND_INVALID", [
+          { index: i, subject: u.subjectId, message: "行级条件只能挂在 table 节点" },
+        ]);
+      }
+      if (!actions.includes("r")) {
+        throw new PolicyValidationError("POLICY_ACTION_INVALID", [
+          { index: i, subject: u.subjectId, message: "行级条件要求动作含 r（读）" },
+        ]);
+      }
     }
     normalized.push(toActionString(actions));
   }
