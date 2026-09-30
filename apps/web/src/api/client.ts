@@ -16,13 +16,11 @@ import type {
   ShareLinkDTO,
   ViewDTO,
   ViewConfig,
+  ViewAdminConfig,
   ViewType,
   LockMode,
-  CellValue,
   DetailLayout,
   TabConfig,
-  LinkRefDTO,
-  AttachmentDTO,
   CSVImportResult,
   TrashItemDTO,
 } from "@gx/shared-types";
@@ -119,6 +117,7 @@ export type {
   AttachmentDTO,
   ViewDTO,
   ViewConfig,
+  ViewAdminConfig,
   ViewType,
   LockMode,
   FilterNode,
@@ -796,6 +795,20 @@ export const Views = {
     apiFetch<SaveDetailLayoutResult>(`/api/views/${encodeURIComponent(viewId)}/detail-layout`, {
       method: "POST",
       body: JSON.stringify(data),
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
+  /**
+   * 视图「管理员配置层」写入（#560）：仅表结构管理者可用（非管理者后端 403）。
+   * 与普通用户 config 的 PATCH /api/views/:id 是两条独立通道，互不干扰。
+   * 请求体只发变化键，后端按 UpdateViewAdminRequest 浅合并。
+   */
+  updateAdmin: (
+    viewId: string,
+    adminConfig: Partial<Omit<ViewAdminConfig, "version">>,
+  ) =>
+    apiFetch<{ view: ViewDTO }>(`/api/views/${encodeURIComponent(viewId)}/admin`, {
+      method: "PATCH",
+      body: JSON.stringify({ adminConfig }),
       timeoutMs: WRITE_TIMEOUT_MS,
     }),
 };

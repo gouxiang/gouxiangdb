@@ -8,6 +8,7 @@ import type { LockMode, PermissionSet, ViewDTO } from "@gx/shared-types";
 import { Button, Input, SegmentedControl, toast } from "../../components/ui";
 import { confirmIrreversible } from "../../components/feedback";
 import FormConfigSection from "../views/FormConfigSection";
+import ViewAdminConfigSection from "./ViewAdminConfigSection";
 
 export interface ViewSettingsPanelProps {
   view: ViewDTO;
@@ -117,6 +118,11 @@ export default function ViewSettingsPanel({ view, tableId, permissions, onClose,
           {LOCK_OPTIONS.find((o) => o.value === lockMode)?.desc}
         </div>
       </div>
+
+      {/* 管理员配置层（#560）：仅表结构管理者可见，普通成员无入口；走独立 admin 端点。 */}
+      {canSchema && (
+        <ViewAdminConfigSection view={view} tableId={tableId} canEdit={canSchema} />
+      )}
 
       {/* 表单视图专属：表单标题/描述 + 字段显隐/顺序/必填。
           之前 formFields/formTitle/formDescription 全仓只有读取没有写入入口，

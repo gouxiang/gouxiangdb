@@ -25,6 +25,7 @@ import type {
   RecordDTO,
   ViewDTO,
   ViewConfig,
+  ViewAdminConfig,
   ViewType,
   LockMode,
   CommentDTO,
@@ -544,6 +545,17 @@ export function useGXMutations() {
       }) => (await Views.update(p.viewId, p.data)).view,
       onSuccess: (_d, v) => {
         void qc.invalidateQueries({ queryKey: ["views", v.tableId] });
+        void qc.invalidateQueries({ queryKey: ["records", v.tableId] });
+      },
+    }),
+    updateViewAdmin: useMutation({
+      mutationFn: async (p: {
+        viewId: string;
+        tableId: string;
+        adminConfig: Partial<Omit<ViewAdminConfig, "version">>;
+      }) => (await Views.updateAdmin(p.viewId, p.adminConfig)).view,
+      onSuccess: (_d, v) => {
+        void qc.invalidateQueries({ queryKey: QK.views(v.tableId) });
         void qc.invalidateQueries({ queryKey: ["records", v.tableId] });
       },
     }),
