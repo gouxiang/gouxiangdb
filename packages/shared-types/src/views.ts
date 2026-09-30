@@ -5,7 +5,15 @@ import type { FilterNode } from "./filters.js";
 import type { FieldType } from "./fields.js";
 import type { FieldIdT } from "./ids.js";
 
-export type ViewType = "grid" | "gallery" | "form" | "detail" | "kanban" | "calendar";
+export type ViewType =
+  | "grid"
+  | "gallery"
+  | "form"
+  | "detail"
+  | "kanban"
+  | "calendar"
+  | "tree"
+  | "gantt";
 
 export const VIEW_TYPES: ViewType[] = [
   "grid",
@@ -14,6 +22,8 @@ export const VIEW_TYPES: ViewType[] = [
   "detail",
   "kanban",
   "calendar",
+  "tree",
+  "gantt",
 ];
 
 export const VIEW_TYPE_LABEL: Record<ViewType, string> = {
@@ -23,6 +33,8 @@ export const VIEW_TYPE_LABEL: Record<ViewType, string> = {
   detail: "详情",
   kanban: "看板",
   calendar: "日历",
+  tree: "层级",
+  gantt: "甘特",
 };
 
 export type LockMode = "collaborative" | "locked" | "personal";
@@ -41,6 +53,20 @@ export interface SortSpec {
 }
 
 export type RowHeight = "short" | "medium" | "tall";
+
+/**
+ * 甘特图时间轴刻度档位（每列宽度代表的时间跨度）。
+ * day=日 / week=周 / month=月 / quarter=季 / year=年。
+ */
+export type GanttZoom = "day" | "week" | "month" | "quarter" | "year";
+
+export const GANTT_ZOOM_LABEL: Record<GanttZoom, string> = {
+  day: "日",
+  week: "周",
+  month: "月",
+  quarter: "季",
+  year: "年",
+};
 
 // 行高档位与参考图「数据表主界面」实测值对齐：紧凑 36 / 常规 44 / 宽松 64。
 // 三档机制原样保留（行高下拉仍可切），只校准前两档的实际渲染高度。
@@ -120,6 +146,16 @@ export interface ViewConfig {
 
   // 日历
   dateFieldId: string | null; // date / datetime / createdTime / lastModifiedTime
+
+  // 层级视图：同表自引用 link 字段（其 LinkRef 决定 parentId）
+  treeParentFieldId: string | null;
+
+  // 甘特图
+  ganttStartFieldId: string | null; // date / datetime
+  ganttEndFieldId: string | null; // date / datetime
+  ganttProgressFieldId: string | null; // number / percent（0~100）
+  ganttDependencyFieldId: string | null; // 同表 link：前置任务
+  ganttZoom: GanttZoom;
 
   // 表单
   formFields: FormFieldConfig[];
@@ -202,6 +238,12 @@ export function defaultViewConfig(overrides: Partial<ViewConfig> = {}): ViewConf
     cardFieldIds: [],
     kanbanFieldId: null,
     dateFieldId: null,
+    treeParentFieldId: null,
+    ganttStartFieldId: null,
+    ganttEndFieldId: null,
+    ganttProgressFieldId: null,
+    ganttDependencyFieldId: null,
+    ganttZoom: "day",
     formFields: [],
     formTitle: "",
     formDescription: "",
@@ -256,4 +298,24 @@ export function canBeDateField(t: FieldType): boolean {
 // 该字段类型能否作为画廊封面
 export function canBeCoverField(t: FieldType): boolean {
   return t === "attachment";
+}
+
+// 该字段类型能否作为层级视图的父级关联（同表自引用 link；是否本表由字段数据保证）
+export function canBeTreeParentField(t: FieldType): boolean {
+  return t === "links";
+}
+
+// 该字段类型能否作为甘特起止日期
+export function canBeGanttDateField(t: FieldType): boolean {
+  return t === "date" || t === "datetime";
+}
+
+// 该字段类型能否作为甘特进度（数字 / 百分比，0~100）
+export function canBeGanttProgressField(t: FieldType): boolean {
+  return t === "number" || t === "percent";
+}
+
+// 该字段类型能否作为甘特前置依赖（同表 link）
+export function canBeGanttDependencyField(t: FieldType): boolean {
+  return t === "links";
 }
