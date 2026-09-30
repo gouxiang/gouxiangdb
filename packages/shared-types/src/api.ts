@@ -506,6 +506,15 @@ export interface V1SearchQuery {
   limit?: number;
 }
 
+/** POST /api/v1/search 请求体（以图搜图：比 GET 多 images，仅接受 data:image 内联数据）。 */
+export interface V1SearchPostBody {
+  q?: string;
+  type?: V1SearchTypeFilter;
+  mode?: V1RequestedMode;
+  limit?: number;
+  images?: string[];
+}
+
 /** GET /admin/embedding/config.apiKey 存在性形状（绝不回明文）。 */
 export interface EmbeddingApiKeyStatus {
   configured: boolean;
