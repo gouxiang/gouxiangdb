@@ -23,7 +23,15 @@ export interface McpSubject {
 
 /** nav resourceType 的可见子集（与 M3 nav_nodes.kind 同域）。 */
 export type McpResourceKind = "base" | "kb" | "table" | "view" | "doc" | "canvas" | "group";
-export type McpAction = "r" | "c" | "u" | "d";
+/**
+ * MCP 侧动作词汇。前四枚是数据读写（对应 shared-types 的 r/c/u/d）；后两枚是搭建类动作——
+ * 与 shared-types `ResourceAction` 的 manage_schema/manage_table 同域，直接透传给 M4 判定：
+ *   - manage_schema：建表（base 节点）、字段增删改（table 节点）、结构设计；
+ *   - manage_table：表改名/删表等表级元数据管理（经 table → base 祖先链命中）。
+ */
+export type McpAction =
+  | "r" | "c" | "u" | "d"
+  | "manage_schema" | "manage_table";
 export type ResourceFamily = "table" | "doc" | "canvas";
 
 export interface McpResource { kind: McpResourceKind; id: string }

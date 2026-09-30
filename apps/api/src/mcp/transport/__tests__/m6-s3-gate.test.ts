@@ -96,8 +96,10 @@ describe("S3 四身份 tools/list 快照", () => {
   // 【签发者的实际能力】。uFull 是 b1/库一的创建者（创建者兜底带出 c/u/d），故它签发的令牌
   // 无论 scope 如何，注册集都一样且含写工具。
   const FULL_SET = [
+    "field.create_field", "field.delete_field", "field.update_field",
     "ping_echo", "record.create_record", "record.delete_record", "record.list_records",
-    "record.query_records", "record.update_record", "table.get_schema", "table.list_bases",
+    "record.query_records", "record.update_record", "table.create_table",
+    "table.delete_table", "table.get_schema", "table.list_bases", "table.update_table",
   ];
 
   it("① 无权（族为空）-> 仅连接性工具（族可见集闸门，与令牌 scope 无关）", async () => {

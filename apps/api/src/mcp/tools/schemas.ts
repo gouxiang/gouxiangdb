@@ -9,6 +9,12 @@
 import { z } from "zod/v4";
 import type { BlockType } from "@gx/blocks";
 
+/**
+ * 转出 zod4 实例：供同目录的 buildSchemas.ts 复用（它不直接 import "zod/v4"，
+ * 由本文件作为唯一直接引用点，守住 zod4 隔离守卫）。
+ */
+export { z };
+
 /** 配额常量（§3-8）：读 limit ≤200、写批量 op ≤100、批文本 ≤100KB、文档/画布 10MB。 */
 export const MCP_LIMITS = {
   READ_LIMIT_MAX: 200,
@@ -223,7 +229,7 @@ export const getBoardShape = {
   docId: z.string().min(1).describe("画布文档 id（须在该令牌可见集内）"),
 };
 
-/* ------------------------- M6/S6b canvas 族（element.create 最小集写入） ------------------------- */
+/* --------------------- M6/S6b canvas 族（element.create 最小集写入） --------------------- */
 
 /**
  * canvas.commit_elements：op 数 ≤100；confirm 必须字面量 true。

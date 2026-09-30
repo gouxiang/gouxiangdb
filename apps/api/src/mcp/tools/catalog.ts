@@ -7,11 +7,22 @@
 
 import { isUnifiedSearchEnabled } from "../../domain/search/searchGateRuntime.js";
 import { tableGetSchema, tableListBases } from "./table.tools.js";
+import { tableCreateTable, tableUpdateTable, tableDeleteTable } from "./tableBuild.tools.js";
+import { fieldCreateField, fieldUpdateField, fieldDeleteField } from "./fieldBuild.tools.js";
 import { recordCreateRecord, recordDeleteRecord, recordUpdateRecord, recordListRecords, recordQueryRecords, recordSearch } from "./record.tools.js";
 import { canvasGetBoard } from "./canvas.tools.js";
 import { canvasCommitElements } from "./canvasWrite.tools.js";
 import { docAppendBlocks, docDeleteBlocks, docGetDocBlocks, docUpdateBlock } from "./doc.tools.js";
-import { appendBlocksShape, commitElementsShape, createRecordShape, deleteBlocksShape, deleteRecordShape, updateBlockShape, updateRecordShape, getBoardShape, getDocBlocksShape, getSchemaShape, listBasesShape, listRecordsShape, pingEchoShape, queryRecordsShape, recordSearchShape } from "./schemas.js";
+import {
+  appendBlocksShape, commitElementsShape, createRecordShape, deleteBlocksShape,
+  deleteRecordShape, updateBlockShape, updateRecordShape, getBoardShape,
+  getDocBlocksShape, getSchemaShape, listBasesShape, listRecordsShape,
+  pingEchoShape, queryRecordsShape, recordSearchShape,
+} from "./schemas.js";
+import {
+  createTableShape, updateTableShape, deleteTableShape,
+  createFieldShape, updateFieldShape, deleteFieldShape,
+} from "./buildSchemas.js";
 import { text, type ToolSpec } from "./types.js";
 
 export const TOOL_CATALOG: readonly ToolSpec[] = [
@@ -48,6 +59,60 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     },
     inputShape: getSchemaShape,
     run: tableGetSchema,
+  },
+  {
+    meta: {
+      name: "table.create_table", title: "创建数据表",
+      description: "在指定 base 下创建一张表（含「名称」主字段与默认网格视图；需 confirm=true）。",
+      scopes: ["record:write"], family: "table", actions: ["manage_schema"], readOnly: false,
+    },
+    inputShape: createTableShape,
+    run: tableCreateTable,
+  },
+  {
+    meta: {
+      name: "table.update_table", title: "更新数据表",
+      description: "修改表名/主字段/图标与图标颜色（仅传 name 时改名；同库表名唯一）。",
+      scopes: ["record:write"], family: "table", actions: ["manage_table"], readOnly: false,
+    },
+    inputShape: updateTableShape,
+    run: tableUpdateTable,
+  },
+  {
+    meta: {
+      name: "table.delete_table", title: "删除数据表",
+      description: "软删整张表（级联记录/字段；需 confirm=true；可由回收站恢复）。",
+      scopes: ["record:write"], family: "table", actions: ["manage_table"], readOnly: false,
+    },
+    inputShape: deleteTableShape,
+    run: tableDeleteTable,
+  },
+  {
+    meta: {
+      name: "field.create_field", title: "创建字段",
+      description: "在指定表创建字段（含关联字段双向对；类型配置经服务端校验；需 confirm=true）。",
+      scopes: ["record:write"], family: "table", actions: ["manage_schema"], readOnly: false,
+    },
+    inputShape: createFieldShape,
+    run: fieldCreateField,
+  },
+  {
+    meta: {
+      name: "field.update_field", title: "更新字段",
+      description: "更新字段配置（部分提交；关联字段改名/改关系会同步反向字段）。",
+      scopes: ["record:write"], family: "table", actions: ["manage_schema"], readOnly: false,
+    },
+    inputShape: updateFieldShape,
+    run: fieldUpdateField,
+  },
+  {
+    meta: {
+      name: "field.delete_field", title: "删除字段",
+      description: "软删字段（关联字段对称删反向字段；级联 lookup/rollup/count；需 confirm=true）。",
+      scopes: ["record:write"], family: "table", actions: ["manage_schema"], readOnly: false,
+    },
+    inputShape: deleteFieldShape,
+    run: fieldDeleteField,
   },
   {
     meta: {

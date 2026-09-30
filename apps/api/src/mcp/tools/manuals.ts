@@ -19,6 +19,14 @@ export const TABLE_LANGUAGE_MD = `# 表与记录语言
 - record.delete_record：软删除一条记录，需 confirm=true。入参 tableId、recordId、confirm。
 - record.search：统一关键词与向量检索。入参 q、mode（auto 或 fts 或 vector）、limit。
 
+## 结构搭建工具
+- table.create_table：在某基础库下新建一张表（含「名称」主字段与默认网格视图），需 confirm=true。入参 baseId、name、withDefaults、confirm。
+- table.update_table：修改表名或主字段或图标；仅传 name 时改名。入参 tableId、name、primaryFieldId、icon、iconColor。
+- table.delete_table：软删整张表（级联记录与字段，可由回收站恢复），需 confirm=true。入参 tableId、confirm。
+- field.create_field：在某表新建字段（关联字段会自动建双向对），需 confirm=true。入参 tableId、name、type 及其配置、confirm。
+- field.update_field：更新字段配置（部分提交；关联字段改名会同步反向字段）。入参 fieldId 及要改的配置。
+- field.delete_field：软删字段（关联字段对称删反向字段、级联查阅/聚合/计数字段），需 confirm=true。入参 fieldId、confirm。
+
 ## 记录与字段语义
 - 记录以 recordId 标识；字段值以 fieldId 到 value 的映射表示。
 - 字段类型由表结构决定；写入前建议先用 table.get_schema 读取字段 id 与类型，避免类型不符被拒。

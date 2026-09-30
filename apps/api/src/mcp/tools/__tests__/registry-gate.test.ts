@@ -61,8 +61,10 @@ describe("S3 闸门一：注册决策", () => {
     await registerTools(server, SUBJ(["record:read"]), { port: fakePort({ table: { byKind: { base: ["b1"] }, truncated: false } }) });
     // M5 off（测试环境默认）-> record.search 不注册（运行期可用性门）
     expect(names()).toEqual([
+      "field.create_field", "field.delete_field", "field.update_field",
       "ping_echo", "record.create_record", "record.delete_record", "record.list_records",
-      "record.query_records", "record.update_record", "table.get_schema", "table.list_bases",
+      "record.query_records", "record.update_record", "table.create_table",
+      "table.delete_table", "table.get_schema", "table.list_bases", "table.update_table",
     ]);
   });
 

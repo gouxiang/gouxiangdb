@@ -55,3 +55,31 @@ export async function recordBriefById(recordId: string): Promise<{ id: string; t
   });
   return r ?? null;
 }
+
+/** 单字段最小投影：由 fieldId 反查 tableId（字段搭建工具权限判定用）。 */
+export async function fieldBriefById(fieldId: string): Promise<{ id: string; tableId: string } | null> {
+  const f = await prisma.field.findUnique({
+    where: { id: fieldId },
+    select: { id: true, tableId: true, deletedAt: true },
+  });
+  if (!f || f.deletedAt) return null;
+  return { id: f.id, tableId: f.tableId };
+}
+
+/** 字段已有配置投影（update_field 合并校验用；只取 fieldValidation 需要的标量列）。 */
+export async function fieldConfigById(
+  fieldId: string,
+): Promise<{
+  id: string; tableId: string; type: string; formula: string | null;
+  lookupFieldId: string | null; rollupFunction: string | null;
+  linkDisplayFieldId: string | null; relatedTableId: string | null; linkFieldId: string | null;
+} | null> {
+  const f = await prisma.field.findFirst({
+    where: { id: fieldId, deletedAt: null },
+    select: {
+      id: true, tableId: true, type: true, formula: true, lookupFieldId: true,
+      rollupFunction: true, linkDisplayFieldId: true, relatedTableId: true, linkFieldId: true,
+    },
+  });
+  return f ?? null;
+}

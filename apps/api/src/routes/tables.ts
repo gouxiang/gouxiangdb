@@ -3,7 +3,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { prisma, withWriteTx, type DbTx } from "../db.js";
+import { prisma, withWriteTx } from "../db.js";
 import {
   requireCanView,
   requireCanEditData,
@@ -15,18 +15,20 @@ import {
   requireTableManage,
   requireSchemaDesign,
 } from "../domain/authz/tableManageGuards.js";
-import { makeOptions } from "../domain/fieldService.js";
+import {
+  createTable,
+  updateTable,
+  softDeleteTable,
+  assertTableNameFree,
+  resolveCopyTableName,
+} from "../domain/tableService.js";
 import { loadTableFields } from "../domain/recordService.js";
 import { exportTableCsv } from "../domain/csvExport.js";
 import { resolveTableMask } from "../domain/authz/maskGate.js";
 import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
 import { deleteTableTx, rebuildTableTx } from "../domain/fieldIndex/sync.js";
 import { enqueueChangeEventsTx } from "../domain/search/outbox.js";
-import {
-  syncNavFromEntitiesTx,
-  softDeleteSubtreeTx,
-} from "../domain/nav/sync.js";
-import { nodeId } from "../domain/nav/backfill.js";
+import { syncNavFromEntitiesTx } from "../domain/nav/sync.js";
 import { syncTableForAllScopesTx } from "../domain/authz/scopeProjectionTx.js";
 import { projectAdminForNewTableTx } from "../domain/authz/scopeDoubleWrite.js";
 import { entityIconSchema, entityIconColorSchema } from "../validators/entity-icon.js";
@@ -53,58 +55,7 @@ async function baseIdOf(tableId: string): Promise<string> {
   return b;
 }
 
-// ============ 表名唯一性（同库 + 未软删 + trim 后精确匹配）============
-//
-// 口径与字段名重名（routes/fields.ts 创建端点）一致：409 + `表名「X」已存在`。
-// 不加数据库唯一索引：存量库里已有重复表名，加索引会让迁移失败、老库起不来——
-// 唯一性只在应用层保证，且只在「新建 / 改名 / 显式命名复制」三条写路径拦，存量重复不动。
-// 查重必须在 withWriteTx 回调内用 tx 做：外部查会有「两个请求都读到没重复→双双写入」的
-// 竞态，而 withWriteTx 是并发度 1 的串行写队列，事务内查重可杜绝它（回调内禁止再入队）。
-
-/**
- * 断言名称在该库内未被占用；占用则抛 409（调用方所在事务随之回滚）。
- * excludeTableId：改名场景排除自己，避免「只改图标」或「改名成自己现在的名字」被误判。
- */
-async function assertTableNameFree(
-  tx: DbTx,
-  baseId: string,
-  name: string,
-  excludeTableId?: string,
-): Promise<void> {
-  const trimmed = name.trim();
-  const dup = await tx.table.findFirst({
-    where: {
-      baseId,
-      name: trimmed,
-      deletedAt: null,
-      ...(excludeTableId ? { id: { not: excludeTableId } } : {}),
-    },
-    select: { id: true },
-  });
-  if (dup) throw new HttpError(409, `表名「${trimmed}」已存在`);
-}
-
-/**
- * 复制表未显式命名时的自动排号：base → `${base} 2` → `${base} 3` …
- * 每次候选都在事务内实查（逐个编号），存量库里已存在的同名副本会被自动绕开。
- * 超过 maxTries 仍全部冲突才抛错——正常不会走到，避免无限循环。
- */
-async function resolveCopyTableName(
-  tx: DbTx,
-  baseId: string,
-  base: string,
-  maxTries = 50,
-): Promise<string> {
-  for (let i = 1; i <= maxTries; i += 1) {
-    const candidate = i === 1 ? base : `${base} ${i}`;
-    const dup = await tx.table.findFirst({
-      where: { baseId, name: candidate, deletedAt: null },
-      select: { id: true },
-    });
-    if (!dup) return candidate;
-  }
-  throw new HttpError(409, `表名「${base}」及其后 ${maxTries} 个编号均已被占用`);
-}
+// 表名唯一性 / 复制自动排号的口径见 domain/tableService.ts（REST 与 MCP 单一真源）。
 
 // ============ Base 下的表列表 ============
 
@@ -143,94 +94,27 @@ tables.post("/", async (c) => {
   const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
   // 表名统一以 trim 后为准落库（「 客户表 」与「客户表」视为同名）。
-  // trim 后为空 → 400 拦在事务之前：放行会落库一张看不到名字的表，而且第二次会被
-  // assertTableNameFree 拦成 `409 表名「」已存在`——用户既看不到表名也看不懂这句报错。
+  // trim 后为空 → 400 拦在事务之前：放行会落库一张看不到名字的表，且报错也看不懂。
   const name = parsed.data.name.trim();
   if (!name) return c.json({ error: "表名不能为空" }, 400);
 
-  // U-9：建表多步写事务化——任何一步失败整体回滚，
+  // U-9：建表多步写事务化（domain/tableService），任何一步失败整体回滚，
   // 不再留下无 primaryField / 无视图的半截表。
-  const { table, primaryFieldId } = await withWriteTx("table.create", async (tx) => {
-    // 表名同库唯一：事务内查重（见 assertTableNameFree 注释），命中则整体回滚，不留半截表。
-    await assertTableNameFree(tx, baseId, name);
-    // shareEnabled 继承当前库级总闸：表级开关是库级「允许分享」的快照，
-    // tableShareAllowed() 两级都判。不继承的话，管理员打开库开关之后新建的表依旧是 0，
-    // 又是一张「库已允许、却没入口能开」的死表（表级没有写端点）。
-    const owner = await tx.base.findUnique({ where: { id: baseId }, select: { shareEnabled: true } });
-    const t = await tx.table.create({
-      data: {
-        baseId,
-        name,
-        primaryFieldId: "",
-        createdBy: userId,
-        shareEnabled: owner?.shareEnabled ?? 0,
-      },
-    });
-
-    const nameField = await tx.field.create({
-      data: { tableId: t.id, name: "名称", type: "singleLineText", order: 0 },
-    });
-    await tx.table.update({ where: { id: t.id }, data: { primaryFieldId: nameField.id } });
-
-    if (parsed.data.withDefaults) {
-      await tx.field.create({
-        data: { tableId: t.id, name: "数量", type: "number", order: 1, precision: 0 },
-      });
-      await tx.field.create({
-        data: {
-          tableId: t.id,
-          name: "状态",
-          type: "singleSelect",
-          order: 2,
-          options: JSON.stringify(makeOptions(["未开始", "进行中", "已完成"])),
-        },
-      });
-      await tx.field.create({ data: { tableId: t.id, name: "日期", type: "date", order: 3 } });
-      await tx.field.create({ data: { tableId: t.id, name: "备注", type: "longText", order: 4 } });
-    }
-
-    const config = {
-      hiddenFieldIds: [],
-      fieldOrder: [],
-      rowHeight: "medium",
-      filters: null,
-      sorts: [],
-      search: "",
-      groupByFieldId: null,
-      collapsedGroupKeys: [],
-      aggregations: {},
-      rowColor: { mode: "none", conditions: [] },
-      coverFieldId: null,
-      cardFieldIds: [],
-      kanbanFieldId: null,
-      dateFieldId: null,
-      formFields: [],
-      formTitle: "",
-      formDescription: "",
-      detailFieldIds: [],
-      detailLayout: null,
-    };
-    await tx.view.create({
-      data: { tableId: t.id, name: "网格视图", type: "grid", order: 0, config: JSON.stringify(config) },
-    });
-    // M3/S3 #4：同事务同步 table + view 节点（field 不建节点）。
-    await syncNavFromEntitiesTx(tx);
-    // P1/S7 #3：为该库每条命中 scope 角色补新表节点 scope:role 策略 + role_admin 隐含策略。
-    await syncTableForAllScopesTx(tx, "base", baseId, t.id, "add", userId);
-    await projectAdminForNewTableTx(tx, baseId, t.id, userId);
-    return { table: t, primaryFieldId: nameField.id };
-  });
+  const created = await createTable(
+    { baseId, name, withDefaults: parsed.data.withDefaults ?? false },
+    userId,
+  );
 
   return c.json({
     table: {
-      id: table.id,
+      id: created.tableId,
       baseId,
-      name: table.name,
-      primaryFieldId,
+      name,
+      primaryFieldId: created.primaryFieldId,
       // create 不接受自定义图标（保持轻量），新表恒为未自定义，由前端渲染默认。
       icon: null,
       iconColor: null,
-      createdAt: table.createdAt.toISOString(),
+      createdAt: created.createdAt.toISOString(),
       createdBy: userId,
       recordCount: 0,
     },
@@ -274,22 +158,17 @@ tables.patch("/:tableId", async (c) => {
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
 
   // 表名同库唯一：只有显式传了 name 才校验（本端点也用于改 icon/iconColor，那时不得查重）；
-  // 排除自己（id: not tableId）——只改图标、或改名成自己现在的名字都不该报 409。
-  const trimmedName = parsed.data.name?.trim();
-  // 同上：改名塞纯空格会把表改成空串名（看不见），且下次改名还会撞「表名「」已存在」。
-  // 只挡显式传了 name 且 trim 后为空的情况——不带 name 的只改图标请求继续放行。
-  if (trimmedName !== undefined && !trimmedName) {
+  // 改名塞纯空格会把表改成空串名（看不见），只挡显式传了 name 且 trim 后为空的情况。
+  if (parsed.data.name !== undefined && !parsed.data.name.trim()) {
     return c.json({ error: "表名不能为空" }, 400);
   }
 
-  // M3/S3 #5：改名收紧进事务（原 runWrite 非事务），同事务同步节点 name。
-  // icon / iconColor 不进 nav_nodes（实体图标走读取时解析），故只有改名才触发 nav 同步。
-  const t = await withWriteTx("table.update", async (tx) => {
-    const data = trimmedName === undefined ? parsed.data : { ...parsed.data, name: trimmedName };
-    if (trimmedName !== undefined) await assertTableNameFree(tx, baseId, trimmedName, tableId);
-    const updated = await tx.table.update({ where: { id: tableId }, data });
-    if (parsed.data.name !== undefined) await syncNavFromEntitiesTx(tx);
-    return updated;
+  // M3/S3 #5：改名收紧进事务（domain/tableService），同事务同步节点 name。
+  const t = await updateTable(tableId, baseId, {
+    name: parsed.data.name,
+    primaryFieldId: parsed.data.primaryFieldId,
+    icon: parsed.data.icon,
+    iconColor: parsed.data.iconColor,
   });
   return c.json({
     table: {
@@ -307,27 +186,8 @@ tables.delete("/:tableId", async (c) => {
   await baseIdOf(tableId);
   await requireTableManage(c, tableId);
 
-  const now = new Date();
-  // M3/S3 #6：原 withWriteBatch 数组事务无法承载 nav async 原语，收紧为 withWriteTx 回调；
-  // table 及视图节点整棵软删（视图实体置 order=-1 隐藏，views 表无 deletedAt 列）。
-  await withWriteTx("table.softDelete", async (tx) => {
-    await tx.table.update({ where: { id: tableId }, data: { deletedAt: now } });
-    // M5/S1：级联软删的活记录逐条登记 delete（先取 id，再更新）。
-    const liveRecords = await tx.record.findMany({
-      where: { tableId, deletedAt: null }, select: { id: true },
-    });
-    await tx.record.updateMany({ where: { tableId }, data: { deletedAt: now } });
-    await tx.field.updateMany({ where: { tableId }, data: { deletedAt: now } });
-    await tx.view.updateMany({ where: { tableId }, data: { order: -1 } });
-    await softDeleteSubtreeTx(tx, nodeId("table", tableId));
-    if (liveRecords.length > 0) {
-      const softVersion = BigInt(now.getTime());
-      await enqueueChangeEventsTx(tx, liveRecords.map((r) => ({
-        entityType: "record" as const, entityId: r.id, op: "delete" as const, version: softVersion,
-      })));
-    }
-  });
-  invalidateOrdinalCache(tableId);
+  // M3/S3 #6：删表收紧进事务（domain/tableService）；table 及视图节点整棵软删。
+  await softDeleteTable(tableId);
   return c.json({ ok: true });
 });
 
