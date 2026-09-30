@@ -162,16 +162,21 @@ describe("reconcile 对账", () => {
     expect(unknown.length).toBe(1); // superuser 不可投影（A 类提示但 apply 不造）
 
     const fix = await applyAuthzReconcileFixes(tx);
-    expect(fix.created).toBe(1);
+    // created=3：1 条 legacy A1（u_disabled）+ 2 条 S 段 admin 隐含投影（本模拟库零 scope 行，
+    // S 段为 role_admin 在活 base/kb 节点补隐含策略；真升级由迁移 20260921020000 先补 scope 行）。
+    expect(fix.created).toBe(3);
     const report2 = await computeAuthzReconcile(tx);
     // A1_UNMAPPABLE_ROLE 是 A 类提示：apply 无法消（旧行档位非法），属人工数据，单独断言其存在而非要求全 A=0
     expect(report2.A.filter((d) => d.code !== "A1_UNMAPPABLE_ROLE")).toHaveLength(0);
     expect(report2.B).toHaveLength(0);
     expect(report2.C).toHaveLength(0);
+    expect(report2.S).toHaveLength(0);
 
-    // 行数 = 活 members(6，含 disabled，剔除软删/未知) + kb_members(4) + acls(4) = 14
+    // legacy 行数 = 活 members(6，含 disabled，剔除软删/未知) + kb_members(4) + acls(4) = 14
     expect(report2.counts.expected).toBe(14);
     expect(report2.counts.legacyPolicies).toBe(14);
+    // policies 总数 = 14 legacy + 2 admin 隐含节点投影。
+    expect(report2.counts.policies).toBe(16);
   });
 
   it("连跑 apply 第二次 no changes（幂等）", async () => {

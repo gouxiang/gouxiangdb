@@ -8,6 +8,7 @@ import {
   RESOURCE_ACTIONS,
   normalizeActions,
   parseActionString,
+  parseRowConditions,
 } from "@gx/shared-types";
 import {
   isKnownLegacyRole,
@@ -18,6 +19,11 @@ import {
   type LegacyRow,
 } from "./backfill.js";
 import type { AuthzClient } from "./types.js";
+import { computeScopeProjectionReconcile } from "./scopeProjectionReconcile.js";
+import { rebuildScopePoliciesTx } from "./scopeDoubleWrite.js";
+
+/** 运维 reconcile 修复的固定 operator（幂等投影维护，不写审计）。 */
+const SCOPE_RECONCILE_OPERATOR = "system-reconcile";
 
 export interface ReconcileDiff {
   code: string;
@@ -29,8 +35,9 @@ export interface ReconcileReport {
   A: ReconcileDiff[];
   B: ReconcileDiff[];
   C: ReconcileDiff[];
+  S: ReconcileDiff[];
   counts: { expected: number; policies: number; legacyPolicies: number };
-  summary: { A: number; B: number; C: number };
+  summary: { A: number; B: number; C: number; S: number };
 }
 
 export interface ReconcileFixResult {
@@ -161,9 +168,17 @@ export async function computeAuthzReconcile(client: AuthzClient): Promise<Reconc
     if (bad.length || rawTokens.length !== normalizeActions(rawTokens).length) {
       C.push({ code: "C1_BAD_ACTION", message: `actions 含非法/非规范动作词: ${p.actions}`, ref: p.id });
     }
-    // C5 非空 conditions（M4 无写入路径）
+    // C5 行级条件：合法 RowConditions 形状放行；坏 JSON/非法结构才报（P1/S8a 开放）。
     if (p.conditions !== null && p.conditions !== undefined && p.conditions !== "") {
-      C.push({ code: "C5_CONDITIONS_PRESENT", message: "conditions 非空（M4 不支持行级条件写入）", ref: p.id });
+      try {
+        parseRowConditions(p.conditions);
+      } catch (err) {
+        C.push({
+          code: "C5_CONDITIONS_INVALID",
+          message: `conditions 不是合法行级条件：${(err as Error).message}`,
+          ref: p.id,
+        });
+      }
     }
     // C3 dept/role 悬挂
     if (p.subjectType === "dept" && !liveDepts.has(p.subjectId)) {
@@ -214,10 +229,13 @@ export async function computeAuthzReconcile(client: AuthzClient): Promise<Reconc
     }
   }
 
+  // P1/S8a：scope:role 投影对账（只读 S 段），期望源与 PUT/seed 主路径同源。
+  const S = await computeScopeProjectionReconcile(client);
+
   return {
-    A, B, C,
+    A, B, C, S,
     counts: { expected: expected.length, policies: policies.length, legacyPolicies: policies.filter((p) => p.reason && LEGACY_REASON_SET.has(p.reason)).length },
-    summary: { A: A.length, B: B.length, C: C.length },
+    summary: { A: A.length, B: B.length, C: C.length, S: S.length },
   };
 }
 
@@ -255,6 +273,16 @@ export async function applyAuthzReconcileFixes(client: AuthzClient): Promise<Rec
   for (const id of dangling) {
     const r = await client.authPolicy.deleteMany({ where: { id, reason: { in: [...LEGACY_REASON_SET] } } });
     if (r.count > 0) deleted++;
+  }
+
+  // S 段：ref 形如 roleId|nodeId，按角色去重后整角色重建（内部只删 scope:role）。
+  const scopeRoleIds = new Set(before.S.map((d) => d.ref?.split("|")[0]));
+  for (const roleId of scopeRoleIds) {
+    if (!roleId) continue;
+    const savedRows = await client.roleLibraryScope.findMany({ where: { roleId } });
+    const res = await rebuildScopePoliciesTx(client, roleId, savedRows, SCOPE_RECONCILE_OPERATOR);
+    created += res.upserted;
+    deleted += res.deleted;
   }
 
   return { created, updated, deleted, skipped };

@@ -44,7 +44,7 @@ function toProjectionInput(row: SavedScopeRow): ScopeProjectionInput {
 }
 
 /** role_admin：覆盖全部活库（含未提交库），避免其隐含只读策略被当孤儿删除。 */
-async function rebuildAdmin(
+async function expectedAdmin(
   client: AuthzClient,
   savedRows: readonly SavedScopeRow[],
 ): Promise<ProjectedPolicy[]> {
@@ -63,7 +63,7 @@ async function rebuildAdmin(
 }
 
 /** 普通角色：逐 base 取形状投影，kb 行用空形状；被删 scope 行对应投影随之精确删除。 */
-async function rebuildRole(
+async function expectedRole(
   client: AuthzClient,
   savedRows: readonly SavedScopeRow[],
 ): Promise<ProjectedPolicy[]> {
@@ -80,6 +80,25 @@ async function rebuildRole(
 }
 
 /**
+ * 计算某角色【当前应有】的 scope:role 投影集（只读，不落库）。
+ * savedRows 缺省时自行查该角色全部活 scope 行（reconcile 只读路径）；
+ * PUT 主路径应传写后行集以复用同事务快照、避免二次查库。
+ * role_owner 只走硬短路、不投影 -> 空数组。
+ */
+export async function expectedScopePoliciesForRole(
+  client: AuthzClient,
+  roleId: string,
+  savedRows?: readonly SavedScopeRow[],
+): Promise<ProjectedPolicy[]> {
+  if (roleId === SUPER_ADMIN_ROLE_ID) return [];
+  const rows = savedRows
+    ?? await client.roleLibraryScope.findMany({ where: { roleId } });
+  return roleId === ADMIN_ROLE_ID
+    ? expectedAdmin(client, rows)
+    : expectedRole(client, rows);
+}
+
+/**
  * 写后按该角色完整 scope 行集重建投影。role_owner 跳过（只走硬短路，不生成策略）。
  */
 export async function rebuildScopePoliciesTx(
@@ -89,10 +108,7 @@ export async function rebuildScopePoliciesTx(
   operatorUserId: string,
 ): Promise<{ upserted: number; deleted: number }> {
   if (roleId === SUPER_ADMIN_ROLE_ID) return { upserted: 0, deleted: 0 };
-  const projected =
-    roleId === ADMIN_ROLE_ID
-      ? await rebuildAdmin(client, savedRows)
-      : await rebuildRole(client, savedRows);
+  const projected = await expectedScopePoliciesForRole(client, roleId, savedRows);
   return replaceScopePoliciesTx(client, roleId, projected, operatorUserId);
 }
 

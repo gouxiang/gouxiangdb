@@ -55,7 +55,7 @@ async function main(): Promise<number> {
         printHuman(after, "修复后");
         console.log(`行数：expected=${after.counts.expected} policies=${after.counts.policies} legacy=${after.counts.legacyPolicies}`);
       }
-      const remaining = after.summary.A + after.summary.B + after.summary.C;
+      const remaining = after.summary.A + after.summary.B + after.summary.C + after.summary.S;
       if (remaining > 0) {
         console.error(`仍有 ${remaining} 项差异（A3/C 类不自动修，按 runbook 人工处理）`);
         return 1;
@@ -71,15 +71,15 @@ async function main(): Promise<number> {
       printHuman(before, "对账");
       console.log(`行数：expected=${before.counts.expected} policies=${before.counts.policies} legacy=${before.counts.legacyPolicies}`);
     }
-    return before.summary.A + before.summary.B + before.summary.C === 0 ? 0 : 1;
+    return before.summary.A + before.summary.B + before.summary.C + before.summary.S === 0 ? 0 : 1;
   } finally {
     await prisma.$disconnect();
   }
 }
 
 function printHuman(r: ReconcileReport, title: string): void {
-  console.log(`== ${title}: A=${r.summary.A} B=${r.summary.B} C=${r.summary.C}`);
-  for (const [tag, group] of [["A", r.A], ["B", r.B], ["C", r.C]] as const) {
+  console.log(`== ${title}: A=${r.summary.A} B=${r.summary.B} C=${r.summary.C} S=${r.summary.S}`);
+  for (const [tag, group] of [["A", r.A], ["B", r.B], ["C", r.C], ["S", r.S]] as const) {
     for (const d of group) console.log(`  [${tag}/${d.code}] ${d.message}${d.ref ? ` (${d.ref})` : ""}`);
   }
 }
