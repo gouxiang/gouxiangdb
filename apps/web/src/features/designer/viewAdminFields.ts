@@ -52,6 +52,36 @@ export function moveField(order: readonly string[], id: string, dir: MoveDir): s
 }
 
 /**
+ * 拖拽排序：把 from 位置的字段移动到 to 位置（HTML5 拖拽落点，按位置移动）。
+ *  - from/to 越界，或 from===to → 原样返回（新数组）；
+ *  - 不修改原数组。调用方保证 from 行与 to 行都在当前列表中。
+ */
+export function reorderFields(
+  list: readonly string[],
+  from: number,
+  to: number,
+): string[] {
+  if (from === to) return [...list];
+  if (from < 0 || from >= list.length || to < 0 || to >= list.length) return [...list];
+  const out = [...list];
+  const [it] = out.splice(from, 1);
+  out.splice(to, 0, it);
+  return out;
+}
+
+/**
+ * 详情可见性的「生效范围」：显式数组非空时以它为准；为空（后端语义=全部字段）时
+ * 回落到全量 id。隐式全选态下移除字段，要提交「全量去掉该 id」的显式数组，
+ * 不能直接 filter 空数组（那样仍是空=全部，移除被静默吞掉）。
+ */
+export function detailBaseIds(
+  explicit: readonly string[],
+  allIds: readonly string[],
+): readonly string[] {
+  return explicit.length > 0 ? explicit : allIds;
+}
+
+/**
  * 「显示字段列表」拖拽/移动后回写完整列序：
  * 可见列按 visibleNext 的新顺序排前，隐藏列按其在旧 order 中的相对顺序追加到末尾。
  * 隐藏列不展示，其列位置无视觉影响；重新取消隐藏后它会出现在末尾，再由用户自行调整。
