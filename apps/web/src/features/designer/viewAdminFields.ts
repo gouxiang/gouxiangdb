@@ -50,3 +50,25 @@ export function moveField(order: readonly string[], id: string, dir: MoveDir): s
   out.splice(j, 0, it);
   return out;
 }
+
+/**
+ * 「显示字段列表」拖拽/移动后回写完整列序：
+ * 可见列按 visibleNext 的新顺序排前，隐藏列按其在旧 order 中的相对顺序追加到末尾。
+ * 隐藏列不展示，其列位置无视觉影响；重新取消隐藏后它会出现在末尾，再由用户自行调整。
+ */
+export function applyVisibleOrder(
+  order: readonly string[],
+  hidden: readonly string[],
+  visibleNext: readonly string[],
+): string[] {
+  const hiddenKept = order.filter((id) => hidden.includes(id) && !visibleNext.includes(id));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of [...visibleNext, ...hiddenKept]) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}

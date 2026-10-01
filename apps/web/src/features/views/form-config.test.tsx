@@ -137,10 +137,13 @@ describe("3b：配置区真的写 view.config 三键，且入口真的挂上了"
     }
   });
 
-  it("ViewSettingsPanel：表单视图才挂表单配置区（其它视图不受影响）", () => {
-    const src = read("../designer/ViewSettingsPanel.tsx");
-    expect(src).toContain('view.type === "form"');
-    expect(src).toContain("FormConfigSection");
+  it("ViewSettingsWide：表单配置只在 form 类型的菜单里出现（其它视图不挂）", () => {
+    // 菜单定义：仅 form 类型包含 form 项；内容块再按 tab==="form" 渲染 FormConfigSection。
+    const tabsSrc = read("../designer/viewSettingsTabs.ts");
+    const wideSrc = read("../designer/ViewSettingsWide.tsx");
+    expect(tabsSrc).toContain('key: "form"');
+    expect(wideSrc).toContain('tab === "form"');
+    expect(wideSrc).toContain("FormConfigSection");
   });
 
   it("TopBar 的视图设置不再是占位文案，已接入真实面板", () => {

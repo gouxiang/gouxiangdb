@@ -1,4 +1,4 @@
-// ViewSettingsPanel「重置为默认视图」行为测试（#561）。
+// ViewDangerActions「重置为默认视图」行为测试（#561，宽布局重构后迁移）。
 //
 // 锁三件事：
 //   ① view.userPrefs 非 null（用户已自定义）→ 按钮可点，点击调 resetViewPrefs 删除自己的 prefs；
@@ -6,7 +6,7 @@
 //   ③ 重置成功 toast「已恢复视图默认设置」。
 //
 // node 环境、无 jsdom：用受控 Button 替身捕获每个按钮的 props（disabled/title/onClick/children），
-// SSR 渲染面板后取出「重置为默认视图」按钮，在外部直接调用其 onClick，再断言替身 mutation。
+// SSR 渲染底部操作区后取出「重置为默认视图」按钮，在外部直接调用其 onClick，再断言替身 mutation。
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup as render } from "react-dom/server";
@@ -26,10 +26,9 @@ interface FakeButtonProps {
 let capturedButtons: FakeButtonProps[] = [];
 
 vi.mock("../../../api/hooks", () => ({
-  useViews: () => ({ data: [] }),
+  useViews: () => ({ data: [{ id: "v1" }, { id: "v2" }] }),
   useGXMutations: () => ({
     resetViewPrefs: { mutateAsync: resetPrefsSpy },
-    updateView: { mutateAsync: vi.fn(async () => ({})) },
     duplicateView: { mutateAsync: vi.fn(async () => ({})) },
     deleteView: { mutateAsync: vi.fn(async () => ({})) },
   }),
@@ -40,24 +39,16 @@ vi.mock("../../../components/ui", () => ({
     capturedButtons.push(p);
     return <span data-mock="button">{p.children}</span>;
   },
-  Input: () => <span data-mock="input" />,
-  SegmentedControl: () => <span data-mock="segmented" />,
 }));
 vi.mock("../../../components/feedback", () => ({
   confirmIrreversible: vi.fn(async () => false),
-}));
-vi.mock("../../views/FormConfigSection", () => ({
-  default: () => <span data-mock="form-section" />,
-}));
-vi.mock("../ViewAdminConfigSection", () => ({
-  default: () => <span data-mock="admin-section" />,
 }));
 vi.mock("react-router-dom", () => ({
   useParams: () => ({ baseId: "b1" }),
   useNavigate: () => vi.fn(),
 }));
 
-import ViewSettingsPanel from "../ViewSettingsPanel";
+import ViewDangerActions from "../sections/ViewDangerActions";
 
 const TABLE_ID = "t1";
 
@@ -95,15 +86,14 @@ const PERM_MEMBER: PermissionSet = {
   canView: true,
 };
 
-function renderPanel(userPrefs: ViewUserPrefs | null): FakeButtonProps {
+function renderActions(userPrefs: ViewUserPrefs | null): FakeButtonProps {
   capturedButtons = [];
   render(
-    <ViewSettingsPanel
+    <ViewDangerActions
       view={makeView(userPrefs)}
       tableId={TABLE_ID}
       permissions={PERM_MEMBER}
       onClose={() => undefined}
-      embedded
     />,
   );
   const btn = capturedButtons.find((b) => b.children === "重置为默认视图");
@@ -119,20 +109,20 @@ beforeEach(() => {
 
 describe("① 用户已自定义（userPrefs 非 null）：可重置", () => {
   it("按钮不被禁用、无禁用 title", () => {
-    const btn = renderPanel(PREFS);
+    const btn = renderActions(PREFS);
     expect(btn.disabled).toBe(false);
     expect(btn.title).toBeUndefined();
   });
 
   it("点击调 resetViewPrefs（删除自己的 prefs），不带结构权也能调", async () => {
-    const btn = renderPanel(PREFS);
+    const btn = renderActions(PREFS);
     await btn.onClick?.();
     expect(resetPrefsSpy).toHaveBeenCalledTimes(1);
     expect(resetPrefsSpy).toHaveBeenCalledWith({ viewId: "v1", tableId: TABLE_ID });
   });
 
   it("重置成功 toast 提示", async () => {
-    const btn = renderPanel(PREFS);
+    const btn = renderActions(PREFS);
     await btn.onClick?.();
     expect(toastSpy).toHaveBeenCalledWith("已恢复视图默认设置", "success");
   });
@@ -140,17 +130,17 @@ describe("① 用户已自定义（userPrefs 非 null）：可重置", () => {
 
 describe("② 当前为默认视图（userPrefs === null）：按钮禁用", () => {
   it("disabled 为 true", () => {
-    const btn = renderPanel(null);
+    const btn = renderActions(null);
     expect(btn.disabled).toBe(true);
   });
 
   it("带 title「当前为默认视图」", () => {
-    const btn = renderPanel(null);
+    const btn = renderActions(null);
     expect(btn.title).toBe("当前为默认视图");
   });
 
   it("点击不触发 resetViewPrefs（handler 提前返回）", async () => {
-    const btn = renderPanel(null);
+    const btn = renderActions(null);
     await btn.onClick?.();
     expect(resetPrefsSpy).not.toHaveBeenCalled();
   });

@@ -609,6 +609,7 @@ export function Modal({
   width = 480,
   ariaLabel,
   zClass = "gx-z-modal",
+  flush = false,
 }: {
   open: boolean;
   title?: ReactNode;
@@ -627,6 +628,11 @@ export function Modal({
    * "gx-z-modal-nested"(860)；裸数字一律禁止，必须走 layout.ts 的 z 令牌。
    */
   zClass?: string;
+  /**
+   * true 时内容区去掉默认 padding 与外层滚动，改由 children 自行管理高度与内部滚动。
+   * 用于宽布局（如视图设置三栏：左右栏各自滚动）。
+   */
+  flush?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   // useId 稳定跨渲染；去掉 React 自带的冒号，避免 querySelector / CSS 选择器踩坑
@@ -681,7 +687,10 @@ export function Modal({
         aria-label={title ? undefined : ariaLabel}
         // tabIndex=-1 只为「打开时移入焦点」，不进 Tab 序列；focus:outline-none 免得整块面板描边
         tabIndex={-1}
-        className="relative flex max-h-[85vh] w-full flex-col overflow-hidden rounded-gx-xl bg-gx-surface shadow-gx-xl focus:outline-none"
+        className={clsx(
+          "relative flex w-full flex-col overflow-hidden rounded-gx-xl bg-gx-surface shadow-gx-xl focus:outline-none",
+          flush ? "h-[80vh]" : "max-h-[85vh]",
+        )}
         style={{ maxWidth: width }}
       >
         {title && (
@@ -692,7 +701,12 @@ export function Modal({
             <IconButton icon="close" label="关闭" onClick={onClose} />
           </div>
         )}
-        <div className="flex-1 overflow-y-auto px-4 py-3">{children}</div>
+        {flush ? (
+          <div className="min-h-0 flex-1">{children}</div>
+        ) : (
+          <div className="flex-1 overflow-y-auto px-4 py-3">{children}
+        </div>
+        )}
         {footer && (
           <div className="flex items-center justify-end gap-2 border-t border-gx-separator px-4 py-3">
             {footer}
