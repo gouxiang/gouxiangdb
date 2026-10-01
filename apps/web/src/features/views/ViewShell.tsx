@@ -30,6 +30,7 @@ import { ViewSwitcher } from "../grid/ViewSwitcher";
 import { GridToolbar } from "../grid/GridToolbar";
 import { TableViewIoDialogs } from "../grid/GridView";
 import { TableShareModal } from "../sharing/TableShareModal";
+import { ViewSettingsModal } from "../shell/ViewSettingsModal";
 
 export interface ViewShellArgs {
   /** 视图配置（外壳持有并写回服务端；第二行的搜索框写 config.search） */
@@ -64,6 +65,8 @@ export function ViewShell({
   const [exportOpen, setExportOpen] = useState(false);
   // 分享弹窗由外壳持有：六类视图的「更多」菜单都指向同一份，不需要每类视图各挂一个。
   const [shareOpen, setShareOpen] = useState(false);
+  // 视图设置弹窗由外壳持有：六类视图工具栏的「视图设置」都指向同一份。
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const currentTable = (tablesData ?? []).find((t) => t.id === tableId) ?? null;
 
@@ -174,6 +177,7 @@ export function ViewShell({
         onCopyView={onCopyView}
         onClearTable={onClearTable}
         onShare={() => setShareOpen(true)}
+        onViewSettings={() => setSettingsOpen(true)}
       />
 
       {/* 视图内容：第三行起（网格自己再渲染一行设置项，其余视图直接进内容区） */}
@@ -200,6 +204,15 @@ export function ViewShell({
         viewId={viewId}
         open={shareOpen}
         onClose={() => setShareOpen(false)}
+      />
+
+      {/* 视图设置：把详细配置面板接进活跃界面（此前只在旧壳 TopBar，活跃界面无入口）。 */}
+      <ViewSettingsModal
+        open={settingsOpen}
+        tableId={tableId}
+        viewId={viewId}
+        permissions={permissions}
+        onClose={() => setSettingsOpen(false)}
       />
     </div>
   );

@@ -56,6 +56,9 @@ vi.mock("../../grid/GridView", () => ({
 vi.mock("../../sharing/TableShareModal", () => ({
   TableShareModal: () => <span data-mock="share-modal" />,
 }));
+vi.mock("../../shell/ViewSettingsModal", () => ({
+  ViewSettingsModal: () => <span data-mock="view-settings-modal" />,
+}));
 
 import { ViewShell } from "../ViewShell";
 

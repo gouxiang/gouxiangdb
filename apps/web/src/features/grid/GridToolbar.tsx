@@ -36,6 +36,11 @@ export interface GridToolbarProps {
   onCopyView: () => void;
   onClearTable: () => void;
   /**
+   * 打开「视图设置」（重命名 / 锁定模式 / 字段显隐与顺序 / 封面 / 详情字段 / 强制筛选 /
+   * 复制 / 删除）。六类视图共用；不做权限门控——面板内部对无结构管理权者逐项置灰。
+   */
+  onViewSettings?: () => void;
+  /**
    * 分享：打开数据表分享弹窗（外壳持有弹窗，六类视图共用同一份）。
    * 可选——老调用点（单测里的裸工具栏）不传就不渲染这一项。
    */
@@ -54,6 +59,7 @@ export function GridToolbar({
   onCopyView,
   onClearTable,
   onShare,
+  onViewSettings,
 }: GridToolbarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   // R-I-03：搜索输入防抖 300ms（此前是各列表各写一份 setTimeout，口径统一到 hook）
@@ -114,6 +120,13 @@ export function GridToolbar({
           <ToolButton icon="upload" label="导入" onClick={onImport} />
         )}
         <ToolButton icon="download" label="导出" onClick={onExport} />
+
+        {/* 视图设置：详细配置（锁定模式 / 字段显隐与顺序 / 画廊封面 / 卡片字段 / 详情字段 /
+            强制筛选 / 复制 / 删除）的统一入口。之前只接在不被渲染的旧壳顶栏，活跃界面无入口。
+            不做权限门控，面板内部对无结构管理权者逐项置灰；调用方未传（单测裸工具栏）则不渲染。 */}
+        {onViewSettings && (
+          <ToolButton icon="settings" label="视图设置" onClick={onViewSettings} />
+        )}
 
         {/* 溢出菜单：表级操作（复制视图 / 清空表）。被收起的网格设置项不在这里——
             它们归第三行的溢出菜单，六类视图里只有网格有第三行。 */}
