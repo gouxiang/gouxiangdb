@@ -5,10 +5,15 @@
 // 都没打包"是最危险的失效——它不会报错、只在真要恢复那一刻才暴露。脚本本身不在 src 下
 // （fpk 里随包分发），只能靠子进程真跑来验。
 //
-// 覆盖三条：
+// 覆盖四条：
 //   1. 口径一致：manifest.uploads.root 就是脚本实际打包的那个目录（与 config.ts 同口径）；
 //   2. 漏备告警：目录缺失/为空而库里有用着的附件时，必须响（而不是静默返回 null）；
-//   3. 保留裁剪：旧 db 被裁时，同批 uploads tar 一并删除（否则磁盘被 tar 静默吃满）。
+//   3. 保留裁剪：旧 db 被裁时，同批 uploads tar 一并删除（否则磁盘被 tar 静默吃满）；
+//   4. 周备份带文件：--weekly 时 db 与 uploads tar 必须成对进 weekly/（只存 db 的周备份
+//      恢复出来附件行都在、文件全丢，比没有这份备份更坑）。
+//
+// 注：第 4 条靠 --weekly 标志位覆盖。周备份分支原本只在周日触发，一年跑 52 天，
+// 不注入就无法在 CI 里证伪——这是"改了生产码却拿不到证据"的典型口子，必须堵。
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
@@ -51,8 +56,8 @@ interface RunResult {
   stderr: string;
 }
 
-function runBackup(env: Record<string, string>): RunResult {
-  const r = spawnSync(process.execPath, [script], {
+function runBackup(env: Record<string, string>, args: string[] = []): RunResult {
+  const r = spawnSync(process.execPath, [script, ...args], {
     cwd: apiRoot,
     // 干净环境：不带本机 .env / DATABASE_URL 等，避免测试之间互相污染。
     env: { PATH: process.env.PATH ?? "", NODE_ENV: "production", ...env },
@@ -156,5 +161,38 @@ describe("备份覆盖 uploads", () => {
       // 同一批的 tar 必须跟着走，否则 db 没了、tar 还在 → 磁盘只涨不落。
       expect(fs.existsSync(path.join(dailyDir, `uploads-${s}.tar`))).toBe(false);
     }
+  });
+
+  it("--weekly：周备份 db 与 uploads tar 成对落盘（恢复出来附件文件也在）", () => {
+    const dir = fs.mkdtempSync(path.join(tmpRoot, "case4-"));
+    const dbFile = path.join(dir, "app.db");
+    const uploadRoot = path.join(dir, "uploads");
+    const backupDir = path.join(dir, "backups");
+    fs.mkdirSync(uploadRoot, { recursive: true });
+    fs.writeFileSync(path.join(uploadRoot, "a.txt"), "hello");
+    makeSourceDb(dbFile);
+
+    const r = runBackup(
+      {
+        DATABASE_URL: `file:${dbFile}`,
+        UPLOAD_ROOT: uploadRoot,
+        BACKUP_DIR: backupDir,
+      },
+      ["--weekly"],
+    );
+    expect(r.code, r.stderr).toBe(0);
+
+    const stamp = todayStamp();
+    const weeklyDir = path.join(backupDir, "weekly");
+    const weeklyDb = path.join(weeklyDir, `app-${stamp}.db`);
+    const weeklyTar = path.join(weeklyDir, `uploads-${stamp}.tar`);
+    expect(fs.existsSync(weeklyDb)).toBe(true);
+    // 这条断言就是本次修复的靶心：此前周备份只 copy db，附件外置后恢复即"有行无文件"。
+    expect(fs.existsSync(weeklyTar)).toBe(true);
+    // 与 daily 同源同字节（周备份是 daily 的另存，不是二次打包）。
+    expect(fs.statSync(weeklyTar).size).toBe(
+      fs.statSync(path.join(backupDir, "daily", `uploads-${stamp}.tar`)).size,
+    );
+    expect(r.stdout).toContain("weekly 含 uploads");
   });
 });

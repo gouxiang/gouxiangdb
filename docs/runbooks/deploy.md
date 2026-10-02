@@ -240,6 +240,45 @@ GX_AUTHZ_ENGINE=shadow
 [authz-engine-flip-on.md](authz-engine-flip-on.md)，规模门与翻转演练证据见
 `docs/baseline/2026-09-16-m4-gate.md`。M4 出口姿态为代码默认 off、生产建议 shadow。
 
+## 6.9 Prisma Client 生成（含新增迁移时，源码同步通道必须先生成再重启）
+
+**结论先行**：三条正规通道（fnOS `install_callback`/`upgrade_callback`、`deploy.sh` 解包、Docker
+`docker-entrypoint.sh`）都**不需要**在目标机上补 `prisma generate`——Prisma Client 是**打包时**就生成好
+随包分发的（`deploy/bin/package-release.mjs`、`deploy/fnos/build-fpk.mjs`、`deploy/docker/Dockerfile`
+各自的 generate 步）。它们只跑 `migrate deploy` 是安全的，不要凭"多跑一次更保险"往里加。
+
+**唯一会漏的是 rsync 源码同步通道**：把工作区源码直接同步到目标机、在目标机 `install` + `build`
+（预览机 167 常用这条）。这条通道不会自动 generate，于是会出现这种组合：
+
+- DB 侧已经 `migrate deploy` 到最新（新表建好了）；
+- 但 `node_modules/.prisma/client` 还是**旧 schema 生成的**，里面没有新 model；
+- 运行期 `prisma.<新表>.create is not a function` / `Unknown arg`，所有写该表的端点 500。
+
+这正是本项目踩过的坑（新增 `attachments`、`record_changes` 时）。因此 rsync 通道的**固定顺序**是：
+
+```bash
+cd /srv/gouxiangdb/current/api          # 或预览机的实际目录
+node node_modules/prisma/build/index.js migrate deploy --schema=prisma/schema.prisma
+# ↓ 新增迁移时必须补这一步，且必须在 restart 之前
+node node_modules/prisma/build/index.js generate --schema=prisma/schema.prisma
+systemctl restart gouxiangdb
+```
+
+判定与自检：
+
+- 现象：日志出现 `prisma.xxx.findMany is not a function`、`Unknown argument`、或对某新表的写入
+  一律 500 而库里表确实存在 → 即"库新、client 旧"，补 generate 后重启即恢复。
+- 主动校验（列出 client 里实际可用的 model 委托，新表不在列表里就是 client 陈旧）：
+
+```bash
+node -e "const {PrismaClient}=require('@prisma/client');const p=new PrismaClient();\
+console.log(Object.keys(p).filter(k=>!k.startsWith('_')&&!k.startsWith('\$')).join(' '))"
+# 期望包含本次新增的表（如 attachment / recordChange）；缺失即 client 陈旧，需 generate
+```
+
+纪律：凡发布内容含 `apps/api/prisma/migrations/` 下的新增目录，该通道**无条件**多跑一次
+generate；生成是幂等的，代价只有几秒，漏跑的代价是整条新功能 500。
+
 ## 7. 证书两条路径
 
 - **公网正式域名（推荐）**：DNS 已指向本机、80/443 可出网。保留 Caddyfile 站点块即可，

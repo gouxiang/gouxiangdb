@@ -2,7 +2,9 @@
 // apps/api/scripts/backup/online-backup.mjs
 // 在线备份入口：better-sqlite3 .backup() 一致性快照 → integrity/迁移/计数校验 →
 // uploads tar → sha256 + manifest → daily 7 / weekly 4 保留 →（可选）age X25519 异地加密。
-// 用法：pnpm --filter @gx/api backup:online
+// 用法：pnpm --filter @gx/api backup:online [--weekly]
+//   --weekly：强制另存一份周快照（不受"必须周日"限制）。给运维手工触发用，
+//     同时也是这条分支唯一的自动化覆盖入口——否则它一年只跑 52 天，改了没证据。
 // 环境：DATABASE_URL、BACKUP_DIR（默认 apps/api/.db-backups）、UPLOAD_ROOT、
 //   BACKUP_ENCRYPT_OFFSITE(true 时 AGE_RECIPIENT 必填)、AGE_BIN(默认 age)、GX_OFFSITE_TARGET。
 // 退出码：0 本地备份成功；2 快照/校验失败；3 异地加密配置或执行失败。
@@ -239,8 +241,8 @@ async function main() {
   };
   fs.writeFileSync(dbFile.replace(/\.db$/, ".manifest.json"), JSON.stringify(manifest, null, 2));
 
-  // 5) 周日另存 weekly（独立目录，保留 4 周）
-  if (now.getUTCDay() === 0) {
+  // 5) 周日（或 --weekly 强制）另存 weekly（独立目录，保留 4 周）
+  if (process.argv.includes("--weekly") || now.getUTCDay() === 0) {
     const weeklyDir = path.join(backupDir, "weekly");
     fs.mkdirSync(weeklyDir, { recursive: true });
     fs.cpSync(dbFile, path.join(weeklyDir, path.basename(dbFile)));
