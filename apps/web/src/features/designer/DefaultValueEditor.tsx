@@ -11,7 +11,7 @@ import type { FieldDTO, TableDTO, DefaultConfig, DefaultSourceKind, FieldType } 
 import {
   allowedDefaultSources,
   isFilterMatchSourceType,
-  isReferenceableType,
+  isDefaultValueSourceType,
   isTypeAssignable,
   isTypeComparable,
   fieldTypeGroup,
@@ -21,6 +21,7 @@ import {
 } from "@gx/shared-types";
 import { useFields } from "../../api/hooks";
 import { Input } from "../../components/ui";
+import { MemberDefaultValueSelect } from "../contacts/member-roster";
 import { DropdownSelect, DashedSetupButton, SoftActionButton } from "../../components/settings-controls";
 import { FilterRuleField } from "./FilterRuleModal";
 import FormulaEditorModal from "./FormulaEditorModal";
@@ -84,7 +85,9 @@ export function DefaultValueEditor({
   const lookup = value?.mode === "lookup" ? value : null;
   const sourceTableId = lookup?.sourceTableId ?? (subtableTargetTableId ?? "") ?? "";
   const sourceFieldsQ = useFields(sources.includes("lookup") && (value?.mode === "lookup") && sourceTableId ? sourceTableId : null);
-  const sourceFields = (sourceFieldsQ.data ?? []).filter((f) => isReferenceableType(f.type));
+  // 取值字段候选：这里用 isDefaultValueSourceType 而不是 isReferenceableType——后者为了
+  // 「关联显示字段 / 查阅子字段」的口径刻意排除了 member，而成员字段的默认值正该从成员字段抓。
+  const sourceFields = (sourceFieldsQ.data ?? []).filter((f) => isDefaultValueSourceType(f.type));
 
   // 子表格整表抓取：不选单值字段；需要数据源表↔实际目标表结构兼容
   const isSubtable = fieldType === "subtable";
@@ -258,6 +261,7 @@ export function DefaultValueEditor({
 /** static 模式的值输入：按字段类型给合适控件（布尔用勾选、数值用数字框、其余文本）；onChange 回传已转型的原始值 */
 function StaticValueInput({ fieldType, value, onChange }: { fieldType: FieldType; value: unknown; onChange: (v: unknown) => void }) {
   const NUMERIC = ["number", "currency", "percent", "duration", "rating"];
+  const str = value == null ? "" : String(value);
   if (fieldType === "checkbox") {
     const checked = value === true || value === "true";
     return (
@@ -273,7 +277,6 @@ function StaticValueInput({ fieldType, value, onChange }: { fieldType: FieldType
     );
   }
   if (NUMERIC.includes(fieldType)) {
-    const str = value == null ? "" : String(value);
     return (
       <Input
         type="number"
@@ -284,7 +287,24 @@ function StaticValueInput({ fieldType, value, onChange }: { fieldType: FieldType
       />
     );
   }
-  const str = value == null ? "" : String(value);
+  // 日期：原生日期控件的 value 格式就是 YYYY-MM-DD / YYYY-MM-DDThh:mm，
+  // 与后端 DATE_LIKE 口径（policy.ts）以及 defaultNow 注入的本地墙钟格式一致，无需再转换。
+  if (fieldType === "date" || fieldType === "datetime") {
+    const isDateTime = fieldType === "datetime";
+    return (
+      <Input
+        type={isDateTime ? "datetime-local" : "date"}
+        value={str}
+        onChange={(e) => onChange(e.target.value || null)}
+        placeholder={isDateTime ? "选择默认日期时间" : "选择默认日期"}
+        className="h-10"
+      />
+    );
+  }
+  // 成员：可选固定成员，也可选动态的「当前用户」（后者存 sentinel，由后端落库前替换）
+  if (fieldType === "member") {
+    return <MemberDefaultValueSelect value={value} onChange={(v) => onChange(v)} />;
+  }
   if (fieldType === "singleSelect") {
     return <Input value={str} onChange={(e) => onChange(e.target.value)} placeholder="预设选项名称（需与选项一致）" className="h-10" />;
   }

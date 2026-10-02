@@ -119,9 +119,9 @@ describe("3a：FormView 提示不再指向不存在的功能", () => {
     );
   };
 
-  it("自动生成的提示写明入口是顶栏「视图设置」，不再泛泛承诺「可在视图设置中调整」", () => {
+  it("自动生成的提示写明入口是视图「⋯」菜单里的「视图设置」，不再泛泛承诺「可在视图设置中调整」", () => {
     const html = renderFormView();
-    expect(html).toContain("顶栏「视图设置」");
+    expect(html).toContain("点视图名称旁的「⋯」→「视图设置」");
     // 旧的误导文案整句不得再出现
     expect(html).not.toContain("可在视图设置中调整");
   });

@@ -77,7 +77,15 @@ export async function validateFieldConfig(tableId: string, cfg: FieldConfigView)
     if (dc["mode"] === "formula" && typeof dc["formula"] === "string" && dc["formula"].trim()) {
       const all = await fieldsOfTable(tableId);
       const byName = new Map(all.map((f) => [f.name, f.type]));
-      const err = validateFormulaOutput(dc["formula"] as string, cfg.type, (n) => byName.get(n));
+      // inferAST 按「分组」判定输出类型：datetime 的 type 是 datetime 但 group 是 date，
+      // 直接把 type 传进去会让日期/勾选字段的引用一律落到兜底 str，从而误报「类型不匹配」。
+      // 这里显式传 group（单一真源 fieldTypeGroup），成员判定再单独传原始 type。
+      const groupByName = (n: string): string | undefined => {
+        const t = byName.get(n);
+        return t === undefined ? undefined : fieldTypeGroup(t as FieldType);
+      };
+      const typeByName = (n: string): string | undefined => byName.get(n);
+      const err = validateFormulaOutput(dc["formula"] as string, cfg.type, groupByName, typeByName);
       if (err) return `默认内容公式校验失败：${err}`;
     }
     if (dc["mode"] === "lookup") {

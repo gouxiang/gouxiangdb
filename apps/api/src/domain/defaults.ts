@@ -19,7 +19,7 @@ import { evalFilter, type RawValue } from "./filter.js";
 import { formulaFieldRefs, type FormulaValue } from "./formula.js";
 import { evaluateRecordFormula } from "./hydrate.js";
 import type { DefaultConfig, NumberRule, NumberSegment } from "@gx/shared-types";
-import { isNumberRuleEmpty, isTypeAssignable } from "@gx/shared-types";
+import { CURRENT_USER_SENTINEL, isNumberRuleEmpty, isTypeAssignable } from "@gx/shared-types";
 import { syncRecordsTx } from "./fieldIndex/sync.js";
 
 // 父记录 fields 中记录「某子表格字段已播种的种子行」的保留 key（cuid 不会与之冲突）
@@ -306,7 +306,12 @@ export async function applyCreateDefaults(
     // static：仅当用户未显式给值
     if (cfg.mode === "static") {
       if (self[f.id] === undefined || self[f.id] === null || self[f.id] === "") {
-        if (cfg.value !== undefined && cfg.value !== null && cfg.value !== "") writes[f.id] = cfg.value;
+        if (cfg.value !== undefined && cfg.value !== null && cfg.value !== "") {
+          // 成员字段的动态「当前用户」：落库这一刻替换成实际操作人的 userId。
+          // sentinel 只在这里被消费，不会进入名册查询，故前端不会出现 id 前缀式乱码。
+          writes[f.id] =
+            f.type === "member" && cfg.value === CURRENT_USER_SENTINEL ? userId : cfg.value;
+        }
       }
       continue;
     }

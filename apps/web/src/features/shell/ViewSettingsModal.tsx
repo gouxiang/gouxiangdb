@@ -1,5 +1,6 @@
 // apps/web/src/features/shell/ViewSettingsModal.tsx
-// 顶栏「视图设置」Modal：宽布局三栏（预览 + 归类菜单 + 配置内容）。
+// 「视图设置」Modal：宽布局三栏（预览 + 归类菜单 + 配置内容）。
+// 入口在视图标签右侧「⋯」菜单里（重命名旁边），2026-10-02 前曾是工具栏上的独立按钮。
 //
 // 不用 Modal 默认 title 头：传 width=960、不传 title（给 ariaLabel 做可访问名称）、flush，
 // 关闭按钮由 ViewSettingsWide 在右上角自绘。本文件仍是 ViewShell 的挂载点，props 保持不变。

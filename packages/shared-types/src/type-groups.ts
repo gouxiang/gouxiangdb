@@ -79,6 +79,10 @@ export function fieldTypeGroup(t: FieldType): FieldTypeGroup {
  *  - formula 字段按其产出动态判定（由调用方用 formula 字段的实际配置判断，这里保守不允许直接作为源）。
  */
 export function isTypeAssignable(target: FieldType, source: FieldType): boolean {
+  // 成员字段存的就是 userId，两个成员字段之间互赋语义安全 —— 这是「成员字段的默认内容
+  // 从另一个成员字段抓取」的前提。此条独立成立，不受下面 container 组规则影响；
+  // container 组内的其它类型（tabs / formula 等）依旧全程不可互赋。
+  if (target === "member" && source === "member") return true;
   const tg = fieldTypeGroup(target);
   const sg = fieldTypeGroup(source);
   if (sg === "link" || sg === "attachment" || sg === "container") return false;

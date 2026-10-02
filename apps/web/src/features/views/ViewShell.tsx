@@ -65,8 +65,10 @@ export function ViewShell({
   const [exportOpen, setExportOpen] = useState(false);
   // 分享弹窗由外壳持有：六类视图的「更多」菜单都指向同一份，不需要每类视图各挂一个。
   const [shareOpen, setShareOpen] = useState(false);
-  // 视图设置弹窗由外壳持有：六类视图工具栏的「视图设置」都指向同一份。
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // 视图设置弹窗由外壳持有：入口在视图标签右侧「⋯」菜单里（重命名旁边）。
+  // ★ 存「目标视图 id」而不是布尔量：菜单挂在每个 tab 上，触发的可能是非当前视图，
+  //   直接用 setSettingsOpen(true) 会让「看板视图」的菜单打开「网格视图」的设置。
+  const [settingsViewId, setSettingsViewId] = useState<string | null>(null);
 
   const currentTable = (tablesData ?? []).find((t) => t.id === tableId) ?? null;
 
@@ -161,6 +163,7 @@ export function ViewShell({
               tableId={tableId}
               viewId={viewId}
               canManageSchema={permissions.canManageSchema}
+              onViewSettings={(id) => setSettingsViewId(id || viewId)}
             />
           </div>
         }
@@ -177,7 +180,6 @@ export function ViewShell({
         onCopyView={onCopyView}
         onClearTable={onClearTable}
         onShare={() => setShareOpen(true)}
-        onViewSettings={() => setSettingsOpen(true)}
       />
 
       {/* 视图内容：第三行起（网格自己再渲染一行设置项，其余视图直接进内容区） */}
@@ -206,13 +208,14 @@ export function ViewShell({
         onClose={() => setShareOpen(false)}
       />
 
-      {/* 视图设置：把详细配置面板接进活跃界面（此前只在旧壳 TopBar，活跃界面无入口）。 */}
+      {/* 视图设置：入口在视图标签右侧「⋯」菜单（重命名旁边）。此前是工具栏上的独立按钮，
+          放在外面不够直觉。目标视图由菜单回传，可能与当前视图不同。 */}
       <ViewSettingsModal
-        open={settingsOpen}
+        open={settingsViewId !== null}
         tableId={tableId}
-        viewId={viewId}
+        viewId={settingsViewId ?? viewId}
         permissions={permissions}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => setSettingsViewId(null)}
       />
     </div>
   );

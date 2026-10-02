@@ -4,8 +4,10 @@
 // 故此处只做「userId -> 展示信息」的前端映射，不新增请求、不动后端存储。
 import { useMemo, useState } from "react";
 import { clsx } from "clsx";
+import { CURRENT_USER_SENTINEL } from "@gx/shared-types";
 import { useOrgMembers } from "./contacts-hooks";
 import { Input, Popover, Spinner } from "../../components/ui";
+import { DropdownSelect } from "../../components/settings-controls";
 
 export interface RosterMember {
   id: string;
@@ -196,3 +198,47 @@ export function MemberSelect({
 }
 
 type CellValueLike = unknown;
+
+/**
+ * 成员字段「默认内容 → 自定义」专用的平铺选择器（与单元格里的 MemberSelect 不同：
+ * 设置面板是内嵌表单控件，不能自带 Popover）。
+ *
+ * 首项是动态的「当前用户」——建记录时落到实际操作人头上，特别适合「负责人默认是我」这类场景；
+ * 其后是在岗成员名册，选中的是 userId（与成员字段的存储口径一致）。
+ */
+export function MemberDefaultValueSelect({
+  value,
+  onChange,
+}: {
+  value: unknown;
+  onChange: (userId: string) => void;
+}) {
+  const { members, byId } = useMemberRoster();
+  const current = typeof value === "string" ? value : "";
+  const currentName = current === CURRENT_USER_SENTINEL
+    ? "当前用户"
+    : (byId.get(current)?.displayName ?? "");
+  const options = [
+    { value: CURRENT_USER_SENTINEL, label: "当前用户（谁新建记录就填谁）" },
+    ...members.map((m) => ({ value: m.id, label: m.displayName })),
+  ];
+  return (
+    <div className="flex flex-col gap-1">
+      <DropdownSelect
+        value={current}
+        options={options}
+        onChange={(v) => onChange(v)}
+        placeholder="选择默认成员"
+      />
+      {!current && (
+        <p className="text-gx-11 text-gx-text-hint">未选择时，新建记录的该成员字段留空。</p>
+      )}
+      {current === CURRENT_USER_SENTINEL && (
+        <p className="text-gx-11 text-gx-text-hint">每次新建记录时，自动填入创建者本人。</p>
+      )}
+      {current && current !== CURRENT_USER_SENTINEL && currentName && (
+        <p className="text-gx-11 text-gx-text-hint">固定填入：{currentName}</p>
+      )}
+    </div>
+  );
+}

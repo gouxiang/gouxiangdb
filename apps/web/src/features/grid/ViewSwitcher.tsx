@@ -34,6 +34,12 @@ export interface ViewSwitcherProps {
   tableId: string;
   viewId: string;
   canManageSchema: boolean;
+  /**
+   * 打开「视图设置」。参数是菜单所属那个视图的 id —— 它可能不是当前视图
+   * （「⋯」菜单挂在每个 tab 上），必须回传，否则点非当前视图的菜单会开错视图的设置。
+   * 未传则不渲染该菜单项（保持旧的单测裸用行为）。
+   */
+  onViewSettings?: (viewId: string) => void;
 }
 
 /** 删除某个视图后，选中态该往哪去（纯函数，便于单测直接覆盖三种情形）。 */
@@ -56,7 +62,7 @@ export function nextViewAfterDelete(
   return { kind: "goto", viewId: rest[at].id };
 }
 
-export function ViewSwitcher({ baseId, tableId, viewId, canManageSchema }: ViewSwitcherProps) {
+export function ViewSwitcher({ baseId, tableId, viewId, canManageSchema, onViewSettings }: ViewSwitcherProps) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data: views } = useViews(tableId);
@@ -206,7 +212,7 @@ export function ViewSwitcher({ baseId, tableId, viewId, canManageSchema }: ViewS
                   aria-label={`视图操作：${v.name}`}
                   aria-haspopup="menu"
                   aria-expanded={menuFor === v.id}
-                  title="重命名 / 删除视图"
+                  title="重命名 / 视图设置 / 删除视图"
                   onClick={(e) => {
                     if (Date.now() - closedAtRef.current < 250) return;
                     if (menuFor === v.id) {
@@ -226,6 +232,16 @@ export function ViewSwitcher({ baseId, tableId, viewId, canManageSchema }: ViewS
                 <Popover open onClose={closeMenu} align="left" width={168} fixed anchorEl={anchorEl}>
                   <Menu width={168}>
                     <MenuItem icon="edit" label="重命名视图" onClick={() => openRename(v.id)} />
+                    {onViewSettings && (
+                      <MenuItem
+                        icon="settings"
+                        label="视图设置"
+                        onClick={() => {
+                          onViewSettings(v.id);
+                          closeMenu();
+                        }}
+                      />
+                    )}
                     <MenuItem
                       icon="trash"
                       label="删除视图"

@@ -856,16 +856,72 @@ function inferAST(
 }
 
 /**
+ * 成员字段专用：判定公式 AST 是否「必然产出成员（userId）」。
+ *
+ * 背景：成员字段在 records.fields 里存的是 userId，前端渲染时按 userId 查通讯录名册取姓名。
+ * 若公式产出的是姓名文本（如 IF({状态}="完成", "张三", "李四")），落库的就是一段中文名，
+ * 名册里查不到 → 界面退化显示成一串 id 前缀 —— 这是脏数据，必须在保存字段配置时拦下。
+ *
+ * 判定规则（与 evalCall 的实现严格对齐，不猜参数排布）：
+ *   - {字段名} 且该字段 type === "member" → 产出成员
+ *   - IF(cond, A, B?)：所有结果分支（args 从 index 1 起）都产出成员
+ *     （IF(c, A) 缺 else 分支时 evalCall 返回 null，即留空，可接受）
+ *   - SWITCH(target, v1, r1, v2, r2[, default])：所有结果值（r1/r2/… 以及 default）都产出成员。
+ *     排布取自 evalCall:530-539 —— args[0] 是待匹配值，(args[i] 匹配值, args[i+1] 结果值) 成对
+ *     出现（i = 1,3,5…），参数总数为偶数时最后一个参数是 default 结果。
+ *   - BLANK()：产出 null，等同「不填」，可接受
+ *   - 其它（字符串字面量、CONCAT 等文本函数、数字、非成员字段引用、比较/算术运算…）→ 不产出成员
+ *
+ * @param isMemberField 判定某个字段名是否为成员字段（由调用方按字段 type === "member" 给出）
+ */
+export function infersMember(ast: FormulaAST, isMemberField: (name: string) => boolean): boolean {
+  switch (ast.k) {
+    case "fieldRef":
+      return isMemberField(ast.v);
+    case "call": {
+      const upper = ast.name.toUpperCase();
+      // 留空：evalCall 返回 FNULL，成员字段允许为空
+      if (upper === "BLANK") return true;
+      if (upper === "IF") {
+        // args[0] 是条件，其余全是结果分支；2 参形式缺 else 时求值为 null（留空）也算通过
+        return ast.args.slice(1).every((branch) => infersMember(branch, isMemberField));
+      }
+      if (upper === "SWITCH") {
+        const results: FormulaAST[] = [];
+        // 成对参数里的「结果值」在下标 2,4,6…
+        for (let i = 2; i < ast.args.length; i += 2) results.push(ast.args[i]!);
+        // 偶数个参数时最后一个是 default 结果值（evalCall:538）
+        if (ast.args.length % 2 === 0 && ast.args.length > 0) {
+          results.push(ast.args[ast.args.length - 1]!);
+        }
+        // 无任何结果分支时 evalCall 直接返回 FNULL（留空），不阻断
+        return results.every((r) => infersMember(r, isMemberField));
+      }
+      // 文本函数/聚合函数/时间函数等一律不产出成员
+      return false;
+    }
+    default:
+      // 字符串/数字/布尔字面量、字段引用的非成员字段、比较与算术运算
+      return false;
+  }
+}
+
+/**
  * 校验公式输出类型是否与宿主字段类型匹配。
  * @param src 公式文本
  * @param hostFieldType 宿主字段类型（formula 字段本身，或配置了 formula 默认内容的字段）
- * @param fieldTypeByName 按字段名查字段类型（公式用 {字段名} 引用）
+ * @param fieldGroupByName 按字段名查字段【分组】（inferAST 按 group 判定，见 type-groups.ts
+ *        fieldTypeGroup；传字段 type 会让 datetime/checkbox 等「type ≠ group」的字段全部落到
+ *        兜底 str，造成日期字段公式误报类型不匹配）
+ * @param fieldTypeByName 可选，按字段名查字段【类型】（仅成员判定需要：分组 container 同时
+ *        覆盖 member/tabs/formula，无法反推是否为成员字段）
  * @returns 错误消息（中文）；null 表示通过
  */
 export function validateFormulaOutput(
   src: string,
   hostFieldType: string,
-  fieldTypeByName: (name: string) => string | undefined,
+  fieldGroupByName: (name: string) => string | undefined,
+  fieldTypeByName?: (name: string) => string | undefined,
 ): string | null {
   const trimmed = (src ?? "").trim();
   if (!trimmed) return "公式不能为空";
@@ -875,7 +931,21 @@ export function validateFormulaOutput(
   } catch (e) {
     return e instanceof Error ? e.message : "公式语法错误";
   }
-  const types = inferAST(ast, fieldTypeByName);
+
+  // 成员字段：仅「产出文本」不合格，必须产出成员 ID。放在类型匹配检查之前，
+  // 因为这里的错误比「类型不匹配」更贴近用户真实问题（写了姓名而不是成员）。
+  if (hostFieldType === "member") {
+    const isMemberField = (n: string): boolean =>
+      (fieldTypeByName ? fieldTypeByName(n) : fieldGroupByName(n)) === "member";
+    if (!infersMember(ast, isMemberField)) {
+      return "成员字段的公式必须输出成员：请直接引用一个成员字段（如 {负责人}），"
+        + "或用 IF / SWITCH 让每一个分支都返回成员字段；不要写「张三」这样的姓名文本 —— "
+        + "成员字段存的是成员 ID，姓名存进去后前端按 ID 查不到通讯录名册，只会显示成一串看不懂的字符。"
+        + "想留空请写 BLANK()。";
+    }
+  }
+
+  const types = inferAST(ast, fieldGroupByName);
 
   const expect = ((): FormulaOutType => {
     const numTypes = ["number", "currency", "percent", "duration", "rating"];

@@ -138,6 +138,19 @@ export function isReferenceableType(t: FieldType): boolean {
 }
 
 /**
+ * 可否作为「默认内容 → 关联已有数据」的取值字段候选。
+ *
+ * 比 isReferenceableType 宽：上面那条刻意在 flag 引用口径里排除了 member（成员不适合做
+ * 关联显示字段 / 查阅子字段），但「成员字段的默认值」本来就该从**另一个成员字段**抓取
+ * （两边存的都是 userId），所以这里单独放开。
+ *
+ * 真正的类型把关交给下游 isTypeAssignable，此处只剔容器类。
+ */
+export function isDefaultValueSourceType(t: FieldType): boolean {
+  return t !== "tabs" && t !== "subtable";
+}
+
+/**
  * 可否作为筛选条件「匹配字段」值来源的本表字段（valueType="field"）。
  * 取「两字段值相等/比较」语义，仅允许物理可输入的标量字段：
  * 排除容器（tabs/subtable）、计算字段（links/lookup/rollup/count/formula）、

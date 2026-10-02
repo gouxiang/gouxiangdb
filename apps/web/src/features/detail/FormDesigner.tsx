@@ -16,7 +16,7 @@ import type { DetailLayout, DetailLayoutRow, DetailRowColumns, FieldDTO, FieldId
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button, FieldIcon, toast } from "../../components/ui";
-import { confirmAction } from "../../components/feedback";
+import { confirmAction, confirmSoftDelete } from "../../components/feedback";
 // 阶段 4：软删除类统一带撤销 toast（R-I-08 / R-D-22）
 import { toastDeleted } from "../../components/interaction";
 import { Icon } from "../../components/icons";
@@ -262,6 +262,9 @@ function initialRows(layout: DetailLayout | null, fields: FieldDTO[]): LayoutRow
     const items: LayoutItem[] = [];
     for (const id of r.fieldIds) {
       if (seen.has(id)) continue;
+      // 已删除的字段不再出现在 fields 里；布局里可能残留它的 id（比如删字段后没来得及
+      // 再保存布局），此时不应渲染成一张空白卡片，也不该让它占住 seen 挤出其它字段。
+      if (!typeById.has(id)) continue;
       seen.add(id);
       if (inTabs.has(id)) continue;
       const t = typeById.get(id);
@@ -463,16 +466,56 @@ export function FormDesigner({
     else setRows((prev) => setFieldWidthInRows(prev, fieldId, widthPct));
   };
 
-  const removeField = (fieldId: FieldIdT) => {
-    setRows((prev) => rowsRemoveField(prev, fieldId));
-    setTabsConfigMap((prev) => {
-      const next: Record<string, TabInternal[]> = {};
-      for (const [k, tabs] of Object.entries(prev)) {
-        next[k] = tabs.map((t) => ({ ...t, rows: rowsRemoveField(t.rows, fieldId) }));
-      }
-      return next;
+  /**
+   * 删除字段（真删除，移入回收站并可撤销）。
+   *
+   * 这里曾经只做「从画布行模型摘除」，从不删字段本体，于是产生「删了又复活」：
+   *   字段本体还在表里 → 每次进入设计器 initialRows() 会把「表里存在、布局没排」的
+   *   字段补回画布末尾 → 用户看到刚删的字段又出现了。
+   * 而新建字段是拖进来那一刻就落库的真字段，所以观感上像是「新字段尤其删不掉」。
+   *
+   * 现在：先删后端字段本体，成功后再从本地画布移除；失败则本地保持原样（可重试），
+   * 绝不会出现「界面显示没了、实际还在」的假绿。
+   */
+  const removeField = async (fieldId: FieldIdT) => {
+    if (!permissions.canManageSchema) { toast("无表结构管理权限", "error"); return; }
+    const f = fieldById.get(fieldId);
+    const name = f?.name ?? "该字段";
+    const width: FieldWidthPct = f ? defaultW(f.type) : 50;
+    const ok = await confirmSoftDelete({
+      title: `删除字段「${name}」`,
+      confirmText: "删除字段",
+      description: "字段会移入回收站，30 天内可恢复；该列的数据会一并移入。",
     });
-    if (selectedFieldId === fieldId) setSelectedFieldId(null);
+    if (!ok) return;
+    try {
+      await m.deleteField.mutateAsync({ fieldId: fieldId as string, tableId });
+      // 只有后端真的删掉了才动本地
+      setRows((prev) => rowsRemoveField(prev, fieldId));
+      setTabsConfigMap((prev) => {
+        const next: Record<string, TabInternal[]> = {};
+        for (const [k, tabs] of Object.entries(prev)) {
+          next[k] = tabs.map((t) => ({ ...t, rows: rowsRemoveField(t.rows, fieldId) }));
+        }
+        return next;
+      });
+      if (selectedFieldId === fieldId) setSelectedFieldId(null);
+      toastDeleted({
+        message: `已删除字段「${name}」`,
+        restoredMessage: `已恢复字段「${name}」`,
+        onUndo: () =>
+          m.restoreTrash.mutateAsync({ id: fieldId as string, kind: "field", baseId }).then(() => {
+            // rows 不会随 fields 刷新自动重算（见 needsHydrateRef 注释），
+            // 撤销后手动把字段放回画布末尾，否则用户会看到「恢复成功但表单里找不到」。
+            setRows((prev) => {
+              if (prev.some((r) => r.items.some((it) => it.fieldId === fieldId))) return prev;
+              return [...prev, ...segmentToRows([{ fieldId, widthPct: width }])];
+            });
+          }),
+      });
+    } catch (err) {
+      toast((err as Error)?.message || "删除字段失败", "error");
+    }
   };
 
   /** 复制字段：新建同类型字段，插到源字段同位置后 */
@@ -1199,7 +1242,7 @@ export function FormDesigner({
                                   onRemoveTab={(tid) => removeTab(f.id, tid)}
                                   onRenameTab={(tid, name) => renameTab(f.id, tid, name)}
                                   onRemoveContainer={() => void deleteTabsContainer(f.id)}
-                                  onRemoveField={(id) => removeField(id)}
+                                  onRemoveField={(id) => { void removeField(id); }}
                                   onDuplicateField={(id) => void duplicateField(id)}
                                   onJoinUp={joinUp}
                                   onSplitDown={splitDown}
@@ -1225,7 +1268,7 @@ export function FormDesigner({
                               canJoinUp={canJoin}
                               canSplitDown={canSplit}
                               onSelect={() => setSelectedFieldId(item.fieldId)}
-                              onRemove={() => removeField(item.fieldId)}
+                              onRemove={() => void removeField(item.fieldId)}
                               onDuplicate={() => void duplicateField(item.fieldId)}
                               onSwapLeft={() => swapWithLeft(item.fieldId)}
                               onJoinUp={() => joinUp(item.fieldId)}
@@ -1703,7 +1746,7 @@ function CanvasFieldCard({
           </button>
           <button
             type="button"
-            title="从表单移除"
+            title="删除字段"
             onClick={(e) => { e.stopPropagation(); onRemove(); }}
             onDragStart={(e) => e.preventDefault()}
             className="flex h-5 w-5 items-center justify-center rounded-full text-gx-text-secondary hover:bg-gx-danger-bg hover:text-gx-danger"

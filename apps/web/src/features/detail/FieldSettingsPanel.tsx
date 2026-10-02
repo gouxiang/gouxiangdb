@@ -413,8 +413,11 @@ export function FieldSettingsPanel({
 
             {(type === "date" || type === "datetime") && (
               <FormRow>
-                <FormField label="默认值" control="auto">
+                <FormField label="当前时间" control="auto">
                   <Checkbox checked={dateDefaultNow} onChange={setDateDefaultNow} label="新建记录时默认填入当前时间" />
+                  <p className="mt-1 text-gx-11 text-gx-text-hint">
+                    与下方「默认内容」里的固定日期互斥：勾选后以当前时间为准，固定日期不会生效。
+                  </p>
                 </FormField>
               </FormRow>
             )}
