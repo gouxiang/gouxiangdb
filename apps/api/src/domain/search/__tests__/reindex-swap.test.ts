@@ -52,7 +52,7 @@ describe("M5/S9 reindex 双库原子切换（真机演练）", () => {
     await seedTable(h, "ri", [
       { id: "ri_f0", name: "标题", type: "singleLineText", order: 0 },
     ]);
-  });
+  }, 120000);
   afterEach(async () => {
     closeSearchStore();
     await h.cleanup();

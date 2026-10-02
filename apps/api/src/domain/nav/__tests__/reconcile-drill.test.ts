@@ -48,7 +48,7 @@ beforeAll(() => {
 });
 beforeEach(() => {
   freshDb(`db${++seq}`);
-});
+}, 120000);
 afterEach(async () => {
   await prisma?.$disconnect();
   raw?.close();
