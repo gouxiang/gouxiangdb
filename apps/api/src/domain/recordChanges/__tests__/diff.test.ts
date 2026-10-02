@@ -112,21 +112,31 @@ describe("diffRecordFields", () => {
 });
 
 describe("GX_RECORD_CHANGES 开关解析", () => {
-  it("仅精确小写 on 为真；其余一律关（默认关、fail-closed）", () => {
+  it("默认开启（fail-open）：未设置 / 空串 / 未知值一律 true", () => {
+    // 历史不可回溯补写，故默认值必须是"记"；漏配 env 的代价只能是"多记"，不能是"永久丢失"。
+    expect(parseRecordChangesFlag(undefined)).toBe(true);
+    expect(parseRecordChangesFlag("")).toBe(true);
+    expect(parseRecordChangesFlag("   ")).toBe(true);
     expect(parseRecordChangesFlag("on")).toBe(true);
-    expect(parseRecordChangesFlag(" on ")).toBe(true);
-    expect(parseRecordChangesFlag("ON")).toBe(false);
-    expect(parseRecordChangesFlag("On")).toBe(false);
-    expect(parseRecordChangesFlag("true")).toBe(false);
-    expect(parseRecordChangesFlag("1")).toBe(false);
-    expect(parseRecordChangesFlag("opne")).toBe(false);
-    expect(parseRecordChangesFlag("")).toBe(false);
-    expect(parseRecordChangesFlag(undefined)).toBe(false);
+    expect(parseRecordChangesFlag("ON")).toBe(true);
+    expect(parseRecordChangesFlag("On")).toBe(true);
+    expect(parseRecordChangesFlag("true")).toBe(true);
+    expect(parseRecordChangesFlag("1")).toBe(true);
+    // 笔误（想写 off 写成 opne）也按"开"处理：反方向的笔误才会造成历史空洞
+    expect(parseRecordChangesFlag("opne")).toBe(true);
+  });
+
+  it("仅精确 off / false / 0（大小写与首尾空白不敏感）为关", () => {
+    expect(parseRecordChangesFlag("off")).toBe(false);
+    expect(parseRecordChangesFlag("OFF")).toBe(false);
+    expect(parseRecordChangesFlag(" off ")).toBe(false);
+    expect(parseRecordChangesFlag("false")).toBe(false);
+    expect(parseRecordChangesFlag("0")).toBe(false);
   });
 
   it("recordChangesEnabled 走 env（运行时可读，故测试可切）", () => {
+    expect(recordChangesEnabled({})).toBe(true);
     expect(recordChangesEnabled({ GX_RECORD_CHANGES: "on" })).toBe(true);
     expect(recordChangesEnabled({ GX_RECORD_CHANGES: "off" })).toBe(false);
-    expect(recordChangesEnabled({})).toBe(false);
   });
 });

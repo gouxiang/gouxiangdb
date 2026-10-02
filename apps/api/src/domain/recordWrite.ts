@@ -209,7 +209,10 @@ export async function applyFieldWrites(
     await db.record.update({ where: { id: recordId }, data: { fields: JSON.stringify(merged) } });
     // 变更历史：before/after 已在这三行里全部在内存，前后值零额外 IO 即可推出。
     // 与字段写同事务共生死（字段写回滚则日志一并回滚，绝不会出现"日志说改了、实际没改"）。
-    // 开关关闭（GX_RECORD_CHANGES 未显式 on）时 appendRecordChangeTx 内部直接 return，零开销。
+    // 两道兜底保证它不成为业务写的失败点：
+    //   - GX_RECORD_CHANGES 显式 off 时 appendRecordChangeTx 内部直接 return，零开销；
+    //   - 写库抛错时它内部 try/catch 吞掉并只告警一次（真旁路），本事务照常提交。
+    //   开关默认开启（历史不可回溯补写），见 configRecordChanges.ts 的翻转理由。
     if (trace) {
       const changes = diffRecordFields({ op: trace.op, beforeFields: before, afterFields: merged, fields });
       // update 且一个字段都没真变 → 不落行：「点了保存但什么都没改」不该在日志里刷屏，

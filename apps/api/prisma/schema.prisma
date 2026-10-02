@@ -813,9 +813,12 @@ model Attachment {
 // 记录变更历史（数据日志）：记录详情抽屉「查看日志」的数据源。
 // 纯增量新表：不动 records/fields 任何既有结构，也不回填存量历史（存量无历史可言）。
 //
-// 写入完全旁路 + 默认关闭（GX_RECORD_CHANGES，未显式 "on" 即不写一行），挂在主写
-// 事务内（create/update 走 applyFieldWrites，delete/restore 走各自事务体），与主写
-// 共生死：主写回滚则本行一并回滚。
+// 写入**真旁路 + 默认开启**（GX_RECORD_CHANGES，仅显式 "off" 才不写一行）：
+//   - 挂在主写事务内（create/update 走 applyFieldWrites，delete/restore 走各自事务体），
+//     与主写共生死：主写回滚则本行一并回滚，不会出现"日志说改了、实际没改"；
+//   - 反向不成立：日志侧抛错被 store.ts 的 try/catch 吞掉（只 console.warn 一次），
+//     业务写照常提交——观测通道绝不允许拖死业务写；
+//   - 默认开启的理由：历史不可回溯补写，关一天丢一天。
 //
 // changes 是 JSON 字符串（[{fieldId,fieldName,before,after}]）：fieldName 落快照
 // 是刻意的——字段被删后前端已无法映射 id，只留 id 会渲染成空白行。

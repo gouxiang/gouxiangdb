@@ -1,8 +1,7 @@
 // GET /api/records/:recordId/changes 端到端测试（真迁移临时库 + 真 records 路由）。
 // 只 mock JWT 的 getUserId（可变 currentUserId），守卫/写队列/事务/迁移全是真的——变更历史挂在
 // 真实主写事务里，用假 db 测不出「与主写共生死」这层语义。开关 GX_RECORD_CHANGES 运行时读 env，
-// 故本文件可在进程内切 on/off 验证默认关闭。夹具见 _recordChangesHarness.ts，纯函数层见
-// domain/recordChanges/__tests__/diff.test.ts。
+// 故本文件可在进程内切开关。夹具见 _recordChangesHarness.ts；纯函数层见 diff.test.ts。
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -90,7 +89,6 @@ describe("写入侧：create / update", () => {
 });
 
 // ============ 2) 写侧：delete / restore ============
-
 describe("写入侧：delete / restore", () => {
   it("删除 → delete 条目且 changes 为 []；恢复 → restore 条目", async () => {
     const t = await h.makeTableWithFields();
@@ -114,7 +112,6 @@ describe("写入侧：delete / restore", () => {
 });
 
 // ============ 3) 读端点 ============
-
 describe("读端点 GET /records/:recordId/changes", () => {
   it("返回 items/nextCursor/hasMore，按时间倒序（新的在前）", async () => {
     const t = await h.makeTableWithFields();
@@ -218,8 +215,9 @@ describe("字段掩码", () => {
 
 // ============ 5) 开关与分页 ============
 describe("开关与分页", () => {
-  it("GX_RECORD_CHANGES 关闭时不写表（零行）", async () => {
+  it("GX_RECORD_CHANGES 显式 off 时不写表（零行）", async () => {
     const t = await h.makeTableWithFields();
+    // 开关已翻成默认开启，故这里**必须显式 off** 才成立（旧语义下不设即关，现在不行了）
     process.env.GX_RECORD_CHANGES = "off";
     const id = await h.createRecord(t.tableId, { [t.fName]: "甲" });
     await h.patchRecord(id, { [t.fName]: "乙" });
@@ -229,6 +227,9 @@ describe("开关与分页", () => {
     const body = await h.changes(id);
     expect(body.items).toEqual([]);
   });
+
+  // 「开关开启但历史写入失败 → 主写仍成功」的旁路验收单独成文件 recordChangesBypass.test.ts
+  //（它要临时把历史表改名，不该与常规用例共用同一个临时库）。
 
   it("limit/cursor 翻页正确，且严格倒序", async () => {
     const t = await h.makeTableWithFields();
@@ -274,7 +275,6 @@ describe("开关与分页", () => {
 });
 
 // ============ 6) 清理联动 ============
-
 describe("purge 清理", () => {
   it("记录物理删 → 历史行一并清掉，不留悬挂", async () => {
     const t = await h.makeTableWithFields();
