@@ -53,6 +53,7 @@ describe("isIndexedField 字段准入矩阵", () => {
       "lastModifiedTime",
       "createdBy",
       "lastModifiedBy",
+      "member",
     ]) {
       expect(isIndexedField(meta(t)), t).toBe(false);
     }

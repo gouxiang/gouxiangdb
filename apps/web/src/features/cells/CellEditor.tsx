@@ -19,6 +19,7 @@ import { Input, Textarea, Popover, Spinner, toast } from "../../components/ui";
 import { useLinkCandidates } from "../../api/records-paging-hooks";
 import { LINK_NARROW_TEXT } from "../common/ResultNotice";
 import { formatCell, isEmptyValue, resolveSelectOption } from "./format";
+import { MemberSelect, useMemberRoster } from "../contacts/member-roster";
 
 export interface CellEditorProps {
   value: CellValue;
@@ -69,6 +70,8 @@ export function CellEditor(props: CellEditorProps) {
       return <DateEditor {...props} />;
     case "rating":
       return <RatingEditor {...props} />;
+    case "member":
+      return <MemberCellEditor {...props} />;
     case "links":
       return <LinksEditor {...props} />;
     case "attachment":
@@ -708,3 +711,17 @@ function AttachmentEditor({ value, onCommit, onCancel }: CellEditorProps) {
 }
 
 export default CellEditor;
+
+// ============ 成员 ============
+function MemberCellEditor({ value, onCommit, onCancel }: CellEditorProps) {
+  const { members, isLoading } = useMemberRoster();
+  return (
+    <MemberSelect
+      value={value}
+      members={members}
+      isLoading={isLoading}
+      onCommit={(userId) => onCommit(userId, "none")}
+      onCancel={onCancel}
+    />
+  );
+}

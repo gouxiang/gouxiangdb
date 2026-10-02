@@ -1210,6 +1210,7 @@ export function FormDesigner({
                               field={f}
                               item={item}
                               forceStack={previewDevice === "mobile"}
+                              dragActive={dragActive}
                               isSelected={selectedFieldId === item.fieldId}
                               isDragging={dragFieldId === item.fieldId}
                               canSwapLeft={ii > 0}
@@ -1562,6 +1563,8 @@ interface CanvasFieldCardProps {
   canSplitDown: boolean;
   /** 移动端预览：强制单列堆叠，隐藏行内多列操作按钮 */
   forceStack?: boolean;
+  /** 是否有任意拖放进行中：临时关掉内层可拖/预览控件的命中，避免 drop 被它们吞掉 */
+  dragActive?: boolean;
   /** 落在选项卡内时提供：用于挂 data-tab-* 落点属性；顶层为 null */
   tabDrop?: { containerFieldId: string; tabId: string; rowIndex: number } | null;
   onSelect: () => void;
@@ -1613,6 +1616,7 @@ function CanvasFieldCard({
   canJoinUp,
   canSplitDown,
   forceStack,
+  dragActive,
   tabDrop,
   onSelect,
   onRemove,
@@ -1710,7 +1714,9 @@ function CanvasFieldCard({
         {field.type === "subtable" ? (
           <SubtableMiniPreview field={field} />
         ) : (
-          <FieldInput field={field} value={null} onChange={() => {}} disabled />
+          <div className={dragActive ? "pointer-events-none" : undefined}>
+            <FieldInput field={field} value={null} onChange={() => {}} disabled />
+          </div>
         )}
       </div>
     </div>
@@ -1944,6 +1950,7 @@ function TabsDesignerCard({
                         field={cf}
                         item={item}
                         forceStack={mobile}
+                        dragActive={dragFieldId != null}
                         isSelected={selectedFieldId === item.fieldId}
                         isDragging={dragFieldId === item.fieldId}
                         canSwapLeft={ii > 0}

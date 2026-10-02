@@ -39,6 +39,7 @@ const FIELD_ICON_MAP: Record<string, IconName> = {
   email: "mail",
   url: "globe",
   phone: "phone",
+  member: "user",
   rating: "star",
   autoNumber: "hash",
   json: "formula",

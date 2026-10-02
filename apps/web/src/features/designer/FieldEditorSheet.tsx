@@ -79,6 +79,7 @@ export const TYPE_GROUPS: { group: string; items: { type: FieldType; label: stri
       { type: "email", label: "邮箱" },
       { type: "url", label: "链接" },
       { type: "phone", label: "电话" },
+      { type: "member", label: "成员" },
       { type: "rating", label: "评分" },
       { type: "autoNumber", label: "自动编号" },
       { type: "json", label: "JSON" },

@@ -44,14 +44,15 @@ describe("relations: GXRelationType 映射（v1 Core 同构）", () => {
   });
 });
 
-describe("fields: 30 种字段类型覆盖（v2 在 28 种基础上加 tabs + subtable）", () => {
-  it("FIELD_TYPES 长度 = 30", () => {
-    expect(FIELD_TYPES.length).toBe(30);
+describe("fields: 31 种字段类型覆盖（v2 在 28 种基础上加 tabs + subtable + member）", () => {
+  it("FIELD_TYPES 长度 = 31", () => {
+    expect(FIELD_TYPES.length).toBe(31);
   });
 
-  it("包含 v2 新增 tabs + subtable", () => {
+  it("包含 v2 新增 tabs + subtable + member", () => {
     expect(FIELD_TYPES).toContain("tabs");
     expect(FIELD_TYPES).toContain("subtable");
+    expect(FIELD_TYPES).toContain("member");
   });
 
   it("系统字段 4 种：createdTime/lastModifiedTime/createdBy/lastModifiedBy", () => {

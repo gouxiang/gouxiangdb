@@ -15,6 +15,7 @@ import { useFields, useGXMutations, useRecords } from "../../api/hooks";
 import { useLinkCandidates } from "../../api/records-paging-hooks";
 import { ResultNotice, LINK_NARROW_TEXT } from "../common/ResultNotice";
 import { FieldInput, FieldValue, isReadonlyField } from "../views/field-controls";
+import { MemberDisplay, useMemberRoster } from "../contacts/member-roster";
 import { FormDesigner } from "./FormDesigner";
 import { deriveDefaultDetailLayout } from "./default-detail-layout";
 
@@ -888,10 +889,19 @@ function ReadValue({ field, value }: { field: FieldDTO; value: CellValue | undef
   if (field.type === "attachment") {
     return <AttachmentLinks value={value} />;
   }
+  if (field.type === "member") {
+    return <ReadMember value={value} />;
+  }
   if (Array.isArray(value)) return <span className="text-gx-13">{(value as unknown[]).map(String).join("、 ")}</span>;
   if (typeof value === "boolean") return <span>{value ? "是" : "否"}</span>;
   if (field.type === "longText" && typeof value === "string") {
     return <MdContent md={value} variant="block" className="md-cell-block text-gx-13" />;
   }
   return <span className="text-gx-13">{String(value)}</span>;
+}
+
+/** 记录抽屉/详情布局里成员字段的只读值：复用成员名册把 userId 映射成头像+名字。 */
+function ReadMember({ value }: { value: CellValue | undefined }) {
+  const { byId } = useMemberRoster();
+  return <MemberDisplay userId={value} byId={byId} />;
 }

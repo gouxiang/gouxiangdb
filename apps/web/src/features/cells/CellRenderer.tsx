@@ -7,6 +7,7 @@ import { Icon } from "../../components/icons";
 import { StatusPill } from "../../components/interaction";
 import { MdContent } from "../../components/MdContent";
 import { AttachmentLinks } from "./AttachmentLinks";
+import { MemberDisplay, useMemberRoster } from "../contacts/member-roster";
 import { sanitizeHtml } from "../../lib/sanitize-html";
 import {
   formatCell,
@@ -73,6 +74,10 @@ export function CellRenderer({
     );
 
   switch (field.type) {
+    // ---------- 成员 ----------
+    case "member":
+      return <MemberCell value={value} emphasis={emphasis} />;
+
     // ---------- 选择类 ----------
     // 口径（参考图）：状态/一般单选 = 胶囊（浅底 18% + 语义色深字）；
     //                优先级 = 纯文字带色（高红 / 中橙 / 低灰），不是胶囊。
@@ -238,3 +243,24 @@ export function CellRenderer({
 }
 
 export default CellRenderer;
+
+/** 成员字段在网格里的只读单元格：头像+名字，沿用统一单元格内边距与主键字重。 */
+function MemberCell({
+  value,
+  emphasis,
+}: {
+  value: CellValue;
+  emphasis: boolean;
+}) {
+  const { byId } = useMemberRoster();
+  return (
+    <div
+      className={clsx(
+        "flex h-full w-full items-center gap-1 px-3 py-1 text-gx-13 text-gx-text-primary",
+        emphasis && "font-medium",
+      )}
+    >
+      <MemberDisplay userId={value} byId={byId} />
+    </div>
+  );
+}

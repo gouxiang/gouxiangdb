@@ -20,6 +20,7 @@ export const FIELD_TYPES = [
   "email",
   "url",
   "phone",
+  "member",
   "rating",
   "autoNumber",
   "json",
@@ -133,7 +134,7 @@ export function isGridSkipType(t: FieldType): boolean {
  * - subtable 是子表容器（LinkRef 数组），不能作为标量值被公式/查阅/筛选引用
  */
 export function isReferenceableType(t: FieldType): boolean {
-  return t !== "tabs" && t !== "subtable";
+  return t !== "tabs" && t !== "subtable" && t !== "member";
 }
 
 /**
@@ -146,7 +147,7 @@ export function isFilterMatchSourceType(t: FieldType): boolean {
   if (t === "tabs" || t === "subtable") return false;
   if (SYSTEM_FIELDS.has(t)) return false;
   if (COMPUTED_FIELDS.has(t)) return false;
-  if (t === "attachment" || t === "json") return false;
+  if (t === "attachment" || t === "json" || t === "member") return false;
   return true;
 }
 
@@ -165,6 +166,7 @@ export const FIELD_TYPE_COLOR: Record<FieldType, string> = {
   url: "#378ADD",
   email: "#378ADD",
   phone: "#378ADD",
+  member: "#534AB7", // 成员紫
   rating: "#BA7517", // 评级橙
   autoNumber: "#5F5E5A", // 自动灰
   json: "#5F5E5A",
@@ -201,6 +203,7 @@ export const FIELD_TYPE_LABEL: Record<FieldType, string> = {
   email: "邮箱",
   url: "链接",
   phone: "电话",
+  member: "成员",
   rating: "评分",
   autoNumber: "自动编号",
   json: "JSON",

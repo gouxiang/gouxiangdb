@@ -17,6 +17,7 @@ export type FieldType =
   | "email"
   | "url"
   | "phone"
+  | "member"
   | "rating"
   | "autoNumber"
   | "json"

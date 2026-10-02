@@ -34,6 +34,7 @@ describe("fieldTypeGroup", () => {
     expect(fieldTypeGroup("subtable")).toBe("link");
     expect(fieldTypeGroup("attachment")).toBe("attachment");
     expect(fieldTypeGroup("tabs")).toBe("container");
+    expect(fieldTypeGroup("member")).toBe("container");
   });
 });
 

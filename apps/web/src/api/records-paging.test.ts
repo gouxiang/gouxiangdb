@@ -138,12 +138,13 @@ const NON_PHYSICAL_TYPES: readonly FieldType[] = [
   "lastModifiedBy",
 ];
 
-// 非主字段：期望【可】物理下推，共 15 种。
+// 非主字段：期望【可】物理下推，共 16 种。
 const PHYSICAL_TYPES: readonly FieldType[] = [
   "singleLineText",
   "email",
   "url",
   "phone",
+  "member",
   "autoNumber",
   "number",
   "currency",
@@ -177,8 +178,8 @@ function sorted(types: readonly FieldType[]): string[] {
 }
 
 describe("isPhysicalField 全 FieldType 穷举守卫（对齐后端 isIndexedField）", () => {
-  it("FIELD_TYPES 当前共 30 种（若数量变化，须显式更新本矩阵与后端口径）", () => {
-    expect(FIELD_TYPES).toHaveLength(30);
+  it("FIELD_TYPES 当前共 31 种（若数量变化，须显式更新本矩阵与后端口径）", () => {
+    expect(FIELD_TYPES).toHaveLength(31);
   });
 
   it("可下推与不可下推两个显式数组的并集 == FIELD_TYPES 全集（无遗漏、无重复、无越界）", () => {
@@ -199,17 +200,17 @@ describe("isPhysicalField 全 FieldType 穷举守卫（对齐后端 isIndexedFie
     }
     // 显式钉死两个分组的数量
     expect(NON_PHYSICAL_TYPES).toHaveLength(15);
-    expect(PHYSICAL_TYPES).toHaveLength(15);
+    expect(PHYSICAL_TYPES).toHaveLength(16);
   });
 
-  it("主字段：逐类型断言 isPrimary=true 与矩阵一致（11 不可 / 19 可）", () => {
+  it("主字段：逐类型断言 isPrimary=true 与矩阵一致（11 不可 / 20 可）", () => {
     for (const t of FIELD_TYPES) {
       // 主字段放行：非主字段不可、但不在「主字段也不可」名单里的类型（longText/richText/json/attachment 等）
       const expectedPhysical = !NON_PHYSICAL_EVEN_PRIMARY_TYPES.includes(t);
       expect(isPhysicalField({ type: t, isPrimary: true }), `主字段 ${t}`).toBe(expectedPhysical);
     }
     expect(NON_PHYSICAL_EVEN_PRIMARY_TYPES).toHaveLength(11);
-    expect(FIELD_TYPES.length - NON_PHYSICAL_EVEN_PRIMARY_TYPES.length).toBe(19);
+    expect(FIELD_TYPES.length - NON_PHYSICAL_EVEN_PRIMARY_TYPES.length).toBe(20);
   });
 
   it("特别保留：longText 主字段放行=true、formula 主字段=false", () => {

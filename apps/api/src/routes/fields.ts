@@ -16,7 +16,7 @@ export const fields = new Hono();
 const FIELD_TYPE_ENUM = z.enum([
   "singleLineText", "longText", "richText", "number", "currency", "percent", "duration",
   "date", "datetime", "checkbox", "singleSelect", "multiSelect", "email", "url", "phone",
-  "rating", "autoNumber", "json", "attachment", "links", "lookup", "rollup", "count",
+  "member", "rating", "autoNumber", "json", "attachment", "links", "lookup", "rollup", "count",
   "formula", "createdTime", "lastModifiedTime", "createdBy", "lastModifiedBy",
   "tabs",
   "subtable",

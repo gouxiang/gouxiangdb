@@ -4,6 +4,7 @@
 // 约定：所有颜色走 token（gx-*），不硬编码；计算/系统字段只读弱化
 
 import { clsx } from "clsx";
+import { useState } from "react";
 import type {
   CellValue,
   FieldDTO,
@@ -15,6 +16,7 @@ import type {
 import { FieldIcon } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { AttachmentLinks } from "../cells/AttachmentLinks";
+import { MemberDisplay, MemberSelect, useMemberRoster } from "../contacts/member-roster";
 
 /** 所有非网格视图统一的 props（由 ViewRouter 注入） */
 export interface ViewProps {
@@ -117,6 +119,9 @@ export function FieldValue({
   }
 
   switch (field.type) {
+    case "member":
+      return <FieldMemberDisplay value={value} />;
+
     case "singleSelect": {
       const opt = resolveSelectOption(field, value);
       if (!opt) return <span className="text-gx-13 text-gx-text-primary">{String(value)}</span>;
@@ -252,6 +257,14 @@ export function FieldInput({
   const common = "w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2 py-1 text-gx-13 text-gx-text-primary focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent-bg disabled:opacity-50";
 
   switch (field.type) {
+    case "member":
+      return (
+        <FieldMemberInput
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+        />
+      );
     case "longText":
     case "richText":
       return (
@@ -479,4 +492,57 @@ export function FieldInput({
         />
       );
   }
+}
+
+/** 非网格视图里成员字段的只读展示。 */
+function FieldMemberDisplay({ value }: { value: CellValue }) {
+  const { byId } = useMemberRoster();
+  return <MemberDisplay userId={value} byId={byId} />;
+}
+
+/**
+ * 非网格视图里成员字段的编辑控件：点击按钮弹出成员选择面板。
+ * 选中/清除即通过 onChange 写回（提交时机由外层 onBlur/保存决定）。
+ */
+function FieldMemberInput({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: CellValue;
+  onChange: (v: CellValue) => void;
+  disabled?: boolean;
+}) {
+  const { members, byId, isLoading } = useMemberRoster();
+  const [open, setOpen] = useState(false);
+  const current = typeof value === "string" ? value : "";
+  const member = current ? byId.get(current) ?? null : null;
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center gap-1.5 rounded-gx-lg border border-gx-border bg-gx-surface px-2 py-1 text-left text-gx-13 text-gx-text-primary hover:border-gx-accent disabled:opacity-50"
+      >
+        {member ? (
+          <MemberDisplay userId={value} byId={byId} />
+        ) : (
+          <span className="text-gx-text-hint">点击选择成员</span>
+        )}
+      </button>
+      {open && (
+        <MemberSelect
+          value={value}
+          members={members}
+          isLoading={isLoading}
+          onCommit={(userId) => {
+            onChange(userId);
+            setOpen(false);
+          }}
+          onCancel={() => setOpen(false)}
+        />
+      )}
+    </div>
+  );
 }

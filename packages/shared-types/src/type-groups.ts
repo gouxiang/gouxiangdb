@@ -66,7 +66,8 @@ export function fieldTypeGroup(t: FieldType): FieldTypeGroup {
   if (t === "checkbox") return "bool";
   if (LINK_TYPES.has(t)) return "link";
   if (t === "attachment") return "attachment";
-  return "container"; // tabs / formula 等无固定组
+  // member 存的是 userId，不参与跨字段自动赋值/比较，归入无标量语义的 container 通道。
+  return "container"; // tabs / member / formula 等无固定组
 }
 
 /**
