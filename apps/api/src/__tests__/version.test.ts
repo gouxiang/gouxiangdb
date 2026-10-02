@@ -1,6 +1,8 @@
 // apps/api/src/__tests__/version.test.ts
 // 版本单源守卫：运行时 VERSION 必须等于根 package.json 的 version，
-// 且不得残留历史漂移值（0.2.0）或解析失败兜底值（0.0.0-dev）。
+// 且不得是解析失败兜底值（0.0.0-dev）。
+// 注：这里曾有一条「不得等于 0.2.0」的断言，那是 0.2.0 被当作历史漂移值的时期留下的，
+// 版本正式升到 0.2.0 后该断言变成误报，已移除——漂移检测由上面「等于根 package.json」那条负责。
 
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
@@ -24,8 +26,7 @@ describe("VERSION 单源", () => {
     expect(VERSION).toBe(rootPkg.version);
   });
 
-  it("不是历史漂移值 0.2.0，也不是解析失败兜底值", () => {
-    expect(VERSION).not.toBe("0.2.0");
+  it("不是解析失败兜底值", () => {
     expect(VERSION).not.toBe("0.0.0-dev");
   });
 
