@@ -17,6 +17,7 @@ export default tseslint.config(
       "**/*.config.{js,cjs,mjs,ts}",
       "**/prisma/**",
       "apps/api/scripts/**",
+      "apps/web/scripts/**",
       "**/*.d.ts",
     ],
   },
