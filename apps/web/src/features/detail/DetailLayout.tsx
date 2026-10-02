@@ -11,6 +11,9 @@ import { Button, FieldIcon, Modal, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { MdContent } from "../../components/MdContent";
 import { AttachmentLinks } from "../cells/AttachmentLinks";
+// 抽屉里的只读值此前完全没有日期分支，日期/公式时间值按原串直出；统一走
+// formatCell 的日期口径，与网格单元格、卡片保持同一套显示规则。
+import { fmtDateTime, formatCell, isIsoDatetimeLike } from "../cells/format";
 import { useFields, useGXMutations, useRecords } from "../../api/hooks";
 import { useLinkCandidates } from "../../api/records-paging-hooks";
 import { ResultNotice, LINK_NARROW_TEXT } from "../common/ResultNotice";
@@ -812,13 +815,20 @@ function DetailCell({ field, value, tableId, recordId, canEdit }: { field: Field
     catch (err) { toast((err as Error).message, "error"); setDraft(value); }
   };
   return (
-    <div className="flex min-w-0 items-start gap-3 rounded-gx-sm border border-gx-border bg-gx-surface px-3 py-1.5">
-      {/* 字段名 label：自然宽度（icon 12 + gap 4 + text，最多 80px）；gap 与字段框 padding 对称 12px */}
-      <div className="flex shrink-0 items-center gap-1 pt-0.5 text-gx-12 text-gx-text-secondary">
-        <FieldIcon type={field.type} size={12} />
-        <span className="truncate" style={{ maxWidth: "5rem" }}>{field.name}</span>
+    // 标签上置（UI-SPEC R-F-06：标签统一上置，左置仅允许行内编辑/筛选条）。
+    // 旧实现是左置 label + flex-1 值区，一行放两个字段时值区只剩几十像素被挤压；
+    // 且 label 写了内联的像素级宽度上限（绕开间距令牌）。改为纵向两行后
+    // 值区始终占满整格宽度，长字段名由容器 min-w-0 + 文本 truncate 收口。
+    <div className="flex min-w-0 flex-col gap-1.5 rounded-gx-sm border border-gx-border bg-gx-surface px-3 py-2">
+      {/* 第一行：字段名（图标 + 名称） */}
+      <div className="flex min-w-0 items-center gap-1 text-gx-12 text-gx-text-secondary">
+        <span className="flex shrink-0 items-center">
+          <FieldIcon type={field.type} size={12} />
+        </span>
+        <span className="truncate">{field.name}</span>
       </div>
-      <div className="min-w-0 flex-1">
+      {/* 第二行：值区，占满整格宽度 */}
+      <div className="min-w-0">
         {editing && !readOnly
           ? <FieldInput field={field} value={draft ?? null} onChange={setDraft} autoFocus onBlur={commit} />
           : (
@@ -891,6 +901,23 @@ function ReadValue({ field, value }: { field: FieldDTO; value: CellValue | undef
   }
   if (field.type === "member") {
     return <ReadMember value={value} />;
+  }
+  // 日期/时间：抽屉此前连普通 date 字段都没有格式化分支，后端存的 UTC ISO 串
+  // （2026-10-02T13:38:39.086Z）会整串直出。统一走 formatCell，与网格同口径。
+  if (
+    field.type === "date" ||
+    field.type === "datetime" ||
+    field.type === "createdTime" ||
+    field.type === "lastModifiedTime"
+  ) {
+    const text = formatCell(value, field);
+    // 解析不出合法日期时原样显示，不静默吞成空串
+    return <span className="text-gx-13">{text !== "" ? text : String(value)}</span>;
+  }
+  // 公式/查阅可能带回时间串（如 NOW() 的 ISO 输出）：按形态识别后再格式化，
+  // 普通文本/数字一律不被误判成时间（isIsoDatetimeLike 的判定刻意保守）。
+  if ((field.type === "formula" || field.type === "lookup") && isIsoDatetimeLike(value)) {
+    return <span className="text-gx-13">{fmtDateTime(value)}</span>;
   }
   if (Array.isArray(value)) return <span className="text-gx-13">{(value as unknown[]).map(String).join("、 ")}</span>;
   if (typeof value === "boolean") return <span>{value ? "是" : "否"}</span>;

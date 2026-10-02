@@ -92,6 +92,11 @@ function pad2(n: number): string {
 /** 把各种形态的日期值统一成 Date，解析失败返回 null */
 function toDate(value: unknown): Date | null {
   if (value == null) return null;
+  // Date 直通：fmtDateTime 内部会拿解析结果回喂 fmtDate，缺少这一支会让日期段
+  // 静默变成空串（历史缺陷：datetime 字段只显示「 13:38」，日期段被吞掉）。
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? null : value;
+  }
   if (typeof value === "number") {
     const d = new Date(value);
     return isNaN(d.getTime()) ? null : d;
@@ -110,10 +115,44 @@ function fmtDate(value: unknown): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+/**
+ * 日期时间显示口径：YYYY-MM-DD HH:mm:ss（含秒）。
+ *
+ * 为什么必须带秒：系统字段（createdTime/lastModifiedTime）与公式 NOW() 存的是
+ * UTC ISO 串（如 2026-10-02T13:38:39.086Z），秒是真实数据的一部分。此前截到分钟，
+ * 同一秒内创建的记录在界面上无法区分，用户会以为数据被改过。
+ */
 function fmtDateTime(value: unknown): string {
   const d = toDate(value);
   if (!d) return "";
-  return `${fmtDate(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return `${fmtDate(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+/** "2026-10-02T13:38" 的长度——带 T 的最短时间形态，短于此不可能是时间。 */
+const ISO_DATETIME_MIN_LEN = 16;
+/** 时间形态必须是 YYYY-MM-DDTHH:mm 开头（后续可跟 :ss / .mmm / Z / ±HH:mm）。 */
+const ISO_DATETIME_HEAD = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
+/**
+ * 值是否长得像 ISO 时间串（相对「纯日期」而言）。
+ *
+ * 用途：formula / lookup 这类字段没有自己的日期口径（后端给什么就存什么），
+ * 取当前时间的公式（NOW()）会返回 `new Date().toISOString()`，直接 String() 出来
+ * 是 `2026-10-02T13:38:39.086Z`，人读不了。识别后走 fmtDateTime 格式化。
+ *
+ * 判定刻意保守（宁可不格式化，也不能把普通文本误判成时间）：
+ *   ① 只认字符串（数字时间戳/布尔/数组一律 false）；
+ *   ② 长度 ≥16 且含 "T"——纯日期 "2026-10-02" 长度 10，必须排除；
+ *   ③ 头部匹配 YYYY-MM-DDTHH:mm；
+ *   ④ new Date() 解析有效（挡掉 "2026-13-45T99:99" 这类形似而非法的值）。
+ */
+export function isIsoDatetimeLike(v: unknown): boolean {
+  if (typeof v !== "string") return false;
+  const s = v.trim();
+  if (s.length < ISO_DATETIME_MIN_LEN) return false;
+  if (!s.includes("T")) return false;
+  if (!ISO_DATETIME_HEAD.test(s)) return false;
+  return toDate(s) !== null;
 }
 
 /** 千分位 + 指定小数位格式化的数字 */
@@ -244,6 +283,14 @@ export function formatCell(
       return typeof value === "object"
         ? JSON.stringify(value)
         : String(value);
+
+    // 公式 / 查阅：这两个类型没有自己的日期口径——后端算什么就存什么。
+    // 取当前时间的公式（NOW()，apps/api/src/domain/formula.ts）返回 toISOString()，
+    // 落到 default 会把 `2026-10-02T13:38:39.086Z` 整串直出；查阅字段从关联记录
+    // 带回日期时同理。这里只按形态识别后走时间格式化，其余值一字不动地原样返回。
+    case "formula":
+    case "lookup":
+      return isIsoDatetimeLike(value) ? fmtDateTime(value) : String(value);
 
     default:
       return String(value);
