@@ -17,6 +17,7 @@ import path from "node:path";
 
 import { auth } from "./auth.js";
 import { meAvatar } from "./routes/meAvatar.js";
+import { attachments } from "./routes/attachments.js";
 import { bases } from "./routes/bases.js";
 import { tables } from "./routes/tables.js";
 import { fields } from "./routes/fields.js";
@@ -162,6 +163,8 @@ function createMount(webRoot: string | null): Hono {
   api.route("/tables", tableShares);
   // 关联插入选择器（后端按 libraryPolicy 过滤可见对象）
   api.route("/linkable", linkable);
+  // R2 附件外置：服务端上传/鉴权下载/软删（纯增量，不动存量 base64 附件）。
+  api.route("/attachments", attachments);
   // 实时协同：票据与 presence 两个 HTTP 端点（WS 通道在 index.ts 里挂 upgrade）
   api.route("/collab", collab);
   api.route("/kb", kb);

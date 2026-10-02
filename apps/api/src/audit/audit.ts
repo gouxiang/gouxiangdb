@@ -68,7 +68,11 @@ export type AuditEventName =
   // 外部访问者（无登录态）经分享链接的写入：成功记 share_external_write，
   // 被档位/权限/字段闸拒绝记 share_external_denied。detail 记 action 与字段 id，绝不记 token。
   | "share_external_write"
-  | "share_external_denied";
+  | "share_external_denied"
+  // R2 附件外置：服务端上传/删除（detail 只带 id/bytes/mime 等元数据，绝不落文件内容）。
+  // 删除被「仍被记录引用」挡下时同样记 attachment_delete，status=409。
+  | "attachment_upload"
+  | "attachment_delete";
 
 export interface AuditInput {
   event: AuditEventName;

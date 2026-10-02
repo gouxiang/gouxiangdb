@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import {
+  ATTACHMENT_UPLOAD_RULE,
   DEFAULT_RULE,
   FixedWindowCounter,
   ORG_ADMIN_RULE,
@@ -32,6 +33,14 @@ describe("规则选择", () => {
   });
   it("其余 /api 走兜底档", () => {
     expect(selectRule("/api/records")).toBe(DEFAULT_RULE);
+  });
+  it("附件上传端点命中 120/60s 附件档；附件下载仍在兜底档（收的是写盘量不是读量）", () => {
+    expect(selectRule("/api/attachments")).toBe(ATTACHMENT_UPLOAD_RULE);
+    expect(selectRule("/api/attachments/")).toBe(ATTACHMENT_UPLOAD_RULE);
+    expect(ATTACHMENT_UPLOAD_RULE.limit).toBe(120);
+    expect(ATTACHMENT_UPLOAD_RULE.windowMs).toBe(60_000);
+    expect(selectRule("/api/attachments/att1/content")).toBe(DEFAULT_RULE);
+    expect(selectRule("/api/attachments/att1")).toBe(DEFAULT_RULE);
   });
   it("健康/上传路径豁免", () => {
     for (const p of ["/healthz", "/readyz", "/api/health", "/uploads/avatars/x.png"]) {

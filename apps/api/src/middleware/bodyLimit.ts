@@ -1,8 +1,10 @@
 // apps/api/src/middleware/bodyLimit.ts
 // 请求体上限：用 Hono 自带 hono/body-limit（零新增依赖）。
-// 全局 JSON 默认 GX_BODY_LIMIT_JSON（1MB）；头像上传 /api/auth/me/avatar 单独放宽到
-// GX_BODY_LIMIT_UPLOAD（6MB，对齐业务 5MB + 余量）。M1 附件外置后再按路由细化。
-// 超限统一返回 413 与机器码，不放行堆栈。必须在任何 body 解析之前挂载。
+// 全局 JSON 默认 GX_BODY_LIMIT_JSON（1MB）；上传类端点走独立放宽档：
+//   · /api/auth/me/avatar      → GX_BODY_LIMIT_UPLOAD（6MB，对齐业务 5MB + 余量）
+//   · /api/attachments         → GX_BODY_LIMIT_ATTACHMENT（20MB）
+// 三档互斥精确路径，JSON 档不放宽。超限统一返回 413 与机器码，不放行堆栈。
+// 必须在任何 body 解析之前挂载。
 
 import { bodyLimit } from "hono/body-limit";
 import type { Context, MiddlewareHandler } from "hono";
@@ -34,6 +36,12 @@ const uploadLimit = bodyLimit({
   onError: payloadTooLarge,
 });
 
+// 附件上传档（R2 附件外置）：默认 20MB，与头像档分名。
+const attachmentLimit = bodyLimit({
+  maxSize: config.bodyLimitAttachmentBytes,
+  onError: payloadTooLarge,
+});
+
 // M6/S2：/mcp 第三档（默认 11MB，GX_MCP_BODY_LIMIT）。MCP 客户端（SDK/Inspector）单次
 // 工具调用可能携带整块文档/画布 JSON，故放宽；**/api 两档语义与 413 行为逐字节不变**（S0 护栏）。
 const mcpLimit = bodyLimit({
@@ -41,11 +49,18 @@ const mcpLimit = bodyLimit({
   onError: payloadTooLargeMcp,
 });
 
-function isAvatarUpload(c: Context): boolean {
+// 上传类路径 → 档位。全部为**精确路径**判定（不做前缀放宽，避免误伤相邻 /api 路由）；
+// 新增上传端点请在此登记，未登记的新端点会落回 1MB JSON 档而静默失败。
+const UPLOAD_LIMIT_PATHS: Record<string, "avatar" | "attachment"> = {
+  "/api/auth/me/avatar": "avatar",
+  "/api/attachments": "attachment",
+};
+
+function isUploadPath(c: Context): "avatar" | "attachment" | null {
   if (c.req.method === "GET" || c.req.method === "HEAD" || c.req.method === "OPTIONS") {
-    return false;
+    return null;
   }
-  return effectivePath(c) === "/api/auth/me/avatar";
+  return UPLOAD_LIMIT_PATHS[effectivePath(c)] ?? null;
 }
 
 /** /mcp 精确判定（去 basePath 前缀后比较；不做前缀放宽，避免误伤 /api）。 */
@@ -53,9 +68,12 @@ function isMcpPath(c: Context): boolean {
   return effectivePath(c) === "/mcp";
 }
 
-// 按请求路径在三档固定阈值间分流（Hono bodyLimit 阈值在创建时固定）。
-// 顺序：/mcp 档 -> 头像上传档 -> /api 默认档（互斥精确路径，既有两档行为不变）。
+// 按请求路径在四档固定阈值间分流（Hono bodyLimit 阈值在创建时固定）。
+// 顺序：/mcp 档 -> 上传类档（头像 6MB / 附件 20MB）-> /api 默认档（互斥精确路径，
+// 既有两档行为不变）。
 export const bodyLimitDispatch: MiddlewareHandler = (c, next) => {
   if (isMcpPath(c)) return mcpLimit(c, next);
-  return isAvatarUpload(c) ? uploadLimit(c, next) : jsonLimit(c, next);
+  const uploadKind = isUploadPath(c);
+  if (uploadKind === "attachment") return attachmentLimit(c, next);
+  return uploadKind === "avatar" ? uploadLimit(c, next) : jsonLimit(c, next);
 };

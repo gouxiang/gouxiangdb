@@ -777,6 +777,38 @@ model AutoNumberCounter {
   @@map("auto_number_counters")
 }
 
+// ---------------------------------------------------------------------------
+// 附件（R2 附件外置，ARCH-production.md §5.1）：服务端上传落盘后的元数据行。
+// 纯增量新表：不动 records/fields 任何既有结构，也不改写存量 dataURL 附件
+// （存量 base64 保持原样，前端照旧渲染；本次不做一次性迁移）。
+//
+// 文件落盘路径 <uploadRoot>/attachments/<yyyy>/<mm>/<sha256>.<ext>，按内容 sha256
+// 在同 base 内去重（同内容复用同一行，storagePath 因此可能跨行共享，删除时须计数）。
+// storagePath 是相对 uploadRoot 的相对路径，下载端只信库里的值，绝不接收用户路径。
+//
+// 建表迁移 migrations/20261009010000_attachments（手写只增，列名 camelCase）。
+// ---------------------------------------------------------------------------
+model Attachment {
+  id          String    @id @default(cuid())
+  baseId      String
+  tableId     String?
+  fieldId     String?
+  recordId    String?
+  name        String
+  mime        String
+  size        Int
+  sha256      String
+  storagePath String
+  uploaderId  String?
+  createdAt   DateTime  @default(now())
+  deletedAt   DateTime?
+
+  @@index([sha256])
+  @@index([baseId])
+  @@index([recordId])
+  @@map("attachments")
+}
+
 // ============================================================================
 // 手写维护表（不经 Prisma 管理，禁止在此添加 model）
 // ============================================================================

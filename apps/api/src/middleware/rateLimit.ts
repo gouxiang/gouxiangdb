@@ -34,6 +34,11 @@ const ORG_ADMIN_PATTERNS = [
   /\/api\/v1\/org\/members\/[^/]+\/reactivate$/,
 ];
 
+// R2 附件外置：上传端点单次请求体最重（默认 20MB 档），单独给桶 120 次/60 秒/键。
+// 目的不是收紧（正常批量上传远达不到），而是别让 600/60s 的 /api 兜底桶被换算成
+// 「每分钟 12GB 写盘」这种量级的放大；下载 /:id/content 仍在兜底桶里，不受影响。
+const ATTACHMENT_UPLOAD_PATTERNS = [/^\/api\/attachments\/?$/];
+
 // 不计数的路径前缀/精确路径。
 const EXEMPT_PATTERNS = [
   /^\/healthz\/?$/,
@@ -57,6 +62,14 @@ export const ORG_ADMIN_RULE: RateRule = {
   match: (path) => ORG_ADMIN_PATTERNS.some((re) => re.test(path)),
 };
 
+// R2 附件上传档：120 次/60 秒（只增命名档，不动旧档）。
+export const ATTACHMENT_UPLOAD_RULE: RateRule = {
+  name: "attachment-upload",
+  limit: 120,
+  windowMs: 60_000,
+  match: (path) => ATTACHMENT_UPLOAD_PATTERNS.some((re) => re.test(path)),
+};
+
 export const DEFAULT_RULE: RateRule = {
   name: "api",
   limit: 600,
@@ -70,9 +83,10 @@ export function isExempt(path: string): boolean {
 
 export function selectRule(path: string): RateRule | null {
   if (isExempt(path)) return null;
-  // 最具体的先匹配：严格认证档 -> M2 组织敏感档 -> /api 兜底档。
+  // 最具体的先匹配：严格认证档 -> M2 组织敏感档 -> 附件上传档 -> /api 兜底档。
   if (STRICT_RULE.match(path, "")) return STRICT_RULE;
   if (ORG_ADMIN_RULE.match(path, "")) return ORG_ADMIN_RULE;
+  if (ATTACHMENT_UPLOAD_RULE.match(path, "")) return ATTACHMENT_UPLOAD_RULE;
   if (DEFAULT_RULE.match(path, "")) return DEFAULT_RULE;
   return null;
 }

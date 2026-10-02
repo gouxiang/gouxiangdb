@@ -21,7 +21,8 @@
 	@api path /api/* /healthz /readyz /mcp /mcp/*
 	reverse_proxy @api 127.0.0.1:3001
 
-	# 附件/头像（M0 维持直供现状；M1 附件外置后改鉴权下载路由）。
+	# 附件/头像（M0 维持直供现状；R2 起新附件经 /api/attachments/:id/content 鉴权下载，
+	# 已走上面 @api 反代；此处仍保留以继续服务存量头像直供路径）。
 	reverse_proxy /uploads/* 127.0.0.1:3001
 
 	# 静态 Web（vite build 产物，SPA history 回退到 index.html）。
@@ -33,9 +34,12 @@
 		header /assets/* Cache-Control "public, max-age=31536000, immutable"
 	}
 
-	# 上传体积第一道闸（与应用 body-limit 双保险：应用 JSON 1MB / 上传 6MB，这里预留到 12MB）。
+	# 上传体积第一道闸（与应用 body-limit 双保险：应用 JSON 1MB / 头像上传 6MB /
+	# 附件上传 20MB，这里取 24MB 给 multipart 边界与编码开销留余量）。
+	# 若把 GX_BODY_LIMIT_ATTACHMENT 调大到 20MB 以上，此处必须同步调大，否则
+	# 网关会先于应用返回 413。
 	request_body {
-		max_size 12MB
+		max_size 24MB
 	}
 
 	# HSTS 仅在“公网正式证书域名”下开启；内网 CA/自签请勿开启。

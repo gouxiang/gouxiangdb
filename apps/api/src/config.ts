@@ -43,6 +43,10 @@ const DEFAULT_PORT = 3001;
 const DEFAULT_MIN_DISK_MB = 1024;
 const DEFAULT_BODY_LIMIT_JSON_MB = 1;
 const DEFAULT_BODY_LIMIT_UPLOAD_MB = 6;
+// 附件上传档（/api/attachments）：默认 20MB。既是【单个文件】上限，也是该端点
+// 请求体总闸（Hono bodyLimit 按 Content-Length 先拦，超限直接 413，不会缓冲进内存）。
+// 需要更大单文件或更大整包时调 GX_BODY_LIMIT_ATTACHMENT（MB）。
+const DEFAULT_BODY_LIMIT_ATTACHMENT_MB = 20;
 
 export interface ConfigIssue {
   variable: string;
@@ -208,6 +212,13 @@ export interface AppConfig {
   minDiskMb: number;
   bodyLimitJsonBytes: number;
   bodyLimitUploadBytes: number;
+  /**
+   * 附件上传档（GX_BODY_LIMIT_ATTACHMENT，默认 20MB）：/api/attachments 的 multipart
+   * 请求体总闸，同时也是路由内【单个文件】大小校验的上限（二者同源，避免中间件放行后
+   * 业务又拒、或业务放行后中间件先 413 的口径分叉）。与头像档（bodyLimitUploadBytes）
+   * 分名，互不影响。
+   */
+  bodyLimitAttachmentBytes: number;
   /** M6/S2：/mcp 请求体上限（GX_MCP_BODY_LIMIT，默认 11MB）；/api 两档语义不变。 */
   mcpBodyLimitBytes: number;
   /** M6/S2 /mcp 限流：窗口秒 / patId 桶上限 / IP 预桶上限（C-1 默认 60/120/300）。 */
@@ -315,6 +326,10 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     bodyLimitUploadBytes: parseBodyLimit(
       env.GX_BODY_LIMIT_UPLOAD,
       DEFAULT_BODY_LIMIT_UPLOAD_MB * 1024 * 1024,
+    ),
+    bodyLimitAttachmentBytes: parseBodyLimit(
+      env.GX_BODY_LIMIT_ATTACHMENT,
+      DEFAULT_BODY_LIMIT_ATTACHMENT_MB * 1024 * 1024,
     ),
     auditDir: env.GX_AUDIT_DIR?.trim()
       || (prod ? "/var/log/gouxiangdb" : path.join(dataDir, ".audit")),
