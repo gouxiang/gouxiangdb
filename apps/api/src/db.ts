@@ -119,7 +119,11 @@ export async function withWriteTx<T>(
   fn: (tx: DbTx) => Promise<T>,
 ): Promise<T> {
   await dbReady;
-  return await writeQueue.run(label, () => prisma.$transaction(fn));
+  // 交互事务默认 timeout=5000ms。写队列已串行（无锁等待），但事务体本身（如协同冷归结
+  // 同步 nav + 写文档）在磁盘高负载下实测可达 ~15s -> P2028 事务过期被拒。写已串行，放宽
+  // timeout 不放大锁竞争（同一时刻仅一个写事务），故显式放宽到 20s；maxWait 也放宽防入队瞬峰。
+  return await writeQueue.run(label, () =>
+    prisma.$transaction(fn, { timeout: 20_000, maxWait: 10_000 }));
 }
 
 /**
