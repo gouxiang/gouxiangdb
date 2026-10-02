@@ -49,6 +49,9 @@ import {
   stripHiddenFromRecords,
   stripHiddenKeys,
 } from "../domain/authz/fieldScope.js";
+// 记录变更历史（数据日志）：读端点编排在本文件，取数/掩码/可读化在 domain/recordChanges。
+import { queryRecordChanges, parseChangesCursor, parseChangesLimit } from "../domain/recordChanges/query.js";
+import { appendRecordChangeTx, purgeRecordChangesTx, purgeTableRecordChangesTx } from "../domain/recordChanges/store.js";
 
 export const records = new Hono();
 
@@ -532,7 +535,7 @@ records.delete("/:recordId", async (c) => {
   // M1/S4：软删同事务撤掉该记录 sidecar 行（派生索引不保留软删记录，恢复时重建）。
   // M3/S1：原 $transaction([...]) 数组批收紧为交互事务，以承载 outbox 同事务登记。
   // M6/S4：事务体已移入 domain/recordWrite.ts（纯移动）。
-  await withWriteTx("record.softDelete", (tx) => softDeleteRecordTx(tx, recordId));
+  await withWriteTx("record.softDelete", (tx) => softDeleteRecordTx(tx, recordId, userId));
   invalidateOrdinalCache(rec.tableId);
 
   // 反向联动：被删记录是某父记录的子表行 → 重算父表点引用 formula 默认值。
@@ -648,7 +651,9 @@ records.post("/bulk-update", async (c) => {
   // 一批记录要么全部写成功，要么全部回滚（避免「前几条改了后几条失败」的半成品）
   await withWriteTx("record.bulkUpdate", async (tx) => {
     for (const id of scopedIds) {
-      await applyFieldWrites(first.tableId, id, parsed.data.fields, fields, tx, false);
+      await applyFieldWrites(first.tableId, id, parsed.data.fields, fields, tx, false, {
+        op: "update", actorId: userId,
+      });
       await tx.record.update({ where: { id }, data: { updatedBy: userId } });
     }
     // M1/S4：整批 fields 在同一事务内统一重建一次 sidecar（避免逐行重复删插）。
@@ -783,7 +788,9 @@ records.post("/csv-import", async (c) => {
         const rec = await tx.record.create({
           data: { tableId, fields: "{}", createdBy: userId, updatedBy: userId },
         });
-        await applyFieldWrites(tableId, rec.id, payload, allFields, tx);
+        await applyFieldWrites(tableId, rec.id, payload, allFields, tx, true, {
+          op: "create", actorId: userId,
+        });
         // 唯一校验在同一行事务内、用 tx 做：unique 字段与存量记录（含本次导入此前各行）
         // 冲突即抛 409，被外层 catch 转为该行错误、继续后续行（部分导入语义不变）。
         await assertUnique(tableId, allFields, payload, rec.id, undefined, tx);
@@ -800,6 +807,53 @@ records.post("/csv-import", async (c) => {
 
   invalidateOrdinalCache(tableId);
   return c.json({ result: { createdFields, createdRecords, errors } }, 201);
+});
+
+// ============ 变更历史（数据日志）============
+
+records.get("/:recordId/changes", async (c) => {
+  const recordId = c.req.param("recordId");
+  const baseId = await baseIdOfRecord(recordId);
+  const { userId, access } = await requireCanView(c, baseId);
+
+  // 刻意**不判 deletedAt**（与详情 GET /:recordId 的 404 判定不同）：
+  // 一条记录被删后，用户最想看的恰恰是「谁删的」，软删记录的历史必须仍可读。
+  // 依据：guards.resolveBaseIdByRecord 不带 deletedAt 过滤，回收站 GET /trash 已是同口径先例。
+  const rec = await prisma.record.findUnique({ where: { id: recordId }, select: { tableId: true } });
+  if (!rec) throw new HttpError(404, "记录不存在");
+
+  const allFields = await loadTableFields(rec.tableId);
+  // 字段权限两层过滤：
+  //   ① fieldScopeOf.hiddenIds —— 恒生效（库权限 config.fields 的 hidden 档，与列表/详情同口径）；
+  //   ② resolveTableMask.visibleIds —— 仅新引擎 on 态生效（off/shadow 返回 null，不加约束）。
+  // 两层取并集的"不可见集"，被掩码字段从 changes 里整条剔除（不是置空：置空仍泄漏"该字段被改过"）。
+  const scope = fieldScopeOf(access, rec.tableId, allFields);
+  const mask = await resolveTableMask(userId, rec.tableId, scope.active ? scope.fields : allFields);
+  const hiddenIds = new Set<string>(scope.hiddenIds);
+  if (mask) {
+    const visible = new Set(mask.visibleFields.map((f) => f.id));
+    for (const f of allFields) if (!visible.has(f.id)) hiddenIds.add(f.id);
+  }
+
+  let cursor: ReturnType<typeof parseChangesCursor> = null;
+  try {
+    cursor = parseChangesCursor(c.req.query("cursor"));
+  } catch (e) {
+    if (e instanceof InvalidCursorError) throw new HttpError(400, e.message);
+    throw e;
+  }
+
+  // 已知边界（登记，不修）：本端点不施加 rowFilter（P1-S8b-2 的行级条件）。与回收站同口径——
+  // 历史是"这条记录发生了什么"的台账，按行条件整条隐去会让"谁改的"无从追溯；
+  // 字段维的两层掩码已在此闭合，行维敞口留待产品明确后再收。
+  const page = await queryRecordChanges({
+    recordId,
+    fields: allFields,
+    hiddenIds,
+    limit: parseChangesLimit(c.req.query("limit")),
+    cursor,
+  });
+  return c.json(page);
 });
 
 // ============ 评论 ============
@@ -915,13 +969,17 @@ records.post("/trash/:id/restore", async (c) => {
     const rec = await prisma.record.findUnique({ where: { id }, select: { tableId: true } });
     if (!rec) throw new HttpError(404, "记录不存在");
     // 恢复与彻底删除同档（可管理库）：普通编辑者不能自行恢复已删除的数据。
-    await requireTableManage(c, rec.tableId);
+    const { userId: restorerId } = await requireTableManage(c, rec.tableId);
     // M5/S1：原 record.update + linkRow + sidecar 三段裸写收紧进单事务，承载 outbox upsert。
     await withWriteTx("record.restore", async (tx) => {
       await tx.record.update({ where: { id }, data: { deletedAt: null } });
       await restoreLinkRows(tx, [id]);
       // M1/S4：记录恢复后按最新 fields 重建 sidecar（只对仍活记录）。
       if (rec) await restoreRecordsTx(tx, rec.tableId, [id]);
+      // 变更历史：恢复是独立写点（不走 applyFieldWrites），整行出回收站、无字段级前后值 → changes 恒空。
+      await appendRecordChangeTx(tx, {
+        tableId: rec.tableId, recordId: id, op: "restore", actorId: restorerId, changes: [],
+      });
       // M5/S1：恢复登记 upsert（worker 重建派生检索行）。
       await enqueueChangeEventTx(tx, {
         entityType: "record", entityId: id, op: "upsert", version: BigInt(Date.now()),
@@ -1056,6 +1114,8 @@ records.delete("/trash/:id", async (c) => {
         where: { OR: [{ parentRowId: id }, { childRowId: id }] },
       });
       await tx.comment.deleteMany({ where: { recordId: id } });
+      // 变更历史无物理外键，记录行消失后不清会留悬挂行（读端点按 recordId 查，永远查不到但占空间）
+      await purgeRecordChangesTx(tx, [id]);
       await tx.record.delete({ where: { id } });
       await enqueueChangeEventTx(tx, {
         entityType: "record", entityId: id, op: "delete", version: BigInt(Date.now()),
@@ -1085,6 +1145,8 @@ records.delete("/trash/:id", async (c) => {
       if (recIds.length > 0) {
         await tx.comment.deleteMany({ where: { recordId: { in: recIds.map((r) => r.id) } } });
       }
+      // 同上：该表全部记录的历史一并清掉（按 tableId 走索引，不逐行删）
+      await purgeTableRecordChangesTx(tx, id);
       await tx.table.delete({ where: { id } });
       // M5/S1：表物理删级联——按 tableId 收集的记录逐条登记 delete（实体随 cascade 消失，
       // 事件无 FK 仍可消费清派生行）。在表删之后、同事务内登记。

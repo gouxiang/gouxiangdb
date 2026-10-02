@@ -213,7 +213,7 @@ export async function recordDeleteRecord(ctx: ToolCtx, args: Record<string, unkn
   if (!brief || brief.deletedAt !== null || brief.tableId !== tableId) {
     return deny("FORBIDDEN_RESOURCE", "记录不存在或不属于该表");
   }
-  await withWriteTx("record.softDelete", (tx) => softDeleteRecordTx(tx, recordId));
+  await withWriteTx("record.softDelete", (tx) => softDeleteRecordTx(tx, recordId, ctx.subject.userId));
   // 反向联动（与 REST 同口径；失败不阻断删除结果，已提交的软删不回滚）
   try {
     await runWrite("defaults.reverseOnDelete", async () => {

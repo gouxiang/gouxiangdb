@@ -231,7 +231,7 @@ export async function externalDeleteRecord(input: ExternalWriteInput, caps: Shar
   // 删除不逐字段校验，但仍要确认这条记录确实在被分享的表里（防跨表删）。
   const record = await prisma.record.findFirst({ where: { id: recordId, tableId: input.tableId, deletedAt: null } });
   if (!record) throw new HttpError(404, "记录不存在或已删除");
-  await withWriteTx("share.record.delete", (tx) => softDeleteRecordTx(tx, recordId));
+  await withWriteTx("share.record.delete", (tx) => softDeleteRecordTx(tx, recordId, sharerId));
   auditWrite({
     event: "share_external_write",
     status: 200,

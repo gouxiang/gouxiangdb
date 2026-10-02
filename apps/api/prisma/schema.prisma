@@ -809,6 +809,39 @@ model Attachment {
   @@map("attachments")
 }
 
+// ---------------------------------------------------------------------------
+// 记录变更历史（数据日志）：记录详情抽屉「查看日志」的数据源。
+// 纯增量新表：不动 records/fields 任何既有结构，也不回填存量历史（存量无历史可言）。
+//
+// 写入完全旁路 + 默认关闭（GX_RECORD_CHANGES，未显式 "on" 即不写一行），挂在主写
+// 事务内（create/update 走 applyFieldWrites，delete/restore 走各自事务体），与主写
+// 共生死：主写回滚则本行一并回滚。
+//
+// changes 是 JSON 字符串（[{fieldId,fieldName,before,after}]）：fieldName 落快照
+// 是刻意的——字段被删后前端已无法映射 id，只留 id 会渲染成空白行。
+// delete/restore 的 changes 恒为 "[]"（整行进/出回收站，无字段级前后值）。
+//
+// actorName 同为快照（改名后历史条目仍显示当时的名字）；null 表示系统写，
+// 读侧**不回填空串**（前端据此显示「系统」）。
+//
+// 建表迁移 migrations/20261010010000_record_changes（手写只增，列名 camelCase，
+// 无物理外键——SQLite REFERENCES 会让旧库 deploy 失败）。
+// ---------------------------------------------------------------------------
+model RecordChange {
+  id        String   @id @default(cuid())
+  tableId   String
+  recordId  String
+  op        String
+  actorId   String?
+  actorName String?
+  changedAt DateTime @default(now())
+  changes   String
+
+  @@index([recordId, changedAt])
+  @@index([tableId, changedAt])
+  @@map("record_changes")
+}
+
 // ============================================================================
 // 手写维护表（不经 Prisma 管理，禁止在此添加 model）
 // ============================================================================
