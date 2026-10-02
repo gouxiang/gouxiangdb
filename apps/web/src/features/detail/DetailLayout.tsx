@@ -11,6 +11,8 @@ import { Button, FieldIcon, Modal, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { MdContent } from "../../components/MdContent";
 import { AttachmentLinks } from "../cells/AttachmentLinks";
+import { openFilePreview } from "../attachments/preview-opener";
+import { attachmentFromLink } from "../attachments/policy";
 // 抽屉里的只读值此前完全没有日期分支，日期/公式时间值按原串直出；统一走
 // formatCell 的日期口径，与网格单元格、卡片保持同一套显示规则。
 import { fmtDateTime, formatCell, isIsoDatetimeLike } from "../cells/format";
@@ -896,8 +898,10 @@ function ReadValue({ field, value }: { field: FieldDTO; value: CellValue | undef
   // 附件：要在进入编辑之前拦掉——下方 Array 兜底会把整个数组 join("、 ") 成死文本，
   // 用户看得见文件名却拿不到文件。AttachmentLinks 自带 stopPropagation，点链接不会
   // 冒泡到外层「进入编辑」按钮；点这行空白处仍然是进入编辑（既有行为不变）。
+  // onPreview：与网格/看板画廊同口径——点文件名开在线预览，名字后另给显式下载按钮，
+  // 下载入口不被预览吞掉（不传该 prop 时行为与改造前一致）。
   if (field.type === "attachment") {
-    return <AttachmentLinks value={value} />;
+    return <AttachmentLinks value={value} onPreview={(f) => openFilePreview(attachmentFromLink(f))} />;
   }
   if (field.type === "member") {
     return <ReadMember value={value} />;

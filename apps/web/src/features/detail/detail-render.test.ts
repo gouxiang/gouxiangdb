@@ -48,6 +48,14 @@ describe("详情抽屉 ReadValue：日期/时间分支接线", () => {
     expect(attAt).toBeLessThan(arrAt);
     expect(attAt).toBeLessThan(dateAt);
   });
+
+  it("抽屉只读态的附件也接了在线预览（与网格/看板画廊同口径）", () => {
+    const rv = sliceFn("ReadValue");
+    // 不传 onPreview 时 AttachmentLinks 退化成纯下载链接，预览能力会在抽屉静默缺席
+    expect(rv).toContain("onPreview=");
+    expect(SRC).toContain('from "../attachments/preview-opener"');
+    expect(SRC).toContain('from "../attachments/policy"');
+  });
 });
 
 describe("详情抽屉 DetailCell：标签上置（R-F-06）", () => {
