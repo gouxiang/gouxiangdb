@@ -22,6 +22,7 @@
 // 注意绝不能 preventDefault——那会把下载本身也拦掉。
 
 import { clsx } from "clsx";
+import { Icon } from "../../components/icons";
 import { withBase } from "../../api/client";
 
 /** 最多展示的文件数，超出折叠为 `+N`（沿用改造前看板/画廊的口径） */
@@ -70,18 +71,72 @@ export interface AttachmentLinksProps {
   maxVisible?: number;
   /** 外层容器附加类名 */
   className?: string;
+  /**
+   * 可选：传入后点击文件名改为「打开在线预览」，并在名字后面额外给一个显式的下载按钮。
+   * **不传时行为与改造前完全一致**（整条就是下载链接）——既有断言与三处调用点
+   * （网格 / 详情 / 看板画廊）均不传，故默认路径零变更。
+   */
+  onPreview?: (file: AttachmentLinkItem) => void;
 }
 
 export function AttachmentLinks({
   value,
   maxVisible = ATTACHMENT_MAX_VISIBLE,
   className,
+  onPreview,
 }: AttachmentLinksProps) {
   const { visible, hiddenCount } = toAttachmentLinks(value, maxVisible);
   return (
     <span className={clsx("flex flex-wrap items-center gap-1", className)} data-testid="attachment-links">
-      {visible.map((f, i) =>
-        f.url ? (
+      {visible.map((f, i) => {
+        if (!f.url) {
+          // url 缺失：只留文件名的纯文本，不给空 href 的链接
+          return (
+            <span key={i} className="text-gx-12 text-gx-text-hint">
+              {f.name}
+            </span>
+          );
+        }
+        if (onPreview) {
+          // 预览模式：文件名仍是真 <a>（保留 href/download/rel，键盘与右键菜单行为不变），
+          // 只是 onClick 改成打开预览弹窗；另给一枚显式下载按钮，下载入口不被预览吞掉。
+          return (
+            <span key={i} className="inline-flex max-w-full items-center gap-0.5">
+              <a
+                href={withBase(f.url)}
+                download={f.name}
+                target="_blank"
+                rel="noreferrer"
+                title={f.name}
+                className="max-w-full truncate text-gx-12 text-gx-accent underline"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // 阻止默认下载：本分支的语义是「点名字=预览」。
+                  // 可选调用：node 环境（既有单测的元素树内省）传的是极简 mock 事件。
+                  e.preventDefault?.();
+                  onPreview(f);
+                }}
+                onDoubleClick={(e) => e.stopPropagation()}
+              >
+                {f.name}
+              </a>
+              <a
+                href={withBase(f.url)}
+                download={f.name}
+                target="_blank"
+                rel="noreferrer"
+                title={`下载 ${f.name}`}
+                aria-label={`下载 ${f.name}`}
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-gx-text-tertiary hover:text-gx-accent"
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+              >
+                <Icon name="download" size={11} />
+              </a>
+            </span>
+          );
+        }
+        return (
           <a
             key={i}
             href={withBase(f.url)}
@@ -95,13 +150,8 @@ export function AttachmentLinks({
           >
             {f.name}
           </a>
-        ) : (
-          // url 缺失：只留文件名的纯文本，不给空 href 的链接
-          <span key={i} className="text-gx-12 text-gx-text-hint">
-            {f.name}
-          </span>
-        ),
-      )}
+        );
+      })}
       {hiddenCount > 0 && <span className="text-gx-12 text-gx-text-hint">+{hiddenCount}</span>}
     </span>
   );

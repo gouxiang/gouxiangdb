@@ -118,8 +118,19 @@ describe("帮助中心：样式与依赖约束（源码断言）", () => {
     //   y-protocols  awareness / sync 协议编解码（服务端认的四种消息码）
     //   y-websocket  WebSocket 传输提供者（自建并重掌重连，见 collab-provider.ts）
     // **不含 y-indexeddb**：阶段 2 不做离线持久化（服务端 collab_docs 是真源），已卸载不入表。
+    //
+    // 2026-10-02 再增三项（**附件 Office 在线预览**，产品负责人书面破例，范围严格限定这三项）：
+    //   docx-preview       Word .docx 渲染（传递依赖 jszip）
+    //   @keep-lts/xlsx     Excel .xls/.xlsx 读取。刻意不用 npm 上的 `xlsx`：那是 2022 年的
+    //                      0.18.5，带 CVE-2023-30533 原型污染与 CVE-2024-22363 ReDoS 两个
+    //                      高危漏洞，官方修复版只发 SheetJS CDN；CDN 外链会让离线构建机失败，
+    //                      故用回填了这两个 CVE 的 registry 版本。
+    //   @file-viewer/pptx  PPT .pptx 渲染（纯 TS + Web Worker，无原生模块 / 无 WASM / 无 postinstall）
+    // 三者**只允许动态 import**（features/attachments/renderers.ts），由
+    // attachment-policy.test.ts 的「体积守卫」断言主 chunk 不因此膨胀。
     const BASE_DEPS = [
       "@drawnix/drawnix", "@floating-ui/react", "@gx/blocks", "@gx/design-tokens", "@gx/shared-types",
+      "@file-viewer/pptx", "@keep-lts/xlsx", "docx-preview",
       "@plait-board/markdown-to-drawnix", "@plait-board/mermaid-to-drawnix", "@plait-board/react-board",
       "@plait-board/react-text", "@plait/common", "@plait/core", "@plait/draw", "@plait/layouts",
       "@plait/text-plugins", "@tanstack/react-query", "ahooks", "classnames", "clsx", "laser-pen",

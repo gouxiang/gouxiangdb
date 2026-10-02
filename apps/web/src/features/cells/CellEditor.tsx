@@ -9,7 +9,6 @@ import type {
   CellValue,
   FieldDTO,
   LinkRefDTO,
-  AttachmentDTO,
   PermissionSet,
   TableIdT,
   RecordIdT,
@@ -17,6 +16,7 @@ import type {
 import { Icon } from "../../components/icons";
 import { Input, Textarea, Popover, Spinner, toast } from "../../components/ui";
 import { useLinkCandidates } from "../../api/records-paging-hooks";
+import { AttachmentUploader } from "../attachments/AttachmentUploader";
 import { LINK_NARROW_TEXT } from "../common/ResultNotice";
 import { formatCell, isEmptyValue, resolveSelectOption } from "./format";
 import { MemberSelect, useMemberRoster } from "../contacts/member-roster";
@@ -618,60 +618,12 @@ function LinksEditor({ value, field, recordFields, onCommit, onCancel }: CellEdi
   );
 }
 
-// ============ 附件：本地读成 base64 ============
-function AttachmentEditor({ value, onCommit, onCancel }: CellEditorProps) {
-  const [files, setFiles] = useState<AttachmentDTO[]>(
-    Array.isArray(value) ? (value as AttachmentDTO[]) : [],
-  );
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const addFiles = (list: FileList | null) => {
-    if (!list) return;
-    // U-3：附件以 dataURL 存 records.fields JSON，无对象存储通道。
-    // 容量守卫：单文件 ≤2MB（base64 后 ~2.7MB）、单格 ≤20 个，超限拒绝并提示，
-    // 防大行拖垮 SQLite 读写/hydrate/导出。文件存储改造（独立附件表/对象存储）见审计 U-3 备注。
-    const MAX_FILE_BYTES = 2 * 1024 * 1024;
-    const MAX_COUNT = 20;
-    const incoming = Array.from(list);
-    const oversized = incoming.filter((f) => f.size > MAX_FILE_BYTES);
-    if (oversized.length > 0) {
-      toast(`以下文件超过 2MB，已跳过：${oversized.map((f) => f.name).join("、")}`, "error");
-    }
-    const acceptable = incoming.filter((f) => f.size <= MAX_FILE_BYTES);
-    const room = Math.max(0, MAX_COUNT - files.length);
-    if (acceptable.length > room) {
-      toast(`单个单元格最多 ${MAX_COUNT} 个附件，多余的已跳过`, "error");
-    }
-    const picked = acceptable.slice(0, room);
-    if (picked.length === 0) return;
-    const reads = picked.map(
-      (f) =>
-        new Promise<AttachmentDTO>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () =>
-            resolve({
-              id: `${Date.now()}-${f.name}`,
-              name: f.name,
-              size: f.size,
-              mime: f.type || "application/octet-stream",
-              url: typeof reader.result === "string" ? reader.result : "",
-            });
-          reader.readAsDataURL(f);
-        }),
-    );
-    void Promise.all(reads).then((added) => {
-      const next = [...files, ...added];
-      setFiles(next);
-      onCommit(next);
-    });
-  };
-
-  const remove = (id: string) => {
-    const next = files.filter((f) => f.id !== id);
-    setFiles(next);
-    onCommit(next);
-  };
-
+// ============ 附件：服务端上传（抽屉/表单/网格共用同一个上传器）============
+//
+// 旧实现是「本地读成 base64 塞进记录 JSON」：单文件 ≤2MB、大行拖垮 hydrate/导出
+// （审计 U-3）。现在改走 POST /api/attachments，上限提到 20MB，并支持在线预览。
+// 存量 dataURL 值**照旧渲染**——上传器只负责不再新增 dataURL，不改写历史数据。
+function AttachmentEditor({ value, field, onCommit, onCancel }: CellEditorProps) {
   return (
     <div className="absolute inset-0 z-30 m-1 rounded-gx-lg border border-gx-accent bg-gx-surface p-2 shadow-lg">
       <div className="mb-1 flex items-center justify-between">
@@ -680,32 +632,7 @@ function AttachmentEditor({ value, onCommit, onCancel }: CellEditorProps) {
           关闭
         </button>
       </div>
-      <div className="max-h-40 space-y-1 overflow-y-auto">
-        {files.map((f) => (
-          <div key={f.id} className="flex items-center gap-1 text-gx-12 text-gx-text-primary">
-            <Icon name="paperclip" size={12} className="text-gx-text-hint" />
-            <span className="flex-1 truncate">{f.name}</span>
-            <button type="button" className="text-gx-danger" onClick={() => remove(f.id)}>
-              <Icon name="close" size={12} />
-            </button>
-          </div>
-        ))}
-        {files.length === 0 && <div className="text-gx-12 text-gx-text-hint">暂无附件</div>}
-      </div>
-      <button
-        type="button"
-        className="mt-2 w-full rounded-gx-lg border border-dashed border-gx-border py-1.5 text-gx-12 text-gx-accent hover:bg-gx-bg"
-        onClick={() => inputRef.current?.click()}
-      >
-        添加文件
-      </button>
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={(e) => addFiles(e.target.files)}
-      />
+      <AttachmentUploader value={value} onChange={(next) => onCommit(next)} fieldId={field.id} compact />
     </div>
   );
 }

@@ -7,6 +7,8 @@ import { Icon } from "../../components/icons";
 import { StatusPill } from "../../components/interaction";
 import { MdContent } from "../../components/MdContent";
 import { AttachmentLinks } from "./AttachmentLinks";
+import { openFilePreview } from "../attachments/preview-opener";
+import { attachmentFromLink } from "../attachments/policy";
 import { MemberDisplay, useMemberRoster } from "../contacts/member-roster";
 import { sanitizeHtml } from "../../lib/sanitize-html";
 import {
@@ -165,7 +167,9 @@ export function CellRenderer({
     // 点击单元格空白处仍走既有行为（GridRow 的 td onClick/onDoubleClick 未被截断）。
     case "attachment": {
       if (empty) return wrap(emptyCell);
-      return wrap(<AttachmentLinks value={value} />);
+      // 点文件名 = 在线预览；下载入口由 AttachmentLinks 在名字后面另给一枚按钮。
+      // 不传 onPreview 的调用方（详情抽屉只读态等）行为完全不变 —— 仍是下载链接。
+      return wrap(<AttachmentLinks value={value} onPreview={(f) => openFilePreview(attachmentFromLink(f))} />);
     }
 
     // ---------- 富文本 ----------

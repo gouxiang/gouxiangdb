@@ -16,6 +16,9 @@ import type {
 import { FieldIcon } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { AttachmentLinks } from "../cells/AttachmentLinks";
+import { AttachmentUploader } from "../attachments/AttachmentUploader";
+import { openFilePreview } from "../attachments/preview-opener";
+import { attachmentFromLink } from "../attachments/policy";
 import { MemberDisplay, MemberSelect, useMemberRoster } from "../contacts/member-roster";
 
 /** 所有非网格视图统一的 props（由 ViewRouter 注入） */
@@ -182,7 +185,10 @@ export function FieldValue({
       // 单一真源 AttachmentLinks：与网格/详情同一份实现（同款视觉 + 同款下载属性）。
       // 相比原实现新增 download——附件是 dataURL，没有 download 时现代浏览器会因
       // 「禁止顶层导航到 data: URL」而点不开。
-      return <AttachmentLinks value={value} />;
+      // 卡片里点文件名进在线预览，另给一枚显式下载按钮（下载入口不被预览吞掉）。
+      return (
+        <AttachmentLinks value={value} onPreview={(f) => openFilePreview(attachmentFromLink(f))} />
+      );
     }
     case "links": {
       const refs = Array.isArray(value) ? (value as LinkRefDTO[]) : [];
@@ -223,6 +229,13 @@ export function FieldValue({
  * 计算字段与系统字段只读，其余类型可编辑。
  * 受控组件：value + onChange（onBlur 由调用方决定是否提交）。
  */
+/** 附件上传的库上下文（选填：缺省时由上传组件从路由推导）。 */
+export interface AttachmentContext {
+  baseId?: string | null;
+  tableId?: string | null;
+  recordId?: string | null;
+}
+
 export function FieldInput({
   field,
   value,
@@ -230,6 +243,7 @@ export function FieldInput({
   disabled,
   autoFocus,
   onBlur,
+  attachmentContext,
 }: {
   field: FieldDTO;
   value: CellValue;
@@ -237,6 +251,7 @@ export function FieldInput({
   disabled?: boolean;
   autoFocus?: boolean;
   onBlur?: () => void;
+  attachmentContext?: AttachmentContext;
 }) {
   if (isReadonlyField(field)) {
     return (
@@ -441,11 +456,21 @@ export function FieldInput({
           placeholder="电话号码"
         />
       );
+    // 详情抽屉 / 表单视图的附件字段：以前这里只有一行「请在单元格中上传」的灰底提示
+    // （用户报的根因），现在换成真正的上传器——选文件、带进度上传、预览、移除都在这里。
+    // baseId 缺省时由上传组件自己从路由 /base/:baseId/table/:tableId 推导，
+    // 因此抽屉（DetailLayout）那几处调用点无需改动即可获得上传能力。
     case "attachment":
       return (
-        <div className="rounded-gx-sm bg-gx-bg px-2 py-1 text-gx-12 text-gx-text-hint">
-          附件请在单元格中上传（抽屉内暂不支持直接上传）
-        </div>
+        <AttachmentUploader
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          fieldId={field.id}
+          baseId={attachmentContext?.baseId}
+          tableId={attachmentContext?.tableId}
+          recordId={attachmentContext?.recordId}
+        />
       );
     case "links":
       return (
