@@ -16,7 +16,21 @@ import {
   useQueryClient,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { Auth, Bases, KbApi, Tables, Fields, Records, Views, SearchApi, OrgMembers, RoleScopes } from "./client";
+import {
+  Auth,
+  Bases,
+  KbApi,
+  Tables,
+  Fields,
+  Records,
+  Views,
+  SearchApi,
+  OrgMembers,
+  RoleScopes,
+  ApiError,
+  parseRecordChanges,
+  type RecordChangeEntry,
+} from "./client";
 import { useAuthStore } from "../store/auth";
 import type {
   BaseDTO,
@@ -55,6 +69,8 @@ export const QK = {
   record: (id: string) => ["record", id] as const,
   views: (tableId: string) => ["views", tableId] as const,
   comments: (recordId: string) => ["comments", recordId] as const,
+  // 记录变更日志（数据日志）：与 comments 同级，按 recordId 缓存。
+  recordChanges: (recordId: string) => ["recordChanges", recordId] as const,
   trash: (baseId: string) => ["trash", baseId] as const,
   search: (baseId: string, q: string) => ["search", baseId, q] as const,
   globalSearch: (q: string) => ["globalSearch", q] as const,
@@ -342,6 +358,30 @@ export function useComments(recordId: string | null): UseQueryResult<CommentDTO[
   return useQuery({
     queryKey: QK.comments(recordId ?? ""),
     queryFn: async () => (await Records.comments(recordId!)).comments,
+    enabled: enabledOf(recordId),
+  });
+}
+
+/**
+ * 记录变更日志（数据日志）：GET /api/records/:id/changes。
+ *
+ * 两条硬要求：
+ *   ① 没打开弹窗（recordId 为 null）就不发请求 —— 走 enabledOf；
+ *   ② 端点还没上线（404）时不报错，降级成空列表，UI 走「暂无变更记录」空态。
+ * 读取结果一律先过 parseRecordChanges，字段缺失/类型不对都不会崩。
+ */
+export function useRecordChanges(recordId: string | null): UseQueryResult<RecordChangeEntry[]> {
+  return useQuery({
+    queryKey: QK.recordChanges(recordId ?? ""),
+    queryFn: async () => {
+      try {
+        return parseRecordChanges(await Records.changes(recordId!));
+      } catch (err) {
+        // 后端 /changes 尚未落地时是 404：按「没有变更记录」处理，不把错误抛给用户。
+        if (err instanceof ApiError && err.status === 404) return [];
+        throw err;
+      }
+    },
     enabled: enabledOf(recordId),
   });
 }

@@ -625,6 +625,101 @@ export type TrashRestoreResult =
   | { ok: true }
   | { ok: true; renamed: boolean; name: string };
 
+// ——— 记录变更日志（数据日志）———
+//
+// 端点：GET /api/records/:recordId/changes?limit=100（后端稍后落地）。
+// 前端按下面的形状消费，并**一律先过 parseRecordChanges 防御性解析**——端点尚未上线时
+// 会返回 404（或字段不齐的旧形态），任何一处都不能让抽屉报错或白屏。
+
+/** 单条变更的操作类型。未知类型一律按 update 处理（不丢条目，也不崩）。 */
+export type RecordChangeOp = "create" | "update" | "delete";
+
+/** 一次操作里某个字段的前后值。 */
+export interface RecordChangeFieldDiff {
+  fieldId: string;
+  fieldName: string;
+  before: unknown;
+  after: unknown;
+}
+
+/** 一次操作（一条日志条目）。 */
+export interface RecordChangeEntry {
+  id: string;
+  op: RecordChangeOp;
+  /** 操作人 userId；系统/未知操作为 null。 */
+  actorId: string | null;
+  /** 后端顺带给的操作人名（可能为 null，前端再按成员名册兜底解析）。 */
+  actorName: string | null;
+  /** 操作时间（ISO 串）。 */
+  changedAt: string;
+  changes: RecordChangeFieldDiff[];
+}
+
+const RECORD_CHANGE_OPS: readonly RecordChangeOp[] = ["create", "update", "delete"];
+
+/** 只把「真对象」当成对象：数组 / null / 原始值一律 null，避免 Array 当字典读。 */
+function asPlainObject(v: unknown): Record<string, unknown> | null {
+  return v !== null && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : null;
+}
+
+function asNonEmptyString(v: unknown): string | null {
+  return typeof v === "string" && v.trim() !== "" ? v : null;
+}
+
+/**
+ * 把后端返回的原始 body 归一为 RecordChangeEntry[]（纯函数，便于 node 环境单测）。
+ *
+ * 防御点：body 非对象 / changes 不是数组 / 条目缺 id / op 是没见过的枚举 /
+ * changedAt 缺失或非法 / 字段级 before|after 缺失 —— 全部降级成安全值而不是抛错。
+ * 缺 id 的条目用下标兜底 key，保证 React 列表 key 稳定且不重复。
+ */
+export function parseRecordChanges(raw: unknown): RecordChangeEntry[] {
+  const root = asPlainObject(raw);
+  const list = root && Array.isArray(root.changes) ? root.changes : [];
+  const entries: RecordChangeEntry[] = [];
+  list.forEach((item, i) => {
+    const o = asPlainObject(item);
+    if (!o) return;
+    const rawOp = asNonEmptyString(o.op);
+    const diffs = Array.isArray(o.changes) ? o.changes : [];
+    entries.push({
+      id: asNonEmptyString(o.id) ?? `record-change-${i}`,
+      op: RECORD_CHANGE_OPS.includes(rawOp as RecordChangeOp) ? (rawOp as RecordChangeOp) : "update",
+      actorId: asNonEmptyString(o.actorId),
+      actorName: asNonEmptyString(o.actorName),
+      changedAt: asNonEmptyString(o.changedAt) ?? "",
+      changes: diffs.map((d, j) => {
+        const dd = asPlainObject(d) ?? {};
+        const fieldId = asNonEmptyString(dd.fieldId) ?? "";
+        return {
+          fieldId,
+          fieldName: asNonEmptyString(dd.fieldName) ?? fieldId ?? `字段 ${j + 1}`,
+          before: dd.before ?? null,
+          after: dd.after ?? null,
+        };
+      }),
+    });
+  });
+  return sortRecordChangesDesc(entries);
+}
+
+/**
+ * 按操作时间倒序（新的在上）。
+ * 解析不出时间（缺失 / 非法）的条目统一排到末尾，并保持原相对顺序——
+ * 既不会因为 NaN 比较把列表打乱，也不会让坏数据混在正常条目中间。
+ */
+export function sortRecordChangesDesc(entries: RecordChangeEntry[]): RecordChangeEntry[] {
+  return entries
+    .map((entry, index) => {
+      const t = Date.parse(entry.changedAt);
+      return { entry, index, time: Number.isFinite(t) ? t : Number.NEGATIVE_INFINITY };
+    })
+    .sort((a, b) => (a.time !== b.time ? b.time - a.time : a.index - b.index))
+    .map((x) => x.entry);
+}
+
 export const Records = {
   list: (params: {
     tableId: string;
@@ -703,6 +798,13 @@ export const Records = {
       method: "DELETE",
       timeoutMs: WRITE_TIMEOUT_MS,
     }),
+
+  /**
+   * 记录变更日志（数据日志）：GET /api/records/:recordId/changes?limit=100。
+   * 只读、不挂超时（与 comments 同口径）；404 由调用方（hook）降级为空列表。
+   */
+  changes: (recordId: string, limit = 100) =>
+    apiFetch<{ changes: RecordChangeEntry[] }>(`/api/records/${recordId}/changes${qs({ limit })}`),
 
   trash: (baseId: string) => apiFetch<{ items: TrashItemDTO[] }>(`/api/records/trash${qs({ baseId })}`),
   restore: (id: string, kind: "record" | "table" | "field") =>

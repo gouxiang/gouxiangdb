@@ -21,6 +21,11 @@ import {
 } from "../../components/ui";
 import { DetailLayoutEditor, DetailLayoutRenderer } from "../detail/DetailLayout";
 import { Icon } from "../../components/icons";
+// 底部元信息的时间口径与单元格一致（含秒），不再各写一份 toLocaleString
+import { fmtDateTime } from "../cells/format";
+// 创建人存的是裸 userId，过成员名册解析成人名
+import { useMemberRoster } from "../contacts/member-roster";
+import { RecordChangesModal } from "./RecordChangesModal";
 // 阶段 4：删除走 L2 确认 + 统一撤销 toast；写操作走在途守卫（R-D-23 / R-I-08 / R-I-26）
 import { confirmSoftDelete } from "../../components/feedback";
 import { toastDeleted, useWriteGuard } from "../../components/interaction";
@@ -153,6 +158,8 @@ function RecordDrawer({
   const user = useAuthStore((s) => s.user);
   const [draftComment, setDraftComment] = useState("");
   const [showComments, setShowComments] = useState(true);
+  // 数据日志弹窗：默认关，打开时才发 GET /api/records/:id/changes
+  const [showChanges, setShowChanges] = useState(false);
   // R-I-26 写操作在途守卫：删除 / 发评论 / 删评论各按 key 去重，防双击重复提交
   const guard = useWriteGuard();
 
@@ -163,11 +170,17 @@ function RecordDrawer({
     saveDrawerWidth(w);
   }, []);
 
+  const { byId: rosterById } = useMemberRoster();
   const table = tables?.find((t) => t.id === tableId);
   const fields = (fieldsRes ?? []).filter((f) => !f.isReverse);
   const record = recordRes?.record ?? null;
   const primaryField = table?.primaryFieldId ? fields.find((f) => f.id === table.primaryFieldId) : undefined;
   const title = record && primaryField ? String(record.fields[primaryField.id] ?? "") : "未命名";
+  // 创建人存的是 userId：过成员名册换成人名，查不到（已停用 / 无通讯录权限）时退回原文，
+  // 绝不显示空白。
+  const creatorLabel = record?.createdBy
+    ? (rosterById.get(record.createdBy)?.displayName ?? record.createdBy)
+    : null;
 
   // 上一条/下一条索引
   const allRecords = recordsRes?.records ?? [];
@@ -179,11 +192,18 @@ function RecordDrawer({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      // 日志弹窗自己会吃掉 Esc 关闭自己；这里再关抽屉会一次按键关两层，很突兀。
+      if (showChanges) return;
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, showChanges]);
+
+  // 抽屉关掉时把日志弹窗一并收掉，避免下次打开抽屉残留上一次的弹窗
+  useEffect(() => {
+    if (!open) setShowChanges(false);
+  }, [open]);
 
   const submitComment = async () => {
     const body = draftComment.trim();
@@ -272,6 +292,14 @@ function RecordDrawer({
             <span className="text-gx-11 text-gx-text-tertiary">{table?.name ?? "记录"}</span>
             <span className="truncate text-gx-14 font-semibold text-gx-text-primary">{title || "未命名"}</span>
           </div>
+          {/* 查看日志：变更历史走弹窗，不铺在抽屉正文里 */}
+          <IconButton
+            icon="history"
+            label="查看日志"
+            title="查看日志（谁在什么时候改了什么）"
+            disabled={!currentId}
+            onClick={() => setShowChanges(true)}
+          />
           {/* 编辑字段布局按钮 */}
           {currentView && (
             <button
@@ -331,12 +359,18 @@ function RecordDrawer({
             />
           )}
 
-          {/* 系统信息 */}
+          {/* 系统信息：横向紧凑一行（窄屏换行），三项同字号/同色/同间距 */}
           {record && (
-            <div className="border-t border-gx-separator px-4 py-2 text-gx-11 text-gx-text-hint">
-              <div>创建：{new Date(record.createdAt).toLocaleString("zh-CN")}</div>
-              <div>最后修改：{new Date(record.updatedAt).toLocaleString("zh-CN")}</div>
-              {record.createdBy && <div>创建人：{record.createdBy}</div>}
+            <div className="flex flex-wrap items-center gap-x-gx-md gap-y-gx-xxs border-t border-gx-separator px-4 py-2 text-gx-11 text-gx-text-hint">
+              <span>创建 {fmtDateTime(record.createdAt) || "—"}</span>
+              <span aria-hidden="true">·</span>
+              <span>最后修改 {fmtDateTime(record.updatedAt) || "—"}</span>
+              {creatorLabel && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>创建人 {creatorLabel}</span>
+                </>
+              )}
             </div>
           )}
 
@@ -434,6 +468,13 @@ function RecordDrawer({
           )}
         </div>
       </div>
+
+      {/* 数据日志弹窗（Modal 自带 portal，层级高于抽屉） */}
+      <RecordChangesModal
+        open={showChanges}
+        recordId={currentId}
+        onClose={() => setShowChanges(false)}
+      />
     </>
   );
 }
