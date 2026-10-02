@@ -46,6 +46,23 @@ export function pickUploadError(body: unknown, fallback: string): string {
 }
 
 /**
+ * 服务端没给中文错误体时（响应不是 JSON）的兜底文案。
+ *
+ * 为什么不能一律回「上传失败（HTTP xxx）」：飞牛 fnOS 上请求要先过门户再经
+ * index.cgi 的 curl 反代，403/413/502 很可能根本不是我们的后端返回的——
+ * 宿主 nginx 或门户自己拦下大包时会回一段 HTML，此时 responseText 解析不出 JSON，
+ * 光秃秃一个「HTTP 413」用户完全不知道发生了什么。这里把几个最可能的拦截码
+ * 翻成人话，并明确区分「我们的服务说不行」和「设备/网络层拦的」。
+ */
+export function uploadHttpFallback(status: number): string {
+  if (status === 413) return "文件过大，被设备或网络的上传限制拦截（HTTP 413），请压缩后再试";
+  if (status === 502) return "应用服务未响应（HTTP 502），请在应用中心重启应用后重试";
+  if (status === 504) return "上传超时（HTTP 504），文件可能过大或网络缓慢，请重试";
+  if (status === 403) return "没有该库的编辑权限，无法上传附件（HTTP 403）";
+  return `上传失败（HTTP ${status}）`;
+}
+
+/**
  * 单文件上传（XHR，带 0-100 进度回调）。
  * 失败时 Error.message 是**服务端原样给出的中文错误**（服务端会给出比前端更精确的原因）。
  */
@@ -81,7 +98,7 @@ export function uploadAttachmentFile(
         return;
       }
       // 401 交给全局登出前先不做特殊处理：附件上传的 401 就是登录态失效。
-      reject(new Error(pickUploadError(json, `上传失败（HTTP ${xhr.status}）`)));
+      reject(new Error(pickUploadError(json, uploadHttpFallback(xhr.status))));
     };
     xhr.onerror = () => reject(new Error("网络错误，上传失败，请重试"));
     xhr.onabort = () => reject(new Error("上传已取消"));
