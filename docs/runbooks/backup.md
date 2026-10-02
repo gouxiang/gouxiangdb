@@ -45,9 +45,21 @@ $BACKUP_DIR/
   daily/app-YYYYmmdd.db
   daily/app-YYYYmmdd.manifest.json
   daily/uploads-YYYYmmdd.tar
-  weekly/app-YYYYmmdd.db          # 仅 UTC 周日当天另存
+  weekly/app-YYYYmmdd.db           # UTC 周日自动另存，或手工加 --weekly 强制另存
+  weekly/uploads-YYYYmmdd.tar      # 与周快照成对（附件外置后周备份必须带文件）
   offsite/spool/offsite-*.tar.gz.age   # 仅启用加密时
 ```
+
+手工补一份周快照（不等周日）：
+
+```bash
+BACKUP_DIR=/var/lib/gouxiangdb/backups \
+node scripts/backup/online-backup.mjs --weekly
+```
+
+> `--weekly` 的另一个用途是让"周备份带 uploads"这条分支在 CI 里可测——它原本一年只在 52 个
+> 周日触发，没有注入点就无法证伪。恢复演练前手工补一份周快照，应确认 `weekly/` 下 db 与
+> uploads tar **成对**存在；只有 db 的周份恢复出来会"附件行都在、文件全丢"。
 
 ## 3. 异地加密（age X25519 收件人模式）——可选扩展，默认不启用
 
