@@ -118,6 +118,17 @@ describe("帮助中心：样式与依赖约束（源码断言）", () => {
     //   y-protocols  awareness / sync 协议编解码（服务端认的四种消息码）
     //   y-websocket  WebSocket 传输提供者（自建并重掌重连，见 collab-provider.ts）
     // **不含 y-indexeddb**：阶段 2 不做离线持久化（服务端 collab_docs 是真源），已卸载不入表。
+    // 2026-10-02 新增三项（**全部为 Office 在线预览**；产品负责人书面要求「Word/Excel/PPT
+    // 都要能在线预览」，据此对「禁新增前端依赖」公约破例一次。范围严格限于这三项，且一律
+    // 走动态 import()，主 chunk 体积不得增长）：
+    //   docx-preview      Word .docx 渲染（DOM 还原，保真度优于 mammoth，体积反而更小）
+    //   @keep-lts/xlsx    Excel .xlsx 读取。**刻意不用 npm 上的 `xlsx`**：那是 2022 年的
+    //                     0.18.5，带 CVE-2023-30533 原型污染 + CVE-2024-22363 ReDoS 两个
+    //                     高危漏洞，官方修复版只发在 SheetJS CDN 不在 npm；本包是回填了
+    //                     这两个 CVE 的 registry 版本，也避免构建机离线时拉不到 CDN。
+    //   @file-viewer/pptx PPT .pptx 渲染（纯 TS + DOM + Web Worker，无原生模块、无 WASM）
+    // PDF 与 CSV **未新增依赖**：PDF 走 blob URL + 浏览器内置渲染，CSV 复用既有的
+    // parseCsvPreview（ImportWizard.tsx）。
     //
     // 2026-10-02 再增三项（**附件 Office 在线预览**，产品负责人书面破例，范围严格限定这三项）：
     //   docx-preview       Word .docx 渲染（传递依赖 jszip）
@@ -129,7 +140,8 @@ describe("帮助中心：样式与依赖约束（源码断言）", () => {
     // 三者**只允许动态 import**（features/attachments/renderers.ts），由
     // attachment-policy.test.ts 的「体积守卫」断言主 chunk 不因此膨胀。
     const BASE_DEPS = [
-      "@drawnix/drawnix", "@floating-ui/react", "@gx/blocks", "@gx/design-tokens", "@gx/shared-types",
+      "@drawnix/drawnix", "@file-viewer/pptx", "@floating-ui/react", "@gx/blocks", "@gx/design-tokens",
+      "@gx/shared-types", "@keep-lts/xlsx", "docx-preview",
       "@file-viewer/pptx", "@keep-lts/xlsx", "docx-preview",
       "@plait-board/markdown-to-drawnix", "@plait-board/mermaid-to-drawnix", "@plait-board/react-board",
       "@plait-board/react-text", "@plait/common", "@plait/core", "@plait/draw", "@plait/layouts",
