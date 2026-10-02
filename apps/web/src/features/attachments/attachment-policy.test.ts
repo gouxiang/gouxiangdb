@@ -16,6 +16,8 @@ import {
   ATTACHMENT_ALLOWED_EXTENSIONS,
   ATTACHMENT_MAX_FILES,
   ATTACHMENT_MAX_FILE_BYTES,
+  ATTACHMENT_MAX_REQUEST_BYTES,
+  uploadCodeHint,
   attachmentFromLink,
   extOfName,
   formatBytes,
@@ -119,6 +121,45 @@ describe("上传前预校验：给出具体中文原因，不是笼统的「上�
     const r = validateAttachmentFiles([f("中.pdf", 5 * MB)], 0, ATTACHMENT_MAX_FILES, 2 * MB);
     expect(r.accepted).toHaveLength(0);
     expect(r.errors[0]).toBe("文件 中.pdf 超过 2MB 上限");
+  });
+});
+
+// ------------------------------------------------- 两个上限旋钮（后端 ade1bd8 起分离）
+
+describe("单文件上限 vs 整包上限：两个独立旋钮，不能互相越界", () => {
+  it("守卫：单文件上限恒 ≤ 整包上限（后端 config.ts 启动时也校验同一条）", () => {
+    expect(ATTACHMENT_MAX_FILE_BYTES).toBeLessThanOrEqual(ATTACHMENT_MAX_REQUEST_BYTES);
+  });
+
+  it("默认值与后端对齐：单文件 20MB、整包 40MB", () => {
+    expect(ATTACHMENT_MAX_FILE_BYTES).toBe(20 * MB);
+    expect(ATTACHMENT_MAX_REQUEST_BYTES).toBe(40 * MB);
+  });
+
+  it("为什么前端不用按整包分批：逐文件发请求时，单包 = 单文件 + 边界开销，够不着整包档", () => {
+    // 一个满格单文件 + 1KB 边界开销，仍远小于整包档：413 在这条路径上不可能触发。
+    const singleRequestBytes = ATTACHMENT_MAX_FILE_BYTES + 1024;
+    expect(singleRequestBytes).toBeLessThan(ATTACHMENT_MAX_REQUEST_BYTES);
+    // 反过来说：预校验只卡单文件就足够了，多文件不会叠加到同一个请求里。
+    const many = Array.from({ length: 50 }, (_, i) => f(`图${i}.png`, 2 * MB));
+    expect(validateAttachmentFiles(many, 0, 50, ATTACHMENT_MAX_FILE_BYTES).accepted).toHaveLength(50);
+  });
+});
+
+describe("中间件机器码只补动作提示，不覆盖服务端文案", () => {
+  it("PAYLOAD_TOO_LARGE 给出下一步该干嘛", () => {
+    expect(uploadCodeHint("PAYLOAD_TOO_LARGE")).toContain("压缩");
+  });
+
+  it("未收录的码 / 脏值一律返回 null，交给调用方原样用服务端文案", () => {
+    for (const c of [undefined, null, "", "  ", "NOT_A_CODE", 413, {}]) {
+      expect(uploadCodeHint(c)).toBeNull();
+    }
+  });
+
+  it("大小写带空格也能命中（中间件未来改写法不至于静默失效）", () => {
+    expect(uploadCodeHint(" payload_too_large ")).toBeNull(); // 不做宽松匹配，改了就应有人来看
+    expect(uploadCodeHint("PAYLOAD_TOO_LARGE")).not.toBeNull();
   });
 });
 

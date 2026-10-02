@@ -40,6 +40,11 @@ import {
  * 等于把原本可用的能力删掉。故这条路径保留旧的「读成 dataURL 存进记录 JSON」实现，
  * 上限仍是 2MB（base64 会膨胀 ~33%，再大就会拖垮 hydrate / 导出）。
  * 正常的数据表网格 / 详情抽屉 / 表单视图都能解析出 baseId，走的是服务端上传（20MB）。
+ *
+ * 关于后端的**整包**档（GX_BODY_LIMIT_ATTACHMENT，默认 40MB）：本组件是「一个文件一个
+ * 请求」（见 api.ts uploadAttachmentFiles），单包 = 单文件 + 边界开销，够不着 40MB，
+ * 所以整包档在这里不是约束，UI 也不必提示它。若将来改成多文件一个 multipart，
+ * 必须先按 policy.ATTACHMENT_MAX_REQUEST_BYTES 分批。
  */
 const LOCAL_FALLBACK_MAX_BYTES = 2 * 1024 * 1024;
 

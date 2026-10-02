@@ -14,6 +14,7 @@
 import { useAuthStore } from "../../store/auth";
 import { authHeaders } from "../../api/authHeader";
 import { withBase } from "../../api/client";
+import { uploadCodeHint } from "./policy";
 import type { AttachmentDTO } from "@gx/shared-types";
 
 /** 上传上下文：baseId 必填（后端鉴权就靠它），其余用于溯源。 */
@@ -31,13 +32,17 @@ interface UploadErrorBody {
   code?: string;
 }
 
-/** 从响应体里挑出**给用户看**的中文原因；服务端没给就用兜底文案。 */
+/**
+ * 从响应体里挑出**给用户看**的原因，并在末尾补一句「下一步该干嘛」。
+ * 服务端文案优先（它比前端准）；中间件机器码只补动作提示，不覆盖服务端文案。
+ */
 export function pickUploadError(body: unknown, fallback: string): string {
   const o = (body !== null && typeof body === "object" ? body : {}) as UploadErrorBody;
   const text = typeof o.error === "string" && o.error.trim() !== "" ? o.error.trim() : "";
-  if (text) return text;
   const msg = typeof o.message === "string" && o.message.trim() !== "" ? o.message.trim() : "";
-  return msg || fallback;
+  const base = text || msg || fallback;
+  const hint = uploadCodeHint(o.code);
+  return hint ? `${base}（${hint}）` : base;
 }
 
 /**
@@ -98,9 +103,14 @@ export interface UploadBatchResult {
 }
 
 /**
- * 逐个上传（不是一次性塞进一个 multipart）：
- * 逐文件才能给每个条目独立进度；后端原本就支持同内容去重（同 base 同 sha256 复用同一行），
- * 所以拆开请求不会多占存储。任一文件失败不中断其余文件。
+ * 逐个上传（**一个文件一个请求**，不是一次性塞进一个 multipart）：
+ *   ① 逐文件才能给每个条目独立进度——一次 multipart 只能拿到整包进度，大附件会「点了没反应」；
+ *   ② 后端支持同内容去重（同 base 同 sha256 复用同一行），拆开请求不会多占存储；
+ *   ③ 顺带让整包档不再是约束：单包 = 单文件（≤20MB，见 policy.ATTACHMENT_MAX_FILE_BYTES）
+ *      + 边界开销，永远小于整包档 40MB（policy.ATTACHMENT_MAX_REQUEST_BYTES），
+ *      所以「一次拖 50 张」不会被 413 拦，也不需要前端再做累计分批。
+ *      ⚠️ 若哪天要改成多文件一个 multipart，必须先按 ATTACHMENT_MAX_REQUEST_BYTES 分批。
+ * 任一文件失败不中断其余文件。
  */
 export async function uploadAttachmentFiles(
   files: readonly File[],

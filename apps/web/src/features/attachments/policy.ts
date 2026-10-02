@@ -45,14 +45,33 @@ export const ATTACHMENT_ALLOWED_EXTENSIONS: readonly string[] = [
 /** 「不支持的文件格式」提示里的人类可读清单。 */
 export const ATTACHMENT_ALLOWED_LABEL = ATTACHMENT_ALLOWED_EXTENSIONS.join("、");
 
-/** 单文件上限（与后端 config.bodyLimitAttachmentBytes 同口径，缺省 20MB）。 */
+/**
+ * 【单文件】上限：对应后端 GX_ATTACHMENT_MAX_FILE（默认 20MB）。
+ * 注意与下方 ATTACHMENT_MAX_REQUEST_BYTES（整包档）是**两个独立旋钮**：
+ * 调容量不动提示口径。后端 config.ts 启动时也会校验「单文件 ≤ 整包」。
+ */
 export const ATTACHMENT_MAX_FILE_BYTES = 20 * 1024 * 1024;
+
+/**
+ * 【整包】上限：对应后端 GX_BODY_LIMIT_ATTACHMENT（默认 40MB），
+ * 即一次 multipart 请求的**总大小**（含 multipart 边界开销），超了由中间件直接 413
+ * + 机器码 PAYLOAD_TOO_LARGE，业务层的中文提示根本走不到。
+ *
+ * 为什么前端今天就不用按它分批：上传是「一个文件一个请求」（见 api.ts uploadAttachmentFiles），
+ * 单包 = 单文件 + 不到 1KB 的边界开销，而单文件已被上面卡在 20MB，整包档永远不是瓶颈。
+ * 保留这个常量是为了两件事：
+ *   ① 将来有人想「多文件塞一个 multipart 少发几次请求」时，这里就是他必须先算的预算；
+ *   ② 守卫测试锁住「单文件 ≤ 整包」，避免两边各自调参到自相矛盾（那样中间件会先 413，
+ *      前端那句「超过 20MB 上限」永远显示不出来）。
+ */
+export const ATTACHMENT_MAX_REQUEST_BYTES = 40 * 1024 * 1024;
+
 /** 单字段最多附件数（与后端 ATTACHMENT_MAX_FILES 对齐）。 */
 export const ATTACHMENT_MAX_FILES = 20;
 
 /** 预览解析超时（ms）。Office 解析在大文件上可能长时间不返回，必须兜住。 */
 export const PREVIEW_TIMEOUT_MS = 15_000;
-/** 预览体积上限：与上传上限同口径，超过直接走「下载后打开」降级，不尝试解析。 */
+/** 预览体积上限：与【单文件】上传上限同口径，超过直接走「下载后打开」降级，不尝试解析。 */
 export const PREVIEW_MAX_BYTES = ATTACHMENT_MAX_FILE_BYTES;
 
 /**
@@ -138,6 +157,23 @@ export function validateAttachmentFiles<T extends AttachmentCandidate>(
     errors.push(`单个字段最多 ${maxFiles} 个附件，多余的已跳过`);
   }
   return { accepted, errors };
+}
+
+/**
+ * 中间件机器码 → 一句**用户知道下一步该干嘛**的中文补充。
+ *
+ * 背景：bodyLimit 这类中间件挡在业务层前面，回的是 `{ error: "请求体超过大小限制",
+ * code: "PAYLOAD_TOO_LARGE" }`——error 是中文但没说该怎么办。这里只补动作，不覆盖
+ * 服务端文案（服务端文案永远更准），由 api.ts 拼在括号里。
+ * 未收录的码返回 null，调用方原样用服务端文案。
+ */
+export function uploadCodeHint(code: unknown): string | null {
+  switch (typeof code === "string" ? code.trim() : "") {
+    case "PAYLOAD_TOO_LARGE":
+      return "请压缩文件后重试，或联系管理员调大附件上传上限";
+    default:
+      return null;
+  }
 }
 
 // ============ 预览分派 ============
