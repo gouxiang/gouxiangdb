@@ -14,6 +14,8 @@ import Database from "better-sqlite3";
 const KEY_TABLES = [
   "bases", "tables", "fields", "views", "records",
   "members", "users", "knowledge_bases", "kb_docs", "comments",
+  // R2 附件外置：与 online-backup.mjs 同口径（库里没有该表时计数取 0，不影响老备份）。
+  "attachments",
 ];
 
 function sha256File(file) {

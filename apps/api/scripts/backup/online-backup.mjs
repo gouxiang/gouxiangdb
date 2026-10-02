@@ -25,7 +25,14 @@ const apiRoot = path.resolve(here, "../..");
 const repoRoot = path.resolve(apiRoot, "../..");
 const prismaDir = path.join(apiRoot, "prisma");
 const backupDir = process.env.BACKUP_DIR?.trim() || path.join(apiRoot, ".db-backups");
-const uploadRoot = process.env.UPLOAD_ROOT?.trim() || path.join(apiRoot, "uploads");
+// uploadRoot 必须与运行时【同一口径】（config.ts:295-297：UPLOAD_ROOT → GX_DATA_DIR/uploads
+// → 生产 /var/lib/gouxiangdb/uploads、开发 <api>/uploads）。
+// 2026-10-02 修：此前这里兜底成 <api>/uploads，而 API 进程在生产（未设 UPLOAD_ROOT 时）
+// 用的是 /var/lib/gouxiangdb/uploads —— 两侧不一致时 makeUploadsTar 会静默返回 null，
+// 备份「成功」但一个附件文件都没打包（附件外置后即等于丢用户文件）。口径统一 + 缺失告警。
+const dataDir = process.env.GX_DATA_DIR?.trim()
+  || (process.env.NODE_ENV === "production" ? "/var/lib/gouxiangdb" : apiRoot);
+const uploadRoot = process.env.UPLOAD_ROOT?.trim() || path.join(dataDir, "uploads");
 const encryptOffsite = process.env.BACKUP_ENCRYPT_OFFSITE === "true";
 const ageRecipient = process.env.AGE_RECIPIENT?.trim();
 const ageBin = process.env.AGE_BIN?.trim() || "age";
@@ -34,6 +41,9 @@ const offsiteTarget = process.env.GX_OFFSITE_TARGET?.trim();
 const KEY_TABLES = [
   "bases", "tables", "fields", "views", "records",
   "members", "users", "knowledge_bases", "kb_docs", "comments",
+  // R2 附件外置：附件行（attachments）进 manifest 计数，恢复校验能发现「行数对不上」。
+  // 注意这只是【行】的一致性；物理文件是否真的进了备份由下面的 uploads 段与告警负责。
+  "attachments",
 ];
 
 function fail(code, msg) {
@@ -86,13 +96,43 @@ function pruneDir(dir, policy) {
     const dbPath = path.join(dir, file);
     fs.rmSync(dbPath, { force: true });
     fs.rmSync(dbPath.replace(/\.db$/, ".manifest.json"), { force: true });
+    // 同批 uploads tar 一并裁剪：db 被裁掉而 tar 永存会静默吃满磁盘
+    //（附件外置后 uploads 体积从"头像级"变成"GB 级"，这个洞必须堵）。
+    const stamp = /^app-(\d{8})(?:-\d{6})?\.db$/.exec(file)?.[1];
+    if (stamp) fs.rmSync(path.join(dir, `uploads-${stamp}.tar`), { force: true });
     deleted.push(file);
   }
   return deleted;
 }
 
+/**
+ * 统计在用附件行数（库里没有 attachments 表时返回 null，表示"未知"，
+ * 老库未迁移属正常，不该被当成 0 而去告警）。
+ */
+function countAttachmentRows(dbFile) {
+  try {
+    const db = new Database(dbFile, { readonly: true, fileMustExist: true });
+    try {
+      const row = db.prepare('SELECT count(*) AS c FROM "attachments" WHERE "deletedAt" IS NULL').get();
+      return typeof row?.c === "number" ? row.c : null;
+    } finally {
+      db.close();
+      removeSidecars(dbFile);
+    }
+  } catch {
+    return null;
+  }
+}
+
 function makeUploadsTar(stamp) {
-  if (!fs.existsSync(uploadRoot) || fs.readdirSync(uploadRoot).length === 0) return null;
+  if (!fs.existsSync(uploadRoot)) {
+    console.warn(
+      `[backup] WARN uploads 目录不存在：${uploadRoot}` +
+        `（本次备份不含任何附件/头像文件。请核对 UPLOAD_ROOT 与 API 进程用的是同一目录）`,
+    );
+    return null;
+  }
+  if (fs.readdirSync(uploadRoot).length === 0) return null;
   const tarFile = path.join(backupDir, "daily", `uploads-${stamp}.tar`);
   // -C 切到 uploads 父目录，按目录相对路径打包；macOS/BSD tar 与 GNU tar 均支持 -C。
   execFileSync("tar", ["-cf", tarFile, "-C", path.dirname(uploadRoot), path.basename(uploadRoot)], { stdio: "ignore" });
@@ -162,6 +202,15 @@ async function main() {
 
   // 3) uploads tar
   const uploadsTar = makeUploadsTar(stamp);
+  // 漏备告警：库里有用着的附件、本次却没产出 uploads 包 = 用户文件不在备份里，
+  // 这比"备份失败"更危险（备份看起来是成功的）。必须响，不能静默。
+  const attachmentRows = countAttachmentRows(dbFile);
+  if (!uploadsTar && attachmentRows) {
+    console.warn(
+      `[backup] WARN 库中有 ${attachmentRows} 条在用附件，但本次未产出 uploads 备份` +
+        `（uploadRoot=${uploadRoot} 不存在或为空）——附件文件不在本次备份内！`,
+    );
+  }
 
   // 4) manifest
   const manifest = {
@@ -179,8 +228,14 @@ async function main() {
       bytes: fs.statSync(dbFile).size,
     },
     uploads: uploadsTar
-      ? { file: path.basename(uploadsTar), sha256: sha256File(uploadsTar), bytes: fs.statSync(uploadsTar).size }
-      : null,
+      ? {
+          file: path.basename(uploadsTar),
+          // 真实来源目录写进 manifest：运维可据此核对"备份的 uploads 是不是应用实际写的那个"。
+          root: uploadRoot,
+          sha256: sha256File(uploadsTar),
+          bytes: fs.statSync(uploadsTar).size,
+        }
+      : { file: null, root: uploadRoot },
   };
   fs.writeFileSync(dbFile.replace(/\.db$/, ".manifest.json"), JSON.stringify(manifest, null, 2));
 
@@ -189,6 +244,13 @@ async function main() {
     const weeklyDir = path.join(backupDir, "weekly");
     fs.mkdirSync(weeklyDir, { recursive: true });
     fs.cpSync(dbFile, path.join(weeklyDir, path.basename(dbFile)));
+    // 附件外置后必须同批带上 uploads：只存 db 的周备份恢复出来，附件行都在、
+    // 文件全丢（下载 404），比"没有这份备份"更坑。代价是周备份体积 ≈ db + uploads tar。
+    if (uploadsTar) {
+      const weeklyTar = path.join(weeklyDir, path.basename(uploadsTar));
+      fs.cpSync(uploadsTar, weeklyTar);
+      console.log(`[backup] weekly 含 uploads：${weeklyTar}`);
+    }
   }
 
   // 6) 保留裁剪

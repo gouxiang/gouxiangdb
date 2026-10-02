@@ -28,6 +28,9 @@ export { parseM5SearchFlag, parseM5ShadowStrict, parseSearchWorkerFlag } from ".
 // 0.1.7 公开注册开关（GX_ALLOW_PUBLIC_SIGNUP）真源在 configSignup.ts（运行时 per-request 判定，
 // 故导出的是纯函数而非启动期快照字段）；此处 re-export 供 import { ... } from "./config.js" 复用。
 export { publicSignupOpen } from "./configSignup.js";
+// 记录变更历史（数据日志）写入开关（GX_RECORD_CHANGES）真源在 configRecordChanges.ts：
+// 同样是运行时函数而非启动期快照——写路径每次判定读 env，运维打开即生效、无需重启。
+export { parseRecordChangesFlag, recordChangesEnabled } from "./configRecordChanges.js";
 import {
   parseM5SearchFlag, parseM5ShadowStrict, parseSearchWorkerFlag, type M5SearchFlag,
 } from "./configM5Search.js";
@@ -43,10 +46,17 @@ const DEFAULT_PORT = 3001;
 const DEFAULT_MIN_DISK_MB = 1024;
 const DEFAULT_BODY_LIMIT_JSON_MB = 1;
 const DEFAULT_BODY_LIMIT_UPLOAD_MB = 6;
-// 附件上传档（/api/attachments）：默认 20MB。既是【单个文件】上限，也是该端点
-// 请求体总闸（Hono bodyLimit 按 Content-Length 先拦，超限直接 413，不会缓冲进内存）。
-// 需要更大单文件或更大整包时调 GX_BODY_LIMIT_ATTACHMENT（MB）。
-const DEFAULT_BODY_LIMIT_ATTACHMENT_MB = 20;
+// 附件上传档（/api/attachments）：默认 40MB。它是该端点【整包】请求体总闸
+//（Hono bodyLimit 按 Content-Length 先拦，超限直接 413，不会缓冲进内存）。
+// 注意：整包 ≠ 单文件。整包必须明显大于单文件上限，否则「一次传多个文件」会被
+// multipart 边界开销先挤爆、用户选几张照片就 413。整包调 GX_BODY_LIMIT_ATTACHMENT（MB）；
+// 调大时【必须】同步调大网关侧（Caddy request_body / 反代 client_max_body_size），
+// 否则请求在到达应用前就被网关 413，报错还不是我们的中文信封。
+const DEFAULT_BODY_LIMIT_ATTACHMENT_MB = 40;
+// 附件【单文件】上限：默认 20MB，与整包档【分名】，由 GX_ATTACHMENT_MAX_FILE（MB）调。
+// 二者必须分离：整包档是容量闸门（调大不影响校验语义），单文件档是给用户的明确错误
+// 提示（「文件 xxx 超过 20MB 上限」）。若共用同一个值，调容量就会连带改掉提示口径。
+const DEFAULT_ATTACHMENT_MAX_FILE_MB = 20;
 
 export interface ConfigIssue {
   variable: string;
@@ -213,12 +223,17 @@ export interface AppConfig {
   bodyLimitJsonBytes: number;
   bodyLimitUploadBytes: number;
   /**
-   * 附件上传档（GX_BODY_LIMIT_ATTACHMENT，默认 20MB）：/api/attachments 的 multipart
-   * 请求体总闸，同时也是路由内【单个文件】大小校验的上限（二者同源，避免中间件放行后
-   * 业务又拒、或业务放行后中间件先 413 的口径分叉）。与头像档（bodyLimitUploadBytes）
-   * 分名，互不影响。
+   * 附件上传档（GX_BODY_LIMIT_ATTACHMENT，默认 40MB）：/api/attachments 的 multipart
+   * 【整包】请求体总闸。与头像档（bodyLimitUploadBytes）分名，互不影响。
+   * 调大时必须同步调大网关侧请求体上限，否则请求先被网关 413。
    */
   bodyLimitAttachmentBytes: number;
+  /**
+   * 附件【单文件】上限（GX_ATTACHMENT_MAX_FILE，默认 20MB）。只用于路由内逐个文件的
+   * 校验与错误提示，与整包档 bodyLimitAttachmentBytes 分离：调容量不改提示口径。
+   * 约束：应恒 ≤ bodyLimitAttachmentBytes，否则中间件会先 413、业务提示永远走不到。
+   */
+  attachmentMaxFileBytes: number;
   /** M6/S2：/mcp 请求体上限（GX_MCP_BODY_LIMIT，默认 11MB）；/api 两档语义不变。 */
   mcpBodyLimitBytes: number;
   /** M6/S2 /mcp 限流：窗口秒 / patId 桶上限 / IP 预桶上限（C-1 默认 60/120/300）。 */
@@ -331,6 +346,10 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
       env.GX_BODY_LIMIT_ATTACHMENT,
       DEFAULT_BODY_LIMIT_ATTACHMENT_MB * 1024 * 1024,
     ),
+    attachmentMaxFileBytes: parseBodyLimit(
+      env.GX_ATTACHMENT_MAX_FILE,
+      DEFAULT_ATTACHMENT_MAX_FILE_MB * 1024 * 1024,
+    ),
     auditDir: env.GX_AUDIT_DIR?.trim()
       || (prod ? "/var/log/gouxiangdb" : path.join(dataDir, ".audit")),
     backupDir: env.BACKUP_DIR?.trim()
@@ -378,6 +397,15 @@ const resolved = buildConfig(process.env);
 // 迁移目录缺失不阻断启动（只读提示）；readyz 探针会给出权威失败结论。
 if (!fs.existsSync(resolved.migrationsDir)) {
   console.warn(`[config] 迁移目录不存在：${resolved.migrationsDir}`);
+}
+// 单文件上限不该大于整包档：否则超大文件会先被 bodyLimit 以 413 拦下，
+// 路由内「文件 xxx 超过 N MB 上限」的中文提示永远走不到（只提示不拦截，配置错也不至于起不来）。
+if (resolved.attachmentMaxFileBytes > resolved.bodyLimitAttachmentBytes) {
+  console.warn(
+    `[config] 附件单文件上限（${(resolved.attachmentMaxFileBytes / 1024 / 1024).toFixed(0)}MB）` +
+      `大于整包档（${(resolved.bodyLimitAttachmentBytes / 1024 / 1024).toFixed(0)}MB）：` +
+      `请调大 GX_BODY_LIMIT_ATTACHMENT 或调小 GX_ATTACHMENT_MAX_FILE。`,
+  );
 }
 
 export const config: AppConfig = Object.freeze(resolved);

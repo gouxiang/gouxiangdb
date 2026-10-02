@@ -5,7 +5,9 @@
 // 三条硬约束：
 //   1. 落盘路径只由本文件按 sha256 推导，绝不接受调用方传入的相对/绝对路径；
 //   2. 读取时同样只信库里的 storagePath，并经 resolveStoredFile 做穿越校验；
-//   3. 单文件上限与配置 bodyLimitAttachmentBytes 同源（中间件档与业务校验不分叉）。
+//   3. 【单文件】上限取 attachmentMaxFileBytes（默认 20MB），与【整包】档
+//      bodyLimitAttachmentBytes（默认 40MB）分名——前者是给用户看的错误口径，
+//      后者是容量闸门，调容量不应改提示。
 
 import fs from "node:fs";
 import path from "node:path";
@@ -59,9 +61,9 @@ export const ALLOWED_EXTENSION_LABEL = ALLOWED_EXTENSIONS.join("、");
  */
 export const FORCE_DOWNLOAD_MIMES: readonly string[] = ["image/svg+xml"];
 
-/** 单文件上限字节数（与中间件 /api/attachments 档同源）。 */
+/** 单文件上限字节数（默认 20MB，GX_ATTACHMENT_MAX_FILE）；与整包档分名，见文件头第 3 条。 */
 export function attachmentMaxBytes(): number {
-  return config.bodyLimitAttachmentBytes;
+  return config.attachmentMaxFileBytes;
 }
 
 /** 20MB → "20MB" 之类的展示串（用于「文件 xxx 超过 20MB 上限」）。 */

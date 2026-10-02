@@ -35,11 +35,11 @@
 	}
 
 	# 上传体积第一道闸（与应用 body-limit 双保险：应用 JSON 1MB / 头像上传 6MB /
-	# 附件上传 20MB，这里取 24MB 给 multipart 边界与编码开销留余量）。
-	# 若把 GX_BODY_LIMIT_ATTACHMENT 调大到 20MB 以上，此处必须同步调大，否则
-	# 网关会先于应用返回 413。
+	# 附件上传【整包】40MB，这里取 48MB 给 multipart 边界与编码开销留余量）。
+	# 若把 GX_BODY_LIMIT_ATTACHMENT 调到 40MB 以上，此处必须同步调大，否则
+	# 网关会先于应用返回 413（用户看不到我们的中文错误提示）。
 	request_body {
-		max_size 24MB
+		max_size 48MB
 	}
 
 	# HSTS 仅在“公网正式证书域名”下开启；内网 CA/自签请勿开启。

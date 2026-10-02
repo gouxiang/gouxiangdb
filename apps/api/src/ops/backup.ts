@@ -22,6 +22,9 @@ export const KEY_TABLES = [
   "knowledge_bases",
   "kb_docs",
   "comments",
+  // R2 附件外置：附件行纳入计数对账（注意只验【行】，物理文件的一致性由
+  // scripts/backup/online-backup.mjs 的 uploads tar + 漏备告警负责）。
+  "attachments",
 ] as const;
 
 export type KeyTable = (typeof KEY_TABLES)[number];

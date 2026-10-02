@@ -34,7 +34,7 @@ const ORG_ADMIN_PATTERNS = [
   /\/api\/v1\/org\/members\/[^/]+\/reactivate$/,
 ];
 
-// R2 附件外置：上传端点单次请求体最重（默认 20MB 档），单独给桶 120 次/60 秒/键。
+// R2 附件外置：上传端点单次请求体最重（默认 40MB 档），单独给桶 120 次/60 秒/键。
 // 目的不是收紧（正常批量上传远达不到），而是别让 600/60s 的 /api 兜底桶被换算成
 // 「每分钟 12GB 写盘」这种量级的放大；下载 /:id/content 仍在兜底桶里，不受影响。
 const ATTACHMENT_UPLOAD_PATTERNS = [/^\/api\/attachments\/?$/];

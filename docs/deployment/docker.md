@@ -214,7 +214,8 @@ docker compose -f deploy/docker/docker-compose.yml down        # 停容器，命
 | `PORT` | 否 | 3001 | |
 | `GX_DATA_DIR` | 内置 | `/data` | |
 | `GX_MIN_DISK_MB` | 否 | 1024 | disk 探针下限 |
-| `GX_BODY_LIMIT_JSON` / `GX_BODY_LIMIT_UPLOAD` / `GX_BODY_LIMIT_ATTACHMENT` | 否 | 1 / 6 / 20（MB） | 附件档同时是单文件上限与 `/api/attachments` 请求体总闸 |
+| `GX_BODY_LIMIT_JSON` / `GX_BODY_LIMIT_UPLOAD` / `GX_BODY_LIMIT_ATTACHMENT` | 否 | 1 / 6 / 40（MB） | 附件档是 `/api/attachments` 的**整包**请求体总闸（一次多文件共用）；调大它要同步调大网关侧请求体上限 |
+| `GX_ATTACHMENT_MAX_FILE` | 否 | 20（MB） | 附件**单文件**上限，只决定「文件 xxx 超过 20MB 上限」的提示口径，与整包档分名 |
 | `GX_RATE_LIMIT` | 否 | on | 压测才设 off |
 | `GX_INIT_ADMIN_EMAIL`/`GX_INIT_ADMIN_PASSWORD`/`GX_INIT_ADMIN_NAME` | 否 | 空 | 首次部署创建超级管理员；两者（EMAIL/PASSWORD）都非空才执行，空则跳过且不失败，详见 [`first-admin-init.md`](./first-admin-init.md) |
 | `GX_SOCKET_PATH`/`GX_BASE_PATH` | 否 | 空 | Docker 走 TCP 根路径，**不用**；仅飞牛原生用 |

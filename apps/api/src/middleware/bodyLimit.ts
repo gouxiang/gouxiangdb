@@ -2,8 +2,9 @@
 // 请求体上限：用 Hono 自带 hono/body-limit（零新增依赖）。
 // 全局 JSON 默认 GX_BODY_LIMIT_JSON（1MB）；上传类端点走独立放宽档：
 //   · /api/auth/me/avatar      → GX_BODY_LIMIT_UPLOAD（6MB，对齐业务 5MB + 余量）
-//   · /api/attachments         → GX_BODY_LIMIT_ATTACHMENT（20MB）
+//   · /api/attachments         → GX_BODY_LIMIT_ATTACHMENT（40MB，【整包】档）
 // 三档互斥精确路径，JSON 档不放宽。超限统一返回 413 与机器码，不放行堆栈。
+// 附件的【单文件】校验（默认 20MB）不在本文件，见 domain/attachmentStore.ts。
 // 必须在任何 body 解析之前挂载。
 
 import { bodyLimit } from "hono/body-limit";
@@ -36,7 +37,8 @@ const uploadLimit = bodyLimit({
   onError: payloadTooLarge,
 });
 
-// 附件上传档（R2 附件外置）：默认 20MB，与头像档分名。
+// 附件上传档（R2 附件外置）：默认 40MB【整包】，与头像档分名，也与该端点单文件
+// 校验（20MB）分名——整包大于单文件，一次多传才不会被边界开销挤爆。
 const attachmentLimit = bodyLimit({
   maxSize: config.bodyLimitAttachmentBytes,
   onError: payloadTooLarge,
@@ -69,7 +71,7 @@ function isMcpPath(c: Context): boolean {
 }
 
 // 按请求路径在四档固定阈值间分流（Hono bodyLimit 阈值在创建时固定）。
-// 顺序：/mcp 档 -> 上传类档（头像 6MB / 附件 20MB）-> /api 默认档（互斥精确路径，
+// 顺序：/mcp 档 -> 上传类档（头像 6MB / 附件整包 40MB）-> /api 默认档（互斥精确路径，
 // 既有两档行为不变）。
 export const bodyLimitDispatch: MiddlewareHandler = (c, next) => {
   if (isMcpPath(c)) return mcpLimit(c, next);

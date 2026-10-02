@@ -131,12 +131,22 @@ describe("POST /api/attachments", () => {
     expect(await h.prisma.attachment.count({ where: { baseId } })).toBe(0);
   });
 
+  it("整包档与单文件档是两个旋钮：整包 6MB、单文件 2MB（调容量不改提示口径）", async () => {
+    const { config } = await import("../../config.js");
+    const m = await import("../../domain/attachmentStore.js");
+    expect(config.bodyLimitAttachmentBytes).toBe(6 * 1024 * 1024);
+    expect(config.attachmentMaxFileBytes).toBe(2 * 1024 * 1024);
+    expect(m.attachmentMaxBytes()).toBe(2 * 1024 * 1024);
+    expect(m.attachmentMaxBytesLabel()).toBe("2MB");
+  });
+
   it("单文件超过 2MB 上限 → 400 且错误信息含文件名与上限", async () => {
     const baseId = await h.makeBase("B-big");
     const res = await h.upload(
       [{ name: "big.zip", type: "application/zip", content: Buffer.alloc(2 * 1024 * 1024 + 1, 7) }],
       { baseId },
     );
+    // 注：整包档是 6MB，这个 2MB+1 的包【能】过中间件；被拒只可能是单文件校验拦的。
     expect(res.status).toBe(400);
     expect((await json(res)).error).toBe("文件 big.zip 超过 2MB 上限");
     expect(await h.prisma.attachment.count({ where: { baseId } })).toBe(0);
@@ -226,10 +236,10 @@ describe("POST /api/attachments", () => {
     expect((await json(res)).files).toHaveLength(1);
   });
 
-  it("请求体分档：超过附件档(2MB) 的包被中间件挡在 413（路由根本不会被执行）", async () => {
+  it("请求体分档：超过附件整包档(6MB) 的包被中间件挡在 413（路由根本不会被执行）", async () => {
     const baseId = await h.makeBase("B-gate-413");
     const res = await h.upload(
-      [{ name: "huge.zip", type: "application/zip", content: Buffer.alloc(2 * 1024 * 1024 + 1, 7) }],
+      [{ name: "huge.zip", type: "application/zip", content: Buffer.alloc(6 * 1024 * 1024 + 1, 7) }],
       { baseId },
       h.gatedApp,
     );
@@ -238,11 +248,13 @@ describe("POST /api/attachments", () => {
     expect(await h.prisma.attachment.count({ where: { baseId } })).toBe(0);
   });
 
+  // createApp 要动态装配整个路由图（含 v1/org/search 等），全量并行下 5s 默认预算不够，
+  // 这是"装配慢"而非"挂载错"，故放宽单例预算（不动全局 testTimeout）。
   it("真 app（createApp）已挂上 /api/attachments：不带 multipart 是 400 而非 404", async () => {
     const { createApp } = await import("../../app.js");
     const full = createApp().app;
     const res = await full.request("/api/attachments", { method: "POST" });
     // 404 = 没挂上；400 = 路由命中但请求体不合 multipart
     expect(res.status).toBe(400);
-  });
+  }, 30000);
 });

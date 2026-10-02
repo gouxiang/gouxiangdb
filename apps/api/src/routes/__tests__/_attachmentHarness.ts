@@ -7,7 +7,10 @@
 //
 // 环境口径（本夹具显式收窄，避免测试造大缓冲）：
 //   GX_BODY_LIMIT_JSON=0.25     → JSON 档 256KB（用来证明附件端点没落回这一档）
-//   GX_BODY_LIMIT_ATTACHMENT=2  → 附件档 2MB，同时是单文件上限（错误信息出现「2MB」）
+//   GX_BODY_LIMIT_ATTACHMENT=6  → 附件【整包】档 6MB（用来证明超大包在中间件层 413）
+//   GX_ATTACHMENT_MAX_FILE=2    → 附件【单文件】上限 2MB（错误信息出现「2MB」）
+// 两档刻意取不同值：这样才能证明「整包容量」与「单文件提示口径」是两个独立旋钮
+// （同值会让下面那些用例退化成自证）。
 
 import { Hono } from "hono";
 import fs from "node:fs";
@@ -59,7 +62,8 @@ export async function setupAttachmentHarness(prefix = "gx-attachment-"): Promise
   process.env.UPLOAD_ROOT = uploadRoot;
   process.env.GX_AUDIT_DIR = auditDir;
   process.env.GX_BODY_LIMIT_JSON = "0.25";
-  process.env.GX_BODY_LIMIT_ATTACHMENT = "2";
+  process.env.GX_BODY_LIMIT_ATTACHMENT = "6";
+  process.env.GX_ATTACHMENT_MAX_FILE = "2";
   process.env.GX_M1_SIDECAR = "off";
   process.env.GX_M1_SIDECAR_READ = "off";
   delete process.env.GX_M1_KEYSET;
