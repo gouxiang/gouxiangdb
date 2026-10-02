@@ -627,12 +627,15 @@ export type TrashRestoreResult =
 
 // ——— 记录变更日志（数据日志）———
 //
-// 端点：GET /api/records/:recordId/changes?limit=100（后端稍后落地）。
-// 前端按下面的形状消费，并**一律先过 parseRecordChanges 防御性解析**——端点尚未上线时
+// 端点：GET /api/records/:recordId/changes?limit=&cursor=（后端稍后落地）。
+// 前端按下面的形状消费，并**一律先过 parseRecordChanges* 防御性解析**——端点尚未上线时
 // 会返回 404（或字段不齐的旧形态），任何一处都不能让抽屉报错或白屏。
 
-/** 单条变更的操作类型。未知类型一律按 update 处理（不丢条目，也不崩）。 */
-export type RecordChangeOp = "create" | "update" | "delete";
+/**
+ * 单条变更的操作类型。未知类型一律按 update 处理（不丢条目，也不崩）。
+ * restore 与 delete 是两件事：删除=进回收站，恢复=从回收站捞回来，别合并。
+ */
+export type RecordChangeOp = "create" | "update" | "delete" | "restore";
 
 /** 一次操作里某个字段的前后值。 */
 export interface RecordChangeFieldDiff {
@@ -655,7 +658,22 @@ export interface RecordChangeEntry {
   changes: RecordChangeFieldDiff[];
 }
 
-const RECORD_CHANGE_OPS: readonly RecordChangeOp[] = ["create", "update", "delete"];
+/**
+ * 变更日志响应体（后端最终契约：分页形态）。
+ *
+ * 列表键**同时接受 items 与 changes**：items 是定稿形态，changes 是早期草稿形态，
+ * 前端 `items ?? changes` 两版都能跑，避免前后端版本错配时整页判成非法。
+ * 分页键（nextCursor / hasMore）一律可选：当前 UI 只取首页，缺了不影响条目解析。
+ */
+export interface RecordChangesResponse {
+  items?: RecordChangeEntry[];
+  /** 早期草稿形态的列表键，保留只为兼容，后端不再产出。 */
+  changes?: RecordChangeEntry[];
+  nextCursor?: string | null;
+  hasMore?: boolean;
+}
+
+const RECORD_CHANGE_OPS: readonly RecordChangeOp[] = ["create", "update", "delete", "restore"];
 
 /** 只把「真对象」当成对象：数组 / null / 原始值一律 null，避免 Array 当字典读。 */
 function asPlainObject(v: unknown): Record<string, unknown> | null {
@@ -669,15 +687,20 @@ function asNonEmptyString(v: unknown): string | null {
 }
 
 /**
- * 把后端返回的原始 body 归一为 RecordChangeEntry[]（纯函数，便于 node 环境单测）。
+ * 把后端返回的原始 body 归一为「条目 + 分页游标」（纯函数，便于 node 环境单测）。
  *
- * 防御点：body 非对象 / changes 不是数组 / 条目缺 id / op 是没见过的枚举 /
- * changedAt 缺失或非法 / 字段级 before|after 缺失 —— 全部降级成安全值而不是抛错。
- * 缺 id 的条目用下标兜底 key，保证 React 列表 key 稳定且不重复。
+ * 防御点：body 非对象 / 列表键缺失或非数组 / 条目缺 id / op 是没见过的枚举 /
+ * changedAt 缺失或非法 / 字段级 before|after 缺失 / 分页键类型不对 ——
+ * 全部降级成安全值而不是抛错。缺 id 的条目用下标兜底 key，保证 React 列表 key 稳定且不重复。
  */
-export function parseRecordChanges(raw: unknown): RecordChangeEntry[] {
+export function parseRecordChangesResponse(raw: unknown): {
+  entries: RecordChangeEntry[];
+  nextCursor: string | null;
+  hasMore: boolean;
+} {
   const root = asPlainObject(raw);
-  const list = root && Array.isArray(root.changes) ? root.changes : [];
+  // items 优先（定稿契约），changes 回退（草稿形态）；两者都不是数组 → 空列表
+  const list = root && Array.isArray(root.items) ? root.items : Array.isArray(root?.changes) ? root.changes : [];
   const entries: RecordChangeEntry[] = [];
   list.forEach((item, i) => {
     const o = asPlainObject(item);
@@ -702,7 +725,20 @@ export function parseRecordChanges(raw: unknown): RecordChangeEntry[] {
       }),
     });
   });
-  return sortRecordChangesDesc(entries);
+  return {
+    entries: sortRecordChangesDesc(entries),
+    // 分页键只做类型收敛：非字符串一律当「没有下一页」，绝不因为键的类型不对把整份响应判非法
+    nextCursor: root ? asNonEmptyString(root.nextCursor) : null,
+    hasMore: root?.hasMore === true,
+  };
+}
+
+/**
+ * 只要条目、不要游标的便捷入口（UI 目前只取首页）。
+ * 行为与 parseRecordChangesResponse 完全一致，仅省掉解构。
+ */
+export function parseRecordChanges(raw: unknown): RecordChangeEntry[] {
+  return parseRecordChangesResponse(raw).entries;
 }
 
 /**
@@ -800,11 +836,12 @@ export const Records = {
     }),
 
   /**
-   * 记录变更日志（数据日志）：GET /api/records/:recordId/changes?limit=100。
+   * 记录变更日志（数据日志）：GET /api/records/:recordId/changes?limit=&cursor=。
    * 只读、不挂超时（与 comments 同口径）；404 由调用方（hook）降级为空列表。
+   * cursor 不传即首页；qs 会滤掉空值，首页不会多出 `cursor=`。
    */
-  changes: (recordId: string, limit = 100) =>
-    apiFetch<{ changes: RecordChangeEntry[] }>(`/api/records/${recordId}/changes${qs({ limit })}`),
+  changes: (recordId: string, limit = 100, cursor?: string) =>
+    apiFetch<RecordChangesResponse>(`/api/records/${recordId}/changes${qs({ limit, cursor })}`),
 
   trash: (baseId: string) => apiFetch<{ items: TrashItemDTO[] }>(`/api/records/trash${qs({ baseId })}`),
   restore: (id: string, kind: "record" | "table" | "field") =>

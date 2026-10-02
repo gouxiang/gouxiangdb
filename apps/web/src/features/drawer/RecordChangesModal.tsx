@@ -15,11 +15,15 @@ import { fmtDateTime } from "../cells/format";
 import { useMemberRoster, type RosterMember } from "../contacts/member-roster";
 import { Badge, EmptyState, Modal, Spinner } from "../../components/ui";
 
-/** 操作类型 → 中文标签 + 语义色（色值一律取 design-tokens，不写死 hex）。 */
+/**
+ * 操作类型 → 中文标签 + 语义色（色值一律取 design-tokens，不写死 hex）。
+ * 删除（红）与恢复（紫）是两种动作：前者进回收站，后者从回收站捞回来，配色必须分开。
+ */
 const OP_META: Record<RecordChangeOp, { label: string; color: string }> = {
   create: { label: "新建", color: colors.success },
   update: { label: "编辑", color: colors.accent },
   delete: { label: "删除", color: colors.danger },
+  restore: { label: "恢复", color: colors.secondaryAlt },
 };
 
 export const EMPTY_CHANGES_TEXT = "暂无变更记录";

@@ -7,7 +7,12 @@
 //
 // 不覆盖：Modal 的开关与焦点管理（依赖 document，走 UI 库既有实现，本轮未改）。
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseRecordChanges, sortRecordChangesDesc, type RecordChangeEntry } from "../../api/client";
+import {
+  parseRecordChanges,
+  parseRecordChangesResponse,
+  sortRecordChangesDesc,
+  type RecordChangeEntry,
+} from "../../api/client";
 import { EMPTY_CHANGES_TEXT, formatChangeValue, resolveActorName } from "./RecordChangesModal";
 
 describe("parseRecordChanges：后端契约防御性解析", () => {
@@ -139,6 +144,59 @@ describe("resolveActorName：操作人解析", () => {
   });
 });
 
+describe("parseRecordChangesResponse：后端定稿分页契约（items 优先 / changes 回退）", () => {
+  const item = (id: string, at: string) => ({ id, op: "update", changedAt: at, changes: [] });
+
+  it("有 items 时读 items（定稿形态）", () => {
+    const out = parseRecordChangesResponse({
+      items: [item("i1", "2026-10-02T21:38:39.000Z")],
+      nextCursor: "cur_1",
+      hasMore: true,
+    });
+    expect(out.entries.map((e) => e.id)).toEqual(["i1"]);
+    expect(out.nextCursor).toBe("cur_1");
+    expect(out.hasMore).toBe(true);
+  });
+
+  it("只有 changes 时回退读 changes（草稿形态，兼容旧后端）", () => {
+    const out = parseRecordChangesResponse({ changes: [item("c1", "2026-10-02T21:38:39.000Z")] });
+    expect(out.entries.map((e) => e.id)).toEqual(["c1"]);
+    expect(out.nextCursor).toBeNull();
+    expect(out.hasMore).toBe(false);
+  });
+
+  it("items 与 changes 同时存在时以 items 为准", () => {
+    const out = parseRecordChangesResponse({
+      items: [item("from-items", "2026-10-02T21:38:39.000Z")],
+      changes: [item("from-changes", "2026-10-02T21:38:39.000Z")],
+    });
+    expect(out.entries.map((e) => e.id)).toEqual(["from-items"]);
+  });
+
+  it("两个列表键都不是数组 → 空条目，不因分页键类型不对把整份响应判非法", () => {
+    expect(parseRecordChangesResponse({ items: "oops", hasMore: "yes" }).entries).toEqual([]);
+    expect(parseRecordChangesResponse({ nextCursor: 42 }).entries).toEqual([]);
+    expect(parseRecordChangesResponse({ nextCursor: 42 }).nextCursor).toBeNull();
+    expect(parseRecordChangesResponse({ hasMore: "yes" }).hasMore).toBe(false);
+    expect(parseRecordChangesResponse({ hasMore: false, nextCursor: null }).hasMore).toBe(false);
+  });
+
+  it("restore 是独立 op，不与 delete 混（删除=进回收站，恢复=捞回来）", () => {
+    const out = parseRecordChangesResponse({
+      items: [
+        { id: "r1", op: "delete", changedAt: "2026-10-02T21:38:39.000Z", changes: [] },
+        { id: "r2", op: "restore", changedAt: "2026-10-02T21:39:39.000Z", changes: [] },
+      ],
+    });
+    expect(out.entries.map((e) => e.op)).toEqual(["restore", "delete"]); // 倒序后 restore 在上
+  });
+
+  it("parseRecordChanges 与 parseRecordChangesResponse 条目一致（便捷入口不换口径）", () => {
+    const body = { items: [item("i1", "2026-10-02T21:38:39.000Z")] };
+    expect(parseRecordChanges(body)).toEqual(parseRecordChangesResponse(body).entries);
+  });
+});
+
 describe("空态文案常量", () => {
   it("接口 404 / 无数据时共用同一句空态文案", () => {
     expect(EMPTY_CHANGES_TEXT).toBe("暂无变更记录");
@@ -192,5 +250,21 @@ describe("取数接线：queryKey 与请求路径", () => {
     await Records.changes("rec_2", 20);
     expect(calls[0]).toContain("limit=20");
     expect(calls[0]).not.toContain("limit=100");
+  });
+
+  it("首页不带 cursor；翻页时带上 cursor", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        calls.push(String(url));
+        return { ok: true, status: 200, headers: new Headers(), json: async () => ({ items: [] }) } as unknown as Response;
+      }),
+    );
+    const { Records } = await import("../../api/client");
+    await Records.changes("rec_3");
+    await Records.changes("rec_3", 100, "cur_9");
+    expect(calls[0]).not.toContain("cursor");
+    expect(calls[1]).toContain("cursor=cur_9");
   });
 });
