@@ -810,11 +810,22 @@ function DetailCell({ field, value, tableId, recordId, canEdit }: { field: Field
   useEffect(() => setDraft(value), [value]);
   const m = useGXMutations();
   const readOnly = !canEdit || READONLY_TYPES.has(field.type);
-  const commit = async () => {
+  // 附件字段必须「onChange 即提交」，不能等失焦：AttachmentUploader 没有也不需要
+  // onBlur 通道（上传/移除都是显式动作，不存在"改了一半"的中间态），而 DetailCell
+  // 的失焦提交对它永远不触发 → 文件传上去了、记录字段却存不进，刷新后附件全丢
+  // （2026-10-03 飞牛真机实测踩到）。与网格 CellEditor 的 AttachmentEditor 同口径：
+  // onChange(next) 直接 onCommit(next)。
+  const commitWith = async (next: CellValue | undefined) => {
     setEditing(false);
-    if (JSON.stringify(draft) === JSON.stringify(value)) return;
-    try { await m.updateRecord.mutateAsync({ recordId, fields: { [field.id]: draft }, tableId }); }
+    if (JSON.stringify(next) === JSON.stringify(value)) return;
+    try { await m.updateRecord.mutateAsync({ recordId, fields: { [field.id]: next }, tableId }); }
     catch (err) { toast((err as Error).message, "error"); setDraft(value); }
+  };
+  const commit = async () => commitWith(draft);
+  const isImmediateCommit = field.type === "attachment";
+  const handleChange = (v: CellValue) => {
+    setDraft(v);
+    if (isImmediateCommit) void commitWith(v);
   };
   return (
     // 标签上置（UI-SPEC R-F-06：标签统一上置，左置仅允许行内编辑/筛选条）。
@@ -837,7 +848,7 @@ function DetailCell({ field, value, tableId, recordId, canEdit }: { field: Field
           // 落库时没有归属记录，记录删除/清空时后端按 recordId 的悬挂清理与「仍被引用」
           // 判定都覆盖不到它，文件会一直留在磁盘上。baseId 仍留给上传器从
           // /base/:baseId/table/:tableId 路由推导（本组件拿不到）。
-          ? <FieldInput field={field} value={draft ?? null} onChange={setDraft} autoFocus onBlur={commit} attachmentContext={{ tableId, recordId }} />
+          ? <FieldInput field={field} value={draft ?? null} onChange={handleChange} autoFocus onBlur={commit} attachmentContext={{ tableId, recordId }} />
           : (
             <button type="button" disabled={readOnly} onClick={() => !readOnly && setEditing(true)} className={clsx("block w-full rounded-gx-sm px-1 py-0.5 text-left", readOnly ? "cursor-default text-gx-text-tertiary" : "hover:bg-gx-bg")}>
               <ReadValue field={field} value={value} />
