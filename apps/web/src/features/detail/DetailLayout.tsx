@@ -832,7 +832,12 @@ function DetailCell({ field, value, tableId, recordId, canEdit }: { field: Field
       {/* 第二行：值区，占满整格宽度 */}
       <div className="min-w-0">
         {editing && !readOnly
-          ? <FieldInput field={field} value={draft ?? null} onChange={setDraft} autoFocus onBlur={commit} />
+          // 附件上下文：tableId/recordId 本组件本来就有，必须透传给上传器。
+          // 不传的话上传器只能靠路由兜底拿到 baseId/tableId，recordId 为空 —— 附件行
+          // 落库时没有归属记录，记录删除/清空时后端按 recordId 的悬挂清理与「仍被引用」
+          // 判定都覆盖不到它，文件会一直留在磁盘上。baseId 仍留给上传器从
+          // /base/:baseId/table/:tableId 路由推导（本组件拿不到）。
+          ? <FieldInput field={field} value={draft ?? null} onChange={setDraft} autoFocus onBlur={commit} attachmentContext={{ tableId, recordId }} />
           : (
             <button type="button" disabled={readOnly} onClick={() => !readOnly && setEditing(true)} className={clsx("block w-full rounded-gx-sm px-1 py-0.5 text-left", readOnly ? "cursor-default text-gx-text-tertiary" : "hover:bg-gx-bg")}>
               <ReadValue field={field} value={value} />
