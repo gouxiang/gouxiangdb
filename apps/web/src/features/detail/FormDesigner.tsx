@@ -381,6 +381,12 @@ export function FormDesigner({
   /** 正在被拖动的字段类型（字段库新字段=目标类型；画布内拖动=该字段类型）。
       落点判定必须在**计算落点**那一层就知道它，才能提前产出 allowed/rejected。 */
   const dragTypeRef = useRef<FieldType | null>(null);
+  /** 正在拖动的来源（row=画布内已有字段 / palette=左侧字段库）。
+   *  ★ 必须在 dragstart 时记到内存，dragover 阶段不能靠 dataTransfer.getData() 判断：
+   *     浏览器安全机制在 dragover 期间对 getData 一律返回空串（drop 瞬间才可读）。
+   *     若据此把 palette 的 copy 拖放误当成 move，dropEffect(move) 与 effectAllowed(copy)
+   *     不兼容，浏览器会在松手时不触发 drop —— 字段库拖入会静默失败。 */
+  const dragSourceRef = useRef<"row" | "palette" | null>(null);
   // dragover 高频触发：用 rAF 合帧 + 落点浅比较，相同落点不重复 setState（消除闪烁）
   const dragRafRef = useRef<number | null>(null);
   const lastTargetKeyRef = useRef<string>("");
@@ -829,8 +835,8 @@ export function FormDesigner({
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    const { source } = readDrag(e);
-    applyDropEffect(e, source);
+    // 来源读内存：dragover 阶段 getData 受浏览器保护返回空串，不能用它判 source
+    applyDropEffect(e, dragSourceRef.current);
     const { clientX, clientY } = e;
     scheduleDropTarget(() => computeDropTarget(clientX, clientY));
   };
@@ -838,8 +844,7 @@ export function FormDesigner({
   const handleGapDragOver = (rowIndex: number) => (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const { source } = readDrag(e);
-    applyDropEffect(e, source);
+    applyDropEffect(e, dragSourceRef.current);
     scheduleDropTarget(() => ({ kind: "line", rowIndex }));
   };
 
@@ -870,6 +875,7 @@ export function FormDesigner({
     dropTargetRef.current = null;
     dropRejectRef.current = null;
     dragTypeRef.current = null;
+    dragSourceRef.current = null;
     setDragFieldId(null);
     setDragActive(false);
     setDropTarget(null);
@@ -882,6 +888,7 @@ export function FormDesigner({
     e.dataTransfer.effectAllowed = "move";
     // 记下拖动类型：落点判定在 dragover 阶段就要用它产出 allowed/rejected
     dragTypeRef.current = fieldById.get(id)?.type ?? null;
+    dragSourceRef.current = "row";
     setDragFieldId(id);
     setDragActive(true);
   };
@@ -891,6 +898,7 @@ export function FormDesigner({
     e.dataTransfer.setData(DT_SOURCE, "palette");
     e.dataTransfer.effectAllowed = "copy";
     dragTypeRef.current = type;
+    dragSourceRef.current = "palette";
     setDragActive(true);
   };
 
