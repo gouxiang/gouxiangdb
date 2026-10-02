@@ -15,5 +15,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     hookTimeout: 120_000,
+    // 真库用例本身只测一次真实写：5000ms 在 2900+ 用例并发、磁盘高负载时会偶发超时
+    //（隔离复跑即过）。提到 30s 消除该 flaky；挂死仍由 spec 内显式超时用例证明，不被掩盖。
+    testTimeout: 30_000,
   },
 });
