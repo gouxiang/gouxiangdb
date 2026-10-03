@@ -138,8 +138,9 @@ describe("PUT 系统角色", () => {
     expect(unlistedTable?.actions).toBe("r");
     const unlistedLib = await policy("nav_base_b2", "role_admin");
     expect(unlistedLib?.actions).toBe("manage_share");
+    // 库节点须同挂 manage_schema：七守 requireCanManageSchema 按 base 节点判（guards.ts:186）
     const managedLib = await policy("nav_base_b1", "role_admin");
-    expect(managedLib?.actions.split(",").sort()).toEqual(["manage_share", "manage_table"]);
+    expect(managedLib?.actions.split(",").sort()).toEqual(["manage_schema", "manage_share", "manage_table"]);
     const managedTable = await policy("nav_table_t1", "role_admin");
     expect(managedTable?.actions.split(",").sort()).toEqual(["manage_schema", "r", "c", "u", "d", "comment"].sort());
   });
@@ -157,12 +158,12 @@ describe("PUT 系统角色", () => {
 });
 
 describe("新库 seed：role_admin 初始投影", () => {
-  it("base：库节点 manage_share+manage_table；kb：kb 节点 content 全权+管理位", async () => {
+  it("base：库节点 manage_share+manage_table+manage_schema；kb：kb 节点 content 全权+管理位", async () => {
     const baseRes = await call("POST", "/api/bases", "owner", { name: "s5 新库" });
     expect(baseRes.status).toBe(201);
     const baseId = (await json<{ base: { id: string } }>(baseRes)).base.id;
     const baseLib = await policy(`nav_base_${baseId}`, "role_admin");
-    expect(baseLib?.actions.split(",").sort()).toEqual(["manage_share", "manage_table"]);
+    expect(baseLib?.actions.split(",").sort()).toEqual(["manage_schema", "manage_share", "manage_table"]);
 
     const kbRes = await call("POST", "/api/kb", "owner", { name: "s5 新 KB" });
     expect(kbRes.status).toBe(201);

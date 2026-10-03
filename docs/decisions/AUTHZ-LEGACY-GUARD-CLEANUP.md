@@ -41,13 +41,25 @@
   兜底）照删，其余仍被硬规则 A 拒。有测试锁（给非超管 `d` 策略仍 403）。
   **未解决**：引擎侧仍表达不了"删库"本身，翻 on 后这一条只能靠旧分支兜底，
   建议补一枚动作位（`delete_library`）后在 R3 前改回 authority。
-- 缺口 2（R2 观察期必盯）：**`manage_schema` 在投影里挂的是 table 节点，不是 base 节点**
-  （`scopeProjection.projectBase`：`canManage` 的策略行挂在 base 节点上只有
-  `manage_table,manage_share`，`manage_schema` 随 `manageSchema` 进了各 table 节点）。
-  而 `requireCanManageSchema` 的对拍点是 base 节点。故非超管的库管理员（canManage=1）在
-  on 态可能被拒改表结构（OVERDENY）。存量库靠 legacy 三表回填（owner 角色映射含
-  manage_schema）暂时不暴露，新配的库管理员会暴露。翻门前需先决定：
-  （a）把该守卫的对拍点改到 table 节点，或（b）投影给 base 节点也补 `manage_schema`。
+- 缺口 2：**已于 2026-10-03 按 (b) 闭合**（投影层改动，commit 见 `git log --oneline`）。
+  原状：`scopeProjection.projectBase` 把 `manage_schema` 只挂在各 **table** 节点，
+  base 节点只有 `manage_table,manage_share`；而 `requireCanManageSchema` 的对拍点是
+  **base** 节点 → 非超管库管理员（canManage=1）在 on 态会被 OVERDENY 403。
+  取 (b) 的三条依据（都不是新发明的语义）：
+  1. 第一代回填本就把 `manage_schema` 授在 base 节点（`shared-types/authz.ts`
+     `BASE_ROLE_ACTIONS.owner/creator` 档位串含 manage_schema，落点即 base 节点）；
+  2. 第二代 `perm.canManageSchema` 恒等于 `access.canManage`（guards.ts:69），是**库级**判定，
+     不是逐表判定——补在 base 节点才是逐值等价；
+  3. MCP 权限端口口径（mcp/permissions/types.ts §29）：manage_schema = 建表（base 节点）
+     + 字段/视图（table 节点），两处都要有。
+  不取 (a) 的理由：改守卫对拍点要动 `requireCanManageSchema` 签名与全部调用方，
+  且会让"建表"（base 级能力）失去引擎侧依据。
+  落地形态：`canManage=1` 时 base 节点 = `manage_schema,manage_table,manage_share`；
+  table 节点的 `manage_schema` **保留不动**（字段/视图写按 table 判，逐值对拍依赖它）；
+  **kb 节点不补**（kind-动作校验：manage_schema 仅 table/base 有意义）。
+  越权方向评估：仅 canManage=1 才补，与第二代库级 canManageSchema 一致，只读成员不补。
+  存量影响：已投影的库会出现 S2_ACTION_MISMATCH（base 节点动作串），
+  跑一次 `scripts/authz/project-scope.ts --apply` 即收敛（实测 dev 副本 7 行）。
 
 ### 阶段 R2：on 稳定观察期内只观测，不删（时间门）
 

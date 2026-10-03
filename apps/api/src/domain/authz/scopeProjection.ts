@@ -98,9 +98,25 @@ export function tableActions(
   return { actions, manageSchema: false };
 }
 
-/** 库节点管理位：canManage -> 表元数据+分享；否则显式 canShare -> 分享；纯只读 -> 空。 */
-function libraryManageActions(input: ScopeProjectionInput): ResourceAction[] {
-  if (input.canManage === 1) return ["manage_table", "manage_share"];
+/**
+ * 库节点管理位：canManage -> 结构+表元数据+分享；否则显式 canShare -> 分享；纯只读 -> 空。
+ *
+ * manage_schema 必须落在【库节点】（与逐表那份并存，不互斥），三处既有事实同指一处：
+ *   1) 七守 requireCanManageSchema 在 on 态按【base 节点】判 manage_schema（guards.ts:186，
+ *      ref = { resourceType: "base" }）——只挂 table 节点会让库管理员被 OVERDENY 403；
+ *   2) 第一代回填把 manage_schema 授在 base 节点（shared-types BASE_ROLE_ACTIONS
+ *      owner/creator 档位串含 manage_schema，落点即 base 节点）；
+ *   3) MCP 权限端口口径：manage_schema = 建表（base 节点）+ 字段/视图（table 节点）。
+ * 不会越权放大：仅当 canManage=1 才补，而第二代 perm.canManageSchema 恒等于 access.canManage
+ * （库级，guards.ts:69），库管理员本就持全部表的结构权；库级只读成员（canManage=0）不补。
+ *
+ * withSchema 仅 base 传 true：kb 节点挂 manage_schema 既无对应守卫、也过不了 kind-动作校验
+ * （policyAdmin §4.1：manage_schema 仅 table/base 有意义），且第一代 kb 档位串不含它。
+ */
+function libraryManageActions(input: ScopeProjectionInput, withSchema: boolean): ResourceAction[] {
+  if (input.canManage === 1) {
+    return withSchema ? ["manage_schema", "manage_table", "manage_share"] : ["manage_table", "manage_share"];
+  }
   if (input.canShare === 1) return ["manage_share"];
   return [];
 }
@@ -138,7 +154,7 @@ function projectBase(input: ScopeProjectionInput, shape: LiveSchemaShape): Proje
     out.push(scopePolicy(nodeId("table", tableId), input.roleId, actions, mask));
   }
 
-  const libActs = libraryManageActions(input);
+  const libActs = libraryManageActions(input, true);
   if (libActs.length > 0) {
     out.push(scopePolicy(nodeId("base", input.libraryId), input.roleId, libActs, null));
   }
@@ -151,7 +167,7 @@ function projectBase(input: ScopeProjectionInput, shape: LiveSchemaShape): Proje
  */
 function projectKb(input: ScopeProjectionInput): ProjectedPolicy[] {
   const { actions: contentActions } = tableActions(input, KB_CONTENT_KEY);
-  const libActs = libraryManageActions(input);
+  const libActs = libraryManageActions(input, false);
   const merged = [...contentActions, ...libActs];
   if (merged.length === 0) return [];
   return [scopePolicy(nodeId("kb", input.libraryId), input.roleId, merged, null)];
@@ -238,7 +254,8 @@ export function projectImplicitAdmin(input: ImplicitAdminInput): ProjectedPolicy
       out.push(scopePolicy(nodeId("table", tableId), ADMIN_ROLE_ID, actions, mask));
     }
     const libActs: ResourceAction[] = ["manage_share"]; // admin canShare 恒真
-    if (dto.canManage) libActs.push("manage_table");
+    // manage_schema 同挂库节点：与 libraryManageActions 同一口径（七守按 base 节点判）。
+    if (dto.canManage) libActs.push("manage_table", "manage_schema");
     out.push(scopePolicy(nodeId("base", libraryId), ADMIN_ROLE_ID, libActs, null));
   }
 

@@ -215,12 +215,53 @@ describe("D 逐表位与字段档位展开", () => {
     // role_admin：b1 canManage -> 全权 + manage_schema；b2 无 scope 行 -> 隐含只读 + manage_share
     const adminT1 = await policyOf("role_admin", nodeId("table", "t1"));
     expect(adminT1.actions.split(",").sort()).toEqual(["c", "comment", "d", "manage_schema", "r", "u"]);
+    // 库节点：canManage -> manage_schema 必须同挂（七守 requireCanManageSchema 按 base 节点判）
     const adminB1 = await policyOf("role_admin", nodeId("base", "b1"));
-    expect(adminB1.actions.split(",").sort()).toEqual(["manage_share", "manage_table"]);
+    expect(adminB1.actions.split(",").sort()).toEqual(["manage_schema", "manage_share", "manage_table"]);
     const adminT2 = await policyOf("role_admin", nodeId("table", "t2"));
     expect(adminT2.actions).toBe("r");
     const adminB2 = await policyOf("role_admin", nodeId("base", "b2"));
     expect(adminB2.actions).toBe("manage_share");
+  });
+
+  it("manage_schema 同时落在库节点与表节点（七守按 base 节点判）；只读成员两处都没有", async () => {
+    await mkUser();
+    await mkBase("b1");
+    await mkTable("b1", "t1", ["f1"]);
+    await mkRole("r_manage");
+    await mkRole("r_read");
+    await mkScope({ roleId: "r_manage", libraryId: "b1", canManage: 1, visible: 1 });
+    await mkScope({ roleId: "r_read", libraryId: "b1", visible: 1 });
+
+    const p = await planScopeBackfill(prisma);
+    await prisma.$transaction((tx) => applyScopeBackfill(tx, p, "tester"));
+
+    // canManage=1：库节点必须带 manage_schema，否则 on 态 requireCanManageSchema 会 OVERDENY 403
+    const mBase = await policyOf("r_manage", nodeId("base", "b1"));
+    expect(mBase.actions.split(",").sort()).toEqual(["manage_schema", "manage_share", "manage_table"]);
+    const mTable = await policyOf("r_manage", nodeId("table", "t1"));
+    expect(mTable.actions.split(",").sort()).toEqual(["c", "comment", "d", "manage_schema", "r", "u"]);
+
+    // 只读成员：库节点无策略行、表节点无结构权
+    expect(await prisma.authPolicy.count({
+      where: { nodeId: nodeId("base", "b1"), subjectId: "r_read", reason: "scope:role" },
+    })).toBe(0);
+    const rTable = await policyOf("r_read", nodeId("table", "t1"));
+    expect(rTable.actions).toBe("r");
+  });
+
+  it("kb 的 canManage 不得把 manage_schema 挂到 kb 节点（kind-动作仅 table/base 合法）", async () => {
+    await mkUser();
+    await prisma.knowledgeBase.create({ data: { id: "kb1", name: "kb1", createdBy: "u1" } });
+    await mkRole("r_kb");
+    await mkScope({ roleId: "r_kb", libraryKind: "kb", libraryId: "kb1", canManage: 1, visible: 1 });
+
+    const p = await planScopeBackfill(prisma);
+    await prisma.$transaction((tx) => applyScopeBackfill(tx, p, "tester"));
+
+    const kbPolicy = await policyOf("r_kb", nodeId("kb", "kb1"));
+    expect(kbPolicy.actions.includes("manage_schema")).toBe(false);
+    expect(kbPolicy.actions.split(",").sort()).toEqual(["c", "comment", "d", "manage_share", "manage_table", "r", "u"]);
   });
 
   it("visible=0 但逐表勾 create：不得单独放行（期望 0 条）", async () => {
