@@ -205,6 +205,36 @@ sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
   是否随 esbuild 进生产发布包属 M4-S11 出口收口范围，在那之前目标机按实际可用的 node/tsx 运行环境执行，
   不要臆造 `dist/cli` 路径。
 
+## 6.7.1 通电前存量 scope 投影与体检（翻 enforce 门之前必跑）
+
+**为什么单列一节**：双写（第二代 `role_library_scope` -> `auth_policies`）只挂在写路径上
+（PUT `/api/v1/org/library-scopes`、建库 seed、建表、字段变更），双写上线之前就存在的存量 scope 行
+从未被投影过——无迁移全量回填、无启动回填。引擎通电瞬间只认 `auth_policies` 里有什么，
+不补这段存量就等于把用户配好的权限整体抹掉。实测（开发库）：`role_library_scope` 203 行、
+`auth_policies` 里 `reason='scope:role'` 0 行、对账 S=31。
+
+```bash
+cd /srv/gouxiangdb/current/api
+# 1) 存量全量投影：只读默认，--apply 单事务写入，幂等（第二次必须 no changes）
+sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
+  pnpm tsx scripts/authz/project-scope.ts             # 只读报告；有差异 exit 1
+sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
+  pnpm tsx scripts/authz/project-scope.ts --apply     # 补存量；期望 applied changes=N、exit 0
+
+# 2) 通电前体检：一次回答「这个库能不能安全通电」
+sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
+  pnpm tsx scripts/authz/preflight.ts                 # READY exit 0 / NOT_READY exit 1
+```
+
+- `project-scope.ts` 与 `reconcile-policies.ts` 同口径（只读默认 / `--apply` / `--json`，
+  0=已一致或已修复、1=仍有差异、64=用法错），只用 `scopeProjection*` 同源原语，
+  只写 `reason='scope:role'` 行，不碰 `legacy:*` / `policy:v1` / user 行。
+- `preflight.ts` 逐项输出：① 覆盖（scope 行数 vs `scope:role` 行数 vs 期望，缺口必须为 0）、
+  ② 对账 A/B/C/S 四段、③ legacy 残留（只报告不删）、④ 双写接线（静态扫描 `apps/api/src` 真实调用点）、
+  ⑤ 门 `AUTHZ_ENFORCE_READY`。阻断项全空才 READY；A3（只报不改）与 legacy 残留是提示项，不阻断。
+- 顺序：先 `reconcile-policies.ts --apply`（修 A1/A2/B），再 `project-scope.ts --apply`（补存量），
+  最后 `preflight.ts` 收口。三者都幂等，可以重复跑。
+
 ## 6.8 权限引擎 shadow 对拍（GX_AUTHZ_ENGINE，M4-S3 起）
 
 M4-S3 在七个旧守卫（`guards.ts` 的 requireCanView/EditData/ManageSchema/ManageBase/Comment，

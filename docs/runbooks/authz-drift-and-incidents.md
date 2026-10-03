@@ -198,6 +198,10 @@ DATABASE_URL=file:/abs/app.db pnpm tsx scripts/authz/reconcile-policies.ts
 （注：脚本只从 DATABASE_URL 解析库路径，不 import 启动配置，可在停机维护
 窗口直接跑；`--apply` 内部分别在事务内计算与修复。）
 
+S 段（第二代 `role_library_scope` -> `reason='scope:role'` 投影）同源修复也走本脚本，
+但**通电前的存量缺口**请用专用入口 `scripts/authz/project-scope.ts --apply`，
+通电前总判定用 `scripts/authz/preflight.ts`（见 deploy.md §6.7.1）。
+
 ### 4.2 各类处置对照
 
 | 码 | 含义 | --apply | 人工动作 |
@@ -214,6 +218,12 @@ DATABASE_URL=file:/abs/app.db pnpm tsx scripts/authz/reconcile-policies.ts
 | C3_DANGLING_DEPT / C3_DANGLING_ROLE | dept/role 主体已删 | 否 | 确认后删该行或改挂有效主体 |
 | C4_DUPLICATE_POLICY | 同节点同主体多行（唯一索引正常会挡住，说明旁路写入） | 否 | 人工合并为一行后删余 |
 | C5_CONDITIONS_PRESENT | conditions 非空（M4 不支持行级条件，A-7） | 否 | M4 引擎不读 conditions；确认非预期后清空该列；P1 行权限启用前不得依赖这些行 |
+| S1_MISSING | 第二代 scope 行缺 `reason='scope:role'` 投影 | 修（整角色精确替换） | 存量缺口用 `scripts/authz/project-scope.ts --apply` 一次补齐（双写只覆盖写路径） |
+| S2_ACTION_MISMATCH | scope 投影动作串与期望不等 | 修（整角色精确替换） | 先查是否有人绕过端点改库 |
+| S3_MASK_MISMATCH | scope 投影 fieldMask 与期望不等 | 修（整角色精确替换） | 字段结构变更后应已由 `resyncTableMaskTx` 重算；未重算说明漏接线 |
+| S4_ORPHAN | 多余 scope 投影（期望集无此节点） | 修（整角色精确替换） | 确认不是手工授权；`role_owner` 的台账行不审计、不删 |
+
+S 段只认 `reason='scope:role'` 的行，`legacy:*` / `policy:v1` / user 行一根不碰。
 
 ### 4.3 修复后验证
 

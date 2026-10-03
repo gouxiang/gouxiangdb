@@ -46,6 +46,27 @@
    全程逐值恢复（s5-toggle-roundtrip + S10 flip-drill），权威行往返不丢（A-5 不可映射授权
    重开即恢复）；本文件由项目总监书面签收。
 
+## 1.5 通电前数据面体检（存量投影 + 体检，翻门前必做）
+
+> 头号风险：通电瞬间引擎只认 `auth_policies` 里有什么。第二代 `role_library_scope` 的存量配置
+> 若没完整投影进 `auth_policies`，用户配好的权限会整体失准。双写只覆盖写路径，存量必须补一次全量投影。
+
+```bash
+cd /srv/gouxiangdb/current/api
+# 1) 存量全量投影（幂等；第二次必须 no changes）
+DATABASE_URL=file:/var/lib/gouxiangdb/app.db pnpm tsx scripts/authz/project-scope.ts --apply
+# 2) 一次回答「能不能通电」（READY exit 0 / NOT_READY exit 1）
+DATABASE_URL=file:/var/lib/gouxiangdb/app.db pnpm tsx scripts/authz/preflight.ts
+```
+
+- [ ] `project-scope.ts --apply` 退出码 0，二次复跑打印 `no changes`。
+- [ ] `preflight.ts` 覆盖缺口=0（`auth_policies` 里 `reason='scope:role'` 行数 == 期望行数）。
+- [ ] `preflight.ts` 对账 S=0（存量投影逐值一致）、A1/A2/B/C=0（legacy 投影无漂移）。
+- [ ] `preflight.ts` 判定 READY（A3 与 legacy 残留是提示项，不阻断；见脚本 [4][5] 段输出）。
+- [ ] 体检用【升级副本库】先跑一遍，再在目标库跑；任一项不通电即停，不要"先试试"。
+
+命令出处与完整口径见 [deploy.md §6.7.1](deploy.md#671-通电前存量-scope-投影与体检翻-enforce-门之前必跑)。
+
 ## 2. 切换步骤（前置 0 + 五条齐备后）
 
 1. 按 [backup.md](backup.md) 做一次在线备份；确认 `/readyz` 五探针绿、当前 env=shadow。
