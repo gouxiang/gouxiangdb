@@ -138,7 +138,17 @@ function printHuman(r: PreflightReport): void {
     console.log(`    [${item.kind === "blocking" ? "阻断" : "提示"}] ${item.code} ${item.count}`);
   }
 
-  console.log("[3] legacy 残留");
+  console.log("[3] 库级判定可达性（抽样：库节点 vs 库内活表节点，真引擎 decide）");
+  const rc = r.data.reachability;
+  console.log(
+    `    抽样=${rc.sampled} 库节点不可达=${rc.libraryUnreachable}（库=false 而任一表=true，on 态必 403）`,
+  );
+  for (const s of rc.samples.slice(0, 5)) {
+    console.log(`    ${s.roleId}@${s.libraryId} ${s.action}：库=${s.library} 表并集=${s.anyTable}`);
+  }
+  if (rc.errors > 0) console.log(`    引擎判定抛错 ${rc.errors} 次（nav 节点缺失？先跑 reconcile-nav）`);
+
+  console.log("[4] legacy 残留");
   const lg = r.data.legacy;
   console.log(
     `    legacy:* =${lg.total} 行（${
@@ -151,14 +161,14 @@ function printHuman(r: PreflightReport): void {
     }）`,
   );
 
-  console.log("[4] 双写接线（静态扫描 apps/api/src，不含 __tests__）");
+  console.log("[5] 双写接线（静态扫描 apps/api/src，不含 __tests__）");
   for (const h of r.facts.hooks) {
     const tag = h.required ? "主路径" : "结构性";
     const where = h.callSites.length ? h.callSites.join(", ") : "无调用点";
     console.log(`    [${tag}] ${h.hook}（${h.why}）：${where}`);
   }
 
-  console.log("[5] 门");
+  console.log("[6] 门");
   console.log(`    AUTHZ_ENFORCE_READY=${r.facts.enforceReady}（本脚本只读，不翻门）`);
 
   console.log(`阻断项（${r.blocking.length}）：`);

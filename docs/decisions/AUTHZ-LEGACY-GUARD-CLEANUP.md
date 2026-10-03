@@ -93,6 +93,21 @@
     「base（零表）预期仅库节点 manage_share+manage_table」，即无 `r` 是**当前设计意图**，
     不是笔误——改它需要明确的裁决而非顺手修。
 
+- 缺口 3（**未解决，翻门硬阻断，2026-10-03 实测坐实**）：**数据动作 r/u/comment 在库节点全部落空**。
+  七守七个全部在 base 节点判（`guards.ts:118` `ref={resourceType:"base"}`）：
+  `requireCanView`→r、`requireCanEditData`→u、`requireCanComment`→comment。而第二代 scope 投影
+  刻意把数据动作只挂在 **table** 节点（库可见逐表展开为窄策略，`scopeProjection.ts` 文件头）。
+  真引擎实测（已投影副本，subject=role_admin，某 canManage 库）：
+  `action=r 库节点=false 表节点=true`、`action=u 库节点=false 表节点=true`。
+  → on 态下所有靠 `role_library_scope` 授权、又不是旧三表成员的人，进库即 403。
+  旧三表成员不暴露，是因为 legacy user 行在 base 节点有 r/c/u/d——这正是观察期看不出来的原因。
+  **不能靠投影补**：把 r/u 补到 base 节点会经继承下发到全部 table 节点，淹没逐表/逐字段收窄
+  → OVERALLOW 越权（M4 零容忍），比 OVERDENY 更致命。
+  **建议出路（enforce 侧）**：`enforceGate` 对数据类动作增加「库内活表并集」聚合语义
+  （`decideMany` 取 OR），与 `permit()` 的 `canEditData = canManage || anyWritable` 同口径；
+  守的签名与调用方不用改（路由仍只传 baseId）。待评估：N 次链查询与 M4「SQL 定数」门的冲突。
+  体检已能自动暴露：`scripts/authz/preflight.ts` [3] 段抽样（dev 副本实测 16/28 不可达 -> 阻断）。
+
 ### 阶段 R2：on 稳定观察期内只观测，不删（时间门）
 
 - on 后反向 shadow 连续 **1 个迭代**双零（DRIFT_OVERALLOW=0、

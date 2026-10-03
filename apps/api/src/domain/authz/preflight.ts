@@ -18,6 +18,10 @@
 import type { AuthzClient } from "./types.js";
 import { computeAuthzReconcile } from "./reconcile.js";
 import { planScopeBackfill, type ScopeBackfillPlan } from "./scopeBackfill.js";
+import {
+  computeLibraryReachability,
+  type PreflightReachability,
+} from "./preflightReachability.js";
 
 /**
  * 阻断码：出现即 NOT_READY。
@@ -82,6 +86,8 @@ export interface PreflightData {
   coverage: PreflightCoverage;
   reconcile: PreflightReconcileView;
   legacy: PreflightLegacyView;
+  /** 库级判定可达性抽样（语义面：七守按库节点判，投影按表节点给）。 */
+  reachability: PreflightReachability;
   /** 底层计划（供 CLI 打印逐角色明细）。 */
   plan: ScopeBackfillPlan;
 }
@@ -174,7 +180,7 @@ export async function computePreflightData(client: AuthzClient): Promise<Preflig
     others,
   };
 
-  return { coverage, reconcile, legacy: legacyView, plan };
+  return { coverage, reconcile, legacy: legacyView, reachability: await computeLibraryReachability(client), plan };
 }
 
 /** 纯函数：数据 + 静态事实 -> 总体判定。（可单测，无需真库） */
@@ -195,6 +201,19 @@ export function evaluatePreflight(data: PreflightData, facts: PreflightFacts): P
     advisory.push(
       `scope:role 投影指向已删角色（惰性，不参与求值）：${data.coverage.danglingProjectionRoles.join(", ")}`,
     );
+  }
+
+  if (data.reachability.libraryUnreachable > 0) {
+    const first = data.reachability.samples[0];
+    blocking.push(
+      `库级判定不可达 ${data.reachability.libraryUnreachable}/${data.reachability.sampled} 个抽样：`
+        + `七守在【库节点】判 r/u，而投影把数据动作挂在【表节点】，on 态 requireCanView/`
+        + `requireCanEditData/requireCanComment 会 403（例：${first?.roleId}@${first?.libraryId} ${first?.action}）`
+        + `——须先让 enforceGate 对数据动作走「库内活表并集」语义，投影层补库节点会变成越权`,
+    );
+  }
+  if (data.reachability.errors > 0) {
+    advisory.push(`库级抽样中有 ${data.reachability.errors} 次引擎判定抛错（多为 nav 节点缺失，先跑 reconcile-nav）`);
   }
 
   for (const item of data.reconcile.byCode) {
