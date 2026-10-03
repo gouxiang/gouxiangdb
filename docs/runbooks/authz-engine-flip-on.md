@@ -83,8 +83,17 @@ DATABASE_URL=file:/var/lib/gouxiangdb/app.db pnpm tsx scripts/authz/preflight.ts
 - [ ] `project-scope.ts --apply` 退出码 0，二次复跑打印 `no changes`。
 - [ ] `preflight.ts` 覆盖缺口=0（`auth_policies` 里 `reason='scope:role'` 行数 == 期望行数）。
 - [ ] `preflight.ts` 对账 S=0（存量投影逐值一致）、A1/A2/B/C=0（legacy 投影无漂移）。
-- [ ] `preflight.ts` 判定 READY（A3 与 legacy 残留是提示项，不阻断；见脚本 [4][5] 段输出）。
+- [ ] `preflight.ts` [3] 段「库级判定不可达」=0、[4] 段「表可见而库全不可见的用户」=0。
+- [ ] `preflight.ts` 判定 READY（A3 与 legacy 残留是提示项，不阻断；见脚本 [5][6] 段输出）。
 - [ ] 体检用【升级副本库】先跑一遍，再在目标库跑；任一项不通电即停，不要"先试试"。
+
+> [3][4] 两段是同一根因的两层失效，都不是投影层能修的，**必须先有架构裁决再通电**：
+> [3] 七守在【库节点】判 r/u，而投影把数据动作挂在【表节点】-> on 态 403；
+> [4] S4 可见集按节点 r 判 -> 库节点一个都不进可见集（dev.db 副本实测 0/24 可见），
+> 通电后 M5「先收敛后召回」与 M3 导航剪枝会把库整层抹掉：能看表、点不进库、检索只召回表。
+> 两条直觉修法均已证伪，别再试：投影层给库节点补 r 会淹没逐表字段收窄（OVERALLOW，
+> `fieldMask.ts:97` 无 mask 即 `visibleAll`，锁在 `preflight.test.ts` 反证用例里）；
+> enforceGate 改走库内活表并集则与可见集分叉（`scope.ts:174` 按节点 r 判，撞 S4 零分叉门禁）。
 
 ### 1.5.1 两个入口的分工与实测口径（别混淆、别重复误判）
 
@@ -110,7 +119,7 @@ DATABASE_URL=file:/var/lib/gouxiangdb/app.db pnpm tsx scripts/authz/preflight.ts
 
 > 口径提示：`A/B/C/S 全零` 在含 legacy 数据的库上**不可达**——A3 是"非 legacy 行动作串等于某旧角色档"
 > 的只报不改项，机器生成的 `scope:role` 行恰好会撞上它。体检脚本按此把 A3 划为提示项而非阻断项。
-> 看到 A3 数字上升不要回滚，要核的是 S 段与 [3] 段可达性。
+> 看到 A3 数字上升不要回滚，要核的是 S 段与 [3][4] 段语义面。
 
 命令出处与完整口径见 [deploy.md §6.7.1](deploy.md#671-通电前存量-scope-投影与体检翻-enforce-门之前必跑)。
 

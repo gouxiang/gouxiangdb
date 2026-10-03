@@ -22,6 +22,10 @@ import {
   computeLibraryReachability,
   type PreflightReachability,
 } from "./preflightReachability.js";
+import {
+  computeScopeVisibility,
+  type PreflightScopeVisibility,
+} from "./preflightScopeVisibility.js";
 
 /**
  * 阻断码：出现即 NOT_READY。
@@ -86,8 +90,10 @@ export interface PreflightData {
   coverage: PreflightCoverage;
   reconcile: PreflightReconcileView;
   legacy: PreflightLegacyView;
-  /** 库级判定可达性抽样（语义面：七守按库节点判，投影按表节点给）。 */
+  /** 库级判定可达性抽样（语义面一：七守按库节点判，投影按表节点给）。 */
   reachability: PreflightReachability;
+  /** 库节点是否进 S4 可见集（语义面二：库整层消失比 403 更硬）。 */
+  scopeVisibility: PreflightScopeVisibility;
   /** 底层计划（供 CLI 打印逐角色明细）。 */
   plan: ScopeBackfillPlan;
 }
@@ -180,7 +186,14 @@ export async function computePreflightData(client: AuthzClient): Promise<Preflig
     others,
   };
 
-  return { coverage, reconcile, legacy: legacyView, reachability: await computeLibraryReachability(client), plan };
+  return {
+    coverage,
+    reconcile,
+    legacy: legacyView,
+    reachability: await computeLibraryReachability(client),
+    scopeVisibility: await computeScopeVisibility(client),
+    plan,
+  };
 }
 
 /** 纯函数：数据 + 静态事实 -> 总体判定。（可单测，无需真库） */
@@ -209,11 +222,22 @@ export function evaluatePreflight(data: PreflightData, facts: PreflightFacts): P
       `库级判定不可达 ${data.reachability.libraryUnreachable}/${data.reachability.sampled} 个抽样：`
         + `七守在【库节点】判 r/u，而投影把数据动作挂在【表节点】，on 态 requireCanView/`
         + `requireCanEditData/requireCanComment 会 403（例：${first?.roleId}@${first?.libraryId} ${first?.action}）`
-        + `——须先让 enforceGate 对数据动作走「库内活表并集」语义，投影层补库节点会变成越权`,
+        + `——两条直觉修法均已证伪：投影层给库节点补 r 会淹没逐表收窄（OVERALLOW，fieldMask.ts:97 `
+        + `无 mask 即 visibleAll），enforceGate 改走库内活表并集则与可见集分叉（scope.ts:174 按节点 r 判）`,
     );
   }
   if (data.reachability.errors > 0) {
     advisory.push(`库级抽样中有 ${data.reachability.errors} 次引擎判定抛错（多为 nav 节点缺失，先跑 reconcile-nav）`);
+  }
+
+  if (data.scopeVisibility.orphanTableUsers > 0) {
+    blocking.push(
+      `库节点缺席可见集：${data.scopeVisibility.orphanTableUsers}/${data.scopeVisibility.sampledUsers} 个抽样用户`
+        + `【表/视图可见、但库节点一个都不可见】（库节点抽样 ${data.scopeVisibility.visible}`
+        + `/${data.scopeVisibility.checked} 可见）——通电后 M5「先收敛后召回」与 M3 导航剪枝会把库整层`
+        + `抹掉：能看表、点不进库、检索只召回表。比七守 403 更硬，同一根因（引擎缺「库级可见性」`
+        + `一等表达），待架构裁决后由投影层重跑 project-scope --apply 收敛`,
+    );
   }
 
   for (const item of data.reconcile.byCode) {

@@ -9,9 +9,11 @@
 // 逐项输出：
 //   1 覆盖：role_library_scope 行数 / 涉及角色 / auth_policies 里 reason='scope:role' 行数 / 期望-现存缺口；
 //   2 对账：reconcile A/B/C/S 四段（按码聚合，标阻断或提示）；
-//   3 legacy 残留：说明现状，不自动删；
-//   4 双写接线：静态扫描 apps/api/src（不含 __tests__）的钩子调用点，不靠记忆；
-//   5 门：AUTHZ_ENFORCE_READY 常量（只读，不翻门）。
+//   3 库级判定可达性：七守按库节点判、投影把数据动作挂表节点 -> on 态 403 候选；
+//   4 库节点是否在 S4 可见集里：表可见而库不可见 -> 通电后库整层从导航/检索消失；
+//   5 legacy 残留：说明现状，不自动删；
+//   6 双写接线：静态扫描 apps/api/src（不含 __tests__）的钩子调用点，不靠记忆；
+//   7 门：AUTHZ_ENFORCE_READY 常量（只读，不翻门）。
 //
 // 退出码与 scripts/authz/reconcile-policies.ts 同口径：0=READY，1=NOT_READY，64=用法错。
 
@@ -148,7 +150,21 @@ function printHuman(r: PreflightReport): void {
   }
   if (rc.errors > 0) console.log(`    引擎判定抛错 ${rc.errors} 次（nav 节点缺失？先跑 reconcile-nav）`);
 
-  console.log("[4] legacy 残留");
+  console.log("[4] 库节点是否在可见集（S4 同源内核；非空即库整层消失）");
+  const sv = r.data.scopeVisibility;
+  console.log(
+    `    非 owner 用户抽样=${sv.sampledUsers}（跳过 owner ${sv.ownerSkipped}）`
+      + ` 库节点抽样=${sv.checked} 其中可见=${sv.visible}`,
+  );
+  console.log(
+    `    表/视图可见但库节点全不可见的用户=${sv.orphanTableUsers}（非 0 即 M5 收敛与 M3 剪枝把库抹掉）`,
+  );
+  for (const s of sv.samples.slice(0, 5)) {
+    console.log(`    ${s.userId.slice(-6)}@${s.nodeId}（${s.kind}）r=${s.visible}`);
+  }
+  if (sv.errors > 0) console.log(`    可见集抽样抛错 ${sv.errors} 次（nav 面问题？先跑 reconcile-nav）`);
+
+  console.log("[5] legacy 残留");
   const lg = r.data.legacy;
   console.log(
     `    legacy:* =${lg.total} 行（${
@@ -161,14 +177,14 @@ function printHuman(r: PreflightReport): void {
     }）`,
   );
 
-  console.log("[5] 双写接线（静态扫描 apps/api/src，不含 __tests__）");
+  console.log("[6] 双写接线（静态扫描 apps/api/src，不含 __tests__）");
   for (const h of r.facts.hooks) {
     const tag = h.required ? "主路径" : "结构性";
     const where = h.callSites.length ? h.callSites.join(", ") : "无调用点";
     console.log(`    [${tag}] ${h.hook}（${h.why}）：${where}`);
   }
 
-  console.log("[6] 门");
+  console.log("[7] 门");
   console.log(`    AUTHZ_ENFORCE_READY=${r.facts.enforceReady}（本脚本只读，不翻门）`);
 
   console.log(`阻断项（${r.blocking.length}）：`);

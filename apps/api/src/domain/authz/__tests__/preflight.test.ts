@@ -43,9 +43,21 @@ const wiredFacts = (enforceReady: boolean): Facts => ({
   hooks: [{ hook: "rebuildScopePoliciesTx", required: true, why: "PUT 主路径", callSites: ["src/x.ts:1"] }],
 });
 
-/** 把「库级判定不可达」这项待修项摘掉（它另有专门用例锁住），用于单独验分级接线。 */
-const withoutReachabilityGap = <T extends { reachability: unknown }>(data: T): T =>
-  ({ ...data, reachability: { sampled: 4, libraryUnreachable: 0, samples: [], errors: 0 } });
+/**
+ * 把两项语义面待修项摘掉（它们另有专门用例锁住），用于单独验分级接线本身：
+ *   - reachability：七守按库节点判、投影按表节点给；
+ *   - scopeVisibility：库节点不进可见集。
+ * 两者都不是投影层能修的（补 r = 越权、改守卫 = 与可见集分叉），故单列不参与分级接线用例。
+ */
+const withoutSemanticGaps = <T extends { reachability: unknown; scopeVisibility: unknown }>(data: T): T =>
+  ({
+    ...data,
+    reachability: { sampled: 4, libraryUnreachable: 0, samples: [], errors: 0 },
+    scopeVisibility: {
+      sampledUsers: 1, ownerSkipped: 0, checked: 2, visible: 2,
+      orphanTableUsers: 0, samples: [], errors: 0,
+    },
+  });
 
 async function projectAll(): Promise<void> {
   const p = await planScopeBackfill(prisma);
@@ -84,8 +96,8 @@ describe("B 投影完成后的判定", () => {
     expect(r.blocking.some((b) => b.includes("库级判定不可达"))).toBe(true);
 
     // 待修项摘掉后回到 READY：证明 evaluate 的分级接线本身正确
-    expect(evaluatePreflight(withoutReachabilityGap(data), wiredFacts(true)).verdict).toBe("READY");
-    const gated = evaluatePreflight(withoutReachabilityGap(data), wiredFacts(false));
+    expect(evaluatePreflight(withoutSemanticGaps(data), wiredFacts(true)).verdict).toBe("READY");
+    const gated = evaluatePreflight(withoutSemanticGaps(data), wiredFacts(false));
     expect(gated.verdict).toBe("NOT_READY");
     expect(gated.blocking.some((b) => b.includes("AUTHZ_ENFORCE_READY"))).toBe(true);
   });
@@ -156,11 +168,45 @@ describe("B 投影完成后的判定", () => {
   });
 });
 
+  it("库节点缺席可见集：表可见、库一个都不可见（通电后库整层从导航/检索消失）", async () => {
+    await seedFixture(prisma);
+    await projectAll();
+
+    const data = await computePreflightData(prisma);
+    const sv = data.scopeVisibility;
+    expect(sv.sampledUsers).toBeGreaterThan(0);
+    expect(sv.errors).toBe(0);
+    expect(sv.checked).toBeGreaterThan(0);
+    // 投影把 r 只挂在表节点 -> 表进可见集、库不进
+    expect(sv.visible).toBe(0);
+    expect(sv.orphanTableUsers).toBeGreaterThan(0);
+
+    const r = evaluatePreflight(data, wiredFacts(true));
+    expect(r.verdict).toBe("NOT_READY");
+    expect(r.blocking.some((b) => b.includes("库节点缺席可见集"))).toBe(true);
+  });
+
+  it("对照：用户本就无任何库视野时不计「库缺席」（表同样不可见，属合法空集）", async () => {
+    await seedFixture(prisma);
+    await prisma.roleAssignment.deleteMany({});
+    await prisma.roleLibraryScope.deleteMany({});
+    await projectAll();
+
+    const data = await computePreflightData(prisma);
+    const sv = data.scopeVisibility;
+    expect(sv.sampledUsers).toBeGreaterThan(0);
+    expect(sv.visible).toBe(0);
+    // 关键：这条体检项只在「表可见而库不可见」时红，空视野不算失效
+    expect(sv.orphanTableUsers).toBe(0);
+    expect(evaluatePreflight(data, wiredFacts(true)).blocking.some((b) => b.includes("库节点缺席可见集")))
+      .toBe(false);
+  });
+
 describe("C 静态事实分级", () => {
   it("主路径双写钩子缺失 -> 阻断；结构性钩子缺失 -> 仅提示", async () => {
     await seedFixture(prisma);
     await projectAll();
-    const data = withoutReachabilityGap(await computePreflightData(prisma));
+    const data = withoutSemanticGaps(await computePreflightData(prisma));
 
     const missingMain = evaluatePreflight(data, {
       enforceReady: true,

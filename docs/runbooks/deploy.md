@@ -230,8 +230,14 @@ sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
   0=已一致或已修复、1=仍有差异、64=用法错），只用 `scopeProjection*` 同源原语，
   只写 `reason='scope:role'` 行，不碰 `legacy:*` / `policy:v1` / user 行。
 - `preflight.ts` 逐项输出：① 覆盖（scope 行数 vs `scope:role` 行数 vs 期望，缺口必须为 0）、
-  ② 对账 A/B/C/S 四段、③ legacy 残留（只报告不删）、④ 双写接线（静态扫描 `apps/api/src` 真实调用点）、
-  ⑤ 门 `AUTHZ_ENFORCE_READY`。阻断项全空才 READY；A3（只报不改）与 legacy 残留是提示项，不阻断。
+  ② 对账 A/B/C/S 四段、③ 库级判定可达性（七守按库节点判 vs 投影把数据动作挂表节点）、
+  ④ 库节点是否在 S4 可见集（表可见而库全不可见 = 通电后库整层从导航/检索消失）、
+  ⑤ legacy 残留（只报告不删）、⑥ 双写接线（静态扫描 `apps/api/src` 真实调用点）、
+  ⑦ 门 `AUTHZ_ENFORCE_READY`。阻断项全空才 READY；A3（只报不改）与 legacy 残留是提示项，不阻断。
+- ③④ 是同一根因（引擎缺「库级可见性」一等表达）的两层失效，两条直觉修法均已证伪并锁死在测试里：
+  投影层给库节点补 `r` 会淹没逐表字段收窄（OVERALLOW，`fieldMask.ts:97`）；
+  enforceGate 改走库内活表并集则与 S4 可见集分叉（`scope.ts:174`，撞零分叉门禁）。
+  两项归零前不得通电，修法待架构裁决。
 - 顺序：先 `reconcile-policies.ts --apply`（修 A1/A2/B），再 `project-scope.ts --apply`（补存量），
   最后 `preflight.ts` 收口。三者都幂等，可以重复跑。
 

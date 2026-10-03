@@ -11,6 +11,7 @@ import { nodeId } from "../../nav/backfill.js";
 /** 每个用例前清空的物理表（顺序无关，外键临时关闭）。 */
 export const CLEAR_TABLES = [
   "auth_policies", "role_library_scope", "nav_nodes", "fields", "tables", "bases", "roles", "users",
+  "role_assignments",
 ];
 
 /** 建一个临时库并跑完真迁移，返回 client 与其清理函数。 */
@@ -40,18 +41,29 @@ export async function mkUser(prisma: PrismaClient, id = "u1"): Promise<void> {
   });
 }
 
+/** 角色授予（M2 role_assignments；引擎 resolveSubject 经 effectiveRoleRows 消费）。 */
+export async function mkRoleAssignment(
+  prisma: PrismaClient, userId: string, roleId: string,
+): Promise<void> {
+  await prisma.roleAssignment.create({
+    data: { roleId, subjectType: "user", subjectId: userId },
+  });
+}
+
 export async function mkRole(prisma: PrismaClient, id: string): Promise<void> {
   await prisma.role.create({
     data: { id, workspaceId: "ws_default", name: id, isSystem: id.startsWith("role_") ? 1 : 0, permissions: "[]" },
   });
 }
 
-export async function mkBase(prisma: PrismaClient, id: string): Promise<void> {
-  await prisma.base.create({ data: { id, name: id, createdBy: "u1" } });
+export async function mkBase(prisma: PrismaClient, id: string, createdBy = "u1"): Promise<void> {
+  await prisma.base.create({ data: { id, name: id, createdBy } });
 }
 
-export async function mkTable(prisma: PrismaClient, baseId: string, id: string, fieldIds: string[]): Promise<void> {
-  await prisma.table.create({ data: { id, baseId, name: id, primaryFieldId: fieldIds[0] ?? "f0", createdBy: "u1" } });
+export async function mkTable(
+  prisma: PrismaClient, baseId: string, id: string, fieldIds: string[], createdBy = "u1",
+): Promise<void> {
+  await prisma.table.create({ data: { id, baseId, name: id, primaryFieldId: fieldIds[0] ?? "f0", createdBy } });
   let order = 0;
   for (const f of fieldIds) {
     await prisma.field.create({ data: { id: f, tableId: id, name: f, type: "singleLineText", order: order++ } });
@@ -110,10 +122,12 @@ export async function mkNode(
  */
 export async function seedFixture(prisma: PrismaClient): Promise<void> {
   await mkUser(prisma);
-  await mkBase(prisma, "b1");
-  await mkTable(prisma, "b1", "t1", ["f1", "f2"]);
-  await mkBase(prisma, "b2");
-  await mkTable(prisma, "b2", "t2", ["f3"]);
+  // 资源创建者写成一个【库里不存在】的 id：否则任一被抽样的用户只要是自己建的库，
+  // 就会因引擎「creator 兜底」直接看见，把体检第 [4] 段（库节点是否在可见集）的真实信号掩盖掉。
+  await mkBase(prisma, "b1", "ghost");
+  await mkTable(prisma, "b1", "t1", ["f1", "f2"], "ghost");
+  await mkBase(prisma, "b2", "ghost");
+  await mkTable(prisma, "b2", "t2", ["f3"], "ghost");
   await prisma.workspace.upsert({
     where: { id: "ws_default" },
     create: { id: "ws_default", name: "ws_default" },
@@ -130,4 +144,6 @@ export async function seedFixture(prisma: PrismaClient): Promise<void> {
     config: { tables: { t1: { create: true } }, fields: { t1: { f2: "hidden" } } },
   });
   await mkScope(prisma, { roleId: "role_admin", libraryId: "b1", canManage: 1, visible: 1 });
+  // u1 归入 r1：体检第 [4] 段（可见集抽样）要按真用户走 resolveSubject，没有授予就是空主体。
+  await mkRoleAssignment(prisma, "u1", "r1");
 }
