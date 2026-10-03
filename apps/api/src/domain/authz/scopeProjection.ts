@@ -10,6 +10,7 @@ import type { FieldMask, ResourceAction } from "@gx/shared-types";
 import { KB_CONTENT_KEY, toActionString } from "@gx/shared-types";
 import { nodeId } from "../nav/backfill.js";
 import { parseConfig } from "./libraryScopeConfig.js";
+import { WILDCARD_TABLE } from "./scopeSynthesize.js";
 
 /** 一条 auth_policies 投影（actions/fieldMask 已序列化为存储串）。 */
 export interface ProjectedPolicy {
@@ -83,7 +84,12 @@ export function tableActions(
   if (input.visible !== 1) return { actions: [], manageSchema: false };
 
   const cfg = parseConfig(input.config);
-  const perTable = cfg.tables[tableId];
+  // 通配优先 -> 精确 -> 缺省，逐字对齐第二代 tableAccessOf（libraryPolicy.ts:68-73）。
+  // 不补这一格会让「配了 tables['*'] 的行」在通电后被判成只有 r：legacy 侧该角色对库内
+  // 【每张】表都持 c/u/d，投影侧一份写权都不给 -> OVERDENY；库节点 edit_data 也会因
+  // anyTableWritable 恒 false 算错。本机 203 条 scope 行实测 0 条通配配置，属潜伏缺口而
+  // 非在发缺陷，但结构上是真缺口，翻闸前必须堵（见 ADR-0056）。
+  const perTable = cfg.tables[WILDCARD_TABLE] ?? cfg.tables[tableId];
   const actions: ResourceAction[] = ["r"];
   if (perTable?.create) actions.push("c");
   if (perTable?.update) actions.push("u");

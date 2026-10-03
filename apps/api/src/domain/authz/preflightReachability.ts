@@ -27,8 +27,15 @@ const SUPER_ADMIN_ROLE_ID = "role_owner";
 /** 管理员（F8 硬规则）：合成后强制 visible/canShare/canToggleShare，不强制 canManage。 */
 const ADMIN_ROLE_ID = "role_admin";
 
-/** 两枚受检的库级聚合位（ADR-0056 §4）。 */
+/** base 节点受检的两枚库级聚合位（ADR-0056 §4）。 */
 const AGGREGATE_ACTIONS: readonly ResourceAction[] = ["enter", "edit_data"];
+
+/**
+ * kb 节点只比 `enter`，不比 `edit_data`（定稿 §7 第 9 条）：
+ * kb 侧投影不 emit edit_data，且 legacy kb 路径【没有】库级 canEditData 聚合
+ * （内容写挂在 content 档位上）——强行比会造出假不等价。
+ */
+const KB_AGGREGATE_ACTIONS: readonly ResourceAction[] = ["enter"];
 
 export interface AggregateParitySample {
   roleId: string;
@@ -106,34 +113,47 @@ export async function computeLibraryAggregateParity(
   const bases = await client.base.findMany({
     where: { deletedAt: null }, select: { id: true }, take: LIMITS.libraries,
   });
-  if (bases.length === 0) return out;
+  const kbs = await client.knowledgeBase.findMany({
+    where: { deletedAt: null }, select: { id: true }, take: LIMITS.libraries,
+  });
+  // base / kb 各按上限取，总量仍是有界的（2 × LIMITS.libraries）。
+  const targets = [
+    ...bases.map((b) => ({ kind: "base" as const, libraryId: b.id })),
+    ...kbs.map((k) => ({ kind: "kb" as const, libraryId: k.id })),
+  ];
+  if (targets.length === 0) return out;
 
   const version = await navVersionOf(client, "ws_default");
   const cache = new NavChainCache();
 
   for (const roleId of roleIds) {
     const rows = await client.roleLibraryScope.findMany({
-      where: { roleId, libraryKind: "base" },
-      select: { libraryId: true, canManage: true, visible: true, canShare: true, config: true },
+      where: { roleId },
+      select: {
+        libraryKind: true, libraryId: true,
+        canManage: true, visible: true, canShare: true, config: true,
+      },
     });
-    // 按库分组：同库若存量重复多行，一起送合成（synthesize 本就是多源并集），不漏算。
+    // 按「族+库」分组：同库若存量重复多行，一起送合成（synthesize 本就是多源并集），不漏算。
     const byLibrary = new Map<string, typeof rows>();
     for (const r of rows) {
-      const list = byLibrary.get(r.libraryId) ?? [];
+      const key = `${r.libraryKind}:${r.libraryId}`;
+      const list = byLibrary.get(key) ?? [];
       list.push(r);
-      byLibrary.set(r.libraryId, list);
+      byLibrary.set(key, list);
     }
 
-    for (const { id: libraryId } of bases) {
-      const legacy = legacyBits(roleId, byLibrary.get(libraryId) ?? []);
+    for (const { kind, libraryId } of targets) {
+      const legacy = legacyBits(roleId, byLibrary.get(`${kind}:${libraryId}`) ?? []);
+      const actions = kind === "kb" ? KB_AGGREGATE_ACTIONS : AGGREGATE_ACTIONS;
       const expected: Record<string, boolean> = { enter: legacy.visible, edit_data: legacy.canEditData };
 
       const deps: EngineDeps = { client, cache, navVersion: version };
       const subject = subjectOf(roleId);
-      for (const action of AGGREGATE_ACTIONS) {
+      for (const action of actions) {
         let engine: boolean;
         try {
-          engine = (await decide(deps, subject, nodeId("base", libraryId), action)).decision.allowed;
+          engine = (await decide(deps, subject, nodeId(kind, libraryId), action)).decision.allowed;
         } catch {
           out.errors += 1;
           continue;

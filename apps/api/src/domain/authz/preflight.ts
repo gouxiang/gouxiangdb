@@ -70,6 +70,14 @@ export interface PreflightCoverage {
   rolesWithoutProjection: string[];
   /** 现存 scope:role 投影的主体角色已删除/不存在（惰行，不参与求值）。 */
   danglingProjectionRoles: string[];
+  /**
+   * 活库（deletedAt=null）但【nav 活节点缺失】的库（报告型，不阻断）。
+   *
+   * 为什么只检测、不据此过滤授权（定稿 §4.3 裁决）：若把「nav 节点存在性」当作投影的
+   * 第二判据，nav 缺口期间会静默取消用户授权 -> OVERDENY，且不可见、不可对账；
+   * 而 nav 完整性本就是 M3 reconcile-nav 的职责。故这里只报，交给 reconcile-nav 修。
+   */
+  missingNav: { count: number; samples: string[] };
 }
 
 export interface PreflightReconcileView {
@@ -133,6 +141,35 @@ async function countReasonGroups(
   return { legacy, others };
 }
 
+/** 报告样本上限（信号只需定位，不为大库撑爆输出）。 */
+const MISSING_NAV_SAMPLES = 20;
+
+/**
+ * 活库但 nav 活节点缺失的库（base/kb 两族）。
+ * 只检测不过滤：nav 完整性归 M3 reconcile-nav，不拿它当投影判据（见 coverage.missingNav 注释）。
+ */
+async function detectMissingNavNodes(
+  client: AuthzClient,
+): Promise<{ count: number; samples: string[] }> {
+  const [bases, kbs, nodes] = await Promise.all([
+    client.base.findMany({ where: { deletedAt: null }, select: { id: true } }),
+    client.knowledgeBase.findMany({ where: { deletedAt: null }, select: { id: true } }),
+    client.navNode.findMany({
+      where: { deletedAt: null, resourceType: { in: ["base", "kb"] } },
+      select: { resourceType: true, resourceId: true },
+    }),
+  ]);
+  const present = new Set(
+    nodes
+      .filter((n) => n.resourceType !== null && n.resourceId !== null)
+      .map((n) => `${n.resourceType}:${n.resourceId}`),
+  );
+  const missing: string[] = [];
+  for (const b of bases) if (!present.has(`base:${b.id}`)) missing.push(`base:${b.id}`);
+  for (const k of kbs) if (!present.has(`kb:${k.id}`)) missing.push(`kb:${k.id}`);
+  return { count: missing.length, samples: missing.slice(0, MISSING_NAV_SAMPLES) };
+}
+
 /** 只读体检：覆盖 + 对账 + legacy 残留。在事务内调用保证一致快照。 */
 export async function computePreflightData(client: AuthzClient): Promise<PreflightData> {
   const plan = await planScopeBackfill(client);
@@ -151,6 +188,7 @@ export async function computePreflightData(client: AuthzClient): Promise<Preflig
   );
 
   const coverage: PreflightCoverage = {
+    missingNav: await detectMissingNavNodes(client),
     scopeRows: plan.totals.scopeRows,
     scopeRoles: scopeRoleIds.size,
     auditedRoles: [...liveRoleIds].filter((id) => id !== "role_owner").length,
@@ -225,6 +263,15 @@ export function evaluatePreflight(data: PreflightData, facts: PreflightFacts): P
         + `legacy=${first?.legacy}）——先跑 scripts/authz/project-scope.ts --apply 重算存量投影`,
     );
   }
+  if (data.coverage.missingNav.count > 0) {
+    const shown = data.coverage.missingNav.samples.join(", ");
+    advisory.push(
+      `活库但 nav 活节点缺失 ${data.coverage.missingNav.count} 个（例：${shown}）：`
+        + `本报告【不用它过滤授权】——按 nav 存在性过滤会在 nav 缺口期间静默取消授权（OVERDENY 且不可对账），`
+        + `nav 完整性归 M3，请跑 reconcile-nav 修复（定稿 §4.3）`,
+    );
+  }
+
   if (data.reachability.errors > 0) {
     advisory.push(`库级抽样中有 ${data.reachability.errors} 次引擎判定抛错（多为 nav 节点缺失，先跑 reconcile-nav）`);
   }
