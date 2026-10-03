@@ -256,11 +256,20 @@ GX_AUTHZ_ENGINE=shadow
 
 观测口径（不落盘、不含响应体；userId 只存 sha256 前 12 位短哈希）：
 
-- 结构化日志事件 `authz_drift`：字段 `kind/guard/action/nodeId/userHash/old/engine/ts`。
+- 结构化日志事件 `authz_drift`：字段 `kind/direction/guard/action/nodeId/userHash/old/engine/ts`。
   - `DRIFT_OVERDENY` = 旧允新拒（引擎更严，可能把用户锁外，可用性风险）；
-  - `DRIFT_OVERALLOW` = 旧拒新允（引擎更宽，越权风险，**零容忍**）。
+  - `DRIFT_OVERALLOW` = 旧拒新允（引擎更宽，越权风险，**零容忍**）；
+  - `direction=forward` = 影子期（旧为准、引擎只对比）；`direction=reverse` = enforce 期
+    （引擎为准、旧决策只作对比基准；R1 接线后 on 态才可能出现）。两个方向的分类口径完全一致。
 - `authz_shadow_error` = 引擎对拍自身异常（旧响应未受影响），错误明文仅进进程内环形缓冲供现场排查。
-- 进程内最近 200 条漂移/错误环形缓冲 + 分类计数，供运维接口/现场诊断（M4 不单独落盘）。
+- enforce 期专属事件（仅生效模式真正为 `on` 时可能出现）：
+  - `authz_enforce_error` = 引擎在**放行链上**抛错，该请求已回落旧决策（`fallback=legacy`，
+    请求不受影响）。与 `authz_shadow_error` 同族同机制（同一环形缓冲），但**必须单独告警**：
+    它意味着"这一条请求实际没走引擎"，影子期的同类事件只意味着"少了一次对拍"。
+  - `authz_enforce_unresolved` = 资源反查不到活 nav 节点，该请求已按 fail-closed 拒绝
+    （`denied=true`），节点缺口归 M3 `reconcile-nav`，不当授权漂移。
+- 进程内最近 200 条漂移/错误环形缓冲 + 分类计数（含 `comparedReverse`/`enforceErrors`/
+  `enforceUnresolved`），供运维接口/现场诊断（M4 不单独落盘）。
 - 翻门纪律（§4.8）：shadow 连续一个迭代 `DRIFT_OVERALLOW=0` 且 `DRIFT_OVERDENY=0` 双零，才允许评估切 on。
 
 回滚：`GX_AUTHZ_ENGINE=off` 重启即恢复纯旧守卫，适配分支保留无副作用（无数据迁移、无双写）。

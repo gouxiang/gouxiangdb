@@ -12,9 +12,8 @@
 import type { Context } from "hono";
 import { prisma } from "./db.js";
 import { getUserId, type Role } from "./auth.js";
-import type { PermissionSet, TableAccess } from "@gx/shared-types";
-import { authzShadowActive } from "./configAuthz.js";
-import { runShadowCheck } from "./domain/authz/adapter.js";
+import type { PermissionSet, ResourceAction, TableAccess } from "@gx/shared-types";
+import { enforceOrLegacy, type EnforceSemantics } from "./domain/authz/enforceGate.js";
 import type { LibraryAccessDTO } from "@gx/shared-types";
 import { HttpError, errorCodeForStatus } from "./httpError.js";
 import {
@@ -92,19 +91,34 @@ const DENY_PERM: PermissionSet = {
   canView: false,
 };
 
-/** M4/S3 shadow 对拍缝：仅 shadow 模式下跑引擎对拍，只计数/记日志，不改返回、不抛错。 */
-async function shadowBase(
+/**
+ * M4/R1 七守统一接线缝：先由第二代 libraryPolicy 算出旧决策，再交 enforceOrLegacy 定权威结论。
+ *
+ * 三态（ADR-0037 / AUTHZ-LEGACY-GUARD-CLEANUP 阶段 R1）：
+ *   off    —— 原样返回旧决策，零引擎 IO；
+ *   shadow —— 原样返回旧决策 + 正向对拍（旧为准，引擎只对比）；
+ *   on     —— 引擎结论为权威（conjunction 时为「旧 ∧ 引擎」），旧决策反向对拍。
+ * 403 文案与状态码一律由【调用方】按旧口径挑选（见各守卫），本函数只回答"放不放行"，
+ * 故 off/shadow 两态响应与接线前逐字节一致。
+ */
+async function enforceBase(
   guard: string,
   userId: string,
   baseId: string,
-  action: ResourceActionLiteral,
-  oldAllowed: boolean,
-): Promise<void> {
-  if (!authzShadowActive()) return;
-  await runShadowCheck(guard, userId, { resourceType: "base", resourceId: baseId }, action, oldAllowed);
+  action: ResourceAction,
+  legacyAllowed: boolean,
+  semantics?: EnforceSemantics,
+): Promise<boolean> {
+  const out = await enforceOrLegacy({
+    guard,
+    userId,
+    action,
+    legacyAllowed,
+    semantics,
+    ref: { resourceType: "base", resourceId: baseId },
+  });
+  return out.allowed;
 }
-
-type ResourceActionLiteral = "r" | "c" | "u" | "d" | "comment" | "manage_share" | "manage_schema";
 
 /** 加载一次裁决结果（同一个请求里多处复用同一份评估）。 */
 export async function baseAccessOf(userId: string, baseId: string): Promise<LibraryAccessDTO> {
@@ -151,62 +165,57 @@ export async function requireRole(c: Context, baseId: string): Promise<Role> {
 
 export async function requireCanView(c: Context, baseId: string): Promise<BaseGuardResult> {
   const g = await loadBaseAccess(c, baseId);
-  if (!g.access.visible) {
-    await shadowBase("requireCanView", g.userId, baseId, "r", false);
-    throw new HttpError(403, "无权访问该 Base");
-  }
-  await shadowBase("requireCanView", g.userId, baseId, "r", true);
+  const allowed = await enforceBase("requireCanView", g.userId, baseId, "r", g.access.visible);
+  if (!allowed) throw new HttpError(403, "无权访问该 Base");
   return g;
 }
 
 export async function requireCanEditData(c: Context, baseId: string): Promise<BaseGuardResult> {
   const g = await loadBaseAccess(c, baseId);
-  if (!g.access.visible) {
-    await shadowBase("requireCanEditData", g.userId, baseId, "u", false);
-    throw new HttpError(403, "无权访问该 Base");
+  const legacyAllowed = g.access.visible && g.perm.canEditData;
+  const allowed = await enforceBase("requireCanEditData", g.userId, baseId, "u", legacyAllowed);
+  if (!allowed) {
+    throw new HttpError(403, g.access.visible ? "当前角色无权编辑数据" : "无权访问该 Base");
   }
-  if (!g.perm.canEditData) {
-    await shadowBase("requireCanEditData", g.userId, baseId, "u", false);
-    throw new HttpError(403, "当前角色无权编辑数据");
-  }
-  await shadowBase("requireCanEditData", g.userId, baseId, "u", true);
   return g;
 }
 
 export async function requireCanManageSchema(c: Context, baseId: string): Promise<BaseGuardResult> {
   const g = await loadBaseAccess(c, baseId);
-  if (!g.access.visible) {
-    await shadowBase("requireCanManageSchema", g.userId, baseId, "manage_schema", false);
-    throw new HttpError(403, "无权访问该 Base");
+  const legacyAllowed = g.access.visible && g.perm.canManageSchema;
+  const allowed = await enforceBase("requireCanManageSchema", g.userId, baseId, "manage_schema", legacyAllowed);
+  if (!allowed) {
+    throw new HttpError(403, g.access.visible ? "当前角色无权修改表结构" : "无权访问该 Base");
   }
-  if (!g.perm.canManageSchema) {
-    await shadowBase("requireCanManageSchema", g.userId, baseId, "manage_schema", false);
-    throw new HttpError(403, "当前角色无权修改表结构");
-  }
-  await shadowBase("requireCanManageSchema", g.userId, baseId, "manage_schema", true);
   return g;
 }
 
 export async function requireCanManageBase(c: Context, baseId: string): Promise<BaseGuardResult> {
   const g = await loadBaseAccess(c, baseId);
-  if (!g.access.visible) {
-    await shadowBase("requireCanManageBase", g.userId, baseId, "manage_share", false);
-    throw new HttpError(403, "无权访问该 Base");
+  const legacyAllowed = g.access.visible && g.perm.canManageBase;
+  const allowed = await enforceBase("requireCanManageBase", g.userId, baseId, "manage_share", legacyAllowed);
+  if (!allowed) {
+    throw new HttpError(403, g.access.visible ? "只有对本库有管理权限的角色可管理该库" : "无权访问该 Base");
   }
-  if (!g.perm.canManageBase) {
-    await shadowBase("requireCanManageBase", g.userId, baseId, "manage_share", false);
-    throw new HttpError(403, "只有对本库有管理权限的角色可管理该库");
-  }
-  await shadowBase("requireCanManageBase", g.userId, baseId, "manage_share", true);
   return g;
 }
 
-/** 硬规则：删除库只有超级管理员（管理权不含删库，故单独成守卫，别挂到 requireCanManageBase）。 */
+/**
+ * 硬规则 A：删除库只有超级管理员（管理权不含删库，故单独成守卫，别挂到 requireCanManageBase）。
+ *
+ * 接线语义取 conjunction（不是 authority）：引擎动作词汇里没有"删库"这一枚，借 "d" 作
+ * 必要条件——删库必然包含删数据，故「引擎允许 d」是必要而非充分；若按 authority 放行，
+ * 任何在数据上拿了 d 的人（编辑者、库管理员）都能删库，那是实打实的越权。
+ * conjunction 只减不增：超级管理员（workspace owner 兜底）照删，其余一律仍由硬规则 A 拒。
+ */
 export async function requireCanDeleteBase(c: Context, baseId: string): Promise<BaseGuardResult> {
   const g = await loadBaseAccess(c, baseId);
-  if (!g.access.visible) throw new HttpError(403, "无权访问该 Base");
-  if (!g.access.canDeleteLibrary) {
-    throw new HttpError(403, "只有超级管理员可以删除库");
+  const legacyAllowed = g.access.visible && g.access.canDeleteLibrary;
+  const allowed = await enforceBase(
+    "requireCanDeleteBase", g.userId, baseId, "d", legacyAllowed, "conjunction",
+  );
+  if (!allowed) {
+    throw new HttpError(403, g.access.visible ? "只有超级管理员可以删除库" : "无权访问该 Base");
   }
   return g;
 }
@@ -214,24 +223,26 @@ export async function requireCanDeleteBase(c: Context, baseId: string): Promise<
 /** 硬规则 C：开关某个库的「允许分享」——对该库有管理权者 + 超级管理员 + 管理员。 */
 export async function requireCanToggleShare(c: Context, baseId: string): Promise<BaseGuardResult> {
   const g = await loadBaseAccess(c, baseId);
-  if (!g.access.visible) throw new HttpError(403, "无权访问该 Base");
-  if (!g.access.canToggleShare) {
-    throw new HttpError(403, "只有对本库有管理权限的角色、超级管理员或管理员可开关分享");
+  const legacyAllowed = g.access.visible && g.access.canToggleShare;
+  const allowed = await enforceBase("requireCanToggleShare", g.userId, baseId, "manage_share", legacyAllowed);
+  if (!allowed) {
+    throw new HttpError(
+      403,
+      g.access.visible
+        ? "只有对本库有管理权限的角色、超级管理员或管理员可开关分享"
+        : "无权访问该 Base",
+    );
   }
   return g;
 }
 
 export async function requireCanComment(c: Context, baseId: string): Promise<BaseGuardResult> {
   const g = await loadBaseAccess(c, baseId);
-  if (!g.access.visible) {
-    await shadowBase("requireCanComment", g.userId, baseId, "comment", false);
-    throw new HttpError(403, "无权访问该 Base");
+  const legacyAllowed = g.access.visible && g.perm.canComment;
+  const allowed = await enforceBase("requireCanComment", g.userId, baseId, "comment", legacyAllowed);
+  if (!allowed) {
+    throw new HttpError(403, g.access.visible ? "当前角色无权评论" : "无权访问该 Base");
   }
-  if (!g.perm.canComment) {
-    await shadowBase("requireCanComment", g.userId, baseId, "comment", false);
-    throw new HttpError(403, "当前角色无权评论");
-  }
-  await shadowBase("requireCanComment", g.userId, baseId, "comment", true);
   return g;
 }
 

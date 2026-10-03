@@ -15,16 +15,26 @@ import type { ResourceAction } from "@gx/shared-types";
 
 export type DriftKind = "DRIFT_OVERDENY" | "DRIFT_OVERALLOW";
 
+/**
+ * 对拍方向（R1 起区分）：
+ *   forward = 影子期：旧决策为准、引擎只对比（off 后仍可回退到该姿态）；
+ *   reverse = enforce 期：引擎为准、旧决策作对比基准（AUTHZ-LEGACY-GUARD-CLEANUP 阶段 R2）。
+ * 分类口径两个方向完全一致（旧 vs 引擎），方向只影响日志/计数标记，不影响 kind 语义。
+ */
+export type CompareDirection = "forward" | "reverse";
+
 /** 一次对拍的最小上下文（来源标记 + 被决策资源/动作/主体）。 */
 export interface ShadowCompareContext {
   /** 埋点来源（守卫名，如 requireCanView/requireKb/requireDocAccess），按来源分桶排查。 */
   guard: string;
-  /** 被对拍的资源动作（r/c/u/d/comment/manage_share/manage_schema）。 */
+  /** 被对拍的资源动作（r/c/u/d/comment/manage_share/manage_schema/manage_table）。 */
   action: ResourceAction;
   /** 被决策 nav 节点 id（资源反查不到时为 null，单独记 UNRESOLVED_NODE metric）。 */
   nodeId: string | null;
   /** 主体用户 id（仅用于哈希，不进日志明文）。 */
   userId: string;
+  /** 对拍方向，缺省 forward（影子期口径）。 */
+  direction?: CompareDirection;
 }
 
 export interface DriftEntry {
@@ -36,6 +46,8 @@ export interface DriftEntry {
   userHash: string;
   oldAllowed: boolean;
   engineAllowed: boolean;
+  /** 对拍方向（老条目缺省 forward）。 */
+  direction?: CompareDirection;
 }
 
 /** 引擎对拍本身失败（区别于决策漂移）：只观测、不影响旧响应。 */
@@ -49,12 +61,22 @@ export interface ShadowErrorEntry {
   message: string;
 }
 
-export interface DriftSnapshot {
+/** 进程内滚动计数（DriftSnapshot 的标量部分）。 */
+export interface DriftCounts {
   overDeny: number;
   overAllow: number;
   errors: number;
   unresolvedNode: number;
   compared: number;
+  /** compared 中方向为 reverse（enforce 期，引擎为准）的次数。 */
+  comparedReverse: number;
+  /** on 态引擎抛错、守卫回落旧决策的次数（事件 authz_enforce_error）。 */
+  enforceErrors: number;
+  /** on 态反查不到活节点而 fail-closed 拒绝的次数（事件 authz_enforce_unresolved）。 */
+  enforceUnresolved: number;
+}
+
+export interface DriftSnapshot extends DriftCounts {
   recent: DriftEntry[];
   recentErrors: ShadowErrorEntry[];
 }
@@ -83,18 +105,31 @@ export class DriftRegistry {
   private errorRing: ShadowErrorEntry[] = [];
   private cursor = 0;
   private errorCursor = 0;
-  private counts = { overDeny: 0, overAllow: 0, errors: 0, unresolvedNode: 0, compared: 0 };
+  private counts = emptyCounts();
 
   constructor(capacity = 200) {
     this.cap = Math.max(1, capacity);
   }
 
-  noteCompared(): void {
+  /** 记一次对拍；reverse（enforce 期）额外进 comparedReverse 桶。 */
+  noteCompared(direction: CompareDirection = "forward"): void {
     this.counts.compared++;
+    if (direction === "reverse") this.counts.comparedReverse++;
   }
 
-  noteUnresolvedNode(): void {
+  /**
+   * 资源反查不到活 nav 节点。
+   *   - 影子期（forward）：只观测、不做布尔对拍（数据问题归 M3 reconcile）；
+   *   - enforce 期（reverse）：守卫已按 fail-closed 拒绝，此处记 enforceUnresolved 供告警。
+   */
+  noteUnresolvedNode(direction: CompareDirection = "forward"): void {
     this.counts.unresolvedNode++;
+    if (direction === "reverse") this.counts.enforceUnresolved++;
+  }
+
+  /** on 态引擎抛错、守卫回落旧决策（事件 authz_enforce_error）。 */
+  noteEnforceError(): void {
+    this.counts.enforceErrors++;
   }
 
   record(entry: DriftEntry): DriftKind {
@@ -137,8 +172,15 @@ export class DriftRegistry {
     this.errorRing = [];
     this.cursor = 0;
     this.errorCursor = 0;
-    this.counts = { overDeny: 0, overAllow: 0, errors: 0, unresolvedNode: 0, compared: 0 };
+    this.counts = emptyCounts();
   }
+}
+
+function emptyCounts(): DriftCounts {
+  return {
+    overDeny: 0, overAllow: 0, errors: 0, unresolvedNode: 0,
+    compared: 0, comparedReverse: 0, enforceErrors: 0, enforceUnresolved: 0,
+  };
 }
 
 /** 模块级单例：守卫全进程共享同一计数/缓冲。 */
@@ -160,6 +202,7 @@ function toEntry(
     userHash: hashSubjectId(ctx.userId),
     oldAllowed,
     engineAllowed,
+    direction: ctx.direction ?? "forward",
   };
 }
 
@@ -174,15 +217,18 @@ export function shadowCompare(
   now: Date = new Date(),
   sink: (line: string) => void = (l) => console.warn(l),
 ): DriftKind | null {
-  driftRegistry.noteCompared();
+  const direction = ctx.direction ?? "forward";
+  driftRegistry.noteCompared(direction);
   const kind = classifyDrift(oldAllowed, engineAllowed);
   if (!kind) return null;
   const entry = toEntry(kind, oldAllowed, engineAllowed, ctx, now);
   driftRegistry.record(entry);
   // 结构化单行 JSON，键集合稳定供日志侧采集；OVERALLOW 零容忍，日志级别仍走 warn（不抛错影响响应）。
+  // direction 区分影子期（forward）与 enforce 期反向对拍（reverse），分类口径两向一致。
   sink(JSON.stringify({
     event: "authz_drift",
     kind,
+    direction,
     guard: ctx.guard,
     action: ctx.action,
     nodeId: ctx.nodeId,
@@ -219,3 +265,7 @@ export function shadowReportError(
     ts: now.toISOString(),
   }));
 }
+
+// enforce（on）态的两个专属事件（authz_enforce_error / authz_enforce_unresolved）
+// 与 authz_shadow_error 同族同机制（同一个 driftRegistry），但只属于 enforce 接线，
+// 故与账本扩展放在 enforceGate.ts，本文件保持"影子观测层"单一职责、不超 300 行。

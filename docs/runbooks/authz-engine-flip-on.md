@@ -7,11 +7,18 @@
   [authz-policy-dual-write.md](authz-policy-dual-write.md)（双写与开关往返）、
   翻门证据 [../baseline/2026-09-16-m4-gate.md](../baseline/2026-09-16-m4-gate.md)。
 
-> 现状边界（2026-09-16 S10 末态，重要，先读）：
+> 现状边界（更新：R1 接线已落地；总门仍未翻）：
 >
-> - 七守（guards.ts 五个 require*、routes/kb requireKb/requireDocAccess）当前**只挂 shadow 对拍**，
->   尚无「以引擎 decide 为准放行/拒绝」的 enforce 生产分支；`AUTHZ_ENFORCE_READY=false`，
->   env 设 `on` 会被运行时降级为 shadow 并打一次 warn。
+> - `guards.ts` 七守（requireCanView / EditData / ManageSchema / ManageBase / DeleteBase /
+>   ToggleShare / Comment）的判定已统一收口到 `domain/authz/enforceGate.ts` 的
+>   `enforceOrLegacy`：生效模式为 `on` 时以引擎 decide 为权威（allow 放行 / deny 403），
+>   旧决策只作反向对拍（日志与计数带 `direction=reverse`）；off / shadow 两态响应逐值不变。
+>   接线原语自带两种降级可观测：引擎抛错回落旧决策并记 `authz_enforce_error`、
+>   资源反查不到活节点按 fail-closed 拒绝并记 `authz_enforce_unresolved`。
+> - `routes/kb/shared.ts` 两守（requireKb / requireDocAccess）**尚未**走该原语，仍只有
+>   shadow 对拍缝；kb 侧接线单独收口后第 0 步才算齐。
+> - `AUTHZ_ENFORCE_READY` 仍为 `false`：env 设 `on` 依旧被运行时降级为 shadow 并打一次 warn。
+>   即**接线已就位、总门未翻**，翻门仍按 §1 五前置 + 总监下令执行。
 > - 已经在 `on` 语义下真实生效的是两件只减不增的能力：fieldMask 五出口（S6，
 >   `FIELD_MASK_ENFORCE_READY=true`）与 tree/menu 剪枝 + 面包屑截断（S7，
 >   `NAV_PRUNE_ENFORCE_READY=true`），它们读原始 env，env=on 即生效。

@@ -30,6 +30,25 @@
 - AUTHZ_ENFORCE_READY 经独立评审翻 true；configAuthz.ts 注释与启动日志更新。
 - 验收：flip runbook 第 0 步四项 + 五前置（authz-engine-flip-on.md）。
 
+**R1 接线落地范围与两处语义缺口（实施记录，2026-10-03）**
+
+- 落地：`apps/api/src/domain/authz/enforceGate.ts`（`enforceOrLegacy` 原语，三态收口）+
+  `guards.ts` 七守改经该原语；`off/shadow` 两态响应逐值不变（有测试锁）。
+- 缺口 1（需架构师/总监裁决）：**引擎动作词汇里没有「删库」这一枚**。
+  `requireCanDeleteBase` 在旧模型是硬规则 A（仅超级管理员），引擎唯一接近的是 base 节点 `d`
+  （删数据）。若按 authority 语义放行，任何在数据上拿到 `d` 的人（编辑者、库管理员）都能删库——
+  实打实的越权。故该关卡取 `conjunction`（旧 ∧ 引擎）：`d` 只作必要条件，超管（workspace owner
+  兜底）照删，其余仍被硬规则 A 拒。有测试锁（给非超管 `d` 策略仍 403）。
+  **未解决**：引擎侧仍表达不了"删库"本身，翻 on 后这一条只能靠旧分支兜底，
+  建议补一枚动作位（`delete_library`）后在 R3 前改回 authority。
+- 缺口 2（R2 观察期必盯）：**`manage_schema` 在投影里挂的是 table 节点，不是 base 节点**
+  （`scopeProjection.projectBase`：`canManage` 的策略行挂在 base 节点上只有
+  `manage_table,manage_share`，`manage_schema` 随 `manageSchema` 进了各 table 节点）。
+  而 `requireCanManageSchema` 的对拍点是 base 节点。故非超管的库管理员（canManage=1）在
+  on 态可能被拒改表结构（OVERDENY）。存量库靠 legacy 三表回填（owner 角色映射含
+  manage_schema）暂时不暴露，新配的库管理员会暴露。翻门前需先决定：
+  （a）把该守卫的对拍点改到 table 节点，或（b）投影给 base 节点也补 `manage_schema`。
+
 ### 阶段 R2：on 稳定观察期内只观测，不删（时间门）
 
 - on 后反向 shadow 连续 **1 个迭代**双零（DRIFT_OVERALLOW=0、
