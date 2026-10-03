@@ -165,7 +165,10 @@ function printHuman(r: PreflightReport): void {
   console.log("    连带：prune.ts resourceAncestorsPass 沿 parentId 向上，任一资源祖先不可见即拒"
     + " -> 库被剪则库内表/视图一并消失");
   for (const s of sv.samples.slice(0, 5)) {
-    console.log(`    ${s.userId.slice(-6)}@${s.nodeId}（${s.kind}）r=${s.visible}`);
+    // 库节点判的是库门 enter、内容节点（table/view/doc）判 r，标签跟着实际判的那枚位走，
+    // 否则运维读报告会把「进不去库」误读成「读不到内容」。
+    const judged = s.kind === "base" || s.kind === "kb" ? "enter" : "r";
+    console.log(`    ${s.userId.slice(-6)}@${s.nodeId}（${s.kind}）${judged}=${s.visible}`);
   }
   if (sv.errors > 0) console.log(`    可见集抽样抛错 ${sv.errors} 次（nav 面问题？先跑 reconcile-nav）`);
 
