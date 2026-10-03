@@ -83,15 +83,22 @@ export async function mkScope(prisma: PrismaClient, s: ScopeSeed): Promise<void>
   });
 }
 
-/** nav 节点（引擎 decide 需要；库级可达性抽样按真节点判）。 */
+/**
+ * nav 节点（引擎 decide 需要）。path 必须按真实物化路径拼（祖先链由 path 切段求，
+ * 不是靠 parentId），否则表节点的祖先链里没有库节点，继承/切断语义会测不出来。
+ */
 export async function mkNode(
   prisma: PrismaClient, kind: "base" | "table", rid: string, parentId: string | null,
 ): Promise<void> {
   const id = nodeId(kind, rid);
+  const parent = parentId
+    ? await prisma.navNode.findUnique({ where: { id: parentId }, select: { path: true } })
+    : null;
+  const parentPath = parent?.path ?? "/";
   await prisma.navNode.create({
     data: {
       id, workspaceId: "ws_default", kind, resourceType: kind, resourceId: rid,
-      name: rid, path: `/${id}/`, depth: kind === "base" ? 0 : 1, isSystem: 1,
+      name: rid, path: `${parentPath}${id}/`, depth: parent ? 1 : 0, isSystem: 1,
       ...(parentId ? { parentId } : {}),
     },
   });

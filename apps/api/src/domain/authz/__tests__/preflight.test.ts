@@ -102,6 +102,36 @@ describe("B 投影完成后的判定", () => {
     expect(data.reachability.samples.some((s) => s.library === false && s.anyTable === true)).toBe(true);
   });
 
+  it("反证：在库节点补一条不带 mask 的 r 会淹没表节点字段收窄（故投影层不能补 r）", async () => {
+    await seedFixture(prisma);
+    await projectAll();
+    const { decide } = await import("../engine.js");
+    const subject = {
+      userId: "", roleIds: ["r1"], departments: [], deptAncestorIds: [], isWorkspaceOwner: false,
+    };
+    const tableNode = nodeId("table", "t1");
+    const F2 = "f2"; // r1 在 scope 配置里把 f2 设为 hidden
+
+    // 补之前：r1 在 t1 只有窄来源（allow=[f1]），f2 不可见
+    const before = await decide({ client: prisma }, subject, tableNode, "r");
+    expect(before.decision.allowed).toBe(true);
+    expect(before.capability.visibleAll).toBe(false);
+    expect(before.capability.visibleFields?.has(F2)).toBe(false);
+
+    // 手工在【库节点】补一条不带 mask 的 r（即"投影补 r"方案）
+    await prisma.authPolicy.create({
+      data: {
+        id: "pol_probe_wide", workspaceId: "ws_default", nodeId: nodeId("base", "b1"),
+        subjectType: "role", subjectId: "r1", actions: "r", reason: "probe", createdBy: "tester",
+      },
+    });
+
+    // 补之后：库节点成为"不裁剪"的宽来源，沿继承进入表节点并集 -> 字段收窄被淹没（越权）
+    const after = await decide({ client: prisma }, subject, tableNode, "r");
+    expect(after.capability.visibleAll).toBe(true);
+    expect(after.capability.visibleFields?.has(F2) ?? true).toBe(true);
+  });
+
   it("库节点有 r 时不计不可达（库级授权本身就存在的场景）", async () => {
     await mkBase(prisma, "b9");
     await mkTable(prisma, "b9", "t9", ["f9"]);
