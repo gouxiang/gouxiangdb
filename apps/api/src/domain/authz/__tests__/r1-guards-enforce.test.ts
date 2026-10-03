@@ -12,6 +12,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setupCharHarness, json, type CharHarness } from "../../nav/__tests__/characterization/charHarness.js";
 import { driftRegistry } from "../shadow.js";
+import { projectImplicitAdmin } from "../scopeProjection.js";
+import { rebuildScopePoliciesTx } from "../scopeDoubleWrite.js";
 
 const forced = vi.hoisted(() => ({ mode: null as null | "off" | "shadow" | "on" }));
 vi.mock("../../../configAuthz.js", async (importOriginal) => {
@@ -33,6 +35,7 @@ let base3Id: string; // 直连 prisma 建、无 nav 节点（nodeId=null 用例�
 const OWNER = "g_owner";
 const MEMBER = "g_member";
 const OUTSIDER = "g_outsider";
+const ADMIN = "g_admin"; // role_admin：二代硬规则「管理员进所有库」，引擎侧无 scope 行也应有视野
 
 async function call(method: string, url: string, userId: string, body?: unknown): Promise<Response> {
   const headers: Record<string, string> = await h.auth(userId);
@@ -69,8 +72,9 @@ beforeAll(async () => {
   forced.mode = null;
   h = await setupCharHarness("gx-r1-guards-");
 
-  for (const u of [OWNER, MEMBER, OUTSIDER]) await h.createUser(u);
+  for (const u of [OWNER, MEMBER, OUTSIDER, ADMIN]) await h.createUser(u);
   await h.grantRole(OWNER); // 超级管理员：建库硬规则 + 引擎 workspace owner 兜底
+  await h.grantRole(ADMIN, "role_admin");
   await h.prisma.role.create({ data: { id: "role_g_mem", workspaceId: "ws_default", name: "R1 可见", isSystem: 0, permissions: "[]" } });
   await h.prisma.role.create({ data: { id: "role_g_none", workspaceId: "ws_default", name: "R1 无关", isSystem: 0, permissions: "[]" } });
   for (const [u, roleId] of [[MEMBER, "role_g_mem"], [OUTSIDER, "role_g_none"]] as const) {
@@ -215,6 +219,49 @@ describe("3. on：引擎为权威（放行与拒绝两个方向）", () => {
     const s = driftRegistry.snapshot();
     expect(s.unresolvedNode).toBeGreaterThanOrEqual(1);
     expect(s.enforceUnresolved).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// P0 缺口冻结（2026-10-03，r-authz-kb 核出、本文件补证）：管理员在 base 节点被投影成
+// 「只有管理位、没有 r」，而 requireCanView 判的正是 base 节点的 r -> on 态管理员被拒。
+// 断言方向为【冻结现状】而非期望值；待 scopeProjection 给管理员 base 节点补 r 后，
+// 下面 3.5-2/3.5-3 两条的 403 需翻转为 200，overDeny 需翻转为 0。
+describe("3.5 管理员 requireCanView：on 态误拒（P0，现状冻结）", () => {
+  it("3.5-1 根因证据：管理员 base 节点投影只有管理位、无 r（kb 节点对照含 r）", async () => {
+    // 空 scope 行集：管理员覆盖本就不依赖行存在，最纯粹的「凭硬规则进库」形态。
+    await rebuildScopePoliciesTx(h.prisma, "role_admin", [], "seed");
+    const pol = await h.prisma.authPolicy.findUnique({
+      where: {
+        nodeId_subjectType_subjectId: {
+          nodeId: baseNodeId, subjectType: "role", subjectId: "role_admin",
+        },
+      },
+    });
+    expect(pol).not.toBeNull();
+    const acts = (pol!.actions ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    expect(acts).toContain("manage_share"); // 证明投影确已落到库节点
+    expect(acts).not.toContain("r"); // <-- P0 根因：库节点没有只读位
+
+    // 对照：kb 分支把 content 伪表动作直接压在 kb 节点上（含 r），两种形态不一致。
+    const kbProj = projectImplicitAdmin({ bases: [], kbs: [{ libraryId: "kb_x" }], adminScopeRows: [] });
+    expect(kbProj).toHaveLength(1);
+    expect(kbProj[0]!.actions).toContain("r");
+  });
+
+  it("3.5-2 shadow 态：管理员仍 200（响应不受影响），但对拍已报 OVERDENY", async () => {
+    forced.mode = "shadow";
+    expect(await status("GET", tablesUrl(baseId), ADMIN)).toBe(200);
+    expect(driftRegistry.snapshot().overDeny).toBeGreaterThanOrEqual(1);
+  });
+
+  it("3.5-3 on 态（现状）：管理员被 requireCanView 403，期望 200", async () => {
+    forced.mode = "on";
+    const res = await call("GET", tablesUrl(baseId), ADMIN);
+    expect(res.status).toBe(403); // TODO(P0)：投影补 r 后应为 200
+    expect((await json<{ error: string }>(res)).error).toBe("无权访问该 Base");
+    const s = driftRegistry.snapshot();
+    expect(s.overDeny).toBeGreaterThanOrEqual(1); // TODO(P0)：应为 0
+    expect(s.recent.at(-1)!.direction).toBe("reverse");
   });
 });
 

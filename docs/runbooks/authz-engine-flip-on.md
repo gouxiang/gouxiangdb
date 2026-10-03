@@ -15,8 +15,22 @@
 >   旧决策只作反向对拍（日志与计数带 `direction=reverse`）；off / shadow 两态响应逐值不变。
 >   接线原语自带两种降级可观测：引擎抛错回落旧决策并记 `authz_enforce_error`、
 >   资源反查不到活节点按 fail-closed 拒绝并记 `authz_enforce_unresolved`。
+> - **翻门的 P0 阻断项（2026-10-03 坐实）**：管理员（`role_admin`）在 base 节点的投影
+>   只有管理位（`manage_share` + canManage 时的 `manage_table`/`manage_schema`）、**没有 `r`**，
+>   而 `requireCanView` 判的正是 base 节点的 `r`；叠加二代硬规则「管理员恒 visible=true」，
+>   生效模式为 `on` 时管理员会被 `requireCanView` 判 403「无权访问该 Base」——
+>   **即翻 on 会把全体管理员锁在所有库门外**。shadow 态只报 `DRIFT_OVERDENY` 不改响应，
+>   故不会提前暴露。证据测试：`src/domain/authz/__tests__/r1-guards-enforce.test.ts`
+>   的 `3.5` 组（现状冻结断言，修好后需翻转为 200 / overDeny=0）。
+>   同源 P1：`requireCanManageBase` 用 `manage_share`，而管理员 base 节点恒有该动作、
+>   二代却不强制 canManage，on 态会给未勾 canManage 的管理员发管理权（OVERALLOW）。
+>   两条修法均落在 `scopeProjection.ts` 的管理员投影口径，需先裁决再翻门。
 > - `routes/kb/shared.ts` 两守（requireKb / requireDocAccess）**尚未**走该原语，仍只有
->   shadow 对拍缝；kb 侧接线单独收口后第 0 步才算齐。
+>   shadow 对拍缝。此外 kb 侧还有 **4 处零 shadow 缝的提级闸**未纳入任何接线清单
+>   （`recycle.ts` 永久删、`index.ts` 分享总闸、`docs.ts` 找回、`sharing.ts` 分享链接），
+>   且 `kb.delete` 现有 shadow 缝用的是 `manage_share` 而其 legacy 判据是 `canDeleteLibrary`
+>   （仅超管），照抄该缝接 authority 会让「能管分享/能分享」的角色删掉整个知识库。
+>   kb 两守 + 这 4 处一并收口后第 0 步才算齐。
 > - `AUTHZ_ENFORCE_READY` 仍为 `false`：env 设 `on` 依旧被运行时降级为 shadow 并打一次 warn。
 >   即**接线已就位、总门未翻**，翻门仍按 §1 五前置 + 总监下令执行。
 > - 已经在 `on` 语义下真实生效的是两件只减不增的能力：fieldMask 五出口（S6，

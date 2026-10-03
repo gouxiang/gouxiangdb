@@ -30,7 +30,7 @@
 - AUTHZ_ENFORCE_READY 经独立评审翻 true；configAuthz.ts 注释与启动日志更新。
 - 验收：flip runbook 第 0 步四项 + 五前置（authz-engine-flip-on.md）。
 
-**R1 接线落地范围与两处语义缺口（实施记录，2026-10-03）**
+**R1 接线落地范围与语义缺口（实施记录，2026-10-03；缺口 3 为 P0，阻断翻 on）**
 
 - 落地：`apps/api/src/domain/authz/enforceGate.ts`（`enforceOrLegacy` 原语，三态收口）+
   `guards.ts` 七守改经该原语；`off/shadow` 两态响应逐值不变（有测试锁）。
@@ -60,6 +60,38 @@
   越权方向评估：仅 canManage=1 才补，与第二代库级 canManageSchema 一致，只读成员不补。
   存量影响：已投影的库会出现 S2_ACTION_MISMATCH（base 节点动作串），
   跑一次 `scripts/authz/project-scope.ts --apply` 即收敛（实测 dev 副本 7 行）。
+- 缺口 3（**P0，阻断翻 on**；r-authz-kb 核出、be-authz-enforce-core 复核并用测试坐实）：
+  **管理员在 base 节点没有 `r`，翻 on 会把全体管理员锁在所有库门外**。
+  - 证据链：`scopeProjection.projectImplicitAdmin` base 分支（库节点）只投
+    `manage_share`（+ canManage 时 `manage_table`/`manage_schema`），数据权限全在 **table** 节点；
+    而 `requireCanView` 的对拍点是 base 节点 + 动作 `r`。base 是根节点无祖先可继承，
+    管理员不持 `role_owner`，`evaluate.evaluateChainDecision` 的 creator / workspace owner /
+    策略命中三档兜底**全部落空** → 引擎 deny。
+  - 另一侧：二代 `libraryPolicy.resolve` 管理员分支**强制 `visible: true`** → 旧决策恒 allow。
+    两者相撞 = `DRIFT_OVERDENY`；on 态 `allowed = engineAllowed = false` → 403。
+  - **形态不一致是根因**：kb 分支把 content 伪表动作直接压在 kb 节点（含 `r`），
+    base 分支却把数据权限下沉到 table 节点、库节点只剩管理位。kb 侧因此安全，base 侧必炸。
+  - 为什么既有测试没暴露：shadow 态 `enforceOrLegacy` 返回旧决策，drift 只计数不改响应，
+    故 shadow 下必然不红；只有显式 `mode="on"` 才复现（这也是本轮 382 例 routes/org 全绿
+    却仍未发现的原因）。
+  - 坐实测试：`apps/api/src/domain/authz/__tests__/r1-guards-enforce.test.ts` 的 `3.5` 组
+    ——3.5-1 断言 base 节点投影**不含** `r`（并以 kb 节点含 `r` 作对照）；
+    3.5-2 断言 shadow 态管理员仍 200 但已报 OVERDENY；
+    3.5-3 冻结现状：on 态管理员 403 + `direction=reverse` 的 OVERDENY。
+    **断言方向为冻结现状，修好后需翻转为 200 / overDeny=0。**
+  - 同源 P1：`requireCanManageBase` 用 `manage_share`，管理员 base 节点恒有该动作，
+    但二代管理员分支只强制 `visible/canToggleShare/canShare`、**不强制 canManage** →
+    未勾 canManage 的管理员在 on 态拿到全部库的管理权（OVERALLOW）。
+  - 修法候选（**未实施，等裁决**；两条都落在 `scopeProjection.ts` 管理员投影口径）：
+    ① 管理员 base 节点补 `r`、并把 `manage_share` 改为跟随 `dto.canManage`
+    ——与二代逐值对齐，但会动 P1 双写期望集（`scopeProjectionReconcile` S 段、
+    `projectImplicitAdmin` 相关断言）；
+    ② `requireCanView` 改 `conjunction` ——能挡误拒，但引擎在该守上永远只能投反对票
+    （等于没真正接进引擎），且会拖累"table 有 r、base 无 r"的非管理员角色，**不推荐**；
+    ③ ref 换 table 粒度 ——语义错（`requireCanView` 判的是库可见性）。
+  - 连带提醒：`scopeDoubleWrite.projectAdminForNewLibraryTx` 的行注释已写明
+    「base（零表）预期仅库节点 manage_share+manage_table」，即无 `r` 是**当前设计意图**，
+    不是笔误——改它需要明确的裁决而非顺手修。
 
 ### 阶段 R2：on 稳定观察期内只观测，不删（时间门）
 
