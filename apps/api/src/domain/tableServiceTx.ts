@@ -14,7 +14,10 @@ import { makeOptions } from "./fieldService.js";
 import { enqueueChangeEventsTx } from "./search/outbox.js";
 import { syncNavFromEntitiesTx, softDeleteSubtreeTx } from "./nav/sync.js";
 import { nodeId } from "./nav/backfill.js";
-import { syncTableForAllScopesTx } from "./authz/scopeProjectionTx.js";
+import {
+  syncTableForAllScopesTx,
+  resyncLibraryAggregateForAllScopesTx,
+} from "./authz/scopeProjectionTx.js";
 import { projectAdminForNewTableTx } from "./authz/scopeDoubleWrite.js";
 
 // ============ 表名唯一性（同库 + 未软删 + trim 后精确匹配）============
@@ -192,10 +195,19 @@ export async function updateTableTx(tx: DbTx, input: UpdateTableTxInput) {
 
 /**
  * 软删表（单事务）：表打软删 → 级联软删 records/fields、view 置 order=-1 → nav 子树整棵软删
- * → 活记录逐条登记 delete outbox。
+ * → 活记录逐条登记 delete outbox → 重算库节点聚合位（防 edit_data 残留 OVERALLOW）。
  */
-export async function softDeleteTableTx(tx: DbTx, tableId: string): Promise<void> {
+export async function softDeleteTableTx(
+  tx: DbTx,
+  tableId: string,
+  operatorUserId: string,
+): Promise<void> {
   const now = new Date();
+  const table = await tx.table.findUnique({
+    where: { id: tableId }, select: { baseId: true },
+  });
+  if (!table) throw new HttpError(404, "数据表不存在");
+  const { baseId } = table;
   await tx.table.update({ where: { id: tableId }, data: { deletedAt: now } });
   // M5/S1：级联软删的活记录逐条登记 delete（先取 id，再更新）。
   const liveRecords = await tx.record.findMany({
@@ -212,4 +224,7 @@ export async function softDeleteTableTx(tx: DbTx, tableId: string): Promise<void
       entityType: "record" as const, entityId: r.id, op: "delete" as const, version: softVersion,
     })));
   }
+  // 删表后按当前活表形态整行覆盖重算库节点：唯一可写表被删时 edit_data 正确移除，
+  // canManage 角色则由 projectScopeRow 继续导出 edit_data（见 ADR-0056）。
+  await resyncLibraryAggregateForAllScopesTx(tx, "base", baseId, operatorUserId);
 }

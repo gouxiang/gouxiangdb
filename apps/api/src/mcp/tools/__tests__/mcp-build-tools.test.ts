@@ -15,7 +15,7 @@ vi.mock("../../../domain/tableService.js", () => ({
   updateTable: vi.fn(async (id: string, _b: unknown, p: Record<string, unknown>) => {
     svcSpy("updateTable", id); return { id, name: p.name ?? "表", primaryFieldId: "fP", icon: null, iconColor: null };
   }),
-  softDeleteTable: vi.fn(async (id: string) => { svcSpy("softDeleteTable", id); }),
+  softDeleteTable: vi.fn(async (id: string, userId: string) => { svcSpy("softDeleteTable", id, userId); }),
 }));
 vi.mock("../../../domain/fieldService.js", () => ({
   createField: vi.fn(async (i: { name: string }) => { svcSpy("createField", i.name); return { field: { id: "fNew" } }; }),
@@ -117,7 +117,7 @@ describe("table 搭建工具：闸门二 manage_schema/manage_table", () => {
     const r = await tableDeleteTable(ctx(portFor({ allow: ["manage_table"], canRead: true })), { tableId: "t1" });
     expect(r.isError).toBeUndefined();
     expect(bodyOf(r)).toMatchObject({ ok: true, tableId: "t1", deleted: true });
-    expect(svcSpy).toHaveBeenCalledWith("softDeleteTable", "t1");
+    expect(svcSpy).toHaveBeenCalledWith("softDeleteTable", "t1", "u1");
   });
 });
 

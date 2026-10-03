@@ -15,6 +15,8 @@ import {
   type ProjectedPolicy,
   type ScopeProjectionInput,
 } from "./scopeProjection.js";
+import { projectImplicitAdmin } from "./implicitAdminProject.js";
+import { ADMIN_ROLE_ID } from "./implicitAdminShared.js";
 import { nodeId } from "../nav/backfill.js";
 import { parseConfig } from "./libraryScopeConfig.js";
 
@@ -135,6 +137,74 @@ export async function syncTableForAllScopesTx(
         nodeId: targetNode, subjectType: "role", subjectId: row.roleId,
       });
     }
+  }
+}
+
+/**
+ * 删表/结构变更后【整行覆盖重算】库节点（base/kb）的 scope:role 动作串。
+ *
+ * 为什么需要：库节点 edit_data 是投影快照，syncTableForAllScopesTx 的 remove 分支只删 table
+ * 节点行；删掉库内唯一可写表后若不重算，库节点 edit_data 残留 true -> on 态 OVERALLOW
+ * （legacy perm.canEditData 已随活表并集转 false）。
+ *
+ * 覆盖而非增量：upsert 直接写 projectScopeRow 按【当前活表形态】算出的库节点整条动作串，
+ * manage_share/manage_table/manage_schema/enter 等位由同一纯函数一并算出、不会丢，也不残留。
+ * kb 投影不依赖 shape，传空形态即可（content 伪表挂 kb 节点）。
+ */
+export async function resyncLibraryAggregateForAllScopesTx(
+  client: AuthzClient,
+  libraryKind: "base" | "kb",
+  libraryId: string,
+  operatorUserId: string,
+): Promise<void> {
+  const rows = await client.roleLibraryScope.findMany({
+    where: { libraryKind, libraryId },
+  });
+  const shape =
+    libraryKind === "base"
+      ? await loadLiveShape(client, libraryId)
+      : { tableIds: [], fieldIdsByTable: new Map<string, readonly string[]>() };
+  const targetNode =
+    libraryKind === "kb"
+      ? nodeId("kb", libraryId)
+      : nodeId("base", libraryId);
+
+  for (const row of rows) {
+    const projected = projectScopeRow(toScopeInput(row), shape);
+    const one = projected.find((p) => p.nodeId === targetNode);
+    if (!one) continue;
+    await upsertPolicyTx(client, {
+      nodeId: one.nodeId, subjectType: "role", subjectId: row.roleId,
+      actions: one.actions, fieldMask: null, reason: "scope:role",
+      createdBy: operatorUserId,
+    });
+  }
+
+  // 非活库一律不投影（同 scopeDoubleWrite.expectedRole 口径）：库已软删时不得写出
+  // 指向死节点的孤儿策略。
+  const library = libraryKind === "base"
+    ? await client.base.findUnique({ where: { id: libraryId }, select: { deletedAt: true } })
+    : await client.knowledgeBase.findUnique({ where: { id: libraryId }, select: { deletedAt: true } });
+  if (!library || library.deletedAt) return;
+
+  // role_admin 不走上面的 scope 行遍历：其隐含投影由 projectImplicitAdmin 单独算
+  // （subjectId=role_admin，可能根本没有该库 scope 行；且管理员恒隐含 visible/canShare）。
+  // 删表后它也必须按现 shape 重算，否则管理员库节点 edit_data 残留 -> 与 legacy 相反放行。
+  const adminRows = await client.roleLibraryScope.findMany({
+    where: { libraryKind, libraryId, roleId: ADMIN_ROLE_ID },
+  });
+  const adminProjected = projectImplicitAdmin({
+    bases: libraryKind === "base" ? [{ libraryId, shape }] : [],
+    kbs: libraryKind === "kb" ? [{ libraryId }] : [],
+    adminScopeRows: adminRows.map(toScopeInput),
+  });
+  const adminOne = adminProjected.find((p) => p.nodeId === targetNode);
+  if (adminOne) {
+    await upsertPolicyTx(client, {
+      nodeId: adminOne.nodeId, subjectType: "role", subjectId: ADMIN_ROLE_ID,
+      actions: adminOne.actions, fieldMask: null, reason: "scope:role",
+      createdBy: operatorUserId,
+    });
   }
 }
 

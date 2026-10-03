@@ -88,8 +88,9 @@ export async function updateTable(
   };
 }
 
-/** 软删表（级联软删记录/字段、nav 子树、outbox 登记）。 */
-export async function softDeleteTable(tableId: string): Promise<void> {
-  await withWriteTx("table.softDelete", (tx) => softDeleteTableTx(tx, tableId));
+/** 软删表（级联软删记录/字段、nav 子树、outbox 登记、库节点聚合位重算）。 */
+export async function softDeleteTable(tableId: string, operatorUserId: string): Promise<void> {
+  await withWriteTx("table.softDelete", (tx) =>
+    softDeleteTableTx(tx, tableId, operatorUserId));
   invalidateOrdinalCache(tableId);
 }

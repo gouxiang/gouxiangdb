@@ -184,10 +184,10 @@ tables.patch("/:tableId", async (c) => {
 tables.delete("/:tableId", async (c) => {
   const tableId = c.req.param("tableId");
   await baseIdOf(tableId);
-  await requireTableManage(c, tableId);
+  const { userId } = await requireTableManage(c, tableId);
 
   // M3/S3 #6：删表收紧进事务（domain/tableService）；table 及视图节点整棵软删。
-  await softDeleteTable(tableId);
+  await softDeleteTable(tableId, userId);
   return c.json({ ok: true });
 });
 

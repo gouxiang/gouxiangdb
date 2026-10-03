@@ -70,7 +70,7 @@ export async function tableDeleteTable(ctx: ToolCtx, args: Record<string,unknown
   }
   const brief = await tableBriefById(tableId);
   if (!brief) return deny("FORBIDDEN_RESOURCE", "数据表不存在");
-  await softDeleteTable(tableId);
+  await softDeleteTable(tableId, ctx.subject.userId);
   const canRead = await ctx.port.can("r", { kind: "table", id: tableId });
   return text(JSON.stringify(canRead ? { ok: true, tableId, deleted: true } : { ok: true }));
 }
