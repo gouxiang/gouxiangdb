@@ -8,9 +8,10 @@
 // 也就是说 scope-parity 只覆盖后者。本文件补的是前者，两条加一起才覆盖全部修路。
 //
 // 判据形态：同一用户、同一库，【守卫在 on 态的结论】必须等于【该库节点是否在 visible-scope 里】。
-//   - 现状：两边同为 false（库节点没 r）——一致，故本测试当前是绿的；
-//   - 走「守卫改活表并集」单侧改动：守卫 true、可见集 false -> 本测试红（这正是要抓的）；
-//   - 走「库级可见性」一等语义且 decide 与 scope 同步落地：两边同变 true -> 本测试保持绿。
+//   - 定稿前：两边同为 false（库节点没 r）——一致，本测试绿；
+//   - 定稿后：库节点按 enter 投影，守卫判 enter、可见集（preflightScopeVisibility 已同步）也判
+//     enter，两边同为 true —— 仍一致，本测试保持绿且具备判别力；
+//   - 任一侧单独改动（守卫改动作位而可见集不改 / 反之）-> 分叉，用例 2 会点名。
 // 即：它只抓【单侧改动】，不判越权（越权由 preflight.test.ts 的 fieldMask 反证用例守）。
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -56,13 +57,17 @@ beforeEach(async () => {
   await prisma.$transaction((tx) => applyScopeBackfill(tx, plan, "tester"));
 });
 
-/** on 态下守卫对【库节点】的结论（mode 显式覆盖仅单测用，生产走 effectiveAuthzMode）。 */
+/**
+ * on 态下守卫对【库节点】的结论（mode 显式覆盖仅单测用，生产走 effectiveAuthzMode）。
+ * 动作位必须与守卫现状一致：requireCanView 判 enter（= legacy access.visible），
+ * 内容 r 只投影在 table 节点上，库节点判 r 恒假 —— 用 r 会让本哨兵退化成恒 false 的空转。
+ */
 async function guardVerdict(): Promise<boolean> {
   const out = await enforceOrLegacy({
     guard: "requireCanView",
     userId: USER_ID,
     ref: { resourceType: "base", resourceId: BASE_ID },
-    action: "r",
+    action: "enter",
     legacyAllowed: true, // 第二代口径：visible=1，旧决策放行
     client: prisma as never,
     mode: "on",
@@ -70,37 +75,31 @@ async function guardVerdict(): Promise<boolean> {
   return out.allowed;
 }
 
+/** 可见集对库节点同样按 enter 判定（preflightScopeVisibility 已同步，口径一致才不分叉）。 */
 async function libraryInVisibleScope(): Promise<boolean> {
-  const scope = await resolveVisibleNodeIds(prisma as never, USER_ID, { actions: ["r"] });
+  const scope = await resolveVisibleNodeIds(prisma as never, USER_ID, { actions: ["enter"] });
   return scope.nodeIds.includes(nodeId("base", BASE_ID));
 }
 
 describe("守卫口径 <-> 可见集口径", () => {
-  it("两者必须一致；且表节点确实可见（否则这条比较是 false==false 的空转）", async () => {
-    const scope = await resolveVisibleNodeIds(prisma as never, USER_ID, { actions: ["r"] });
-    // 判别力前提：该用户确有库内视野（表节点进可见集），否则两边恒 false，比对无意义。
-    expect(scope.nodeIds).toContain(nodeId("table", TABLE_ID));
+  it("两者必须一致；且库节点确实在可见集里（否则这条比较是 false==false 的空转）", async () => {
+    // 判别力前提：定稿后库节点按 enter 进可见集（P0-B 已修），两边若恒 false 则比对无意义。
+    expect(await libraryInVisibleScope()).toBe(true);
 
-    const inScope = await libraryInVisibleScope();
     const guarded = await guardVerdict();
-    expect(guarded).toBe(inScope);
+    expect(guarded).toBe(true);
+    expect(guarded).toBe(await libraryInVisibleScope());
   });
 
-  it("单侧改动必被抓：只把守卫换成『库内活表并集』而可见集不动 -> 两边分叉", async () => {
-    expect(await libraryInVisibleScope()).toBe(false);
+  it("单侧改动必被抓：可见集若仍按 r 判库节点，就与守卫的 enter 口径分叉", async () => {
+    // 模拟「可见集那侧没跟着改」：仍按内容 r 判库节点（库节点没有 r -> 不可见）。
+    const stale = await resolveVisibleNodeIds(prisma as never, USER_ID, { actions: ["r"] });
+    const staleInScope = stale.nodeIds.includes(nodeId("base", BASE_ID));
+    expect(staleInScope).toBe(false);
 
-    // 模拟 enforceGate 改成「库内活表并集」：直接读表节点结论代替库节点结论
-    const { decide } = await import("../engine.js");
-    const tableAllowed = (await decide(
-      { client: prisma as never },
-      await (await import("../subjects.js")).resolveSubject(USER_ID, prisma as never),
-      nodeId("table", TABLE_ID),
-      "r",
-    )).decision.allowed;
-    expect(tableAllowed).toBe(true); // 表节点确实给 r
-
-    // 于是守卫会说放行、可见集仍说库不可见 —— 分叉，本哨兵存在的唯一理由
-    expect(tableAllowed).not.toBe(await libraryInVisibleScope());
+    // 守卫按 enter 放行、可见集按 r 说不可见 -> 分叉。这正是本哨兵存在的唯一理由：
+    // 任何一侧单独改动（守卫改动作位 / 可见集改动作位）都会被这里点名。
+    expect(await guardVerdict()).not.toBe(staleInScope);
   });
 
   it("哨兵只抓单侧改动：库节点补 r 时两边同步变 true，不误报（越权另由 fieldMask 用例守）", async () => {
