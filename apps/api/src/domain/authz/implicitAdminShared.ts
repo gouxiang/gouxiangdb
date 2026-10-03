@@ -12,6 +12,13 @@ import type { LiveSchemaShape, ScopeProjectionInput } from "./scopeProjection.js
 /** 系统管理员角色 id（org/roles.ts ADMIN_ROLE_ID，本地常量避免 import 其 prisma 模块）。 */
 export const ADMIN_ROLE_ID = "role_admin";
 
+/**
+ * 超级管理员角色 id（org/roles.ts SUPER_ADMIN_ROLE_ID，同理本地常量）。
+ * owner 走硬短路、永不投影：任何投影/重算入口都必须先行跳过它（与 scopeDoubleWrite.ts
+ * 的 expectedScopePoliciesForRole / rebuildScopePoliciesTx 同源同口径）。
+ */
+export const SUPER_ADMIN_ROLE_ID = "role_owner";
+
 export interface ImplicitAdminInput {
   bases: ReadonlyArray<{ libraryId: string; shape: LiveSchemaShape }>;
   kbs: ReadonlyArray<{ libraryId: string }>;

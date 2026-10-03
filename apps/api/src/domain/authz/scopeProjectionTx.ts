@@ -16,7 +16,7 @@ import {
   type ScopeProjectionInput,
 } from "./scopeProjection.js";
 import { projectImplicitAdmin } from "./implicitAdminProject.js";
-import { ADMIN_ROLE_ID } from "./implicitAdminShared.js";
+import { ADMIN_ROLE_ID, SUPER_ADMIN_ROLE_ID } from "./implicitAdminShared.js";
 import { nodeId } from "../nav/backfill.js";
 import { parseConfig } from "./libraryScopeConfig.js";
 
@@ -118,6 +118,10 @@ export async function syncTableForAllScopesTx(
   const shape = libraryKind === "base" ? await loadLiveShape(client, libraryId) : undefined;
 
   for (const row of rows) {
+    // role_owner 只走硬短路、永不投影（同 resyncLibraryAggregateForAllScopesTx:182 及
+    // scopeDoubleWrite 两处既有口径）；add/remove 两分支都必须跳过，否则建表也会凭空
+    // 给 owner 造一条表节点策略。
+    if (row.roleId === SUPER_ADMIN_ROLE_ID) continue;
     if (op === "add") {
       const projected = projectScopeRow(toScopeInput(row), shape as LiveSchemaShape);
       const one = projected.find((p) => p.nodeId === targetNode);
@@ -157,6 +161,13 @@ export async function resyncLibraryAggregateForAllScopesTx(
   libraryId: string,
   operatorUserId: string,
 ): Promise<void> {
+  // 非活库一律不投影（同 scopeDoubleWrite.expectedRole 口径）：库已软删/不存在时不得写出
+  // 指向死节点的孤儿策略。必须在任何写之前判定，否则软删库会先被普通角色循环写出孤儿行。
+  const library = libraryKind === "base"
+    ? await client.base.findUnique({ where: { id: libraryId }, select: { deletedAt: true } })
+    : await client.knowledgeBase.findUnique({ where: { id: libraryId }, select: { deletedAt: true } });
+  if (!library || library.deletedAt) return;
+
   const rows = await client.roleLibraryScope.findMany({
     where: { libraryKind, libraryId },
   });
@@ -170,6 +181,9 @@ export async function resyncLibraryAggregateForAllScopesTx(
       : nodeId("base", libraryId);
 
   for (const row of rows) {
+    // role_owner 只走硬短路、永不投影（同 expectedScopePoliciesForRole:114 /
+    // rebuildScopePoliciesTx:131 两处既有口径）；owner 也有 scope 行，漏跳会凭空造出策略。
+    if (row.roleId === SUPER_ADMIN_ROLE_ID) continue;
     const projected = projectScopeRow(toScopeInput(row), shape);
     const one = projected.find((p) => p.nodeId === targetNode);
     if (!one) continue;
@@ -179,13 +193,6 @@ export async function resyncLibraryAggregateForAllScopesTx(
       createdBy: operatorUserId,
     });
   }
-
-  // 非活库一律不投影（同 scopeDoubleWrite.expectedRole 口径）：库已软删时不得写出
-  // 指向死节点的孤儿策略。
-  const library = libraryKind === "base"
-    ? await client.base.findUnique({ where: { id: libraryId }, select: { deletedAt: true } })
-    : await client.knowledgeBase.findUnique({ where: { id: libraryId }, select: { deletedAt: true } });
-  if (!library || library.deletedAt) return;
 
   // role_admin 不走上面的 scope 行遍历：其隐含投影由 projectImplicitAdmin 单独算
   // （subjectId=role_admin，可能根本没有该库 scope 行；且管理员恒隐含 visible/canShare）。

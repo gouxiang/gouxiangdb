@@ -194,4 +194,30 @@ describe("软删表后库节点 edit_data 重算", () => {
     const restored = await readLibraryActions();
     expect(restored.includes("edit_data"), "恢复可写表后须拿回 edit_data").toBe(true);
   });
+
+  it("role_owner 永不投影：owner 的 scope 行不产生库节点策略", async () => {
+    await resetDb();
+    await mkUser();
+    await mkBaseWithTable();
+    await mkScope({ roleId: "role_owner", canManage: 1, visible: 1 });
+
+    await prisma.$transaction((tx) => softDeleteTableTx(tx, "t1", "admin"));
+
+    expect(
+      await prisma.authPolicy.count({ where: { subjectId: "role_owner" } }),
+      "owner 走硬短路、不得被投影出策略行",
+    ).toBe(0);
+  });
+
+  it("非活库不投影：库软删后重算不写出孤儿策略", async () => {
+    await resetDb();
+    await mkUser();
+    await mkBaseWithTable();
+    await mkScope({ config: JSON.stringify({ tables: { t1: { update: true } } }) });
+    await prisma.base.update({ where: { id: "b1" }, data: { deletedAt: new Date() } });
+
+    await resyncLibraryAggregateForAllScopesTx(prisma, "base", "b1", "admin");
+
+    expect(await prisma.authPolicy.count(), "软删库不得投影（含 admin 分支）").toBe(0);
+  });
 });
