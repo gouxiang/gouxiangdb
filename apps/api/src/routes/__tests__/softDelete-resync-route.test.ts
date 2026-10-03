@@ -28,6 +28,12 @@ let tmpDir: string;
 let request: (method: string, url: string, body?: unknown) => Promise<Response>;
 let baseId: string;
 let tableId: string;
+/**
+ * 删表事务体（第三条用例绕开 HTTP 守卫直调）。必须动态 import：静态 import 会在本文件顶部
+ * 就把 db.ts 单例建出来（那时 DATABASE_URL 尚未指向临时库），路由随后复用该单例将查不到
+ * 新建的库 -> 守卫 403。与路由模块同在 setup() 内、env 生效之后加载。
+ */
+let softDeleteTableTx: typeof import("../../domain/tableServiceTx.js")["softDeleteTableTx"];
 
 async function setup() {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gx-delroute-"));
@@ -50,10 +56,12 @@ async function setup() {
   });
 
   const guardsMod = await import("../../guards.js");
-  const [tablesMod, recordsMod] = await Promise.all([
+  const [tablesMod, recordsMod, tableTxMod] = await Promise.all([
     import("../tables.js"),
     import("../records.js"),
+    import("../../domain/tableServiceTx.js"),
   ]);
+  softDeleteTableTx = tableTxMod.softDeleteTableTx;
   const app = new Hono();
   app.route("/tables", tablesMod.tables);
   app.route("/records", recordsMod.records);
@@ -123,6 +131,20 @@ describe("软删/恢复表路由：库节点 edit_data 随活表形态重算", (
     expect(afterDelete.includes("edit_data"),
       "删表路由必须重算库节点，edit_data 不得残留").toBe(false);
     expect(afterDelete.includes("enter")).toBe(true);
+  }, 120000);
+
+  it("删表走真事务体（不经 HTTP 守卫）+ 恢复走真路由：非管理员 r1 拿回 edit_data", async () => {
+    // OVERDENY 的真实形状：断言主体是 canManage=0 的普通角色 r1，其 edit_data 纯由
+    // 活表可写并集导出（不掺 canManage）。删表绕开 HTTP 走 domain 事务体（r1 本就过不了
+    // requireTableManage，而故障路径是「删」这一步没重算），恢复侧仍走真 HTTP 路由。
+    await seed("b3");
+    await prisma.$transaction((tx) => softDeleteTableTx(tx, tableId, OWNER));
+    expect((await libraryActions()).includes("edit_data")).toBe(false);
+
+    const restore = await request("POST", `/records/trash/${tableId}/restore`, { kind: "table" });
+    expect(restore.status, "恢复表路由应放行").toBe(200);
+    expect((await libraryActions()).includes("edit_data"),
+      "普通角色恢复可写表后必须拿回 edit_data").toBe(true);
   }, 120000);
 
   it("POST /records/trash/:id/restore：走完恢复路由，库节点 edit_data 回来（OVERDENY 反证）", async () => {
