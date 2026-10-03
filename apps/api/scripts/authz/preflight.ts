@@ -151,6 +151,8 @@ function printHuman(r: PreflightReport): void {
   if (rc.errors > 0) console.log(`    引擎判定抛错 ${rc.errors} 次（nav 节点缺失？先跑 reconcile-nav）`);
 
   console.log("[4] 库节点是否在可见集（S4 同源内核；非空即库整层消失）");
+  console.log("    触发条件：GX_AUTHZ_ENGINE=on 即生效，与 AUTHZ_ENFORCE_READY 无关"
+    + "（navPruneEnforceEffective 读原始 env，configAuthz.ts:85）");
   const sv = r.data.scopeVisibility;
   console.log(
     `    非 owner 用户抽样=${sv.sampledUsers}（跳过 owner ${sv.ownerSkipped}）`
@@ -159,6 +161,8 @@ function printHuman(r: PreflightReport): void {
   console.log(
     `    表/视图可见但库节点全不可见的用户=${sv.orphanTableUsers}（非 0 即 M5 收敛与 M3 剪枝把库抹掉）`,
   );
+  console.log("    连带：prune.ts resourceAncestorsPass 沿 parentId 向上，任一资源祖先不可见即拒"
+    + " -> 库被剪则库内表/视图一并消失");
   for (const s of sv.samples.slice(0, 5)) {
     console.log(`    ${s.userId.slice(-6)}@${s.nodeId}（${s.kind}）r=${s.visible}`);
   }

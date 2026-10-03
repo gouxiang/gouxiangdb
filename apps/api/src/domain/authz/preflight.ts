@@ -234,9 +234,13 @@ export function evaluatePreflight(data: PreflightData, facts: PreflightFacts): P
     blocking.push(
       `库节点缺席可见集：${data.scopeVisibility.orphanTableUsers}/${data.scopeVisibility.sampledUsers} 个抽样用户`
         + `【表/视图可见、但库节点一个都不可见】（库节点抽样 ${data.scopeVisibility.visible}`
-        + `/${data.scopeVisibility.checked} 可见）——通电后 M5「先收敛后召回」与 M3 导航剪枝会把库整层`
-        + `抹掉：能看表、点不进库、检索只召回表。比七守 403 更硬，同一根因（引擎缺「库级可见性」`
-        + `一等表达），待架构裁决后由投影层重跑 project-scope --apply 收敛`,
+        + `/${data.scopeVisibility.checked} 可见）——这不是"翻门后才会发生"的未来态：剪枝门`
+        + `navPruneEnforceEffective 读【原始 env】（configAuthz.ts:85，不经 on->shadow 降级），`
+        + `**GX_AUTHZ_ENGINE=on 即生效、与 AUTHZ_ENFORCE_READY 无关**，运维改一个环境变量就能进。`
+        + `后果是 M5「先收敛后召回」与 M3 导航剪枝把库整层抹掉，且 nav/prune.ts 的`
+        + `resourceAncestorsPass 沿 parentId 向上"任一资源祖先不可见即拒"——库被剪则库内表/视图`
+        + `一并消失，不是"能看表点不进库"而是"库连同库内资源一起消失"。`
+        + `同一根因（引擎缺「库级可见性」一等表达），待架构裁决后由投影层重跑 project-scope --apply 收敛`,
     );
   }
 

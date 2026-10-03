@@ -238,6 +238,12 @@ sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
   投影层给库节点补 `r` 会淹没逐表字段收窄（OVERALLOW，`fieldMask.ts:97`）；
   enforceGate 改走库内活表并集则与 S4 可见集分叉（`scope.ts:174`，撞零分叉门禁）。
   两项归零前不得通电，修法待架构裁决。
+- **④ 是现存可触发态，不需要翻总门**：剪枝门 `navPruneEnforceEffective` 读原始 env
+  （`configAuthz.ts:85`，`NAV_PRUNE_ENFORCE_READY=true`，不经 on→shadow 降级），
+  故 `GX_AUTHZ_ENGINE=on` 而 `AUTHZ_ENFORCE_READY=false` 时，**剪枝已按 on 生效、七守仍 shadow**。
+  且 `nav/prune.ts` 的 `resourceAncestorsPass` 沿 parentId 向上「任一资源祖先不可见即拒」，
+  库被剪 ⇒ 库内表/视图一并消失。**④ 归零前 `GX_AUTHZ_ENGINE` 不得置 on**（不是"翻门要谨慎"，
+  是"连 on 都不能设"）。详见 [authz-engine-flip-on.md §1.5.0](authz-engine-flip-on.md#150-风险当前可触发4-不需要翻总门envon-即发生)。
 - 顺序：先 `reconcile-policies.ts --apply`（修 A1/A2/B），再 `project-scope.ts --apply`（补存量），
   最后 `preflight.ts` 收口。三者都幂等，可以重复跑。
 

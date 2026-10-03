@@ -89,11 +89,38 @@ DATABASE_URL=file:/var/lib/gouxiangdb/app.db pnpm tsx scripts/authz/preflight.ts
 
 > [3][4] 两段是同一根因的两层失效，都不是投影层能修的，**必须先有架构裁决再通电**：
 > [3] 七守在【库节点】判 r/u，而投影把数据动作挂在【表节点】-> on 态 403；
-> [4] S4 可见集按节点 r 判 -> 库节点一个都不进可见集（dev.db 副本实测 0/24 可见），
-> 通电后 M5「先收敛后召回」与 M3 导航剪枝会把库整层抹掉：能看表、点不进库、检索只召回表。
+> [4] S4 可见集按节点 r 判 -> 库节点一个都不进可见集（dev.db 副本实测 0/24 可见）。
 > 两条直觉修法均已证伪，别再试：投影层给库节点补 r 会淹没逐表字段收窄（OVERALLOW，
 > `fieldMask.ts:97` 无 mask 即 `visibleAll`，锁在 `preflight.test.ts` 反证用例里）；
 > enforceGate 改走库内活表并集则与可见集分叉（`scope.ts:174` 按节点 r 判，撞 S4 零分叉门禁）。
+
+### 1.5.0 【风险·当前可触发】[4] 不需要翻总门，env=on 即发生
+
+[4] 是**现存可触发态**，不是"翻门后的未来态"。触发链条（`apps/api/src/configAuthz.ts`）：
+
+```ts
+export const NAV_PRUNE_ENFORCE_READY = true;                 // :82
+export function navPruneEnforceEffective(env = process.env) { // :85
+  return NAV_PRUNE_ENFORCE_READY && resolveAuthzEngineMode(env) === "on";
+}
+```
+
+`resolveAuthzEngineMode` 读的是**原始 env**，不经 on→shadow 降级；总门 `AUTHZ_ENFORCE_READY=false`
+只收敛 `effectiveAuthzMode`（七守那条路），**管不到剪枝**。于是：
+
+`GX_AUTHZ_ENGINE=on` + 总门仍 false ⇒ **剪枝已按 on 生效、七守仍 shadow**。运维改一个环境变量
+就能进这个状态，不需要任何人下令翻门。
+
+后果比"点不进库"再深一层：`nav/prune.ts` 的 `resourceAncestorsPass` 沿 `parentId` 向上，
+**任一资源祖先不在 visible 集即拒** —— 库节点被剪 ⇒ 库内表/视图作为其后代被连带拒。
+所以 [4] 描述的撕裂态是：表节点自身判 r 通过，却在剪枝阶段被父门拖下水，
+**库连同库内资源一起从导航与检索（M5 先收敛后召回）消失**。
+
+> 连带：`configAuthz.ts:79-80` 原安全论证「只减不增…故全局 enforce 未翻也安全」**已被本段证伪**：
+> 它成立的前提是"剪掉的正是本不该看的节点"，而实测被剪的是二代 `visible=true` 判定的该看之库。
+> "只减不增"只剩字面成立（确实没放行任何东西），但没防住**删错**。该处注释已就地标注。
+
+**操作口径**：在 [4] 归零前，`GX_AUTHZ_ENGINE` 不得置 on——不是"翻门要谨慎"，是"连 on 都不能设"。
 
 ### 1.5.1 两个入口的分工与实测口径（别混淆、别重复误判）
 

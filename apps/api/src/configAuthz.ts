@@ -78,6 +78,16 @@ export function fieldMaskEnforceEffective(env: NodeJS.ProcessEnv = process.env):
  *   - off/shadow 恒 false：树与菜单短路全量返回，零引擎 SQL，响应与 M3 金标准逐字节一致；
  *   - 只减不增：剪枝只从全量集合删节点，从不放行任何被旧守卫拒绝的请求（shortcut/URL
  *     能否打开仍由旧守卫/内容端点决定），故全局 enforce 未翻也安全。
+ *
+ * ★ 上面这条「故全局 enforce 未翻也安全」的安全论证【已被证伪，勿再据此放心】。
+ *   它成立的前提是「剪掉的正是本不该看的节点」，而通电前体检 [4] 段实测（dev.db 字节副本，
+ *   已完成存量全量投影）：库节点抽样 24 个、可见 **0** 个——被剪掉的是二代 `visible=true`
+ *   判定「该看」的库，删错了。"只减不增"只剩字面成立（确实没放行任何东西），但没防住删错。
+ *   连带后果比"点不进库"更深一层：`nav/prune.ts` 的 resourceAncestorsPass 沿 parentId 向上，
+ *   **任一资源祖先不在 visible 集即拒**，故库被剪 ⇒ 库内表/视图一并从导航消失。
+ *   触发条件（注意是现存可触发态，不是未来态）：本门读原始 env，故 **GX_AUTHZ_ENGINE=on 即生效，
+ *   与 AUTHZ_ENFORCE_READY 无关**——env=on 而总门未翻时，剪枝已按 on 生效、七守仍 shadow。
+ *   修法不在本文件（改门只会把头埋沙里），见 docs/runbooks/authz-engine-flip-on.md §1.5 风险段。
  */
 export const NAV_PRUNE_ENFORCE_READY = true;
 
