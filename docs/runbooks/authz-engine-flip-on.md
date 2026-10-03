@@ -86,6 +86,32 @@ DATABASE_URL=file:/var/lib/gouxiangdb/app.db pnpm tsx scripts/authz/preflight.ts
 - [ ] `preflight.ts` 判定 READY（A3 与 legacy 残留是提示项，不阻断；见脚本 [4][5] 段输出）。
 - [ ] 体检用【升级副本库】先跑一遍，再在目标库跑；任一项不通电即停，不要"先试试"。
 
+### 1.5.1 两个入口的分工与实测口径（别混淆、别重复误判）
+
+`reconcile-policies.ts --apply` 内部走的是同一个 `rebuildScopePoliciesTx`（reconcile.ts:283），
+所以**它也能把 S 段修到 0**。差异只在爆炸半径与可观测性：
+
+| | `project-scope.ts --apply` | `reconcile-policies.ts --apply` |
+|---|---|---|
+| 触碰范围 | 只碰 `reason='scope:role'` | 另修 A1（补 legacy user 行）、清 B2（删断节点 legacy 行） |
+| 写入事务 | 单个写事务 | 同源写事务，但改动面更宽 |
+| 审计痕迹 | `createdBy=system-scope-backfill` | `createdBy=system-reconcile` |
+| 干净时 | `no changes` + exit 0 | 有 A3 时恒为 exit 1，永远打不出 `no changes` |
+
+顺序无关、幂等已实测（dev.db 字节副本，203 条 scope 行）：
+两条顺序跑完，`auth_policies` 53 行授权语义**全行一致**（nodeId/subject/actions/reason/fieldMask/conditions
+排序后哈希 `eab5767f265bdabf`），差别的只有 `createdBy` 印章。实跑三态数字：
+
+| 阶段 | A | B | C | S | 说明 |
+|---|---|---|---|---|---|
+| 原始库 | 10 | 4 | 0 | 31 | A=9×A1+1×A3；B=4×B2；S=31×S1_MISSING |
+| 仅 `project-scope --apply` | 21 | 4 | 0 | **0** | A 升到 21：新增 31 行里有 11 行动作串撞 A3 |
+| 再 `reconcile --apply` | **12** | 0 | 0 | 0 | A1/B2 被修掉，剩 12×A3（runbook 只报不改） |
+
+> 口径提示：`A/B/C/S 全零` 在含 legacy 数据的库上**不可达**——A3 是"非 legacy 行动作串等于某旧角色档"
+> 的只报不改项，机器生成的 `scope:role` 行恰好会撞上它。体检脚本按此把 A3 划为提示项而非阻断项。
+> 看到 A3 数字上升不要回滚，要核的是 S 段与 [3] 段可达性。
+
 命令出处与完整口径见 [deploy.md §6.7.1](deploy.md#671-通电前存量-scope-投影与体检翻-enforce-门之前必跑)。
 
 ## 2. 切换步骤（前置 0 + 五条齐备后）
