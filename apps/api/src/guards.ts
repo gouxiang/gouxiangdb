@@ -120,6 +120,29 @@ async function enforceBase(
   return out.allowed;
 }
 
+/**
+ * 非 base 资源（kb 容器与其内容）的统一接线缝：三态语义与 enforceBase 完全同源，
+ * 只把 ref 交给调用方。kb 守判 kb 节点的 enter；doc/canvas 的内容授权实际挂 kb 节点、
+ * 沿 kb→doc 继承，故对拍 ref 也应对齐 kb 节点（doc 中断继承时按 doc 自身判会出假漂移，
+ * 见 docs/decisions/AUTHZ-ENGINE-ON-LIBRARY-SEMANTICS.md §3.3）。
+ *
+ * 用它取代旧的「仅 shadow 期跑一次 runShadowCheck」形态后，off/shadow 两态仍恒定返回
+ * legacyAllowed（off 零 IO、shadow 正向对拍），on 态才真正由引擎决定放行。
+ */
+export async function enforceResource(
+  guard: string,
+  userId: string,
+  ref: { resourceType: "kb" | "doc" | "canvas"; resourceId: string },
+  action: ResourceAction,
+  legacyAllowed: boolean,
+  semantics?: EnforceSemantics,
+): Promise<boolean> {
+  const out = await enforceOrLegacy({
+    guard, userId, action, legacyAllowed, semantics, ref,
+  });
+  return out.allowed;
+}
+
 /** 加载一次裁决结果（同一个请求里多处复用同一份评估）。 */
 export async function baseAccessOf(userId: string, baseId: string): Promise<LibraryAccessDTO> {
   return resolveBaseAccess(userId, baseId);
@@ -165,7 +188,9 @@ export async function requireRole(c: Context, baseId: string): Promise<Role> {
 
 export async function requireCanView(c: Context, baseId: string): Promise<BaseGuardResult> {
   const g = await loadBaseAccess(c, baseId);
-  const allowed = await enforceBase("requireCanView", g.userId, baseId, "r", g.access.visible);
+  // 库门准入判 enter（= legacy access.visible），不再用 r：内容 r 只投影在 table 节点，
+  // 库节点判 r 会把全体库可见成员（不止管理员）拒在库门外（P0-A）。见定稿 §2.4。
+  const allowed = await enforceBase("requireCanView", g.userId, baseId, "enter", g.access.visible);
   if (!allowed) throw new HttpError(403, "无权访问该 Base");
   return g;
 }
@@ -173,7 +198,9 @@ export async function requireCanView(c: Context, baseId: string): Promise<BaseGu
 export async function requireCanEditData(c: Context, baseId: string): Promise<BaseGuardResult> {
   const g = await loadBaseAccess(c, baseId);
   const legacyAllowed = g.access.visible && g.perm.canEditData;
-  const allowed = await enforceBase("requireCanEditData", g.userId, baseId, "u", legacyAllowed);
+  // 库内可写并集判 edit_data（= canManage 或任一活表被授 c/u/d），不再用 u：
+  // 单表 u 只表达该表的写权，legacy canEditData 是跨表并集。见定稿 §2.4。
+  const allowed = await enforceBase("requireCanEditData", g.userId, baseId, "edit_data", legacyAllowed);
   if (!allowed) {
     throw new HttpError(403, g.access.visible ? "当前角色无权编辑数据" : "无权访问该 Base");
   }
@@ -193,7 +220,10 @@ export async function requireCanManageSchema(c: Context, baseId: string): Promis
 export async function requireCanManageBase(c: Context, baseId: string): Promise<BaseGuardResult> {
   const g = await loadBaseAccess(c, baseId);
   const legacyAllowed = g.access.visible && g.perm.canManageBase;
-  const allowed = await enforceBase("requireCanManageBase", g.userId, baseId, "manage_share", legacyAllowed);
+  // 库管理权判 manage_table（仅 canManage=1 时才投影到库节点），纠正旧用 manage_share 的
+  // OVERALLOW：管理员 canShare 恒真、库节点恒持 manage_share，会让未勾 canManage 的
+  // 管理员拿到全库管理权（P1）。manage_share 是「分享管理」位，归 requireCanToggleShare。
+  const allowed = await enforceBase("requireCanManageBase", g.userId, baseId, "manage_table", legacyAllowed);
   if (!allowed) {
     throw new HttpError(403, g.access.visible ? "只有对本库有管理权限的角色可管理该库" : "无权访问该 Base");
   }
@@ -239,7 +269,9 @@ export async function requireCanToggleShare(c: Context, baseId: string): Promise
 export async function requireCanComment(c: Context, baseId: string): Promise<BaseGuardResult> {
   const g = await loadBaseAccess(c, baseId);
   const legacyAllowed = g.access.visible && g.perm.canComment;
-  const allowed = await enforceBase("requireCanComment", g.userId, baseId, "comment", legacyAllowed);
+  // legacy canComment 恒等于 canEditData（见 permit），故评论守直接判 edit_data，
+  // 不再用 comment：该位在引擎词表里是内容动作、只投影到 table 节点。见定稿 §2.4。
+  const allowed = await enforceBase("requireCanComment", g.userId, baseId, "edit_data", legacyAllowed);
   if (!allowed) {
     throw new HttpError(403, g.access.visible ? "当前角色无权评论" : "无权访问该 Base");
   }
