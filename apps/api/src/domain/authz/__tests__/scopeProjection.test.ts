@@ -252,6 +252,13 @@ describe("projectScopeRow ↔ 第二代 libraryPolicy 逐值对拍", () => {
         expect(libActs.includes("manage_share")).toBe(
           c.row.canManage === 1 || c.row.canShare === 1,
         );
+        // 库级聚合位（ADR-0056 §4）：enter ≡ acc.visible‖canManage（不依赖活表）；
+        // edit_data ≡ canManage ‖ 任一活表可写（与 guards.ts:66 permit.canEditData 同一口径）。
+        const expectEnter = acc.visible || acc.canManage;
+        const expectEditData = acc.canManage
+          || Object.values(acc.tables).some((t) => t.create || t.update || t.delete);
+        expect(libActs.includes("enter")).toBe(expectEnter);
+        expect(libActs.includes("edit_data")).toBe(expectEditData);
         expect(libPolicy?.fieldMask ?? null).toBeNull();
       } else {
         const expected = contentAccessOf(acc);
@@ -283,3 +290,6 @@ describe("projectScopeRow ↔ 第二代 libraryPolicy 逐值对拍", () => {
     });
   }
 });
+
+// 库级聚合位 enter / edit_data 的专项反证另立 spec：
+// __tests__/scopeProjectionAggregate.test.ts（本文件已达单文件 ≤300 行上限）。

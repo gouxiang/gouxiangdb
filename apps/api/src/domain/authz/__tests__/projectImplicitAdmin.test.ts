@@ -6,8 +6,10 @@ import { describe, expect, it } from "vitest";
 import { parseActionString, type FieldMask, type ResourceAction } from "@gx/shared-types";
 import {
   projectImplicitAdmin,
-  type LiveSchemaShape,
-  type ScopeProjectionInput,
+} from "../implicitAdminProject.js";
+import type {
+  LiveSchemaShape,
+  ScopeProjectionInput,
 } from "../scopeProjection.js";
 import {
   synthesizeAccess,
@@ -143,6 +145,15 @@ describe("projectImplicitAdmin ↔ 第二代 admin oracle 对拍（base）", () 
       const libActs = parseActionString(lib!.actions);
       expect(libActs.includes("manage_share")).toBe(true); // admin canShare 恒真
       expect(libActs.includes("manage_table")).toBe(oracle.canManage);
+      // 库级聚合位（ADR-0056 §4）：enter 恒真——admin 覆盖强制 visible=true（F8）；
+      // edit_data 对齐 legacy canEditData = canManage ‖ 任一活表可写（guards.ts:66）。
+      expect(libActs.includes("enter")).toBe(true);
+      const oracleCanEditData = oracle.canManage
+        || Object.values(oracle.tables).some((t) => t.create || t.update || t.delete);
+      expect(libActs.includes("edit_data")).toBe(oracleCanEditData);
+      // F6 不变量（永不退化）：base 节点【不得出现 r】——一旦出现即说明有人退回
+      // 「库节点补 r」的错修法，会经 fieldMask 并集淹没逐表收窄（见 §6.2）。
+      expect(libActs.includes("r")).toBe(false);
       expect(lib!.fieldMask).toBeNull();
 
       // 永不投影超级管理员，永不出现删库语义（动作枚举内无删库位，仅核 subjectId）。
@@ -196,6 +207,7 @@ describe("projectImplicitAdmin ↔ oracle 对拍（kb）", () => {
 
       const ta = tableAccessOf(oracle, "content");
       const expected: ResourceAction[] = ["manage_share"];
+      expected.push("enter"); // admin 覆盖强制 visible=true；kb 不 emit edit_data（§7.2-3）
       if (ta.read) expected.push("r");
       if (ta.create) expected.push("c");
       if (ta.update) expected.push("u");

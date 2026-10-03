@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import {
   RESOURCE_ACTIONS,
+  LIBRARY_RESOURCE_TYPES,
   normalizeActions,
   parseRowConditions,
   PolicyValidationError,
@@ -12,10 +13,15 @@ import {
 import type { FilterNode } from "../filters.js";
 
 describe("manage_table 资源动作", () => {
-  it("已加入封闭枚举 RESOURCE_ACTIONS，且为第 8 枚", () => {
-    expect(RESOURCE_ACTIONS).toHaveLength(8);
+  it("已加入封闭枚举 RESOURCE_ACTIONS（词汇已扩至 10 枚，末位为聚合位 edit_data）", () => {
+    // 8 -> 10：新增 enter / edit_data 两枚库级聚合位（ADR-0056 §4.1）。
+    // 末位按字典序是 edit_data（"edit_data" < "enter"，且二者均排在 manage_* 之后、r 之前）。
+    expect(RESOURCE_ACTIONS).toHaveLength(10);
     expect(RESOURCE_ACTIONS).toContain("manage_table");
-    expect(RESOURCE_ACTIONS[RESOURCE_ACTIONS.length - 1]).toBe("manage_table");
+    expect(RESOURCE_ACTIONS).toContain("enter");
+    expect(RESOURCE_ACTIONS).toContain("edit_data");
+    expect(RESOURCE_ACTIONS[RESOURCE_ACTIONS.length - 1]).toBe("edit_data");
+    expect(LIBRARY_RESOURCE_TYPES).toEqual(["base", "kb"]);
   });
 
   it("normalizeActions：去重 + JS 默认字典序（既有口径，不随新动作改变）", () => {

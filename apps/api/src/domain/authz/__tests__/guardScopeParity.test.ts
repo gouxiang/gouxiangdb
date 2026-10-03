@@ -104,11 +104,10 @@ describe("守卫口径 <-> 可见集口径", () => {
   });
 
   it("哨兵只抓单侧改动：库节点补 r 时两边同步变 true，不误报（越权另由 fieldMask 用例守）", async () => {
-    await prisma.authPolicy.create({
-      data: {
-        id: "pol_probe", workspaceId: "ws_default", nodeId: nodeId("base", BASE_ID),
-        subjectType: "role", subjectId: "r1", actions: "r", reason: "manual", createdBy: "tester",
-      },
+    // 库节点策略行已存在（enter），唯一键冲突，故改写而非新建。
+    await prisma.authPolicy.updateMany({
+      where: { nodeId: nodeId("base", BASE_ID), subjectType: "role", subjectId: "r1" },
+      data: { actions: "enter,r" },
     });
     // decide 与 scope 同内核，补 r 后两边一起翻 -> 哨兵保持绿（它不判这条修路的对错）
     expect(await libraryInVisibleScope()).toBe(true);

@@ -19,7 +19,7 @@ import type { AuthzClient } from "./types.js";
 import { computeAuthzReconcile } from "./reconcile.js";
 import { planScopeBackfill, type ScopeBackfillPlan } from "./scopeBackfill.js";
 import {
-  computeLibraryReachability,
+  computeLibraryAggregateParity,
   type PreflightReachability,
 } from "./preflightReachability.js";
 import {
@@ -90,7 +90,7 @@ export interface PreflightData {
   coverage: PreflightCoverage;
   reconcile: PreflightReconcileView;
   legacy: PreflightLegacyView;
-  /** 库级判定可达性抽样（语义面一：七守按库节点判，投影按表节点给）。 */
+  /** 库级聚合位等价性抽样（语义面一：enter/edit_data 与 legacy visible/canEditData 逐值对拍）。 */
   reachability: PreflightReachability;
   /** 库节点是否进 S4 可见集（语义面二：库整层消失比 403 更硬）。 */
   scopeVisibility: PreflightScopeVisibility;
@@ -190,7 +190,7 @@ export async function computePreflightData(client: AuthzClient): Promise<Preflig
     coverage,
     reconcile,
     legacy: legacyView,
-    reachability: await computeLibraryReachability(client),
+    reachability: await computeLibraryAggregateParity(client),
     scopeVisibility: await computeScopeVisibility(client),
     plan,
   };
@@ -216,14 +216,13 @@ export function evaluatePreflight(data: PreflightData, facts: PreflightFacts): P
     );
   }
 
-  if (data.reachability.libraryUnreachable > 0) {
+  if (data.reachability.mismatches > 0) {
     const first = data.reachability.samples[0];
     blocking.push(
-      `库级判定不可达 ${data.reachability.libraryUnreachable}/${data.reachability.sampled} 个抽样：`
-        + `七守在【库节点】判 r/u，而投影把数据动作挂在【表节点】，on 态 requireCanView/`
-        + `requireCanEditData/requireCanComment 会 403（例：${first?.roleId}@${first?.libraryId} ${first?.action}）`
-        + `——两条直觉修法均已证伪：投影层给库节点补 r 会淹没逐表收窄（OVERALLOW，fieldMask.ts:97 `
-        + `无 mask 即 visibleAll），enforceGate 改走库内活表并集则与可见集分叉（scope.ts:174 按节点 r 判）`,
+      `库级聚合位缺失/不等价 ${data.reachability.mismatches}/${data.reachability.sampled} 个抽样：`
+        + `库节点的 enter/edit_data 与第二代 legacy（visible / canEditData）不等价，on 态会误拒或越权`
+        + `（例：${first?.roleId}@${first?.libraryId} ${first?.action} 引擎=${first?.engine} `
+        + `legacy=${first?.legacy}）——先跑 scripts/authz/project-scope.ts --apply 重算存量投影`,
     );
   }
   if (data.reachability.errors > 0) {

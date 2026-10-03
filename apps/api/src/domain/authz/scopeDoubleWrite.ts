@@ -9,10 +9,10 @@ import type { AuthzClient } from "./types.js";
 import { upsertPolicyTx } from "./repository.js";
 import {
   projectScopeRow,
-  projectImplicitAdmin,
   type ProjectedPolicy,
   type ScopeProjectionInput,
 } from "./scopeProjection.js";
+import { projectImplicitAdmin } from "./implicitAdminProject.js";
 import { loadLiveShape, replaceScopePoliciesTx } from "./scopeProjectionTx.js";
 import { nodeId } from "../nav/backfill.js";
 
@@ -62,13 +62,34 @@ async function expectedAdmin(
   });
 }
 
-/** 普通角色：逐 base 取形状投影，kb 行用空形状；被删 scope 行对应投影随之精确删除。 */
+/**
+ * 普通角色：逐 base 取形状投影，kb 行用空形状；被删 scope 行对应投影随之精确删除。
+ *
+ * 【非活库一律不投影】ADR-0056 实施时坐实的前置缺口：库软删/不存在时 `loadLiveShape` 返回空形状，
+ * 早先因为「零表 + 非管理位 -> 库节点策略行根本不生成」而侥幸不产生任何行；新增 `enter` 聚合位后
+ * 仅 visible=1 也会生成一条指向死节点的孤儿策略（nav 节点软删或压根不存在）。
+ * 故在此显式按活库过滤——这不是新增规则，而是把「已删库不投影」这条既有语义钉死。
+ * 实测量级（dev.db 副本）：203 条 scope 行中 164 条指向非活库（82 个死库 id，其 nav 节点
+ * 41 个存在但已软删、其余不存在），全部属于 role_owner/role_admin，两条路径本就不投影，
+ * 故对本库零影响；但普通角色一旦出现同类行就会写出孤儿。
+ */
 async function expectedRole(
   client: AuthzClient,
   savedRows: readonly SavedScopeRow[],
 ): Promise<ProjectedPolicy[]> {
+  if (savedRows.length === 0) return [];
+  const liveBaseIds = new Set(
+    (await client.base.findMany({ where: { deletedAt: null }, select: { id: true } })).map((b) => b.id),
+  );
+  const liveKbIds = new Set(
+    (await client.knowledgeBase.findMany({ where: { deletedAt: null }, select: { id: true } })).map((k) => k.id),
+  );
   const out: ProjectedPolicy[] = [];
   for (const row of savedRows) {
+    const live = row.libraryKind === "base"
+      ? liveBaseIds.has(row.libraryId)
+      : liveKbIds.has(row.libraryId);
+    if (!live) continue;
     if (row.libraryKind === "base") {
       const shape = await loadLiveShape(client, row.libraryId);
       out.push(...projectScopeRow(toProjectionInput(row), shape));

@@ -90,8 +90,9 @@ describe("PUT 普通角色：scope -> auth_policies", () => {
     expect(JSON.parse(t2!.fieldMask!)).toEqual({
       allowFields: ["t2_f1"], readOnlyFields: ["t2_f1"],
     });
-    // 纯只读：库节点无行。
-    expect(await policy("nav_base_b1")).toBeNull();
+    // 库节点：enter（visible）+ edit_data（t1 勾了 create/update -> 库内活表可写并集），
+    // 且不带任何 manage_*（非管理位成员）。这正是 ADR-0056 的两枚聚合位。
+    expect(await policy("nav_base_b1")).toMatchObject({ actions: "edit_data,enter" });
   });
 
   it("删除语义：再 PUT 只保留 b2 -> b1 全部 scope:role 行删、b2 不动", async () => {
@@ -118,7 +119,8 @@ describe("PUT 普通角色：scope -> auth_policies", () => {
     expect(await policy("nav_table_t9")).not.toBeNull();
     const nodes = (await h.prisma.authPolicy.findMany({ where: { subjectId: "r1" } }))
       .map((p) => p.nodeId).sort();
-    expect(nodes).toEqual(["nav_table_t9"]);
+    // b2 仍可见 -> 库节点带 enter，与表节点一并保留
+    expect(nodes).toEqual(["nav_base_b2", "nav_table_t9"]);
   });
 });
 
@@ -137,10 +139,13 @@ describe("PUT 系统角色", () => {
     const unlistedTable = await policy("nav_table_t9", "role_admin");
     expect(unlistedTable?.actions).toBe("r");
     const unlistedLib = await policy("nav_base_b2", "role_admin");
-    expect(unlistedLib?.actions).toBe("manage_share");
+    // 未列入的活库：隐含只读 -> enter + manage_share，无 edit_data
+    expect(unlistedLib?.actions.split(",").sort()).toEqual(["enter", "manage_share"]);
     // 库节点须同挂 manage_schema：七守 requireCanManageSchema 按 base 节点判（guards.ts:186）
     const managedLib = await policy("nav_base_b1", "role_admin");
-    expect(managedLib?.actions.split(",").sort()).toEqual(["manage_schema", "manage_share", "manage_table"]);
+    expect(managedLib?.actions.split(",").sort()).toEqual([
+      "edit_data", "enter", "manage_schema", "manage_share", "manage_table",
+    ]);
     const managedTable = await policy("nav_table_t1", "role_admin");
     expect(managedTable?.actions.split(",").sort()).toEqual(["manage_schema", "r", "c", "u", "d", "comment"].sort());
   });
@@ -163,14 +168,18 @@ describe("新库 seed：role_admin 初始投影", () => {
     expect(baseRes.status).toBe(201);
     const baseId = (await json<{ base: { id: string } }>(baseRes)).base.id;
     const baseLib = await policy(`nav_base_${baseId}`, "role_admin");
-    expect(baseLib?.actions.split(",").sort()).toEqual(["manage_schema", "manage_share", "manage_table"]);
+    // 新库 seed 走 projectImplicitAdmin（canManage 构造）-> 含 enter + edit_data
+    expect(baseLib?.actions.split(",").sort()).toEqual([
+      "edit_data", "enter", "manage_schema", "manage_share", "manage_table",
+    ]);
 
     const kbRes = await call("POST", "/api/kb", "owner", { name: "s5 新 KB" });
     expect(kbRes.status).toBe(201);
     const kbId = (await json<{ knowledgeBase: { id: string } }>(kbRes)).knowledgeBase.id;
     const kbNode = await policy(`nav_kb_${kbId}`, "role_admin");
+    // kb 节点追加 enter（不 emit edit_data，§7.2-3）
     expect(kbNode?.actions.split(",").sort()).toEqual(
-      ["c", "comment", "d", "manage_share", "manage_table", "r", "u"].sort(),
+      ["c", "comment", "d", "enter", "manage_share", "manage_table", "r", "u"].sort(),
     );
   });
 

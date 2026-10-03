@@ -122,7 +122,8 @@ describe("#3 建表：scope 角色投影 + role_admin 隐含", () => {
     await h.prisma.$transaction((tx) => projectAdminForNewTableTx(tx, baseId, t0.id, "owner"));
 
     const { loadLiveShape } = await import("../scopeProjectionTx.js");
-    let projected = proj.projectImplicitAdmin({
+    const { projectImplicitAdmin } = await import("../implicitAdminProject.js");
+    let projected = projectImplicitAdmin({
       bases: [{ libraryId: baseId, shape: await loadLiveShape(h.prisma, baseId) }],
       kbs: [], adminScopeRows: [],
     }).find((p) => p.nodeId === `nav_table_${t0.id}`);
@@ -144,7 +145,7 @@ describe("#3 建表：scope 角色投影 + role_admin 隐含", () => {
     const adminRow = await h.prisma.roleLibraryScope.findFirst({
       where: { roleId: "role_admin", libraryKind: "base", libraryId: baseId },
     });
-    projected = proj.projectImplicitAdmin({
+    projected = (await import("../implicitAdminProject.js")).projectImplicitAdmin({
       bases: [{ libraryId: baseId, shape: await loadLiveShape(h.prisma, baseId) }],
       kbs: [], adminScopeRows: [{
         roleId: "role_admin", libraryKind: "base", libraryId: baseId,

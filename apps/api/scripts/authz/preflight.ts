@@ -9,7 +9,8 @@
 // 逐项输出：
 //   1 覆盖：role_library_scope 行数 / 涉及角色 / auth_policies 里 reason='scope:role' 行数 / 期望-现存缺口；
 //   2 对账：reconcile A/B/C/S 四段（按码聚合，标阻断或提示）；
-//   3 库级判定可达性：七守按库节点判、投影把数据动作挂表节点 -> on 态 403 候选；
+//   3 库级聚合位等价性（ADR-0056 §10.1）：抽样比对 base 节点的 enter/edit_data 与
+//      legacy access.visible / perm.canEditData 是否逐值相等——不等价即阻断；
 //   4 库节点是否在 S4 可见集里：表可见而库不可见 -> 通电后库整层从导航/检索消失；
 //   5 legacy 残留：说明现状，不自动删；
 //   6 双写接线：静态扫描 apps/api/src（不含 __tests__）的钩子调用点，不靠记忆；
@@ -140,13 +141,13 @@ function printHuman(r: PreflightReport): void {
     console.log(`    [${item.kind === "blocking" ? "阻断" : "提示"}] ${item.code} ${item.count}`);
   }
 
-  console.log("[3] 库级判定可达性（抽样：库节点 vs 库内活表节点，真引擎 decide）");
+  console.log("[3] 库级聚合位等价性（抽样：库节点 enter/edit_data vs legacy visible/canEditData）");
   const rc = r.data.reachability;
   console.log(
-    `    抽样=${rc.sampled} 库节点不可达=${rc.libraryUnreachable}（库=false 而任一表=true，on 态必 403）`,
+    `    抽样=${rc.sampled} 不等价=${rc.mismatches}（非 0 即 on 态误拒/越权，先跑 project-scope --apply）`,
   );
   for (const s of rc.samples.slice(0, 5)) {
-    console.log(`    ${s.roleId}@${s.libraryId} ${s.action}：库=${s.library} 表并集=${s.anyTable}`);
+    console.log(`    ${s.roleId}@${s.libraryId} ${s.action}：引擎=${s.engine} legacy=${s.legacy}`);
   }
   if (rc.errors > 0) console.log(`    引擎判定抛错 ${rc.errors} 次（nav 节点缺失？先跑 reconcile-nav）`);
 

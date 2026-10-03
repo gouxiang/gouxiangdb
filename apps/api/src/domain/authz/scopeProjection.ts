@@ -10,10 +10,6 @@ import type { FieldMask, ResourceAction } from "@gx/shared-types";
 import { KB_CONTENT_KEY, toActionString } from "@gx/shared-types";
 import { nodeId } from "../nav/backfill.js";
 import { parseConfig } from "./libraryScopeConfig.js";
-import { synthesizeAccess } from "./scopeSynthesize.js";
-
-/** 系统管理员角色 id（org/roles.ts ADMIN_ROLE_ID，本地常量避免 import 其 prisma 模块）。 */
-const ADMIN_ROLE_ID = "role_admin";
 
 /** 一条 auth_policies 投影（actions/fieldMask 已序列化为存储串）。 */
 export interface ProjectedPolicy {
@@ -113,6 +109,43 @@ export function tableActions(
  * withSchema 仅 base 传 true：kb 节点挂 manage_schema 既无对应守卫、也过不了 kind-动作校验
  * （policyAdmin §4.1：manage_schema 仅 table/base 有意义），且第一代 kb 档位串不含它。
  */
+/**
+ * 库级准入位 `enter`：恒等于第二代 `access.visible`（ADR-0056 §4）。
+ * 派生自库的 visible/canManage 两个位，**不遍历库内表**——故零表库照样 emit，
+ * 这正是「判定层实时跑活表并集」做不到的事（空集会被判 deny）。
+ * 管理员由 adminDtoFor 强制 visible=true 后同样命中本函数（F8 硬规则）。
+ */
+function enterAction(input: ScopeProjectionInput | { visible: number; canManage: number }): ResourceAction[] {
+  return input.visible === 1 || input.canManage === 1 ? ["enter"] : [];
+}
+
+/** 活表里是否存在任一被授予写动作（c/u/d）的表。 */
+function anyTableWritable(
+  input: ScopeProjectionInput,
+  tableIds: readonly string[],
+): boolean {
+  return tableIds.some((tid) => {
+    const { actions } = tableActions(input, tid);
+    return actions.includes("c") || actions.includes("u") || actions.includes("d");
+  });
+}
+
+/**
+ * 库级聚合位（ADR-0056 §4）：
+ *   - `enter`     库级准入，恒等于 legacy `access.visible`；
+ *   - `edit_data` 库内活表可写并集，恒等于 legacy `perm.canEditData`（= canManage ‖ 任一活表可写，
+ *                 见 guards.ts:66）。
+ *
+ * 为什么不直接在库节点上给 r/u：这俩不是 r/c/u，故结构上进不了 fieldMask 的能力并集
+ * （fieldMask.ts:85/226 只看 r/c/u），不会淹没收窄；且与 visible-scope 判的是同一枚位，
+ * 不产生守卫↔探针分叉。见 AUTHZ-ENGINE-ON-LIBRARY-SEMANTICS.md §3.4。
+ */
+function libraryDataActions(input: ScopeProjectionInput, shape: LiveSchemaShape): ResourceAction[] {
+  const out: ResourceAction[] = [...enterAction(input)];
+  if (input.canManage === 1 || anyTableWritable(input, shape.tableIds)) out.push("edit_data");
+  return out;
+}
+
 function libraryManageActions(input: ScopeProjectionInput, withSchema: boolean): ResourceAction[] {
   if (input.canManage === 1) {
     return withSchema ? ["manage_schema", "manage_table", "manage_share"] : ["manage_table", "manage_share"];
@@ -154,7 +187,8 @@ function projectBase(input: ScopeProjectionInput, shape: LiveSchemaShape): Proje
     out.push(scopePolicy(nodeId("table", tableId), input.roleId, actions, mask));
   }
 
-  const libActs = libraryManageActions(input, true);
+  // 库节点 = 管理位 + 两枚聚合位（ADR-0056 §9.2-②）。零表库也 emit：enter 不依赖表。
+  const libActs = [...libraryManageActions(input, true), ...libraryDataActions(input, shape)];
   if (libActs.length > 0) {
     out.push(scopePolicy(nodeId("base", input.libraryId), input.roleId, libActs, null));
   }
@@ -168,7 +202,8 @@ function projectBase(input: ScopeProjectionInput, shape: LiveSchemaShape): Proje
 function projectKb(input: ScopeProjectionInput): ProjectedPolicy[] {
   const { actions: contentActions } = tableActions(input, KB_CONTENT_KEY);
   const libActs = libraryManageActions(input, false);
-  const merged = [...contentActions, ...libActs];
+  // kb 只追加 enter，不 emit edit_data（§7.2-3：kb 的内容写关在 content 档位上）。
+  const merged = [...contentActions, ...libActs, ...enterAction(input)];
   if (merged.length === 0) return [];
   return [scopePolicy(nodeId("kb", input.libraryId), input.roleId, merged, null)];
 }
@@ -182,92 +217,4 @@ export function projectScopeRow(
   shape: LiveSchemaShape,
 ): ProjectedPolicy[] {
   return row.libraryKind === "kb" ? projectKb(row) : projectBase(row, shape);
-}
-
-// ---------- P1/S4：管理员隐含投影 ----------
-
-export interface ImplicitAdminInput {
-  bases: ReadonlyArray<{ libraryId: string; shape: LiveSchemaShape }>;
-  kbs: ReadonlyArray<{ libraryId: string }>;
-  /** role_admin 现有全部 scope 行（纯函数不查库，由调用方传入；缺省空数组）。 */
-  adminScopeRows: ReadonlyArray<ScopeProjectionInput>;
-}
-
-/**
- * 由 scope 行合成 dto 并施加【第二代 admin 覆盖】：只强制 visible/canShare/canToggleShare，
- * 不强制 canManage，不给删库（libraryPolicy.resolve 的管理员分支逐字复现）。
- */
-function adminDtoFor(
-  rows: ReadonlyArray<ScopeProjectionInput>,
-): ReturnType<typeof synthesizeAccess> {
-  const dto = synthesizeAccess(
-    rows.map((r) => ({
-      canManage: r.canManage, visible: r.visible, canShare: r.canShare, config: r.config,
-    })),
-  );
-  return { ...dto, visible: true, canToggleShare: true, canShare: true };
-}
-
-const rowsFor = (
-  adminScopeRows: ReadonlyArray<ScopeProjectionInput>,
-  libraryKind: "base" | "kb", libraryId: string,
-): ScopeProjectionInput[] =>
-  adminScopeRows.filter(
-    (r) => r.libraryKind === libraryKind && r.libraryId === libraryId,
-  );
-
-/** 由 tableAccessOf 语义（wildcard→精确→visible 默认）推出动作集，comment 跟随 c/u/d。 */
-function actionsFromTableAccess(ta: {
-  read: boolean; create: boolean; update: boolean; delete: boolean;
-}): ResourceAction[] {
-  const actions: ResourceAction[] = [];
-  if (ta.read) actions.push("r");
-  if (ta.create) actions.push("c");
-  if (ta.update) actions.push("u");
-  if (ta.delete) actions.push("d");
-  if (ta.create || ta.update || ta.delete) actions.push("comment");
-  return actions;
-}
-
-/**
- * 管理员（role_admin）对全部活库/活表的隐含授权投影，逐字节对齐第二代 admin 口径：
- * 进所有库默认只读；管理权仍只来自其 scope 行 canManage；永不投影删库。
- * subjectId=role_admin、reason=scope:role（与 scope 同源，便于 replaceScopePoliciesTx 对账）。
- * 绝不生成 role_owner（超级管理员全权含删库，只走硬短路）。
- */
-export function projectImplicitAdmin(input: ImplicitAdminInput): ProjectedPolicy[] {
-  const out: ProjectedPolicy[] = [];
-
-  for (const { libraryId, shape } of input.bases) {
-    const dto = adminDtoFor(rowsFor(input.adminScopeRows, "base", libraryId));
-    for (const tableId of shape.tableIds) {
-      const ta = dto.tables["*"] ?? dto.tables[tableId]
-        ?? { read: dto.visible, create: false, update: false, delete: false };
-      const actions = actionsFromTableAccess(ta);
-      if (dto.canManage) actions.push("manage_schema");
-      if (actions.length === 0) continue;
-      const adminRow = rowsFor(input.adminScopeRows, "base", libraryId)[0];
-      const mask = buildFieldMask(
-        tableId, shape.fieldIdsByTable.get(tableId) ?? [],
-        parseConfig(adminRow?.config ?? "{}").fields as FieldsConfig,
-      );
-      out.push(scopePolicy(nodeId("table", tableId), ADMIN_ROLE_ID, actions, mask));
-    }
-    const libActs: ResourceAction[] = ["manage_share"]; // admin canShare 恒真
-    // manage_schema 同挂库节点：与 libraryManageActions 同一口径（七守按 base 节点判）。
-    if (dto.canManage) libActs.push("manage_table", "manage_schema");
-    out.push(scopePolicy(nodeId("base", libraryId), ADMIN_ROLE_ID, libActs, null));
-  }
-
-  for (const { libraryId } of input.kbs) {
-    const dto = adminDtoFor(rowsFor(input.adminScopeRows, "kb", libraryId));
-    const ta = dto.tables["*"] ?? dto.tables[KB_CONTENT_KEY]
-      ?? { read: dto.visible, create: false, update: false, delete: false };
-    const actions = actionsFromTableAccess(ta);
-    actions.push("manage_share"); // admin canShare 恒真
-    if (dto.canManage) actions.push("manage_table");
-    out.push(scopePolicy(nodeId("kb", libraryId), ADMIN_ROLE_ID, actions, null));
-  }
-
-  return out;
 }

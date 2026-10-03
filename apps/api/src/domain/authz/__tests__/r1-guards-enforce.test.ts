@@ -12,7 +12,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setupCharHarness, json, type CharHarness } from "../../nav/__tests__/characterization/charHarness.js";
 import { driftRegistry } from "../shadow.js";
-import { projectImplicitAdmin } from "../scopeProjection.js";
+import { projectImplicitAdmin } from "../implicitAdminProject.js";
 import { rebuildScopePoliciesTx } from "../scopeDoubleWrite.js";
 
 const forced = vi.hoisted(() => ({ mode: null as null | "off" | "shadow" | "on" }));

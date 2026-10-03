@@ -1,11 +1,11 @@
-// 通电前【体检】真库集成测试（临时库 + 真迁移）：覆盖/对账/legacy/库级判定可达性
-// 与 READY/NOT_READY 分级。门（AUTHZ_ENFORCE_READY）与双写接线是注入的静态事实，
+// 通电前【体检】真库集成测试（临时库 + 真迁移）：覆盖/对账/legacy/库级聚合位等价性/
+// 库节点可见集，与 READY/NOT_READY 分级。门（AUTHZ_ENFORCE_READY）与双写接线是注入的静态事实，
 // 故判定逻辑可脱离运行时单独验。
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import {
-  createAuthzTempDb, resetTables, mkRole, mkBase, mkTable, mkNode, mkScope, seedFixture,
+  createAuthzTempDb, resetTables, seedFixture,
 } from "./scopeBackfillFixture.js";
 import { nodeId } from "../../nav/backfill.js";
 
@@ -45,14 +45,13 @@ const wiredFacts = (enforceReady: boolean): Facts => ({
 
 /**
  * 把两项语义面待修项摘掉（它们另有专门用例锁住），用于单独验分级接线本身：
- *   - reachability：七守按库节点判、投影按表节点给；
- *   - scopeVisibility：库节点不进可见集。
- * 两者都不是投影层能修的（补 r = 越权、改守卫 = 与可见集分叉），故单列不参与分级接线用例。
+ *   - reachability：库节点聚合位 enter/edit_data 与 legacy 等价性；
+ *   - scopeVisibility：库节点是否进可见集（判定层 scope.ts 尚未按 enter 改判）。
  */
 const withoutSemanticGaps = <T extends { reachability: unknown; scopeVisibility: unknown }>(data: T): T =>
   ({
     ...data,
-    reachability: { sampled: 4, libraryUnreachable: 0, samples: [], errors: 0 },
+    reachability: { sampled: 4, mismatches: 0, samples: [], errors: 0 },
     scopeVisibility: {
       sampledUsers: 1, ownerSkipped: 0, checked: 2, visible: 2,
       orphanTableUsers: 0, samples: [], errors: 0,
@@ -76,10 +75,20 @@ describe("A 存量未投影", () => {
     expect(r.blocking.some((b) => b.includes("存量覆盖缺口"))).toBe(true);
     expect(r.blocking.some((b) => b.includes("S1_MISSING"))).toBe(true);
   });
+
+  it("未投影时：库节点缺聚合位 -> parity mismatch（翻 on 必误拒/越权）", async () => {
+    await seedFixture(prisma);
+    const data = await computePreflightData(prisma);
+    expect(data.reachability.sampled).toBeGreaterThan(0);
+    expect(data.reachability.errors).toBe(0);
+    expect(data.reachability.mismatches).toBeGreaterThan(0);
+    // 样例必须能定位到 enter 或 edit_data 中至少一枚的引擎/legacy 分歧
+    expect(data.reachability.samples.some((s) => s.engine !== s.legacy)).toBe(true);
+  });
 });
 
 describe("B 投影完成后的判定", () => {
-  it("数据面齐了、门已翻，仍 NOT_READY：库级判定不可达（enforce 侧待修项）", async () => {
+  it("聚合位投影后 parity=0，但 scope.ts 未改判 -> 库节点缺席可见集仍 NOT_READY", async () => {
     await seedFixture(prisma);
     await projectAll();
 
@@ -91,30 +100,36 @@ describe("B 投影完成后的判定", () => {
     // A 段可能含 A3（投影动作串恰等于旧档，只报不改的已知噪声）-> 提示不阻断
     expect(data.reconcile.byCode.every((x) => x.kind === "advisory")).toBe(true);
 
+    // 投影层活已干完：库节点聚合位与 legacy 逐值等价
+    expect(data.reachability.errors).toBe(0);
+    expect(data.reachability.mismatches).toBe(0);
+
+    // 判定层（scope.ts 按 enter 改判）尚未接线 -> 库节点仍缺席可见集，故仍 NOT_READY
     const r = evaluatePreflight(data, wiredFacts(true));
     expect(r.verdict).toBe("NOT_READY");
-    expect(r.blocking.some((b) => b.includes("库级判定不可达"))).toBe(true);
+    expect(r.blocking.some((b) => b.includes("库节点缺席可见集"))).toBe(true);
 
-    // 待修项摘掉后回到 READY：证明 evaluate 的分级接线本身正确
+    // 两项语义面待修项都摘掉后回到 READY：证明 evaluate 的分级接线本身正确
     expect(evaluatePreflight(withoutSemanticGaps(data), wiredFacts(true)).verdict).toBe("READY");
     const gated = evaluatePreflight(withoutSemanticGaps(data), wiredFacts(false));
     expect(gated.verdict).toBe("NOT_READY");
     expect(gated.blocking.some((b) => b.includes("AUTHZ_ENFORCE_READY"))).toBe(true);
   });
 
-  it("库级判定不可达：库节点判不到 r/u，但库内表节点判得到（投影层不能补，补了是越权）", async () => {
+  it("聚合位 parity：抽样覆盖 r1/role_admin × b1/b2，逐值引擎==legacy", async () => {
     await seedFixture(prisma);
     await projectAll();
 
     const data = await computePreflightData(prisma);
-    expect(data.reachability.sampled).toBeGreaterThan(0);
-    expect(data.reachability.errors).toBe(0);
-    expect(data.reachability.libraryUnreachable).toBeGreaterThan(0);
-    // 抽样必须同时看到「库=false / 表并集=true」这一对，否则这条缝测不出来
-    expect(data.reachability.samples.some((s) => s.library === false && s.anyTable === true)).toBe(true);
+    // 2 角色 × 2 库 × 2 聚合位 = 8 个值（r1 在 b2 无行、role_admin 在 b2 无行：各得空期望）
+    expect(data.reachability.sampled).toBe(8);
+    expect(data.reachability.mismatches).toBe(0);
+    // role_admin 在 b1 持 canManage -> enter/edit_data 两枚都应真；r1 在 b1 visible+t1 可写同理
+    const b1 = data.reachability.samples;
+    expect(b1).toEqual([]); // 全等价 -> 无样例留存
   });
 
-  it("反证：在库节点补一条不带 mask 的 r 会淹没表节点字段收窄（故投影层不能补 r）", async () => {
+  it("反证（A-4 专项 §11.2）：库节点已带 enter，但 visibleAll 仍为 false、hidden 字段不可见", async () => {
     await seedFixture(prisma);
     await projectAll();
     const { decide } = await import("../engine.js");
@@ -124,50 +139,28 @@ describe("B 投影完成后的判定", () => {
     const tableNode = nodeId("table", "t1");
     const F2 = "f2"; // r1 在 scope 配置里把 f2 设为 hidden
 
-    // 补之前：r1 在 t1 只有窄来源（allow=[f1]），f2 不可见
+    // 库节点此刻已带 enter（ADR-0056 聚合位），它不是 r，故不进 capability 并集；
+    // r1 在 t1 仍只有窄来源（allow=[f1]），f2 不可见。
     const before = await decide({ client: prisma }, subject, tableNode, "r");
     expect(before.decision.allowed).toBe(true);
     expect(before.capability.visibleAll).toBe(false);
     expect(before.capability.visibleFields?.has(F2)).toBe(false);
 
-    // 手工在【库节点】补一条不带 mask 的 r（即"投影补 r"方案）
-    await prisma.authPolicy.create({
-      data: {
-        id: "pol_probe_wide", workspaceId: "ws_default", nodeId: nodeId("base", "b1"),
-        subjectType: "role", subjectId: "r1", actions: "r", reason: "probe", createdBy: "tester",
-      },
+    // 手工在【库节点】再补一枚不带 mask 的 r（即被否决的方案 ①）
+    // 库节点策略行已存在（enter），(nodeId, subjectType, subjectId) 唯一，故改写而非新建。
+    await prisma.authPolicy.updateMany({
+      where: { nodeId: nodeId("base", "b1"), subjectType: "role", subjectId: "r1" },
+      data: { actions: "enter,r" },
     });
 
-    // 补之后：库节点成为"不裁剪"的宽来源，沿继承进入表节点并集 -> 字段收窄被淹没（越权）
+    // 补 r 之后：库节点成为"不裁剪"的宽来源，沿继承进入表节点并集 -> 字段收窄被淹没（越权）
     const after = await decide({ client: prisma }, subject, tableNode, "r");
     expect(after.capability.visibleAll).toBe(true);
     expect(after.capability.visibleFields?.has(F2) ?? true).toBe(true);
   });
-
-  it("库节点有 r 时不计不可达（库级授权本身就存在的场景）", async () => {
-    await mkBase(prisma, "b9");
-    await mkTable(prisma, "b9", "t9", ["f9"]);
-    await mkNode(prisma, "base", "b9", null);
-    await mkNode(prisma, "table", "t9", nodeId("base", "b9"));
-    await mkRole(prisma, "r9");
-    await prisma.workspace.upsert({
-      where: { id: "ws_default" }, create: { id: "ws_default", name: "ws_default" }, update: {},
-    });
-    await mkScope(prisma, { roleId: "r9", libraryId: "b9", visible: 1 });
-    // 手工在【库节点】补一条 r（模拟 enforce 侧改走库级并集之前的对照事实）
-    await prisma.authPolicy.create({
-      data: {
-        id: "pol_probe", workspaceId: "ws_default", nodeId: nodeId("base", "b9"),
-        subjectType: "role", subjectId: "r9", actions: "r", reason: "manual", createdBy: "tester",
-      },
-    });
-
-    const data = await computePreflightData(prisma);
-    const hit = data.reachability.samples.filter((s) => s.libraryId === "b9" && s.action === "r");
-    expect(hit).toEqual([]); // 库=true，不计入不可达
-  });
 });
 
+describe("B2 库节点是否进可见集（判定层 scope.ts 待改判）", () => {
   it("库节点缺席可见集：表可见、库一个都不可见（通电后库整层从导航/检索消失）", async () => {
     await seedFixture(prisma);
     await projectAll();
@@ -177,7 +170,7 @@ describe("B 投影完成后的判定", () => {
     expect(sv.sampledUsers).toBeGreaterThan(0);
     expect(sv.errors).toBe(0);
     expect(sv.checked).toBeGreaterThan(0);
-    // 投影把 r 只挂在表节点 -> 表进可见集、库不进
+    // scope.ts 尚未按 enter 改判：表进可见集、库不进
     expect(sv.visible).toBe(0);
     expect(sv.orphanTableUsers).toBeGreaterThan(0);
 
@@ -201,6 +194,7 @@ describe("B 投影完成后的判定", () => {
     expect(evaluatePreflight(data, wiredFacts(true)).blocking.some((b) => b.includes("库节点缺席可见集")))
       .toBe(false);
   });
+});
 
 describe("C 静态事实分级", () => {
   it("主路径双写钩子缺失 -> 阻断；结构性钩子缺失 -> 仅提示", async () => {

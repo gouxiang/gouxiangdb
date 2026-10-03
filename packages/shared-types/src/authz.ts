@@ -7,7 +7,15 @@
 //   - FieldMask 是命中 allow 之上的能力裁剪（收窄清单，不是 deny/授权清单）：
 //     缺省=不裁剪；多来源并集取最宽（见 fieldMask.ts）。
 
-/** 资源动作（auth_policies.actions 全集）。 */
+/**
+ * 资源动作（auth_policies.actions 全集）。
+ *
+ * 后两枚是【库级聚合位】（ADR-0056 / AUTHZ-ENGINE-ON-LIBRARY-SEMANTICS.md §4）：
+ *   - enter     库级准入，恒等于第二代 access.visible；
+ *   - edit_data 库内活表可写并集，恒等于第二代 perm.canEditData。
+ * 只在 base/kb 节点上有语义，且【只由 scope 投影派生、不得手授】（不变量 I1）；
+ * 二者都不是 r/c/u，故结构上不可能进入 fieldMask 能力并集（不变量 I2）。
+ */
 export type ResourceAction =
   | "r"
   | "c"
@@ -16,7 +24,9 @@ export type ResourceAction =
   | "comment"
   | "manage_share"
   | "manage_schema"
-  | "manage_table";
+  | "manage_table"
+  | "enter"
+  | "edit_data";
 
 /** ResourceAction 封闭枚举（白名单校验/穷举用），字典序即规范串序。 */
 export const RESOURCE_ACTIONS: readonly ResourceAction[] = [
@@ -28,7 +38,12 @@ export const RESOURCE_ACTIONS: readonly ResourceAction[] = [
   "manage_share",
   "manage_schema",
   "manage_table",
+  "enter",
+  "edit_data",
 ];
+
+/** 库节点资源类型：两枚聚合位只在这两类节点上有语义。 */
+export const LIBRARY_RESOURCE_TYPES: readonly string[] = ["base", "kb"];
 
 /** 旧角色三族（members=base 五档 / kb_members=kb 四档 / kb_doc_acls=doc 三档）。 */
 export type LegacyRoleFamily = "base" | "kb" | "doc";

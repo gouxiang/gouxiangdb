@@ -8,10 +8,17 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { nodeId } from "../../nav/backfill.js";
 
-/** 每个用例前清空的物理表（顺序无关，外键临时关闭）。 */
+/**
+ * 每个用例前清空的物理表。
+ *
+ * 【顺序有关，子表必须在父表之前】：resetTables 的 `PRAGMA foreign_keys=OFF` 不保证生效
+ * （SQLite 禁止在事务内切换该开关，且 Prisma 可能换连接执行后续 DELETE），实测在
+ * `roles` 先于 `role_assignments` 时抛 1811 FOREIGN KEY constraint failed
+ * （role_assignments.roleId -> roles.id）。故这里按「子表在前」排，fk 开不开都安全。
+ */
 export const CLEAR_TABLES = [
-  "auth_policies", "role_library_scope", "nav_nodes", "fields", "tables", "bases", "roles", "users",
-  "role_assignments",
+  "auth_policies", "role_library_scope", "role_assignments",
+  "nav_nodes", "fields", "tables", "bases", "roles", "users",
 ];
 
 /** 建一个临时库并跑完真迁移，返回 client 与其清理函数。 */

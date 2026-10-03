@@ -58,7 +58,8 @@ describe("A 存量投影", () => {
     expect(before.totals.toCreate).toBeGreaterThan(0);
     // role_admin 覆盖全部活库（含未配 scope 的 b2 隐含只读）：b1 库节点+表 + b2 库节点+表 = 4
     expect(before.roles.find((r) => r.roleId === "role_admin")?.toCreate).toBe(4);
-    expect(before.roles.find((r) => r.roleId === "r1")?.toCreate).toBe(1);
+    // r1：b1 可见 + t1.create -> 库节点（enter+edit_data）+ 表节点（r,c,comment） = 2
+    expect(before.roles.find((r) => r.roleId === "r1")?.toCreate).toBe(2);
 
     const fix = await prisma.$transaction((tx) => applyScopeBackfill(tx, before, "tester"));
     expect(fix.created).toBe(before.totals.toCreate);
@@ -131,12 +132,16 @@ describe("D 逐表位与字段档位展开", () => {
     const adminT1 = await policyOf("role_admin", nodeId("table", "t1"));
     expect(adminT1.actions.split(",").sort()).toEqual(["c", "comment", "d", "manage_schema", "r", "u"]);
     // 库节点：canManage -> manage_schema 必须同挂（七守 requireCanManageSchema 按 base 节点判）
+    // 另含两枚聚合位：enter（库级准入）+ edit_data（canManage 隐含可写）
     const adminB1 = await policyOf("role_admin", nodeId("base", "b1"));
-    expect(adminB1.actions.split(",").sort()).toEqual(["manage_schema", "manage_share", "manage_table"]);
+    expect(adminB1.actions.split(",").sort()).toEqual([
+      "edit_data", "enter", "manage_schema", "manage_share", "manage_table",
+    ]);
     const adminT2 = await policyOf("role_admin", nodeId("table", "t2"));
     expect(adminT2.actions).toBe("r");
+    // b2 无 admin scope 行：隐含只读 -> enter + manage_share，无 edit_data（不可写）
     const adminB2 = await policyOf("role_admin", nodeId("base", "b2"));
-    expect(adminB2.actions).toBe("manage_share");
+    expect(adminB2.actions.split(",").sort()).toEqual(["enter", "manage_share"]);
   });
 
   it("manage_schema 同时落在库节点与表节点（七守按 base 节点判）；只读成员两处都没有", async () => {
@@ -153,14 +158,15 @@ describe("D 逐表位与字段档位展开", () => {
 
     // canManage=1：库节点必须带 manage_schema，否则 on 态 requireCanManageSchema 会 OVERDENY 403
     const mBase = await policyOf("r_manage", nodeId("base", "b1"));
-    expect(mBase.actions.split(",").sort()).toEqual(["manage_schema", "manage_share", "manage_table"]);
+    expect(mBase.actions.split(",").sort()).toEqual([
+      "edit_data", "enter", "manage_schema", "manage_share", "manage_table",
+    ]);
     const mTable = await policyOf("r_manage", nodeId("table", "t1"));
     expect(mTable.actions.split(",").sort()).toEqual(["c", "comment", "d", "manage_schema", "r", "u"]);
 
-    // 只读成员：库节点无策略行、表节点无结构权
-    expect(await prisma.authPolicy.count({
-      where: { nodeId: nodeId("base", "b1"), subjectId: "r_read", reason: "scope:role" },
-    })).toBe(0);
+    // 只读成员：库节点只有一枚 enter（准入），不带任何管理位、不带 edit_data
+    const rBase = await policyOf("r_read", nodeId("base", "b1"));
+    expect(rBase.actions).toBe("enter");
     const rTable = await policyOf("r_read", nodeId("table", "t1"));
     expect(rTable.actions).toBe("r");
   });
@@ -176,7 +182,12 @@ describe("D 逐表位与字段档位展开", () => {
 
     const kbPolicy = await policyOf("r_kb", nodeId("kb", "kb1"));
     expect(kbPolicy.actions.includes("manage_schema")).toBe(false);
-    expect(kbPolicy.actions.split(",").sort()).toEqual(["c", "comment", "d", "manage_share", "manage_table", "r", "u"]);
+    // kb 只 emit enter，不 emit edit_data（§7.2-3：kb 内容写关在 content 档位上）
+    expect(kbPolicy.actions.includes("enter")).toBe(true);
+    expect(kbPolicy.actions.includes("edit_data")).toBe(false);
+    expect(kbPolicy.actions.split(",").sort()).toEqual([
+      "c", "comment", "d", "enter", "manage_share", "manage_table", "r", "u",
+    ]);
   });
 
   it("visible=0 但逐表勾 create：不得单独放行（期望 0 条）", async () => {
