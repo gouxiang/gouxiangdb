@@ -16,7 +16,11 @@ import {
   HttpError,
 } from "../guards.js";
 import { requireTableManage } from "../domain/authz/tableManageGuards.js";
-import { resyncTableMaskTx, syncTableForAllScopesTx } from "../domain/authz/scopeProjectionTx.js";
+import {
+  resyncTableMaskTx,
+  syncTableForAllScopesTx,
+  resyncLibraryAggregateForAllScopesTx,
+} from "../domain/authz/scopeProjectionTx.js";
 import { projectAdminForNewTableTx } from "../domain/authz/scopeDoubleWrite.js";
 import {
   loadTableFields,
@@ -1087,6 +1091,9 @@ records.post("/trash/:id/restore", async (c) => {
       // 并补 role_admin 隐含策略（恢复表此前投影随删表被删，须重建；漏补会 OVERDENY）。
       await syncTableForAllScopesTx(tx, "base", t.baseId, id, "add", userId);
       await projectAdminForNewTableTx(tx, t.baseId, id, userId);
+      // 与删表对称：恢复表后按现活表形态重算库节点聚合位，否则恢复的可写表
+      // 拿不回 edit_data（删表时已被移除）-> on 态 OVERDENY。
+      await resyncLibraryAggregateForAllScopesTx(tx, "base", t.baseId, userId);
     });
     restoreName = finalName;
     restoreRenamed = finalName !== t.name;
