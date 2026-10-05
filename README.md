@@ -3,14 +3,19 @@
 > 私有化部署的智能表格 + 知识库 + 画布一体化工作台，前后端分离 · 客户端壳化 · 多端复用。
 
 - **产品名**：「**构想工作台**」。飞牛应用包名 / 目录 / monorepo 根包名仍为 `gouxiangdb` / `gouxiangdb-v2`，仅为技术标识，界面与清单展示名一律为「构想工作台」。
-- **当前版本**：**`v0.1.7`**（单一真源 = 根 `package.json` 的 `version` 字段；运行时禁止再出现硬编码版本字面）。
+- **当前版本**：**`v0.2.1`**（单一真源 = 根 `package.json` 的 `version` 字段；运行时禁止再出现硬编码版本字面）。
 - **当前阶段**：M0–M6 已全部收口（生产基座 / 数据底座 / 组织通讯录 / 统一导航 / 权限引擎 / 向量检索 / 鉴权 MCP），**M7 企业版总验收进行中**（门⑦⑧未完成）。
 
-> **⚠️ 权限引擎当前真实状态（别误读"已具备"）**：新权限引擎（M4）**默认完全不生效**。
-> `apps/api/src/configAuthz.ts:17` 硬编码 `AUTHZ_ENFORCE_READY = false`，且 `GX_AUTHZ_ENGINE` 代码默认 `off`
-> （`resolveAuthzEngineMode`：未设置 / 未知值 / 空值一律回 `off`）。因此系统实际仍走**旧三表决策**（`members` / `kb_members` / `kb_doc_acls`），
-> shadow 适配层零新增 SQL；权限管理页面当前为只读。生产建议由部署侧显式设 `shadow`（旧决策为准、额外对拍只记日志）；
-> 翻 `on` 需满足五条前置且**仅由项目总监下令**。详见 `docs/runbooks/authz-engine-flip-on.md` 与 ADR-0037。
+> **⚠️ 权限当前真实状态（谁说了算，别误读）**：
+> 当前**实际执法的是第二代「库级策略」**——`apps/api/src/domain/authz/libraryPolicy.ts` 的 `resolveBaseAccess()`，
+> 读 **`role_library_scope`**（角色×库台账，另有超管/管理员硬短路），**不读旧三表**。日常在
+> 「工作区设置 → 角色权限」里配的库/表权限就是这一层，真生效。
+> 第三代 M4 权限引擎（读 `auth_policies` + `nav_nodes`）**本体已建成，且七个守卫的 enforce 接线（阶段 R1）已完成**，
+> 但被两个门卡着：`apps/api/src/configAuthz.ts` 的 `AUTHZ_ENFORCE_READY = false` + 环境变量 `GX_AUTHZ_ENGINE` 默认 `off`
+> （未设置 / 未知值 / 空值一律回 `off`；即使写 `on`，阶段门未翻也会降级为 `shadow`）。
+> 故引擎现在只在 `shadow` 下做对拍、不改判；翻 `on` 需满足前置条件且**仅由项目总监下令**。
+> 第一代旧三表（`members` / `kb_members` / `kb_doc_acls`）生产已**零写点**，仅剩 3 处非执法只读用途，实际已退役。
+> 详见 `docs/runbooks/authz-engine-flip-on.md`、ADR-0056 与 `docs/decisions/AUTHZ-LEGACY-GUARD-CLEANUP.md`。
 
 ---
 
@@ -88,18 +93,18 @@ bash scripts/ci-quality.sh                   # CI 用质量门
 
 健康检查：`/healthz`（存活）与 `/readyz`（就绪，含迁移对账 / 磁盘 / WAL 等探针）—— 见 `docs/runbooks/`。
 
-### 测试基线（最近记录，以实际重跑为准）
+### 测试基线（带日期的历史实测，以实际重跑为准）
 
 | 包 | 实测值 | **记录日期** | 来源 |
 |---|---|---|---|
-| `apps/api` | **2145 passed**（196 files passed / 3 skipped，VM 独占全量，0 失败） | 2026-09-18 | `docs/baseline/2026-09-18-m7-acceptance-report.md` |
-| `apps/web` | 314 passed（M7 轮） | 2026-09-18 | 同上 |
-| `apps/web` | **665 passed / 54 files**（P0 前端片后） | 2026-09-19 | `ARCHIVE-LOG.md` 第 14 项 |
-| `@gx/shared-types` | 56 passed | 2026-09-18 | `docs/baseline/2026-09-18-m7-acceptance-report.md` |
+| `apps/api` | **2976 passed / 0 failed**（290 files，2 files 本地 skip）；大资源规模门 VM15 跑 10/10 | 2026-10-05 | 本轮全量复跑（HEAD 59f49f5） |
+| `apps/web` | **1636 passed / 0 failed**（129 files） | 2026-10-05 | 本轮全量复跑 |
+| `@gx/shared-types` | **103 passed** | 2026-10-05 | 本轮复跑 |
+| `@gx/canvas` | **51 passed** | 2026-10-05 | 本轮复跑 |
 
 > 本表是**带日期的历史实测记录**，不是当前断言——数字会随迭代变化，**以实际重跑为准**，请勿当作现状承诺。
-> 三者**非同一轮全量**；`NODE_ENV=test pnpm -w test` 全量一次过的复跑结果【待补】（见 `docs/baseline/2026-09-18-m7-checklist.md` M7-④-08）。
-> 需要权威出口数字请查 `docs/baseline/` 最新报告，本 README 不复制易漂移的实时统计。
+> 三包 `typecheck` 零错误、`eslint` **0 error**（web 100 / api 4 均为历史既有 warning）。
+> 内存/资源占用大的规模门与压测**不在本机跑**，放预览机 VM15；需要权威出口数字请查 `docs/baseline/` 最新报告。
 
 ---
 
@@ -121,7 +126,7 @@ bash scripts/ci-quality.sh                   # CI 用质量门
 
 | 想找什么 | 去哪 |
 |---|---|
-| **现行规范 / 架构决策** | `docs/adr/`（ADR-0001~0055，决策唯一权威） |
+| **现行规范 / 架构决策** | `docs/adr/`（ADR-0001~0056，决策唯一权威）；权限专项另见 `docs/decisions/` |
 | **出口证据 / 实测基线** | `docs/baseline/`（含 M7 门①~⑥ 证据、gate6 三环境证据） |
 | **运维手册** | `docs/runbooks/`（deploy / backup / restore / ci / m1-sidecar / m5-search / mcp / authz-*） |
 | **接口契约** | `docs/api/openapi.yaml`（冻结）+ `docs/api/m4-error-codes.md` |
@@ -181,7 +186,7 @@ ADR-0001 拍板阶段初选 PostgreSQL，落地实现改用 **SQLite**（以代�
 | Core/RecordRepository.swift（hydrate） | `apps/api/src/domain/hydrate.ts` | 已对齐并超越：两轮 hydration + 防双向递归 + 跨表点引用 |
 | 公式 / Lookup / Rollup | `apps/api/src/domain/formula*` + `defaults.ts` | 完整实现，跨表点引用 + 即时反向重算 |
 | Core/MetaRepository.swift | `apps/api` 字段 / 关联路由 | 已移植，关联双向自动建 + 软删恢复 |
-| Core/PermissionChecker.swift | `shared-types permissionsForRole` + 旧三表守卫 | 已移植；M4 统一引擎已建成但**默认不生效**（见文首警示），现行决策仍走旧三表 |
+| Core/PermissionChecker.swift | `shared-types permissionsForRole` + `libraryPolicy`（库级策略） | 已移植；M4 统一引擎已建成、R1 enforce 接线已完成但**默认不生效**（见文首警示），现行执法走第二代 `role_library_scope` |
 | Shared/Theme.swift | `packages/design-tokens` | 1:1 移植为跨端 token |
 | Grid / Gallery / Form / Detail / Drawer | `apps/web/src/features/{grid,views,detail,drawer}` | 已实现，另增 Kanban / Calendar / ERD |
 | 画布 / 知识库（v1 无） | `apps/web/src/features/kb` | 新增能力 |
