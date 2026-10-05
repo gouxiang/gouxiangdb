@@ -178,6 +178,8 @@ export async function buildSearchStatus(d: StatusDeps): Promise<SearchStatus> {
         mainDbPath: resolveMainDbPath(d.env, d.prisma),
         searchDbPath: searchPath,
         mode: view.mode,
+        appDir: d.appDir,
+        vecExtPath: d.env.GX_VEC_EXT_PATH?.trim(),
       });
       index = {
         schemaVersion: meta.schemaVersion,

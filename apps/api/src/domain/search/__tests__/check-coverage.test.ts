@@ -158,6 +158,38 @@ describe("check-coverage A-F（domain 单一真源，每用例独立库）", () 
   }, 30_000);
 });
 
+describe("check-coverage vec0 虚表回归（cloud + 独立只读连接）", () => {
+  it("vec_chunks 为 vec0 虚表时：computeCoverage(cloud) 不抛 no-such-module、D=0", async () => {
+    const h = await makeIndexerHarness("gx-m5-cov-vec-");
+    await seedTable(h, "vec", [
+      { id: "vec_f0", name: "标题", type: "singleLineText", order: 0 },
+    ]);
+    const { syncNavFromEntitiesTx } = await import("../../nav/sync.js");
+    await h.prisma.$transaction((tx) => syncNavFromEntitiesTx(tx));
+    const storeKey = "v";
+    const store = h.openStore(storeKey, true);
+    if (!store.vecAvailable) {
+      console.warn(`跳过：本机 vec0 不可用 (${store.vecError})`);
+      store.close();
+      await h.cleanup();
+      return;
+    }
+    expect(store.vecAvailable).toBe(true);
+    // 建一个真实 vec0 虚拟表（维度 8）：旧逻辑独立只读连接未加载扩展 -> 必抛 no such module。
+    store.ensureVecChunks(8);
+    const mainDbPath = process.env.DATABASE_URL!.slice("file:".length).split("?")[0]!;
+    const searchDbPath = h.searchPathFor(storeKey);
+    const rep = computeCoverage({
+      mainDbPath, searchDbPath, mode: "cloud",
+      appDir: process.cwd(), vecExtPath: process.env.GX_VEC_EXT_PATH?.trim(),
+    });
+    expect(rep.counts.D).toBe(0); // 无 chunk，自然无欠账
+    expect(rep.vecTableExists).toBe(true);
+    store.close();
+    await h.cleanup();
+  }, 30_000);
+});
+
 describe("check-coverage CLI（pnpm tsx 端到端，脚本调 domain 真源）", () => {
   it("--json 干净库 exit 0 且输出与 domain 一致", async () => {
     const c = await freshCtx("cli");

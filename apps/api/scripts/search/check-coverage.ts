@@ -63,7 +63,10 @@ function main(): number {
 
   let report: ReturnType<typeof computeCoverage>;
   try {
-    report = computeCoverage({ mainDbPath, searchDbPath, mode });
+    report = computeCoverage({
+      mainDbPath, searchDbPath, mode,
+      appDir: apiRoot, vecExtPath: process.env.GX_VEC_EXT_PATH?.trim(),
+    });
   } catch (err) {
     console.error(`巡检失败：${err instanceof Error ? err.message : String(err)}`);
     return 70;

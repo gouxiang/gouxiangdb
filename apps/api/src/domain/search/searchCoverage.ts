@@ -11,6 +11,7 @@
 import path from "node:path";
 import Database from "better-sqlite3";
 import type { EmbeddingMode } from "./embedding/types.js";
+import { loadVec0 } from "./vecLoader.js";
 
 /** 阻断类（exit 非 0）：A 漏索引 / B 脏行 / E fts 缺失 / F 授权漏登。C 悬空、D 向量欠账仅警告。 */
 export const COVERAGE_BLOCKING = new Set(["A", "B", "E", "F"]);
@@ -212,16 +213,28 @@ function openRo(file: string): Database.Database {
 /**
  * 按物理路径只读打开两库计算 A-F（CLI 与 status 端点共用）。
  * search.db 不存在由调用方先判（openRo 会抛），主库同理。
+ *
+ * vec_chunks 是 vec0【虚拟表】：cloud 态对其 SELECT 要求本连接已加载 vec0，
+ * 否则报 "no such module: vec0"。故 cloud 时在 search 只读连接上先加载扩展
+ * （加载扩展不写库，readonly 连接可用），解析口径与写连接（SearchStore）一致。
  */
 export function computeCoverage(args: {
   mainDbPath: string;
   searchDbPath: string;
   mode?: EmbeddingMode;
+  /** vec0 解析用应用目录（与 SearchStore 同值）。 */
+  appDir?: string;
+  /** GX_VEC_EXT_PATH 显式覆盖（与 SearchStore 同值）。 */
+  vecExtPath?: string;
 }): CoverageReport {
   const main = openRo(path.resolve(args.mainDbPath));
   const search = openRo(path.resolve(args.searchDbPath));
   try {
-    return computeCoverageFromConnections(main, search, args.mode ?? "off");
+    const mode = args.mode ?? "off";
+    if (mode === "cloud" && args.appDir) {
+      loadVec0(search, { envPath: args.vecExtPath, appDir: args.appDir });
+    }
+    return computeCoverageFromConnections(main, search, mode);
   } finally {
     main.close();
     search.close();
