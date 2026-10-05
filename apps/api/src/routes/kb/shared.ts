@@ -35,9 +35,26 @@ export async function shadowKbAction(
   await runShadowCheck(guard, userId, { resourceType: "kb", resourceId: kbId }, action, oldAllowed);
 }
 
-/** requireKb 成员资格对拍（kb 节点 enter 库门，= legacy access.visible）。 */
-async function shadowKb(userId: string, kbId: string, oldAllowed: boolean): Promise<void> {
-  await shadowKbAction("requireKb", userId, kbId, "enter", oldAllowed);
+/**
+ * KB 侧统一接线缝：与 guards.ts 的 enforceBase 完全同源，仅资源类型固定为 kb。
+ * off 零 IO 返回 legacy；shadow 正向对拍；on 态引擎为权威（authority），旧决策反向对拍。
+ */
+async function enforceKb(
+  guard: string,
+  userId: string,
+  kbId: string,
+  action: "enter" | "r" | "u",
+  legacyAllowed: boolean,
+): Promise<boolean> {
+  const out = await enforceOrLegacy({
+    guard,
+    userId,
+    ref: { resourceType: "kb", resourceId: kbId },
+    action,
+    legacyAllowed,
+    semantics: "authority",
+  });
+  return out.allowed;
 }
 
 /**
@@ -82,11 +99,8 @@ export async function requireKb(userId: string, kbId: string): Promise<KbGuardRe
   const kb = await prisma.knowledgeBase.findFirst({ where: { id: kbId, deletedAt: null } });
   if (!kb) throw new HttpError(404, "知识库不存在");
   const access = await resolveKbAccess(userId, kbId);
-  if (!access.visible) {
-    await shadowKb(userId, kbId, false);
-    throw new HttpError(403, "无权访问该知识库");
-  }
-  await shadowKb(userId, kbId, true);
+  const allowed = await enforceKb("requireKb", userId, kbId, "enter", access.visible);
+  if (!allowed) throw new HttpError(403, "无权访问该知识库");
   return { role: derivedRole(access), access };
 }
 
@@ -105,20 +119,14 @@ export async function requireDocAccess(
   const content = contentAccessOf(access);
   const canEdit = content.update;
 
+  // 内容授权实际挂 kb 节点、沿 kb→doc 继承：enforce ref 对齐 kb 节点（而非 doc 自身），
+  // 否则 doc 中断继承时 doc 节点判 r/u 会产生假漂移。动作仍 r/u。见 §3.3。
   const action = needEdit ? ("u" as const) : ("r" as const);
-  const shadowContent = async (oldAllowed: boolean): Promise<void> => {
-    if (!authzShadowActive()) return;
-    // 内容授权实际挂 kb 节点、沿 kb→doc 继承：对拍 ref 对齐 kb 节点（而非 doc 自身），
-    // 否则 doc 中断继承时 doc 节点判 r/u 会产生假漂移。动作仍 r/u。见 §3.3。
-    await runShadowCheck(
-      "requireDocAccess", userId, { resourceType: "kb", resourceId: doc.kbId }, action, oldAllowed,
-    );
-  };
-  if (needEdit && !canEdit) {
-    await shadowContent(false);
-    throw new HttpError(403, "当前角色无权编辑");
+  const legacyAllowed = needEdit ? canEdit : true;
+  const allowed = await enforceKb("requireDocAccess", userId, doc.kbId, action, legacyAllowed);
+  if (!allowed) {
+    throw new HttpError(403, needEdit ? "当前角色无权编辑" : "无权访问该知识库");
   }
-  await shadowContent(needEdit ? canEdit : true);
   return { doc, role: derivedRole(access), canEdit, access };
 }
 
