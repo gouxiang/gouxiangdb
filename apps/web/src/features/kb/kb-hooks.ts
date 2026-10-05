@@ -11,7 +11,6 @@ const QK = {
   doc: (id: string) => ["kb", "doc", id] as const,
   versions: (id: string) => ["kb", "doc", id, "versions"] as const,
   trash: (kbId: string) => ["kb", kbId, "trash"] as const,
-  acl: (docId: string) => ["kb", "doc", docId, "acl"] as const,
 };
 
 // ============ 知识库容器 ============
@@ -244,22 +243,7 @@ export function usePurgeDoc(kbId: string) {
   });
 }
 
-// ============ 单文档 ACL ============
-
-export function useDocAcl(docId: string | undefined) {
-  return useQuery({
-    queryKey: QK.acl(docId ?? ""),
-    queryFn: () => KbApi.acl(docId!).then((r) => r.acls),
-    enabled: !!docId,
-  });
-}
-
-export function useSetDocAcl(docId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: { email: string; role: "editor" | "commenter" | "viewer" | null }) => KbApi.setAcl(docId, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: QK.acl(docId) }),
-  });
-}
+// 单文档独立权限弹窗（DocAclModal）及其专属 hooks useDocAcl / useSetDocAcl 已随
+// 该零引用组件一并删除；文档级授权不再有独立入口。
 
 export type { KbDTO, KbDocDTO };

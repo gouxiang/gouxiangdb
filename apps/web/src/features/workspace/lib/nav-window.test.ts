@@ -15,8 +15,6 @@ import { buildSecondaryRows, SECONDARY_ROW_H, type SecondaryEntry } from "../Sec
 
 /** 一级行高（PrimaryNav.NAV_ROW_H，源码同名常量未导出，测试侧按同值锁定）。 */
 const PRIMARY_ROW_H = 32;
-/** 编排树行高（ComposerTree.COMPOSER_ROW_H）。 */
-const COMPOSER_ROW_H = 31;
 const OVERSCAN = 12; // useMenuVirtualizer 默认 overscan
 /** 典型侧栏可视高度（900p 屏去掉顶栏/底栏后的保守取值），仅用于上界算术。 */
 const VIEWPORT_H = 768;
@@ -88,7 +86,7 @@ describe("virtualWindow 切片：挂载行数只与视口相关（有界性）",
     expect(Math.ceil(VIEWPORT_H / PRIMARY_ROW_H) + 2 * OVERSCAN).toBe(48);
   });
 
-  it("首帧保守视口（rowH*24）下窗口即有界：一级/二级/编排均 = 24+2*overscan 行", () => {
+  it("首帧保守视口（rowH*24）下窗口即有界：一级/二级均 = 24+2*overscan 行", () => {
     // useMenuVirtualizer 首帧 viewportH = rowH*24，ResizeObserver 挂载前也不全量渲染
     const firstFrame = (rowH: number) => {
       const win = virtualWindow(0, rowH * 24, rowH, 99999, OVERSCAN);
@@ -96,7 +94,7 @@ describe("virtualWindow 切片：挂载行数只与视口相关（有界性）",
     };
     expect(firstFrame(PRIMARY_ROW_H)).toBe(24 + 2 * OVERSCAN);
     expect(firstFrame(SECONDARY_ROW_H)).toBe(24 + 2 * OVERSCAN);
-    expect(firstFrame(COMPOSER_ROW_H)).toBe(24 + 2 * OVERSCAN);
+    // 编排树（ComposerTree）已随导航编排下线删除，不再有 31px 行高档位需要锁。
   });
 
   it("滚动到真实底部（scrollTop ≤ totalHeight-vh，浏览器保证）时 end=total、padBottom=0", () => {
@@ -249,15 +247,13 @@ describe("窗口化接线源码守卫（防回归：三处必须挂 scrollerRef 
   const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
   const read = (p: string) => readFileSync(here(p), "utf8");
 
-  it("PrimaryNav / ComposerTree / SecondaryNav 均把 scrollerRef 挂到 overflow 滚动容器并渲染 virt.windowed", () => {
+  it("PrimaryNav / SecondaryNav 均把 scrollerRef 挂到 overflow 滚动容器并渲染 virt.windowed", () => {
     const primary = read("../PrimaryNav.tsx");
     expect(primary).toContain("ref={virt.scrollerRef}");
     expect(primary).toContain("overflow-y-auto");
     expect(primary).toContain("virt.windowed.map");
 
-    const composer = read("../composer/ComposerTree.tsx");
-    expect(composer).toContain("ref={virt.scrollerRef}");
-    expect(composer).toContain("virt.windowed.map");
+    // ComposerTree 源码守卫随组件删除（导航编排树零生产引用），不再需要锁其接线。
 
     const secondary = read("../SecondaryNav.tsx");
     expect(secondary).toContain("ref={virt.scrollerRef}");

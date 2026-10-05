@@ -80,6 +80,10 @@ export function toggleAction(
     manage_share: 5,
     manage_schema: 6,
     manage_table: 7,
+    // enter/edit_data 为库节点聚合位（shared-types ResourceAction 新增），排序末位，
+    // 顺序对齐 RESOURCE_ACTIONS；补全 Record 以满足 tsc 穷举。
+    enter: 8,
+    edit_data: 9,
   };
   return [...set].sort((a, b) => order[a] - order[b]);
 }
