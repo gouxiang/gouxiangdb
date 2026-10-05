@@ -22,7 +22,7 @@ import { creatorOwnedKeys } from "./scopeCreators.js";
 import { clampBudget, buildVisibleScopeSql, type VisibleScopeSql } from "./scopeSql.js";
 import type { AuthzClient, AuthzNode, ResolvedSubject, ScopedPolicy } from "./types.js";
 
-export type ScopeKind = "base" | "kb" | "table" | "view" | "doc" | "canvas" | "group";
+type ScopeKind = "base" | "kb" | "table" | "view" | "doc" | "canvas" | "group";
 const ALL_SCOPE_KINDS: readonly ScopeKind[] = ["base", "kb", "table", "view", "doc", "canvas", "group"];
 
 export interface VisibleScope {
@@ -44,7 +44,7 @@ export interface VisibleScope {
   sql: VisibleScopeSql;
 }
 
-export interface ResolveScopeOptions {
+interface ResolveScopeOptions {
   actions?: string[];
   kinds?: string[];
   budget?: number;

@@ -18,10 +18,10 @@ import {
   type OpenSearchOptions,
   type SearchStore,
 } from "./searchStore.js";
-import { quarantineCorruptFiles, isCorruptionError } from "./searchCorruption.js";
+import { quarantineCorruptFiles } from "./searchCorruption.js";
 import type { ReindexDeps } from "./reindex.js";
 
-export interface RecoveryResult {
+interface RecoveryResult {
   /** 重开后的新鲜空库（已是进程单例）。 */
   store: SearchStore;
   /** 隔离物路径（.corrupt-<ts> 主库），供测试/日志断言三件留存。 */
@@ -70,11 +70,6 @@ export function recoverCorruptSearchStore(
   return task;
 }
 
-/** 判定一次检索链异常是否是 search.db 物理损坏（供路由决定是否走自愈）。 */
-export function looksLikeCorruption(err: unknown): boolean {
-  return isCorruptionError(err);
-}
-
 /** 后台重播任务（可观测/测试确定性收口）；空闲为 null。与 reindex inflight 锁互不相关。 */
 let repopulationInFlight: Promise<RepopulateSummary> | null = null;
 
@@ -92,7 +87,7 @@ export function isRepopulating(): boolean {
   return repopulationInFlight !== null;
 }
 
-export interface RepopulateSummary {
+interface RepopulateSummary {
   entities: number; chunksWritten: number; vecWritten: number; vecDebt: number;
 }
 

@@ -22,7 +22,7 @@ const require = createRequire(import.meta.url);
 /** 入口文件名恒为 vec0（H7）；扩展名随平台。 */
 export const VEC_ENTRY_BASENAME = "vec0";
 
-export type VecTriplet =
+type VecTriplet =
   | "darwin-x64"
   | "darwin-arm64"
   | "linux-x64"
@@ -150,7 +150,7 @@ export function classifyVecExtKind(
   return "platform";
 }
 
-export interface VecLoadResult {
+interface VecLoadResult {
   /** vec0 是否加载成功；false 时主流程必须降级 fts-only（H8）。 */
   vecAvailable: boolean;
   /** 实际加载的文件绝对路径；失败为 null。 */
@@ -160,7 +160,7 @@ export interface VecLoadResult {
 }
 
 /** 已打开的 better-sqlite3 连接所需最小形状（避免本文件硬依赖具体实例类型）。 */
-export interface VecLoadableDb {
+interface VecLoadableDb {
   loadExtension(file: string): void;
 }
 

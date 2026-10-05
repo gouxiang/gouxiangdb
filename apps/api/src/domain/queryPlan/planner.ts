@@ -29,7 +29,7 @@ import { buildViewPlan, aggregationsFullyPhysical } from "./planBuild.js";
 import { fetchRawByIds, orderByIds } from "./fetch.js";
 import { prismaDeps } from "../prismaDeps.js";
 
-export interface PlannerInput {
+interface PlannerInput {
   tableId: string;
   fields: FieldMeta[];
   config: ViewConfig;
@@ -45,7 +45,7 @@ export interface PlannerInput {
   currentUserId?: string | null;
 }
 
-export interface PlannerResult {
+interface PlannerResult {
   records: HydratedRecord[];
   total: number;
   filteredTotal: number;

@@ -12,7 +12,7 @@ import type { EmbeddingProvider, EmbeddingHealth } from "./types.js";
 /** off 模式不支持嵌入的固定错误（不触网、信息确定，供单测与上层分支匹配）。 */
 export const OFF_EMBED_UNSUPPORTED = "embedding provider is off (fts/like only); embed() must not be called";
 
-export interface OffProviderOptions {
+interface OffProviderOptions {
   /** 仅用于与接口对齐的展示名，默认空串。 */
   model?: string;
 }

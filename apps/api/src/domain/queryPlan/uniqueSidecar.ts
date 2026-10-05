@@ -12,7 +12,7 @@
 
 import type { FieldMeta } from "../types.js";
 
-export interface UniqueTx {
+interface UniqueTx {
   $queryRawUnsafe: (query: string, ...values: unknown[]) => Promise<Array<{ id: unknown }>>;
 }
 
@@ -27,7 +27,7 @@ const TEXT_EQ_TYPES = new Set([
   "singleLineText", "email", "url", "phone", "singleSelect", "date", "datetime",
 ]);
 
-export interface UniqueMatch {
+interface UniqueMatch {
   column: "valueText" | "valueNum";
   value: string | number;
 }

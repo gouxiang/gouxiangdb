@@ -10,7 +10,7 @@
 // 绝不落查询词、标题、字段值、key、向量、实体 id。writeAudit 自身的 SENSITIVE_PARTS 是第二道网。
 
 /** 技术态签名：reason 集合（排序去重）+ mode + recovering，同态不重复打点。 */
-export interface DegradeState {
+interface DegradeState {
   /** 当次实际执行 mode（hybrid|vector|fts|like）。 */
   mode: string;
   /** 当次降级原因集合（空数组=完全健康）。 */

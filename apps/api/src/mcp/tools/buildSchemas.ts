@@ -7,7 +7,7 @@
 import { z, requestId } from "./schemas.js";
 
 /** 全部字段类型（与 shared-types FIELD_TYPES 同域，30 枚）。 */
-export const FIELD_TYPE_VALUES = [
+const FIELD_TYPE_VALUES = [
   "singleLineText", "longText", "richText", "number", "currency", "percent", "duration",
   "date", "datetime", "checkbox", "singleSelect", "multiSelect", "email", "url", "phone",
   "rating", "autoNumber", "json", "attachment", "links", "lookup", "rollup", "count",

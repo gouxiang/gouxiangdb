@@ -19,7 +19,7 @@ import type { LibraryAccessDTO } from "@gx/shared-types";
 import { fieldAccessOf } from "./libraryPolicy.js";
 
 /** 一张表对某人的字段读侧视野。 */
-export interface FieldScope<T> {
+interface FieldScope<T> {
   /** active=true 时为「去掉 hidden」的新数组；active=false 时是入参同一引用（不复制）。 */
   fields: T[];
   /** 允许出现的字段 id 集（active 时用于视图配置脱敏）。 */

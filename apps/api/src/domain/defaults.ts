@@ -148,7 +148,7 @@ async function resolveScalarDefault(
  *   formula → 公式引用的本表字段（按名解析为 id）
  *   lookup  → 筛选中 valueType=field 的匹配字段 id
  */
-export function defaultTriggerFieldIds(field: FieldMeta, allFields?: FieldMeta[]): Set<string> {
+function defaultTriggerFieldIds(field: FieldMeta, allFields?: FieldMeta[]): Set<string> {
   const out = new Set<string>();
   const cfg = asDefaultConfig(field.defaultConfig);
   if (!cfg) return out;

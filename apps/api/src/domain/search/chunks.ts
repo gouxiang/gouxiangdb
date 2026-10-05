@@ -85,13 +85,13 @@ export interface ProducedChunk {
   images?: string[];
 }
 
-export interface RecordChunkMeta {
+interface RecordChunkMeta {
   cap: number; totalCandidates: number; emitted: number; capped: boolean;
   /** 被确定性截断丢弃的 fieldId（按取舍排序，最末位先丢）。 */
   droppedFieldIds: string[];
 }
 
-export interface RecordChunksResult {
+interface RecordChunksResult {
   identity: ProducedChunk;
   fieldChunks: ProducedChunk[];
   /** identity(seq=0) 在前，其后 field chunk 按取舍序 seq=1..N。 */
@@ -176,7 +176,7 @@ export function buildRecordChunks(input: RecordChunkInput, cap: number = FIELD_C
 
 // ============ doc：h1-h3 粗切 + 超长滑窗（骨架；TODO S5 接 markdownToSearchText） ============
 
-export interface DocSection { headingPath: string[]; text: string; }
+interface DocSection { headingPath: string[]; text: string; }
 
 /** 按 h1-h3 粗切章节（纯正则）；标题层级路径随节保留；无正文节过滤。 */
 export function splitMarkdownHeadings(markdown: string): DocSection[] {
@@ -217,7 +217,7 @@ function docChunk(docId: string, nodeId: string, title: string, body: string, id
   return { chunkKind: "identity", chunkId: `doc:${docId}:${idx}`, entityType: "doc", entityId: docId, nodeId, fieldId: null, title, body, seq: idx };
 }
 
-export interface DocChunkInput {
+interface DocChunkInput {
   docId: string; nodeId: string; title: string;
   /** 已去标记纯文本（buildDocIdentityChunks 必填，接线片由 markdownToSearchText 产出，TODO S5）。 */
   plainText?: string;
@@ -232,7 +232,7 @@ export function buildDocIdentityChunks(input: DocChunkInput): ProducedChunk[] {
     ));
 }
 
-export interface DocMarkdownChunkInput {
+interface DocMarkdownChunkInput {
   docId: string; nodeId: string; title: string;
   /** 原始 markdown：h1-h3 粗切，节内超长再滑窗（去标记在接线片，TODO S5）。 */
   markdown: string;

@@ -16,7 +16,7 @@ import { HttpError } from "../../guards.js";
 import { WS_ID } from "./backfill.js";
 
 /** 菜单容器嵌套层级硬上限（一级容器 depth=1）。 */
-export const MENU_MAX_DEPTH = 2;
+const MENU_MAX_DEPTH = 2;
 const LABEL_MAX = 120;
 const ICONS = new Set<string>(NAV_ICONS);
 
@@ -125,7 +125,7 @@ async function bumpMenuVersionTx(tx: DbTx): Promise<number> {
  *     原 ensureEntityShortcutTx 随之删除，此处不再有第二个调用点）。
  * 刻意不 bump menuVersion：由调用方在其事务边界内决定，避免同事务重复自增。
  */
-export async function createShortcutRowTx(
+async function createShortcutRowTx(
   tx: DbTx,
   input: {
     id: string;

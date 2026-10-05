@@ -17,7 +17,7 @@ import { nodeVisibleInPrepared, prepareScope } from "./scope.js";
 /** 抽样上限（保证体检是有界动作，不为大库拖垮）。 */
 const LIMITS = { users: 5, libraries: 8 } as const;
 
-export interface ScopeVisibilitySample {
+interface ScopeVisibilitySample {
   userId: string;
   /** 库节点 id（nav_nodes.id）。 */
   nodeId: string;

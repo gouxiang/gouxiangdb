@@ -18,7 +18,7 @@ import {
   MAX_DEPTH,
 } from "./deptTree.js";
 
-export interface DepartmentDTO {
+interface DepartmentDTO {
   id: string;
   workspaceId: string;
   parentId: string | null;

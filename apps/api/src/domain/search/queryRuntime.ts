@@ -26,7 +26,7 @@ import {
 } from "./queryTypes.js";
 import type { EntityTypeFilter } from "./queryPlan.js";
 
-export interface BuildRuntimeOptions {
+interface BuildRuntimeOptions {
   prisma: PrismaClient;
   env: NodeJS.ProcessEnv;
   /** 解析 search.db 路径所需：config.dataDir（prod /var/lib/gouxiangdb，dev apiRoot）。 */

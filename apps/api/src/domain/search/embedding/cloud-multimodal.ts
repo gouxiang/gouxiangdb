@@ -9,7 +9,7 @@ import {
 } from "@gx/shared-types";
 import { EmbeddingError } from "./types.js";
 
-export interface MultimodalRequestArgs {
+interface MultimodalRequestArgs {
   endpoint: string;
   apiKey: string;
   model: string;

@@ -30,19 +30,19 @@ export interface PhysicalFilter {
   countPlan?: CountPlan | null;
 }
 
-export interface CandidateQuery extends PhysicalFilter {
+interface CandidateQuery extends PhysicalFilter {
   tableId: string;
   sortJoins: SortJoin[] | null;
 }
 
-export interface PhysicalAggRequest extends PhysicalFilter {
+interface PhysicalAggRequest extends PhysicalFilter {
   tableId: string;
   fieldId: string;
   funcs: Array<"count" | "countEmpty" | "countFilled" | "percentEmpty" | "percentFilled"
     | "sum" | "avg" | "min" | "max">;
 }
 
-export interface GroupBucketRequest extends PhysicalFilter {
+interface GroupBucketRequest extends PhysicalFilter {
   tableId: string;
   fieldId: string;
   /** "singleSelect" → valueText 分桶；"checkbox" → valueNum 分桶。 */
@@ -62,7 +62,7 @@ export interface KeysetPageArgs extends PhysicalFilter {
   limit: number;
 }
 
-export interface KeysetIdPage {
+interface KeysetIdPage {
   rows: { id: string; createdAt: number }[];
   hasMore: boolean;
 }

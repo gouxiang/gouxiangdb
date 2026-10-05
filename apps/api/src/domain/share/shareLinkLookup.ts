@@ -43,14 +43,14 @@ export interface ShareDocRow {
   updatedAt: Date;
 }
 
-export interface ShareBaseRow {
+interface ShareBaseRow {
   id: string;
   name: string;
   icon: string | null;
   iconColor: string | null;
 }
 
-export interface ShareTableRow {
+interface ShareTableRow {
   id: string;
   name: string;
   icon: string | null;
@@ -60,7 +60,7 @@ export interface ShareTableRow {
   baseName: string;
 }
 
-export type ShareTarget =
+type ShareTarget =
   | { type: "kb_doc"; doc: ShareDocRow }
   | { type: "base"; link: ShareLinkRow; base: ShareBaseRow }
   | { type: "table"; link: ShareLinkRow; table: ShareTableRow };
@@ -73,7 +73,7 @@ function expired(link: ShareLinkRow, now: Date): boolean {
 }
 
 /** 按 token 取对象化分享链接；不存在/已过期/未知对象族都返回 null（由调用方统一 404）。 */
-export async function findShareLink(token: string): Promise<ShareLinkRow | null> {
+async function findShareLink(token: string): Promise<ShareLinkRow | null> {
   const row = await prisma.shareLink.findUnique({ where: { token } });
   if (!row || !KNOWN_OBJECT_TYPES.has(row.objectType)) return null;
   return row;

@@ -12,7 +12,7 @@ import type { ResourceAction } from "@gx/shared-types";
 import type { PruneIndex, PruneNode } from "../nav/prune.js";
 import type { AuthzClient, AuthzNode } from "./types.js";
 
-export interface NavVisibility {
+interface NavVisibility {
   prepared: PreparedScope;
   index: PruneIndex;
   /** 节点【自身】r 是否成立（不查祖先；shortcut/面包屑逐节点判定用）。 */

@@ -16,8 +16,8 @@ import { WS_ID } from "./backfill.js";
 import { pruneTreeRows, type PruneIndex } from "./prune.js";
 
 /** 普通分块读的默认/最大层级跨度。 */
-export const TREE_DEFAULT_MAX_DEPTH = 2;
-export const TREE_MAX_DEPTH_CAP = 10;
+const TREE_DEFAULT_MAX_DEPTH = 2;
+const TREE_MAX_DEPTH_CAP = 10;
 
 export interface TreeParams {
   parentId?: string;
@@ -27,7 +27,7 @@ export interface TreeParams {
 }
 
 /** on 态剪枝入参（authz 层 buildNavVisibility 产物；缺省即 M3 零剪枝）。 */
-export type TreePrune = PruneIndex;
+type TreePrune = PruneIndex;
 
 export class TreeQueryError extends Error {
   constructor(public status: 400 | 403, message: string) {

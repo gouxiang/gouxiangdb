@@ -26,7 +26,7 @@ export class VersionConflictError extends HttpError {
   }
 }
 
-export interface SaveDocContentParams {
+interface SaveDocContentParams {
   docId: string;
   kind: string;
   /** 读取时的 contentVersion（用于 outbox version 兜底）。 */

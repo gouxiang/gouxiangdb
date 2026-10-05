@@ -31,8 +31,6 @@ const AUTH_MESSAGE: Record<McpAuthFailReason, string> = {
 };
 
 const counter = new FixedWindowCounter();
-/** 每进程一个 MCP 限流桶实例（单实例部署前提，与全局限流同纪律）。 */
-export const mcpRateCounter = counter;
 
 function ipRule(): RateRule {
   return { name: "mcp-ip", limit: config.mcpRateIpMax, windowMs: config.mcpRateWindowMs, match: () => true };
@@ -74,7 +72,7 @@ function rateLimited(c: Context, limit: number, remaining: number, retryAfterSec
   return jsonRpcError(c, 429, -32029, "RATE_LIMITED");
 }
 
-export function createMcpApp(): Hono {
+function createMcpApp(): Hono {
   const app = new Hono();
   app.all("/", async (c) => {
     const enabled = config.rateLimitEnabled;

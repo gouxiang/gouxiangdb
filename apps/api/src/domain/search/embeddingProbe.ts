@@ -20,7 +20,7 @@ const PROBE_IMAGE =
 /** 探活超时上限：配置里填 60s 也不让按钮等 60s。 */
 const PROBE_TIMEOUT_CAP_MS = 8000;
 
-export interface ProbeDeps {
+interface ProbeDeps {
   prisma: PrismaClient;
   env: NodeJS.ProcessEnv;
   jwtSecret: string;

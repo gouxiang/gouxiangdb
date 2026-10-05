@@ -11,7 +11,7 @@ import type { DbTx } from "../../db.js";
 /** 应用层深度护栏：移动/重写后最深层级不得超过 32（护栏而非功能承诺）。 */
 export const NAV_MAX_DEPTH = 32;
 
-export interface NavPathRow {
+interface NavPathRow {
   id: string;
   parentId: string | null;
   path: string;
@@ -82,12 +82,12 @@ export async function applySubtreeRewriteTx(tx: DbTx, updates: SubtreeRewrite[])
   }
 }
 
-export interface RebuildNodeRow {
+interface RebuildNodeRow {
   id: string;
   parentId: string | null;
 }
 
-export interface PathRebuild {
+interface PathRebuild {
   id: string;
   path: string;
   depth: number;

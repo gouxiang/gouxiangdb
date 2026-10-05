@@ -65,16 +65,6 @@ const AUTO_VERSION_WINDOW_MS = 10 * 60 * 1000; // 距上一版本 10 分钟
 const MAX_AUTO_VERSIONS = 50; // 自动版本上限（手动版本不参与淘汰）
 
 /**
- * 内容保存时的自动版本策略：
- *   - 当天还没有版本，或距上一版本超过 10 分钟 → 自动存快照（label=null）
- *   - 自动版本超上限时，淘汰最旧的自动版本（手动版本永远保留）
- * 返回是否创建了快照。
- */
-export async function maybeAutoSnapshot(docId: string, userId: string): Promise<boolean> {
-  return maybeAutoSnapshotTx(prisma, docId, userId);
-}
-
-/**
  * 自动版本快照的事务版：调用方可传入交互事务 tx（M3/S3 内容保存需与 nav 同步同事务），
  * 或直接传全局 prisma（单连接下其本身满足 DbTx 结构）。读/写全部走传入 client。
  */

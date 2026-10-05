@@ -21,7 +21,7 @@ export type DriftKind = "DRIFT_OVERDENY" | "DRIFT_OVERALLOW";
  *   reverse = enforce 期：引擎为准、旧决策作对比基准（AUTHZ-LEGACY-GUARD-CLEANUP 阶段 R2）。
  * 分类口径两个方向完全一致（旧 vs 引擎），方向只影响日志/计数标记，不影响 kind 语义。
  */
-export type CompareDirection = "forward" | "reverse";
+type CompareDirection = "forward" | "reverse";
 
 /** 一次对拍的最小上下文（来源标记 + 被决策资源/动作/主体）。 */
 export interface ShadowCompareContext {
@@ -37,7 +37,7 @@ export interface ShadowCompareContext {
   direction?: CompareDirection;
 }
 
-export interface DriftEntry {
+interface DriftEntry {
   ts: string;
   kind: DriftKind;
   guard: string;
@@ -51,7 +51,7 @@ export interface DriftEntry {
 }
 
 /** 引擎对拍本身失败（区别于决策漂移）：只观测、不影响旧响应。 */
-export interface ShadowErrorEntry {
+interface ShadowErrorEntry {
   ts: string;
   guard: string;
   action: ResourceAction;
@@ -62,7 +62,7 @@ export interface ShadowErrorEntry {
 }
 
 /** 进程内滚动计数（DriftSnapshot 的标量部分）。 */
-export interface DriftCounts {
+interface DriftCounts {
   overDeny: number;
   overAllow: number;
   errors: number;
@@ -76,7 +76,7 @@ export interface DriftCounts {
   enforceUnresolved: number;
 }
 
-export interface DriftSnapshot extends DriftCounts {
+interface DriftSnapshot extends DriftCounts {
   recent: DriftEntry[];
   recentErrors: ShadowErrorEntry[];
 }

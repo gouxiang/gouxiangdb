@@ -19,7 +19,7 @@ import type { AllowSource, AuthzClient, AuthzNode } from "./types.js";
 
 type SubjectType = "user" | "dept" | "role";
 
-export interface NamedSubject {
+interface NamedSubject {
   subjectType: SubjectType;
   subjectId: string;
   /** user=displayName，role/dept=name；查不到（悬挂）为 null。 */
@@ -77,7 +77,7 @@ function parseMask(raw: string | null): FieldMask | null {
   }
 }
 
-export interface NodePolicyRow extends NamedSubject {
+interface NodePolicyRow extends NamedSubject {
   id: string;
   actions: string[];
   fieldMask: FieldMask | null;
@@ -85,7 +85,7 @@ export interface NodePolicyRow extends NamedSubject {
   createdAt: string;
 }
 
-export interface AncestorPolicySummary {
+interface AncestorPolicySummary {
   nodeId: string;
   nodeName: string;
   policies: Array<NamedSubject & { actions: string[] }>;
@@ -162,7 +162,7 @@ export async function listNodePolicies(client: AuthzClient, nodeId: string): Pro
   };
 }
 
-export interface EffectiveSource extends NamedSubject {
+interface EffectiveSource extends NamedSubject {
   kind: AllowSource["kind"];
   policyId: string | null;
   nodeId: string;

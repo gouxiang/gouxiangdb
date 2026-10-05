@@ -21,28 +21,28 @@ export const ENTITY_TYPE_CODE: Readonly<Record<SearchEntityType, number>> = {
 export const ALL_ENTITY_TYPES: readonly SearchEntityType[] = ["record", "doc", "canvas"];
 
 /** 关键词策略：fts=trigram MATCH；like=短词参数化 LIKE；browse=空查询的 identity 有界浏览。 */
-export type KeywordStrategy = "fts" | "like" | "browse";
+type KeywordStrategy = "fts" | "like" | "browse";
 
 /** 请求侧 mode（§4.5 步骤 1b；降级到实际可用路由由 S7 执行，本层只如实规划）。 */
 export type RequestedMode = "auto" | "fts" | "vector";
 
 export type EntityTypeFilter = "all" | SearchEntityType;
 
-export interface LikePlan {
+interface LikePlan {
   /** 已转义并包 % 的模式串；两个绑定位同值（title/body）。 */
   sql: string;
   bindings: string[];
   pattern: string;
 }
 
-export interface FtsPlan {
+interface FtsPlan {
   /** 双引号短语，内部双引号已翻倍；绑定给 MATCH 右值。 */
   sql: string;
   bindings: string[];
   phrase: string;
 }
 
-export interface BrowsePlan {
+interface BrowsePlan {
   /** 空查询只浏览身份 chunk（绝不扫 field body），有界 LIMIT。 */
   identityOnly: true;
   bounded: true;
@@ -59,14 +59,14 @@ export interface BrowsePlan {
  *   3. 否则须命中该主体白名单行 (tableNodeId,fieldId)。
  * 别名约定：chunks c（与 §4.5 SQL 一致）。
  */
-export interface AllowedPredicate {
+interface AllowedPredicate {
   identityAlwaysVisible: true;
   grantTable: "temp_field_grant";
   sql: string;
   bindings: never[];
 }
 
-export interface VectorRoutePlan {
+interface VectorRoutePlan {
   enabled: boolean;
   /** H4 铁律：KNN 必须带 k（= LIMIT），无上限的计划不允许产出。 */
   k: number;
@@ -95,7 +95,7 @@ export interface SearchQueryPlan {
   limits: { perRoute: number; finalTopN: number };
 }
 
-export interface BuildPlanOptions {
+interface BuildPlanOptions {
   mode?: RequestedMode;
   type?: EntityTypeFilter;
   /** 出口最终实体聚合上限，默认 20，硬上限 50（§9）。 */

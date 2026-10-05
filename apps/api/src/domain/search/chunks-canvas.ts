@@ -50,7 +50,7 @@ export function collectCanvasTextElements(json: string): { texts: string[]; trun
   return { texts, truncated };
 }
 
-export interface CanvasChunkInput { canvasId: string; nodeId: string; title: string; contentJson: string; }
+interface CanvasChunkInput { canvasId: string; nodeId: string; title: string; contentJson: string; }
 
 /** canvas 每个含文本元素 1 identity chunk（§4.6）；非法 JSON 返回 null 由接线片记账。 */
 export function buildCanvasIdentityChunks(input: CanvasChunkInput): { chunks: ProducedChunk[]; truncated: boolean } | null {

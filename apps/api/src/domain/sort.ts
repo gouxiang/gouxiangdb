@@ -9,7 +9,7 @@
 import type { SortSpec } from "@gx/shared-types";
 import { toComparableText } from "./filter.js";
 
-export type SortableRow = {
+type SortableRow = {
   id: string;
   get: (fieldId: string) => unknown;
 };

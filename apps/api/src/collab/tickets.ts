@@ -9,7 +9,7 @@ import { randomBytes } from "node:crypto";
 import type { CollabRole, CollabSubjectKind } from "@gx/shared-types";
 
 /** 票据有效期（§4.1：60s）。 */
-export const TICKET_TTL_MS = 60_000;
+const TICKET_TTL_MS = 60_000;
 
 export interface CollabTicketPayload {
   /** 票据只对这一个房间有效（防跨房复用）。 */
@@ -57,9 +57,4 @@ export function redeemTicket(ticket: string): CollabTicketPayload | null {
   const now = Date.now();
   sweep(now);
   return rec.expiresAt > now ? rec.payload : null;
-}
-
-/** 排障/测试用：当前未核销的票据数。 */
-export function pendingTicketCount(): number {
-  return tickets.size;
 }

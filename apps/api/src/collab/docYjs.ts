@@ -147,7 +147,7 @@ export function textOf(b: DocBlocks, id: string): string {
   return b.texts.get(id)?.toString() ?? "";
 }
 
-export function metaOf(b: DocBlocks, id: string): Record<string, MetaValue> {
+function metaOf(b: DocBlocks, id: string): Record<string, MetaValue> {
   const out: Record<string, MetaValue> = {};
   const m = b.blocks.get(id);
   if (!m) return out;
@@ -204,7 +204,7 @@ export function minimalDiff(prev: string, next: string): TextPatch {
 }
 
 /** 一次最小文本补丁：从 index 起删除 remove 个字符、再原位插入 insert。 */
-export interface TextPatch {
+interface TextPatch {
   index: number;
   remove: number;
   insert: string;

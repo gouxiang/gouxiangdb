@@ -58,7 +58,7 @@ async function familyVisible(
 /* ------------------------------ M6/S7 调用信封 ------------------------------ */
 
 /** 从 ToolResult 提取 §317 resultCode（isError 时取结构化 code；非 isError 即 OK）。 */
-export function resultCodeOf(result: ToolResult): string {
+function resultCodeOf(result: ToolResult): string {
   if (!result?.isError) return "OK";
   try {
     const parsed = JSON.parse(result.content?.[0]?.text ?? "") as unknown;

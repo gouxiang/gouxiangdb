@@ -21,7 +21,7 @@ import { USER_STATUS } from "./authState.js";
 import { BCRYPT_ROUNDS } from "./members.js";
 
 /** 交给 init-admin 的凭据（已归一化：邮箱小写去空格）。 */
-export interface InitAdminInput {
+interface InitAdminInput {
   email: string;
   password: string;
   displayName: string;
@@ -35,7 +35,7 @@ export interface InitAdminResult {
 }
 
 /** 解析成功：input 可直接交给 initAdmin；source 用于外壳诚实打印凭据来源。 */
-export interface InitAdminCredentialsResolved {
+interface InitAdminCredentialsResolved {
   ok: true;
   input: InitAdminInput;
   source: {
@@ -46,35 +46,35 @@ export interface InitAdminCredentialsResolved {
 }
 
 /** 解析失败：调用方据此 exit 64（用法/环境变量缺失）。 */
-export interface InitAdminCredentialsMissing {
+interface InitAdminCredentialsMissing {
   ok: false;
   missing: string[];
   reason: string;
 }
 
-export type InitAdminCredentials =
+type InitAdminCredentials =
   | InitAdminCredentialsResolved
   | InitAdminCredentialsMissing;
 
 export type CredentialSource = "argv" | "env" | "default";
 
 /** 事务/查询客户端：需支持交互事务，故限定 PrismaClient（不是 DbTx）。 */
-export type InitAdminClient = PrismaClient;
+type InitAdminClient = PrismaClient;
 
 /** 本地默认值：仅 NODE_ENV !== "production" 时可用，生产用即视为配置缺失（exit 64）。 */
-export const INIT_ADMIN_DEFAULT_EMAIL = "admin@gouxiang.local";
-export const INIT_ADMIN_DEFAULT_PASSWORD = "admin12345";
-export const INIT_ADMIN_DEFAULT_NAME = "超级管理员";
+const INIT_ADMIN_DEFAULT_EMAIL = "admin@gouxiang.local";
+const INIT_ADMIN_DEFAULT_PASSWORD = "admin12345";
+const INIT_ADMIN_DEFAULT_NAME = "超级管理员";
 
 /** 授予行 createdBy 锚点：与运行时自举 "system-signup-bootstrap" 区分，审计可追溯来源。 */
-export const INIT_ADMIN_CREATED_BY = "system-init-admin";
+const INIT_ADMIN_CREATED_BY = "system-init-admin";
 
 // 与 members.ts:138 isValidEmail 同一口径（不重复发明正则，也不把成员内部函数提为公共 API）。
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // 与 auth.ts change-password（min 8 / max 72）一致：8 位是下限，72 字节是 bcrypt 硬上限。
-export const INIT_ADMIN_PASSWORD_MIN = 8;
-export const INIT_ADMIN_PASSWORD_MAX = 72;
+const INIT_ADMIN_PASSWORD_MIN = 8;
+const INIT_ADMIN_PASSWORD_MAX = 72;
 
 /** 初始化失败的统一错误：exitCode 供 CLI 外壳直接采用（64=用法/凭据，1=执行失败）。 */
 export class InitAdminError extends Error {

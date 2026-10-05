@@ -128,7 +128,7 @@ export async function permissionsOf(userId: string, baseId: string): Promise<Per
 
 // ============ 守卫 ============
 
-export interface BaseGuardResult {
+interface BaseGuardResult {
   userId: string;
   /** 展示用角色名，不承载授权语义。 */
   role: Role;

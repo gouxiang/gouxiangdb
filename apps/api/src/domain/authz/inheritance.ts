@@ -33,10 +33,10 @@ export class InheritanceError extends Error {
 }
 
 /** §4.5：仅 doc/canvas 叶子可切换继承；其他 kind 400 NODE_NOT_INHERITABLE。 */
-export const INHERITABLE_KINDS = new Set(["doc", "canvas"]);
+const INHERITABLE_KINDS = new Set(["doc", "canvas"]);
 
-export const IMPACT_DEFAULT_LIMIT = 100;
-export const IMPACT_MAX_LIMIT = 200;
+const IMPACT_DEFAULT_LIMIT = 100;
+const IMPACT_MAX_LIMIT = 200;
 
 /**
  * 纯函数：假设把 chain[0]（被决策节点自身）的 inheritAncestors 置为 target 后，
@@ -105,7 +105,7 @@ function clampPagination(rawLimit: number | undefined, rawOffset: number | undef
   return { limit, offset };
 }
 
-export interface InheritanceImpactParams {
+interface InheritanceImpactParams {
   /** 目标值：0=关继承（losing），1=重开（gaining）。 */
   target: 0 | 1;
   limit?: number;
@@ -204,7 +204,7 @@ export async function inheritanceImpact(
   };
 }
 
-export interface InheritanceChangeResult {
+interface InheritanceChangeResult {
   nodeId: string;
   inheritAncestors: boolean;
   navVersion: number;

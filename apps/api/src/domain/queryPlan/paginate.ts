@@ -28,7 +28,7 @@ import { physicalPathEligible, physicalAggregations } from "./planner.js";
 import { resolveInMemLimit, resolveOffsetWindowPages } from "./flags.js";
 import { encodeCursor, decodeCursor, InvalidCursorError, OffsetWindowError } from "./cursor.js";
 
-export interface KeysetInput {
+interface KeysetInput {
   tableId: string;
   fields: FieldMeta[];
   config: ViewConfig;
@@ -45,9 +45,9 @@ export interface KeysetInput {
   currentUserId?: string | null;
 }
 
-export type KeysetPageMode = "keyset-created" | "keyset-sorted" | "keyset-wide";
+type KeysetPageMode = "keyset-created" | "keyset-sorted" | "keyset-wide";
 
-export interface KeysetPageResult {
+interface KeysetPageResult {
   records: HydratedRecord[];
   total: number;
   filteredTotal: number;
@@ -61,7 +61,7 @@ export interface KeysetPageResult {
 }
 
 /** 有效偏移窗口上界（不含）：limit × 配置页数。 */
-export function offsetWindowLimit(limit: number): number {
+function offsetWindowLimit(limit: number): number {
   return limit * resolveOffsetWindowPages();
 }
 

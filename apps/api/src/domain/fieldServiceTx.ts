@@ -30,7 +30,7 @@ export function reverseRelation(kind: RelationKind): RelationKind {
   }
 }
 
-export type ExistingFieldRow = NonNullable<Awaited<ReturnType<DbTx["field"]["findUnique"]>>>;
+type ExistingFieldRow = NonNullable<Awaited<ReturnType<DbTx["field"]["findUnique"]>>>;
 
 export async function createSimpleFieldTx(
   tx: DbTx,

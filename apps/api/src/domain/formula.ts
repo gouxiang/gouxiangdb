@@ -56,7 +56,7 @@ export function asNum(v: FormulaValue): number | null {
   }
 }
 
-export function asBool(v: FormulaValue): boolean {
+function asBool(v: FormulaValue): boolean {
   switch (v.t) {
     case "num":
       return v.v !== 0;
@@ -73,7 +73,7 @@ export function asBool(v: FormulaValue): boolean {
 
 // ============ Token ============
 
-export type FormulaToken =
+type FormulaToken =
   | { k: "number"; v: number }
   | { k: "string"; v: string }
   | { k: "fieldRef"; v: string }
@@ -83,7 +83,7 @@ export type FormulaToken =
   | { k: "rparen" }
   | { k: "comma" };
 
-export type FormulaAST =
+type FormulaAST =
   | { k: "number"; v: number }
   | { k: "string"; v: string }
   | { k: "boolean"; v: boolean }
@@ -383,7 +383,7 @@ class Parser {
 
 // ============ Eval ============
 
-export type FieldValueSource = (name: string) => FormulaValue;
+type FieldValueSource = (name: string) => FormulaValue;
 
 function compareOrdered(lv: FormulaValue, rv: FormulaValue): number {
   const a = asNum(lv);
@@ -757,7 +757,7 @@ export function safeEvaluateFormula(
 
 // ============ 输出类型推断（字段保存时校验：公式结果类型必须与字段类型匹配） ============
 
-export type FormulaOutType = "num" | "str" | "bool" | "date" | "list" | "any";
+type FormulaOutType = "num" | "str" | "bool" | "date" | "list" | "any";
 
 /** 函数返回类型表（与 evalCall 实现一一对应） */
 const FN_RETURN: Record<string, FormulaOutType> = {

@@ -29,7 +29,7 @@ function warnBypass(where: string, err: unknown): void {
   console.warn(`[recordChanges] ${where} 失败已旁路（业务写不受影响，后续同类告警不再重复）：${msg}`);
 }
 
-export interface AppendRecordChangeInput {
+interface AppendRecordChangeInput {
   tableId: string;
   recordId: string;
   op: RecordChangeOp;

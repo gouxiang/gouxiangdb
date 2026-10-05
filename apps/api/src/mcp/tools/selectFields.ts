@@ -9,7 +9,7 @@
 import type { FieldMeta } from "../../domain/types.js";
 
 /** 值域由选项定义的字段类型（其落库值为选项 id 或选项名）。 */
-export const SELECT_FIELD_TYPES = new Set(["singleSelect", "multiSelect"]);
+const SELECT_FIELD_TYPES = new Set(["singleSelect", "multiSelect"]);
 
 /**
  * 字段 id → 「候选 key → 选项名」映射，候选 key 同时容纳**选项 id 与选项名**
@@ -18,7 +18,7 @@ export const SELECT_FIELD_TYPES = new Set(["singleSelect", "multiSelect"]);
 export type SelectDisplayIndex = Map<string, Map<string, string>>;
 
 /** 建索引只需这三个键，放宽入参类型便于上层传部分构造的字段对象（含单测夹具）。 */
-export type SelectFieldLike = Pick<FieldMeta, "id" | "type" | "options">;
+type SelectFieldLike = Pick<FieldMeta, "id" | "type" | "options">;
 
 /**
  * 按可见字段集建立 id→名索引；表内没有选择类字段时返回 null

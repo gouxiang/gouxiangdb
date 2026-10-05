@@ -18,7 +18,7 @@ import { prismaDeps } from "../prismaDeps.js";
 import { FieldMaskSession, type TableMask } from "./maskSession.js";
 
 /** on 态一次表请求的字段掩码上下文；off/shadow 时 resolveTableMask 返回 null。 */
-export interface MaskContext {
+interface MaskContext {
   session: FieldMaskSession;
   mask: TableMask;
   /** 可见字段定义子集（hydrate 入参 + fields/allFields/CSV 表头同口径）。 */

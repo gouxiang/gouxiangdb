@@ -11,7 +11,7 @@ import { MANUAL_RESOURCES } from "./tools/manuals.js";
 import { registerTools, type ToolDeps } from "./tools/registry.js";
 
 /** 服务器标识（initialize 回参）。 */
-export const MCP_SERVER_INFO = { name: "gouxiangdb-mcp", version: VERSION } as const;
+const MCP_SERVER_INFO = { name: "gouxiangdb-mcp", version: VERSION } as const;
 
 /** 注册三份语言说明书为 MCP Resources（静态 markdown；不涉任何业务数据，故不挂 scope 门）。 */
 function registerManualResources(server: McpServer): void {

@@ -21,7 +21,7 @@ import { observeDegrade } from "./degradeAudit.js";
 import type { UnifiedSearchResponse } from "./queryTypes.js";
 import type { EntityTypeFilter, RequestedMode } from "./queryPlan.js";
 
-export interface RunSearchInput {
+interface RunSearchInput {
   userId: string;
   prisma: PrismaClient;
   /** 原始（未 trim）查询词；纯以图搜图可为空串。 */

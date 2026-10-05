@@ -13,13 +13,11 @@
 export const SEARCH_SCHEMA_VERSION = 1;
 
 /** entityType 文本 -> vec_chunks.entityType 整数码（§4.2：1=record 2=doc 3=canvas）。 */
-export const ENTITY_TYPE_CODES = {
+const ENTITY_TYPE_CODES = {
   record: 1,
   doc: 2,
   canvas: 3,
 } as const;
-
-export type SearchEntityTypeName = keyof typeof ENTITY_TYPE_CODES;
 
 /** entityType 文本 -> vec_chunks.entityType 整数码（bigint；绑定时不发 REAL，H2）。 */
 export function entityTypeCode(type: string): bigint {
@@ -29,7 +27,7 @@ export function entityTypeCode(type: string): bigint {
 }
 
 /** 基础表（不含 vec0 虚表）自举语句；全部 IF NOT EXISTS，可重入/可对已存在库执行。 */
-export const BASE_DDL: readonly string[] = [
+const BASE_DDL: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS chunks(
     rowid       INTEGER PRIMARY KEY,
     chunkId     TEXT NOT NULL UNIQUE,
@@ -149,7 +147,7 @@ export function vecChunksExists(db: SchemaDb): boolean {
 }
 
 /** search.db 逻辑表名（白名单）；FTS5 与 vec0 的内部影子表不计入。 */
-export const LOGICAL_TABLES = [
+const LOGICAL_TABLES = [
   "chunks",
   "fts_chunks",
   "vec_chunks",

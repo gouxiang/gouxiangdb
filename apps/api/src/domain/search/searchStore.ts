@@ -33,7 +33,7 @@ import {
 import { isCorruptionError, SearchStoreCorruptError } from "./searchCorruption.js";
 
 /** search.db 文件名（可被 GX_SEARCH_DB_PATH 整路径覆盖）。 */
-export const SEARCH_DB_FILENAME = "search.db";
+const SEARCH_DB_FILENAME = "search.db";
 /** 写连接 busy_timeout 与主库口径一致 5000ms。 */
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
 

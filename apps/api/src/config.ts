@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export type NodeEnv = "development" | "test" | "production";
+type NodeEnv = "development" | "test" | "production";
 
 // M4 权限引擎模式解析/阶段门抽到独立纯函数文件（保 config.ts 单文件行数门禁）；此处 re-export
 // 供既有 import { ... } from "./config.js" 调用方无感，真源唯一在 configAuthz.ts。
@@ -58,7 +58,7 @@ const DEFAULT_BODY_LIMIT_ATTACHMENT_MB = 40;
 // 提示（「文件 xxx 超过 20MB 上限」）。若共用同一个值，调容量就会连带改掉提示口径。
 const DEFAULT_ATTACHMENT_MAX_FILE_MB = 20;
 
-export interface ConfigIssue {
+interface ConfigIssue {
   variable: string;
   reason: string;
 }
@@ -204,7 +204,7 @@ function buildCorsPatterns(raw: string | undefined): RegExp[] {
     .map((s) => new RegExp(`^${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\*/g, ".*")}$`));
 }
 
-export interface AppConfig {
+interface AppConfig {
   nodeEnv: NodeEnv;
   isProduction: boolean;
   jwtSecret: string;

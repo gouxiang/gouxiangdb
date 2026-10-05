@@ -21,7 +21,7 @@ import {
   getSearchStore, closeSearchStore, openSearchStore, deleteSearchDbFiles,
   resolveSearchDbPath, type SearchStore,
 } from "./searchStore.js";
-import { META_KEYS, setMeta, getMeta } from "./schema.js";
+import { META_KEYS, setMeta } from "./schema.js";
 import { EmbeddingConfigStore } from "./embeddingConfig.js";
 import { suspendSearchWorker, resumeSearchWorker } from "./workerRuntime.js";
 import { buildContext, listLiveEntities, pumpOne } from "./reindexPump.js";
@@ -224,9 +224,4 @@ export function startReindex(d: ReindexDeps, scope: ReindexScope = {}): Promise<
   ).finally(() => { inflight = null; });
   inflight = task;
   return task;
-}
-
-/** status 端点读现役库 rebuilding 元数据（in-flight 之外的跨进程可见位）。 */
-export function metaRebuilding(store: SearchStore): boolean {
-  return getMeta(store.db, META_KEYS.rebuilding) === "1";
 }

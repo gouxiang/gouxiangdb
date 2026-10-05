@@ -30,7 +30,7 @@ import {
 } from "./initAdmin.js";
 
 /** --reset 的凭据（邮箱已归一化小写）。displayName 不参与重置。 */
-export interface ResetAdminInput {
+interface ResetAdminInput {
   email: string;
   password: string;
 }
@@ -43,24 +43,24 @@ export interface ResetAdminResult {
   tokenVersion: number;
 }
 
-export interface ResetAdminCredentialsResolved {
+interface ResetAdminCredentialsResolved {
   ok: true;
   input: ResetAdminInput;
   source: { email: CredentialSource; password: CredentialSource };
 }
 
 /** 解析失败：调用方据此 exit 64。 */
-export interface ResetAdminCredentialsMissing {
+interface ResetAdminCredentialsMissing {
   ok: false;
   missing: string[];
   reason: string;
 }
 
-export type ResetAdminCredentials =
+type ResetAdminCredentials =
   | ResetAdminCredentialsResolved
   | ResetAdminCredentialsMissing;
 
-export type ResetAdminClient = PrismaClient;
+type ResetAdminClient = PrismaClient;
 
 /**
  * 解析 --reset 凭据（纯函数，可直接单测）：**只认显式提供**（命令行参数 > 环境变量），

@@ -8,7 +8,7 @@ import { prisma } from "../../db.js";
 import type { FieldMeta } from "../types.js";
 import { compilePlan, physicalAggFuncs, type CompiledPlan, type PlanField } from "./compile.js";
 
-export interface BuiltPlan {
+interface BuiltPlan {
   planFields: PlanField[];
   plan: CompiledPlan;
   primaryFieldId: string;

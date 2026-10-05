@@ -38,7 +38,7 @@ export function shouldMarkDead(attempts: number): boolean {
   return attempts >= MAX_ATTEMPTS;
 }
 
-export interface FailureDecision {
+interface FailureDecision {
   status: "failed" | "dead";
   /** 下次可运行的毫秒时间戳；dead 时仍给出（列里非空），但 worker 不认领 dead。 */
   nextRunAtMs: number;

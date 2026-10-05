@@ -93,35 +93,6 @@ export async function softDeleteSubtreeTx(tx: DbTx, rootNodeId: string): Promise
 }
 
 /**
- * 定向对齐单个实体节点的 name/parentId/ord（改名、视图换序），不影响 path。
- * 供高频保存路径使用（如视图 PATCH 的 config-only 更新不得触发 nav 全量扫描）：
- * 仅当实体的 name/ord/parent 实际可能变化时调用。节点缺失则建活（含 path 重算）。
- * 返回是否发生写入（调用方无需关心，bump 已在内部按变化处理）。
- */
-export async function alignResourceNodeTx(tx: DbTx, kind: NavKind, resourceId: string): Promise<void> {
-  const expected = await buildExpectedNodes(tx);
-  const e = expected.find((x) => x.kind === kind && x.resourceId === resourceId);
-  if (!e) return; // 实体已不活（软删/消失）：由软删/purge/reconcile 路径处理，此处不写。
-  const cur = await tx.navNode.findUnique({ where: { id: e.id } });
-  if (!cur) {
-    await reconcileNodesTx(tx, [e]);
-    await rebuildPathsTx(tx);
-    await bumpNavVersionTx(tx);
-    return;
-  }
-  const changed = cur.name !== e.name || cur.parentId !== e.parentId || cur.ord !== e.ord ||
-    cur.resourceType !== e.kind || cur.resourceId !== e.resourceId;
-  if (changed || cur.deletedAt) {
-    await tx.navNode.update({
-      where: { id: e.id },
-      data: { name: e.name, parentId: e.parentId, ord: e.ord, resourceType: e.kind, resourceId: e.resourceId, deletedAt: null },
-    });
-    if (cur.parentId !== e.parentId || cur.deletedAt) await rebuildPathsTx(tx);
-    await bumpNavVersionTx(tx);
-  }
-}
-
-/**
  * 仅软删单个节点（doc 软删不级联子文档——实体层 kbDoc 软删就是单条）。
  * 子节点的父改挂（父软删后活子 doc 回退挂 kb）由随后的 syncNavFromEntitiesTx 按期望集对齐。
  */

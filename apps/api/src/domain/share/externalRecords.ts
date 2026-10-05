@@ -18,13 +18,12 @@ import {
   parseViewConfig,
   queryRecords,
   visibleFields,
-  hydrateRecordById,
 } from "../recordService.js";
 import { createRecordTx, softDeleteRecordTx, updateRecordTx } from "../recordWrite.js";
 import { externalFieldGate, shareVisibleFields, type ShareCaps } from "./shareCaps.js";
 
-export const SHARE_PAGE_DEFAULT = 50;
-export const SHARE_PAGE_MAX = 200;
+const SHARE_PAGE_DEFAULT = 50;
+const SHARE_PAGE_MAX = 200;
 
 export function sharePage(query: { limit?: string; offset?: string }): { limit: number; offset: number } {
   const raw = Number(query.limit ?? SHARE_PAGE_DEFAULT);
@@ -52,7 +51,7 @@ async function resolveView(tableId: string, viewId: string | null): Promise<View
   return prisma.view.findFirst({ where: { tableId }, orderBy: { order: "asc" } });
 }
 
-export interface ExternalReadInput {
+interface ExternalReadInput {
   tableId: string;
   viewId: string | null;
   limit: number;
@@ -127,7 +126,7 @@ export async function readSharedRecords(
 // 写
 // ---------------------------------------------------------------------------
 
-export interface ExternalWriteInput {
+interface ExternalWriteInput {
   tableId: string;
   recordId?: string;
   patch: Record<string, unknown>;
@@ -241,20 +240,3 @@ export async function externalDeleteRecord(input: ExternalWriteInput, caps: Shar
   });
 }
 
-/** 单条记录读取（嵌入预览/详情抽屉用），字段同样按分享人裁剪。 */
-export async function readSharedRecord(
-  tableId: string,
-  recordId: string,
-  caps: ShareCaps,
-): Promise<Record<string, unknown> | null> {
-  const allFields = await loadTableFields(tableId);
-  const fields = shareVisibleFields(caps.sharerAccess, tableId, allFields);
-  const allowed = new Set(fields.map((f) => f.id));
-  const row = await hydrateRecordById(tableId, recordId, { fields });
-  if (!row) return null;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(row as unknown as Record<string, unknown>)) {
-    if (allowed.has(k)) out[k] = v;
-  }
-  return out;
-}

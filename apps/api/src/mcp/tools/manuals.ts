@@ -5,7 +5,7 @@
 // 且 TOOL_CATALOG 中除连接性工具 ping_echo 外的每个工具都至少被某份说明书提到一次，防止说明书与目录漂移。
 
 /** 表与记录语言：表/记录语义 + filter 算子白名单 + keyset 分页 + 配额。 */
-export const TABLE_LANGUAGE_MD = `# 表与记录语言
+const TABLE_LANGUAGE_MD = `# 表与记录语言
 
 本说明书面向通过 MCP 读写数据表与记录的客户端，说明可用工具、筛选语法与配额约束。
 
@@ -53,7 +53,7 @@ is、isNot、contains、notContains、isEmpty、isNotEmpty、gte、lte、gt、lt
 `;
 
 /** 文档块语言：块类型全集 + append_blocks 的 op 结构 + 乐观锁 + align 通道 + 上限。 */
-export const BLOCK_LANGUAGE_MD = `# 文档块语言
+const BLOCK_LANGUAGE_MD = `# 文档块语言
 
 本说明书说明文档正文的块模型。文档正文以 Markdown 存储；服务端在 Markdown 与结构化块之间双向转换，
 读取与写入共用同一套转换规则。
@@ -97,7 +97,7 @@ p、h1、h2、h3、h4、h5、h6、ul、ol、task、quote、callout、toggle、co
 `;
 
 /** 画布图元语言：元素结构 + 当前支持的写入最小集 + 二期操作声明。 */
-export const CANVAS_LANGUAGE_MD = `# 画布图元语言
+const CANVAS_LANGUAGE_MD = `# 画布图元语言
 
 本说明书说明画布正文的元素结构，以及当前经 MCP 支持的全部图元写入操作。
 
@@ -133,7 +133,7 @@ export const CANVAS_LANGUAGE_MD = `# 画布图元语言
 `;
 
 /** 说明书资源规格（不含 URI 之外的业务数据）；由 server.ts 注册为 MCP Resources。 */
-export interface ManualSpec {
+interface ManualSpec {
   /** 资源展示名。 */
   name: string;
   /** 资源 URI（gx://manuals/<lang>）。 */

@@ -54,7 +54,7 @@ export const SETTING_KEYS = {
  * Prisma AppSetting 访问面（最小结构；只声明本片实际用到的三个方法）。
  * 真实 Prisma 客户端可结构化赋值（harness 直接传 h.prisma），不静态绑 db 单例。
  */
-export interface AppSettingClient {
+interface AppSettingClient {
   appSetting: {
     findUnique(args: { where: { k: string } }): Promise<{ k: string; v: string } | null>;
     upsert(args: {
@@ -68,7 +68,7 @@ export interface AppSettingClient {
 
 // ============================ 纯函数：env 种子 ============================
 
-export interface EnvEmbeddingSeed {
+interface EnvEmbeddingSeed {
   mode: EmbeddingMode;
   provider: EmbeddingProviderKind;
   baseURL: string;

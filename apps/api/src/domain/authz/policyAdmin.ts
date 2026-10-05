@@ -48,7 +48,7 @@ export class PolicyValidationError extends Error {
 }
 
 /** 旧三表反向映射落点（仅 base/kb/doc|canvas 实体节点的 per-user 授权可回写）。 */
-export interface LegacyTarget {
+interface LegacyTarget {
   family: LegacyRoleFamily;
   table: "member" | "kbMember" | "kbDocAcl";
   resourceId: string;

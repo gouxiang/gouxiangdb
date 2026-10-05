@@ -24,7 +24,7 @@ export const PAT_SCOPES = [
 export type PatScope = (typeof PAT_SCOPES)[number];
 
 /** 有效期可选天数（C-3）；null 语义 = 永不过期，由调用方显式传入。 */
-export const PAT_EXPIRY_DAYS = [30, 90, 365] as const;
+const PAT_EXPIRY_DAYS = [30, 90, 365] as const;
 /** 未携带 expiresInDays 时的默认有效期（C-3 定稿：默认 90 天）。 */
 export const PAT_DEFAULT_EXPIRY_DAYS = 90;
 
@@ -38,7 +38,7 @@ export class PatValidationError extends Error {
   }
 }
 
-export interface GeneratedToken {
+interface GeneratedToken {
   /** 完整明文（仅创建响应返回一次，绝不入库/入日志）。 */
   token: string;
   /** 明文前 14 字符，列表辨识用。 */

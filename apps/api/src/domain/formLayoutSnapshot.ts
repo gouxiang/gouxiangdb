@@ -28,7 +28,6 @@ import type { DetailLayout, DetailRowColumns, FieldWidthPct } from "@gx/shared-t
 // 这里 import 后原样 re-export，服务端既有 import 路径全部不变。
 import {
   SNAPSHOT_ENVELOPE_VERSION,
-  SNAPSHOT_ORDER_FIELDS,
   type FormLayoutSnapshotEnvelope,
   type FormLayoutTabSnapshot,
 } from "@gx/shared-types";
@@ -42,11 +41,8 @@ import {
   toStringList,
 } from "./formLayoutTabs.js";
 
-export { SNAPSHOT_ENVELOPE_VERSION, SNAPSHOT_ORDER_FIELDS };
+export { SNAPSHOT_ENVELOPE_VERSION };
 export type { FormLayoutSnapshotEnvelope, FormLayoutTabSnapshot };
-
-/** 物理表名（schema.prisma 里 FormLayoutVersion @@map 的值）。 */
-export const FORM_LAYOUT_VERSIONS_TABLE = "form_layout_versions";
 
 /**
  * 本特性的回滚 SQL（与 prisma/docs/rollback/20260924010000_form_layout_versions.down.sql

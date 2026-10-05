@@ -18,7 +18,7 @@ import { runShadowCheck } from "./adapter.js";
 import { resolveBaseAccess, resolveBaseAccessByTable } from "./libraryPolicy.js";
 import { nodeId } from "../nav/backfill.js";
 
-export interface TableManageResult {
+interface TableManageResult {
   userId: string;
   access: LibraryAccessDTO;
   /** 该表 nav 节点 id（manage_table 经祖先链在库节点命中，仍以表节点为对拍点）。 */
@@ -46,7 +46,7 @@ async function shadow(
   await runShadowCheck(guard, userId, { resourceType: "table", resourceId: tableId }, action, oldAllowed);
 }
 
-export interface BaseDesignResult {
+interface BaseDesignResult {
   userId: string;
   access: LibraryAccessDTO;
   baseNodeId: string;

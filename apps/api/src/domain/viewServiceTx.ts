@@ -10,7 +10,7 @@ import { parseViewConfig } from "./recordService.js";
 import { syncNavFromEntitiesTx, purgeViewNodeTx } from "./nav/sync.js";
 import { maybeAutoSnapshotLayoutTx, purgeVersionsTx } from "./formLayoutVersion.js";
 
-export interface CreateViewTxInput {
+interface CreateViewTxInput {
   tableId: string;
   name: string;
   type: string;
@@ -51,7 +51,7 @@ export interface UpdateViewSnapshot {
   skipIfIdentical?: boolean;
 }
 
-export interface UpdateViewTxInput {
+interface UpdateViewTxInput {
   viewId: string;
   /** 调用方按权限组装好的可写列（不含已被拒绝的键）。 */
   data: Record<string, unknown>;

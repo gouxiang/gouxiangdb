@@ -50,7 +50,7 @@ const EXT_MIME: Record<string, string[]> = {
 };
 
 /** 白名单扩展名（错误提示用，顺序 = EXT_MIME 声明顺序）。 */
-export const ALLOWED_EXTENSIONS: readonly string[] = Object.keys(EXT_MIME);
+const ALLOWED_EXTENSIONS: readonly string[] = Object.keys(EXT_MIME);
 
 /** 人类可读的白名单串，用于「不支持的文件格式」错误提示。 */
 export const ALLOWED_EXTENSION_LABEL = ALLOWED_EXTENSIONS.join("、");
@@ -72,7 +72,7 @@ export function attachmentMaxBytesLabel(): string {
   return `${Number.isInteger(mb) ? mb : mb.toFixed(1)}MB`;
 }
 
-export interface ResolvedFileType {
+interface ResolvedFileType {
   ext: string;
   mime: string;
 }
@@ -148,11 +148,6 @@ export function removeStoredFile(storagePath: string): boolean {
   if (!fs.existsSync(abs)) return false;
   fs.rmSync(abs, { force: true });
   return true;
-}
-
-export function storedFileExists(storagePath: string): boolean {
-  const abs = resolveStoredFile(storagePath);
-  return !!abs && fs.existsSync(abs);
 }
 
 /**

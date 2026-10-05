@@ -68,12 +68,6 @@ export async function listRoles(): Promise<OrgRoleDTO[]> {
   }).map(toRoleDTO);
 }
 
-export async function getRoleById(id: string): Promise<OrgRoleDTO | null> {
-  const workspaceId = await getDefaultWorkspaceId();
-  const r = await prisma.role.findFirst({ where: { id, workspaceId, deletedAt: null } });
-  return r ? toRoleDTO(r) : null;
-}
-
 export async function createCustomRole(input: {
   name: unknown;
   description?: unknown;
@@ -246,7 +240,7 @@ export async function grantRole(
   });
 }
 
-export interface ReplaceAssignmentsResult {
+interface ReplaceAssignmentsResult {
   assignments: RoleAssignmentDTO[];
   added: Array<{ subjectType: string; subjectId: string }>;
   removed: Array<{ subjectType: string; subjectId: string }>;

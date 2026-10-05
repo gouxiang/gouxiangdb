@@ -47,7 +47,7 @@ const CODE_STATUS: Record<string, number> = {
   INTERNAL_ERROR: 500,
 };
 
-export function auditStatusFor(resultCode: string): number {
+function auditStatusFor(resultCode: string): number {
   return CODE_STATUS[resultCode] ?? 200;
 }
 
@@ -66,7 +66,7 @@ function resourceKindOf(tool: string): string | null {
 }
 
 /** 从入参提取主资源 {kind,id}（供越权追溯）；无资源 id 时返回 null（如 ping_echo / record.search）。 */
-export function resourceOf(tool: string, args: Record<string, unknown>): { kind: string; id: string } | null {
+function resourceOf(tool: string, args: Record<string, unknown>): { kind: string; id: string } | null {
   const kind = resourceKindOf(tool);
   if (!kind) return null;
   for (const k of RESOURCE_ID_KEYS) {
@@ -80,7 +80,7 @@ export function resourceOf(tool: string, args: Record<string, unknown>): { kind:
  * 入参白名单化（**绝不透传业务值**）：仅保留资源 id 标量、分页/版本/确认等元信息，
  * cursor 只记存在性（游标是 opaque 串，无追溯价值且有长度风险）。
  */
-export function sanitizeArgsForAudit(args: Record<string, unknown>): Record<string, unknown> {
+function sanitizeArgsForAudit(args: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const k of [...RESOURCE_ID_KEYS, ...SCALAR_META_KEYS]) {
     const v = args[k];
@@ -91,7 +91,7 @@ export function sanitizeArgsForAudit(args: Record<string, unknown>): Record<stri
   return out;
 }
 
-export interface ToolCallAuditInput {
+interface ToolCallAuditInput {
   ctx: McpCallAuditCtx;
   actorId: string;
   patId: string;
@@ -128,7 +128,7 @@ export function emitToolCall(input: ToolCallAuditInput): void {
   });
 }
 
-export interface AuthFailureAuditInput {
+interface AuthFailureAuditInput {
   ctx: McpCallAuditCtx;
   /** 认证失败原因（authenticate.ts 的 McpAuthFailReason；仅审计可见，对客户端统一 401）。 */
   reason: string;

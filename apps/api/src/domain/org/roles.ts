@@ -20,7 +20,7 @@ export function assertOrgActions(actions: readonly unknown[]): OrgAction[] {
   return [...new Set(out)];
 }
 
-export interface SystemRoleSpec {
+interface SystemRoleSpec {
   id: string;
   systemKey: SystemRoleKey;
   name: string;
@@ -89,10 +89,6 @@ export const OWNER_ROLE_ID = SUPER_ADMIN_ROLE_ID;
 
 /** 角色列表固定序：三枚权限预设在前，其后为 M4 资源名锚点，最后是自定义角色。 */
 export const SYSTEM_ROLE_ID_ORDER: readonly string[] = SYSTEM_ROLES.map((r) => r.id);
-
-export function isSystemRoleId(id: string): boolean {
-  return SYSTEM_ROLE_BY_ID.has(id);
-}
 
 type Client = DbTx | typeof prisma;
 

@@ -27,7 +27,7 @@ const EXPORT_BATCH = 500;
  *   sanitizeConfig：抹掉隐藏字段的 filter/sort（导出条件不能借隐藏列偷偷过滤）；
  *   hydrateDeps：携带跨表字段可见性钩子的 hydration 依赖（LinkRef 两档/公式 mask-null）。
  */
-export interface CsvMaskContext {
+interface CsvMaskContext {
   visibleFields: FieldMeta[];
   sanitizeConfig: (config: ViewConfig) => ViewConfig;
   hydrateDeps: HydrateDeps;
@@ -55,7 +55,7 @@ function needsPostProcessing(config: ViewConfig, search: string): boolean {
   );
 }
 
-export interface CsvExportResult {
+interface CsvExportResult {
   csv: string;
   /** 实际导出的数据行数（筛选后口径），便于调用方/测试核对。 */
   rowCount: number;

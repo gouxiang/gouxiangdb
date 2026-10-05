@@ -130,7 +130,7 @@ function writeVectors(store: SearchStore, rows: PreparedRow[], vectors: Float32A
   });
 }
 
-export interface UpsertOptions {
+interface UpsertOptions {
   workspaceId: string;
   mode: "off" | "cloud";
   provider: EmbeddingProvider | null;

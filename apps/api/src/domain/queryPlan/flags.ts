@@ -11,7 +11,7 @@
 //
 // 独立于写开关：GX_M1_SIDECAR=off（停写）时读 sidecar 无意义，planner 自动不启用。
 
-export type SidecarReadMode = "off" | "shadow" | "on";
+type SidecarReadMode = "off" | "shadow" | "on";
 
 export function resolveSidecarReadMode(env: NodeJS.ProcessEnv = process.env): SidecarReadMode {
   const v = (env.GX_M1_SIDECAR_READ ?? "off").trim().toLowerCase();
@@ -37,7 +37,7 @@ export function sidecarReadUsable(env: NodeJS.ProcessEnv = process.env): boolean
  *   on（且 read=on）            → GET 列表走 keyset 续点，响应 additive 带 nextCursor/hasMore/degraded。
  * 灰度纪律与读开关一致：shadow 连续一迭代差异 0 才允许切 on。
  */
-export type KeysetMode = "off" | "shadow" | "on";
+type KeysetMode = "off" | "shadow" | "on";
 
 export function resolveKeysetMode(env: NodeJS.ProcessEnv = process.env): KeysetMode {
   const v = (env.GX_M1_KEYSET ?? "off").trim().toLowerCase();
@@ -71,7 +71,7 @@ export function resolveOffsetWindowPages(env: NodeJS.ProcessEnv = process.env): 
  * 受限宽口径阈值：含计算字段残余筛选/排序时，物理粗筛候选数超过该值则不硬算，
  * 由服务端返回 degraded 提示（S8 才在 UI 置灰，S6 只保证服务端口径、不伪造全量）。
  */
-export const DEFAULT_INMEM_LIMIT = 50_000;
+const DEFAULT_INMEM_LIMIT = 50_000;
 
 export function resolveInMemLimit(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.GX_M1_INMEM_LIMIT;

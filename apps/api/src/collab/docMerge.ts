@@ -34,13 +34,13 @@ import {
 } from "./docYjs.js";
 
 /** 服务端自身写入的 Y 事务标记（不是连接：handleDocUpdate 据此不认它是某个人的编辑）。 */
-export const COLLAB_SERVER_ORIGIN = { kind: "gx-collab-server" };
+const COLLAB_SERVER_ORIGIN = { kind: "gx-collab-server" };
 
 /**
  * 三方归并：base = 房间基线内容，mine = Y 现值，next = 外部整篇内容。
  * 返回待落到 Y 的 Block[]；能沿用 Y 现块 id 的一律沿用（保住 Yjs 的字符级历史）。
  */
-export function mergeBlocks(
+function mergeBlocks(
   base: readonly Block[],
   mine: readonly Block[],
   next: readonly Block[],
@@ -96,7 +96,7 @@ function mergeOneBlock(b: Block, m: Block | undefined, nxt: Block, id: string): 
  *   base === next  -> 外部没动，保留 mine；
  *   其余           -> 取 base→next 的差异区域替换 mine 的同一区域（区域外的我的编辑保留）。
  */
-export function mergeText(base: string, mine: string, next: string): string {
+function mergeText(base: string, mine: string, next: string): string {
   if (mine === next) return mine;
   if (base === mine) return next;
   if (base === next) return mine;

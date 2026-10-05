@@ -12,12 +12,12 @@ import { resolveDatabaseFile } from "./databaseFile.js";
 import { benchEnabled, instrumentDatabase } from "../ops/benchMetrics.js";
 
 /** keyset 游标：createdAt 为 epoch 毫秒；null 表示从头一页取起。 */
-export interface KeysetCursor {
+interface KeysetCursor {
   createdAt: number;
   id: string;
 }
 
-export type KeysetOrder = "asc" | "desc";
+type KeysetOrder = "asc" | "desc";
 
 /** better-sqlite3 接受的绑定值（不含 boolean/undefined，布尔需调用方转 0/1）。 */
 export type SqlBindValue = string | number | bigint | Buffer | null;
@@ -45,7 +45,7 @@ export interface RawRecordRow {
   updatedBy: string;
 }
 
-export interface KeysetPage {
+interface KeysetPage {
   rows: RawRecordRow[];
   /** 本页满 limit 时有下一页，返回末行游标；否则 null。 */
   nextCursor: KeysetCursor | null;
@@ -142,10 +142,4 @@ export function defaultDatabaseFile(): string {
 export function getRawReader(): RawReader {
   if (!defaultReader) defaultReader = openRawReader(defaultDatabaseFile());
   return defaultReader;
-}
-
-/** 测试/优雅停机：关闭并清空单例。 */
-export function closeRawReader(): void {
-  defaultReader?.close();
-  defaultReader = undefined;
 }

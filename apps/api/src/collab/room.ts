@@ -49,7 +49,7 @@ export interface CollabConn extends CollabIdentity {
   alive: boolean;
 }
 
-export type CollabFlushReason = "debounce" | "empty" | "tick" | "shutdown";
+type CollabFlushReason = "debounce" | "empty" | "tick" | "shutdown";
 
 /** 冷归结（阶段 2/3/4 才注册）：把房间的 Y.Doc 内容并回主库既有写事务。 */
 export type RoomFlusher = (room: CollabRoom) => Promise<void>;
@@ -61,7 +61,7 @@ export function registerRoomFlusher(kind: CollabKind, fn: RoomFlusher): void {
   flushers.set(kind, fn);
 }
 
-export function getRoomFlusher(kind: CollabKind): RoomFlusher | undefined {
+function getRoomFlusher(kind: CollabKind): RoomFlusher | undefined {
   return flushers.get(kind);
 }
 

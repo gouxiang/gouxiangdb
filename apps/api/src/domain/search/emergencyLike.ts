@@ -21,7 +21,7 @@ import type {
 } from "./queryTypes.js";
 
 /** 应急 SQL 客户端最小形状（真实 PrismaClient 满足）。 */
-export interface EmergencyMainDb {
+interface EmergencyMainDb {
   $queryRawUnsafe<T = unknown>(query: string, ...values: unknown[]): Promise<T[]>;
 }
 

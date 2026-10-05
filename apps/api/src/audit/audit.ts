@@ -74,7 +74,7 @@ export type AuditEventName =
   | "attachment_upload"
   | "attachment_delete";
 
-export interface AuditInput {
+interface AuditInput {
   event: AuditEventName;
   actorId?: string | null;
   ip?: string;

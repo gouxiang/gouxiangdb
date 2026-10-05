@@ -196,7 +196,7 @@ function createMount(webRoot: string | null): Hono {
   return mount;
 }
 
-export interface CreatedApp {
+interface CreatedApp {
   app: Hono;
   webRoot: string | null;
 }

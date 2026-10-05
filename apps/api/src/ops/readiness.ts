@@ -30,12 +30,12 @@ export interface ProbeResult {
   code?: string;
 }
 
-export interface MigrationState {
+interface MigrationState {
   applied: number;
   latest: string | null;
 }
 
-export interface ReadinessReport {
+interface ReadinessReport {
   status: "ready" | "not_ready";
   service: string;
   version: string;

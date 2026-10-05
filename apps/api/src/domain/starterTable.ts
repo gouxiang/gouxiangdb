@@ -6,7 +6,7 @@ import { makeOptions } from "./fieldService.js";
 import type { DbTx } from "../db.js";
 
 /** 默认网格视图配置（与前端默认配置同构）。 */
-export function starterViewConfig(): ViewConfig {
+function starterViewConfig(): ViewConfig {
   return {
     hiddenFieldIds: [],
     fieldOrder: [],

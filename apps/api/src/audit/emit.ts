@@ -6,7 +6,7 @@ import { config } from "../config.js";
 import { sourceIp } from "../utils/client-ip.js";
 import { writeAudit, type AuditEventName } from "./audit.js";
 
-export interface EmitAudit {
+interface EmitAudit {
   event: AuditEventName;
   status: number;
   actorId?: string | null;

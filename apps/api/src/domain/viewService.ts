@@ -12,7 +12,7 @@ import {
   type UpdateViewSnapshot,
 } from "./viewServiceTx.js";
 
-export interface CreateViewInput {
+interface CreateViewInput {
   tableId: string;
   name: string;
   type: string;
@@ -29,7 +29,7 @@ export async function createView(input: CreateViewInput): Promise<{ id: string; 
   return { id: v.id, createdAt: v.createdAt };
 }
 
-export interface UpdateViewPatch {
+interface UpdateViewPatch {
   /** 调用方按权限组装的可写列；name 已 trim（空串由调用方拦截）。 */
   data: Record<string, unknown>;
   affectsNav: boolean;

@@ -30,7 +30,7 @@ export interface McpSubject {
   scopes: PatScope[];
 }
 
-export type McpAuthResult =
+type McpAuthResult =
   | { ok: true; subject: McpSubject }
   | { ok: false; reason: McpAuthFailReason };
 
@@ -40,7 +40,7 @@ export function bearerValue(authorization: string | undefined): string {
   return raw.startsWith("Bearer ") ? raw.slice("Bearer ".length).trim() : "";
 }
 
-export interface AuthenticateOptions {
+interface AuthenticateOptions {
   /** 时间注入（假时钟测试）。 */
   now?: Date;
   /** 是否记 lastUsedAt（stdio 等场景可关；默认开，fire-and-forget 不阻塞）。 */

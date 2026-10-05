@@ -7,7 +7,7 @@
 import { withWriteTx } from "../db.js";
 import { createContentTx, type ContentKind } from "./contentServiceTx.js";
 
-export interface CreateContentInput {
+interface CreateContentInput {
   kbId: string;
   kind: ContentKind;
   /** 原始标题（可空，事务体按 kind 取默认名）。 */

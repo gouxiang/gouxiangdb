@@ -77,7 +77,7 @@ function fallbackDecision(node: AuthzNode, fallback: "workspace_owner" | "creato
   };
 }
 
-export interface ChainEvaluationInput {
+interface ChainEvaluationInput {
   subject: ResolvedSubject;
   node: AuthzNode;
   chain: AuthzNode[];

@@ -50,7 +50,7 @@ export function isCorruptionError(err: unknown): boolean {
   return CORRUPT_MESSAGE.test(msg);
 }
 
-export interface QuarantineResult {
+interface QuarantineResult {
   /** 隔离时间戳（毫秒），三件共用同一后缀。 */
   ts: number;
   /** 主库隔离后的绝对路径 `<file>.corrupt-<ts>`。 */

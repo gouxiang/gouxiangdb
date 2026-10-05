@@ -59,7 +59,7 @@ function splitMulti(v: string): string[] {
 }
 
 /** 与 policy.isIndexedField 同口径的最小判定（autoNumber 入索引但不参与下推）。 */
-export function isIndexedPlanField(f: PlanField): boolean {
+function isIndexedPlanField(f: PlanField): boolean {
   const t = f.type;
   if (SHORT_TEXT.has(t) || t === "autoNumber") return true;
   if (NUM_LIKE.has(t) || DATE_LIKE_TYPES.has(t)) return true;
@@ -206,7 +206,7 @@ export function compileLeaf(b: Builder, c: FilterCondition): string | null {
 }
 
 /** 可参与「同字段 valueNum 范围合并」的正向谓词；不满足（NOT/非数值/多行类型）返回 null。 */
-export interface NumTerm {
+interface NumTerm {
   sym: string;
   n: number;
 }

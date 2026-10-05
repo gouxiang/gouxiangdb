@@ -8,7 +8,7 @@
 import type { DbTx } from "../../db.js";
 import { nodeId, type ExpectedNode } from "./backfill.js";
 
-export interface EntityState {
+interface EntityState {
   aliveId: Set<string>;
   softId: Set<string>;
   nameOf: Map<string, string>;

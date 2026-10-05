@@ -12,7 +12,7 @@
 export const SEARCH_PREVIEW_LIMIT = 2000;
 
 /** 挂在搜索响应上的有界预览标记（additive，前端可据此提示"结果为预览"）。 */
-export interface BoundedPreviewMarker {
+interface BoundedPreviewMarker {
   /** 恒定 true：M1 搜索始终是有界预览而非全量检索。 */
   boundedPreview: true;
   /** 每表扫描的活记录上限；超过该上限的记录不在召回范围。 */

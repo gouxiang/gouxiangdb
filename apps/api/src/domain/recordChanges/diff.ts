@@ -13,13 +13,13 @@ import { isComputedFieldType, isSystemFieldType } from "../types.js";
 import type { FieldChange, RecordChangeOp } from "./types.js";
 
 /** diff 需要的最小字段信息（id 用于取值、name 落快照、type 用于跳过计算列）。 */
-export interface DiffFieldLike {
+interface DiffFieldLike {
   id: string;
   name: string;
   type?: string;
 }
 
-export interface DiffRecordFieldsInput {
+interface DiffRecordFieldsInput {
   op: RecordChangeOp;
   /** 写入【前】的完整 fields（全量，不是 patch）。 */
   beforeFields: Record<string, unknown>;

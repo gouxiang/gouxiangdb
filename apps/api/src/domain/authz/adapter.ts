@@ -40,7 +40,7 @@ function cacheSet<K, V>(map: Map<K, V>, key: K, value: V, max: number): void {
 }
 
 /** 资源 -> 活 nav 节点 id（唯一索引一次点查；软删/缺失返回 null）。 */
-export async function resolveNodeId(
+async function resolveNodeId(
   ref: ResourceRef,
   client: AuthzClient = prisma,
 ): Promise<string | null> {

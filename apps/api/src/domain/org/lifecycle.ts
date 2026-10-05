@@ -11,11 +11,11 @@ import { USER_STATUS, issueToken, invalidateAuthState } from "./authState.js";
 import { usersWithRole, SUPER_ADMIN_ROLE_ID } from "./roles.js";
 
 /** 激活码明文 -> sha256 摘要（与建邀请时同一算法）。 */
-export function hashInviteToken(plain: string): string {
+function hashInviteToken(plain: string): string {
   return crypto.createHash("sha256").update(plain).digest("hex");
 }
 
-export interface AcceptInviteResult {
+interface AcceptInviteResult {
   token: string;
   user: { id: string; email: string; displayName: string; status: string };
 }
@@ -105,7 +105,7 @@ export async function assertWorkspaceHasOwnerTx(tx: DbTx): Promise<void> {
   }
 }
 
-export interface LifecycleResult {
+interface LifecycleResult {
   id: string;
   status: string;
   disabledAt: string | null;
@@ -165,7 +165,7 @@ export async function disableUser(actorId: string, targetId: string): Promise<Li
 // 企业化定位：删除用户（物理删除，最后 owner 保护）
 // ---------------------------------------------------------------------------
 
-export interface DeleteUserResult {
+interface DeleteUserResult {
   id: string;
   email: string;
   deleted: true;

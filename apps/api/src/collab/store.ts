@@ -12,7 +12,7 @@
 import { prisma, runWrite } from "../db.js";
 import type { CollabKind } from "@gx/shared-types";
 
-export interface CollabStateRow {
+interface CollabStateRow {
   /** null = 该房间还没有任何协同态（首次进入）。 */
   state: Uint8Array | null;
   /** 写入次数（单调递增，首次写入为 1）。 */

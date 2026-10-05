@@ -22,7 +22,7 @@ export interface McpSubject {
 }
 
 /** nav resourceType 的可见子集（与 M3 nav_nodes.kind 同域）。 */
-export type McpResourceKind = "base" | "kb" | "table" | "view" | "doc" | "canvas" | "group";
+type McpResourceKind = "base" | "kb" | "table" | "view" | "doc" | "canvas" | "group";
 /**
  * MCP 侧动作词汇。前四枚是数据读写（对应 shared-types 的 r/c/u/d）；后两枚是搭建类动作——
  * 与 shared-types `ResourceAction` 的 manage_schema/manage_table 同域，直接透传给 M4 判定：

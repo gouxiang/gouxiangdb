@@ -16,7 +16,7 @@ import { createEmbeddingProvider } from "./embedding/cloud.js";
 import { computeCoverage, coverageToStatus, type CoverageStatus } from "./searchCoverage.js";
 import type { EmbeddingProvider } from "./embedding/types.js";
 
-export interface SearchStatus {
+interface SearchStatus {
   vec: {
     loaded: boolean;
     version: string | null;
@@ -48,7 +48,7 @@ export interface SearchStatus {
   } | null;
 }
 
-export interface StatusDeps {
+interface StatusDeps {
   prisma: PrismaClient;
   env: NodeJS.ProcessEnv;
   dataDir: string;

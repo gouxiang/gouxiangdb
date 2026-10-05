@@ -13,12 +13,12 @@
 import type { DbTx } from "../db.js";
 
 /** 首个候选后缀。 */
-export const RESTORE_SUFFIX = "（已恢复）";
+const RESTORE_SUFFIX = "（已恢复）";
 /** 序号候选上限（第 2 个候选起带序号）。超过则返回原名。 */
-export const RESTORE_SUFFIX_MAX = 99;
+const RESTORE_SUFFIX_MAX = 99;
 
 /** 候选名序列：`X（已恢复）`、`X（已恢复 2）`……`X（已恢复 max）`。 */
-export function restoreCandidateNames(name: string, max: number = RESTORE_SUFFIX_MAX): string[] {
+function restoreCandidateNames(name: string, max: number = RESTORE_SUFFIX_MAX): string[] {
   const out: string[] = [`${name}${RESTORE_SUFFIX}`];
   for (let i = 2; i <= max; i++) out.push(`${name}（已恢复 ${i}）`);
   return out;

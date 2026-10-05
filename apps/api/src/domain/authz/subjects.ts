@@ -9,7 +9,7 @@ import { effectiveRoleRows } from "../org/authorization.js";
 import type { AuthzClient, ResolvedSubject } from "./types.js";
 
 /** 由部门物化路径切出祖先闭包（含自身）id："/a/b/" -> ["a","b"]。 */
-export function ancestorDeptIds(paths: readonly string[]): string[] {
+function ancestorDeptIds(paths: readonly string[]): string[] {
   const set = new Set<string>();
   for (const p of paths) {
     for (const seg of p.split("/").filter(Boolean)) set.add(seg);

@@ -15,16 +15,13 @@ import type { DbTx } from "../../db.js";
 /** 可索引实体类型（与 change_events.entityType 对齐）。 */
 export type ChangeEntityType = "record" | "doc" | "canvas";
 /** 事件操作：upsert=建/改/恢复（重新抽文本建索引）；delete=软删/物理删（清派生行）。 */
-export type ChangeOp = "upsert" | "delete";
-/** 事件状态机（S5 worker 消费）；本原语只写 pending。 */
-export type ChangeStatus = "pending" | "processing" | "done" | "failed" | "dead";
-
+type ChangeOp = "upsert" | "delete";
 /** 合并候选状态：这两态的同实体事件被新编辑原地吸收；processing/done 不吸收。 */
 const MERGEABLE_STATUS = ["pending", "failed"] as const;
 
 export const DEFAULT_WORKSPACE = "ws_default";
 
-export interface EnqueueChangeInput {
+interface EnqueueChangeInput {
   entityType: ChangeEntityType;
   entityId: string;
   /**
@@ -40,7 +37,7 @@ export interface EnqueueChangeInput {
   workspaceId?: string;
 }
 
-export interface EnqueueChangeResult {
+interface EnqueueChangeResult {
   /** "merged"=吸收进既有 pending/failed 行；"inserted"=新建一行（含 done 后再编辑）。 */
   outcome: "merged" | "inserted";
   /** 受影响的事件行 id（inserted 为新 id；merged 为被吸收行 id，单行）。 */

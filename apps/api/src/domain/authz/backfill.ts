@@ -93,7 +93,7 @@ export async function upsertByLegacyRow(
 }
 
 /** 两动作串并集后重规范化（字典序）；非包含关系也安全（纯并集，旧角色档之间实为包含关系）。 */
-export function unionActionStrings(a: string, b: string): string {
+function unionActionStrings(a: string, b: string): string {
   return toActionString([...a.split(",").map((s) => s.trim()).filter(Boolean),
     ...b.split(",").map((s) => s.trim()).filter(Boolean)]);
 }

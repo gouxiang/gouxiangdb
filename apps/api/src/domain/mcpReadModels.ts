@@ -6,8 +6,8 @@
 
 import { prisma } from "../db.js";
 
-export interface BaseBrief { id: string; name: string }
-export interface TableBrief { id: string; baseId: string; name: string }
+interface BaseBrief { id: string; name: string }
+interface TableBrief { id: string; baseId: string; name: string }
 
 /** 按 id 取可见 base 的元数据（顺序按入参顺序；缺者跳过）。 */
 export async function listBasesByIds(ids: readonly string[]): Promise<BaseBrief[]> {
@@ -39,12 +39,6 @@ export async function tableBriefById(tableId: string): Promise<TableBrief | null
   });
   if (!t || t.deletedAt) return null;
   return { id: t.id, baseId: t.baseId, name: t.name };
-}
-
-/** 单 base 元数据（供 list_records 的 baseId 归属校验）。 */
-export async function baseExists(baseId: string): Promise<boolean> {
-  const b = await prisma.base.findUnique({ where: { id: baseId }, select: { id: true, deletedAt: true } });
-  return !!b && !b.deletedAt;
 }
 
 /** 单记录最小投影（MCP 写前存在性/归属校验用；不做授权判定）。 */export async function recordBriefById(recordId: string): Promise<{ id: string; tableId: string; deletedAt: Date | null } | null> {

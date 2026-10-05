@@ -32,7 +32,7 @@ export interface EngineDeps {
 }
 
 /** 一次决策的完整产物（capability 是收集的副产物，不新增往返，供出口投影）。 */
-export interface DecisionResult {
+interface DecisionResult {
   decision: Decision;
   node: AuthzNode;
   chain: AuthzNode[];

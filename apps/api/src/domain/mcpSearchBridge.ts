@@ -19,7 +19,7 @@ import { buildQueryRuntime } from "./search/queryRuntime.js";
 import { executeUnifiedSearch } from "./search/query.js";
 import type { SearchEntityType } from "./search/queryPlan.js";
 
-export interface McpSearchResult {
+interface McpSearchResult {
   items: unknown[];
   total: number;
   mode: string;

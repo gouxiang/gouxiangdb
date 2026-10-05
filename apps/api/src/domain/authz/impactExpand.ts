@@ -12,8 +12,6 @@
 
 import type { AuthzClient } from "./types.js";
 
-export type GrantSourceKind = "direct" | "dept" | "role";
-
 /** 一条待展开的授予（auth_policies 行投影；动作过滤由调用方完成）。 */
 export interface GrantRef {
   subjectType: "user" | "dept" | "role";

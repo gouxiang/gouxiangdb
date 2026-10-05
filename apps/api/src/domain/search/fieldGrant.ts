@@ -33,21 +33,21 @@ export interface ChunkVisibilityInput {
 }
 
 /** temp_field_grant 应物化的授权行（去重、确定性排序，供 S7 批量 INSERT）。 */
-export interface FieldGrantRow {
+interface FieldGrantRow {
   tableNodeId: string;
   fieldId: string;
 }
 
-export type ChunkVisibility = "visible" | "hidden";
+type ChunkVisibility = "visible" | "hidden";
 
-export interface ChunkVisibilityResult {
+interface ChunkVisibilityResult {
   chunkRowid: bigint;
   visibility: ChunkVisibility;
   /** 不可见原因（纯诊断，不参与授权；identity 与通过项为 null）。 */
   reason: null | "table_out_of_scope" | "field_masked";
 }
 
-export interface FieldGrantResolution {
+interface FieldGrantResolution {
   /** (a) 该主体 temp_field_grant 应物化的授权行（仅 mask 表白名单；§4.5 步骤 3）。 */
   grantRows: FieldGrantRow[];
   /** (b) 每个登记 field chunk 的逐行可见判定（顺序与输入一致）。 */

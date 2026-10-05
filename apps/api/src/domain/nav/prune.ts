@@ -28,7 +28,7 @@ export interface PruneIndex {
   manageAll: boolean;
 }
 
-export interface PrunedNode<T extends PruneNode> {
+interface PrunedNode<T extends PruneNode> {
   row: T;
   /** 仅 group：管理能力者可见但子树对其无任何可见内容（前端标灰）。 */
   dimmed: boolean;
@@ -58,7 +58,7 @@ function resourceAncestorsPass(
 
 /** group 子树内是否含可见资源的 O(n) 索引见 buildGroupContentIndex（S10 前为 O(g*n) 嵌套扫描，已替换）。 */
 
-export interface GroupContentIndex {
+interface GroupContentIndex {
   /** 子树内含"门通过可见资源"的 group id（这些 group 对普通成员保留）。 */
   contentGroups: ReadonlySet<string>;
   /**

@@ -8,7 +8,6 @@
 // 纯只读：computeCoverageFromConnections 不 open/close 任何连接、绝不写库；
 // computeCoverage 是按物理路径以 readonly+fileMustExist 打开两库的薄包装（供 CLI/路由复用）。
 
-import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import type { EmbeddingMode } from "./embedding/types.js";
@@ -17,9 +16,9 @@ import type { EmbeddingMode } from "./embedding/types.js";
 export const COVERAGE_BLOCKING = new Set(["A", "B", "E", "F"]);
 const SAMPLE_LIMIT = 20;
 
-export type CoverageCode = "A" | "B" | "C" | "D" | "E" | "F";
+type CoverageCode = "A" | "B" | "C" | "D" | "E" | "F";
 
-export interface CoverageCounts {
+interface CoverageCounts {
   A: number;
   B: number;
   C: number;
@@ -50,7 +49,7 @@ export interface CoverageReport {
 }
 
 /** 只读 better-sqlite3 连接所需最小形状（避免域内硬绑具体实例类型）。 */
-export interface CoverageRoDb {
+interface CoverageRoDb {
   prepare(sql: string): {
     all(...params: unknown[]): unknown[];
     get(...params: unknown[]): unknown;
@@ -76,7 +75,7 @@ function sample<T>(arr: T[]): T[] {
  * mode=cloud 才计算 D（off 下 chunk 无 vec 行是常态，不算欠账）。
  * 不 open/close 连接，调用方负责生命周期。
  */
-export function computeCoverageFromConnections(
+function computeCoverageFromConnections(
   main: CoverageRoDb,
   search: CoverageRoDb,
   mode: EmbeddingMode = "off",
@@ -227,9 +226,4 @@ export function computeCoverage(args: {
     main.close();
     search.close();
   }
-}
-
-/** status 端点便捷：search.db 文件缺失视为"尚未建库"（全部活实体漏索引无法直接判，交 0 态）。 */
-export function searchDbFileExists(searchDbPath: string): boolean {
-  return fs.existsSync(searchDbPath);
 }

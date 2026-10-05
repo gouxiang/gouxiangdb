@@ -45,7 +45,7 @@ export interface TabLayoutItem {
   fieldId: string;
   widthPct: 25 | 50 | 75 | 100;
 }
-export interface TabLayoutRow {
+interface TabLayoutRow {
   items: TabLayoutItem[];
 }
 export interface TabConfig {
@@ -112,7 +112,7 @@ export interface LinkRef {
   title: string;
 }
 
-export interface AttachmentValue {
+interface AttachmentValue {
   id: string;
   name: string;
   size: number;
@@ -164,11 +164,6 @@ export function isSystemFieldType(t: string): boolean {
 
 export function isComputedFieldType(t: string): boolean {
   return COMPUTED_TYPES.has(t as FieldType);
-}
-
-/** 该字段类型是否真的把值存在 records.fields 里 */
-export function isPhysicalFieldType(t: string): boolean {
-  return !isComputedFieldType(t) && !isSystemFieldType(t) && t !== "autoNumber";
 }
 
 // ============ 显示格式化（v1 Shared/Formatters.swift TS 同构）============

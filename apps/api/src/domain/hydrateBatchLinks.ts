@@ -6,7 +6,7 @@
 import type { HydrateDeps, LinkBatchQuery, LinkRowRef } from "./hydrate.js";
 
 /** linkRows 单键缓存：与 resolveForward/ReverseLinks 的单点查询形状严格对齐。 */
-export function linkKey(linkFieldId: string, dir: "parent" | "child", rowId: string): string {
+function linkKey(linkFieldId: string, dir: "parent" | "child", rowId: string): string {
   return `${linkFieldId}|${dir}|${rowId}`;
 }
 

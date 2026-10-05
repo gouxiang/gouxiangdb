@@ -19,7 +19,7 @@ import type { SearchEnabledOverride, SearchGateDTO, SearchGateFlag } from "@gx/s
 import { parseM5SearchFlag } from "../../configM5Search.js";
 import { EmbeddingConfigStore } from "./embeddingConfig.js";
 
-export interface SearchGateResolution {
+interface SearchGateResolution {
   effective: SearchGateFlag;
   queryAvailable: boolean;
   envGateOff: boolean;

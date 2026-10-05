@@ -43,7 +43,7 @@ export function relationIsMultiple(kind: "mm" | "hm" | "bt" | null): boolean {
   return kind === "mm" || kind === "hm";
 }
 
-export const SELECT_PALETTE = [
+const SELECT_PALETTE = [
   "#D3F0E4",
   "#F7E1D7",
   "#FBDDDD",
@@ -92,7 +92,7 @@ export interface CreateFieldInput {
   numberRule?: unknown | null;
 }
 
-export interface CreateFieldResult {
+interface CreateFieldResult {
   field: FieldMeta;
   reverseField?: FieldMeta;
 }
@@ -265,14 +265,6 @@ export async function deleteField(
   // 缓存失效在提交成功后（纯同步内存操作）。
   invalidateOrdinalCache(field.tableId);
   return { deleted };
-}
-
-export async function listFields(tableId: string): Promise<FieldMeta[]> {
-  const rows = await prisma.field.findMany({
-    where: { tableId, deletedAt: null },
-    orderBy: { order: "asc" },
-  });
-  return rows.map(toFieldMeta);
 }
 
 /**

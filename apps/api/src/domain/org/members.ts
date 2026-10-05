@@ -27,7 +27,7 @@ export { listMembers, getMemberById, MEMBER_PAGE_MAX } from "./memberDirectory.j
 // 导出供 initAdmin（首次部署 CLI）复用，避免第二处硬编码轮次。
 export const BCRYPT_ROUNDS = 10;
 
-export interface AssignDepartmentsInput {
+interface AssignDepartmentsInput {
   add?: unknown;
   remove?: unknown;
   mainDeptId?: unknown;
@@ -124,7 +124,7 @@ export async function assignDepartments(
 }
 
 /** 生成一次性激活码：32 字节随机 -> hex；库存 sha256 摘要（明文不入库）。 */
-export function newInviteToken(): { plain: string; hash: string } {
+function newInviteToken(): { plain: string; hash: string } {
   const plain = crypto.randomBytes(32).toString("hex");
   const hash = crypto.createHash("sha256").update(plain).digest("hex");
   return { plain, hash };
@@ -154,7 +154,7 @@ export async function grantDefaultRoleTx(tx: DbTx, userId: string): Promise<void
   });
 }
 
-export interface InvitedUserResult {
+interface InvitedUserResult {
   userId: string;
   email: string;
   status: string;
@@ -199,7 +199,7 @@ export async function createInvitedUser(input: {
   });
 }
 
-export interface CreatedActiveUser {
+interface CreatedActiveUser {
   userId: string;
   email: string;
   status: string;

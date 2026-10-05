@@ -29,7 +29,7 @@ export const AUTO_INTERVAL_MS = 600_000;
 export const AUTO_MAX_VERSIONS = 50;
 
 /** 参与淘汰判定所需的最小字段集。 */
-export interface VersionRef {
+interface VersionRef {
   id: string;
   version: number;
   label: string | null;
@@ -60,15 +60,6 @@ export function buildVersionExtractor(
   return { keep, drop };
 }
 
-/** 该视图是否存在自动版本（label=null）。前端据此决定"回退"按钮要不要提示先备份。 */
-export async function hasAutoSnapshots(client: DbTx, viewId: string): Promise<boolean> {
-  const one = await client.formLayoutVersion.findFirst({
-    where: { viewId, label: null },
-    select: { id: true },
-  });
-  return one !== null;
-}
-
 /** 自动版本超上限时删最旧的；返回删除条数。手动版本不受影响。 */
 export async function pruneAutoVersionsTx(
   client: DbTx,
@@ -95,21 +86,6 @@ export interface FormLayoutVersionMeta {
   createdAt: Date;
 }
 
-/** 历史列表（只要元数据，不含 snapshot 正文；默认 version 倒序）。 */
-export async function listAutoVersions(
-  client: DbTx,
-  viewId: string,
-  opts: { limit?: number; autoOnly?: boolean } = {},
-): Promise<FormLayoutVersionMeta[]> {
-  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
-  return client.formLayoutVersion.findMany({
-    where: { viewId, ...(opts.autoOnly ? { label: null } : {}) },
-    orderBy: { version: "desc" },
-    take: limit,
-    select: { id: true, viewId: true, version: true, label: true, createdBy: true, createdAt: true },
-  });
-}
-
 // ---------------------------------------------------------------------------
 // 快照内容采集
 // ---------------------------------------------------------------------------
@@ -118,7 +94,7 @@ export async function listAutoVersions(
  * 从表内现存 tabs 字段反推 tabs 快照（服务端自采，不依赖前端上报）。
  * 只在真正要落版本时才被调（10 分钟窗 + 事务内），不是热路径。
  */
-export async function collectTabsSnapshotTx(
+async function collectTabsSnapshotTx(
   client: DbTx,
   tableId: string,
 ): Promise<Record<string, FormLayoutTabSnapshot>> {
@@ -149,7 +125,7 @@ export async function collectTabsSnapshotTx(
 // 自动快照
 // ---------------------------------------------------------------------------
 
-export interface AutoSnapshotInput {
+interface AutoSnapshotInput {
   /** 注入当前时间（单测用；不传取 Date.now()） */
   now?: number;
   /** 跳过时间窗判定，强制留一版（保存端点用：每次保存都该有档） */
@@ -164,7 +140,7 @@ export interface AutoSnapshotInput {
   viewType?: string;
 }
 
-export interface AutoSnapshotResult {
+interface AutoSnapshotResult {
   created: boolean;
   version: number | null;
   /** 没留档的原因（排障与测试断言用；created=true 时为 undefined） */

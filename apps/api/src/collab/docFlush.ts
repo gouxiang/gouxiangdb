@@ -28,7 +28,7 @@ import {
 import { registerRoomFlusher, type CollabRoom } from "./room.js";
 
 /** 归结结果（房间空置 / tick / 关闭三条触发路径共用；HTTP PUT 注入后也复用它取版本号）。 */
-export interface DocFlushResult {
+interface DocFlushResult {
   status: "written" | "unchanged" | "skipped" | "deferred";
   /** 落库后的 kb_docs.contentVersion；未写库时为当前值或 null。 */
   contentVersion: number | null;

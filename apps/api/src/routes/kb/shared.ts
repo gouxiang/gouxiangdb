@@ -20,16 +20,6 @@ import { contentAccessOf, resolveKbAccess } from "../../domain/authz/libraryPoli
 
 export type Role = "owner" | "editor" | "commenter" | "viewer";
 
-export const RANK: Record<string, number> = { owner: 4, editor: 3, commenter: 2, viewer: 1 };
-
-export async function kbRoleOf(userId: string, kbId: string): Promise<Role | null> {
-  const m = await prisma.kbMember.findUnique({
-    where: { kbId_userId: { kbId, userId } },
-    select: { role: true },
-  });
-  return (m?.role as Role) ?? null;
-}
-
 /**
  * M4/S3 shadow 对拍缝：仅 GX_AUTHZ_ENGINE 生效为 shadow 时跑引擎同上下文对拍；
  * off 时空操作零新增 SQL。旧决策永远为准，对拍只分类计数/脱敏日志、不改返回、不抛错。
@@ -83,7 +73,7 @@ function derivedRole(access: LibraryAccessDTO): Role {
   return "viewer";
 }
 
-export interface KbGuardResult {
+interface KbGuardResult {
   role: Role;
   access: LibraryAccessDTO;
 }

@@ -107,7 +107,7 @@ export interface CreateTableTxInput {
   userId: string;
 }
 
-export interface CreateTableTxResult {
+interface CreateTableTxResult {
   table: { id: string; createdAt: Date };
   primaryFieldId: string;
 }

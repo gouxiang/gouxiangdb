@@ -24,7 +24,7 @@ export interface LayoutAliveIndex {
   tabIdsByContainer: Map<string, Set<string>>;
 }
 
-export interface SanitizeResult {
+interface SanitizeResult {
   envelope: FormLayoutSnapshotEnvelope;
   /** 被剔除的孤儿字段 id（去重） */
   removedFieldIds: string[];

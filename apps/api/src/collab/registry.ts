@@ -12,7 +12,7 @@ import { CollabRoom, type CollabConn } from "./room.js";
 import { loadCollabState } from "./store.js";
 
 /** 长会话兜底归结间隔（§12-A1：30s；且不得 < 1.2s）。 */
-export const COLD_FLUSH_TICK_MS = 30_000;
+const COLD_FLUSH_TICK_MS = 30_000;
 
 const rooms = new Map<string, CollabRoom>();
 /** 并发首次进入同一房间时只建一次（避免两个连接各建一个 Y.Doc 互相覆盖）。 */
@@ -97,11 +97,6 @@ async function tickFlush(): Promise<void> {
     if (!room.coldDirty) continue;
     await room.flush("tick");
   }
-}
-
-/** 房间是否存在（不管有没有人在线）。 */
-export function roomOf(roomId: string): CollabRoom | undefined {
-  return rooms.get(roomId);
 }
 
 /**

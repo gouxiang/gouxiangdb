@@ -4,7 +4,7 @@
 import type { AggFunc } from "@gx/shared-types";
 import { isEmptyValue } from "./filter.js";
 
-export type AggValue = unknown;
+type AggValue = unknown;
 
 function toNum(v: AggValue): number | null {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
@@ -53,39 +53,4 @@ export function aggregateAll(
     out[fieldId] = f ? aggregate(f, values) : null;
   }
   return out;
-}
-
-/** 该字段类型支持哪些聚合函数 */
-export function supportedAggregations(type: string): AggFunc[] {
-  switch (type) {
-    case "number":
-    case "currency":
-    case "percent":
-    case "duration":
-    case "rating":
-    case "autoNumber":
-    case "count":
-    case "rollup":
-      return ["sum", "avg", "min", "max", "count", "countEmpty", "countFilled", "percentEmpty", "percentFilled"];
-    case "date":
-    case "datetime":
-    case "createdTime":
-    case "lastModifiedTime":
-      return ["min", "max", "count", "countEmpty", "countFilled"];
-    case "checkbox":
-      return ["count", "countFilled", "countEmpty", "percentFilled"];
-    case "singleSelect":
-    case "multiSelect":
-    case "singleLineText":
-    case "longText":
-    case "email":
-    case "url":
-    case "phone":
-      return ["count", "countEmpty", "countFilled", "percentEmpty", "percentFilled"];
-    case "links":
-    case "attachment":
-      return ["count", "countEmpty", "countFilled"];
-    default:
-      return ["count", "countEmpty", "countFilled"];
-  }
 }

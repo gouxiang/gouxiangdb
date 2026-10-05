@@ -205,7 +205,7 @@ export function assertFieldsWritable(keys: readonly string[], cap: FieldCapabili
  *   - 否则 writableFields=各窄写来源在该源可见且非只读字段之并；payload 键必须落在此并集内。
  *   - 无任何该动作写来源：writeMatched=false、writableAll=false、writableFields=空集（fail-closed）。
  */
-export interface WriteOnlyFieldCapability {
+interface WriteOnlyFieldCapability {
   /** 主体在该节点上是否命中至少一条承载指定写动作的策略。 */
   writeMatched: boolean;
   /** 任一写来源不裁剪（mask=null）-> 全字段可写。 */

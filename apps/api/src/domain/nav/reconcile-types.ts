@@ -12,7 +12,7 @@ import { NAV_ICONS } from "@gx/shared-types";
 // reconcile 以 Set 形态消费。只增不删：新增菜单图标先在 icons.tsx 落地再进 NAV_ICONS。
 export const MENU_ICONS = new Set<string>(NAV_ICONS);
 
-export interface DiffEntry {
+interface DiffEntry {
   code: string;
   message: string;
   ref?: string;

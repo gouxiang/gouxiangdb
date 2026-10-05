@@ -32,7 +32,7 @@ import {
 export { EmbeddingConfigInvalid, NeedCloudConfirm } from "./adminEmbeddingFields.js";
 export type { ApiKeyStatus } from "./adminEmbeddingFields.js";
 
-export interface EmbeddingConfigResponse {
+interface EmbeddingConfigResponse {
   mode: EmbeddingMode;
   provider: EmbeddingProviderKind;
   baseURL: string;
@@ -54,7 +54,7 @@ export interface EmbeddingConfigResponse {
   searchGate: SearchGateDTO;
 }
 
-export interface PatchConfigResult {
+interface PatchConfigResult {
   config: EmbeddingConfigResponse;
   /** mode/model/provider/dim/fieldChunkCap 变更后置 true（两步：不自动重建）。 */
   reindexRequired: boolean;
@@ -78,7 +78,7 @@ function readEmbeddingDim(searchPath: string | undefined): number {
   }
 }
 
-export interface ConfigDeps {
+interface ConfigDeps {
   prisma: PrismaClient;
   env: NodeJS.ProcessEnv;
   jwtSecret: string;

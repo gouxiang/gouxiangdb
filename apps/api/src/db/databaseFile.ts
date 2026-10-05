@@ -19,8 +19,3 @@ export function resolveDatabaseFile(databaseUrl: string, prismaDir: string): str
   const noQuery = raw.split("?")[0] ?? raw;
   return path.isAbsolute(noQuery) ? noQuery : path.resolve(prismaDir, noQuery);
 }
-
-/** 便捷重载：从 config.migrationsDir（…/prisma/migrations）推导 prisma/ 目录。 */
-export function prismaDirFromMigrations(migrationsDir: string): string {
-  return path.dirname(migrationsDir);
-}

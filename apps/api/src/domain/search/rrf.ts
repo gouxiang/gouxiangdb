@@ -13,7 +13,7 @@
 //   - 同一路内同一实体重复出现只保留最靠前名次（最小 rank）。
 
 /** 召回路名（§4.5：FTS trigram / vec KNN / 短词 LIKE；调用层也可传自定义名）。 */
-export type FusionRoute = "fts" | "vec" | "like" | (string & {});
+type FusionRoute = "fts" | "vec" | "like" | (string & {});
 
 /** 单路内的一条命中。rank 为 1 基名次；缺省时按该路 hits 数组下标 +1 计名。 */
 export interface RouteHit {
@@ -37,14 +37,14 @@ export interface FusionInput {
   weight?: number;
 }
 
-export interface RouteContribution {
+interface RouteContribution {
   route: string;
   rank: number;
   weight: number;
   contribution: number;
 }
 
-export interface FusedCandidate {
+interface FusedCandidate {
   entityType: string;
   entityId: string;
   /** 加权 RRF 总分：sum_r weight_r * 1/(k + rank_r) + titleBoost。 */
@@ -59,7 +59,7 @@ export interface FusedCandidate {
   rawScores: Record<string, number>;
 }
 
-export interface RrfOptions {
+interface RrfOptions {
   /** RRF 平滑常数，典型 60（§4.5 步骤 5）。 */
   k?: number;
   /** 路权重（默认等权 1）；可被单路 input.weight 覆盖。 */

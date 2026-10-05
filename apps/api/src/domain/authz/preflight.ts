@@ -53,7 +53,7 @@ const BLOCKING_CODES: ReadonlySet<string> = new Set([
 
 const LEGACY_PREFIX = "legacy:";
 
-export interface PreflightCoverage {
+interface PreflightCoverage {
   /** role_library_scope 总行数。 */
   scopeRows: number;
   /** 有 scope 行的角色数（含硬短路的 role_owner）。 */
@@ -80,13 +80,13 @@ export interface PreflightCoverage {
   missingNav: { count: number; samples: string[] };
 }
 
-export interface PreflightReconcileView {
+interface PreflightReconcileView {
   summary: { A: number; B: number; C: number; S: number };
   /** 按码聚合，供运维一眼看出是哪一类；kind 决定阻断还是提示。 */
   byCode: Array<{ code: string; count: number; kind: "blocking" | "advisory" }>;
 }
 
-export interface PreflightLegacyView {
+interface PreflightLegacyView {
   /** reason='legacy:*' 行数。 */
   total: number;
   byReason: Record<string, number>;
@@ -94,7 +94,7 @@ export interface PreflightLegacyView {
   others: Record<string, number>;
 }
 
-export interface PreflightData {
+interface PreflightData {
   coverage: PreflightCoverage;
   reconcile: PreflightReconcileView;
   legacy: PreflightLegacyView;

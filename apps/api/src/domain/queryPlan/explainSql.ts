@@ -9,7 +9,7 @@ import type { SqlBindValue } from "../../db/rawRead.js";
 import type { CountPlan } from "./compileCount.js";
 
 /** 与 sidecarQuery.PhysicalFilter 结构兼容的最小输入。 */
-export interface CountSqlInput {
+interface CountSqlInput {
   tableId: string;
   filterSql: string | null;
   filterParams: SqlBindValue[];
@@ -17,7 +17,7 @@ export interface CountSqlInput {
 }
 
 /** 与 sidecarQuery.KeysetPageArgs 结构兼容的最小输入。 */
-export interface KeysetSqlInput extends CountSqlInput {
+interface KeysetSqlInput extends CountSqlInput {
   cursor: { createdAt: number; id: string } | null;
   limit: number;
 }
@@ -64,7 +64,7 @@ export function keysetAllBinds(q: KeysetSqlInput, limit: number): SqlBindValue[]
 }
 
 /** countPhysical 的 countPlan JOIN 快速路径完整 SQL（调用前必须 countPlan 非空）。 */
-export function countJoinSql(q: CountSqlInput): string {
+function countJoinSql(q: CountSqlInput): string {
   return (
     `SELECT count(*) AS n FROM records r ${q.countPlan!.joins} ` +
     `WHERE r."tableId"=? AND r."deletedAt" IS NULL`
@@ -72,7 +72,7 @@ export function countJoinSql(q: CountSqlInput): string {
 }
 
 /** physicalKeysetOnCreatedAt 的 countPlan JOIN 取页完整 SQL（cursor 以占位符形态给出）。 */
-export function keysetJoinSql(q: KeysetSqlInput): string {
+function keysetJoinSql(q: KeysetSqlInput): string {
   return (
     `SELECT r."id" AS id, r."createdAt" AS createdAt FROM records r ${q.countPlan!.joins} ` +
     `WHERE r."tableId"=? AND r."deletedAt" IS NULL ${cursorClause(q)} ` +
@@ -81,12 +81,12 @@ export function keysetJoinSql(q: KeysetSqlInput): string {
 }
 
 /** countPlan JOIN 计数路径的绑定（JOIN 参数在前，records.tableId 在末）。 */
-export function countBinds(q: CountSqlInput): SqlBindValue[] {
+function countBinds(q: CountSqlInput): SqlBindValue[] {
   return [...(q.countPlan?.joinParams ?? []), q.tableId];
 }
 
 /** keyset 取页路径的绑定（JOIN 参数→tableId→可选游标三参→limit）。 */
-export function keysetBinds(q: KeysetSqlInput, limit: number): SqlBindValue[] {
+function keysetBinds(q: KeysetSqlInput, limit: number): SqlBindValue[] {
   const bind: SqlBindValue[] = [...(q.countPlan?.joinParams ?? []), q.tableId];
   if (q.cursor) bind.push(q.cursor.createdAt, q.cursor.createdAt, q.cursor.id);
   bind.push(limit);

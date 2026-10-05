@@ -27,10 +27,9 @@ export const KEY_TABLES = [
   "attachments",
 ] as const;
 
-export type KeyTable = (typeof KEY_TABLES)[number];
-export type TableCounts = Record<string, number>;
+type TableCounts = Record<string, number>;
 
-export interface SnapshotInfo {
+interface SnapshotInfo {
   integrity: string;
   appliedMigrations: number;
   latestMigration: string | null;
@@ -105,7 +104,7 @@ export function sha256File(file: string): string {
 
 // ============ 纯函数：时间戳 / 保留策略 / manifest 比对 ============
 
-export interface BackupEntry {
+interface BackupEntry {
   file: string;
   date: Date;
 }
@@ -136,12 +135,12 @@ function isoWeekKey(dt: Date): string {
   return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
-export interface RetentionPolicy {
+interface RetentionPolicy {
   daily: number; // 保留最近 N 个有备份的日历日
   weekly: number; // 另保留最近 N 个 ISO 周的周末份
 }
 
-export const DEFAULT_RETENTION: RetentionPolicy = { daily: 7, weekly: 4 };
+const DEFAULT_RETENTION: RetentionPolicy = { daily: 7, weekly: 4 };
 
 /**
  * 纯保留裁剪：返回应保留的文件名集合（daily ∪ weekly），其余可删。
@@ -186,12 +185,12 @@ export function selectRetention(
   return new Set([...dailyKeep, ...weeklyKeep].map((e) => e.file));
 }
 
-export interface ManifestFileInfo {
+interface ManifestFileInfo {
   sha256: string;
   bytes: number;
 }
 
-export interface BackupManifest {
+interface BackupManifest {
   format: "gouxiangdb-backup-manifest";
   manifestVersion: 1;
   appVersion: string;
@@ -237,7 +236,7 @@ export function buildManifest(input: {
   };
 }
 
-export interface VerifyResult {
+interface VerifyResult {
   pass: boolean;
   problems: string[];
 }

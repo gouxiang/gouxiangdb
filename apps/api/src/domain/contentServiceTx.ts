@@ -12,7 +12,7 @@ import { syncNavFromEntitiesTx } from "./nav/sync.js";
 
 export type ContentKind = "doc" | "canvas";
 
-export interface CreateContentTxInput {
+interface CreateContentTxInput {
   kbId: string;
   kind: ContentKind;
   /** 已 trim 的标题；空串时由本层按 kind 取默认名。 */

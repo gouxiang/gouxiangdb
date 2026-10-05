@@ -13,7 +13,7 @@
 import type { FieldMeta } from "../types.js";
 
 /** 单条 sidecar 行（不含 recordId/tableId，由 sync 层补）。 */
-export interface FieldIndexEntry {
+interface FieldIndexEntry {
   fieldId: string;
   valueText: string | null;
   valueNum: number | null;
@@ -29,7 +29,7 @@ export interface ExpectedSidecarRow extends FieldIndexEntry {
 }
 
 /** buildExpectedRows 的最小输入（Prisma 行 / better-sqlite3 行均可映射成此结构）。 */
-export interface ExpectedRowsInput {
+interface ExpectedRowsInput {
   fieldsMeta: Array<{ id: string; type: string }>;
   primaryFieldId: string;
   records: Array<{ id: string; tableId: string; fields: string }>;
@@ -203,7 +203,7 @@ export function extractEntries(f: IndexableFieldMeta, stored: unknown): FieldInd
 }
 
 /** 安全解析记录 fields JSON（损坏/空 → {}），sync 与脚本共用。 */
-export function parseRecordFields(raw: string): Record<string, unknown> {
+function parseRecordFields(raw: string): Record<string, unknown> {
   try {
     const v = JSON.parse(raw) as unknown;
     return v && typeof v === "object" ? (v as Record<string, unknown>) : {};

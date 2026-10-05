@@ -2,7 +2,7 @@
 //
 // 权威依据：M5-implementation-plan.md §4.5（九步）、§9（v1 响应契约纲要）、§4.9（降级矩阵）。
 
-import type { RequestedMode, EntityTypeFilter, SearchEntityType } from "./queryPlan.js";
+import type { SearchEntityType } from "./queryPlan.js";
 
 /** §9 degraded[] 取值（只增；空数组=无降级）。 */
 export type DegradedReason =
@@ -58,18 +58,6 @@ export function emptySearchResponse(limit: number): UnifiedSearchResponse {
   };
 }
 
-export interface SearchRequestInput {
-  /** 原始（未 trim）查询词；trim 在编排内做。 */
-  q: string;
-  userId: string;
-  /** all|record|doc|canvas（默认 all）。 */
-  type?: EntityTypeFilter;
-  /** auto|fts|vector（默认 auto）。 */
-  mode?: RequestedMode;
-  /** 实体聚合上限，默认 20、硬上限 50（queryPlan clamp）。 */
-  limit?: number;
-}
-
 /** 一个 search.db 连接所需的最小形状（真实 SearchStore 结构化满足；不静态绑实现，便于测试）。 */
 export interface SearchDbLike {
   prepare(sql: string): {
@@ -100,7 +88,7 @@ export interface QueryRuntimeDeps {
 }
 
 /** 查询向量请求：text=文本查询；images=可选图片（data:image/... 或 https），带图即"以图搜图"。 */
-export interface VectorEmbedRequest {
+interface VectorEmbedRequest {
   text: string;
   images?: readonly string[];
 }
@@ -145,7 +133,7 @@ export interface HydratedEntity {
   matchedField: string | null;
 }
 
-export interface QueryMetric {
+interface QueryMetric {
   /** 二次 decide 丢弃的失配实体数（正常 0；非 0=scope 快照与决策不一致的 bug 信号）。 */
   decideMismatch?: number;
   /** 实际执行的路（观测用）。 */

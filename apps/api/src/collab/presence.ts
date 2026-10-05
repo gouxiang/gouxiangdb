@@ -13,7 +13,7 @@ import { z } from "zod";
 import type { CollabLease, CollabPresenceEntry, CollabRole, CollabSubjectKind } from "@gx/shared-types";
 
 /** 8 色调色板（服务端唯一分配方）。 */
-export const COLLAB_PALETTE: readonly string[] = [
+const COLLAB_PALETTE: readonly string[] = [
   "#2563EB",
   "#0891B2",
   "#16A34A",
@@ -41,14 +41,14 @@ export function colorForId(seed: string): string {
 }
 
 /** 昵称白名单：非字符串/空串一律回落服务端下发值。 */
-export function sanitizeNick(raw: unknown, fallback: string): string {
+function sanitizeNick(raw: unknown, fallback: string): string {
   if (typeof raw !== "string") return fallback;
   const trimmed = raw.trim().slice(0, MAX_NICK_LEN);
   return trimmed.length > 0 ? trimmed : fallback;
 }
 
 /** 颜色白名单：严格 6 位十六进制，否则回落服务端分配值。 */
-export function sanitizeColor(raw: unknown, fallback: string): string {
+function sanitizeColor(raw: unknown, fallback: string): string {
   return typeof raw === "string" && HEX_COLOR.test(raw) ? raw : fallback;
 }
 
@@ -79,13 +79,13 @@ const leaseSchema = z.object({
 });
 
 /** 光标位置：形状非法即丢弃（返回 null），不连带丢掉整条在线状态。 */
-export function sanitizeSelection(raw: unknown): CollabPresenceEntry["selection"] {
+function sanitizeSelection(raw: unknown): CollabPresenceEntry["selection"] {
   const parsed = selectionSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
 }
 
 /** 占用租约：逐条校验，非法条目丢弃，总量封顶（防超大数组）。 */
-export function sanitizeLeases(raw: unknown): CollabLease[] {
+function sanitizeLeases(raw: unknown): CollabLease[] {
   if (!Array.isArray(raw)) return [];
   const out: CollabLease[] = [];
   for (const item of raw.slice(0, MAX_LEASES)) {

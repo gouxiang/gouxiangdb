@@ -17,7 +17,7 @@ import { loadLiveShape, replaceScopePoliciesTx } from "./scopeProjectionTx.js";
 import { nodeId } from "../nav/backfill.js";
 
 /** scope 行快照（写后 role_library_scope 行的形状）。 */
-export interface SavedScopeRow {
+interface SavedScopeRow {
   roleId: string;
   libraryKind: string;
   libraryId: string;

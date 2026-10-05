@@ -6,7 +6,7 @@
 // 「同进程唯一写入口」纪律。零运行时依赖；不开事务、不吞错，异常原样透传。
 // 铁律：task 回调体内绝不能再调用同一队列的 run（自死锁），事务回调只用传入 tx。
 
-export interface QueueStats {
+interface QueueStats {
   enqueued: number; // 累计入队任务数
   settled: number; // 已完成（成功或失败）任务数
   failed: number; // 失败任务数

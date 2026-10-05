@@ -19,7 +19,7 @@ import type { PolicyUpsertInput, PolicySubjectType } from "./policyAdmin.js";
 export const SUBJECT_TYPES: readonly PolicySubjectType[] = ["user", "dept", "role"];
 
 /** 单条解析可产出的错误码（policyAdmin PolicyValidationError 码的子集）。 */
-export type ItemCode =
+type ItemCode =
   | "POLICY_SUBJECT_INVALID"
   | "POLICY_ACTION_INVALID"
   | "POLICY_FIELD_INVALID"

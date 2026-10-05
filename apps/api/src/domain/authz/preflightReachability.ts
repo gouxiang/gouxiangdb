@@ -37,7 +37,7 @@ const AGGREGATE_ACTIONS: readonly ResourceAction[] = ["enter", "edit_data"];
  */
 const KB_AGGREGATE_ACTIONS: readonly ResourceAction[] = ["enter"];
 
-export interface AggregateParitySample {
+interface AggregateParitySample {
   roleId: string;
   libraryId: string;
   action: ResourceAction;

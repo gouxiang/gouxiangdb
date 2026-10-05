@@ -28,7 +28,7 @@ interface NodeRow {
 }
 
 /** on 态菜单剪枝入参（authz 层 buildNavVisibility 产物）。 */
-export type MenuPrune = Pick<PruneIndex, "visible" | "manageAll">;
+type MenuPrune = Pick<PruneIndex, "visible" | "manageAll">;
 
 /** 节点行 -> shortcut 摘要（state 由 deletedAt 决定）。 */
 function summaryOf(node: NodeRow, state: ShortcutState): MenuNodeSummaryDTO {
@@ -80,7 +80,7 @@ async function resolveShortcuts(tx: DbTx, menus: MenuRow[]): Promise<Map<string,
   return result;
 }
 
-export async function menuVersionOf(tx: DbTx): Promise<number> {
+async function menuVersionOf(tx: DbTx): Promise<number> {
   const ws = await tx.workspace.findUnique({ where: { id: WS_ID }, select: { menuVersion: true } });
   return ws?.menuVersion ?? 0;
 }

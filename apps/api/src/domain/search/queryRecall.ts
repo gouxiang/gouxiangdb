@@ -44,7 +44,7 @@ export interface RecallResult {
   plans: Record<string, string[]>;
 }
 
-export interface RecallOptions {
+interface RecallOptions {
   /** vec 路查询向量（Float32 BLOB）；null=不跑 vec。 */
   queryVector?: Buffer | null;
   /** 是否同时采集三路 EXPLAIN QUERY PLAN（测试/S11 留证；生产关闭零开销）。 */

@@ -15,7 +15,7 @@ import type { EmbeddingProvider, EmbeddingMode } from "./embedding/types.js";
 import { DEFAULT_WORKSPACE } from "../authz/adapter.js";
 import type { ReindexDeps, ReindexEntityType } from "./reindexTypes.js";
 
-export interface LiveEntityRef {
+interface LiveEntityRef {
   entityType: ReindexEntityType;
   entityId: string;
   version: bigint;
@@ -44,7 +44,7 @@ export async function listLiveEntities(prisma: PrismaClient): Promise<LiveEntity
   return out;
 }
 
-export interface ReindexContext {
+interface ReindexContext {
   prisma: PrismaClient;
   store: SearchStore;
   mode: EmbeddingMode;

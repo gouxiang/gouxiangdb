@@ -36,9 +36,7 @@ export const RETRY_MAX_ATTEMPTS = 10;
 /** cloud 重试指数退避基数（毫秒）；1s -> 2s（受上限钳制）。测试可注入更小值。 */
 export const DEFAULT_RETRY_BASE_MS = 1000;
 /** 退避上限（毫秒），避免长退避堆积。 */
-export const MAX_RETRY_DELAY_MS = 8000;
-/** 401/403 后连续失败到此阈值即固定 unhealthy（§4.4 与门，health 周期 60s 由 S5/S7 接）。 */
-export const AUTH_FAILURE_MARK = "unauthorized";
+const MAX_RETRY_DELAY_MS = 8000;
 
 /**
  * 解析模式字符串：仅 "cloud"（大小写不敏感、去空白）启用 cloud；

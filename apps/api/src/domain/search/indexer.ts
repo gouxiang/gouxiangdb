@@ -28,9 +28,9 @@ import {
   MAX_ATTEMPTS,
 } from "./indexerSchedule.js";
 
-export const DEFAULT_BATCH = 50;
-export const DEFAULT_IDLE_POLL_MS = 2000;
-export const DEFAULT_START_DELAY_MS = 3000;
+const DEFAULT_BATCH = 50;
+const DEFAULT_IDLE_POLL_MS = 2000;
+const DEFAULT_START_DELAY_MS = 3000;
 export const DEFAULT_WORKSPACE = "ws_default";
 
 interface ClaimedRow {
@@ -43,7 +43,7 @@ interface ClaimedRow {
   workerId: string;
 }
 
-export interface IndexerDeps {
+interface IndexerDeps {
   prisma: PrismaClient;
   store: SearchStore;
   mode: "off" | "cloud";

@@ -17,11 +17,11 @@ import type { FieldMeta } from "../types.js";
 import type { FieldChange, RecordChangeDTO, RecordChangeOp, RecordChangesPage } from "./types.js";
 import { RECORD_CHANGE_OPS } from "./types.js";
 
-export const RECORD_CHANGES_DEFAULT_LIMIT = 50;
-export const RECORD_CHANGES_MAX_LIMIT = 200;
+const RECORD_CHANGES_DEFAULT_LIMIT = 50;
+const RECORD_CHANGES_MAX_LIMIT = 200;
 
 /** 读一次变更历史页。cursor 为 null 表示取首页。 */
-export interface QueryRecordChangesInput {
+interface QueryRecordChangesInput {
   recordId: string;
   /** 该表字段定义全集（可读化用：选项名 / 成员名索引）。 */
   fields: readonly FieldMeta[];

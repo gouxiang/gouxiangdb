@@ -18,7 +18,7 @@ const CHECK_NAMES: CheckName[] = [
   "disk",
 ];
 
-export interface ReadinessHttp {
+interface ReadinessHttp {
   httpStatus: 200 | 503;
   body: Record<string, unknown>;
 }

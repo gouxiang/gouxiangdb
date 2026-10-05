@@ -14,14 +14,14 @@ import type { EffectiveMode } from "./queryTypes.js";
 import type { UnifiedSearchItem } from "./queryTypes.js";
 import type { LegacySearchResult } from "./legacySearch.js";
 
-export type ShadowDriftKind = "SHADOW_OVERDENY" | "SHADOW_OVERALLOW" | "SHADOW_ORDER";
+type ShadowDriftKind = "SHADOW_OVERDENY" | "SHADOW_OVERALLOW" | "SHADOW_ORDER";
 
-export interface EntityKey {
+interface EntityKey {
   type: "record" | "doc" | "canvas";
   id: string;
 }
 
-export interface ShadowReport {
+interface ShadowReport {
   /** 是否在可比集上（keyword 两模式）；false 时不计数、不严格失败。 */
   comparable: boolean;
   /** 不可比原因（向量路/空等）。 */
@@ -119,7 +119,7 @@ export function compareSearchShadow(
   return report;
 }
 
-export interface ShadowSnapshot {
+interface ShadowSnapshot {
   compared: number;
   skipped: number;
   drift: number;

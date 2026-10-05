@@ -28,10 +28,10 @@ import { rebuildScopePoliciesTx } from "./scopeDoubleWrite.js";
 const SUPER_ADMIN_ROLE_ID = "role_owner";
 
 /** 运维存量投影的固定 operator（幂等投影维护，与运行时请求无关，不写审计）。 */
-export const SCOPE_BACKFILL_OPERATOR = "system-scope-backfill";
+const SCOPE_BACKFILL_OPERATOR = "system-scope-backfill";
 
 /** 单角色的存量投影计划。expected 由恒等式推出：expected = stored - toDelete + toCreate。 */
-export interface ScopeBackfillRolePlan {
+interface ScopeBackfillRolePlan {
   roleId: string;
   /** 该角色在 role_library_scope 的行数（可能为 0：管理员隐含覆盖不需要行）。 */
   scopeRows: number;

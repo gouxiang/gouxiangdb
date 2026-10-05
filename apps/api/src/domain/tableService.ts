@@ -16,13 +16,13 @@ export {
   type UpdateTableTxInput,
 } from "./tableServiceTx.js";
 
-export interface CreateTableInput {
+interface CreateTableInput {
   baseId: string;
   name: string;
   withDefaults?: boolean;
 }
 
-export interface CreateTableResult {
+interface CreateTableResult {
   tableId: string;
   primaryFieldId: string;
   createdAt: Date;
@@ -44,14 +44,14 @@ export async function createTable(input: CreateTableInput, operatorUserId: strin
   return { tableId: result.table.id, primaryFieldId: result.primaryFieldId, createdAt: result.table.createdAt };
 }
 
-export interface UpdateTableInput {
+interface UpdateTableInput {
   name?: string;
   primaryFieldId?: string;
   icon?: string | null;
   iconColor?: string | null;
 }
 
-export interface UpdateTableResult {
+interface UpdateTableResult {
   id: string;
   name: string;
   primaryFieldId: string;

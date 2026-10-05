@@ -25,7 +25,7 @@ import {
 /** 单次扫描上限：超过即截断（truncated=true），防止大库把列表接口拖成慢查询。 */
 const SCAN_CAP = 500;
 
-export interface LinkableQuery {
+interface LinkableQuery {
   userId: string;
   /** 名称/标题包含匹配（大小写不敏感由 SQLite LIKE 保证 ASCII 段）。 */
   q: string;

@@ -87,7 +87,7 @@ export function contentAccessOf(access: LibraryAccessDTO): TableAccess {
 }
 
 /** 人能不能写这个字段：'仅可见'与'隐藏'都不能写。系统自动计算不受此限制。 */
-export function humanCanWriteField(access: LibraryAccessDTO, tableId: string, fieldId: string): boolean {
+function humanCanWriteField(access: LibraryAccessDTO, tableId: string, fieldId: string): boolean {
   return fieldAccessOf(access, tableId, fieldId) === "editable";
 }
 
@@ -108,7 +108,7 @@ export function fieldWriteGate(
 }
 
 /** humanCanWriteField 的复数形式：一次判断整批键，任一键不可写返回该字段名。 */
-export function firstUnwritableField(
+function firstUnwritableField(
   access: LibraryAccessDTO,
   tableId: string,
   fieldIds: readonly string[],
@@ -170,18 +170,6 @@ async function baseIdBy(tableIdField: "table" | "view" | "record", id: string): 
 /** 手上只有 tableId 时的裁决入口。 */
 export async function resolveBaseAccessByTable(userId: string, tableId: string): Promise<LibraryAccessDTO | null> {
   const baseId = await baseIdBy("table", tableId);
-  return baseId ? resolve(userId, "base", baseId) : null;
-}
-
-/** 手上只有 viewId 时的裁决入口。 */
-export async function resolveBaseAccessByView(userId: string, viewId: string): Promise<LibraryAccessDTO | null> {
-  const baseId = await baseIdBy("view", viewId);
-  return baseId ? resolve(userId, "base", baseId) : null;
-}
-
-/** 手上只有 recordId 时的裁决入口。 */
-export async function resolveBaseAccessByRecord(userId: string, recordId: string): Promise<LibraryAccessDTO | null> {
-  const baseId = await baseIdBy("record", recordId);
   return baseId ? resolve(userId, "base", baseId) : null;
 }
 

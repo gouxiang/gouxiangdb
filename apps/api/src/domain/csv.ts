@@ -90,7 +90,7 @@ function escapeCell(v: string): string {
   return s;
 }
 
-export function buildCSV(headers: string[], rows: string[][]): string {
+function buildCSV(headers: string[], rows: string[][]): string {
   const lines = [headers.map(escapeCell).join(","), ...rows.map((r) => r.map(escapeCell).join(","))];
   // BOM 让 Excel 正确识别 UTF-8 中文
   return "\uFEFF" + lines.join("\r\n");
@@ -130,25 +130,6 @@ export function csvHeaderLine(fields: FieldMeta[]): string {
   return "\uFEFF" + fields.map((f) => f.name).map(escapeCell).join(",");
 }
 
-/** 记录导出为 TSV（便于粘贴到 Excel / 对比测试 diff） */
-export function recordsToTSV(records: HydratedRecord[], fields: FieldMeta[]): string {
-  const headers = fields.map((f) => f.name).join("\t");
-  const rows = records.map((r) =>
-    fields
-      .map((f) => {
-        const v = r.fields[f.id];
-        const s = Array.isArray(v)
-          ? (v as unknown[])
-              .map((x) => (typeof x === "object" && x !== null && "title" in (x as object) ? (x as { title: string }).title : String(x)))
-              .join("; ")
-          : formatCellValue((v ?? null) as FieldValue, f);
-        return s.replace(/[\t\n\r]/g, " ");
-      })
-      .join("\t"),
-  );
-  return [headers, ...rows].join("\n");
-}
-
 // ============ 类型推断 ============
 
 export function inferFieldType(values: string[]): FieldMeta["type"] {
@@ -178,7 +159,7 @@ const CHECKBOX_TRUE = new Set(["true", "1", "是", "TRUE"]);
 const CHECKBOX_FALSE = new Set(["false", "0", "否", "FALSE"]);
 
 /** 单元格强转结果。`issue` 非空 = 原文不合法、已被降级（按空值 / 按「否」导入）。 */
-export interface CellCoerceResult {
+interface CellCoerceResult {
   value: FieldValue;
   /** 面向用户的降级说明（不含行列信息，由调用方补「第 N 行「列名」的」前缀）。 */
   issue?: string;

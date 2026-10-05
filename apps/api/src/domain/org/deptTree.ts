@@ -12,7 +12,7 @@ import type { DbTx } from "../../db.js";
 export const MAX_DEPTH = 32;
 
 /** 部门名长度上限（与展示侧一致的保守值）。 */
-export const MAX_DEPT_NAME_LEN = 60;
+const MAX_DEPT_NAME_LEN = 60;
 
 export interface DeptPathRow {
   id: string;

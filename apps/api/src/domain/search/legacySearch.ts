@@ -12,7 +12,7 @@ import type { PrismaClient } from "@prisma/client";
 import { isComputedFieldType } from "../types.js";
 import { SEARCH_PREVIEW_LIMIT, boundedPreviewMarker } from "../../routes/searchBounds.js";
 
-export interface LegacyRecordHit {
+interface LegacyRecordHit {
   type: "record";
   baseId: string;
   baseName: string;
@@ -23,7 +23,7 @@ export interface LegacyRecordHit {
   snippet: string;
   matchedField: string;
 }
-export interface LegacyDocHit {
+interface LegacyDocHit {
   type: "doc" | "canvas";
   kbId: string;
   kbName: string;

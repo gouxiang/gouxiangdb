@@ -55,7 +55,7 @@ export function parseScopeInput(input: {
 }
 
 /** 入参清洗：未知字段权限档位直接丢弃，不静默降级成 editable。 */
-export function normalizeIncomingConfig(raw: unknown): LibraryScopeConfig {
+function normalizeIncomingConfig(raw: unknown): LibraryScopeConfig {
   if (!raw || typeof raw !== "object") return EMPTY_LIBRARY_SCOPE_CONFIG;
   const o = raw as Record<string, unknown>;
   const out: LibraryScopeConfig = { tables: {}, fields: {} };

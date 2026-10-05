@@ -117,7 +117,7 @@ export const updateRecordShape = {
  * 可写入的块类型白名单（与 @gx/blocks 的 `BlockType` 同域）。
  * 完备性由下方编译期守卫保证：@gx/blocks 新增块类型而此处未同步时 tsc 直接报错。
  */
-export const BLOCK_TYPES = [
+const BLOCK_TYPES = [
   "p",
   "h1", "h2", "h3", "h4", "h5", "h6",
   "ul", "ol", "task",

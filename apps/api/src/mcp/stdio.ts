@@ -18,7 +18,7 @@ import { buildServer } from "./server.js";
 import { authenticatePat } from "./transport/authenticate.js";
 
 /** token 不可用（缺失/为空/非法/不可用）统一退出码。 */
-export const EXIT_TOKEN_UNUSABLE = 2;
+const EXIT_TOKEN_UNUSABLE = 2;
 
 function fail(reason: string): never {
   process.stderr.write(`[gx-mcp-stdio] ${reason}\n`);

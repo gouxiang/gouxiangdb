@@ -17,7 +17,7 @@
 import { prisma, runWrite } from "../db.js";
 
 /** 去重窗：24h（§242）。 */
-export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * 占位哨兵：**不是合法 ToolResult JSON**（首字符 \u0000），故绝不可能与真实响应混淆。
@@ -38,7 +38,7 @@ function isExpired(createdAt: Date, now: Date): boolean {
   return now.getTime() - createdAt.getTime() >= IDEMPOTENCY_TTL_MS;
 }
 
-export type IdemReserve =
+type IdemReserve =
   /** 占位成功：调用方**独占**该 key，执行 handler 后必须 finalize 或 release。 */
   | { kind: "reserved" }
   /** 命中已完成的首调：直接返首次结果，**不得再执行 handler**。 */

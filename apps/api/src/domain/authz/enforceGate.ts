@@ -34,7 +34,7 @@ import type { AuthzClient } from "./types.js";
  */
 export type EnforceSemantics = "authority" | "conjunction";
 
-export interface EnforceParams {
+interface EnforceParams {
   /** 埋点来源（守卫名，如 requireCanView），按来源分桶排查。 */
   guard: string;
   userId: string;
@@ -51,7 +51,7 @@ export interface EnforceParams {
   mode?: AuthzEngineMode;
 }
 
-export interface EnforceOutcome {
+interface EnforceOutcome {
   /** 权威结论：守卫据此放行或抛 403。 */
   allowed: boolean;
   /** 结论来源。on 态引擎故障回落时 source=legacy 且 degraded=true。 */
@@ -157,7 +157,7 @@ export function reportEnforceError(
  * UNRESOLVED_NODE（与影子期同一账本）+ enforceUnresolved 告警计数，并打一条独立事件
  * authz_enforce_unresolved（denied=true 是 fail-closed 事实，供值班核对，不静默）。
  */
-export function reportEnforceUnresolved(
+function reportEnforceUnresolved(
   ctx: ShadowCompareContext,
   now: Date = new Date(),
   sink: (line: string) => void = (l) => console.error(l),

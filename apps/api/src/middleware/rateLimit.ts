@@ -96,7 +96,7 @@ interface CounterEntry {
   resetAt: number;
 }
 
-export interface RateDecision {
+interface RateDecision {
   allowed: boolean;
   remaining: number;
   limit: number;
@@ -153,7 +153,7 @@ export class FixedWindowCounter {
 // 限流键与审计来源 IP 共用同一判定（utils/client-ip.ts）。
 export { sourceIp as clientKey, sourceIp } from "../utils/client-ip.js";
 
-export interface RateLimiterDeps {
+interface RateLimiterDeps {
   enabled: () => boolean;
   now: () => number;
   counter: FixedWindowCounter;

@@ -21,7 +21,7 @@ interface Entry extends AuthStateRow {
 
 const MAX_ENTRIES = 5000;
 
-export interface AuthStateCache {
+interface AuthStateCache {
   get(userId: string): AuthStateRow | null;
   set(row: AuthStateRow, ttlMs: number): void;
   invalidate(userId: string): void;

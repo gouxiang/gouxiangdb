@@ -17,20 +17,20 @@ import { seedAdminScopeTx } from "./authz/libraryScopeSeed.js";
 const BASE_DEFAULT_ICON_COLOR = "#378ADD";
 const KB_DEFAULT_ICON_COLOR = "#0F6E56";
 
-export interface CreateBaseInput {
+interface CreateBaseInput {
   name: string;
   iconColor?: string | null;
   icon?: string | null;
   withStarter?: boolean;
 }
-export interface CreateKbInput {
+interface CreateKbInput {
   name: string;
   iconColor?: string | null;
   icon?: string | null;
 }
 
 /** 建库成功的创建行回执（REST DTO 与 MCP 工具共用）。 */
-export interface CreatedLibrary {
+interface CreatedLibrary {
   id: string;
   name: string;
   icon: string | null;

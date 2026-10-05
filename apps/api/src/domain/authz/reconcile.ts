@@ -40,7 +40,7 @@ export interface ReconcileReport {
   summary: { A: number; B: number; C: number; S: number };
 }
 
-export interface ReconcileFixResult {
+interface ReconcileFixResult {
   created: number;
   updated: number;
   deleted: number;

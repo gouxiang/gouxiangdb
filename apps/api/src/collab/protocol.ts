@@ -24,7 +24,7 @@ export const SYNC_SUB = {
   UPDATE: 2,
 } as const;
 
-export interface SyncFrameHead {
+interface SyncFrameHead {
   messageType: number;
   /** 仅 messageType===SYNC 时有值；帧被截断时为 null。 */
   syncSubType: number | null;

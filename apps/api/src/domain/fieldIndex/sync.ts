@@ -12,13 +12,11 @@
 //      不做 try/catch 静默降级（否则会制造 check-sidecar 抓不到的隐蔽 drift）；
 //      回退手段是 GX_M1_SIDECAR=off（写维护全旁路，派生表闲置无害，事后 backfill 重建）。
 
-import type { Prisma } from "@prisma/client";
-import { prisma } from "../../db.js";
 import type { DbTx } from "../../db.js";
 import { buildExpectedRows, type ExpectedSidecarRow } from "./policy.js";
 
 /** sync 所需的最小事务能力（Prisma DbTx/全局 client 满足；内存 mock 通常缺 raw 方法）。 */
-export interface SidecarTx {
+interface SidecarTx {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   $executeRawUnsafe: (query: string, ...values: any[]) => Promise<any>;
   record: {
@@ -116,29 +114,6 @@ export async function deleteRecordsTx(tx: unknown, recordIds: string[]): Promise
 export async function deleteTableTx(tx: unknown, tableId: string): Promise<void> {
   if (!resolveSidecarEnabled() || !supportsRaw(tx)) return;
   await (tx as SidecarTx).$executeRawUnsafe(
-    `DELETE FROM record_field_index WHERE "tableId" = ?`,
-    tableId,
-  );
-}
-
-/**
- * 数组批量事务形态（prisma.$transaction([...])）的 sidecar 删除语句。
- * Prisma 的 $executeRawUnsafe 返回惰性 PrismaPromise，放入语句数组即随该批事务提交。
- * 与 records.ts 的 record.softDelete/bulkSoftDelete 批语句原子提交。
- */
-export function deleteRecordsStatement(recordIds: string[]): Prisma.PrismaPromise<unknown> | null {
-  if (!resolveSidecarEnabled() || recordIds.length === 0) return null;
-  const placeholders = recordIds.map(() => "?").join(",");
-  return prisma.$executeRawUnsafe(
-    `DELETE FROM record_field_index WHERE "recordId" IN (${placeholders})`,
-    ...recordIds,
-  );
-}
-
-/** 清空表（table.clear）数组事务形态：按 tableId 撤掉该表全部 sidecar 行。 */
-export function deleteTableStatement(tableId: string): Prisma.PrismaPromise<unknown> | null {
-  if (!resolveSidecarEnabled()) return null;
-  return prisma.$executeRawUnsafe(
     `DELETE FROM record_field_index WHERE "tableId" = ?`,
     tableId,
   );

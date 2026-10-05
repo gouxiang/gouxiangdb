@@ -34,9 +34,3 @@ export function getDefaultWorkspaceId(): Promise<string> {
   }
   return inflight;
 }
-
-/** 测试/切换环境时清掉缓存（正常业务不调用）。 */
-export function resetDefaultWorkspaceCache(): void {
-  resolvedId = null;
-  inflight = null;
-}

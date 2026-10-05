@@ -239,11 +239,6 @@ auth.delete("/me", async (c) => {
   return c.json({ ok: true });
 });
 
-export type AuthPayload = {
-  userId: string;
-  iat: number;
-};
-
 // 鉴权工具：从 Authorization 头解析 userId。
 // 签名保持 (c) => Promise<string|null> 不变（records-keyset.test.ts 的 vi.mock 依赖此形态）；
 // 内部改为走 resolveActiveAuth：ACTIVE 且 tv 匹配时与旧版"仅验签"结果等价（存量无 tv token

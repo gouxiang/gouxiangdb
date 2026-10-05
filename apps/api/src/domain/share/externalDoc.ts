@@ -23,7 +23,7 @@ import { saveDocContentTx } from "../kbDocWrite.js";
 import { auditWrite } from "./externalRecords.js";
 import type { ShareCaps } from "./shareCaps.js";
 
-export interface ExternalDocWriteInput {
+interface ExternalDocWriteInput {
   docId: string;
   content: string;
   /** 客户端读取时拿到的 updatedAt（乐观锁基准），必填。 */
@@ -64,7 +64,7 @@ function deny(caps: ShareCaps, input: ExternalDocDenyContext, reason: string): n
  * 那时 content / baseUpdatedAt 还没解析出来；而 `ExternalDocWriteInput` 是「已解析完整」
  * 的形状。让校验函数只依赖它真正用到的三个字段，两个调用点才都能复用。
  */
-export interface ExternalDocDenyContext {
+interface ExternalDocDenyContext {
   docId: string;
   ip: string;
   token: string;

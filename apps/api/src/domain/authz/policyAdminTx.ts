@@ -33,7 +33,7 @@ interface PolicySnapshot {
   reason: string | null;
 }
 
-export interface ApplyPolicyBatchResult {
+interface ApplyPolicyBatchResult {
   node: { id: string; kind: string; resourceType: string | null; resourceId: string | null; name: string };
   policyVersion: number;
   upserted: number;

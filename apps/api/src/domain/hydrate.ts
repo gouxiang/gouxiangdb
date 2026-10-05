@@ -94,7 +94,7 @@ function createContext(deps: HydrateDeps, firstTableId: string, fields: FieldMet
  * 行为与取值完全一致，仅查询数不收敛）。未设置/=on 均走批量预取（NODE_ENV=test 也默认开，
  * 由 S0 逐值快照对拍保证一致）。
  */
-export function resolvePrefetchEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+function resolvePrefetchEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.GX_HYDRATE_PREFETCH !== "off";
 }
 
@@ -140,14 +140,6 @@ export async function hydrateRecordsLegacy(
     out.push(await hydrateOne(r, fields, ctx));
   }
   return out;
-}
-
-export async function hydrateRecord(
-  record: RawRecord,
-  fields: FieldMeta[],
-  deps: HydrateDeps,
-): Promise<HydratedRecord> {
-  return await hydrateRecords([record], fields, deps).then((r) => r[0]!);
 }
 
 // ============ 单条 hydration ============
@@ -758,4 +750,3 @@ function formulaValueToCell(v: FormulaValue): FieldValue {
   }
 }
 
-export { loadFieldsCached };

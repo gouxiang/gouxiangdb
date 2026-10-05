@@ -15,7 +15,7 @@ import {
   PAT_SCOPES, type PatScope,
 } from "./tokens.js";
 
-export interface CreatePatInput {
+interface CreatePatInput {
   name: string;
   /**
    * 令牌身上那份「权限范围」——**仅作老数据兼容，不参与任何鉴权判定**（P3 起能力一律按签发者

@@ -19,7 +19,7 @@ export { ORG_ACTIONS };
 type Client = DbTx | typeof prisma;
 
 /** 由物化路径切出祖先闭包（含自身）的部门 id："/a/b/" -> ["a","b"]。 */
-export function ancestorDeptIdsFromPath(path: string): string[] {
+function ancestorDeptIdsFromPath(path: string): string[] {
   return path.split("/").filter(Boolean);
 }
 

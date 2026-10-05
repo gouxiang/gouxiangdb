@@ -147,7 +147,7 @@ async function writeLinks(
  * 不传 = 不记日志。保留这个"不记"的口子是为了让纯内部修复性写入（如 sidecar 回填）
  * 不污染「谁改了什么」这份账。
  */
-export interface FieldWriteTrace {
+interface FieldWriteTrace {
   op: "create" | "update";
   actorId: string | null;
 }
@@ -368,7 +368,7 @@ export async function softDeleteRecordTx(tx: DbTx, recordId: string, actorId: st
 }
 
 /** createRecordTx 入参（MCP 与 REST 同口径；显式传参、无 Hono Context）。 */
-export interface CreateRecordParams {
+interface CreateRecordParams {
   tableId: string;
   payloadFields: Record<string, unknown>;
   fields: Awaited<ReturnType<typeof loadTableFields>>;
@@ -413,7 +413,7 @@ export async function createRecordTx(tx: DbTx, params: CreateRecordParams): Prom
 }
 
 /** updateRecordTx 入参（MCP 与 REST 同口径；显式传参、无 Hono Context）。 */
-export interface UpdateRecordParams {
+interface UpdateRecordParams {
   tableId: string;
   recordId: string;
   /** 本次写入的字段映射（仅含 payload 出现的键）。 */
