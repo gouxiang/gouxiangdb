@@ -16,13 +16,7 @@ import type { PermissionSet, ResourceAction, TableAccess } from "@gx/shared-type
 import { enforceOrLegacy, type EnforceSemantics } from "./domain/authz/enforceGate.js";
 import type { LibraryAccessDTO } from "@gx/shared-types";
 import { HttpError, errorCodeForStatus } from "./httpError.js";
-import {
-  resolveBaseAccess,
-  resolveBaseAccessByRecord,
-  resolveBaseAccessByTable,
-  resolveBaseAccessByView,
-  tableAccessOf,
-} from "./domain/authz/libraryPolicy.js";
+import { resolveBaseAccess } from "./domain/authz/libraryPolicy.js";
 
 // 4xx 错误类与状态码映射在 httpError.ts（零依赖）：domain/** 也要抛 4xx，
 // 但 domain 不能 import 本文件（会拖入 Hono 的 Context）。这里转出保持既有调用点不变。
@@ -39,14 +33,6 @@ export async function requireUserId(c: Context): Promise<string> {
 export async function resolveBaseIdByTable(tableId: string): Promise<string | null> {
   const t = await prisma.table.findUnique({ where: { id: tableId }, select: { baseId: true } });
   return t?.baseId ?? null;
-}
-
-export async function resolveBaseIdByView(viewId: string): Promise<string | null> {
-  const v = await prisma.view.findUnique({
-    where: { id: viewId },
-    select: { table: { select: { baseId: true } } },
-  });
-  return v?.table.baseId ?? null;
 }
 
 export async function resolveBaseIdByRecord(recordId: string): Promise<string | null> {
@@ -129,28 +115,9 @@ async function enforceBase(
  * 用它取代旧的「仅 shadow 期跑一次 runShadowCheck」形态后，off/shadow 两态仍恒定返回
  * legacyAllowed（off 零 IO、shadow 正向对拍），on 态才真正由引擎决定放行。
  */
-export async function enforceResource(
-  guard: string,
-  userId: string,
-  ref: { resourceType: "kb" | "doc" | "canvas"; resourceId: string },
-  action: ResourceAction,
-  legacyAllowed: boolean,
-  semantics?: EnforceSemantics,
-): Promise<boolean> {
-  const out = await enforceOrLegacy({
-    guard, userId, action, legacyAllowed, semantics, ref,
-  });
-  return out.allowed;
-}
-
 /** 加载一次裁决结果（同一个请求里多处复用同一份评估）。 */
 export async function baseAccessOf(userId: string, baseId: string): Promise<LibraryAccessDTO> {
   return resolveBaseAccess(userId, baseId);
-}
-
-/** 按 tableId 加载裁决结果；表不存在返回 null。 */
-export async function baseAccessOfTable(userId: string, tableId: string): Promise<LibraryAccessDTO | null> {
-  return resolveBaseAccessByTable(userId, tableId);
 }
 
 export async function permissionsOf(userId: string, baseId: string): Promise<PermissionSet> {
@@ -178,12 +145,6 @@ async function loadBaseAccess(c: Context, baseId: string): Promise<BaseGuardResu
     perm: access.visible ? permit(access) : DENY_PERM,
     access,
   };
-}
-
-export async function requireRole(c: Context, baseId: string): Promise<Role> {
-  const g = await loadBaseAccess(c, baseId);
-  if (!g.access.visible) throw new HttpError(403, "无权访问该 Base");
-  return g.role;
 }
 
 export async function requireCanView(c: Context, baseId: string): Promise<BaseGuardResult> {
@@ -279,28 +240,6 @@ export async function requireCanComment(c: Context, baseId: string): Promise<Bas
 }
 
 // ============ 表级细粒度（拿到 tableId 的路由应当使用这一组） ============
-
-/** 表不存在 -> 404；不可见 -> 403。返回该表的四枚数据动作。 */
-export async function requireTableAccess(
-  c: Context,
-  tableId: string,
-): Promise<{ userId: string; access: LibraryAccessDTO; table: ReturnType<typeof tableAccessOf> }> {
-  const userId = await requireUserId(c);
-  const access = await resolveBaseAccessByTable(userId, tableId);
-  if (!access) throw new HttpError(404, "表不存在");
-  const table = tableAccessOf(access, tableId);
-  if (!table.read) throw new HttpError(403, "无权查看该表");
-  return { userId, access, table };
-}
-
-/** 按 recordId / viewId 反查所在库后裁决（无单表语义，走库级并集）。 */
-export async function baseAccessOfRecord(userId: string, recordId: string): Promise<LibraryAccessDTO | null> {
-  return resolveBaseAccessByRecord(userId, recordId);
-}
-
-export async function baseAccessOfView(userId: string, viewId: string): Promise<LibraryAccessDTO | null> {
-  return resolveBaseAccessByView(userId, viewId);
-}
 
 // ============ 统一错误出口 ============
 
