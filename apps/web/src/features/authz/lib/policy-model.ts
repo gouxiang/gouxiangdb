@@ -84,6 +84,8 @@ export function toggleAction(
     // 顺序对齐 RESOURCE_ACTIONS；补全 Record 以满足 tsc 穷举。
     enter: 8,
     edit_data: 9,
+    // share_link 为建链位（派生不可手授），仅用于排序，补全 Record 穷举。
+    share_link: 10,
   };
   return [...set].sort((a, b) => order[a] - order[b]);
 }
