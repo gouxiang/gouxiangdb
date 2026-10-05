@@ -1,5 +1,17 @@
 # 权限体系现状盘点（PERMISSION-MATRIX）
 
+> ## ⚠️ 2026-10-06 状态更新（先读这条，正文为历史快照）
+>
+> 下方盘点正文冻结于 **2026-09-20 / 基线 `ca2a530`**，其中「总门 `AUTHZ_ENFORCE_READY=false`、M4 默认不生效、KB 路由未接 authority」等结论**已被后续工作改变**。截至 2026-10-06：
+>
+> - **节点守卫总门已翻开**：`apps/api/src/configAuthz.ts` 的 `AUTHZ_ENFORCE_READY = true`（commit `138933f`，2026-10-05 戴总下令「直接通电接管」）。env `GX_AUTHZ_ENGINE` **默认仍 `off`，生产行为零变化、可逆**；部署侧显式置 `on` 后引擎即为权威，不再降级 shadow。
+> - **第 11 枚资源动作 `share_link`（建链位）已落地**（commit `a629b98`）：拆开此前 `manage_share` 一位的重载（总闸 vs 建单条外发链接）。`manage_share` 仅 canManage 投影；`share_link` 在 canManage=1 **或** canShare=1 时投影到 kb 节点。
+> - **KB 七路由已全部接 authority**：`routes/kb/index.ts`、`docs.ts`、`recycle.ts`、`sharing.ts` 等经 `enforceKbAuthority` 走 `enforceOrLegacy`，旧 shadow 缝 `shadowKbAction` 已删除。
+> - **真实进程 `on` 通电冒烟已通过**（独立临时库，未碰真实数据）：启动行 `configured=on effective=on`；owner 建库/建表/加字段/建记录/读回全放行，合法外部人全 403、坏/无 token 401，零 `authz_enforce_error`、零 unresolved。
+> - 权威操作步骤以 **`docs/runbooks/authz-engine-flip-on.md`** 为准（其「现状边界」段已同步更新）。
+>
+> 正文（§0 起）作为时点证据原样保留，行号均对应 2026-09-20 基线，**勿据其当前值操作**。
+
 > **本文性质**：现状盘点，**不含任何已拍板决策**，也不修改任何业务代码。
 > 所有结论须可凭 `文件:行号` 复核；无证据处一律写「未核实 / 代码中未见」，不凭印象补写。
 > **最关键的现状（务必先读 §0.1）：新权限引擎（M4）默认完全不生效**。任何「收缩权限」方案若不先翻这个闸门，改了也不生效。

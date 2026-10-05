@@ -7,7 +7,7 @@
   [authz-policy-dual-write.md](authz-policy-dual-write.md)（双写与开关往返）、
   翻门证据 [../baseline/2026-09-16-m4-gate.md](../baseline/2026-09-16-m4-gate.md)。
 
-> 现状边界（更新：R1 接线已落地；总门仍未翻）：
+> 现状边界（更新：2026-10-06。R1 接线已落地、KB 七路由已接 authority、**总门已翻**、真实进程 on 冒烟通过）：
 >
 > - `guards.ts` 七守（requireCanView / EditData / ManageSchema / ManageBase / DeleteBase /
 >   ToggleShare / Comment）的判定已统一收口到 `domain/authz/enforceGate.ts` 的
@@ -15,30 +15,32 @@
 >   旧决策只作反向对拍（日志与计数带 `direction=reverse`）；off / shadow 两态响应逐值不变。
 >   接线原语自带两种降级可观测：引擎抛错回落旧决策并记 `authz_enforce_error`、
 >   资源反查不到活节点按 fail-closed 拒绝并记 `authz_enforce_unresolved`。
-> - **翻门的 P0 阻断项（2026-10-03 坐实）**：管理员（`role_admin`）在 base 节点的投影
->   只有管理位（`manage_share` + canManage 时的 `manage_table`/`manage_schema`）、**没有 `r`**，
->   而 `requireCanView` 判的正是 base 节点的 `r`；叠加二代硬规则「管理员恒 visible=true」，
->   生效模式为 `on` 时管理员会被 `requireCanView` 判 403「无权访问该 Base」——
->   **即翻 on 会把全体管理员锁在所有库门外**。shadow 态只报 `DRIFT_OVERDENY` 不改响应，
->   故不会提前暴露。证据测试：`src/domain/authz/__tests__/r1-guards-enforce.test.ts`
->   的 `3.5` 组（现状冻结断言，修好后需翻转为 200 / overDeny=0）。
->   同源 P1：`requireCanManageBase` 用 `manage_share`，而管理员 base 节点恒有该动作、
->   二代却不强制 canManage，on 态会给未勾 canManage 的管理员发管理权（OVERALLOW）。
->   两条修法均落在 `scopeProjection.ts` 的管理员投影口径，需先裁决再翻门。
-> - `routes/kb/shared.ts` 两守（requireKb / requireDocAccess）**尚未**走该原语，仍只有
->   shadow 对拍缝。此外 kb 侧还有 **4 处零 shadow 缝的提级闸**未纳入任何接线清单
->   （`recycle.ts` 永久删、`index.ts` 分享总闸、`docs.ts` 找回、`sharing.ts` 分享链接），
->   且 `kb.delete` 现有 shadow 缝用的是 `manage_share` 而其 legacy 判据是 `canDeleteLibrary`
->   （仅超管），照抄该缝接 authority 会让「能管分享/能分享」的角色删掉整个知识库。
->   kb 两守 + 这 4 处一并收口后第 0 步才算齐。
-> - `AUTHZ_ENFORCE_READY` 仍为 `false`：env 设 `on` 依旧被运行时降级为 shadow 并打一次 warn。
->   即**接线已就位、总门未翻**，翻门仍按 §1 五前置 + 总监下令执行。
-> - 已经在 `on` 语义下真实生效的是两件只减不增的能力：fieldMask 五出口（S6，
->   `FIELD_MASK_ENFORCE_READY=true`）与 tree/menu 剪枝 + 面包屑截断（S7，
->   `NAV_PRUNE_ENFORCE_READY=true`），它们读原始 env，env=on 即生效。
-> - 因此本清单第 0 步是「部署含七守 enforce 接线、且总门可翻的构建」——这是总监下令后的
->   **独立切片**（不在 M4 里程碑内默认发生，M4 不删旧守卫分支）。下列步骤描述切 on 的
->   完整操作面，供该切片落地后照此执行与签收。
+> - **P0 阻断项已闭合**（2026-10-03）：管理员 `role_admin` 的库级准入改由库节点聚合位
+>   **`enter`** 承载（= legacy `access.visible`，管理员强制 visible=true 即投影），
+>   `requireCanView` 由判内容 `r` 改为判 **`enter`**——on 态不再把管理员锁门外。
+>   库节点仍**不持内容 `r`**（防淹没逐表字段收窄）。证据测试：`r1-guards-enforce.test.ts`
+>   的 `3.5` 组已翻转为 on 态管理员 200 / OVERDENY=0。
+> - **同源 P1 已修**：`requireCanManageBase` 由判 `manage_share` 改为判 **`manage_table`**
+>   （仅 canManage=1 才投影），未勾 canManage 的管理员不再拿到全库管理权；`manage_share`
+>   归 `requireCanToggleShare`。
+> - 其余守卫动作映射：`requireCanEditData` / `requireCanComment` → **`edit_data`**；
+>   `requireCanManageSchema` → `manage_schema`；`requireCanDeleteBase` → `d`（**conjunction**，
+>   仅超管 workspace owner 兜底放行）；`requireCanToggleShare` → `manage_share`。
+> - **KB 七路由已全部接 authority**（commit `a629b98`）：`routes/kb/index.ts`（改名 `manage_table`、
+>   分享总闸 `manage_share`）、`docs.ts`（建文档 `c`、找回 `u`）、`recycle.ts`（永久删
+>   `manage_table`）、`sharing.ts`（查看/建链接用第 11 枚动作 **`share_link`**，editor 模式另独立把 `u`）
+>   经 `enforceKbAuthority` 走 `enforceOrLegacy`；旧 shadow 缝 `shadowKbAction` 已删除。
+>   **第 11 枚资源动作 `share_link`（建链位，仅 kb 节点）**：canManage=1 **或** canShare=1
+>   时投影，scope 派生、不可手授；与仅 canManage 投影的总闸位 `manage_share` 严格区分。
+> - **总门 `AUTHZ_ENFORCE_READY = true`**（commit `138933f`，2026-10-05 戴总下令直接通电接管）：
+>   env 设 `on` 不再降级 shadow。**但 env `GX_AUTHZ_ENGINE` 默认仍 `off`，生产行为零变化、可逆**，
+>   由部署侧显式置 `on` 才真正以引擎为权威。
+> - **真实进程 on 通电冒烟已通过**（2026-10-06，独立临时库、未碰真实数据）：启动行
+>   `configured=on effective=on`；owner 建库/建表/加字段/建记录/读回全放行，合法外部人全 403、
+>   坏/无 token 401，零 `authz_enforce_error`、零 unresolved。
+> - fieldMask 五出口（S6 `FIELD_MASK_ENFORCE_READY=true`）与 tree/menu 剪枝 + 面包屑截断
+>   （S7 `NAV_PRUNE_ENFORCE_READY=true`）读原始 env，env=on 即生效。
+> - 旧守卫决策分支按 A-3 保留（on 稳定后再保两个迭代，删除在另开切片，M4 不删）。
 
 ## 0. 前置 0：enforce 构建就位（独立切片交付后）
 

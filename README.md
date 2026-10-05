@@ -10,10 +10,12 @@
 > 当前**实际执法的是第二代「库级策略」**——`apps/api/src/domain/authz/libraryPolicy.ts` 的 `resolveBaseAccess()`，
 > 读 **`role_library_scope`**（角色×库台账，另有超管/管理员硬短路），**不读旧三表**。日常在
 > 「工作区设置 → 角色权限」里配的库/表权限就是这一层，真生效。
-> 第三代 M4 权限引擎（读 `auth_policies` + `nav_nodes`）**本体已建成，且七个守卫的 enforce 接线（阶段 R1）已完成**，
-> 但被两个门卡着：`apps/api/src/configAuthz.ts` 的 `AUTHZ_ENFORCE_READY = false` + 环境变量 `GX_AUTHZ_ENGINE` 默认 `off`
-> （未设置 / 未知值 / 空值一律回 `off`；即使写 `on`，阶段门未翻也会降级为 `shadow`）。
-> 故引擎现在只在 `shadow` 下做对拍、不改判；翻 `on` 需满足前置条件且**仅由项目总监下令**。
+> 第三代 M4 权限引擎（读 `auth_policies` + `nav_nodes`）**本体 + 七守 R1 接线已建成，且总门已翻开**——
+> `apps/api/src/configAuthz.ts` 的 `AUTHZ_ENFORCE_READY = true`（commit `138933f`，2026-10-05 戴总下令直接通电接管）；
+> KB 七路由也已全部接 `authority`，并新增第 11 枚动作 **`share_link`**（建链位）。
+> **但环境变量 `GX_AUTHZ_ENGINE` 默认仍 `off`，故生产此刻行为零变化、仍由第二代执法**；部署侧显式置 `on`
+> （未设置 / 未知值 / 空值一律回 `off`）后引擎即为权威、不再降级。
+> 真实进程 `on` 通电冒烟已通过（2026-10-06，独立临时库）：owner 全放行、外部人 403、零 enforce error。
 > 第一代旧三表（`members` / `kb_members` / `kb_doc_acls`）生产已**零写点**，仅剩 3 处非执法只读用途，实际已退役。
 > 详见 `docs/runbooks/authz-engine-flip-on.md`、ADR-0056 与 `docs/decisions/AUTHZ-LEGACY-GUARD-CLEANUP.md`。
 
@@ -149,7 +151,7 @@ bash scripts/ci-quality.sh                   # CI 用质量门
 2. **子路径 / 网关部署的鉴权头**：飞牛网关会吞 `Authorization`，应用 JWT 改用自定义头 **`X-GX-Token`** 携带；服务端 `resolveActiveAuth` 先取 `Authorization: Bearer`，再回退 `X-GX-Token`（可带或不带 Bearer 前缀）。见 `docs/baseline/gate6-evidence/2026-09-18-fnos-fpk-0.1.1-delivery.md`。
 3. **数据库方言**：SQLite 单写者。所有写走 `withWriteTx` / `runWrite` / `withWriteBatch`，铁律「回调体内只用传入 `tx`，不得再入队」；raw SQL 一律参数化。
 4. **搜索**：`GX_M5_SEARCH` 出厂默认 `off`，`GX_EMBEDDING_MODE` 出厂默认 `off`（cloud 需管理员显式配置 + 二次确认）；`search.db` 可整文件重建，不进业务备份。
-5. **权限引擎**：`GX_AUTHZ_ENGINE` 代码默认 `off`，生产建议 `shadow`；**即使部署侧写 `on`，阶段门也会降级为 shadow 并 warn 一次**；真正翻 `on` 需满足五条前置且**仅由项目总监下令**（详见文首警示）。
+5. **权限引擎**：`GX_AUTHZ_ENGINE` 代码默认 `off`（生产此刻仍由第二代执法）；**总门 `AUTHZ_ENFORCE_READY=true` 已翻开**，部署侧显式置 `on` 后引擎即为权威、不再降级（回滚＝置回 `off`，零数据改动）；通电前按 `authz-engine-flip-on.md` 做 scope 投影与体检（详见文首警示）。
 6. **MCP**：`/mcp` 独立 body 上限 `GX_MCP_BODY_LIMIT` 默认 11MB（全局 JSON 限为 1MB）；`/mcp` 与 `/api/v1/pats` 同受 `GX_ENTERPRISE_ORG` 门控（off 即不挂载）。
 7. **未实测项**：本 README 不给出任何跨硬件性能承诺（如 KNN 延迟、首屏时间）；需要数字请查 `docs/baseline/`（含旧口径压测 `docs/baseline/2026-09-07-api-benchmark.md`），无记录的一律标【待补】。
 8. **项目瘦身**：截图、临时产物、疑似冗余组件等清理项**尚未裁决**，清单见根目录 `PENDING-DECISIONS.md`；未裁决前不得自行删除。
@@ -186,7 +188,7 @@ ADR-0001 拍板阶段初选 PostgreSQL，落地实现改用 **SQLite**（以代�
 | Core/RecordRepository.swift（hydrate） | `apps/api/src/domain/hydrate.ts` | 已对齐并超越：两轮 hydration + 防双向递归 + 跨表点引用 |
 | 公式 / Lookup / Rollup | `apps/api/src/domain/formula*` + `defaults.ts` | 完整实现，跨表点引用 + 即时反向重算 |
 | Core/MetaRepository.swift | `apps/api` 字段 / 关联路由 | 已移植，关联双向自动建 + 软删恢复 |
-| Core/PermissionChecker.swift | `shared-types permissionsForRole` + `libraryPolicy`（库级策略） | 已移植；M4 统一引擎已建成、R1 enforce 接线已完成但**默认不生效**（见文首警示），现行执法走第二代 `role_library_scope` |
+| Core/PermissionChecker.swift | `shared-types permissionsForRole` + `libraryPolicy`（库级策略） | 已移植；M4 统一引擎已建成、R1 接线完成且**总门已翻开**，但 env 默认仍 `off`，现行执法走第二代 `role_library_scope`（见文首警示） |
 | Shared/Theme.swift | `packages/design-tokens` | 1:1 移植为跨端 token |
 | Grid / Gallery / Form / Detail / Drawer | `apps/web/src/features/{grid,views,detail,drawer}` | 已实现，另增 Kanban / Calendar / ERD |
 | 画布 / 知识库（v1 无） | `apps/web/src/features/kb` | 新增能力 |
