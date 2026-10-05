@@ -42,10 +42,10 @@ beforeAll(async () => {
   baseNode = nodeId("base", base.baseId);
   const kb = await seedKbWithDocs(h, "s10az");
   docNode = nodeId("doc", kb.rootDoc);
-  await grant(baseNode, "viewer", "r", "s10az_v_base");
+  await grant(baseNode, "viewer", "enter", "s10az_v_base");
   await grant(docNode, "viewer", "r", "s10az_v_doc");
   // disabled 停用前给足授权（停用后旧 JWT 必须在鉴权链第一道被 401，根本到不了授权判定）。
-  await grant(baseNode, "disabled", "manage_share,r", "s10az_d_base");
+  await grant(baseNode, "disabled", "manage_share,enter", "s10az_d_base");
   const created = await h.app.request("/api/v1/nav/groups", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await h.auth("owner")) },
@@ -106,7 +106,7 @@ describe("viewer（仅 r）直调写/排障端点 -> 403", () => {
     const write = await h.app.request(`/api/v1/nodes/${baseNode}/policies`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...(await h.auth("viewer")) },
-      body: JSON.stringify({ upserts: [{ subjectType: "user", subjectId: "owner", actions: ["r"] }] }),
+      body: JSON.stringify({ upserts: [{ subjectType: "user", subjectId: "owner", actions: ["enter"] }] }),
     });
     expect(write.status).toBe(403);
     const read = await h.app.request(`/api/v1/nodes/${baseNode}/effective`, { headers: await h.auth("viewer") });

@@ -130,7 +130,7 @@ describe("AC-M4-1 调岗即时性（无 policyVersion/TTL 等待窗口）", () =
 });
 
 describe("AC-M4-1 owner_fallback 兜底独立例", () => {
-  it("base 创建人无任何策略行时 r 仍允许，来源 kind=owner_fallback 且 fallback=creator、policyId=null", async () => {
+  it("base 创建人无任何策略行时 enter 仍允许，来源 kind=owner_fallback 且 fallback=creator、policyId=null", async () => {
     // seeded base 的节点；owner 是创建人（seedBaseWithStarter createdBy=owner）。
     const baseNode = nodeId("base", "s10src_b");
     const res = await h.app.request(`/api/v1/nodes/${baseNode}/effective`, { headers: await h.auth("owner") });
@@ -138,9 +138,11 @@ describe("AC-M4-1 owner_fallback 兜底独立例", () => {
     const body = await json<{
       perAction: Array<{ action: string; allowed: boolean; sources: Array<{ kind: string; fallback: string | null; policyId: string | null }> }>;
     }>(res);
-    const r = body.perAction.find((p) => p.action === "r")!;
-    expect(r.allowed).toBe(true);
-    const fallback = r.sources.find((s) => s.kind === "owner_fallback");
+    // base 库节点只呈现库门位 enter；创建人兜底同样落在 enter 上。
+    expect(body.perAction.some((p) => p.action === "r")).toBe(false);
+    const enter = body.perAction.find((p) => p.action === "enter")!;
+    expect(enter.allowed).toBe(true);
+    const fallback = enter.sources.find((s) => s.kind === "owner_fallback");
     expect(fallback).toBeTruthy();
     expect(fallback!.fallback).toBe("creator");
     expect(fallback!.policyId).toBeNull();
