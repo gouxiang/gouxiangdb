@@ -8,7 +8,7 @@ import { requireUserId, errorResponse, HttpError } from "../../guards.js";
 import { syncNavFromEntitiesTx, purgeDocNodeTx } from "../../domain/nav/sync.js";
 import { removeDocAclProjectionsTx } from "../../domain/authz/projection.js";
 import { enqueueChangeEventTx } from "../../domain/search/outbox.js";
-import { requireKb } from "./shared.js";
+import { requireKb, enforceKbAuthority } from "./shared.js";
 
 export const recycleRoutes = new Hono();
 
@@ -21,8 +21,10 @@ recycleRoutes.delete("/docs/:docId/permanent", async (c) => {
     // 先过库身份（非成员 403 / 库不存在或已软删 404），再提级 owner-only：成员资格与角色提级
     // 分两步，不把"是不是这个库的人"隐含在"角色等不等于 owner"里。与同文件 GET /:kbId/trash
     // 同源（都走 requireKb），顺带纳入 requireKb 的 shadow 对拍，且库缺失时回 404 而非 403。
-    const { role } = await requireKb(userId, doc.kbId);
-    if (role !== "owner") throw new HttpError(403, "只有知识库所有者可彻底删除");
+    const { access } = await requireKb(userId, doc.kbId);
+    if (!(await enforceKbAuthority("kb.doc.permanent", userId, doc.kbId, "manage_table", access.canManage))) {
+      throw new HttpError(403, "只有知识库所有者可彻底删除");
+    }
     // M3/S3 #13d-永久删：顺序关键（nav_nodes 自引用 ON DELETE RESTRICT）——先删版本/ACL/实体，
     // 再按期望集对齐，把仍活的孤儿子文档（实体 parentId 悬空）节点改挂 kb、解除对被删节点的
     // 父子引用，最后 purgeDocNodeTx 清自身 shortcut + 删节点（doc 永久删按内容所有者语义主动

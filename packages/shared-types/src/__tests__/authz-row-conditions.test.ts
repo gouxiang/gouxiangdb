@@ -13,14 +13,15 @@ import {
 import type { FilterNode } from "../filters.js";
 
 describe("manage_table 资源动作", () => {
-  it("已加入封闭枚举 RESOURCE_ACTIONS（词汇已扩至 10 枚，末位为聚合位 edit_data）", () => {
-    // 8 -> 10：新增 enter / edit_data 两枚库级聚合位（ADR-0056 §4.1）。
-    // 末位按字典序是 edit_data（"edit_data" < "enter"，且二者均排在 manage_* 之后、r 之前）。
-    expect(RESOURCE_ACTIONS).toHaveLength(10);
+  it("已加入封闭枚举 RESOURCE_ACTIONS（词汇已扩至 11 枚，末位为建链位 share_link）", () => {
+    // 8 -> 10：新增 enter / edit_data 两枚库级聚合位（ADR-0056 §4.1）；
+    // 10 -> 11：新增建链位 share_link（仅 kb 节点，scope 投影派生），追加在数组末位。
+    expect(RESOURCE_ACTIONS).toHaveLength(11);
     expect(RESOURCE_ACTIONS).toContain("manage_table");
     expect(RESOURCE_ACTIONS).toContain("enter");
     expect(RESOURCE_ACTIONS).toContain("edit_data");
-    expect(RESOURCE_ACTIONS[RESOURCE_ACTIONS.length - 1]).toBe("edit_data");
+    expect(RESOURCE_ACTIONS).toContain("share_link");
+    expect(RESOURCE_ACTIONS[RESOURCE_ACTIONS.length - 1]).toBe("share_link");
     expect(LIBRARY_RESOURCE_TYPES).toEqual(["base", "kb"]);
   });
 

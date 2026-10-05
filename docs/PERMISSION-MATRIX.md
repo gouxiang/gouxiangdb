@@ -27,8 +27,8 @@
 
 1. `GX_AUTHZ_ENGINE` **默认 off**：`configAuthz.ts:22-26`（`resolveAuthzEngineMode`，缺省/未知/空值一律回 `"off"`），`config.ts:341` 用同函数解析出 `authzEngine`。
 2. 即使显式设 `on`，在 `AUTHZ_ENFORCE_READY=false` 时会被**降级为 shadow**：`configAuthz.ts:32-45`（`effectiveAuthzMode`，命中时 `return "shadow"` 并 warn 一次）。
-3. shadow 态下七守卫与 kb 守卫**仍以旧决策为准返回**，引擎只做对拍分类计数、不改响应、不抛错：`guards.ts:79-88`（`shadowBase`，`authzShadowActive()` 为假时直接 return）、`routes/kb/shared.ts:41-50`（`shadowKbAction` 同结构）。
-4. off 时 `authzShadowActive()=false` → 两个对拍缝均为空操作，**零新增 SQL**。
+3. shadow 态下七守卫与 kb 守卫**仍以旧决策为准返回**，引擎只做对拍分类计数、不改响应、不抛错：`guards.ts:79-88`（`shadowBase`，`authzShadowActive()` 为假时直接 return）；kb 侧无独立对拍缝，由 `enforceKbAuthority`（`routes/kb/shared.ts`）经 `enforceOrLegacy` 在 shadow 态内部正向对拍。
+4. off 时 `authzShadowActive()=false` → Base 对拍缝为空操作；kb 侧 `enforceOrLegacy` off 态零引擎 IO 直接返回 legacy，**零新增 SQL**。
 
 **结论**：当前任何角色/成员数据来源都是**旧三表**（`members` / `kb_members` / `kb_doc_acls`），由 `guards.ts` 的五个守卫判定。`auth_policies` / `nav_nodes` 这套新模型只在两处真正参与判定（见 §0.3 例外）。
 

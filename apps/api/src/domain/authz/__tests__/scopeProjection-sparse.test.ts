@@ -35,12 +35,16 @@ describe("projectScopeRow 稀疏条目（API-only 形状）按 §4.4 有意取�
     expect(projectScopeRow(row, SHAPE)).toEqual([]);
   });
 
-  it("kb：visible=0 canShare=1 content 有增量 -> 零投影（visible=0 表动作空集，canShare 不投影 manage_share）", () => {
+  it("kb：visible=0 canShare=1 -> 仅 share_link 单条（无内容动作、无 manage_share，建链位独立于 visible）", () => {
     const row: ScopeProjectionInput = {
       roleId: "r1", libraryKind: "kb", libraryId: "k9",
       canManage: 0, visible: 0, canShare: 1,
       config: JSON.stringify({ tables: { content: { delete: true } } }),
     };
-    expect(projectScopeRow(row, SHAPE)).toEqual([]);
+    const policies = projectScopeRow(row, SHAPE);
+    expect(policies).toHaveLength(1);
+    expect(policies[0].nodeId).toBe("nav_kb_k9");
+    // visible=0 -> content 表动作空集（增量配置不放大）；仅投影建链位 share_link。
+    expect(parseActionString(policies[0].actions)).toEqual(["share_link"]);
   });
 });

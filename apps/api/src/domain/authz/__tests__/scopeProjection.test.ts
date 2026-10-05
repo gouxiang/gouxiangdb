@@ -189,7 +189,7 @@ const CASES: ParityCase[] = [
     },
   },
   {
-    name: "kb visible=0 仅 canShare：零 kb 策略（建链接权另读 legacy canShare）",
+    name: "kb visible=0 仅 canShare：仅 share_link 的 kb 策略（无内容动作/无 manage_share）",
     row: {
       roleId: "role_kb_off", libraryKind: "kb", libraryId: "k4",
       canManage: 0, visible: 0, canShare: 1, config: "{}",
@@ -262,10 +262,12 @@ describe("projectScopeRow ↔ 第二代 libraryPolicy 逐值对拍", () => {
       } else {
         const expected = contentAccessOf(acc);
         const policy = index.get(`nav_kb_${c.row.libraryId}`);
-        // 仅 canShare（无内容动作、非 canManage）在新口径下不出 kb 策略（建链接权另读 legacy）。
+        // share_link 在 canManage=1 或 canShare=1 时投影，独立于 visible/内容动作；
+        // 这是唯一能让 visible=0/canShare=1 的行仍出现 kb 策略的位。
+        const expectShareLink = c.row.canManage === 1 || c.row.canShare === 1;
         const hasAny = !!(
           expected.read || expected.create || expected.update || expected.delete
-          || c.row.canManage === 1
+          || c.row.canManage === 1 || expectShareLink
         );
         if (!hasAny) {
           expect(policy).toBeUndefined();
@@ -284,6 +286,8 @@ describe("projectScopeRow ↔ 第二代 libraryPolicy 逐值对拍", () => {
         expect(acts.includes("manage_table")).toBe(c.row.canManage === 1);
         // kb manage_share 承载 owner-only rename，语义=canManage；仅 canShare 不给（legacy rename 亦拒）。
         expect(acts.includes("manage_share")).toBe(c.row.canManage === 1);
+        // 建链位与总闸分离：canManage 或 canShare 即有；纯只读（两者皆 0）没有。
+        expect(acts.includes("share_link")).toBe(expectShareLink);
         expect(policy!.fieldMask).toBeNull();
       }
     });

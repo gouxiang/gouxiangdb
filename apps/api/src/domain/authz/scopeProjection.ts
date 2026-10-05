@@ -159,8 +159,17 @@ function libraryManageActions(input: ScopeProjectionInput, withSchema: boolean):
   // 注意：canShare=1（仅能建/管外发链接）【不】映射 manage_share。该位被 requireCanToggleShare
   // 读取，语义必须恒等于 legacy canToggleShare（普通角色 = canManage，scopeSynthesize.ts:72）。
   // 若仅 canShare 也给位，toggle 总闸守卫会 overallow（on-guard-exhaustive canShareOnly 实测）。
-  // 建链接权另由 tableShares/kb sharing 端点直接读 legacy DTO 的 canShare 执法，不靠这一位。
+  // 建链接权由独立的 share_link 位承载（见 kbShareLinkAction），与 manage_share 总闸分离。
   return [];
+}
+
+/**
+ * 建链位 share_link（第 11 枚动作，仅 kb 节点）：canManage=1 或 canShare=1 时投影。
+ * 与 manage_share 严格区分——manage_share 是切换库分享总闸的管理位（仅 canManage），
+ * share_link 是为单篇文档创建外发链接之权（canManage 或 canShare）。scope 投影派生，不可手授。
+ */
+function kbShareLinkAction(input: ScopeProjectionInput): ResourceAction[] {
+  return input.canManage === 1 || input.canShare === 1 ? ["share_link"] : [];
 }
 
 function scopePolicy(
@@ -212,7 +221,8 @@ function projectKb(input: ScopeProjectionInput): ProjectedPolicy[] {
   const { actions: contentActions } = tableActions(input, KB_CONTENT_KEY);
   const libActs = libraryManageActions(input, false);
   // kb 只追加 enter，不 emit edit_data（§7.2-3：kb 的内容写关在 content 档位上）。
-  const merged = [...contentActions, ...libActs, ...enterAction(input)];
+  // share_link 独立于 visible：canShare-only viewer（visible=0）仍需建查看模式链接。
+  const merged = [...contentActions, ...libActs, ...enterAction(input), ...kbShareLinkAction(input)];
   if (merged.length === 0) return [];
   return [scopePolicy(nodeId("kb", input.libraryId), input.roleId, merged, null)];
 }

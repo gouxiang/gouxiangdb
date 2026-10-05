@@ -214,7 +214,12 @@ describe("projectImplicitAdmin ↔ oracle 对拍（kb）", () => {
       if (ta.delete) expected.push("d");
       if (ta.create || ta.update || ta.delete) expected.push("comment");
       if (oracle.canManage) expected.push("manage_table");
+      // 建链位 share_link：admin 覆盖强制 canShare=true，故每个 kb 用例都应投影
+      // （与普通角色 projectKb 同口径；与 manage_share 总闸分离）。
+      expected.push("share_link");
       expect(parseActionString(policy.actions).sort()).toEqual([...expected].sort());
+      const acts = parseActionString(policy.actions);
+      expect(acts.includes("share_link")).toBe(true);
       expect(policy.subjectId).toBe("role_admin");
     });
   }

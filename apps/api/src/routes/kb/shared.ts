@@ -1,5 +1,5 @@
 // apps/api/src/routes/kb/shared.ts
-// 知识库路由共享层：库/文档访问守卫、shadow 对拍缝、分享令牌/防环辅助。
+// 知识库路由共享层：库/文档访问守卫、authority 接线缝、分享令牌/防环辅助。
 //
 // 权限核心模型重构后：本文件不再有自己的判定逻辑。
 // requireKb / requireDocAccess 的放行与拦截全部来自 domain/authz/libraryPolicy.ts 的
@@ -12,38 +12,22 @@
 
 import { prisma } from "../../db.js";
 import { HttpError } from "../../guards.js";
-import { authzShadowActive } from "../../configAuthz.js";
-import { runShadowCheck } from "../../domain/authz/adapter.js";
 import { enforceOrLegacy } from "../../domain/authz/enforceGate.js";
-import type { LibraryAccessDTO } from "@gx/shared-types";
+import type { LibraryAccessDTO, ResourceAction } from "@gx/shared-types";
 import { contentAccessOf, resolveKbAccess } from "../../domain/authz/libraryPolicy.js";
 
 export type Role = "owner" | "editor" | "commenter" | "viewer";
 
 /**
- * M4/S3 shadow 对拍缝：仅 GX_AUTHZ_ENGINE 生效为 shadow 时跑引擎同上下文对拍；
- * off 时空操作零新增 SQL。旧决策永远为准，对拍只分类计数/脱敏日志、不改返回、不抛错。
- */
-export async function shadowKbAction(
-  guard: string,
-  userId: string,
-  kbId: string,
-  action: "r" | "c" | "d" | "enter" | "manage_share",
-  oldAllowed: boolean,
-): Promise<void> {
-  if (!authzShadowActive()) return;
-  await runShadowCheck(guard, userId, { resourceType: "kb", resourceId: kbId }, action, oldAllowed);
-}
-
-/**
  * KB 侧统一接线缝：与 guards.ts 的 enforceBase 完全同源，仅资源类型固定为 kb。
  * off 零 IO 返回 legacy；shadow 正向对拍；on 态引擎为权威（authority），旧决策反向对拍。
+ * action 接受任意 ResourceAction（c/manage_table/share_link 等由调用点传入）。
  */
-async function enforceKb(
+export async function enforceKbAuthority(
   guard: string,
   userId: string,
   kbId: string,
-  action: "enter" | "r" | "u",
+  action: ResourceAction,
   legacyAllowed: boolean,
 ): Promise<boolean> {
   const out = await enforceOrLegacy({
@@ -99,7 +83,7 @@ export async function requireKb(userId: string, kbId: string): Promise<KbGuardRe
   const kb = await prisma.knowledgeBase.findFirst({ where: { id: kbId, deletedAt: null } });
   if (!kb) throw new HttpError(404, "知识库不存在");
   const access = await resolveKbAccess(userId, kbId);
-  const allowed = await enforceKb("requireKb", userId, kbId, "enter", access.visible);
+  const allowed = await enforceKbAuthority("requireKb", userId, kbId, "enter", access.visible);
   if (!allowed) throw new HttpError(403, "无权访问该知识库");
   return { role: derivedRole(access), access };
 }
@@ -123,7 +107,7 @@ export async function requireDocAccess(
   // 否则 doc 中断继承时 doc 节点判 r/u 会产生假漂移。动作仍 r/u。见 §3.3。
   const action = needEdit ? ("u" as const) : ("r" as const);
   const legacyAllowed = needEdit ? canEdit : true;
-  const allowed = await enforceKb("requireDocAccess", userId, doc.kbId, action, legacyAllowed);
+  const allowed = await enforceKbAuthority("requireDocAccess", userId, doc.kbId, action, legacyAllowed);
   if (!allowed) {
     throw new HttpError(403, needEdit ? "当前角色无权编辑" : "无权访问该知识库");
   }

@@ -185,8 +185,9 @@ describe("D 逐表位与字段档位展开", () => {
     // kb 只 emit enter，不 emit edit_data（§7.2-3：kb 内容写关在 content 档位上）
     expect(kbPolicy.actions.includes("enter")).toBe(true);
     expect(kbPolicy.actions.includes("edit_data")).toBe(false);
+    // canManage=1 -> 建链位 share_link 随之投影（字典序位于 r/u 之间）；manage_schema 仍不挂 kb。
     expect(kbPolicy.actions.split(",").sort()).toEqual([
-      "c", "comment", "d", "enter", "manage_share", "manage_table", "r", "u",
+      "c", "comment", "d", "enter", "manage_share", "manage_table", "r", "share_link", "u",
     ]);
   });
 

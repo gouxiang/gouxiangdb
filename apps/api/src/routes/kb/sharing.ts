@@ -13,7 +13,7 @@ import { prisma } from "../../db.js";
 import { requireUserId, errorResponse, HttpError } from "../../guards.js";
 import { readShareEnabled } from "../../domain/authz/libraryVisibility.js";
 import { assertSharerCanGrantDocEdit, canSharerGrantDocEdit, resolveDocShareCaps } from "../../domain/share/shareCaps.js";
-import { genShareToken, requireDocAccess } from "./shared.js";
+import { enforceKbAuthority, genShareToken, requireDocAccess } from "./shared.js";
 
 export const sharingRoutes = new Hono();
 
@@ -22,7 +22,7 @@ sharingRoutes.get("/docs/:docId/share", async (c) => {
     const userId = await requireUserId(c);
     const docId = c.req.param("docId");
     const { doc, access } = await requireDocAccess(userId, docId);
-    if (!access.canShare) {
+    if (!(await enforceKbAuthority("kb.share.get", userId, doc.kbId, "share_link", access.canShare))) {
       throw new HttpError(403, "你没有这个库的分享权限：需要角色被授予「可分享」或对该库有管理权");
     }
     // 能否外发取决于所在知识库的「允许分享」开关（库级；知识库没有表这一级）。
@@ -61,8 +61,10 @@ sharingRoutes.post("/docs/:docId/share", async (c) => {
   try {
     const userId = await requireUserId(c);
     const docId = c.req.param("docId");
-    const { doc, access } = await requireDocAccess(userId, docId, true);
-    if (!access.canShare) {
+    // needEdit=false：canShare-only viewer 也需能创建查看模式链接；editor 模式链接
+    // 的内容编辑权另由下方 assertSharerCanGrantDocEdit 独立校验（不在这里要 u）。
+    const { doc, access } = await requireDocAccess(userId, docId, false);
+    if (!(await enforceKbAuthority("kb.share.post", userId, doc.kbId, "share_link", access.canShare))) {
       throw new HttpError(403, "你没有这个库的分享权限：需要角色被授予「可分享」或对该库有管理权");
     }
     const schema = z.object({

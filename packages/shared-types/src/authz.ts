@@ -2,7 +2,7 @@
 // M4 统一权限引擎：资源动作词汇 + 旧角色映射 + 动作串规范化 + FieldMask（唯一真源，只增）。
 //
 // 边界（M4 计划 §4.1/§4.4，总监裁决纯 allow）：
-//   - 资源动作全集 8 枚，auth_policies.actions 存放【字典序去重】的逗号分隔串；
+//   - 资源动作全集 11 枚，auth_policies.actions 存放【字典序去重】的逗号分隔串；
 //   - resourceActionsForLegacyRole 是回填 SQL 与引擎的共同映射，禁止两处各写一份；
 //   - FieldMask 是命中 allow 之上的能力裁剪（收窄清单，不是 deny/授权清单）：
 //     缺省=不裁剪；多来源并集取最宽（见 fieldMask.ts）。
@@ -10,11 +10,14 @@
 /**
  * 资源动作（auth_policies.actions 全集）。
  *
- * 后两枚是【库级聚合位】（ADR-0056 / AUTHZ-ENGINE-ON-LIBRARY-SEMANTICS.md §4）：
- *   - enter     库级准入，恒等于第二代 access.visible；
- *   - edit_data 库内活表可写并集，恒等于第二代 perm.canEditData。
- * 只在 base/kb 节点上有语义，且【只由 scope 投影派生、不得手授】（不变量 I1）；
- * 二者都不是 r/c/u，故结构上不可能进入 fieldMask 能力并集（不变量 I2）。
+ * 后三枚中：
+ *   - enter      库级聚合位（ADR-0056），库级准入，恒等于第二代 access.visible；
+ *   - edit_data  库级聚合位（ADR-0056），库内活表可写并集，恒等于第二代 perm.canEditData。
+ *     两枚只在 base/kb 节点上有语义，且【只由 scope 投影派生、不得手授】（不变量 I1）；
+ *     二者都不是 r/c/u，故结构上不可能进入 fieldMask 能力并集（不变量 I2）。
+ *   - share_link 第 11 枚动作：仅 kb 节点语义，表【为单篇文档创建外发分享链接】之权
+ *     （canManage=1 或 canShare=1 由 scope 投影派生，不得手授）；与 manage_share 严格区分——
+ *     manage_share 是切换库分享总闸的管理位（只投影 canManage），share_link 是建链位。
  */
 export type ResourceAction =
   | "r"
@@ -26,7 +29,8 @@ export type ResourceAction =
   | "manage_schema"
   | "manage_table"
   | "enter"
-  | "edit_data";
+  | "edit_data"
+  | "share_link";
 
 /** ResourceAction 封闭枚举（白名单校验/穷举用），字典序即规范串序。 */
 export const RESOURCE_ACTIONS: readonly ResourceAction[] = [
@@ -40,6 +44,7 @@ export const RESOURCE_ACTIONS: readonly ResourceAction[] = [
   "manage_table",
   "enter",
   "edit_data",
+  "share_link",
 ];
 
 /** 库节点资源类型：两枚聚合位只在这两类节点上有语义。 */

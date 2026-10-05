@@ -195,8 +195,9 @@ export async function explainEffective(
   const cache = new NavChainCache();
   const shared: EngineDeps = { ...engineDeps, cache };
 
-  // 库节点只呈现其合法位：base = enter/edit_data/manage_*，kb = enter/manage_share/manage_table；
-  // 内容节点（table/doc/canvas/view）枚举全部 10 枚。库节点不呈现内容动作 r/c/u/d/comment。
+  // 库节点只呈现其合法位：base = enter/edit_data/manage_*（不含 share_link），
+  // kb = enter/manage_share/manage_table/share_link；内容节点（table/doc/canvas/view）枚举全部 11 枚。
+  // 库节点不呈现内容动作 r/c/u/d/comment。
   const libType = first.node.resourceType === "base" || first.node.resourceType === "kb";
   const actionsToRun = RESOURCE_ACTIONS.filter((a) => {
     if (!libType) return true;
@@ -204,6 +205,8 @@ export async function explainEffective(
       return first.node.resourceType === "base" || a === "enter";
     }
     if (a === "manage_schema") return first.node.resourceType === "base";
+    // 建链位只在 kb 节点有语义；base 库节点剔除（对齐 actionLegalForNode）。
+    if (a === "share_link") return first.node.resourceType === "kb";
     if (a === "r" || a === "c" || a === "u" || a === "d" || a === "comment") return false;
     return true;
   });

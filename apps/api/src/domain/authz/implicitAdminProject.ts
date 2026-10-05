@@ -76,7 +76,7 @@ function projectBases(input: ImplicitAdminInput): ProjectedPolicy[] {
   return out;
 }
 
-/** kb 族投影：content 动作 + 管理位 + enter 合并到单条 kb 节点（kb 不 emit edit_data §7.2-3）。 */
+/** kb 族投影：content 动作 + 管理位 + enter + share_link 合并到单条 kb 节点（kb 不 emit edit_data §7.2-3）。 */
 function projectKbs(input: ImplicitAdminInput): ProjectedPolicy[] {
   const out: ProjectedPolicy[] = [];
   for (const { libraryId } of input.kbs) {
@@ -84,9 +84,12 @@ function projectKbs(input: ImplicitAdminInput): ProjectedPolicy[] {
     const ta = dto.tables["*"] ?? dto.tables[KB_CONTENT_KEY]
       ?? { read: dto.visible, create: false, update: false, delete: false };
     const actions = actionsFromTableAccess(ta);
-    actions.push("manage_share"); // admin canShare 恒真
+    actions.push("manage_share"); // admin canShare 恒真（总闸管理位）
     actions.push("enter");
     if (dto.canManage) actions.push("manage_table");
+    // 建链位 share_link：canManage=1 或 canShare=1 投影。管理员 canShare 恒真，故 admin
+    // 的 kb 节点必带 share_link（与普通角色 scope 投影 projectKb 同口径，二者分离于 manage_share）。
+    if (dto.canManage || dto.canShare) actions.push("share_link");
     out.push(policy(nodeId("kb", libraryId), actions));
   }
   return out;

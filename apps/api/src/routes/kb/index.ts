@@ -24,7 +24,7 @@ import {
   entityIconSchema,
   entityIconColorSchema,
 } from "../../validators/entity-icon.js";
-import { requireKb, shadowKbAction, enforceKbDelete } from "./shared.js";
+import { requireKb, enforceKbAuthority, enforceKbDelete } from "./shared.js";
 import { resolveKbAccess, resolveManyAccess, visibleLibraryIds } from "../../domain/authz/libraryPolicy.js";
 import { setShareEnabled } from "../../domain/authz/libraryVisibility.js";
 import { createKb } from "../../domain/libraryService.js";
@@ -133,13 +133,10 @@ kb.patch("/:kbId", async (c) => {
   try {
     const userId = await requireUserId(c);
     const kbId = c.req.param("kbId");
-    const { role } = await requireKb(userId, kbId);
-    const canManageShare = role === "owner";
-    if (!canManageShare) {
-      await shadowKbAction("kb.rename", userId, kbId, "manage_share", false);
+    const { access } = await requireKb(userId, kbId);
+    if (!(await enforceKbAuthority("kb.rename", userId, kbId, "manage_table", access.canManage))) {
       throw new HttpError(403, "只有所有者可修改知识库");
     }
-    await shadowKbAction("kb.rename", userId, kbId, "manage_share", true);
     const schema = z.object({
       name: z.string().min(1).max(80).optional(),
       // 自定义颜色：#RRGGBB | null（恢复默认色）| 缺省（不改动）。
@@ -237,9 +234,10 @@ kb.patch("/:kbId/share-enabled", async (c) => {
   try {
     const userId = await requireUserId(c);
     const kbId = c.req.param("kbId");
-    await requireKb(userId, kbId);
-    const access = await resolveKbAccess(userId, kbId);
-    if (!access.canToggleShare) throw new HttpError(403, "只有对本库有管理权限的角色、超级管理员或管理员可开关分享");
+    const { access } = await requireKb(userId, kbId);
+    if (!(await enforceKbAuthority("kb.share_enabled", userId, kbId, "manage_share", access.canToggleShare))) {
+      throw new HttpError(403, "只有对本库有管理权限的角色、超级管理员或管理员可开关分享");
+    }
     const schema = z.object({ enabled: z.boolean() });
     const parsed = schema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "参数不合法" }, 400);

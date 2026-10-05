@@ -177,9 +177,9 @@ describe("新库 seed：role_admin 初始投影", () => {
     expect(kbRes.status).toBe(201);
     const kbId = (await json<{ knowledgeBase: { id: string } }>(kbRes)).knowledgeBase.id;
     const kbNode = await policy(`nav_kb_${kbId}`, "role_admin");
-    // kb 节点追加 enter（不 emit edit_data，§7.2-3）
+    // kb 节点追加 enter（不 emit edit_data，§7.2-3），并带建链位 share_link（admin canShare 恒真）
     expect(kbNode?.actions.split(",").sort()).toEqual(
-      ["c", "comment", "d", "enter", "manage_share", "manage_table", "r", "u"].sort(),
+      ["c", "comment", "d", "enter", "manage_share", "manage_table", "r", "share_link", "u"].sort(),
     );
   });
 

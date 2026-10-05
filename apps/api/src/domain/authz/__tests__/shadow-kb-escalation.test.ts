@@ -142,23 +142,24 @@ describe("shadow：kb 四处 owner-only 提级（manage_share）+ 建内容（c�
   });
 });
 
-describe("shadow：人为制造 manage_share 提级漂移，旧提级判断仍为准", () => {
-  it("给 editor 在 kb 节点直授 manage_share -> PATCH 旧仍 403，引擎 allow，DRIFT_OVERALLOW=1", async () => {
+describe("shadow：人为制造 rename 提级漂移，旧提级判断仍为准", () => {
+  it("给 editor 在 kb 节点直授 manage_table -> PATCH 旧仍 403，引擎 allow，DRIFT_OVERALLOW=1", async () => {
     const kbId = await makeKb("ke_owner", [["ke_editor", "editor"]]);
     const node = await kbNodeId(kbId);
-    // reconcile 已投影 editor 的 kb 行（c,comment,d,r,u，无 manage_share）；同键 update 追加 manage_share，
-    // 模拟"策略比旧角色宽"。字典序存储串：c,comment,d,manage_share,r,u。
+    // reconcile 已投影 editor 的 kb 行（c,comment,d,r,u，无 manage_table）；同键 update 追加 manage_table，
+    // 模拟"策略比旧角色宽"。字典序存储串：c,comment,d,manage_table,r,u。
+    // 注意 rename 现按 manage_table（owner-only 改名权）判定，不再读重载的 manage_share。
     const upd = await h.prisma.authPolicy.updateMany({
       where: { nodeId: node, subjectType: "user", subjectId: "ke_editor" },
-      data: { actions: "c,comment,d,manage_share,r,u" },
+      data: { actions: "c,comment,d,manage_table,r,u" },
     });
     expect(upd.count).toBe(1);
     driftRegistry.reset();
     const res = await call("PATCH", `/api/kb/${kbId}`, "ke_editor", { name: "hack" });
-    expect(res.status).toBe(403); // 旧 owner-only 判断为准，引擎越权结论不放行
+    expect(res.status).toBe(403); // 旧 canManage 判断为准，引擎越权结论不放行
     const s = driftRegistry.snapshot();
     expect(s.overAllow).toBe(1);
     expect(s.overDeny).toBe(0);
-    expect(s.recent.some((e) => e.guard === "kb.rename" && e.action === "manage_share")).toBe(true);
+    expect(s.recent.some((e) => e.guard === "kb.rename" && e.action === "manage_table")).toBe(true);
   });
 });
