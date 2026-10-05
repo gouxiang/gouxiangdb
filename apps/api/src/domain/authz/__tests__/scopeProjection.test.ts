@@ -189,7 +189,7 @@ const CASES: ParityCase[] = [
     },
   },
   {
-    name: "kb visible=0 仅 canShare：只出 manage_share",
+    name: "kb visible=0 仅 canShare：零 kb 策略（建链接权另读 legacy canShare）",
     row: {
       roleId: "role_kb_off", libraryKind: "kb", libraryId: "k4",
       canManage: 0, visible: 0, canShare: 1, config: "{}",
@@ -249,9 +249,8 @@ describe("projectScopeRow ↔ 第二代 libraryPolicy 逐值对拍", () => {
         const libPolicy = index.get(`nav_base_${c.row.libraryId}`);
         const libActs = libPolicy ? parseActionString(libPolicy.actions) : [];
         expect(libActs.includes("manage_table")).toBe(c.row.canManage === 1);
-        expect(libActs.includes("manage_share")).toBe(
-          c.row.canManage === 1 || c.row.canShare === 1,
-        );
+        // manage_share 承载 toggle 总闸，语义=legacy canToggleShare(=canManage)；仅 canShare 不给。
+        expect(libActs.includes("manage_share")).toBe(c.row.canManage === 1);
         // 库级聚合位（ADR-0056 §4）：enter ≡ acc.visible‖canManage（不依赖活表）；
         // edit_data ≡ canManage ‖ 任一活表可写（与 guards.ts:66 permit.canEditData 同一口径）。
         const expectEnter = acc.visible || acc.canManage;
@@ -263,10 +262,11 @@ describe("projectScopeRow ↔ 第二代 libraryPolicy 逐值对拍", () => {
       } else {
         const expected = contentAccessOf(acc);
         const policy = index.get(`nav_kb_${c.row.libraryId}`);
-        const hasAny =
+        // 仅 canShare（无内容动作、非 canManage）在新口径下不出 kb 策略（建链接权另读 legacy）。
+        const hasAny = !!(
           expected.read || expected.create || expected.update || expected.delete
-            ? true
-            : c.row.canManage === 1 || c.row.canShare === 1;
+          || c.row.canManage === 1
+        );
         if (!hasAny) {
           expect(policy).toBeUndefined();
           return;
@@ -282,9 +282,8 @@ describe("projectScopeRow ↔ 第二代 libraryPolicy 逐值对拍", () => {
         );
         expect(acts.includes("manage_schema")).toBe(false);
         expect(acts.includes("manage_table")).toBe(c.row.canManage === 1);
-        expect(acts.includes("manage_share")).toBe(
-          c.row.canManage === 1 || c.row.canShare === 1,
-        );
+        // kb manage_share 承载 owner-only rename，语义=canManage；仅 canShare 不给（legacy rename 亦拒）。
+        expect(acts.includes("manage_share")).toBe(c.row.canManage === 1);
         expect(policy!.fieldMask).toBeNull();
       }
     });

@@ -87,8 +87,8 @@ describe("A 存量未投影", () => {
   });
 });
 
-describe("B 投影完成后的判定", () => {
-  it("聚合位投影后 parity=0，但 scope.ts 未改判 -> 库节点缺席可见集仍 NOT_READY", async () => {
+describe("B 根因修复后的判定（投影 + 判定两层都已接线）", () => {
+  it("聚合位 parity=0 且库节点进可见集；语义面两段同时归零", async () => {
     await seedFixture(prisma);
     await projectAll();
 
@@ -100,18 +100,18 @@ describe("B 投影完成后的判定", () => {
     // A 段可能含 A3（投影动作串恰等于旧档，只报不改的已知噪声）-> 提示不阻断
     expect(data.reconcile.byCode.every((x) => x.kind === "advisory")).toBe(true);
 
-    // 投影层活已干完：库节点聚合位与 legacy 逐值等价
+    // 语义面一：库节点聚合位 enter/edit_data 与 legacy 逐值等价
     expect(data.reachability.errors).toBe(0);
     expect(data.reachability.mismatches).toBe(0);
+    // 语义面二：判定层 scope.ts 已按 enter 改判 -> 库节点进可见集，无「表可见库消失」用户
+    expect(data.scopeVisibility.errors).toBe(0);
+    expect(data.scopeVisibility.orphanTableUsers).toBe(0);
+    expect(data.scopeVisibility.visible).toBeGreaterThan(0);
 
-    // 判定层（scope.ts 按 enter 改判）尚未接线 -> 库节点仍缺席可见集，故仍 NOT_READY
     const r = evaluatePreflight(data, wiredFacts(true));
-    expect(r.verdict).toBe("NOT_READY");
-    expect(r.blocking.some((b) => b.includes("库节点缺席可见集"))).toBe(true);
-
-    // 两项语义面待修项都摘掉后回到 READY：证明 evaluate 的分级接线本身正确
-    expect(evaluatePreflight(withoutSemanticGaps(data), wiredFacts(true)).verdict).toBe("READY");
-    const gated = evaluatePreflight(withoutSemanticGaps(data), wiredFacts(false));
+    expect(r.blocking.some((b) => b.includes("库节点缺席可见集"))).toBe(false);
+    expect(r.verdict).toBe("READY"); // 语义面与数据面齐；唯一剩余门仅在 enforceReady=false 时挡
+    const gated = evaluatePreflight(data, wiredFacts(false));
     expect(gated.verdict).toBe("NOT_READY");
     expect(gated.blocking.some((b) => b.includes("AUTHZ_ENFORCE_READY"))).toBe(true);
   });
@@ -124,9 +124,8 @@ describe("B 投影完成后的判定", () => {
     // 2 角色 × 2 库 × 2 聚合位 = 8 个值（r1 在 b2 无行、role_admin 在 b2 无行：各得空期望）
     expect(data.reachability.sampled).toBe(8);
     expect(data.reachability.mismatches).toBe(0);
-    // role_admin 在 b1 持 canManage -> enter/edit_data 两枚都应真；r1 在 b1 visible+t1 可写同理
-    const b1 = data.reachability.samples;
-    expect(b1).toEqual([]); // 全等价 -> 无样例留存
+    // 全等价 -> 无样例留存
+    expect(data.reachability.samples).toEqual([]);
   });
 
   it("反证（A-4 专项 §11.2）：库节点已带 enter，但 visibleAll 仍为 false、hidden 字段不可见", async () => {
@@ -160,8 +159,8 @@ describe("B 投影完成后的判定", () => {
   });
 });
 
-describe("B2 库节点是否进可见集（判定层 scope.ts 待改判）", () => {
-  it("库节点缺席可见集：表可见、库一个都不可见（通电后库整层从导航/检索消失）", async () => {
+describe("B2 库节点进入可见集（判定层 scope.ts 已按 enter 改判）", () => {
+  it("库节点进可见集：表可见、库也可见（不再整层消失）", async () => {
     await seedFixture(prisma);
     await projectAll();
 
@@ -170,16 +169,15 @@ describe("B2 库节点是否进可见集（判定层 scope.ts 待改判）", () 
     expect(sv.sampledUsers).toBeGreaterThan(0);
     expect(sv.errors).toBe(0);
     expect(sv.checked).toBeGreaterThan(0);
-    // scope.ts 尚未按 enter 改判：表进可见集、库不进
-    expect(sv.visible).toBe(0);
-    expect(sv.orphanTableUsers).toBeGreaterThan(0);
+    // scope.ts 已按 enter 改判：库节点进可见集，无 orphan 用户
+    expect(sv.visible).toBeGreaterThan(0);
+    expect(sv.orphanTableUsers).toBe(0);
 
     const r = evaluatePreflight(data, wiredFacts(true));
-    expect(r.verdict).toBe("NOT_READY");
-    expect(r.blocking.some((b) => b.includes("库节点缺席可见集"))).toBe(true);
+    expect(r.blocking.some((b) => b.includes("库节点缺席可见集"))).toBe(false);
   });
 
-  it("对照：用户本就无任何库视野时不计「库缺席」（表同样不可见，属合法空集）", async () => {
+  it("对照：用户本就无任何库视野时（表同样不可见，属合法空集）", async () => {
     await seedFixture(prisma);
     await prisma.roleAssignment.deleteMany({});
     await prisma.roleLibraryScope.deleteMany({});

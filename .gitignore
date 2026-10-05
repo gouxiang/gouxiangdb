@@ -40,6 +40,7 @@ _tmp_*
 .workbuddy-artifacts/
 artifacts/
 screenshots/
+.zwork/
 
 # ============ WorkBuddy 项目记忆 ============
 # 规则：知识“文本”随仓走（跨机继承约定/方案/技能/报告），重型二进制与机器本地数据忽略。

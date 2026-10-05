@@ -53,8 +53,10 @@ afterAll(async () => {
 
 describe("不可映射（角色）授权：落权威表、不回灌旧表、开关往返行恒保留", () => {
   it("PUT 角色授予 -> 200 带 legacyUnmappable，members 旧表零行，auth_policies 有行", async () => {
+    // ADR-0056 后 base 节点禁手授内容位（r 等会无 mask 下放），改用合法的库门 enter；
+    // 主体仍为 role，依旧不可映射旧三表（旧表只承载 per-user），本测试不变量不变。
     const res = await applyPolicyBatch(baseNode, {
-      upserts: [{ subjectType: "role", subjectId: "role_tog", actions: ["r"] }],
+      upserts: [{ subjectType: "role", subjectId: "role_tog", actions: ["enter"] }],
     }, "test-admin");
 
     const item = res.legacyUnmappable.find((x) => x.subjectType === "role" && x.subjectId === "role_tog");
@@ -68,7 +70,7 @@ describe("不可映射（角色）授权：落权威表、不回灌旧表、开�
       where: { nodeId: baseNode, subjectType: "role", subjectId: "role_tog" },
     });
     expect(pol).not.toBeNull();
-    expect(pol!.actions).toBe("r");
+    expect(pol!.actions).toBe("enter");
   });
 
   it.each([
@@ -84,14 +86,14 @@ describe("不可映射（角色）授权：落权威表、不回灌旧表、开�
       where: { nodeId: baseNode, subjectType: "role", subjectId: "role_tog" },
     });
     expect(pol).not.toBeNull();
-    expect(pol!.actions).toBe("r");
+    expect(pol!.actions).toBe("enter");
     expect(await h.prisma.member.count({ where: { userId: "ru" } })).toBe(0);
   });
 
   it("引擎 decide 与 flag 无关：off 下权威行仍被求值为 allow（重开即恢复的根据）", async () => {
     process.env.GX_AUTHZ_ENGINE = "off";
     const subject = await resolveSubject("ru", h.prisma);
-    const result = await decide({ client: h.prisma }, subject, baseNode, "r");
+    const result = await decide({ client: h.prisma }, subject, baseNode, "enter");
     expect(result.decision.allowed).toBe(true);
     expect(result.decision.sources.some((s) => s.kind === "role")).toBe(true);
   });

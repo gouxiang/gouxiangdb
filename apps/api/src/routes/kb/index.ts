@@ -24,7 +24,7 @@ import {
   entityIconSchema,
   entityIconColorSchema,
 } from "../../validators/entity-icon.js";
-import { requireKb, shadowKbAction } from "./shared.js";
+import { requireKb, shadowKbAction, enforceKbDelete } from "./shared.js";
 import { resolveKbAccess, resolveManyAccess, visibleLibraryIds } from "../../domain/authz/libraryPolicy.js";
 import { setShareEnabled } from "../../domain/authz/libraryVisibility.js";
 import { createKb } from "../../domain/libraryService.js";
@@ -201,11 +201,12 @@ kb.delete("/:kbId", async (c) => {
     // 硬规则：删除知识库只有超级管理员。对本库有管理权的角色也删不掉。
     await requireKb(userId, kbId);
     const access = await resolveKbAccess(userId, kbId);
-    if (!access.canDeleteLibrary) {
-      await shadowKbAction("kb.delete", userId, kbId, "manage_share", false);
+    // conjunction + d 统一裁定（对齐 requireCanDeleteBase）：off 零差异，
+    // on/shadow 非超管不因内容 d 被放大。见裁决 §5.1。
+    const allowed = await enforceKbDelete(userId, kbId, access.canDeleteLibrary);
+    if (!allowed) {
       throw new HttpError(403, "只有超级管理员可以删除知识库");
     }
-    await shadowKbAction("kb.delete", userId, kbId, "manage_share", true);
     const now = new Date();
     // M3/S3 #12b：kb 软删 + 级联 docs 收紧进单事务；nav 整棵子树（kb/doc/canvas）软删。
     // kb 无恢复端点（裁决 6），子树节点随实体一并软删、保留行；如需找回由管理员 reconcile 兜底。

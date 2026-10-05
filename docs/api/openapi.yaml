@@ -211,7 +211,7 @@ components:
         userId: { type: string, description: 实际求值的目标用户 id }
         actions:
           type: array
-          items: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema] }
+          items: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema, enter, edit_data] }
         kinds:
           type: array
           nullable: true
@@ -293,7 +293,7 @@ components:
               - type: object
                 required: [actions]
                 properties:
-                  actions: { type: array, items: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema] } }
+                  actions: { type: array, items: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema, enter, edit_data] } }
     NodePoliciesView:
       type: object
       required: [node, inheritAncestors, direct, ancestors]
@@ -320,7 +320,7 @@ components:
         actions:
           type: array
           minItems: 1
-          items: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema] }
+          items: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema, enter, edit_data] }
         fieldMask: { oneOf: [{ $ref: '#/components/schemas/FieldMask' }, { type: 'null' }] }
         # 注意：A-7 行级条件本期不实现，conditions 键不被读取也不持久化（非 null 条件 P1 启用时
         # 返回 400 POLICY_CONDITION_UNSUPPORTED），故本请求 schema 不声明 conditions。
@@ -380,7 +380,7 @@ components:
       description: effective perAction[] 单项：一枚资源动作的最终判定与完整来源链。
       required: [action, allowed, sources]
       properties:
-        action: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema] }
+        action: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema, enter, edit_data] }
         allowed: { type: boolean }
         sources: { type: array, items: { $ref: '#/components/schemas/DiagSource' } }
     EffectiveView:
@@ -396,7 +396,7 @@ components:
             resourceType: { type: string, nullable: true }
             name: { type: string }
         userId: { type: string }
-        actions: { type: array, items: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema] }, description: 最终允许的动作集（allowed=true 的动作） }
+        actions: { type: array, items: { type: string, enum: [r, c, u, d, comment, manage_share, manage_schema, enter, edit_data] }, description: 最终允许的动作集（allowed=true 的动作） }
         policyVersion: { type: integer }
         perAction: { type: array, items: { $ref: '#/components/schemas/EffectivePermission' }, description: 七枚资源动作逐一判定 }
 
@@ -1136,7 +1136,7 @@ paths:
           in: query
           required: false
           schema: { type: string, default: 'r' }
-          description: 逗号分隔资源动作（r/c/u/d/comment/manage_share/manage_schema），默认 r
+          description: 逗号分隔资源动作（r/c/u/d/comment/manage_share/manage_schema/enter/edit_data；enter=库门准入仅 base/kb、edit_data=库内可写并集仅 base/kb，两枚均为投影派生位不可手工授予），默认 r
         - name: kinds
           in: query
           required: false
@@ -1674,7 +1674,7 @@ paths:
       summary: 单事务整单写节点策略（需组织 manage_share 或节点资源 manage_share）
       description: |
         整单 upserts/deletes，全合法才提交（任一不合法 4xx 全拒，policyVersion 不增）：
-        动作白名单（r/c/u/d/comment/manage_share/manage_schema）、节点存在非软删、
+        动作白名单（r/c/u/d/comment/manage_share/manage_schema/enter/edit_data）、节点存在非软删、edit_data 不接受手工授予（仅 scope 投影派生）、
         kind-动作合法（manage_schema 仅 table/base）、fieldMask 字段必须属于该 table、主体存在不悬挂。
         成功 bump workspaces.policyVersion 并审计 policy_changed（detail 带 before/after diff）。
         可映射到旧三表角色档的 per-user 授权同事务反写 members/kb_members/kb_doc_acls；

@@ -120,7 +120,8 @@ describe("软删表后库节点 edit_data 重算", () => {
     const before = await readLibraryActions();
     expect(before.includes("edit_data")).toBe(true);
     expect(before.includes("enter")).toBe(true);
-    expect(before.includes("manage_share")).toBe(true);
+    // canManage=0：manage_share 不因 canShare 投影（toggle overallow 反证）。
+    expect(before.includes("manage_share")).toBe(false);
 
     await prisma.$transaction((tx) =>
       softDeleteTableTx(tx, "t1", "admin"));
@@ -128,7 +129,7 @@ describe("软删表后库节点 edit_data 重算", () => {
     const after = await readLibraryActions();
     expect(after.includes("edit_data"), "删唯一可写表后 edit_data 必须移除").toBe(false);
     expect(after.includes("enter"), "空库库门仍可见（legacy visible）").toBe(true);
-    expect(after.includes("manage_share"), "库级分享位由 scope 行保留").toBe(true);
+    expect(after.includes("manage_share"), "canManage=0 始终不投影 manage_share").toBe(false);
     expect(after.includes("manage_table")).toBe(false);
   });
 

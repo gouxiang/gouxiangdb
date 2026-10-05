@@ -136,26 +136,31 @@ describe("shadow：回填夹具三族对拍 0 drift", () => {
 describe("shadow：人工制造漂移，旧结果仍为准", () => {
   beforeEach(() => { process.env.GX_AUTHZ_ENGINE = "shadow"; });
 
-  it("DRIFT_OVERDENY：删 editor 投影行 -> 旧仍 200，引擎更严计 1", async () => {
-    await h.prisma.authPolicy.deleteMany({
-      where: { nodeId: baseNodeId, subjectType: "user", subjectId: "sh_editor" },
+  it("DRIFT_OVERDENY：删 viewer 角色的库门 enter 投影 -> 旧仍 200，引擎更严计 1", async () => {
+    // 权威已收归 role 投影：删 user 行无效（引擎仍从 role 行 allow）。sh_viewer 仅持
+    // sh_role_view，删该角色在 base 节点的 enter 投影即制造「legacy 读 scope=visible 放行、
+    // 引擎无 enter 拒绝」的真实分叉。
+    const deleted = await h.prisma.authPolicy.deleteMany({
+      where: { nodeId: baseNodeId, subjectType: "role", subjectId: "sh_role_view" },
     });
-    const res = await call("GET", `/api/tables?baseId=${baseId}`, "sh_editor");
-    expect(res.status).toBe(200); // 旧成员表为准，未被引擎误拒
+    expect(deleted.count).toBeGreaterThan(0);
+    const res = await call("GET", `/api/tables?baseId=${baseId}`, "sh_viewer");
+    expect(res.status).toBe(200); // 旧 scope 表为准，未被引擎误拒
     const s = driftRegistry.snapshot();
     expect(s.overDeny).toBe(1);
     expect(s.overAllow).toBe(0);
   });
 
-  it("DRIFT_OVERALLOW：给非成员插 r 策略 -> 旧仍 403，引擎更宽计 1（零容忍分类）", async () => {
+  it("DRIFT_OVERALLOW：给非成员插 enter 策略 -> 旧仍 403，引擎更宽计 1（零容忍分类）", async () => {
+    // 守卫库门现判 enter（不再是 r）：手授策略必须给 enter，引擎才会放行、与 legacy 拒绝分叉。
     await h.prisma.authPolicy.create({
       data: {
         id: "pol_test_overallow_stranger", workspaceId: "ws_default", nodeId: baseNodeId,
-        subjectType: "user", subjectId: "sh_stranger", actions: "r", createdBy: "test",
+        subjectType: "user", subjectId: "sh_stranger", actions: "enter", createdBy: "test",
       },
     });
     const res = await call("GET", `/api/tables?baseId=${baseId}`, "sh_stranger");
-    expect(res.status).toBe(403); // 旧成员表为准，引擎越权结论不放行
+    expect(res.status).toBe(403); // 旧 scope 表为准，引擎越权结论不放行
     const s = driftRegistry.snapshot();
     expect(s.overAllow).toBe(1);
     expect(s.overDeny).toBe(0);

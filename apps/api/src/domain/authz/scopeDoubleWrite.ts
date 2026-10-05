@@ -135,8 +135,9 @@ export async function rebuildScopePoliciesTx(
 
 /**
  * 新库 seed：为 role_admin 仅投影这一个新库，只 upsert 不删除。
- * base（零表）预期仅库节点 manage_share+manage_table；
- * kb 预期 kb 节点 content 全权 + comment + manage_share + manage_table。
+ * base（零表，此处 adminScopeRow.canManage=1）库节点 = enter,edit_data,manage_share,manage_table,manage_schema
+ *   （零表也 emit enter——库级准入不依赖表；edit_data 因 canManage 给出）；
+ * kb 节点 = enter + content 全权 + comment + manage_share + manage_table（kb 不 emit edit_data §7.2-3）。
  */
 export async function projectAdminForNewLibraryTx(
   client: AuthzClient,

@@ -128,7 +128,12 @@ export async function runShadowCheck(
   action: ResourceAction,
   oldAllowed: boolean,
   client: AuthzClient = prisma,
+  semantics: "authority" | "conjunction" = "authority",
 ): Promise<void> {
+  // conjunction：该动作只是借位的必要条件（如删库借 d），并不等于关卡真实裁决。
+  // 拿它与旧决策布尔对拍会产生结构性噪声（内容持 d 的编辑者被判「删库 overallow」），
+  // 故跳过对拍、不计数；on 态 conjunction 仍由 enforceWithEngine 只减不增地正确执法。
+  if (semantics === "conjunction") return;
   const baseCtx: ShadowCompareContext = { guard, action, nodeId: null, userId };
   try {
     const { nodeId, engineAllowed } = await engineDecideResource(userId, ref, action, client);

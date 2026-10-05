@@ -100,8 +100,8 @@ beforeAll(async () => {
   baseNodeId = await navNodeIdOf(baseId);
   base2NodeId = await navNodeIdOf(base2Id);
 
-  // 引擎侧授权：MEMBER 在主库有 r（与旧视野一致 -> 零漂移基线）。
-  await setPolicy(baseNodeId, MEMBER, "r");
+  // 引擎侧授权：MEMBER 在主库有 enter 库门（与旧视野一致 -> 零漂移基线）。
+  await setPolicy(baseNodeId, MEMBER, "enter");
 
   // 无 nav 节点的库（数据缺口形态，M3 reconcile 归口，此处验证 fail-closed）。
   const b3 = await h.prisma.base.create({ data: { name: "R1 无节点库", createdBy: "seed" } });
@@ -166,11 +166,11 @@ describe("3. on：引擎为权威（放行与拒绝两个方向）", () => {
     const s = driftRegistry.snapshot();
     expect(s.overDeny).toBeGreaterThanOrEqual(1);
     expect(s.recent.at(-1)!.direction).toBe("reverse");
-    await setPolicy(baseNodeId, MEMBER, "r");
+    await setPolicy(baseNodeId, MEMBER, "enter");
   });
 
-  it("引擎 allow 即放行：给无视野者插 r 策略，旧决策仍拒也放行，记 OVERALLOW(reverse)", async () => {
-    await setPolicy(baseNodeId, OUTSIDER, "r");
+  it("引擎 allow 即放行：给无视野者插 enter 策略，旧决策仍拒也放行，记 OVERALLOW(reverse)", async () => {
+    await setPolicy(baseNodeId, OUTSIDER, "enter");
     expect(await status("GET", tablesUrl(baseId), OUTSIDER)).toBe(200);
     expect(driftRegistry.snapshot().overAllow).toBeGreaterThanOrEqual(1);
     await clearPolicy(baseNodeId, OUTSIDER);
@@ -182,10 +182,11 @@ describe("3. on：引擎为权威（放行与拒绝两个方向）", () => {
     expect(await json<{ error: string; code: string }>(res)).toEqual({ error: "无权访问该 Base", code: "FORBIDDEN" });
   });
 
-  it("requireCanEditData：引擎给 u 即放行（旧视野拒绝），撤掉 u 即 403 且文案不变", async () => {
-    await setPolicy(baseNodeId, MEMBER, "r,u");
+  it("requireCanEditData：引擎给 edit_data 即放行（旧视野拒绝），撤掉即 403 且文案不变", async () => {
+    // 库节点只需聚合位：写入守判 edit_data（= canManage 或任一活表可写），不再判单表单动作的 u。
+    await setPolicy(baseNodeId, MEMBER, "enter,edit_data");
     expect(await status("POST", `/api/records?tableId=${tableId}`, MEMBER, { fields: {} })).toBe(201);
-    await setPolicy(baseNodeId, MEMBER, "r");
+    await setPolicy(baseNodeId, MEMBER, "enter");
     const res = await call("POST", `/api/records?tableId=${tableId}`, MEMBER, { fields: {} });
     expect(res.status).toBe(403);
     expect((await json<{ error: string }>(res)).error).toBe("当前角色无权编辑数据");
@@ -197,9 +198,9 @@ describe("3. on：引擎为权威（放行与拒绝两个方向）", () => {
     expect((await json<{ error: string }>(res0)).error)
       .toBe("只有对本库有管理权限的角色、超级管理员或管理员可开关分享");
 
-    await setPolicy(baseNodeId, MEMBER, "r,manage_share");
+    await setPolicy(baseNodeId, MEMBER, "enter,manage_share");
     expect(await status("PATCH", `/api/bases/${baseId}/share-enabled`, MEMBER, { enabled: true })).toBe(200);
-    await setPolicy(baseNodeId, MEMBER, "r");
+    await setPolicy(baseNodeId, MEMBER, "enter");
   });
 
   it("requireCanDeleteBase（conjunction）：引擎给 d 也不放行删库，超管照删", async () => {
@@ -222,12 +223,13 @@ describe("3. on：引擎为权威（放行与拒绝两个方向）", () => {
   });
 });
 
-// P0 缺口冻结（2026-10-03，r-authz-kb 核出、本文件补证）：管理员在 base 节点被投影成
-// 「只有管理位、没有 r」，而 requireCanView 判的正是 base 节点的 r -> on 态管理员被拒。
-// 断言方向为【冻结现状】而非期望值；待 scopeProjection 给管理员 base 节点补 r 后，
-// 下面 3.5-2/3.5-3 两条的 403 需翻转为 200，overDeny 需翻转为 0。
-describe("3.5 管理员 requireCanView：on 态误拒（P0，现状冻结）", () => {
-  it("3.5-1 根因证据：管理员 base 节点投影只有管理位、无 r（kb 节点对照含 r）", async () => {
+// P0 缺口【已闭合】（2026-10-03 核出 -> 同日由两枚库级聚合位 enter/edit_data 修掉）：
+// 管理员 base 节点原先只有管理位、没有任何库级准入位，而 requireCanView 判数据动作 r，
+// 故 on 态全体管理员被锁在库门外。现 requireCanView 改判 enter（= legacy access.visible），
+// 投影侧已在库节点 emit enter。本组断言由「冻结现状」翻转为【期望值】，不得再回退。
+// 依据 docs/decisions/AUTHZ-ENGINE-ON-LIBRARY-SEMANTICS.md §6 第 3 条。
+describe("3.5 管理员 requireCanView：库门 enter 已投影（P0 已闭合）", () => {
+  it("3.5-1 修法证据：管理员 base 节点持 enter，且不持内容 r；未勾 canManage 时不持 edit_data", async () => {
     // 空 scope 行集：管理员覆盖本就不依赖行存在，最纯粹的「凭硬规则进库」形态。
     await rebuildScopePoliciesTx(h.prisma, "role_admin", [], "seed");
     const pol = await h.prisma.authPolicy.findUnique({
@@ -239,29 +241,36 @@ describe("3.5 管理员 requireCanView：on 态误拒（P0，现状冻结）", (
     });
     expect(pol).not.toBeNull();
     const acts = (pol!.actions ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-    expect(acts).toContain("manage_share"); // 证明投影确已落到库节点
-    expect(acts).not.toContain("r"); // <-- P0 根因：库节点没有只读位
+    expect(acts).toContain("enter"); // 修法落点：库门位（= access.visible）
+    expect(acts).toContain("manage_share"); // 管理员 canShare 恒真，管理位不受影响
+    expect(acts).not.toContain("r"); // 仍不得有内容 r：否则淹没逐表字段收窄（A-4）
+    expect(acts).not.toContain("edit_data"); // 未勾 canManage 的管理员不给写并集（P1）
 
-    // 对照：kb 分支把 content 伪表动作直接压在 kb 节点上（含 r），两种形态不一致。
+    // 对照：kb 节点同样 emit enter，且 kb 不 emit edit_data（§7.2-3：kb 内容写关在 content 档位）。
     const kbProj = projectImplicitAdmin({ bases: [], kbs: [{ libraryId: "kb_x" }], adminScopeRows: [] });
     expect(kbProj).toHaveLength(1);
-    expect(kbProj[0]!.actions).toContain("r");
+    const kbActs = kbProj[0]!.actions.split(",").map((s) => s.trim()).filter(Boolean);
+    expect(kbActs).toContain("enter");
+    expect(kbActs).not.toContain("edit_data");
   });
 
-  it("3.5-2 shadow 态：管理员仍 200（响应不受影响），但对拍已报 OVERDENY", async () => {
+  it("3.5-2 shadow 态：管理员 200，且正向对拍零漂移", async () => {
     forced.mode = "shadow";
     expect(await status("GET", tablesUrl(baseId), ADMIN)).toBe(200);
-    expect(driftRegistry.snapshot().overDeny).toBeGreaterThanOrEqual(1);
+    const s = driftRegistry.snapshot();
+    expect(s.overDeny + s.overAllow).toBe(0);
+    expect(s.compared).toBeGreaterThan(0);
   });
 
-  it("3.5-3 on 态（现状）：管理员被 requireCanView 403，期望 200", async () => {
+  it("3.5-3 on 态：管理员 200，OVERDENY 归零（P0 已闭合）", async () => {
     forced.mode = "on";
     const res = await call("GET", tablesUrl(baseId), ADMIN);
-    expect(res.status).toBe(403); // TODO(P0)：投影补 r 后应为 200
-    expect((await json<{ error: string }>(res)).error).toBe("无权访问该 Base");
+    expect(res.status).toBe(200);
     const s = driftRegistry.snapshot();
-    expect(s.overDeny).toBeGreaterThanOrEqual(1); // TODO(P0)：应为 0
-    expect(s.recent.at(-1)!.direction).toBe("reverse");
+    expect(s.overDeny).toBe(0);
+    expect(s.overAllow).toBe(0);
+    // 走了 enforce 路径且以引擎结论为权威（零漂移时 recent 为空，故看计数而非环形缓冲）。
+    expect(s.comparedReverse).toBeGreaterThan(0);
   });
 });
 

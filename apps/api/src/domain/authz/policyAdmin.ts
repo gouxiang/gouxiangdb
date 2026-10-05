@@ -161,10 +161,31 @@ export function parsePolicyBatch(body: unknown): {
   return { upserts, deletes };
 }
 
-/** 管理动作按节点类型的合法性（§4.1：manage_schema 仅 table/base 有意义）。 */
+/**
+ * 动作按节点类型的合法性（整单校验唯一真源）：
+ *   - manage_schema：仅 table/base 节点；
+ *   - enter：库门聚合位，仅 base/kb 节点；
+ *   - edit_data：库内可写并集聚合位，仅 base/kb 节点（kb 当前不投影，见下）。
+ * 依据 docs/decisions/AUTHZ-ENGINE-ON-LIBRARY-SEMANTICS.md §2.1/§4.2。
+ */
 export function actionLegalForNode(node: AuthzNode, action: string): boolean {
-  if (action !== "manage_schema") return true;
-  return node.resourceType === "table" || node.resourceType === "base";
+  const rt = node.resourceType;
+  if (rt === "base") {
+    // 库节点只接受库门聚合位与库级管理位。内容动作 r/c/u/d/comment 落在此会沿继承
+    // 无 mask 下放（visibleAll，f2 泄漏），一律拒（§1.3 否决的「库节点补 r」越权口）。
+    return action === "enter" || action === "edit_data"
+      || action === "manage_share" || action === "manage_schema" || action === "manage_table";
+  }
+  if (rt === "kb") {
+    // kb 库门：enter + 内容动作 + 分享/表管理合法；manage_schema 无意义、edit_data 不投影（I1）。
+    return action === "enter"
+      || action === "r" || action === "c" || action === "u" || action === "d" || action === "comment"
+      || action === "manage_share" || action === "manage_table";
+  }
+  // 内容/结构节点（table/doc/canvas/view…）：两枚库级聚合位不适用；schema 位仅 table。
+  if (action === "enter" || action === "edit_data") return false;
+  if (action === "manage_schema") return rt === "table";
+  return true;
 }
 
 /** 加载活节点（软删/缺失 -> POLICY_NODE_NOT_FOUND）；group 写策略 -> kind 非法。 */
@@ -243,6 +264,13 @@ export async function validateBatch(
       throw new PolicyValidationError("POLICY_ACTION_INVALID", [{ index: i, message: "动作规范化后为空" }]);
     }
     for (const a of actions) {
+      if (a === "edit_data") {
+        // 聚合位只接受 scope 投影派生（经 scopeProjectionTx 直接写、不走本校验）；
+        // 手工 upsert 会制造与 legacy canEditData 口径不一致的越权，一律拒绝（I1）。
+        throw new PolicyValidationError("POLICY_ACTION_INVALID", [
+          { index: i, subject: u.subjectId, message: "edit_data 为投影派生位，不可手工授予" },
+        ]);
+      }
       if (!actionLegalForNode(node, a)) {
         throw new PolicyValidationError("POLICY_ACTION_INVALID", [
           { index: i, subject: u.subjectId, message: `动作 ${a} 对该节点类型非法` },

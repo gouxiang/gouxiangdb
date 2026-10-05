@@ -156,7 +156,10 @@ function libraryManageActions(input: ScopeProjectionInput, withSchema: boolean):
   if (input.canManage === 1) {
     return withSchema ? ["manage_schema", "manage_table", "manage_share"] : ["manage_table", "manage_share"];
   }
-  if (input.canShare === 1) return ["manage_share"];
+  // 注意：canShare=1（仅能建/管外发链接）【不】映射 manage_share。该位被 requireCanToggleShare
+  // 读取，语义必须恒等于 legacy canToggleShare（普通角色 = canManage，scopeSynthesize.ts:72）。
+  // 若仅 canShare 也给位，toggle 总闸守卫会 overallow（on-guard-exhaustive canShareOnly 实测）。
+  // 建链接权另由 tableShares/kb sharing 端点直接读 legacy DTO 的 canShare 执法，不靠这一位。
   return [];
 }
 

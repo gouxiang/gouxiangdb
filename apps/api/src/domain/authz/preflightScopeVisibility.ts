@@ -52,7 +52,8 @@ function isLibraryNode(resourceType: string | null): boolean {
 }
 
 /**
- * 只读抽样：对若干非 owner 用户，用 S4 同一内核逐个判其库节点的 r 可见性。
+ * 只读抽样：对若干非 owner 用户，用 S4 同一内核逐个判其库节点的 enter 库门可见性
+ * （内容节点 table/view/doc 仍判 r，见下）。
  * 只统计「有没有」，不重排、不落预算（体检要的是定性信号，不是端点契约）。
  */
 export async function computeScopeVisibility(client: AuthzClient): Promise<PreflightScopeVisibility> {
@@ -80,7 +81,8 @@ export async function computeScopeVisibility(client: AuthzClient): Promise<Prefl
 
       let userHasLibrary = false;
       for (const node of libraryNodes) {
-        const visible = nodeVisibleInPrepared(prepared, node, "r");
+        // 库门与守卫同口径判 enter（不再判 r：库节点无内容 r）。
+        const visible = nodeVisibleInPrepared(prepared, node, "enter");
         out.checked += 1;
         if (visible) {
           out.visible += 1;

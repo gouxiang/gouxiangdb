@@ -14,6 +14,7 @@ import { prisma } from "../../db.js";
 import { HttpError } from "../../guards.js";
 import { authzShadowActive } from "../../configAuthz.js";
 import { runShadowCheck } from "../../domain/authz/adapter.js";
+import { enforceOrLegacy } from "../../domain/authz/enforceGate.js";
 import type { LibraryAccessDTO } from "@gx/shared-types";
 import { contentAccessOf, resolveKbAccess } from "../../domain/authz/libraryPolicy.js";
 
@@ -37,16 +38,37 @@ export async function shadowKbAction(
   guard: string,
   userId: string,
   kbId: string,
-  action: "r" | "c" | "manage_share",
+  action: "r" | "c" | "d" | "enter" | "manage_share",
   oldAllowed: boolean,
 ): Promise<void> {
   if (!authzShadowActive()) return;
   await runShadowCheck(guard, userId, { resourceType: "kb", resourceId: kbId }, action, oldAllowed);
 }
 
-/** requireKb 成员资格对拍（kb 节点 r）。 */
+/** requireKb 成员资格对拍（kb 节点 enter 库门，= legacy access.visible）。 */
 async function shadowKb(userId: string, kbId: string, oldAllowed: boolean): Promise<void> {
-  await shadowKbAction("requireKb", userId, kbId, "r", oldAllowed);
+  await shadowKbAction("requireKb", userId, kbId, "enter", oldAllowed);
+}
+
+/**
+ * kb.delete 统一裁定，口径对齐 requireCanDeleteBase（裁决 §5.1）：引擎动作词汇无「删库」位，
+ * 以 conjunction 借 "d" 作必要条件（删 kb 必删内容），权威答案仍是 legacy canDeleteLibrary（仅超管）。
+ * off 零 IO 返回 legacy；shadow 正向对拍；on 态结论 = legacy ∧ engine，非超管不被 d 放大。
+ */
+export async function enforceKbDelete(
+  userId: string,
+  kbId: string,
+  legacyAllowed: boolean,
+): Promise<boolean> {
+  const out = await enforceOrLegacy({
+    guard: "kb.delete",
+    userId,
+    ref: { resourceType: "kb", resourceId: kbId },
+    action: "d",
+    legacyAllowed,
+    semantics: "conjunction",
+  });
+  return out.allowed;
 }
 
 /**
@@ -96,8 +118,11 @@ export async function requireDocAccess(
   const action = needEdit ? ("u" as const) : ("r" as const);
   const shadowContent = async (oldAllowed: boolean): Promise<void> => {
     if (!authzShadowActive()) return;
-    const kind = doc.kind === "canvas" ? "canvas" : "doc";
-    await runShadowCheck("requireDocAccess", userId, { resourceType: kind, resourceId: docId }, action, oldAllowed);
+    // 内容授权实际挂 kb 节点、沿 kb→doc 继承：对拍 ref 对齐 kb 节点（而非 doc 自身），
+    // 否则 doc 中断继承时 doc 节点判 r/u 会产生假漂移。动作仍 r/u。见 §3.3。
+    await runShadowCheck(
+      "requireDocAccess", userId, { resourceType: "kb", resourceId: doc.kbId }, action, oldAllowed,
+    );
   };
   if (needEdit && !canEdit) {
     await shadowContent(false);

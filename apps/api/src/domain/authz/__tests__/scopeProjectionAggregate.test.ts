@@ -32,14 +32,16 @@ describe("库级聚合位 enter / edit_data", () => {
     expect(acts).toEqual(["enter"]); // 仅准入位；零表无可写 -> 无 edit_data
   });
 
-  it("canShare=1 且 canManage=0：库节点含 manage_share/enter，但不含 manage_table（P1 越权反证）", () => {
+  it("canShare=1 且 canManage=0：库节点仅 enter，不含 manage_share/manage_table（toggle overallow 反证）", () => {
     const policies = projectScopeRow(baseInput({ visible: 1, canShare: 1 }), SHAPE);
     const lib = policies.find((p) => p.nodeId === "nav_base_b1");
     expect(lib, "缺 base 节点投影").toBeDefined();
     const acts = parseActionString(lib!.actions);
-    expect(acts.includes("manage_share")).toBe(true);
     expect(acts.includes("enter")).toBe(true);
-    // manage_table 严格 iff canManage；只勾 canShare 不得拿到库管理权（§2.2 OVERALLOW 反证）。
+    // manage_share 被 requireCanToggleShare 读取，语义=legacy canToggleShare(=canManage)；
+    // 仅 canShare 不得拿该位，否则开关分享总闸 overallow（on-guard-exhaustive canShareOnly）。
+    expect(acts.includes("manage_share")).toBe(false);
+    // manage_table 严格 iff canManage；只勾 canShare 不得拿到库管理权。
     expect(acts.includes("manage_table")).toBe(false);
   });
 });

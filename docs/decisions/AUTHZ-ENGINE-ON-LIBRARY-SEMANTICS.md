@@ -3,7 +3,7 @@
 - 状态: Accepted（2026-10-03 架构师 arch-authz-on-final 定稿；2026-10-03 按落地实况校订，见 §0.1）
 - 范围: 构想工作台新权限引擎 M4，三态由 `GX_AUTHZ_ENGINE(off|shadow|on)` + 硬门 `AUTHZ_ENFORCE_READY` 控制。当前生产 `off`，本设计是翻 `AUTHZ_ENFORCE_READY` 前最后一个阻断缺陷的唯一修法。
 - 性质: 纯设计。只读代码、只写本文档；不改任何生产码、不提交代码。
-- 关联: `docs/decisions/AUTHZ-LEGACY-GUARD-CLEANUP.md`、`docs/runbooks/authz-engine-flip-on.md`，M4 implementation plan，代码内以 `ADR-0056` 编号引用本裁决。
+- 关联: `docs/decisions/AUTHZ-LEGACY-GUARD-CLEANUP.md`、`docs/runbooks/authz-engine-flip-on.md`，M4 implementation plan，ADR 登记：`docs/adr/0056-library-aggregate-actions-enter-edit-data.md`（编号 0056 为 docs/adr 下 0055 之后的空号；代码注释引用正确，此前仅缺该文件，现已补齐）。
 
 ---
 
@@ -177,6 +177,8 @@ function libraryDataActions(input, shape): ResourceAction[] {
 - `KB_CONTENT_KEY = "content"`：kb 逐表投影用该伪表 key 的逻辑不变；enter 是库门独立位，不经 content 伪表。
 - kb 节点不挂 manage_schema（仅 table/base 合法）；enter 允许 kb、edit_data 不挂 kb，均需在 actionLegalForNode/投影登记。
 
+**orphanTableUsers 定义在 r→enter 后保持有效（非假绿）。** 该指标（preflightScopeVisibility.ts:100）= 「该用户对任一库节点 enter 均 false（:85 现判 enter）」且「对某非库内容节点 r=true（:98）」。判定集 `libraryNodes` 与 `otherNodes` 都来自 `prepareScope` 对全部活 nav 节点的预取（scope.ts:86-92，不按可见性预过滤），故库节点在被判定前不会被提前剔除——改判动作位只换了「以哪枚位定义库可见」，没有改「节点是否进入抽样集」。阈值仍为 0，且语义更准（enter 才是库门；旧版判 r 时库节点本就恒 false，反而把指标推向恒正）。唯一须保留的边界：抽样有 LIMITS.users=5 / libraries=8 上限，指标为 0 只覆盖样本，不能替代全量 reconcile，故退出清单同时要求 §6 第 5 条全量重投影。
+
 ### 3.4 性能与有界性
 
 - **零 N 次 decide / 零请求期聚合**：写并集在投影期固化为 edit_data，七守都是对库节点的单次 decide，复用 S4 单节点路径。
@@ -198,15 +200,42 @@ function libraryDataActions(input, shape): ResourceAction[] {
 
 | 写点 | edit_data 是否重算 | 证据 | 失效窗口 |
 | --- | --- | --- | --- |
-| 1. 新建表 | **无窗口**（edit_data 不受影响） | `tableActions`（`scopeProjection.ts:76-95`）：普通角色按 `cfg.tables[tableId]` 取 c/u/d，新表在 config 无条目 → 只给 r，故 `anyTableWritable` 不变。`projectAdminForNewTableTx`（`scopeDoubleWrite.ts:189-214`）只补 admin 表节点，与 edit_data 无关 | 无 |
-| 2. 改表级授权（scope 行 / config 变更） | **已覆盖，同事务** | `routes/v1/org/roleLibraryScopes.ts:24` → `rebuildScopePoliciesTx` → `expectedRole`（`scopeDoubleWrite.ts:88-99`）每次 `loadLiveShape` 现算 | 无 |
-| 3. 删除表 | **未覆盖 → OVERALLOW** | `softDeleteTableTx`（`domain/tableServiceTx.ts:197`）与 `routes/tables.ts:190` 无任何投影/重算调用。删掉唯一可写表后 `cfg.tables` 条目仍在、但 `shape.tableIds` 不再含它 → legacy `canEditData` 转 false，投影 `edit_data` 仍 true | **真实存在** |
-| 4. 恢复表 | **未覆盖 → OVERDENY** | `recycle.ts`/`tables.ts` 无 restore 投影钩子 | **真实存在** |
+| 1. 新建表 | **无窗口**（edit_data 不变） | `tableActions`：普通角色按 `cfg.tables[tableId]` 取 c/u/d，新表 config 无条目 → 仅 r，`anyTableWritable` 不变。三处建表点（`tableServiceTx.ts:160`、`tables.ts:358`、`records.ts` 复制）虽调 `syncTableForAllScopesTx(add)`，但 base 位本就无需变；`projectAdminForNewTableTx` 只补 admin 表节点 | 无 |
+| 2. 改表级授权（scope 行变更） | **已覆盖，同事务** | `routes/v1/org/roleLibraryScopes.ts:136` → `rebuildScopePoliciesTx` → `expectedRole`（`scopeDoubleWrite.ts:88-99`）每次 `loadLiveShape` 现算并全量替换，含 base 位 | 无 |
+| 3. 软删表 | **未覆盖 → OVERALLOW** | `softDeleteTableTx`（`domain/tableServiceTx.ts:197-215`，由 `tables.ts:190` 经 `tableService.ts:93` 调用）**全程无任何投影调用**——连 table 节点策略都不删。删掉唯一可写表后 `shape.tableIds` 不再含它，legacy canEditData 转 false，库节点 `edit_data` 仍 true | **真实存在** |
+| 4. 恢复表 | **部分覆盖 → OVERDENY** | 恢复路径在 `records.ts:1057-1090`（不在 recycle.ts）。`:1088` 调 `syncTableForAllScopesTx(add)`，但该原语**只回写目标 table 节点**（`scopeProjectionTx.ts:119-127`，`one = projected.find(p=>p.nodeId===targetNode)`），同一轮 projectScopeRow 已算出的 base 节点 edit_data 被丢弃。若删表后曾由回填把 edit_data 修正为 false，恢复后 edit_data 仍 false → 有可写表却写不了 | **真实存在** |
 | 5. 库软删/恢复 | 已覆盖 | `expectedRole` 活库过滤（`scopeDoubleWrite.ts:81-92`） | 无 |
 
-**裁决：3 与 4 是翻闸阻断项（不是可接受风险）。** 方向 3 是 OVERALLOW，M4 对越权零容忍，不能靠"下层守卫还会拦"自证安全——guard 层已先给出与 legacy 相反的放行结论，drift 计 OVERALLOW。
+**统一根因**：`syncTableForAllScopesTx`（scopeProjectionTx.ts:101-139）把整库投影（含 base 节点的 enter/edit_data）都算出来了，却只持久化目标 table 节点那一条；而软删表路径压根不调它。
 
-**补法（改动小，同事务，不新增语义）**：在 `softDeleteTableTx`（`tableServiceTx.ts:197`）与表恢复路径各加一次 `rebuildScopePoliciesTx`（或等价的按库重投影），与建库/scope 写入同一原语；表复制（`tables.ts:359`）同理可复用。补充测试：删表与恢复表后立即对拍 `edit_data` ↔ legacy `canEditData`。
+**裁决：3 与 4 是翻闸阻断项（不是可接受风险）。** 3 是 OVERALLOW，M4 对越权零容忍，不能靠「下层守卫还会拦」自证——guard 层已先给出与 legacy 相反的放行，drift 计 OVERALLOW；4 是真实误拒。
+
+**建议补法（由实施 worker 落地，本设计不改码，二选一）：**
+- 首选（最小、零新增查询面）：在 `syncTableForAllScopesTx` 处理完 targetNode 后，**额外从同一 `projected` 集里取 base 节点那一行（nodeId("base", libraryId)）一并 upsert（add）/ delete（remove）**；并在 `softDeleteTableTx` 内补一次 `syncTableForAllScopesTx(..., "remove")`（同事务，库节点位随之删除）。
+- 备选：这些调用点改走 `rebuildScopePoliciesTx` 对受影响角色全量替换（语义最稳，但写放大略大）。
+- 兜底（不替代上述修复）：翻闸前先全量跑一次 `project-scope --apply` 只清存量，清不了「上线后再删表」的窗口，故不能作为唯一手段。
+- 必补对拍测试：建表/软删/恢复后立即核对 `edit_data` ↔ legacy `canEditData`。
+
+### 3.6 通配表配置（wildcard `*`）与 edit_data 派生（回裁，推翻初稿「建表无窗口」的适用前提）
+
+初稿「建表无窗口」依赖一个未言明前提：不存在通配表配置。**该前提不成立**——legacy 明确支持通配且优先级高于精确：
+
+- `WILDCARD_TABLE = "*"`（`scopeSynthesize.ts:23`）；`tableAccessOf` 顺序为「通配 → 精确 → 库级默认」（`libraryPolicy.ts:67-74`）；`synthesizeAccess:66` 对 canManage 直接注入 `"*": FULL_TABLE_ACCESS`。
+- legacy `permit.canEditData = canManage || Object.values(access.tables).some(可写)`（`guards.ts:63-66`），而 `access.tables` **含 `"*"` 键** → 配了通配的角色其 `canEditData` 恒真，**与库内活表集合无关**（空库也真）。
+- 投影侧原 `tableActions` 只做精确查找、不读 `"*"`，故逐表动作与 `anyTableWritable` 双双算错。已修：`scopeProjection.ts:92` 改为 `cfg.tables[WILDCARD_TABLE] ?? cfg.tables[tableId]`（通配优先、不合并，逐字对齐 legacy）。
+
+**回裁结论（两条，方向相反）：**
+
+1. **通配 edit_data 派生 = 翻闸阻断项（必须修）。** 仅修 `tableActions` 不够：`anyTableWritable` 遍历 `shape.tableIds`，空库（或表全软删）时为空 → `edit_data` false，而 legacy 恒真 → OVERDENY；parity `[3]` 会记不等价。修法：`libraryDataActions` 的 edit_data 条件改为 `canManage || 通配可写 || 任一活表可写`，使通配角色的 edit_data 与活表集合解耦。
+2. **建表/复制表重算钩子 = 非阻断，且不推荐加。** 一旦 edit_data 按上式感知通配，通配角色的 edit_data 与建/删/恢复表完全无关；非通配角色新建表在 config 无写条目、并集不变。两类都不存在窗口，加钩子只带来写放大。故维持「建表无窗口」结论，但其成立条件现由第 1 条保证。
+
+### 3.7 库节点重算原语的两条硬约束（resyncLibraryAggregateForAllScopesTx）
+
+新增的库节点重算原语（`scopeProjectionTx.ts:152-180`）当前遍历全部 `roleLibraryScope` 行并对每行调用 `projectScopeRow`，有两处必须与既有口径对齐，否则制造新缺陷：
+
+1. **必须跳过 `role_owner`**：owner 走硬短路、永不投影。`expectedScopePoliciesForRole` 对 owner 返回空（`scopeDoubleWrite.ts:114`）、`rebuildScopePoliciesTx` 对 owner 提前 return（`:131`）。不跳过会给 owner 生成上百条库节点策略，违反「owner 永不投影」且触发 B1 阻断码。**已闭合**：原语 :186（及 `syncTableForAllScopesTx` :124）均已 `if (row.roleId === SUPER_ADMIN_ROLE_ID) continue;`；「非活库不投影」守卫亦已提前到函数最前（:164-170）。
+   - **常量同源（非阻断，排期收敛）**：`SUPER_ADMIN_ROLE_ID` 现散落 6 处（`org/roles.ts:85` 导出、`scopeDoubleWrite.ts:30`、`scopeProjectionReconcile.ts:24`、`scopeBackfill.ts:28`、`preflightReachability.ts:26`、新增 `implicitAdminShared.ts:20`）。事务原语不可引 `org/roles.ts`（该模块带 prisma 单例副作用），故取 `implicitAdminShared.ts` 这个零 IO 纯常量模块为 authz 侧真源；其余 5 处应在 be-authz-projection 切片落地后统一改引，**排在落地之后以避免撞在途文件**。当前值一致且有「owner 零策略 count=0」测试兜底，漂移即红，故不构成翻闸阻断项。
+2. **`role_admin` 必须走隐含投影，不能走 `projectScopeRow`**：管理员库节点的 `manage_share`/`enter` 由 F8 硬规则强制（`implicitAdminProject.ts:68-73`），`projectScopeRow` 算不出这层隐含位，用它整行覆盖会抹掉 `manage_share` → OVERDENY（今天因 admin 行恰为 canManage=1 而侥幸等价，一旦出现 `canManage=0 & visible=1` 的 admin 行即暴露）。**翻闸阻断项（潜伏）。**
 
 ---
 
@@ -255,7 +284,7 @@ function libraryDataActions(input, shape): ResourceAction[] {
 | 文件 | 改动 |
 | --- | --- |
 | `preflightReachability.ts` | 已以 `computeLibraryAggregateParity` 对拍 enter/edit_data ↔ legacy visible/canEditData；退出看 **`mismatches=0`、`errors=0`**（旧 libraryUnreachable 已废弃） |
-| `preflightScopeVisibility.ts` | 库整层可见抽样；退出看 **`orphanTableUsers=0`**（库节点按 enter，注意该模块当前逐库判 r 的位置须同步改 enter） |
+| `preflightScopeVisibility.ts` | 库整层可见抽样；退出看 **`orphanTableUsers=0`**（库节点已在 :85 判 enter、内容节点 :98 判 r，口径已对齐，复核即可） |
 | `preflight.ts` | 汇总上述两段；阻断文案随方案更新为「聚合位不等价 / 库整层退出」 |
 | `reconcile.ts` | A3 增加条件：`reason==='scope:role'` 的机器投影**排除出 A3**（合法等于旧档，非手工污染） |
 | `scripts/authz/project-scope.ts` | 复用，无需改；存量以新投影重跑 `--apply` |
@@ -312,7 +341,12 @@ function libraryDataActions(input, shape): ResourceAction[] {
    - 根因断言由「base 节点无 r」改为「库节点持 enter/edit_data、不持内容 r」；
    - 管理员由 403 翻 **200**、overDeny 翻 **0**；移除 TODO(P0) 或改已闭合说明。
 4. **S4 零分叉保持**：scope-parity 全绿（聚合位进入矩阵后逐节点 scope↔decide 一致）；visibleTotal 与 decide 真值计数恒等。
-5. **存量重投影与新鲜度闸**：重跑 `scripts/authz/project-scope.ts --apply`，所有活库（含空库、kb）聚合位与管理位到位；重跑后 preflight 全 0、幂等（第二次 changed=0）；且 §3.5 列出的并集影响写入点（建表/删表/恢复表/config 改表级写权限/库软删恢复）全部事务内重投影，缺则补齐并补对拍测试。
+5. **存量重投影与新鲜度闸**：重跑 `scripts/authz/project-scope.ts --apply`，所有活库（含空库、kb）聚合位与管理位到位；重跑后 preflight 全 0、幂等（第二次 changed=0）。
+   **翻闸阻断项（未补齐不得翻 on）：**
+   - **重算原语必须跳过 `role_owner`**（§3.7-1，仍未实现）：owner 永不投影，不跳会生成上百条库节点策略并触发 B1 阻断码；且「非活库不投影」守卫须移到普通角色循环之前。
+   - **通配 edit_data 派生**（§3.6-1）：`libraryDataActions` 必须感知 `"*"`，否则空库/表全软删时与 legacy canEditData 不等价（OVERDENY）。
+   - **接线级对拍**（新增要求）：删表/恢复表两处调用点须有路由级或等价断言——原语级测试证明不了调用点被接通，而「调用点缺失」正是本条缺口当初的成因。
+   **非阻断（已覆盖或确认无窗口，仅复核）：** 删表（`softDeleteTableTx:229`）、**恢复表（`records.ts:1096` 已补，与删表对称）**、role_admin 隐含重算（原语内 :190-208 已并入 `projectImplicitAdmin`）、scope 行变更（`roleLibraryScopes.ts:136`）、库软删/恢复（活库过滤）、**建表/复制表（§3.6-2 判定无窗口，不加重算钩子）**。
 6. **A3 口径修正**：A3 排除 reason='scope:role'；字节副本上清 A1（补投影）/B2（删断节点 legacy），验证不扩大删除面。
 7. **接管完整性**：kb.delete 改 conjunction+d；4 处零 shadow 缝补对拍且观察期双向 drift=0；「on 仍 legacy」边界登记 runbook。
 8. **on 态穷举测试新增**：见 §7，全部身份×七守（含 kb 侧）强制 on 端到端绿，含字段收窄/继承中断/空库对抗。
@@ -339,6 +373,8 @@ shadow 态响应恒等于 legacy，引擎结论只计数、不参与放行。on 
 5. **继承中断对抗**：table/doc 中断后库 enter 仍判库门；内容读以自身 r 为准、不越权；requireDocAccess 在 kb 节点对拍无假漂移。
 6. **高权限缝对拍**：kb.delete 与 4 缝 shadow 对拍与 legacy 一致、drift=0；手授 edit_data 被策略校验拒绝。
 7. **故障/缺节点 on 行为**：引擎抛错回落 legacy（不 500）；库 nav 节点缺失 fail-closed 403 + UNRESOLVED_NODE。
+8. **聚合位新鲜度（裁决 §3.5）**：删表后立即对拍 `edit_data` ↔ legacy `canEditData`（须同步转 false，防 OVERALLOW）；恢复表后对拍（须同步转 true，防 OVERDENY）；建表后对拍（应不变）。
+9. **kb 侧 parity（裁决 b）**：`computeLibraryAggregateParity` 扩展覆盖 **kb 节点的 `enter`** ↔ legacy kb `visible`；kb **不比 `edit_data`**（kb 不 emit，且 legacy kb 无库级 canEditData 聚合，内容写挂在 content 档位）。
 
 ---
 

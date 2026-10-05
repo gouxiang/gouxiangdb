@@ -81,8 +81,8 @@ export async function enforceOrLegacy(p: EnforceParams): Promise<EnforceOutcome>
   }
 
   if (mode === "shadow") {
-    // 正向对拍：旧为准，引擎只对比；runShadowCheck 自身吞错（fail-open 仅限观测层）。
-    await runShadowCheck(p.guard, p.userId, p.ref, p.action, p.legacyAllowed, p.client);
+    // 正向对拍：旧为准，引擎只对比；conjunction 借位不可比，runShadowCheck 内部跳过对拍。
+    await runShadowCheck(p.guard, p.userId, p.ref, p.action, p.legacyAllowed, p.client, p.semantics);
     return { allowed: p.legacyAllowed, source: "legacy", direction: "forward" };
   }
 
