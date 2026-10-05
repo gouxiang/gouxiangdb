@@ -195,9 +195,22 @@ export async function explainEffective(
   const cache = new NavChainCache();
   const shared: EngineDeps = { ...engineDeps, cache };
 
+  // 库节点只呈现其合法位：base = enter/edit_data/manage_*，kb = enter/manage_share/manage_table；
+  // 内容节点（table/doc/canvas/view）枚举全部 10 枚。库节点不呈现内容动作 r/c/u/d/comment。
+  const libType = first.node.resourceType === "base" || first.node.resourceType === "kb";
+  const actionsToRun = RESOURCE_ACTIONS.filter((a) => {
+    if (!libType) return true;
+    if (a === "enter" || a === "edit_data") {
+      return first.node.resourceType === "base" || a === "enter";
+    }
+    if (a === "manage_schema") return first.node.resourceType === "base";
+    if (a === "r" || a === "c" || a === "u" || a === "d" || a === "comment") return false;
+    return true;
+  });
+
   const nameRefs = new Set<string>();
   const perAction: EffectiveView["perAction"] = [];
-  for (const action of RESOURCE_ACTIONS) {
+  for (const action of actionsToRun) {
     const result = action === "r" ? first : await decide(shared, subject, nodeId, action);
     for (const s of result.decision.sources) {
       if (s.kind === "direct") nameRefs.add(`user:${targetUserId}`);

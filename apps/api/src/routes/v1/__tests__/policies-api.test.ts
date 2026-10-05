@@ -17,7 +17,6 @@ import {
   type CharHarness,
 } from "../../../domain/nav/__tests__/navRouteHarness.js";
 import { nodeId } from "../../../domain/nav/backfill.js";
-import { RESOURCE_ACTIONS } from "@gx/shared-types";
 
 let h: CharHarness;
 let baseId = "";
@@ -57,11 +56,11 @@ beforeAll(async () => {
   baseNode = nodeId("base", baseId);
   tableNode = nodeId("table", tableId);
   viewNode = nodeId("view", viewId);
-  // sharer：仅在 base 节点有直授 manage_share+r（资源路径，非组织角色、非创建人、非旧表成员）。
+  // sharer：仅在 base 节点有直授 manage_share+enter（资源路径，非组织角色、非创建人、非旧表成员）。
   await h.prisma.authPolicy.create({
     data: {
       id: "s5p_sharer_direct", workspaceId: "ws_default", nodeId: baseNode,
-      subjectType: "user", subjectId: "sharer", actions: "manage_share,r", reason: "policy:v1", createdBy: "seed",
+      subjectType: "user", subjectId: "sharer", actions: "manage_share,enter", reason: "policy:v1", createdBy: "seed",
     },
   });
 }, 120000);
@@ -92,8 +91,9 @@ describe("鉴权：读 r / 写 manage_share 取或", () => {
   });
 
   it("仅持节点直授 manage_share 的 sharer 可写但不是组织角色（资源命名空间隔离）", async () => {
+    // base 节点内容动作 r 非法，body 用合法库门位 enter；sharer 写授权仍仅来自节点直授 manage_share。
     const res = await putPolicies("sharer", baseNode, {
-      upserts: [{ subjectType: "user", subjectId: "target", actions: ["r"] }],
+      upserts: [{ subjectType: "user", subjectId: "target", actions: ["enter"] }],
     });
     expect(res.status).toBe(200);
   });
@@ -119,7 +119,7 @@ describe("PUT 整单校验（任一不合法 -> 整单 4xx 全拒）", () => {
   it("manage_schema 挂在 base 合法、挂在 view 节点非法（kind-动作）", async () => {
     // base 节点允许 manage_schema（owner 经 base creator 兜底通过写鉴权）。
     const ok = await putPolicies("owner", baseNode, {
-      upserts: [{ subjectType: "user", subjectId: "target", actions: ["manage_schema", "r"] }],
+      upserts: [{ subjectType: "user", subjectId: "target", actions: ["manage_schema"] }],
     });
     expect(ok.status).toBe(200);
     // view 节点不允许 manage_schema：admin 经组织 manage_share 过鉴权后，命中 kind-动作校验 400。
@@ -159,7 +159,8 @@ describe("PUT 整单校验（任一不合法 -> 整单 4xx 全拒）", () => {
 
   it("一合法一非法整单拒：合法项不落、policyVersion 不增", async () => {
     const before = await h.prisma.workspace.findUniqueOrThrow({ where: { id: "ws_default" } });
-    const res = await putPolicies("owner", baseNode, {
+    // 合法项 u 挂 table 节点（内容动作合法）；同一整单里 base 的 ghost 悬挂主体让 subject 校验先撞，整单 400。
+    const res = await putPolicies("owner", tableNode, {
       upserts: [
         { subjectType: "user", subjectId: "target", actions: ["u"] },
         { subjectType: "user", subjectId: "ghost", actions: ["r"] },
@@ -168,9 +169,9 @@ describe("PUT 整单校验（任一不合法 -> 整单 4xx 全拒）", () => {
     expect(res.status).toBe(400);
     const after = await h.prisma.workspace.findUniqueOrThrow({ where: { id: "ws_default" } });
     expect(after.policyVersion).toBe(before.policyVersion);
-    // 合法项（u）也不得落：target 在 base 节点仍是先前的 viewer(r) 串（fieldMask 用例在 table 节点）。
+    // 合法项（u）也不得落：target 在 table 节点仍只有前序 fieldMask 用例的 r 串。
     const row = await h.prisma.authPolicy.findFirst({
-      where: { nodeId: baseNode, subjectType: "user", subjectId: "target" },
+      where: { nodeId: tableNode, subjectType: "user", subjectId: "target" },
     });
     expect(row?.actions ?? "").not.toContain("u");
   });
@@ -186,8 +187,9 @@ describe("PUT 整单校验（任一不合法 -> 整单 4xx 全拒）", () => {
 describe("legacyUnmappable 实测响应 + 旧表不写", () => {
   it("角色授予不可映射：200 带 legacyUnmappable 明细，members 旧表不动，auth_policies 行保留", async () => {
     const membersBefore = await h.prisma.member.count({ where: { baseId } });
+    // base 节点用合法库门位 enter；角色主体仍不可映射旧三表（非 per-user 成员）。
     const res = await putPolicies("owner", baseNode, {
-      upserts: [{ subjectType: "role", subjectId: "role_viewer", actions: ["r"] }],
+      upserts: [{ subjectType: "role", subjectId: "role_viewer", actions: ["enter"] }],
     });
     expect(res.status).toBe(200);
     const body = await json<{
@@ -204,7 +206,7 @@ describe("legacyUnmappable 实测响应 + 旧表不写", () => {
       where: { nodeId: baseNode, subjectType: "role", subjectId: "role_viewer" },
     });
     expect(row).toBeTruthy();
-    expect(row!.actions).toBe("r");
+    expect(row!.actions).toBe("enter");
   });
 });
 
@@ -226,21 +228,23 @@ describe("GET policies 主体解析与继承摘要", () => {
 });
 
 describe("GET effective 决策解释器", () => {
-  it("缺省查本人返回八动作判定与来源链；查他人无 manage_share 403", async () => {
+  it("缺省查本人返回库合法动作判定与来源链；查他人无 manage_share 403", async () => {
     const own = await h.app.request(`/api/v1/nodes/${baseNode}/effective`, { headers: await h.auth("sharer") });
     expect(own.status).toBe(200);
     const body = await json<{
       actions: string[];
       perAction: Array<{ action: string; allowed: boolean; sources: unknown[] }>;
     }>(own);
-    expect(body.perAction.length).toBe(RESOURCE_ACTIONS.length);
-    expect(body.actions).toContain("r");
+    // base 库节点只呈现 5 枚（enter/edit_data/manage_share/manage_schema/manage_table），不含内容 r。
+    expect(body.perAction.length).toBe(5);
+    expect(body.perAction.some((p) => p.action === "r")).toBe(false);
+    expect(body.actions).toContain("enter");
     expect(body.actions).toContain("manage_share");
     // sharer 的 manage_share 来自直授 policy（direct）。
     const ms = body.perAction.find((p) => p.action === "manage_share")!;
     expect(ms.allowed).toBe(true);
 
-    // outsider 查 target 的 effective：outsider 对节点无 r，先撞读 403。
+    // outsider 查 target 的 effective：outsider 对库门 enter 不成立，先撞读 403。
     const peek = await h.app.request(
       `/api/v1/nodes/${baseNode}/effective?userId=target`,
       { headers: await h.auth("outsider") },
@@ -259,8 +263,9 @@ describe("GET effective 决策解释器", () => {
       perAction: Array<{ action: string; allowed: boolean; sources: Array<{ kind: string; nodeName: string | null }> }>;
     }>(res);
     expect(body.userId).toBe("target");
-    // base owner 创建人兜底对 target 不成立（target 非 creator）；target 在 base 节点有直授 r。
-    const r = body.perAction.find((p) => p.action === "r")!;
-    expect(r.allowed).toBe(true);
+    // base 库节点不呈现内容 r；target 需在 table 节点直授 r 才能读内容，这里断言库门 enter 项。
+    expect(body.perAction.some((p) => p.action === "r")).toBe(false);
+    const enter = body.perAction.find((p) => p.action === "enter");
+    expect(enter).toBeTruthy();
   });
 });

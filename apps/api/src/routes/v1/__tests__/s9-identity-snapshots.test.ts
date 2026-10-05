@@ -18,7 +18,6 @@ import {
   type CharHarness,
 } from "../../../domain/nav/__tests__/navRouteHarness.js";
 import { nodeId } from "../../../domain/nav/backfill.js";
-import { RESOURCE_ACTIONS } from "@gx/shared-types";
 
 let h: CharHarness;
 let baseNode = "";
@@ -52,8 +51,8 @@ beforeAll(async () => {
   baseNode = nodeId("base", base.baseId);
   const kb = await seedKbWithDocs(h, "s9id");
   docNode = nodeId("doc", kb.rootDoc);
-  await grant(baseNode, SHARER, "manage_share,r", "s9p_base_sharer");
-  await grant(baseNode, VIEWER, "r", "s9p_base_viewer");
+  await grant(baseNode, SHARER, "manage_share,enter", "s9p_base_sharer");
+  await grant(baseNode, VIEWER, "enter", "s9p_base_viewer");
   await grant(docNode, SHARER, "manage_share,r", "s9p_doc_sharer");
   await grant(docNode, VIEWER, "r", "s9p_doc_viewer");
 }, 120000);
@@ -101,7 +100,7 @@ describe("GET /nodes/:id/policies（读需 r）三身份快照", () => {
 
 describe("PUT /nodes/:id/policies（写需组织或节点 manage_share）三身份快照", () => {
   it("owner 与 sharer -> 200 PolicyWriteResult；viewer -> 403", async () => {
-    const payload = { upserts: [{ subjectType: "user", subjectId: TARGET, actions: ["r"] }] };
+    const payload = { upserts: [{ subjectType: "user", subjectId: TARGET, actions: ["enter"] }] };
     for (const [user, want] of [[OWNER, 200], [SHARER, 200]] as const) {
       const res = await put(`/api/v1/nodes/${baseNode}/policies`, user, payload);
       expect(res.status, user).toBe(want);
@@ -113,13 +112,14 @@ describe("PUT /nodes/:id/policies（写需组织或节点 manage_share）三身�
 });
 
 describe("GET /nodes/:id/effective 三身份快照", () => {
-  it("三身份查本人 -> 200（都有 r），userId 回显本人", async () => {
+  it("三身份查本人 -> 200（库节点 5 枚 / doc 10 枚），userId 回显本人", async () => {
     for (const user of [OWNER, SHARER, VIEWER]) {
       const res = await get(`/api/v1/nodes/${baseNode}/effective`, user);
       expect(res.status, user).toBe(200);
       const body = await json<{ userId: string; perAction: unknown[] }>(res);
       expect(body.userId).toBe(user);
-      expect(body.perAction.length).toBe(RESOURCE_ACTIONS.length);
+      // base 库节点只呈现 5 枚合法位（enter/edit_data/manage_share/manage_schema/manage_table）。
+      expect(body.perAction.length).toBe(5);
     }
   });
 

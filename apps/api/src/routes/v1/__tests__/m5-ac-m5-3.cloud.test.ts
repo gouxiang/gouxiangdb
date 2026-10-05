@@ -114,33 +114,33 @@ describe("AC-M5-3 cloud 中断/恢复继承：祖先 PATCH，子孙文档即时�
 });
 
 describe("AC-M5-3 cloud move：移入空 group 断祖先继承即时失访；删组 retain 回位恢复", () => {
-  it("base 祖先授予可见 -> move 进组立即不可见（nodeId/resourceId 稳定）-> retain 回默认父恢复；pv 不变", async () => {
+  it("kb 祖先授内容 r -> move doc 进组立即不可见（nodeId/resourceId 稳定）-> retain 回默认父恢复；pv 不变", async () => {
     const u = "ac3c_move";
     await w.mkUser(u);
-    const r = await w.mkRecord("mov");
-    const baseNode = `nav_base_${r.baseId}`;
-    const g = await w.putPolicies(baseNode, { upserts: [{ subjectType: "user", subjectId: u, actions: ["r"] }] });
+    // doc + kb 祖先：kb 合法授内容 r；move doc 进空组断继承，retain 回 kb 默认父。
+    const d = await w.mkDoc("mov");
+    const g = await w.putPolicies(d.kbNodeId, { upserts: [{ subjectType: "user", subjectId: u, actions: ["r"] }] });
     expect(g.status).toBe(200);
-    await assertVisible(u, r.secretWord, r.recordId);
-    const pvBefore = (await searchAs(u, r.secretWord, "fts")).policyVersion;
+    await assertVisible(u, d.word, d.docId);
+    const pvBefore = (await searchAs(u, d.word, "fts")).policyVersion;
     const snap = w.snapshotSearch();
 
     const groupId = await w.createGroup("ac3-move-归档组");
-    const moved = await w.moveNode(r.nodeId, groupId);
+    const moved = await w.moveNode(d.nodeId, groupId);
     expect(moved.status).toBe(200);
     // move 只 bump navVersion 不 bump policyVersion；scope 无跨请求缓存，可见集仍立即变化。
-    expect(await assertEntityGone(u, r.secretWord, r.recordId)).toBe(pvBefore);
-    const node = await w.prisma.navNode.findUniqueOrThrow({ where: { id: r.nodeId } });
-    expect(node.resourceType).toBe("table"); // nav 节点键域稳定，不制造 C 类悬空 chunk
-    expect(node.resourceId).toBe(r.tableId);
+    expect(await assertEntityGone(u, d.word, d.docId)).toBe(pvBefore);
+    const node = await w.prisma.navNode.findUniqueOrThrow({ where: { id: d.nodeId } });
+    expect(node.resourceType).toBe("doc"); // nav 节点键域稳定，不制造 C 类悬空 chunk
+    expect(node.resourceId).toBe(d.docId);
     expect(node.parentId).toBe(groupId);
 
     const retained = await w.deleteGroupRetain(groupId);
     expect(retained.status).toBe(200);
-    await assertVisible(u, r.secretWord, r.recordId);
+    await assertVisible(u, d.word, d.docId);
     await noReindex();
     expect(w.snapshotSearch().checksum).toBe(snap.checksum);
-    expect(w.chunksForEntity("record", r.recordId)).toBeGreaterThan(0);
+    expect(w.chunksForEntity("doc", d.docId)).toBeGreaterThan(0);
   }, 60000);
 });
 

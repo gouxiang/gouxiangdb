@@ -106,19 +106,20 @@ describe("AC-M5-3 off move 与调岗", () => {
   it("move 进空 group 断祖先继承立即失访；retain 回位恢复", async () => {
     const u = "ac3o_move";
     await w.mkUser(u);
-    const r = await w.mkRecord("omov");
-    const g = await w.putPolicies(`nav_base_${r.baseId}`, { upserts: [{ subjectType: "user", subjectId: u, actions: ["r"] }] });
+    // 用 doc + kb 祖先：kb 可合法授内容 r，是 doc 的默认祖先；move doc 进空组断继承、retain 回 kb。
+    const d = await w.mkDoc("omov");
+    const g = await w.putPolicies(d.kbNodeId, { upserts: [{ subjectType: "user", subjectId: u, actions: ["r"] }] });
     expect(g.status).toBe(200);
-    await assertVisible(u, r.secretWord, r.recordId);
+    await assertVisible(u, d.word, d.docId);
     const snap = w.snapshotSearch();
 
     const groupId = await w.createGroup("ac3-off-move-组");
-    const moved = await w.moveNode(r.nodeId, groupId);
+    const moved = await w.moveNode(d.nodeId, groupId);
     expect(moved.status).toBe(200);
-    await assertGone(u, r.secretWord, r.recordId);
+    await assertGone(u, d.word, d.docId);
     const retained = await w.deleteGroupRetain(groupId);
     expect(retained.status).toBe(200);
-    await assertVisible(u, r.secretWord, r.recordId);
+    await assertVisible(u, d.word, d.docId);
     await noReindex();
     expect(w.snapshotSearch().checksum).toBe(snap.checksum);
   }, 60000);

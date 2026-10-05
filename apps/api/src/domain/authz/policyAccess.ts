@@ -18,7 +18,7 @@ async function nodeAllows(
   client: AuthzClient,
   userId: string,
   nodeId: string,
-  action: "r" | "manage_share",
+  action: "r" | "enter" | "manage_share",
 ): Promise<boolean> {
   const subject = await resolveSubject(userId, client);
   const deps: EngineDeps = {
@@ -29,13 +29,19 @@ async function nodeAllows(
   return result.decision.allowed;
 }
 
-/** 读策略/决策解释：对该节点有 r 即放行（workspace owner / 实体 creator 经引擎兜底已含）。 */
+/** 读门按节点类型取动作：库节点（base/kb）看库可见性 enter，内容节点看 r（一次主键点查）。 */
+const READ_GATE_NODE: ReadonlySet<string> = new Set(["base", "kb"]);
+
 export async function canReadNodePolicy(
   userId: string,
   nodeId: string,
   client: AuthzClient = prisma,
 ): Promise<boolean> {
-  return await nodeAllows(client, userId, nodeId, "r");
+  const node = await client.navNode.findUnique({
+    where: { id: nodeId }, select: { resourceType: true },
+  });
+  const action: "r" | "enter" = node && READ_GATE_NODE.has(node.resourceType ?? "") ? "enter" : "r";
+  return await nodeAllows(client, userId, nodeId, action);
 }
 
 /**

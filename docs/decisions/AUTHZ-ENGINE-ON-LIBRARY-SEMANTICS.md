@@ -384,3 +384,102 @@ shadow 态响应恒等于 legacy，引擎结论只计数、不参与放行。on 
 - 否决：库节点补 r（A-4 越权）、判定层沿用 r 实时跑库内并集（S4 分叉且空库失效）、库节点补最窄 mask（方向相反）。
 - 纠正：requireCanView 判 enter；EditData/Comment 判 edit_data；requireCanManageBase 由 manage_share 改 manage_table，消除管理员 OVERALLOW；requireDocAccess 对拍对齐 kb 节点；kb.delete 对齐 conjunction+d。
 - 翻 on：以 §6 十项退出清单全绿为唯一前提，且仅由项目总监下令。
+
+---
+
+## 9. ADR-0056 落地后 12 例失败的裁决与编码规格（2026-10-03 增补）
+
+基线 `2aec51c` 已存在这 12 例，非死代码清理误删。分两类。以下为单一实施 worker 可直接编码的规格；本设计仍只写文档，不先改生产码。
+
+### 9.1 第一类：两条真语义裁决
+
+**裁决 1：base 节点的「读策略/诊断门」改判 `enter`，table/doc 等内容节点仍判 `r`。**
+现状 `policyAccess.ts:33-39` canReadNodePolicy 对任意节点都 `nodeAllows(...,"r")`；base 节点已无内容 r（`actionLegalForNode` base 白名单只有 enter/edit_data/manage_*），故持 enter 的普通成员对 base 节点被判 r=false → 403，只有 creator/owner 能过。这与全文「base 库可见性一律用 enter」矛盾。
+
+落点（一次点查、不引入 N 查询）：
+
+```ts
+// policyAccess.ts
+const READ_GATE_NODE: ReadonlySet<string> = new Set(["base", "kb"]);
+
+export async function canReadNodePolicy(
+  userId: string,
+  nodeId: string,
+  client: AuthzClient = prisma,
+): Promise<boolean> {
+  const node = await client.navNode.findUnique({
+    where: { id: nodeId }, select: { resourceType: true },
+  });
+  const action = node && READ_GATE_NODE.has(node.resourceType ?? "") ? "enter" : "r";
+  return await nodeAllows(client, userId, nodeId, action);
+}
+```
+
+- 点查 1 次（`navNode.findUnique`，按主键）；该读门是低频管理操作，不接受「为省这 1 查而在调用方传类型」造成签名分叉。
+- **kb 一并改判 enter**：kb 节点的诊断门同理（kb 门可见性＝enter）。
+- canManageNodeShare 不受影响，仍判 manage_share（base/kb/content 节点都合法）。
+
+**裁决 2：`explainEffective` 不在库节点枚举内容动作；库节点 perAction 只列其合法位。**
+现状 `policyQuery.ts:200-221` 遍历全部 RESOURCE_ACTIONS（含 r/c/u/d/comment），库节点上这些枚恒 false、语义不存在；旧测试 `policies-api.test.ts:262-264` 期望 base perAction 的 r.allowed=true（旧夹具给 base 直授 r），是旧口径。
+
+裁决：effective 解释器按节点 resourceType 过滤枚举措，**库节点（base/kb）不判 r/c/u/d/comment**，只对该节点合法的动作跑 decide：
+
+```ts
+// policyQuery.ts explainEffective
+const libNode = first.node.resourceType === "base" || first.node.resourceType === "kb";
+const actions = RESOURCE_ACTIONS.filter((a) => {
+  if (!libNode) return true;
+  if (a === "enter" || a === "edit_data") return first.node.resourceType === "base" || a === "enter";
+  if (a === "manage_schema") return first.node.resourceType === "base";
+  if (a === "r" || a === "c" || a === "u" || a === "d" || a === "comment") return false;
+  return true; // manage_share / manage_table
+});
+```
+
+- base：`enter,edit_data,manage_share,manage_schema,manage_table`（5 枚）；
+- kb：`enter,manage_share,manage_table`（3 枚；无 edit_data/manage_schema，内容 r 虽在 kb 策略行存在，但解释器不从这里呈现——内容访问经 doc/canvas 节点的 effective 看）；
+- table/doc/canvas/view：全部 10 枚（含逐表内容动作）。
+- 被否决的另两种呈现：①「库节点仍枚举 r，allowed 反映库内活表可读并集」——等于把内容并集塞回库节点呈现，与库门/内容分离原则冲突，且要为呈现再跑聚合，废弃；②维持枚举恒 false——语义噪声大、且诱导调用方误读，废弃。
+
+### 9.2 第二类：逐文件夹具/快照改法（10 例，纯测试对齐）
+
+统一原则：**内容 r 不再落在 base 节点**；凡夹具想表达「能进库」用 enter、想表达「能读内容」把 r 落到 table 节点。
+
+**A. `routes/v1/__tests__/policies-api.test.ts`（含第一类牵连，改夹具）**
+- `:64` sharer 直授串 `"manage_share,r"` → `"manage_share,enter"`（sharer 要进库诊断门，配合裁决 1）。
+- `:122` 合法 kind 校验用例 body `["manage_schema","r"]` → `["manage_schema","enter"]`。
+- `:164-165` 一合法一非法：合法项 `["u"]` 改挂到 **table 节点**（把该用例的 nodeId 由 baseNode 改 tableNode）；非法 ghost 项可留 base。`:171-175` 注释与查询同步改到 table 节点。
+- `:190` role_viewer `actions:["r"]` 在 base 节点现在非法 kind → 该用例本意是测「角色授予不可映射」，改为 base 合法动作 `["enter"]`（角色授予 enter 仍不可映射旧表，legacyUnmappable 行为不变）；`:207` 期望串 `"r"` → `"enter"`。
+- `:237` effective 本人 `actions.toContain("r")`：sharer 对 base 节点 effective 不含 r（裁决 2），改为 `toContain("enter")`；`:238` manage_share 保留。
+- `:262-264` 查 target 的 base effective：「base r.allowed=true」前提不成立。target 对 base 应持有 enter（若需内容读另在 table 节点授 r），断言改为 perAction 中 `enter.allowed=true`、且不存在 r 项（或 r 项不出现）。
+- `:229-249` 中「outsider 无 r 先撞读门」语义不变（裁决 1 后 outsider 对 enter 仍 false → 403）。
+
+**B. `docs/__tests__/s8-openapi-shapes.test.ts`（3 例）**
+- `:87` PUT `target ["r"]` 到 base → `["enter"]`（其余 writeResult 键断言不变；`upserted=1`）。
+- `:103` role_viewer `["r"]` → `["enter"]`。
+- `:113-121` GET 回读 target 行：前两例改 enter 后该行存在（subjectType=user、subjectId=target），`:117` row truthy 恢复；`:120` actions 为数组。
+
+**C. `routes/v1/__tests__/s9-identity-snapshots.test.ts`（1 例 + seed）**
+- seed `:55` SHARER `"manage_share,r"` → `"manage_share,enter"`；`:56` VIEWER `"r"` → `"enter"`；doc 节点 `:57-58` 保持 r（doc 是内容节点）。
+- `:104` PUT payload `["r"]` → `["enter"]`，owner/sharer 仍 200、viewer（只持 enter 无 manage_share）仍 403。
+- `:93-99` viewer 回读断言（direct 含 VIEWER）随 seed 改后仍成立。
+
+**D. `routes/v1/__tests__/row-conditions-write.test.ts`（1 例）**
+- `:153-167` 想触达「base 节点不支持 rowConditions」的 kind 检查，但 body `["r"]` 先撞 kind-action（400 POLICY_ACTION_INVALID），拿不到 409。改用 base 合法且能承载该校验的动作：`["manage_table"]`（或 enter），conditions 保留 → 校验顺序走到节点-kind → **409 POLICY_NODE_KIND_INVALID**。文件头 `:8` 同步注明「用 manage_table 触达」。
+
+**E. `routes/v1/__tests__/m5-ac-m5-3.off.test.ts` + `m5-ac-m5-3.cloud.test.ts`（2 例，同一根因）**
+- 两例均在 setup 阶段对 `nav_base_<id>` PUT `["r"]` 表示「base 祖先授予可见」，现在 base 不收 r → 400。改为 **`["enter"]`**：
+  - off 用例 `m5-ac-m5-3.off.test.ts:110`；cloud 用例对应 setup 处（搜 `nav_base_` + `["r"]`）。
+- 语义不变：enter 经祖先继承，move 进空 group 断祖先链 → 立即失访，retain 回位恢复；nodeId/resourceId 稳定、pv 不变的断言全部保留。若用例同时要证「内容可读」（不只是进库），应改在 table 节点授 r 而非 base——按用例意图（祖先授予可见性）enter 即够。
+
+**撞车去留（已闭环，2026-10-03）**：临时红文件 `t1-restore-resync-aggregate.test.ts` 已由其作者删除；现仅保留 committed 的 `src/routes/__tests__/softDelete-resync-route.test.ts`（ae109a8 引入），满足三条——删+恢复双侧真路由、非管理员 r1 主体、setupHarness 后动态 import，3/3 绿。无需 team-lead 再指名归属。
+
+### 9.3 修完后的翻闸前置项结论
+
+这 12 例修完且四门全绿后，**第一类两条（裁决 1、2）属于「让读门/解释器与库门口径一致」的必要修正，不是新增功能**。仍独立存在、未闭合的翻闸前置项：
+
+1. **通配 edit_data 派生**（§3.6-1）：`libraryDataActions` 须感知 `"*"`，be-authz-projection 在途；
+2. **4 处零 shadow 缝 + kb.delete**（§5）：对拍/登记，team-lead 已排；
+3. **on 态身份×七守穷举、规模性能复验、灰度回滚**（§6 第 8/9/10 条）。
+
+除此之外无新增阻断项。本批仅动测试夹具 + policyAccess/policyQuery 两文件的最小改动，不扩大授权面。

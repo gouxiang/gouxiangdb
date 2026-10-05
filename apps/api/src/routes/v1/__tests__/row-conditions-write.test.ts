@@ -151,11 +151,12 @@ describe("RowConditions 写入口", () => {
   });
 
   it("非 table（base）节点带 conditions -> 409 POLICY_NODE_KIND_INVALID", async () => {
+    // base 节点内容动作 r 非法，用合法库门位 enter 承载，让请求先过动作校验再撞 conditions 关卡。
     const res = await putPolicies(baseNode, {
       upserts: [{
         subjectType: "user",
         subjectId: "target",
-        actions: ["r"],
+        actions: ["enter"],
         conditions: {
           version: 1,
           filter: { kind: "condition", fieldId, op: "isNotEmpty" },
