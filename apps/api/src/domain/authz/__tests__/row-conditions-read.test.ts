@@ -132,6 +132,16 @@ describe("RowConditions 读求值（on 态）", () => {
     hitId = await insertRow({ [titleFid]: "命中行", [ownerFid]: null }, "owner");
     missId = await insertRow({ [titleFid]: "不命中行", [ownerFid]: null }, "other");
     otherRowId = await insertRow({ [titleFid]: "他人负责行", [ownerFid]: null }, "other");
+    // 通电后（READY=true，on 为权威）库门位须由 scope 投影提供：补 base 节点聚合位
+    // enter（=visible）+ edit_data（表可写并集）。二者非 table 内容动作，故不制造无条件
+    // table 宽来源、不干扰本文件用 PUT 写入的带行条件 r/u（行级过滤仍只由那些窄策略决定）。
+    await h.prisma.authPolicy.create({
+      data: {
+        id: "s8br_base_gate", workspaceId: "ws_default", nodeId: nodeId("base", "s8br_b"),
+        subjectType: "user", subjectId: "target", actions: "edit_data,enter",
+        reason: "test:gate", createdBy: "owner",
+      },
+    });
     process.env.GX_AUTHZ_ENGINE = "on";
   }, 120000);
 

@@ -104,9 +104,12 @@ describe("A-6 三通道：父 kb 无权、子 doc 直授（ACL）有权", () => 
     expect(ownerBody.items.some((m) => m.nodeId === nodeId("table", I().table))).toBe(true);
   });
 
-  it("通道3 URL 直达：旧守卫按 doc ACL 放行 200（权限在、导航路径断）", async () => {
+  it("通道3 URL 直达：引擎权威下仅 doc-node r（无 kb enter）不放行，DIRECT/NOBODY 均 403", async () => {
+    // 通电后（READY=true）旧守卫按 doc ACL「断链直达」已退役：DIRECT 只在 d1 doc 节点持
+    // legacy:acl r、kb 节点零来源；requireDocAccess ref 对齐 kb 节点，故 doc-node r 不足以
+    // 放行，权威判定 403（fail-closed，防退役 ACL 借断链偷偷进入）。NOBODY 同样 403。
     const allowed = await fx.call("GET", `/api/kb/docs/${I().d1}`, DIRECT);
-    expect(allowed.status).toBe(200);
+    expect(allowed.status).toBe(403);
     const denied = await fx.call("GET", `/api/kb/docs/${I().d1}`, NOBODY);
     expect(denied.status).toBe(403);
   });

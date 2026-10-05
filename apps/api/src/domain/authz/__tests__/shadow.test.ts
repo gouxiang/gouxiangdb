@@ -33,19 +33,19 @@ describe("GX_AUTHZ_ENGINE 模式解析（仿 flags.ts，未知保守回 off）",
     expect(resolveAuthzEngineMode({ GX_AUTHZ_ENGINE: " on " })).toBe("on");
   });
 
-  it("阶段门未就绪（S3-S5）：on 一律降级 shadow；shadow/off 原样", () => {
-    expect(AUTHZ_ENFORCE_READY).toBe(false); // S6 完成且翻门前恒 false
-    expect(effectiveAuthzMode({ GX_AUTHZ_ENGINE: "on" })).toBe("shadow");
+  it("阶段门已翻（2026-10-05 总监下令通电）：on 原样生效为权威；shadow/off 不变", () => {
+    expect(AUTHZ_ENFORCE_READY).toBe(true); // 通电后 READY 恒真
+    expect(effectiveAuthzMode({ GX_AUTHZ_ENGINE: "on" })).toBe("on");
     expect(effectiveAuthzMode({ GX_AUTHZ_ENGINE: "shadow" })).toBe("shadow");
     expect(effectiveAuthzMode({ GX_AUTHZ_ENGINE: "off" })).toBe("off");
     expect(effectiveAuthzMode({})).toBe("off");
   });
 
-  it("authzShadowActive 仅 shadow 为 true（on 降级后也算 active，off 恒 false）", () => {
+  it("authzShadowActive 仅 shadow 为 true（on 已是权威、不再降级，故 false；off 恒 false）", () => {
     expect(authzShadowActive({ GX_AUTHZ_ENGINE: "off" })).toBe(false);
     expect(authzShadowActive({})).toBe(false);
     expect(authzShadowActive({ GX_AUTHZ_ENGINE: "shadow" })).toBe(true);
-    expect(authzShadowActive({ GX_AUTHZ_ENGINE: "on" })).toBe(true); // 降级 shadow，仍对拍
+    expect(authzShadowActive({ GX_AUTHZ_ENGINE: "on" })).toBe(false); // on 为权威，非对拍态
   });
 });
 

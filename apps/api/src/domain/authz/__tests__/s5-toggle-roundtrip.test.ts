@@ -1,8 +1,7 @@
 // M4/S5 开关往返 + legacyUnmappable 数据不变量（裁决 A-5，§7-S5 验收①②）。
 //
-// 阶段门约束（S5）：AUTHZ_ENFORCE_READY=false，GX_AUTHZ_ENGINE=on 在本阶段降级 shadow——
-// 守卫永不以引擎为准（S6 翻门后才变）。故"不可映射授权在 off 失效、重开恢复"在 S5 只能、
-// 也必须在【权威数据层】证明，而不是 HTTP 守卫响应：
+// 阶段门已翻（2026-10-05 总监下令通电）：AUTHZ_ENFORCE_READY=true，env=on 为引擎权威态。
+// 本测试不变量与阶段无关——「不可映射授权在 off 失效、重开恢复」在【权威数据层】证明：
 //   1. 角色授予（不可映射旧三表）经 PUT 落 auth_policies，200 带 legacyUnmappable，旧表零行；
 //   2. 无论 flag off/shadow/on 如何往返，auth_policies 权威行始终保留、动作串不回灌不删除；
 //   3. 引擎 decide 与 flag 无关（flag 只作用于守卫是否采信），权威行恒被求值 -> 重开即恢复；
@@ -76,7 +75,7 @@ describe("不可映射（角色）授权：落权威表、不回灌旧表、开�
   it.each([
     ["off", false],
     ["shadow", true],
-    ["on", true], // S5 阶段门：on 降级 shadow，shadowActive=true
+    ["on", false], // 已翻门：on 为权威、非对拍态，shadowActive=false
     ["off", false],
   ])("flag=%s 往返：权威行保留且旧表仍零行（shadowActive=%s）", async (mode, shadow) => {
     process.env.GX_AUTHZ_ENGINE = mode;

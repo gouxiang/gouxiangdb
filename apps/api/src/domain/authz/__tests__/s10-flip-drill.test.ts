@@ -186,19 +186,19 @@ describe("翻转演练 2/5 shadow：旧结果逐值不变，对拍双零", () =>
   });
 });
 
-describe("翻转演练 3/5 on 语义：门未翻转的事实 + 引擎为权威时 AC 全绿", () => {
-  it("READY=false 锁定，env=on 生产物理降级 shadow；引擎布尔与七守旧期望 28 格全等", async () => {
-    // 门控事实：S10 不翻默认、无 enforce 接线。
-    expect(AUTHZ_ENFORCE_READY).toBe(false);
-    expect(effectiveAuthzMode({ GX_AUTHZ_ENGINE: "on" })).toBe("shadow");
+describe("翻转演练 3/5 on 权威：门已翻转，引擎为权威时 AC 全绿", () => {
+  it("READY=true，env=on 生产生效为 on（不再降级 shadow）；引擎布尔与七守旧期望 28 格全等", async () => {
+    // 门控事实：2026-10-05 经总监下令翻门，AUTHZ_ENFORCE_READY=true。
+    expect(AUTHZ_ENFORCE_READY).toBe(true);
+    expect(effectiveAuthzMode({ GX_AUTHZ_ENGINE: "on" })).toBe("on");
 
     process.env.GX_AUTHZ_ENGINE = "off";
     const offSnap = await readSnapshot();
     process.env.GX_AUTHZ_ENGINE = "on";
-    // 物理上 on 降级 shadow：HTTP 旧结果不变（没有请求会因 env=on 被引擎真拒绝）。
+    // on 为引擎权威：因存量已全量投影+reconcile，HTTP 结果与 off 逐值相等（28 格等价保证）。
     expect(await readSnapshot()).toEqual(offSnap);
 
-    // on 语义（测试内以引擎为权威）：七守 x 四主体，引擎布尔必须与旧守卫期望全等。
+    // 权威语义：七守 x 四主体，引擎布尔必须与旧守卫期望全等。
     let compared = 0;
     for (const p of probes) {
       for (const u of USERS) {
@@ -213,7 +213,7 @@ describe("翻转演练 3/5 on 语义：门未翻转的事实 + 引擎为权威�
 
 describe("翻转演练 4/5 反向 shadow：等价双零，人工 OVERALLOW/OVERDENY 分类与旧结果不受影响", () => {
   it("测试内独立 registry：等价序列双零；注入越权行 overAllow=1 旧 HTTP 仍 403；删投影 overDeny=1 旧 HTTP 仍 200", async () => {
-    process.env.GX_AUTHZ_ENGINE = "on"; // 生产降级 shadow；反向计数在测试内独立 registry 做。
+    process.env.GX_AUTHZ_ENGINE = "shadow"; // 旧决策为准、引擎仅对比：注入/删投影不改 HTTP
     const reverse = new DriftRegistry(50);
     for (const p of probes) {
       for (const u of USERS) {

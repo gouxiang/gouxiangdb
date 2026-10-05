@@ -10,11 +10,13 @@
 export type AuthzEngineMode = "off" | "shadow" | "on";
 
 /**
- * 阶段门（M4 计划 §7-S3 行559 定稿）：S3-S5 期间引擎能力未齐（策略双写/fieldMask 五出口
- * 下推在 S5/S6），此刻 on 只判节点动作会误拒，故 on 一律解析为 shadow 并打一次 warn；
- * S6 完成、§4.8 翻门五条件全满足且仅由项目总监下令后才置 true，on 方真正生效。
+ * 阶段门（M4 计划 §7-S3 行559 定稿；2026-10-05 经项目总监下令「直接通电接管」翻为 true）：
+ * 翻门前 on 一律解析为 shadow 并打一次 warn。翻门时前置已齐——存量 role_library_scope 全量投影、
+ * preflight 44/44 库级聚合位等价、覆盖缺口 0、Base 七守与 KB 全路由（含建链位 share_link）
+ * 均已接 authority。翻为 true 后 env=on 不再降级、引擎为权威；env 默认仍 off，生产行为零变化，
+ * 由部署侧显式置 GX_AUTHZ_ENGINE=on 才生效。
  */
-export const AUTHZ_ENFORCE_READY = false;
+export const AUTHZ_ENFORCE_READY = true;
 
 let onDowngradeWarned = false;
 
@@ -26,8 +28,8 @@ export function resolveAuthzEngineMode(env: NodeJS.ProcessEnv = process.env): Au
 }
 
 /**
- * 生效模式：经阶段门收敛。S3-S5（AUTHZ_ENFORCE_READY=false）时 on 降级 shadow 并 warn 一次；
- * 守卫运行时按本结果分支，保证误开 on 也不会提前以引擎为准造成误拒。
+ * 生效模式：经阶段门收敛。AUTHZ_ENFORCE_READY=true（已翻门）后 on 原样生效、引擎为权威；
+ * 保留 READY=false 的降级分支作为防御兜底（常量回退时 on 仍会安全降级 shadow 并 warn）。
  */
 export function effectiveAuthzMode(env: NodeJS.ProcessEnv = process.env): AuthzEngineMode {
   const mode = resolveAuthzEngineMode(env);

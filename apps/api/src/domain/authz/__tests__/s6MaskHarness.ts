@@ -207,6 +207,16 @@ export async function setupS6MaskFixture(): Promise<S6Fixture> {
   await h.prisma.authPolicy.deleteMany({
     where: { nodeId: nodeId("base", base1), subjectId: MASK },
   });
+  // 通电后（AUTHZ_ENFORCE_READY=true，on 为权威）库门位必须由 scope 投影提供：补该 scope 行
+  // 投影到 base 节点的库级聚合位 enter（=visible）+ edit_data（A 表可写并集）。二者非 r/c/u、
+  // 不进 fieldMask 能力并集，故不会淹没下方 table 窄 mask（字段维仍只减不增）。
+  await h.prisma.authPolicy.create({
+    data: {
+      id: "s6_pol_base_gate", workspaceId: "ws_default", nodeId: nodeId("base", base1),
+      subjectType: "user", subjectId: MASK, actions: "edit_data,enter",
+      reason: "test:direct", createdBy: OWNER,
+    },
+  });
   const visibleCols = [
     name, ro, cust, deal, fmRef, fmSum, fmAvg, fmMin, fmMax, fmConcat, fmArith, fmIsNull,
     dotSum, lookupName, rollupAmt, countB, countC,
