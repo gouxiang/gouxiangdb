@@ -126,6 +126,9 @@ export function GridRow(props: GridRowProps) {
         return (
           <td
             key={field.id}
+            // 单元格内点击不应穿透到行 onClick 打开记录抽屉（见行首守卫对
+            // [data-cell-content] 的判定）；td 本身就是单元格区域，故在此打标。
+            data-cell-content="true"
             className={clsx(
               // 行间发丝线（gx-hairline）：列与列之间不画竖线，靠 12px 列间距分隔
               "relative border-b border-gx-hairline align-middle",

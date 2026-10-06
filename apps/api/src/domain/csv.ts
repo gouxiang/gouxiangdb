@@ -107,8 +107,22 @@ export function recordsToCSV(records: HydratedRecord[], fields: FieldMeta[]): st
 export function recordToRow(r: HydratedRecord, fields: FieldMeta[]): string[] {
   return fields.map((f) => {
     const v = r.fields[f.id];
+    // 单选：hydrate 后仍是 option id（浏览器侧自行映射成选项名），导出必须给选项名；
+    // 查不到对应选项则留空，不把内部 opt_ id 写进 CSV。
+    if (f.type === "singleSelect") {
+      const id = v === null || v === undefined ? "" : String(v);
+      return f.options?.find((o) => o.id === id)?.name ?? "";
+    }
     if (Array.isArray(v)) {
-      // links → title；multiSelect → 值
+      // 多选：元素是 option id（区别于 links——links 元素是带 title 的对象），同样映射成选项名。
+      if (f.type === "multiSelect") {
+        const optMap = new Map((f.options ?? []).map((o) => [o.id, o.name]));
+        return (v as unknown[])
+          .map((x) => (x === null || x === undefined ? "" : optMap.get(String(x)) ?? ""))
+          .filter((s) => s !== "")
+          .join("; ");
+      }
+      // links → title
       const parts = (v as unknown[]).map((x) =>
         typeof x === "object" && x !== null && "title" in (x as object)
           ? (x as { title: string }).title
