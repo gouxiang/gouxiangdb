@@ -164,7 +164,11 @@ export function AttachmentUploader({
       setBusy(false);
       for (const e of uploadErrors) toast(e, "error");
       if (added.length > 0) {
-        onChange([...latestRef.current, ...added]);
+        // 按 id 去重后再追加：同一服务端文件（相同 id）重复触发上传/整跑重放时，
+        // 不应被追加成多条，否则列表出现重复项与重复 React key。
+        const existing = new Set(latestRef.current.map((f) => f.id));
+        const fresh = added.filter((f) => !existing.has(f.id));
+        if (fresh.length > 0) onChange([...latestRef.current, ...fresh]);
       }
     },
     [disabled, fieldId, maxBytes, onChange, recordId, resolvedBaseId, resolvedTableId, serverMode],

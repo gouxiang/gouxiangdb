@@ -83,21 +83,25 @@ export function useDebouncedCommit(
   const [pending, setPending] = useState(false);
   const cbRef = useRef(onCommit);
   cbRef.current = onCommit;
-  const first = useRef(true);
+  // 已提交（或无需提交）的权威值。挂载 / 外部回灌时 value 恒等于它，提交 effect 直接跳过。
+  // ★ 不能用「首次 effect 跳过」标志：React 18 StrictMode 开发态会 mount → cleanup → 再 mount，
+  //   同一组件实例内该标志已被置位，第二次 effect 不再跳过，于是挂载约 300ms 后把初始值当成
+  //   用户输入自动提交一次（2026-10-06 E2E 抓到的「零点击自动 PATCH 整份 config、把排序写乱」）。
+  //   改成比较值，跑任意次都是幂等的。
+  const committedRef = useRef(initial);
 
-  // 外部值（如切换视图重置）回灌
+  // 外部值（如切换视图重置）回灌：连同权威值一起重置，避免把旧视图的待提交值带进新视图。
   useEffect(() => {
+    committedRef.current = initial;
     setValue(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial]);
 
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
+    if (value === committedRef.current) return; // 挂载 / 回灌：无变化，绝不自动提交
     setPending(true);
     const t = setTimeout(() => {
+      committedRef.current = value;
       setPending(false);
       cbRef.current(value);
     }, delay);
