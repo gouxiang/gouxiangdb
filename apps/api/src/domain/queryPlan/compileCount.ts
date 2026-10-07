@@ -140,9 +140,11 @@ function escLike(v: string): string {
   return v.replace(/[\\%_]/g, (m) => `\\${m}`);
 }
 
-/** 把 AND 扁平化成条件叶（嵌套 AND 展开）；遇非 AND 结构返回 null。 */
+/** 把 AND 扁平化成条件叶（嵌套 AND 展开）；遇非 AND 结构（含 formula 节点）返回 null。 */
 function flattenAnd(node: FilterNode): FilterCondition[] | null {
   if (node.kind === "condition") return [node as FilterCondition];
+  // formula 节点不可计数下推：计数快速路径放弃，回退 records 驱动相关 EXISTS
+  // （随后 B 档在内存精修得到正确 filteredTotal，不错误计数）。
   if (node.kind !== "and" || !node.children) return null;
   const out: FilterCondition[] = [];
   for (const ch of node.children) {

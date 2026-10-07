@@ -57,6 +57,10 @@ function normalize(node: FilterNode | null, validFieldIds: Set<string>, selfFiel
     const c = normalize(node.child, validFieldIds, selfFieldIds);
     return c ? { kind: "not", child: c } : null;
   }
+  if (node.kind === "formula") {
+    // 空公式 = 无筛选 -> 剔除；非空原样保留（字段引用合法性由后端求值侧 mask 收口）
+    return node.expression.trim() === "" ? null : node;
+  }
   // group
   const kids = node.children
     .map((c) => normalize(c, validFieldIds, selfFieldIds))
@@ -184,6 +188,7 @@ function findInvalidFields(node: FilterNode | null, valid: Set<string>, selfVali
     return bad;
   }
   if (node.kind === "not") return findInvalidFields(node.child, valid, selfValid);
+  if (node.kind === "formula") return 0; // 公式引用字段不经本条件校验
   return node.children.reduce((s, c) => s + findInvalidFields(c, valid, selfValid), 0);
 }
 
@@ -458,6 +463,16 @@ function AdvancedEditor({
           <button type="button" onClick={() => setDraft(null)} className="text-gx-text-hint hover:text-gx-danger"><Icon name="trash" size={13} /></button>
         </div>
         <AdvancedEditor draft={root.child} setDraft={(n) => setDraft(n ? { kind: "not", child: n } : null)} fields={fields} fieldById={fieldById} selfFields={selfFields} depth={depth + 1} />
+      </div>
+    );
+  }
+
+  if (root.kind === "formula") {
+    // 本编辑器不直接编辑公式谓词：公式经筛选面板的高级模式维护
+    return (
+      <div className="rounded-gx-lg border border-gx-border bg-gx-bg/30 p-3 text-gx-12 leading-5 text-gx-text-secondary">
+        高级公式筛选：<code className="font-mono">{root.expression || "（空）"}</code>。
+        请在筛选面板的「高级模式」中修改公式。
       </div>
     );
   }

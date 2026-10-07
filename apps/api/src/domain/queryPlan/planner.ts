@@ -165,7 +165,14 @@ export async function runQueryPlan(
   const raw = await fetchRawByIds(tableId, candidateIds);
   let hydrated = await hydrateRecords(raw, fields, hydrateDeps);
   // 与 S5 完全相同的后处理（完整 evalFilter/search/sort），物理候选是超集，精修后逐值一致。
-  hydrated = applyViewQuery(hydrated, fields, config, input.search, input.currentUserId ?? null);
+  hydrated = await applyViewQuery(
+    hydrated,
+    fields,
+    config,
+    input.search,
+    input.currentUserId ?? null,
+    hydrateDeps,
+  );
   const filteredTotal = hydrated.length;
   const groups = assembleGroups(hydrated, fields, config);
   const aggregations = assembleAggregations(hydrated, config.aggregations ?? {});

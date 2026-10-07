@@ -38,6 +38,9 @@ export function isFilterNode(value: unknown): value is NonNullable<ViewAdminConf
       return Array.isArray(node.children) && node.children.every(isFilterNode);
     case "not":
       return isFilterNode(node.child);
+    case "formula":
+      // 高级模式：表达式为字符串即可（求值/布尔收口在 queryPlan 内存层 fail-closed）
+      return typeof node.expression === "string";
     default:
       return false;
   }

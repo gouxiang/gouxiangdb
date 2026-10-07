@@ -122,7 +122,7 @@ describe("CSV keyset 分批导出 vs 旧全表导出（逐字节一致）", () =
     });
     const { toRawRecord } = await import("../prismaDeps.js");
     const hydrated = await hydrateRecords(rows.map(toRawRecord), fields, prismaDeps);
-    const sorted = applyViewQuery(hydrated, fields, config, "");
+    const sorted = await applyViewQuery(hydrated, fields, config, "");
     const expectedCsv = recordsToCSV(sorted, fields);
 
     const res = await exportTableCsv(tableId, JSON.stringify(config), undefined, reader);

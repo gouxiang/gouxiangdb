@@ -44,6 +44,13 @@ export interface FilterVars {
 export interface FilterEvalContext {
   vars?: FilterVars;
   getActorId?: (fieldId: string) => RawValue;
+  /**
+   * 高级模式公式谓词求值：对当前记录求 expression，必须返回严格布尔。
+   * 由调用方（recordService）注入，内部已持有该记录的公式 source；缺省（未注入）时
+   * formula 节点一律 fail-closed 返回 false。空表达式在本文件内先短路为 true（无筛选），
+   * 不会走到回调。
+   */
+  evalFormula?: (expression: string) => boolean;
 }
 
 /** 把任意 cell 值「文本化」，模拟 v1 的 CAST(col AS TEXT) */
@@ -320,6 +327,22 @@ export function evalFilter(
       return !evalFilter(node.child, get, getSelf, ctx);
     case "condition":
       return evalCondition(node, get, getSelf, ctx);
+    case "formula": {
+      const expression = node.expression;
+      // 空表达式（含纯空白）视为「无筛选」
+      if (typeof expression !== "string" || expression.trim() === "") return true;
+      const fn = ctx?.evalFormula;
+      // 未注入公式求值器（前端预览 / 未接线路径）：fail-closed 不放行
+      if (typeof fn !== "function") return false;
+      try {
+        const result = fn(expression);
+        // 严格布尔：truthy（数值 1 / 非空字符串）不等于命中，非布尔一律 false
+        return result === true;
+      } catch {
+        // 公式解析 / 求值异常：fail-closed
+        return false;
+      }
+    }
     default:
       return true;
   }

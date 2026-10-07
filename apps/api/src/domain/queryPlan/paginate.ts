@@ -197,7 +197,14 @@ async function pageWide(
   const { tableId, fields, config, search, limit, offset } = input;
   const rawAll = await fetchRawByIds(tableId, candidateIds);
   let hydrated = await hydrateRecords(rawAll, fields, input.hydrateDeps ?? prismaDeps);
-  hydrated = applyViewQuery(hydrated, fields, config, search, input.currentUserId ?? null);
+  hydrated = await applyViewQuery(
+    hydrated,
+    fields,
+    config,
+    search,
+    input.currentUserId ?? null,
+    input.hydrateDeps ?? prismaDeps,
+  );
 
   const needsMemSort = sorts.length > 0 && plan.sortJoins === null;
   const computedInMem =

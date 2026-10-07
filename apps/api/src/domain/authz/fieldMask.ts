@@ -299,6 +299,9 @@ function stripFilterByMask(node: FilterNode | null, visible: ReadonlySet<string>
   if (node.kind === "condition") {
     return visible.has(node.fieldId) ? node : null;
   }
+  // formula 节点不直接引用物理条件列：原样保留。其内部字段引用在求值时经
+  // buildFormulaSource 的可见性钩子收口（被 mask 字段以 FNULL 占位，不泄漏）。
+  if (node.kind === "formula") return node;
   if (node.kind === "not") {
     const child = node.child ? stripFilterByMask(node.child, visible) : null;
     // NOT(隐藏条件) 无法安全求值为 true/false（隐藏值未知），整体失效。

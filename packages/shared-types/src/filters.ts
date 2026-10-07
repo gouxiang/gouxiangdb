@@ -64,7 +64,17 @@ export interface FilterNot {
   child: FilterNode;
 }
 
-export type FilterNode = FilterCondition | FilterGroup | FilterNot;
+/**
+ * 高级模式筛选：以公式表达式作为布尔谓词。
+ * 表达式必须返回布尔真/假；空表达式视为「无筛选」（放行）。
+ * formula 节点不可下推 SQL，一律在内存中对每条记录求值（fail-closed）。
+ */
+export interface FilterFormula {
+  kind: "formula";
+  expression: string;
+}
+
+export type FilterNode = FilterCondition | FilterGroup | FilterNot | FilterFormula;
 
 /** 操作符是否需要引用比较值（无值操作符不引用 currentUser） */
 function opNeedsRef(op: string): boolean {
@@ -90,6 +100,9 @@ export function filterReferencesCurrentUser(node: FilterNode | null | undefined)
       );
     case "not":
       return filterReferencesCurrentUser(node.child);
+    case "formula":
+      // 公式没有内置 currentUser 变量，语法层面不构成动态用户引用
+      return false;
     default:
       return (node.children ?? []).some((ch) => filterReferencesCurrentUser(ch));
   }

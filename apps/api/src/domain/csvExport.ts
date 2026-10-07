@@ -122,7 +122,14 @@ export async function exportTableCsv(
     cursor = page.nextCursor;
     if (!cursor) break;
   }
-  const finalRows = applyViewQuery(accumulated, fields, config, search, currentUserId ?? null);
+  const finalRows = await applyViewQuery(
+    accumulated,
+    fields,
+    config,
+    search,
+    currentUserId ?? null,
+    hydrateDeps,
+  );
   rowCount = finalRows.length;
   const body = rowsToCSVBody(finalRows.map((x) => recordToRow(x, fields)));
   const csv = body === "" ? header : [header, body].join("\r\n");

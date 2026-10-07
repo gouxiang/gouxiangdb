@@ -8,9 +8,11 @@ import { prisma } from "../db.js";
 import type { HydratedRecord, FieldMeta } from "./types.js";
 import { toFieldMeta, toRawRecord, prismaDeps } from "./prismaDeps.js";
 import { hydrateRecords, type HydrateDeps } from "./hydrate.js";
-import { evalFilter, matchesSearch } from "./filter.js";
+import { matchesSearch } from "./filter.js";
 import { sortRows } from "./sort.js";
 import { assembleGroups, assembleAggregations } from "./queryPlan/assemble.js";
+import { filterByView } from "./queryPlan/viewFilter.js";
+import { buildFormulaCallbacks, filterHasFormulaNode } from "./queryPlan/formulaEval.js";
 import { isGridSkipType } from "@gx/shared-types";
 import type { FilterNode, SortSpec, ViewConfig } from "@gx/shared-types";
 
@@ -79,33 +81,38 @@ export function visibleFields(fields: FieldMeta[], config: ViewConfig): FieldMet
  * 视图后处理（M1/S5 抽出为纯函数）：对已 hydrate 的记录依次套用 视图过滤 → 搜索 → 排序。
  * 列表 queryRecords 与导出（keyset 分批 hydrate 后）共用，保证两条路径筛选/排序口径零漂移。
  * 不含分页/分组/聚合（导出不需要；列表在调用方继续处理）。
+ *
+ * 高级模式（filters 含 kind:"formula"）时异步预构造公式回调（复用 buildFormulaSource /
+ * parseCached 缓存与 hydrated 数据），无 formula 节点时走纯同步过滤、行为与旧版一致。
  */
-export function applyViewQuery(
+export async function applyViewQuery(
   hydrated: HydratedRecord[],
   fields: FieldMeta[],
   config: ViewConfig,
   search: string,
   currentUserId?: string | null,
-): HydratedRecord[] {
+  deps?: HydrateDeps,
+): Promise<HydratedRecord[]> {
   let out = hydrated;
 
   // 过滤
   if (config.filters) {
-    // currentUser 在内存路径按 userId 精确匹配（非显示名）：人名字段 hydrate 后 fields[]
-    // 里是 resolveUserName() 的显示名，而 actor userId 在 HydratedRecord 顶层物理列
-    // （createdBy / updatedBy）。getActorId 按字段类型把左值解析回 userId，
-    // 与物理 records.createdBy = :uid 口径逐值一致（见 shared-types/filter.ts 注释）。
-    const typeById = new Map(fields.map((f) => [f.id, f.type]));
-    out = out.filter((r) =>
-      evalFilter(config.filters as FilterNode | null, (fid) => r.fields[fid], undefined, {
-        vars: { currentUserId: currentUserId ?? null },
-        getActorId: (fid) => {
-          const t = typeById.get(fid);
-          if (t === "createdBy") return r.createdBy;
-          if (t === "lastModifiedBy") return r.updatedBy;
-          return r.fields[fid];
-        },
-      }),
+    const formulaCallbacks = filterHasFormulaNode(config.filters as FilterNode)
+      ? await buildFormulaCallbacks(
+          // B 档调用方按本表 id 与 hydration deps 注入；缺省退 prismaDeps（off/shadow 同口径）
+          out[0]?.tableId ?? "",
+          fields,
+          config.filters as FilterNode,
+          out,
+          deps ?? prismaDeps,
+        )
+      : null;
+    out = filterByView(
+      out,
+      fields,
+      config.filters as FilterNode | null,
+      currentUserId ?? null,
+      formulaCallbacks,
     );
   }
 
@@ -288,7 +295,14 @@ export async function queryRecordsLegacy(opts: QueryOptions): Promise<QueryResul
   );
 
   // 3-5. 视图过滤 / 搜索 / 排序（纯内存，导出与列表共用同一后处理，口径零漂移）
-  hydrated = applyViewQuery(hydrated, fields, config, search, opts.currentUserId ?? null);
+  hydrated = await applyViewQuery(
+    hydrated,
+    fields,
+    config,
+    search,
+    opts.currentUserId ?? null,
+    hydrateDeps,
+  );
 
   const filteredTotal = hydrated.length;
 

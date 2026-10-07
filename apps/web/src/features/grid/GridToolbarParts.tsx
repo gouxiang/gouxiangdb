@@ -60,8 +60,12 @@ export function ToolButton({
 
 export function countConditions(node: unknown): number {
   if (!node || typeof node !== "object") return 0;
-  const n = node as { kind: string; children?: unknown[]; child?: unknown };
+  const n = node as { kind: string; children?: unknown[]; child?: unknown; expression?: string };
   if (n.kind === "condition") return 1;
+  // 高级公式谓词计为一个有效筛选（空表达式不算，与无筛选一致）
+  if (n.kind === "formula") {
+    return typeof n.expression === "string" && n.expression.trim() !== "" ? 1 : 0;
+  }
   if (n.kind === "and" || n.kind === "or") {
     return (n.children ?? []).reduce<number>((sum, c) => sum + countConditions(c), 0);
   }

@@ -151,6 +151,9 @@ function compileNode(b: Builder, node: FilterNode | null | undefined, denied: Re
       if (!r.sql || r.residual) return { sql: null, residual: node };
       return { sql: `(NOT (${r.sql}))`, residual: null };
     }
+    case "formula":
+      // 高级公式谓词永不下推 SQL：整节点留 residual，由 B 档内存精修求值（fail-closed）。
+      return { sql: null, residual: node };
     default:
       return { sql: null, residual: node };
   }
@@ -160,6 +163,8 @@ function compileNode(b: Builder, node: FilterNode | null | undefined, denied: Re
 function filterReferencesField(node: FilterNode | null | undefined, denied: ReadonlySet<string>): boolean {
   if (!node) return false;
   if (node.kind === "condition") return denied.has(node.fieldId);
+  // formula 节点不直接引用物理条件列；其内部字段引用经 buildFormulaSource 的 mask 钩子收口
+  if (node.kind === "formula") return false;
   if (node.kind === "not") return filterReferencesField(node.child, denied);
   return (node.children ?? []).some((ch) => filterReferencesField(ch, denied));
 }

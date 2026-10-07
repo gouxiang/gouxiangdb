@@ -36,6 +36,9 @@ function renderNode(node: FilterNode, m: Map<string, FieldDTO>, sm: Map<string, 
     }
     case "not":
       return `非（${renderNode(node.child, m, sm, false)}）`;
+    case "formula":
+      // 公式谓词摘要：展示公式正文，空表达式注明无筛选
+      return node.expression.trim() === "" ? "公式（无筛选）" : `公式：${node.expression}`;
     case "and":
     case "or": {
       const joiner = node.kind === "and" ? " 且 " : " 或 ";
