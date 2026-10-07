@@ -43,7 +43,8 @@ export interface RecordDrawerProps {
 
 // 抽屉宽度持久化的 localStorage key（与 v1 DrawerLayout 一致，便于跨端同步）
 const DRAWER_WIDTH_KEY = "gx.drawerWidth.v1";
-const DEFAULT_DRAWER_WIDTH = 560;
+// R-F-23：抽屉默认宽 480（已保存过宽度的用户沿用 localStorage 值）
+const DEFAULT_DRAWER_WIDTH = 480;
 const MIN_DRAWER_WIDTH = 340;
 const MAX_DRAWER_WIDTH = 960;
 
@@ -266,13 +267,19 @@ function RecordDrawer({
 
   return (
     <>
-      {/* 背景遮罩 */}
-      {open && <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} />}
+      {/* 背景遮罩：R-F-22 rgba(22,32,58,.35)（令牌未收录该值，按 SPEC 走内联） */}
+      {open && (
+        <div
+          className="fixed inset-0 gx-z-drawer"
+          style={{ backgroundColor: "rgba(22,32,58,.35)" }}
+          onClick={onClose}
+        />
+      )}
 
-      {/* 抽屉面板 */}
+      {/* 抽屉面板：R-F-23 贴右全高；R-D-06 阴影 lg；浮层圆角 12 只在左缘（贴右侧不圆角） */}
       <div
         className={
-          "fixed right-0 top-0 z-40 flex h-full max-w-full flex-col bg-gx-surface shadow-2xl transition-transform duration-200 " +
+          "fixed right-0 top-0 gx-z-drawer flex h-full max-w-full flex-col overflow-hidden rounded-l-gx-2xl bg-gx-surface shadow-gx-lg transition-transform duration-200 " +
           (open ? "translate-x-0" : "translate-x-full pointer-events-none")
         }
         style={{ width: drawerWidth }}
@@ -284,35 +291,39 @@ function RecordDrawer({
           onCommit={commitDrawerWidth}
         />
 
-        {/* 头部 */}
-        <div className="flex items-center gap-2 border-b border-gx-separator px-4 py-2.5">
-          <IconButton icon="chevronLeft" label="上一条" disabled={!prevId} onClick={() => prevId && setCurrentId(prevId)} />
-          <IconButton icon="chevronRight" label="下一条" disabled={!nextId} onClick={() => nextId && setCurrentId(nextId)} />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-gx-11 text-gx-text-tertiary">{table?.name ?? "记录"}</span>
-            <span className="truncate text-gx-14 font-semibold text-gx-text-primary">{title || "未命名"}</span>
+        {/* 头部：上下条成组 → 标题区弹性占满 → 右侧动作（布局 / 日志 / 关闭）成组 */}
+        <div className="flex items-center gap-3 border-b border-gx-hairline px-4 py-2.5">
+          {/* 上一条 / 下一条 */}
+          <div className="flex items-center gap-1">
+            <IconButton icon="chevronLeft" label="上一条" disabled={!prevId} onClick={() => prevId && setCurrentId(prevId)} />
+            <IconButton icon="chevronRight" label="下一条" disabled={!nextId} onClick={() => nextId && setCurrentId(nextId)} />
           </div>
-          {/* 查看日志：变更历史走弹窗，不铺在抽屉正文里 */}
-          <IconButton
-            icon="history"
-            label="查看日志"
-            title="查看日志（谁在什么时候改了什么）"
-            disabled={!currentId}
-            onClick={() => setShowChanges(true)}
-          />
-          {/* 编辑字段布局按钮 */}
-          {currentView && (
-            <button
-              type="button"
-              aria-label="编辑字段布局"
-              title="编辑字段布局（拖拽换序 / 行内 1-4 列）"
-              onClick={() => setLayoutEditing(true)}
-              className="flex h-6 w-6 items-center justify-center rounded border border-gx-border bg-gx-surface text-gx-text-tertiary hover:bg-gx-bg hover:text-gx-text-primary"
-            >
-              <Icon name="grid" size={14} />
-            </button>
-          )}
-          <IconButton icon="close" label="关闭" onClick={onClose} />
+          {/* 双行标题：双行均截断，行高收紧 */}
+          <div className="flex min-w-0 flex-1 flex-col justify-center">
+            <span className="truncate text-gx-11 leading-4 text-gx-text-tertiary">{table?.name ?? "记录"}</span>
+            <span className="truncate text-gx-14 font-semibold leading-5 text-gx-text-primary">{title || "未命名"}</span>
+          </div>
+          {/* 右侧动作区：规格统一为 IconButton（28×28，hover/圆角一致） */}
+          <div className="flex items-center gap-1">
+            {/* 编辑字段布局 */}
+            {currentView && (
+              <IconButton
+                icon="grid"
+                label="编辑字段布局"
+                title="编辑字段布局（拖拽换序 / 行内 1-4 列）"
+                onClick={() => setLayoutEditing(true)}
+              />
+            )}
+            {/* 查看日志：变更历史走弹窗，不铺在抽屉正文里 */}
+            <IconButton
+              icon="history"
+              label="查看日志"
+              title="查看日志（谁在什么时候改了什么）"
+              disabled={!currentId}
+              onClick={() => setShowChanges(true)}
+            />
+            <IconButton icon="close" label="关闭" onClick={onClose} />
+          </div>
         </div>
 
         {/* 主体 */}
@@ -359,9 +370,9 @@ function RecordDrawer({
             />
           )}
 
-          {/* 系统信息：横向紧凑一行（窄屏换行），三项同字号/同色/同间距 */}
+          {/* 系统信息：横向紧凑一行（窄屏换行），三项同字号/同色/同间距；发丝线分区 */}
           {record && (
-            <div className="flex flex-wrap items-center gap-x-gx-md gap-y-gx-xxs border-t border-gx-separator px-4 py-2 text-gx-11 text-gx-text-hint">
+            <div className="flex flex-wrap items-center gap-x-gx-md gap-y-gx-xxs border-t border-gx-hairline px-4 py-2 text-gx-11 text-gx-text-hint">
               <span>创建 {fmtDateTime(record.createdAt) || "—"}</span>
               <span aria-hidden="true">·</span>
               <span>最后修改 {fmtDateTime(record.updatedAt) || "—"}</span>
@@ -374,12 +385,12 @@ function RecordDrawer({
             </div>
           )}
 
-          {/* 评论面板 */}
-          <div className="border-t border-gx-separator">
+          {/* 评论面板：发丝线分区；头部为整行可点的折叠开关 */}
+          <div className="border-t border-gx-hairline">
             <button
               type="button"
               onClick={() => setShowComments((v) => !v)}
-              className="flex w-full items-center gap-2 px-4 py-2 text-gx-13 font-medium text-gx-text-secondary hover:bg-gx-bg"
+              className="flex w-full items-center gap-2 px-4 py-2 text-gx-13 font-medium text-gx-text-secondary transition-colors duration-[120ms] hover:bg-gx-row-hover"
             >
               <FieldIcon type="comment" size={14} />
               评论 {comments ? `(${comments.length})` : ""}
@@ -447,8 +458,9 @@ function RecordDrawer({
           </div>
         </div>
 
-        {/* 底部操作栏 */}
-        <div className="flex items-center gap-2 border-t border-gx-separator px-4 py-2.5">
+        {/* 底部操作栏：删除独立成组在左；右侧右对齐，顺序「次要 → 主要」（主要最右） */}
+        <div className="flex items-center gap-2 border-t border-gx-hairline px-4 py-2.5">
+          {/* 危险操作组 */}
           {permissions.canEditData && (
             <Button
               variant="danger"
@@ -460,12 +472,14 @@ function RecordDrawer({
               删除记录
             </Button>
           )}
-          <div className="flex-1" />
-          {onCreateNew && (
-            <Button variant="secondary" size="sm" icon="plus" onClick={onCreateNew}>
-              新建记录
-            </Button>
-          )}
+          {/* 右侧动作组（当前仅新建：保持最右；后续新增按钮按次要在前排列） */}
+          <div className="ml-auto flex items-center gap-2">
+            {onCreateNew && (
+              <Button variant="secondary" size="sm" icon="plus" onClick={onCreateNew}>
+                新建记录
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
