@@ -14,6 +14,7 @@ import type {
   ViewDTO,
 } from "@gx/shared-types";
 import { FieldIcon } from "../../components/ui";
+import { optionTone } from "../../components/interaction";
 import { Icon } from "../../components/icons";
 import { AttachmentLinks } from "../cells/AttachmentLinks";
 import { AttachmentUploader } from "../attachments/AttachmentUploader";
@@ -88,13 +89,17 @@ export function isReadonlyField(field: FieldDTO): boolean {
 
 /** 单选/多选的彩色胶囊 */
 export function SelectPill({ option, multi }: { option: SelectOption; multi?: boolean }) {
+  // 与 interaction.tsx StatusPill 同一混色口径（#693）：浅底 18% + 同系边框 50% +
+  // darkenForText 深字。color 缺失/非法走 gx token 兜底，不再用浅底白字。
+  const style = optionTone(option.color);
   return (
     <span
       className={clsx(
-        "inline-flex max-w-full items-center truncate rounded-full px-2 py-0.5 text-gx-12 font-medium",
-        multi && "border border-gx-border",
+        "inline-flex max-w-full items-center truncate rounded-full border px-2 py-0.5 text-gx-12 font-medium",
+        style ? "" : "border-gx-border bg-gx-row-hover text-gx-text-secondary",
+        multi && "border-gx-border",
       )}
-      style={{ backgroundColor: option.color, color: "#FFFFFF" }}
+      style={style}
     >
       {option.name}
     </span>

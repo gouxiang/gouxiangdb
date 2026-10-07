@@ -10,6 +10,7 @@ import { clsx } from "clsx";
 import { Button, FieldIcon, Modal, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { MdContent } from "../../components/MdContent";
+import { optionTone } from "../../components/interaction";
 import { AttachmentLinks } from "../cells/AttachmentLinks";
 import { openFilePreview } from "../attachments/preview-opener";
 import { attachmentFromLink } from "../attachments/policy";
@@ -893,16 +894,16 @@ function ReadValue({ field, value }: { field: FieldDTO; value: CellValue | undef
       <span className="inline-flex flex-wrap gap-1">
         {arr.map((v, i) => {
           const opt = (field.options ?? []).find((o) => o.id === v || o.name === v);
-          const color = opt?.color;
+          // 与 StatusPill/SelectPill 同一混色口径（#693）；缺色/非法走 gx token
+          const style = optionTone(opt?.color);
           return (
             <span
               key={i}
-              className="inline-flex items-center rounded-full px-2 py-0.5 text-gx-11 font-medium"
-              style={
-                color
-                  ? { backgroundColor: color, color: "#FFFFFF" }
-                  : { backgroundColor: "rgba(0,0,0,0.06)", color: "#5F5E5A" }
-              }
+              className={clsx(
+                "inline-flex items-center rounded-full border px-2 py-0.5 text-gx-11 font-medium",
+                style ? "" : "border-gx-border bg-gx-row-hover text-gx-text-secondary",
+              )}
+              style={style}
             >
               {opt?.name ?? (typeof v === "string" ? v : JSON.stringify(v))}
             </span>

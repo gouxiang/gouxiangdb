@@ -20,7 +20,6 @@ import type {
 } from "@gx/shared-types";
 import { FIELD_TYPE_LABEL, allowedDefaultSources, isFilterMatchSourceType, isNumberRuleEmpty, isReferenceableType, rollupAggOptions } from "@gx/shared-types";
 import { Button, Checkbox, FieldIcon, Input, Select, toast } from "../../components/ui";
-import { COLOR_PALETTE } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { draftFromField, isDirty, type FieldDraft } from "../designer/field-editor-dirty";
 // 字段名称长度上限与 FieldEditorSheet 同源（后端 Zod 也是 80，超限 400 too_big）
@@ -31,6 +30,7 @@ import FormulaEditorModal from "../designer/FormulaEditorModal";
 import { DefaultValueEditor } from "../designer/DefaultValueEditor";
 import { sanitizeDefaultConfig } from "../designer/DefaultValueEditor";
 import { NumberRuleEditor } from "../designer/NumberRuleEditor";
+import FieldSelectModal, { FieldSelectSummary, OptionColorButton, OPTION_DEFAULT_COLOR } from "../designer/FieldSelectModal";
 
 export interface FieldSettingsPanelProps {
   field: FieldDTO | null;
@@ -100,6 +100,8 @@ export function FieldSettingsPanel({
   const [visibleFieldIds, setVisibleFieldIds] = useState<FieldIdT[]>([]);
   // 公式编辑器弹窗
   const [formulaModalOpen, setFormulaModalOpen] = useState(false);
+  // 子表格字段选择弹窗：displayed=内嵌显示字段；visible=选择弹窗可见字段
+  const [selectModal, setSelectModal] = useState<null | "displayed" | "visible">(null);
   const [helpText, setHelpText] = useState("");
   const [required, setRequired] = useState(false);
   const [unique, setUnique] = useState(false);
@@ -129,6 +131,8 @@ export function FieldSettingsPanel({
     setRequired((field as { required?: boolean } | null)?.required ?? false);
     setUnique((field as { unique?: boolean } | null)?.unique ?? false);
     setMaxLength((field as { maxLength?: number | null } | null)?.maxLength ?? null);
+    // 切换字段时关闭可能打开的字段选择弹窗，避免把旧字段弹窗留在新字段上
+    setSelectModal(null);
   }, [field?.id]);
 
   const targetFieldsQ = useFields(relTableId || null);
@@ -147,23 +151,14 @@ export function FieldSettingsPanel({
     return rt?.reverse ?? "";
   }, [relKind, relationTypes]);
 
-  const cycleColor = (idx: number) => {
-    setOptions((prev) => {
-      const copy = [...prev];
-      const cur = copy[idx]!;
-      const ci = COLOR_PALETTE.indexOf(cur.color);
-      const next = COLOR_PALETTE[(ci + 1) % COLOR_PALETTE.length]!;
-      copy[idx] = { ...cur, color: next };
-      return copy;
-    });
-  };
   useEffect(() => {
     if (type === "tabs" && tabs.length === 0) {
       setTabs([{ id: `tab_${Date.now()}`, name: "基本信息", fieldIds: [] }]);
     }
   }, [type]);
+  // #693：新选项统一默认起始色，不再按 COLOR_PALETTE 下标轮转
   const addOption = () =>
-    setOptions((prev) => [...prev, { id: `opt_${Date.now()}_${prev.length}`, name: "新选项", color: COLOR_PALETTE[prev.length % COLOR_PALETTE.length]! }]);
+    setOptions((prev) => [...prev, { id: `opt_${Date.now()}_${prev.length}`, name: "新选项", color: OPTION_DEFAULT_COLOR }]);
   const removeOption = (i: number) => setOptions((prev) => prev.filter((_, j) => j !== i));
 
   const isSystem = ["createdTime", "lastModifiedTime", "createdBy", "lastModifiedBy"].includes(type);
@@ -383,12 +378,13 @@ export function FieldSettingsPanel({
                   <div className="flex flex-col gap-1.5">
                     {options.map((o, i) => (
                       <div key={o.id} className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => cycleColor(i)}
-                          className="h-6 w-6 flex-shrink-0 rounded-full border border-gx-border"
-                          style={{ backgroundColor: o.color }}
-                          title="点击切换颜色"
+                        <OptionColorButton
+                          color={o.color}
+                          onChange={(hex) =>
+                            setOptions((p) =>
+                              p.map((x, j) => (j === i ? { ...x, color: hex } : x)),
+                            )
+                          }
                         />
                         <Input value={o.name} onChange={(e) => setOptions((p) => p.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
                         {/* 图标统一走 icons.tsx，不用字符符号（emoji）当功能图标 */}
@@ -541,34 +537,20 @@ export function FieldSettingsPanel({
                 </FormRow>
                 <FormRow>
                   <FormField label="子表格显示字段（内嵌表格列，多选）" control="auto">
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {targetFields.map((f) => {
-                        const checked = displayedFieldIds.includes(f.id);
-                        return (
-                          <label key={f.id} className="flex cursor-pointer items-center gap-1.5 rounded-gx-sm border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 hover:bg-gx-bg">
-                            <input type="checkbox" checked={checked} onChange={() => setDisplayedFieldIds((prev) => checked ? prev.filter((x) => x !== f.id) : [...prev, f.id])} />
-                            <FieldIcon type={f.type} size={12} />
-                            <span className="truncate">{f.name}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
+                    <FieldSelectSummary
+                      fields={targetFields}
+                      ids={displayedFieldIds}
+                      onSelect={() => setSelectModal("displayed")}
+                    />
                   </FormField>
                 </FormRow>
                 <FormRow>
                   <FormField label="选择弹窗可见字段（「选择数据」弹窗列，多选）" control="auto" help="仅作用于「选择数据」弹窗展示的列；公式引用子表格字段不受显示/可见字段限制。">
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {targetFields.map((f) => {
-                        const checked = visibleFieldIds.includes(f.id);
-                        return (
-                          <label key={f.id} className="flex cursor-pointer items-center gap-1.5 rounded-gx-sm border border-gx-border bg-gx-surface px-2 py-1.5 text-gx-12 hover:bg-gx-bg">
-                            <input type="checkbox" checked={checked} onChange={() => setVisibleFieldIds((prev) => checked ? prev.filter((x) => x !== f.id) : [...prev, f.id])} />
-                            <FieldIcon type={f.type} size={12} />
-                            <span className="truncate">{f.name}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
+                    <FieldSelectSummary
+                      fields={targetFields}
+                      ids={visibleFieldIds}
+                      onSelect={() => setSelectModal("visible")}
+                    />
                   </FormField>
                 </FormRow>
                 <FormRow>
@@ -652,6 +634,26 @@ export function FieldSettingsPanel({
           }
         />
       </div>
+      {selectModal && (
+        <FieldSelectModal
+          fields={targetFields}
+          // 空数组即「默认」：传 null 触发默认预勾选与提示横幅
+          value={
+            (selectModal === "displayed" ? displayedFieldIds : visibleFieldIds).length === 0
+              ? null
+              : ((selectModal === "displayed" ? displayedFieldIds : visibleFieldIds) as string[])
+          }
+          title={selectModal === "displayed" ? "选择子表格显示字段" : "选择弹窗可见字段"}
+          subtitle={tables.find((t) => t.id === relTableId)?.name ?? relTableId}
+          onClose={() => setSelectModal(null)}
+          onChange={(next) => {
+            // 确定（显式数组）写回；恢复默认（null）落为空数组（与既有默认回退口径一致）
+            const ids = (next ?? []) as FieldIdT[];
+            if (selectModal === "displayed") setDisplayedFieldIds(ids);
+            else setVisibleFieldIds(ids);
+          }}
+        />
+      )}
     </div>
   );
 }

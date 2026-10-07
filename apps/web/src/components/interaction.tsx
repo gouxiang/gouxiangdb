@@ -21,7 +21,7 @@
 //
 // 全部使用 gx-* token 与 components/icons.tsx 自建图标；不新增依赖、不裸 fetch、不写死 hex。
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { clsx } from "clsx";
 import { Button, FOCUS_RING, toast, darkenForText } from "./ui";
 import { Icon, type IconName } from "./icons";
@@ -84,7 +84,7 @@ export function useDebouncedCommit(
   const cbRef = useRef(onCommit);
   cbRef.current = onCommit;
   // 已提交（或无需提交）的权威值。挂载 / 外部回灌时 value 恒等于它，提交 effect 直接跳过。
-  // ★ 不能用「首次 effect 跳过」标志：React 18 StrictMode 开发态会 mount → cleanup → 再 mount，
+  // 注意：不能用「首次 effect 跳过」标志：React 18 StrictMode 开发态会 mount → cleanup → 再 mount，
   //   同一组件实例内该标志已被置位，第二次 effect 不再跳过，于是挂载约 300ms 后把初始值当成
   //   用户输入自动提交一次（2026-10-06 E2E 抓到的「零点击自动 PATCH 整份 config、把排序写乱」）。
   //   改成比较值，跑任意次都是幂等的。
@@ -232,13 +232,29 @@ export function TruncatedText({
  * 颜色来源仍是选项自带 color（用户可配），不新增任何硬编码色值。
  */
 /** 把单色 hex 解析为 rgb 三元组；非 hex（如 rgb()/命名色）返回 null 由调用方降级。 */
-function parseHexColor(c: string): [number, number, number] | null {
+export function parseHexColor(c: string): [number, number, number] | null {
   const m = c.trim().match(/^#?([a-f\d]{3}|[a-f\d]{6})$/i);
   if (!m) return null;
   let h = m[1];
   if (h.length === 3) h = h.split("").map((x) => x + x).join("");
   const n = parseInt(h, 16);
   return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
+/**
+ * 选项色统一混色口径（#693）：原色 18% 浅底 + 同系原色 50% 边框 +
+ * darkenForText 同系深字。StatusPill / SelectPill / DetailLayout 选项 pill
+ * 三处共用此函数，不允许复制第三套混色代码。
+ * color 缺失/非 hex 返回 undefined，由调用方走 gx-* token 兜底。
+ */
+export function optionTone(color?: string | null): CSSProperties | undefined {
+  const rgb = color ? parseHexColor(color) : null;
+  if (!rgb) return undefined;
+  return {
+    backgroundColor: `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.18)`,
+    borderColor: `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.5)`,
+    color: darkenForText(rgb),
+  };
 }
 
 export function StatusPill({
@@ -254,21 +270,14 @@ export function StatusPill({
   // 底色取原色 18%、边框取原色 50%，文字取原色**压暗一档**（与 Badge 同一取色函数
   // darkenForText），既保留"同色系"语义，又满足浅底上的 4.5:1 对比度。
   // 非 hex（rgb()/命名色）无法可靠压暗 → 整体降级走 gx-* token，不拼非法色值。
-  const rgb = color ? parseHexColor(color) : null;
-  const style: React.CSSProperties | undefined = rgb
-    ? {
-        backgroundColor: `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.18)`,
-        borderColor: `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.5)`,
-        color: darkenForText(rgb),
-      }
-    : undefined;
+  const style = optionTone(color);
   return (
     <span
       data-gx-status-pill="true"
       title={label}
       className={clsx(
         "inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-gx-11 font-medium leading-none",
-        rgb ? "" : "border-gx-border bg-gx-row-hover text-gx-text-secondary",
+        style ? "" : "border-gx-border bg-gx-row-hover text-gx-text-secondary",
         className,
       )}
       style={style}
