@@ -406,6 +406,106 @@ function valueEqual(lv: FormulaValue, rv: FormulaValue): boolean {
   return asString(lv) === asString(rv);
 }
 
+// ============ 条件匹配（SUMIF / COUNTIF / AVERAGEIF 共用，Excel 风格 criteria）============
+
+/** 通配符文本匹配：* 任意序列、? 单个字符，~ 转义 ~* ~? ~~；整串完全匹配，大小写不敏感 */
+function wildcardMatch(text: string, pattern: string): boolean {
+  let re = "^";
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i]!;
+    if (c === "~" && i + 1 < pattern.length && "*?~".includes(pattern[i + 1]!)) {
+      re += pattern[i + 1]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      i += 1;
+    } else if (c === "*") {
+      re += ".*";
+    } else if (c === "?") {
+      re += ".";
+    } else {
+      re += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp(`${re}$`, "i").test(text);
+}
+
+/** criteria 文本中是否含未转义的 * 或 ? */
+function hasWildcard(pattern: string): boolean {
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i]!;
+    if (c === "~" && i + 1 < pattern.length && "*?~".includes(pattern[i + 1]!)) i += 1;
+    else if (c === "*" || c === "?") return true;
+  }
+  return false;
+}
+
+/**
+ * 判定单个元素是否满足 criteria（均为已求值 FormulaValue）：
+ * - 数字 criteria：数值精确相等（元素须能转为有限数）
+ * - 布尔 criteria：元素按 1/0 精确相等
+ * - 文本 criteria：可带 > >= < <= <> = 前缀做比较；无前缀时数字串按数值相等、
+ *   其余按文本相等；含未转义 * ? 时按通配符匹配（~ 转义）。
+ * - null 元素一律不匹配；criteria 为 null 不匹配。
+ */
+function criteriaMatch(cell: FormulaValue, criteria: FormulaValue): boolean {
+  if (cell.t === "null" || criteria.t === "null") return false;
+  if (criteria.t === "num") {
+    const x = asNum(cell);
+    return x !== null && Number.isFinite(x) && x === criteria.v;
+  }
+  if (criteria.t === "bool") {
+    const x = asNum(cell);
+    return x !== null && Number.isFinite(x) && x === (criteria.v ? 1 : 0);
+  }
+  if (criteria.t !== "str") return false;
+  const s = criteria.v;
+  const ops = ["<=", ">=", "<>", "=", "<", ">"] as const;
+  for (const op of ops) {
+    if (!s.startsWith(op)) continue;
+    const rest = s.slice(op.length).trim();
+    const operand: FormulaValue = /^-?\d+(\.\d+)?$/.test(rest) ? fnum(Number(rest)) : fstr(rest);
+    switch (op) {
+      case ">": return compareOrdered(cell, operand) > 0;
+      case ">=": return compareOrdered(cell, operand) >= 0;
+      case "<": return compareOrdered(cell, operand) < 0;
+      case "<=": return compareOrdered(cell, operand) <= 0;
+      case "=": return valueEqual(cell, operand);
+      case "<>": return !valueEqual(cell, operand);
+    }
+  }
+  if (hasWildcard(s)) return wildcardMatch(asString(cell), s);
+  // 无前缀：数字串按数值相等（数字列与 "100" 这类文本条件）；其余按文本相等
+  const n = s.trim() === "" ? NaN : Number(s);
+  if (Number.isFinite(n)) {
+    const x = asNum(cell);
+    return x !== null && Number.isFinite(x) ? x === n : false;
+  }
+  return asString(cell) === s;
+}
+
+/** range 标量→单元素、null→空；列表保持含 FNULL 占位（条件聚合下标对齐依赖） */
+function rangeElements(v: FormulaValue): FormulaValue[] {
+  if (v.t === "list") return v.v;
+  if (v.t === "null") return [];
+  return [v];
+}
+
+/** SUMIF / AVERAGEIF 共用：按下标遍历 range，匹配 criteria 时取 valueRange 对应下标数值 */
+function conditionalNums(a: FormulaValue[]): { count: number; sum: number } {
+  const rangeEls = rangeElements(a[0] ?? FNULL);
+  const valueEls = a.length >= 3 ? rangeElements(a[2]!) : [];
+  let count = 0;
+  let sum = 0;
+  for (let i = 0; i < rangeEls.length; i++) {
+    const cell = rangeEls[i]!;
+    if (!criteriaMatch(cell, a[1] ?? FNULL)) continue;
+    const source = a.length < 3 ? cell : (valueEls[i] ?? FNULL);
+    const x = asNum(source);
+    if (x === null || !Number.isFinite(x)) continue;
+    count += 1;
+    sum += x;
+  }
+  return { count, sum };
+}
+
 function evalAST(ast: FormulaAST, src: FieldValueSource): FormulaValue {
   switch (ast.k) {
     case "number":
@@ -587,20 +687,66 @@ function evalCall(name: string, args: FormulaAST[], src: FieldValueSource): Form
       return fnum(nums.length === 0 ? 0 : Math.max(...nums));
     }
     case "FIRST": {
-      // 点引用多记录→list：取首条；单标量原样返回；空→null
+      // 点引用多记录→list：取首条非空值（保位列表可能以 FNULL 开头，跳过与历史
+      // 紧凑列表行为一致）；单标量原样返回；空→null
       const v0 = a[0] ?? FNULL;
-      if (v0.t === "list") return v0.v[0] ?? FNULL;
+      if (v0.t === "list") return v0.v.find((v) => v.t !== "null") ?? FNULL;
       return v0;
     }
     case "LAST": {
       const v0 = a[0] ?? FNULL;
-      if (v0.t === "list") return v0.v[v0.v.length - 1] ?? FNULL;
+      if (v0.t === "list") {
+        const last = [...v0.v].reverse().find((v) => v.t !== "null");
+        return last ?? FNULL;
+      }
       return v0;
     }
     case "ISNULL":
       return fbool(a.length === 0 ? true : a[0]!.t === "null");
     case "BLANK":
       return FNULL;
+    case "COUNTIF": {
+      // 统计 range 中满足 criteria 的非空元素个数
+      let n = 0;
+      for (const cell of rangeElements(a[0] ?? FNULL)) {
+        if (criteriaMatch(cell, a[1] ?? FNULL)) n += 1;
+      }
+      return fnum(n);
+    }
+    case "SUMIF": {
+      const { sum } = conditionalNums(a);
+      return fnum(sum);
+    }
+    case "AVERAGEIF": {
+      // 与 AVERAGE 空集口径一致：无匹配返回 0
+      const { count, sum } = conditionalNums(a);
+      return fnum(count === 0 ? 0 : sum / count);
+    }
+    case "COUNT": {
+      // Excel 口径：仅数值型元素；布尔/文本/null 不计，数字文本不转数
+      return fnum(flattenArgs(a).filter((v) => v.t === "num" && Number.isFinite(v.v)).length);
+    }
+    case "COUNTA": {
+      // 非空元素个数：null 不计；空字符串计入（与 Excel 一致）
+      return fnum(flattenArgs(a).filter((v) => v.t !== "null").length);
+    }
+    case "YEAR":
+    case "MONTH":
+    case "DAY": {
+      // ISO 日期串（YYYY-MM-DD / YYYY-MM-DDTHH:mm:ss.sssZ）或毫秒时间戳；无法解析返回 null
+      const t = ((): number | null => {
+        const v0 = a[0] ?? FNULL;
+        if (v0.t === "num") return Number.isFinite(v0.v) ? v0.v : null;
+        if (v0.t === "str" && v0.v.trim() !== "") {
+          const dm = /^(\d{4})-(\d{2})-(\d{2})(?:T.*)?$/.exec(v0.v.trim());
+          if (dm) return Date.UTC(Number(dm[1]), Number(dm[2]) - 1, Number(dm[3]));
+        }
+        return null;
+      })();
+      if (t === null) return FNULL;
+      const d = new Date(t);
+      return fnum(name === "YEAR" ? d.getUTCFullYear() : name === "MONTH" ? d.getUTCMonth() + 1 : d.getUTCDate());
+    }
     case "NOW":
       return fstr(new Date().toISOString());
     case "TODAY":
@@ -764,6 +910,8 @@ const FN_RETURN: Record<string, FormulaOutType> = {
   SUM: "num", ROUND: "num", CEILING: "num", FLOOR: "num", ABS: "num",
   MIN: "num", MAX: "num", SQRT: "num", POWER: "num", MOD: "num",
   INT: "num", AVERAGE: "num", LEN: "num", SEARCH: "num", DATETIME_DIFF: "num",
+  SUMIF: "num", COUNTIF: "num", AVERAGEIF: "num",
+  COUNT: "num", COUNTA: "num", YEAR: "num", MONTH: "num", DAY: "num",
   CONCAT: "str", CONCATENATE: "str", TRIM: "str", UPPER: "str", LOWER: "str",
   LEFT: "str", RIGHT: "str", REPLACE: "str", SUBSTR: "str", REPT: "str",
   FIRST: "any", LAST: "any",

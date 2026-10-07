@@ -336,44 +336,75 @@ export async function buildFormulaSource(
   merged: Record<string, FieldValue>,
   ctx: HydrationContext,
 ): Promise<(name: string) => FormulaValue> {
-  // 预解析点引用（异步查库，避免求值函数里做 IO）→ 带类型的值
+  // 预解析点引用（异步查库，避免求值函数里做 IO）→ 带类型的值。
+  // 同一 link/subtable 字段的多个点引用【按子记录遍历一次】，每个子记录的每个被引用子字段
+  // 都产出一个值（缺失/被 mask → FNULL 占位），保证 {关联.A} 与 {关联.B} 列表等长、
+  // 下标对应同一条子记录——SUMIF/AVERAGEIF 的 range/sumRange 下标对齐依赖此性质。
   const dotted = new Map<string, FormulaValue>();
+  const refs = formulaFieldRefs(formula);
 
-  for (const ref of formulaFieldRefs(formula)) {
+  // 收集点引用：linkFieldId -> [{ ref, subName }]
+  const groups = new Map<string, { ref: string; subName: string }[]>();
+  for (const ref of refs) {
     if (!ref.includes(".") || dotted.has(ref)) continue;
     const dot = ref.indexOf(".");
-    const linkName = ref.slice(0, dot);
-    const subName = ref.slice(dot + 1);
-
-    const lf = fields.find((f) => f.name === linkName && (f.type === "links" || f.type === "subtable"));
+    const lf = fields.find(
+      (f) => f.name === ref.slice(0, dot) && (f.type === "links" || f.type === "subtable"),
+    );
     if (!lf) {
       dotted.set(ref, FNULL);
       continue;
     }
-    const links = merged[lf.id] as LinkRef[] | undefined;
+    const list = groups.get(lf.id) ?? [];
+    list.push({ ref, subName: ref.slice(dot + 1) });
+    groups.set(lf.id, list);
+  }
+
+  for (const [linkFieldId, subRefs] of groups) {
+    const links = merged[linkFieldId] as LinkRef[] | undefined;
     if (!links || links.length === 0) {
-      dotted.set(ref, FNULL);
+      for (const sr of subRefs) dotted.set(sr.ref, FNULL);
       continue;
     }
 
-    const vals: FormulaValue[] = [];
+    // 每个被引用子字段一列，初始等长、逐子记录同步追加（含 FNULL）
+    const columns = new Map<string, FormulaValue[]>(subRefs.map((sr) => [sr.ref, []]));
     for (const l of links) {
       // 每条 link 自带 tableId（反向关联也正确）；取子记录完整 hydration 后的值，
       // 因此 {子表格.某公式字段} / {关联.lookup字段} 同样可读。
       const childFields = await loadFieldsCached(l.tableId, ctx);
-      const subField = childFields.find((f) => f.name === subName);
-      if (!subField) continue;
-      // M4/S6：对端字段对当前主体被 mask -> 该点引用以 null 参与（与真实空值不可区分，裁决 A-4）。
+      // M4/S6：对端字段对当前主体被 mask -> 该点引用以 null 占位（与真实空值不可区分，裁决 A-4）。
       const peerVis = await visibilityOf(ctx, l.tableId);
-      if (!fieldVisible(peerVis, subField.id)) continue;
       const childMerged = await getMergedCached(l.tableId, l.recordId, ctx);
-      if (!childMerged) continue;
-      const v = cellToFormulaValue(childMerged[subField.id] ?? null);
-      if (v.t !== "null") vals.push(v);
+      for (const sr of subRefs) {
+        const subField = childFields.find((f) => f.name === sr.subName);
+        let v: FormulaValue = FNULL;
+        if (subField && fieldVisible(peerVis, subField.id) && childMerged) {
+          v = cellToFormulaValue(childMerged[subField.id] ?? null);
+        }
+        columns.get(sr.ref)!.push(v);
+      }
     }
-    if (vals.length === 0) dotted.set(ref, FNULL);
-    else if (vals.length === 1) dotted.set(ref, vals[0]!);
-    else dotted.set(ref, flist(vals));
+
+    for (const sr of subRefs) {
+      const col = columns.get(sr.ref)!;
+      const valid = col.filter((v) => v.t !== "null");
+      if (valid.length === 0) {
+        dotted.set(sr.ref, FNULL);
+        continue;
+      }
+      if (subRefs.length === 1) {
+        // 无兄弟点引用：严格保持历史对外契约——0 有效→FNULL、恰好 1 有效→标量、
+        // 多有效→【紧凑列表】（过滤 FNULL）。LEN/下标位置等旧行为由此零回归。
+        if (valid.length === 1) dotted.set(sr.ref, valid[0]!);
+        else dotted.set(sr.ref, flist(valid));
+        continue;
+      }
+      // 同公式引用了该字段的多个子字段：所有列一律保留【等长含 FNULL 占位】列表
+      // （即使本列仅 1 个有效值），否则标量/紧凑列表会丢失原下标，导致 SUMIF
+      // range/sumRange 错配（沉默逻辑错误）。
+      dotted.set(sr.ref, flist(col));
+    }
   }
 
   return (name: string): FormulaValue => {

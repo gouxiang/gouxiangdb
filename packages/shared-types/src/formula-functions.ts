@@ -91,6 +91,69 @@ export const FORMULA_FUNCTIONS: FormulaFnDef[] = [
     arity: { min: 1, max: null },
   },
   {
+    name: "SUMIF", category: "common",
+    signature: "SUMIF(条件范围, 条件, [求和范围])",
+    description:
+      "按条件求和：逐行检查「条件范围」中的值是否满足「条件」，满足时把「求和范围」同一行的数值累加。"
+      + "省略「求和范围」时直接累加条件范围自身的数值。常用于子表格场景，如只统计状态为已付款的明细金额。"
+      + "空值行会以占位形式保留，两个范围始终按行号一一对应。",
+    params: [
+      {
+        name: "条件范围",
+        type: "任意/列表",
+        desc: "逐行检查的值，通常是点引用列表，如 {订单明细.状态}",
+      },
+      {
+        name: "条件",
+        type: "数字/布尔/文本",
+        desc:
+          "匹配条件：数字或布尔按精确相等；文本可加比较符 >、>=、<、<=、<>、=（如 \">100\"、\"<>已完成\"），"
+          + "不加比较符按相等匹配；支持通配符 *（任意个字符）和 ?（单个字符），用 ~ 转义（~*、~?、~~）",
+      },
+      {
+        name: "求和范围",
+        type: "数值/列表",
+        desc: "满足条件时实际累加的数值，通常是点引用列表，如 {订单明细.金额}（可选，省略则累加条件范围）",
+      },
+    ],
+    example: 'SUMIF({订单明细.状态}, "已付款", {订单明细.金额})',
+    returns: "数值（无任何匹配时返回 0）",
+    arity: { min: 2, max: 3 },
+  },
+  {
+    name: "COUNTIF", category: "common",
+    signature: "COUNTIF(范围, 条件)",
+    description:
+      "按条件计数：统计范围中满足条件的非空元素个数。条件写法与 SUMIF 相同：数字精确相等，"
+      + "文本支持 >、>=、<、<=、<>、= 比较符以及 *、? 通配符（~ 转义）。",
+    params: [
+      { name: "范围", type: "任意/列表", desc: "逐行检查的值，通常是点引用列表" },
+      {
+        name: "条件",
+        type: "数字/布尔/文本",
+        desc: "匹配条件，支持比较符与通配符，规则同 SUMIF",
+      },
+    ],
+    example: 'COUNTIF({订单明细.状态}, "已付款")',
+    returns: "数值（无匹配时返回 0）",
+    arity: { min: 2, max: 2 },
+  },
+  {
+    name: "AVERAGEIF", category: "common",
+    signature: "AVERAGEIF(条件范围, 条件, [求平均范围])",
+    description:
+      "按条件求平均：逐行检查条件，满足时取「求平均范围」同一行的数值求平均。"
+      + "省略第三参数时对条件范围自身的数值求平均。条件写法与 SUMIF 相同。",
+    params: [
+      { name: "条件范围", type: "任意/列表", desc: "逐行检查的值，通常是点引用列表" },
+      { name: "条件", type: "数字/布尔/文本", desc: "匹配条件，支持比较符与通配符，规则同 SUMIF" },
+      { name: "求平均范围", type: "数值/列表", desc: "满足条件时参与平均的数值（可选）" },
+    ],
+    example: 'AVERAGEIF({订单明细.状态}, "已付款", {订单明细.金额})',
+    returns: "数值（无任何匹配时返回 0）",
+    arity: { min: 2, max: 3 },
+  },
+  {
     name: "ROUND", category: "common",
     signature: "ROUND(数值, 小数位)",
     description: "按指定小数位四舍五入。",
@@ -294,6 +357,27 @@ export const FORMULA_FUNCTIONS: FormulaFnDef[] = [
 
   // ---- 数学 ----
   {
+    name: "COUNT", category: "math",
+    signature: "COUNT(值1, 值2, ...)",
+    description:
+      "统计数值型元素的个数：列表会先展开，只有数字类型的值才计入；布尔值、文本、空值不计，"
+      + "形如 \"100\" 的数字文本不会自动转成数字（与 Excel 口径一致）。",
+    params: [{ name: "值", type: "任意/列表", desc: "待统计的值，可多个；列表参数会展开" }],
+    example: "COUNT({订单明细.金额})",
+    returns: "数值",
+    arity: { min: 1, max: null },
+  },
+  {
+    name: "COUNTA", category: "math",
+    signature: "COUNTA(值1, 值2, ...)",
+    description:
+      "统计非空元素的个数：列表会先展开，只有空值不计入；文本（含空字符串 \"\"）、数字、布尔均计入（与 Excel 口径一致）。",
+    params: [{ name: "值", type: "任意/列表", desc: "待统计的值，可多个；列表参数会展开" }],
+    example: "COUNTA({订单明细.备注})",
+    returns: "数值",
+    arity: { min: 1, max: null },
+  },
+  {
     name: "CEILING", category: "math",
     signature: "CEILING(数值)",
     description: "向上取整。",
@@ -391,6 +475,37 @@ export const FORMULA_FUNCTIONS: FormulaFnDef[] = [
   },
 
   // ---- 时间 ----
+  {
+    name: "YEAR", category: "date",
+    signature: "YEAR(日期)",
+    description:
+      "取日期的年份。日期参数支持 ISO 文本（如 \"2026-10-06\"、\"2026-10-06T08:00:00.000Z\"）"
+      + "或毫秒时间戳数字；无法解析为有效日期时返回空值。",
+    params: [{ name: "日期", type: "日期文本/数值", desc: "ISO 日期文本或毫秒时间戳" }],
+    example: "YEAR({下单日期})",
+    returns: "数值（解析失败返回空值）",
+    arity: { min: 1, max: 1 },
+  },
+  {
+    name: "MONTH", category: "date",
+    signature: "MONTH(日期)",
+    description:
+      "取日期的月份（1-12）。日期参数支持 ISO 文本或毫秒时间戳数字；无法解析为有效日期时返回空值。",
+    params: [{ name: "日期", type: "日期文本/数值", desc: "ISO 日期文本或毫秒时间戳" }],
+    example: "MONTH({下单日期})",
+    returns: "数值（解析失败返回空值）",
+    arity: { min: 1, max: 1 },
+  },
+  {
+    name: "DAY", category: "date",
+    signature: "DAY(日期)",
+    description:
+      "取日期是当月第几天（1-31）。日期参数支持 ISO 文本或毫秒时间戳数字；无法解析为有效日期时返回空值。",
+    params: [{ name: "日期", type: "日期文本/数值", desc: "ISO 日期文本或毫秒时间戳" }],
+    example: "DAY({下单日期})",
+    returns: "数值（解析失败返回空值）",
+    arity: { min: 1, max: 1 },
+  },
   {
     name: "NOW", category: "date",
     signature: "NOW()",
