@@ -53,8 +53,11 @@ afterAll(async () => {
 describe("S8-C1 AC-M6-1 只读凭证：tools/list 无写工具 + 直调与「不存在」同口径", () => {
   it("HTTP tools/list 恰为读工具（零写工具），且集合精确匹配", async () => {
     const names = await listTools(stack.tcp.target, stack.fx.pat.ro.token);
+    // 本夹具是「无角色授予」全新实例，createLibraryGuard 正式兜底＝登录即可建库，
+    // 故 base.create_base / kb.create_kb 对任何用户入册（非越权；有授予后 gate 即生效）。
     expect(names).toEqual([
-      "canvas.get_board", "doc.get_doc_blocks", "ping_echo",
+      "base.create_base",
+      "canvas.get_board", "doc.get_doc_blocks", "kb.create_kb", "ping_echo",
       "record.list_records", "record.query_records", "table.get_schema", "table.list_bases",
     ]);
     expect(names.filter((n) => WRITE_TOOLS.includes(n))).toEqual([]);
@@ -75,8 +78,10 @@ describe("S8-C1 AC-M6-1 只读凭证：tools/list 无写工具 + 直调与「不
 
   it("stdio tools/list 与 HTTP 同集合（共用 buildServer，闸门一决策一致）", async () => {
     const names = (await stdioRo.client.listTools()).tools.map((t) => t.name).sort();
+    // 无角色授予兜底：建库/建知识库工具同 HTTP 一并入册。
     expect(names).toEqual([
-      "canvas.get_board", "doc.get_doc_blocks", "ping_echo",
+      "base.create_base",
+      "canvas.get_board", "doc.get_doc_blocks", "kb.create_kb", "ping_echo",
       "record.list_records", "record.query_records", "table.get_schema", "table.list_bases",
     ]);
   });

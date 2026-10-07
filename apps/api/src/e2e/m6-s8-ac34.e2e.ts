@@ -14,16 +14,27 @@ import { dumpAttackMatrix, recordAttack } from "./attackLog.js";
 import type { PatScope } from "../mcp/pat/tokens.js";
 
 const ALL_SCOPES: PatScope[] = ["record:read", "record:write", "doc:read", "doc:write", "canvas:read", "canvas:write"];
-/** M6 未开放的画布操作集（C-2 二期边界）：入参出现即整批拒绝，**绝不静默成功**。 */
-const UNSUPPORTED_CANVAS_OPS = [
-  { label: "element.update", op: { op: "element.update", element: { id: "x" } } },
-  { label: "element.move", op: { op: "element.move", element: { id: "x" } } },
-  { label: "element.delete", op: { op: "element.delete", element: { id: "x" } } },
-  { label: "element.connect", op: { op: "element.connect", element: { id: "x" } } },
+/**
+ * 当前仍未开放的画布能力（二期边界）：入参出现即整批 UNSUPPORTED_OPERATION，**绝不静默成功**。
+ * 注意：element.update/move/delete/connect 已在画布二期落地（见 canvasWrite.tools.ts SUPPORTED），
+ * 不再属于本集合；其成功往返在下方 AC-M6-3c 用真实写入证明。
+ */
+const FUTURE_CANVAS_OPS = [
   { label: "箭头 arrow-line", op: { op: "element.create", element: { type: "arrow-line", shape: "straight", points: [[0, 0], [1, 1]], source: {}, target: {} } } },
   { label: "gxLinkRef 关联块", op: { op: "element.create", element: { type: "geometry", shape: "rectangle", points: [[0, 0], [1, 1]], gxLinkRef: {} } } },
   { label: "gxDocRef 文档引用", op: { op: "element.create", element: { type: "geometry", shape: "rectangle", points: [[0, 0], [1, 1]], gxDocRef: {} } } },
 ];
+/** 画布写入当前支持的操作集（与 canvasWrite.tools.ts SUPPORTED 同序）。 */
+const EXPECTED_SUPPORTED = [
+  "element.create",
+  "element.update",
+  "element.move",
+  "element.delete",
+  "element.connect",
+];
+function rect(): { type: "geometry"; shape: "rectangle"; points: [[number, number], [number, number]] } {
+  return { type: "geometry", shape: "rectangle", points: [[0, 0], [100, 100]] };
+}
 
 let stack: E2eStack;
 let stdio: SdkConnection;
@@ -93,22 +104,22 @@ describe("S8-C3 AC-M6-3a doc 写入：confirm 强制 + 409/currentVersion + 往�
   });
 });
 
-describe("S8-C3 AC-M6-3b 画布二期操作：UNSUPPORTED_OPERATION 显式拒绝、绝不静默", () => {
-  it.each(UNSUPPORTED_CANVAS_OPS)("HTTP $label -> UNSUPPORTED_OPERATION + supported=[element.create]", async ({ label, op }) => {
+describe("S8-C3 AC-M6-3b 画布二期未开放能力：UNSUPPORTED_OPERATION 显式拒绝、绝不静默", () => {
+  it.each(FUTURE_CANVAS_OPS)("HTTP $label -> UNSUPPORTED_OPERATION + supported 含 element.connect", async ({ label, op }) => {
     const env = await callTool(stack.tcp.target, stack.fx.pat.full.token, "canvas.commit_elements", {
       docId: stack.fx.ids.canvasId, ops: [op], confirm: true,
     });
     expect(env.isError, `${label} 必须被拒（不得静默成功）`).toBe(true);
     const body = parseText<{ code: string; supported: string[] }>(env);
     expect(body.code, label).toBe("UNSUPPORTED_OPERATION");
-    expect(body.supported, label).toEqual(["element.create"]);
-    recordAttack({ id: `AC-M6-3/${label}`, entry: "http", input: `commit_elements ops=[${label}]`, expected: "UNSUPPORTED_OPERATION + supported=[element.create]", actual: "UNSUPPORTED_OPERATION", verdict: "PASS" });
+    expect(body.supported, label).toEqual(EXPECTED_SUPPORTED);
+    recordAttack({ id: `AC-M6-3/${label}`, entry: "http", input: `commit_elements ops=[${label}]`, expected: "UNSUPPORTED_OPERATION + supported", actual: "UNSUPPORTED_OPERATION", verdict: "PASS" });
   });
 
   it("被拒的整批未落库（DB 内容与版本逐字节不变）", async () => {
     const before = await stack.prisma.kbDoc.findUniqueOrThrow({ where: { id: stack.fx.ids.canvasId } });
     const env = await callTool(stack.tcp.target, stack.fx.pat.full.token, "canvas.commit_elements", {
-      docId: stack.fx.ids.canvasId, ops: [{ op: "element.update", element: { id: "x" } }], confirm: true,
+      docId: stack.fx.ids.canvasId, ops: FUTURE_CANVAS_OPS[0].op, confirm: true,
     });
     expect(env.isError).toBe(true);
     const after = await stack.prisma.kbDoc.findUniqueOrThrow({ where: { id: stack.fx.ids.canvasId } });
@@ -116,16 +127,16 @@ describe("S8-C3 AC-M6-3b 画布二期操作：UNSUPPORTED_OPERATION 显式拒绝
     expect(after.contentVersion).toBe(before.contentVersion);
   });
 
-  it("stdio 同款一发：element.update -> UNSUPPORTED_OPERATION", async () => {
+  it("stdio 同款一发：arrow-line create -> UNSUPPORTED_OPERATION", async () => {
     const r = await stdio.client.callTool({
       name: "canvas.commit_elements",
-      arguments: { docId: stack.fx.ids.canvasId, ops: [{ op: "element.update", element: { id: "x" } }], confirm: true },
+      arguments: { docId: stack.fx.ids.canvasId, ops: [FUTURE_CANVAS_OPS[0].op], confirm: true },
     });
     expect(r.isError).toBe(true);
     const body = JSON.parse((r.content as Array<{ text?: string }>)[0]?.text ?? "{}") as { code: string; supported: string[] };
     expect(body.code).toBe("UNSUPPORTED_OPERATION");
-    expect(body.supported).toEqual(["element.create"]);
-    recordAttack({ id: "AC-M6-3/element.update", entry: "stdio", input: "commit_elements ops=[element.update]", expected: "UNSUPPORTED_OPERATION", actual: "UNSUPPORTED_OPERATION", verdict: "PASS" });
+    expect(body.supported).toEqual(EXPECTED_SUPPORTED);
+    recordAttack({ id: "AC-M6-3/arrow-line", entry: "stdio", input: "commit_elements ops=[arrow-line create]", expected: "UNSUPPORTED_OPERATION", actual: "UNSUPPORTED_OPERATION", verdict: "PASS" });
   });
 
   it("stdio doc 写入一发：append_blocks 成功（LWW），证明 stdio 与 HTTP 同构可写", async () => {
@@ -154,6 +165,81 @@ describe("S8-C3 AC-M6-3b 画布二期操作：UNSUPPORTED_OPERATION 显式拒绝
     expect(body.code).toBe("VERSION_CONFLICT");
     expect(body.currentVersion).toBe(cur);
     recordAttack({ id: "AC-M6-3/409", entry: "stdio", input: `append_blocks baseVersion=${cur - 1}（陈旧）`, expected: "VERSION_CONFLICT + currentVersion", actual: `VERSION_CONFLICT currentVersion=${body.currentVersion}`, verdict: "PASS" });
+  });
+});
+
+describe("S8-C3 AC-M6-3c 画布二期已开放操作：create/update/move/connect/delete 真实成功往返", () => {
+  /**
+   * 用一个原子混批把生命周期走完：建两个矩形 -> 连线 -> 改 A 的填充 -> 移 B -> 删 A（级联删连线）。
+   * 成功后板上只剩被移动后的 B。回执各 id 集合与操作一一对应。
+   * 该 describe 在 3b 的拒绝用例之后跑，属各自独立的新写入（不依赖 3b 数据）。
+   */
+  it("HTTP 混批一次成功，回执 created/connected/updated/moved/deleted 分类正确", async () => {
+    const r = await callTool(stack.tcp.target, stack.fx.pat.full.token, "canvas.commit_elements", {
+      docId: stack.fx.ids.canvasId,
+      confirm: true,
+      ops: [
+        { op: "element.create", element: rect() },
+        { op: "element.create", element: { type: "geometry", shape: "rectangle", points: [[200, 0], [300, 100]] } },
+      ],
+    });
+    expect(r.isError ?? false, r.text).toBe(false);
+    const created = parseText<{ createdIds: string[]; elementCount: number }>(r);
+    expect(created.createdIds).toHaveLength(2);
+    const [idA, idB] = created.createdIds;
+
+    // connect（arrow-line 绑两端）+ update A 填充 + move B
+    const r2 = await callTool(stack.tcp.target, stack.fx.pat.full.token, "canvas.commit_elements", {
+      docId: stack.fx.ids.canvasId,
+      confirm: true,
+      ops: [
+        { op: "element.connect", type: "arrow-line", sourceId: idA, targetId: idB },
+        { op: "element.update", id: idA, patch: { fill: "#FF0000" } },
+        { op: "element.move", id: idB, dx: 10, dy: 20 },
+      ],
+    });
+    expect(r2.isError ?? false, r2.text).toBe(false);
+    const mid = parseText<{ connectedIds: string[]; updatedIds: string[]; movedIds: string[] }>(r2);
+    expect(mid.connectedIds).toHaveLength(1);
+    expect(mid.updatedIds).toEqual([idA]);
+    expect(mid.movedIds).toEqual([idB]);
+
+    // delete A：级联删除绑定它的 arrow-line
+    const r3 = await callTool(stack.tcp.target, stack.fx.pat.full.token, "canvas.commit_elements", {
+      docId: stack.fx.ids.canvasId,
+      confirm: true,
+      ops: [{ op: "element.delete", id: idA }],
+    });
+    expect(r3.isError ?? false, r3.text).toBe(false);
+    const del = parseText<{ deletedIds: string[] }>(r3);
+    expect(del.deletedIds).toContain(idA);
+    expect(del.deletedIds).toContain(mid.connectedIds[0]); // 连线被级联删除
+    recordAttack({ id: "AC-M6-3c/positive", entry: "http", input: "create/connect/update/move/delete", expected: "全部成功 + 回执分类正确", actual: "成功，删除级联生效", verdict: "PASS" });
+
+    // 经协议读回：A 与连线已不在；B 存在且 points 已平移
+    const board = parseText<{ elements: Array<Record<string, unknown>> }>(
+      await callTool(stack.tcp.target, stack.fx.pat.full.token, "canvas.get_board", { docId: stack.fx.ids.canvasId }),
+    );
+    const byId = new Map(board.elements.map((e) => [e.id as string, e]));
+    expect(byId.has(idA)).toBe(false);
+    expect(byId.has(mid.connectedIds[0])).toBe(false);
+    const b = byId.get(idB);
+    expect(b).toBeTruthy();
+    expect(b?.points).toEqual([[210, 20], [310, 120]]);
+  });
+
+  it("无效目标（update 不存在的 id）-> INVALID_PARAMS，且整批未落库", async () => {
+    const before = await stack.prisma.kbDoc.findUniqueOrThrow({ where: { id: stack.fx.ids.canvasId } });
+    const env = await callTool(stack.tcp.target, stack.fx.pat.full.token, "canvas.commit_elements", {
+      docId: stack.fx.ids.canvasId, confirm: true,
+      ops: [{ op: "element.update", id: "ghost-id", patch: { fill: "#000000" } }],
+    });
+    expect(env.isError).toBe(true);
+    const body = parseText<{ code: string }>(env);
+    expect(body.code).toBe("INVALID_PARAMS");
+    const after = await stack.prisma.kbDoc.findUniqueOrThrow({ where: { id: stack.fx.ids.canvasId } });
+    expect(after.content).toBe(before.content);
+    expect(after.contentVersion).toBe(before.contentVersion);
   });
 });
 
