@@ -1,20 +1,18 @@
-// M4/S3 shadow 适配层组合缝：把守卫的旧资源引用（base/kb/doc/...）解析为 nav 节点，
-// 跑一次新引擎 decide，供 shadow 对拍。仅在 GX_AUTHZ_ENGINE 生效为 shadow 时被守卫调用。
+// 引擎适配层：把守卫的资源引用（base/kb/doc/...）解析为 nav 节点，跑一次引擎 decide。
+// 权限引擎永久单一化后，本层是引擎布尔裁决的唯一点查入口，无条件被守卫调用。
 //
-// 边界（M4 计划 §7-S3 行524/560）：
+// 边界：
 //   - 本模块是"适配层"，允许 import config/db 与引擎，但不 import Hono/guards（守卫 import 本层，反向禁止）；
-//   - 引擎本身（engine/subjects/repository）不读旧三表；旧决策由守卫算出后传入 shadowCompare，
-//     本层只为引擎侧提供"资源 -> nav nodeId"反查与主体展开；
-//   - 任何错误都在 runShadowCheck 内吞掉并记 metric，绝不抛出影响旧守卫响应（fail-open 仅限观测层）。
+//   - 引擎本身（engine/subjects/repository）不读旧三表；本层只提供"资源 -> nav nodeId"反查与主体展开；
+//   - engineDecideResource 不吞错：错误由调用方（enforceGate）按 fail-closed 处理。
 //
 // 客体点查：nav_nodes [workspaceId,resourceType,resourceId] 唯一索引（M3 已建），一次 findUnique。
-// table 的视图/记录动作在守卫侧统一映射到其 base 节点（旧成员权限本就 base 级，沿 nav 祖先继承）。
+// table 的视图/记录动作在守卫侧统一映射到其 base 节点（沿 nav 祖先继承）。
 
 import type { ResourceAction } from "@gx/shared-types";
 import { prisma } from "../../db.js";
 import { decide, type EngineDeps } from "./engine.js";
 import { resolveSubject } from "./subjects.js";
-import { shadowCompare, shadowReportError, driftRegistry, type ShadowCompareContext } from "./shadow.js";
 import type { AuthzClient, AuthzNode, CreatedByResolver } from "./types.js";
 
 export const DEFAULT_WORKSPACE = "ws_default";
@@ -94,7 +92,7 @@ export function makeCreatedByResolver(client: AuthzClient): CreatedByResolver {
   };
 }
 
-/** 引擎侧单资源单动作判定（不吞错；错误由 runShadowCheck 统一捕获）。 */
+/** 引擎侧单资源单动作判定（不吞错；错误由调用方 enforceGate 按 fail-closed 处理）。 */
 export async function engineDecideResource(
   userId: string,
   ref: ResourceRef,
@@ -112,37 +110,4 @@ export async function engineDecideResource(
   };
   const result = await decide(deps, subject, nodeId, action);
   return { nodeId, engineAllowed: result.decision.allowed };
-}
-
-/**
- * shadow 对拍总入口（守卫在旧决策落定后调用）：
- *   - 资源反查不到活节点 -> 计 UNRESOLVED_NODE，不做布尔对拍（数据问题归 M3 reconcile，不当权限漂移）；
- *   - 引擎抛错 -> shadowReportError 吞错记 metric，旧响应不受影响；
- *   - 正常 -> shadowCompare 分类计数/脱敏日志，返回 drift 类（一致为 null）。
- * 不返回也不抛授权结论：调用方永远以旧决策为准。
- */
-export async function runShadowCheck(
-  guard: string,
-  userId: string,
-  ref: ResourceRef,
-  action: ResourceAction,
-  oldAllowed: boolean,
-  client: AuthzClient = prisma,
-  semantics: "authority" | "conjunction" = "authority",
-): Promise<void> {
-  // conjunction：该动作只是借位的必要条件（如删库借 d），并不等于关卡真实裁决。
-  // 拿它与旧决策布尔对拍会产生结构性噪声（内容持 d 的编辑者被判「删库 overallow」），
-  // 故跳过对拍、不计数；on 态 conjunction 仍由 enforceWithEngine 只减不增地正确执法。
-  if (semantics === "conjunction") return;
-  const baseCtx: ShadowCompareContext = { guard, action, nodeId: null, userId };
-  try {
-    const { nodeId, engineAllowed } = await engineDecideResource(userId, ref, action, client);
-    if (!nodeId) {
-      driftRegistry.noteUnresolvedNode();
-      return;
-    }
-    shadowCompare(oldAllowed, engineAllowed, { ...baseCtx, nodeId });
-  } catch (error) {
-    shadowReportError(baseCtx, error);
-  }
 }

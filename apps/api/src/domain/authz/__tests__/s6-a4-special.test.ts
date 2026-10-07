@@ -16,14 +16,12 @@ beforeAll(async () => {
 }, 120000);
 
 afterAll(async () => {
-  delete process.env.GX_AUTHZ_ENGINE;
   delete process.env.GX_M1_SIDECAR_READ;
   delete process.env.GX_M1_KEYSET;
   await fx.h.cleanup();
 });
 
 beforeEach(() => {
-  process.env.GX_AUTHZ_ENGINE = "on";
   process.env.GX_M1_SIDECAR_READ = "off";
   process.env.GX_M1_KEYSET = "off";
 });

@@ -99,6 +99,11 @@ beforeEach(async () => {
     });
   }
   await prisma.record.createMany({ data });
+
+  // 引擎永久单一化后，base/table 裸建无 nav 节点 -> GET 守卫反查 fail-closed。补 nav 同步。
+  // u1 是超管（isWorkspaceOwner 硬短路），放行不依赖节点策略投影。
+  const { syncNavFromEntitiesTx } = await import("../../domain/nav/sync.js");
+  await prisma.$transaction((tx) => syncNavFromEntitiesTx(tx));
 });
 
 afterEach(() => {

@@ -54,7 +54,6 @@ export interface S7Fixture {
 
 export async function setupS7Fixture(): Promise<S7Fixture> {
   const h = await makeNavHarness("gx-m4-s7-");
-  delete process.env.GX_AUTHZ_ENGINE; // 建实体阶段恒 off（引擎不介入）
   for (const [id, name] of USERS) {
     await h.createUser(id, { email: `${id}@x.com`, displayName: name });
   }
@@ -234,7 +233,6 @@ export async function setupS7Fixture(): Promise<S7Fixture> {
     call,
     ids,
     cleanup: async () => {
-      delete process.env.GX_AUTHZ_ENGINE;
       await h.cleanup();
     },
   };

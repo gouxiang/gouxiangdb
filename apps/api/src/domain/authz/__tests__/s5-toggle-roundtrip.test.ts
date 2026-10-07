@@ -1,13 +1,12 @@
-// M4/S5 开关往返 + legacyUnmappable 数据不变量（裁决 A-5，§7-S5 验收①②）。
+// 角色授权落权威表 + 不回灌旧表 + 引擎恒求值（引擎永久单一化后无开关往返）。
 //
-// 阶段门已翻（2026-10-05 总监下令通电）：AUTHZ_ENFORCE_READY=true，env=on 为引擎权威态。
-// 本测试不变量与阶段无关——「不可映射授权在 off 失效、重开恢复」在【权威数据层】证明：
-//   1. 角色授予（不可映射旧三表）经 PUT 落 auth_policies，200 带 legacyUnmappable，旧表零行；
-//   2. 无论 flag off/shadow/on 如何往返，auth_policies 权威行始终保留、动作串不回灌不删除；
-//   3. 引擎 decide 与 flag 无关（flag 只作用于守卫是否采信），权威行恒被求值 -> 重开即恢复；
-//   4. 旧三表（members）在往返全程对该用户零行——不可映射授权绝不污染旧权威，off 期旧决策不受其影响。
+// 本测试在【权威数据层】证明以下不变量（与任何 flag 无关，因 flag 已删除）：
+//   1. 角色授予（旧三表不可映射）经 PUT 落 auth_policies，带 legacyUnmappable，旧表零行；
+//   2. auth_policies 权威行持久保留、动作串不回灌不删除；
+//   3. 引擎 decide 恒定求值该权威行（无任何开关影响是否采信）；
+//   4. 旧三表（members）对该用户始终零行——不可映射授权绝不污染旧权威。
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   setupEngineHarness,
   createUsers,
@@ -19,9 +18,8 @@ import {
 // 注意纪律：任何【运行时】拉 db 单例的模块（policyAdminTx 用单例、subjects ->
 // org/authorization -> db）都禁止顶层静态 import，否则 db.ts 在 setupEngineHarness 注入
 // globalThis.__gx_prisma 之前求值、单例绑到默认库。setup 后首次 await import 才是正确单例。
-// decide 纯 db-free（只收注入 client），可静态；resolveSubject 改动态。
+// decide 纯 db-free（只收注入 client），可静态。
 import { decide } from "../engine.js";
-import { authzShadowActive } from "../../../configAuthz.js";
 import type { applyPolicyBatch as ApplyPolicyBatch } from "../policyAdminTx.js";
 import type { resolveSubject as ResolveSubject } from "../subjects.js";
 
@@ -41,17 +39,12 @@ beforeAll(async () => {
   ({ resolveSubject } = await import("../subjects.js"));
 }, 120000);
 
-beforeEach(() => {
-  process.env.GX_AUTHZ_ENGINE = "off";
-});
-
 afterAll(async () => {
-  process.env.GX_AUTHZ_ENGINE = "off";
   await h.cleanup();
 });
 
-describe("不可映射（角色）授权：落权威表、不回灌旧表、开关往返行恒保留", () => {
-  it("PUT 角色授予 -> 200 带 legacyUnmappable，members 旧表零行，auth_policies 有行", async () => {
+describe("不可映射（角色）授权：落权威表、不回灌旧表、行恒保留", () => {
+  it("PUT 角色授予 -> 带 legacyUnmappable，members 旧表零行，auth_policies 有行", async () => {
     // ADR-0056 后 base 节点禁手授内容位（r 等会无 mask 下放），改用合法的库门 enter；
     // 主体仍为 role，依旧不可映射旧三表（旧表只承载 per-user），本测试不变量不变。
     const res = await applyPolicyBatch(baseNode, {
@@ -72,25 +65,18 @@ describe("不可映射（角色）授权：落权威表、不回灌旧表、开�
     expect(pol!.actions).toBe("enter");
   });
 
-  it.each([
-    ["off", false],
-    ["shadow", true],
-    ["on", false], // 已翻门：on 为权威、非对拍态，shadowActive=false
-    ["off", false],
-  ])("flag=%s 往返：权威行保留且旧表仍零行（shadowActive=%s）", async (mode, shadow) => {
-    process.env.GX_AUTHZ_ENGINE = mode;
-    expect(authzShadowActive()).toBe(shadow);
-
-    const pol = await h.prisma.authPolicy.findFirst({
-      where: { nodeId: baseNode, subjectType: "role", subjectId: "role_tog" },
-    });
-    expect(pol).not.toBeNull();
-    expect(pol!.actions).toBe("enter");
-    expect(await h.prisma.member.count({ where: { userId: "ru" } })).toBe(0);
+  it("权威行持久保留：重复读取动作串恒为 enter，旧表仍零行（无开关可改其状态）", async () => {
+    for (let i = 0; i < 3; i++) {
+      const pol = await h.prisma.authPolicy.findFirst({
+        where: { nodeId: baseNode, subjectType: "role", subjectId: "role_tog" },
+      });
+      expect(pol).not.toBeNull();
+      expect(pol!.actions).toBe("enter");
+      expect(await h.prisma.member.count({ where: { userId: "ru" } })).toBe(0);
+    }
   });
 
-  it("引擎 decide 与 flag 无关：off 下权威行仍被求值为 allow（重开即恢复的根据）", async () => {
-    process.env.GX_AUTHZ_ENGINE = "off";
+  it("引擎 decide 恒定求值权威行为 allow（无任何开关可令其失效或被忽略）", async () => {
     const subject = await resolveSubject("ru", h.prisma);
     const result = await decide({ client: h.prisma }, subject, baseNode, "enter");
     expect(result.decision.allowed).toBe(true);

@@ -6,7 +6,7 @@
 //   - 查他人：非 workspace owner 403（fail-closed），owner 200（manage_share 工作区兜底形态）；
 //   - 参数校验：budget 非正整数 400；actions 含非法动作 400；kinds 未知值忽略不报错；
 //   - budget 截断 -> materialize=temp_table；小结果 in_list；
-//   - 旧 /api 不感知本端点（走旧 404 链），GX_AUTHZ_ENGINE 缺省 off 不影响可用性。
+//   - 旧 /api 不感知本端点（走旧 404 链），端点可用性与任何引擎开关无关。
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupOrgHarness, json, type OrgHarness } from "../org/__tests__/orgHarness.js";
@@ -35,7 +35,6 @@ async function seed(): Promise<void> {
 }
 
 beforeAll(async () => {
-  delete process.env.GX_AUTHZ_ENGINE;
   h = await setupOrgHarness();
   await seed();
 }, 120_000);

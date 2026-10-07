@@ -11,7 +11,7 @@ import { parseArgs } from "./probe.mjs";
 const FLAG_META = [
   { id: "R1", name: "GX_ENTERPRISE_ORG=off（组织面摘除）", check: "check-mounts orgoff" },
   { id: "R2", name: "GX_ENTERPRISE_NAV=off（导航面摘除）", check: "check-mounts navoff" },
-  { id: "R3", name: "GX_AUTHZ_ENGINE shadow→off（旧三表守卫）", check: "check-authz" },
+  { id: "R3", name: "GX_AUTHZ_ENGINE=off 被忽略（引擎永久生效，无旧引擎可回）", check: "check-authz" },
   { id: "R4", name: "GX_M1_SIDECAR_READ/KEYSET on→off（游标键消失）", check: "check-keyset" },
   { id: "R5", name: "GX_EMBEDDING_MODE cloud→off（纯 FTS，零外网）", check: "check-embedding" },
   { id: "R6", name: "outbox 回滚面：GX_SEARCH_WORKER=off 下 pending 静置不消化 + 手动 reindex 建 chunks", check: "check-outbox" },

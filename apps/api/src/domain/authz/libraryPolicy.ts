@@ -151,6 +151,12 @@ export function resolveKbAccess(userId: string, kbId: string): Promise<LibraryAc
   return resolve(userId, "kb", kbId);
 }
 
+/** 由 tableId 直接取其所在 baseId（表含软删行，findUnique 不过滤软删——回收站恢复要用）。 */
+export async function baseIdOfTable(tableId: string): Promise<string | null> {
+  const t = await prisma.table.findUnique({ where: { id: tableId }, select: { baseId: true } });
+  return t?.baseId ?? null;
+}
+
 async function baseIdBy(tableIdField: "table" | "view" | "record", id: string): Promise<string | null> {
   if (tableIdField === "table") {
     const t = await prisma.table.findUnique({ where: { id }, select: { baseId: true } });

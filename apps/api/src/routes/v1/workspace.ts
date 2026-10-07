@@ -10,7 +10,6 @@ import { readNavTree, TreeQueryError, type TreeParams } from "../../domain/nav/w
 import { readMenuTree } from "../../domain/nav/menu-read.js";
 import { applyMenuChangesTx } from "../../domain/nav/menu.js";
 import { effectiveRoleRows } from "../../domain/org/authorization.js";
-import { navPruneEnforceEffective } from "../../configAuthz.js";
 import { buildNavVisibility } from "../../domain/authz/navVisibility.js";
 import { withWriteTx, prisma } from "../../db.js";
 import { requireOrgAction } from "../../middleware/authActive.js";
@@ -56,8 +55,8 @@ workspaceRoutes.get("/current/tree", async (c) => {
   const admin = params.all ? await isWorkspaceAdmin(c.get("auth").userId) : false;
   const userId = c.get("auth").userId;
   try {
-    // S7：on 态在同一事务内构造可见索引并后置剪枝；off/shadow 门 false 时零引擎 SQL。
-    const prune = !params.all && navPruneEnforceEffective()
+    // 非管理通道在同一事务内构造可见索引并后置剪枝（引擎永久生效）。
+    const prune = !params.all
       ? (await buildNavVisibility(prisma, userId)).index
       : undefined;
     const data = await prisma.$transaction((tx) => readNavTree(tx, params, admin, prune));
@@ -71,10 +70,8 @@ workspaceRoutes.get("/current/tree", async (c) => {
 // 菜单引用树读：全部活菜单项 + shortcut 节点摘要（state 三态）。
 workspaceRoutes.get("/current/menu", async (c) => {
   const userId = c.get("auth").userId;
-  // S7：on 态 shortcut 按目标自身 r 剔除 + 空容器隐藏；off/shadow 全量不变。
-  const prune = navPruneEnforceEffective()
-    ? (await buildNavVisibility(prisma, userId)).index
-    : undefined;
+  // shortcut 按目标自身 r 剔除 + 空容器隐藏（引擎永久生效）。
+  const prune = (await buildNavVisibility(prisma, userId)).index;
   const data = await prisma.$transaction((tx) => readMenuTree(tx, prune));
   return c.json(data);
 });

@@ -61,6 +61,47 @@ vi.mock("../../db.js", () => ({
         return Promise.resolve({ ...d });
       },
     },
+    // requireKb 走真实引擎：资源 -> kb nav 节点反查 + 祖先链 + 候选策略这几步 IO 会发生。
+    // 补最小 nav 桩（kb 自闭环单节点），authPolicy 返回空（放行由 legacy canShare + 本测试
+    // 意图决定；enforce 走 authority 语义，legacyAllowed=access.canShare 直接反映用例期望）。
+    navNode: {
+      findUnique: () => Promise.resolve({ id: "nav_kb", deletedAt: null }),
+      findFirst: () => Promise.resolve({
+        id: "nav_kb", workspaceId: "ws_default", parentId: null, kind: "kb",
+        resourceType: "kb", resourceId: KB, name: KB, path: "/nav_kb/", depth: 1,
+        inheritAncestors: 1, deletedAt: null,
+      }),
+      findMany: () => Promise.resolve([{
+        id: "nav_kb", workspaceId: "ws_default", parentId: null, kind: "kb",
+        resourceType: "kb", resourceId: KB, name: KB, path: "/nav_kb/", depth: 1,
+        inheritAncestors: 1, deletedAt: null,
+      }]),
+    },
+    workspace: {
+      findUnique: () => Promise.resolve({ navVersion: 1 }),
+    },
+    // resolveSubject -> effectiveRoleRows 真实查 roleAssignment（include role）与 deptMember。
+    // USER 无角色 -> 返回空（isWorkspaceOwner=false），放行完全由下面节点策略承载。
+    roleAssignment: {
+      findMany: () => Promise.resolve([]),
+    },
+    deptMember: {
+      findMany: () => Promise.resolve([]),
+    },
+    // 节点策略：USER 恒持 enter + r（requireDocAccess needEdit=false 会先判 enter 再判 r，
+    // 两道都要过才走得到分享闸）；share_link 仅在 access.canShare 时承载。
+    // 于是「无 canShare -> share_link 不命中 -> 403」；canShare=true 时引擎放行 share_link，
+    // 路由内部再按总闸与开/关动作决定结果（总闸关闭开启动作 -> 403；关闭动作一律放行）。
+    authPolicy: {
+      findMany: () => {
+        const row = {
+          id: "pol_kb_user", nodeId: "nav_kb", subjectType: "user", subjectId: USER,
+          actions: state.canShare ? "enter,r,share_link" : "enter,r",
+          fieldMask: null, conditions: null,
+        };
+        return Promise.resolve([row]);
+      },
+    },
   },
   withWriteTx: (_label: string, fn: (tx: unknown) => unknown) => Promise.resolve(fn({})),
 }));

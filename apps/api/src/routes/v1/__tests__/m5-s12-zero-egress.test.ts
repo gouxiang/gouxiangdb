@@ -75,6 +75,9 @@ describe("AC-M5-5 B：GX_M5_SEARCH=off（出厂默认）全链零 fetch、不建
     await w.prisma.member.create({ data: { baseId, userId: "s12-owner", role: "owner" } });
     await w.prisma.table.create({ data: { id: tableId, baseId, name: "egoff 表", primaryFieldId: f0, createdBy: "s12-owner" } });
     await w.prisma.field.create({ data: { id: f0, tableId, name: "主", type: "singleLineText", order: 0 } });
+    // 裸建 base/table 无 nav 节点，引擎永久生效后 POST 记录会 fail-closed。补一次全量同步。
+    const { syncNavFromEntitiesTx } = await import("../../../domain/nav/sync.js");
+    await w.prisma.$transaction((tx) => syncNavFromEntitiesTx(tx));
     const post = await w.http(`/api/records?tableId=${tableId}`, {
       method: "POST", headers: await w.auth(),
       body: JSON.stringify({ fields: { [f0]: "门关旧检索词GATEOFF1" } }),

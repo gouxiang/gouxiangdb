@@ -79,8 +79,10 @@ DATABASE_URL="file:$GOLD" "$NODE_BIN" "$PRISMA" migrate deploy --schema "$API_DI
 # ---------------- 阶段2：全开姿态起服务 + HTTP 种子 -> 黄金静止库 ----------------
 log "全开姿态起 dist 服务 + HTTP 最小种子"
 GOLD_DATA="$RUN_DIR/stages/seed-data"
+# seed 阶段是隔离临时库：首 owner 自举在公开注册关闭时也成立，但 member/outsider 靠自助
+# signup 建立，需在此临时库显式打开公开注册（产品默认 fail-closed，见 configSignup.ts）。
 start_stage seed "$GOLD" "$GOLD_DATA" 0 \
-  GX_ENTERPRISE_ORG=on GX_ENTERPRISE_NAV=on GX_M5_SEARCH=on GX_SEARCH_WORKER=off
+  GX_ENTERPRISE_ORG=on GX_ENTERPRISE_NAV=on GX_M5_SEARCH=on GX_SEARCH_WORKER=off GX_ALLOW_PUBLIC_SIGNUP=on
 REC_SEED="$(wait_readyz_stage seed)" || die "全开姿态服务未就绪"
 log "全开基线服务就绪（${REC_SEED}s）"
 "$NODE_BIN" "$ROLL_DIR/seed.mjs" --base-url "http://127.0.0.1:$RB_PORT" --out "$RUN_DIR/context.json" \
@@ -119,11 +121,11 @@ check r2 check-mounts.mjs --mode navoff
 record R2 "${P%%|*}" "$CHK_HITS" "$CHK_RC" "org,pats 200 / tree,menu 404 / legacy+readyz 200"
 stop_stage_server r2 || die "R2 停服失败"
 
-# ---------------- R3：authz shadow -> off（真服务旧三表守卫） ----------------
-log "R3 GX_AUTHZ_ENGINE=off（真服务 HTTP，旧 members 三表守卫）"
+# ---------------- R3：authz 引擎永久生效（旧开关被忽略） ----------------
+log "R3 GX_AUTHZ_ENGINE=off 已无效（引擎永久单一化，恒走 nav auth_policies 守卫）"
 P="$(serve r3 0 GX_ENTERPRISE_ORG=on GX_ENTERPRISE_NAV=on GX_AUTHZ_ENGINE=off)" || die "R3 服务未就绪"
 check r3 check-authz.mjs --log-evidence "$RUN_DIR/stages/r3.log"
-record R3 "${P%%|*}" "$CHK_HITS" "$CHK_RC" "owner/member 200、outsider 403、viewer 写 403、启动日志 effective=off"
+record R3 "${P%%|*}" "$CHK_HITS" "$CHK_RC" "owner/member 200、outsider 403、viewer 写 403、启动日志无旧 [authz] 块"
 stop_stage_server r3 || die "R3 停服失败"
 
 # ---------------- R4：m1 read+keyset on 基线 -> off 旧形状 ----------------

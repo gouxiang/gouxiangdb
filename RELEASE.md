@@ -4,20 +4,20 @@
 - **展示名**：构想工作台（技术标识 `gouxiangdb` / `gouxiangdb-v2`，仅包名/目录使用）
 - **本轮变更区间**：2026-09-19 ~ 2026-10-06
 - **上游阶段**：M0–M6 全部收口，**六项产品需求（响应式/表级权限/视图管理员/层级视图甘特/多模态语义检索/MCP 全功能）代码全部完成**；四门回归、生产构建、五档真机验收、飞牛 x86 fpk 均通过。
-- **当前权限真实口径**：实际执法＝第二代 `libraryPolicy.resolveBaseAccess()`（读 `role_library_scope`）；第三代 M4 引擎本体 + 七守卫 R1 enforce 接线已完成、KB 七路由已全接 `authority`（含新增第 11 枚动作 `share_link`），且**总门 `AUTHZ_ENFORCE_READY` 已翻为 `true`**（commit `138933f`，2026-10-05 戴总下令直接通电接管）。**但 env `GX_AUTHZ_ENGINE` 默认仍 `off`，生产行为零变化、此刻仍由第二代执法**，部署侧显式置 `on` 后引擎为权威。真实进程 on 通电冒烟已通过（独立临时库，owner 放行/外部人 403/零 error）。第一代旧三表生产零写点、仅剩 3 处非执法只读，已退役。详见 README 文首、`authz-engine-flip-on.md` 与 ADR-0056。
+- **当前权限真实口径**：实际执法＝ **M4 统一权限引擎**（`engine.decide()`，读 `auth_policies` + `nav_nodes`）。引擎**永久、无条件、唯一生效**（2026-10-06，ADR-0057）：三态开关 `GX_AUTHZ_ENGINE`、三个 READY 阶段门、shadow 对拍/drift 账本已全部物理删除；引擎抛错 → 503 fail-closed（不回落旧决策），资源无活 nav 节点 → 403；删库/删知识库走 conjunction；字段掩码/行级条件/导航剪枝恒定执行。`libraryPolicy` 保留为能力/UI 形状层，`authzManage` 与执法正交。第一代旧三表仅为台账、不参与放行。详见 README 文首与 ADR-0057。
 
 > **2026-10-06 通电复验实数（HEAD `138933f`，受管 Node v22.22.2）**：
 > api 全量 **2986 通过 / 0 失败 / 14 skip**（294 files）；web 1636 / shared-types **103** / canvas 51；
 > 三包 `typecheck` 零错误、`eslint` **0 error**（仅历史 warning）；**迁移共 40 个**；preflight **READY**、覆盖缺口 0。
-> 真实进程 `GX_AUTHZ_ENGINE=on` 冒烟（独立临时库）：启动行 `configured=on effective=on`，零 `authz_enforce_error`/unresolved。
+> 真实进程冒烟（独立临时库）：引擎永久生效，零 `authz_engine_error`/unresolved。
 
 > **2026-10-05 复验实数（HEAD `59f49f5`）**：
 > api **2976 通过 / 0 失败**（290 files；2 个规模门文件本地 skip）；web **1636** / shared-types **103** / canvas **51**；
 > 三包 `typecheck` 零错误、`eslint` **0 error**（仅历史 warning）；**迁移共 40 个**。
 > 大资源规模门在预览机 VM15 跑：M4 gate **10/10**，EXPLAIN 全走索引、scope P95≈160ms。
 
-> 待外部凭证项（非代码缺口）：飞牛真机 192.168.31.183 安装冒烟（需设备 SSH 密码 / 手动安装）、多模态真召回（需真 ARK key）。
-> 权限总门已翻（`AUTHZ_ENFORCE_READY=true`，戴总已点头）；**是否在生产 env 显式置 `GX_AUTHZ_ENGINE=on` 属戴总下一步操作**（置 on 才真正接管，置 off/不设则维持现状、可逆）。
+> 待外部凭证项（非代码缺口）：飞牛真机 192.168.31.183 重装冒烟（需设备 SSH / 手动安装）、多模态真召回（需真 ARK key）。
+> 权限引擎已永久单一化（ADR-0057）：无开关、无 READY 门，无需也无法再在 env 中切换新旧引擎。
 
 ---
 
@@ -145,7 +145,7 @@
 2. **迁移纪律：只增不删**（不删列、不改列类型），回填幂等可重跑。当前迁移目录 **38 个**（含 entity_icon / 组织 / nav / view_admin_config / view_user_prefs 等）。
 3. **升级前先做在线快照**：`pnpm --filter @gx/api run backup:online`，并用 `backup:verify` 验证可恢复；回滚窗口 30 分钟内。
 4. **升级后须跑 nav path 重算**：部署链路在 `migrate deploy` 之后接 `dist/cli/nav-reconcile.js`，失败必须在切换前 die —— 否则升级后导航失效（M7 AC-UPG-1 前置）。
-5. **权限引擎默认不生效**：`AUTHZ_ENFORCE_READY = false` 且 `GX_AUTHZ_ENGINE` 默认 `off`，实际走旧三表决策，权限管理页只读。生产建议由部署侧显式设 `shadow`；翻 `on` 需满足五条前置且**仅由项目总监下令**。详见 README 文首警示与 `docs/runbooks/authz-engine-flip-on.md`。
+5. **权限引擎永久生效、无开关**：M4 引擎是唯一、无条件、永久的执法路径（ADR-0057）；旧 `GX_AUTHZ_ENGINE` 三态开关与 READY 阶段门已物理删除，即使环境里仍设该变量也会被忽略。权限故障 fail-closed（503）。详见 README 文首。
 6. **健康检查**：升级后确认 `/healthz` 与 `/readyz`（含迁移对账 / 磁盘 / WAL 探针）。
 
 ---

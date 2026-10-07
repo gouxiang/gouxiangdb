@@ -15,7 +15,7 @@ import {
   resolveBaseIdByRecord,
   HttpError,
 } from "../guards.js";
-import { requireTableManage } from "../domain/authz/tableManageGuards.js";
+import { requireTableManage, requireRestoreTable } from "../domain/authz/tableManageGuards.js";
 import {
   resyncTableMaskTx,
   syncTableForAllScopesTx,
@@ -1053,7 +1053,8 @@ records.post("/trash/:id/restore", async (c) => {
     const t = await prisma.table.findUnique({ where: { id }, select: { baseId: true, name: true } });
     if (!t) throw new HttpError(404, "数据表不存在");
     // 恢复表同回收站口径（manage_table）：与彻底删除同一档，不再按 canManageSchema 放行 creator。
-    const { userId } = await requireTableManage(c, id);
+    // 走 requireRestoreTable：在 base 节点执法（软删 table 节点无法解析，否则永远恢复不了）。
+    const { userId } = await requireRestoreTable(c, id);
     // M3/S3 #14：原裸多写收紧进单事务。恢复表连带恢复字段/记录（级联软删，单恢复会成空壳），
     // 视图 order=-1 重排为可见；nav 子树节点（table/view）原地复活、重算 ord/path
     // （仅当其 base 活；base 仍软删时期望集不含该表，节点保持软删与实体悬挂态一致）。
@@ -1142,7 +1143,8 @@ records.delete("/trash/:id", async (c) => {
   } else {
     const t = await prisma.table.findUnique({ where: { id }, select: { baseId: true } });
     if (!t) throw new HttpError(404, "数据表不存在");
-    await requireTableManage(c, id);
+    // 软删表的 table 节点已软删，同样在 base 节点判 manage_table（与恢复同执法点）。
+    await requireRestoreTable(c, id);
     // M3/S3 #15：物理删表收紧进事务。nav 守卫先于任何删除：table 节点仍被菜单引用则 409
     // （C-12，不静默级联删菜单）；守卫通过后清 view/table 节点，再清评论、删实体（views 随表 cascade）。
     await withWriteTx("table.purge", async (tx) => {

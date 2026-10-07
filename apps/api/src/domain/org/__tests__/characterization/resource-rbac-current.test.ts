@@ -103,6 +103,29 @@ beforeAll(async () => {
   await grant(roleManager.id, "u_manager");
   await scope(roleManager.id, true);
   // u_out 刻意不授予任何角色：零授权用户。
+
+  // 引擎永久单一化后，base 裸建无 nav 节点 -> 守卫端到端反查 fail-closed（permissionsOf 不反查
+  // navNode 故前面能过）。补 nav 同步建出 base 节点，并投影两个自定义角色（super/admin 硬短路）。
+  const { syncNavFromEntitiesTx } = await import("../../../nav/sync.js");
+  await prisma.$transaction((tx) => syncNavFromEntitiesTx(tx));
+  // 管理员隐式投影（enter/manage_share）：裸建 base 没走标准 seed。对 role_admin 用其现有
+  // 视野行重算投影——本夹具 admin 在该库无 canManage 行，故精确投影为 enter/manage_share，
+  // 不给 edit_data/manage_table/manage_schema（replace 同时清掉先前多余策略）。
+  const { rebuildScopePoliciesTx } = await import("../../../authz/scopeDoubleWrite.js");
+  {
+    const saved = await prisma.roleLibraryScope.findMany({ where: { roleId: "role_admin" } });
+    await rebuildScopePoliciesTx(prisma, "role_admin", saved.map((r) => ({
+      roleId: r.roleId, libraryKind: r.libraryKind, libraryId: r.libraryId,
+      canManage: r.canManage, visible: r.visible, canShare: r.canShare, config: r.config,
+    })), "seed");
+  }
+  for (const roleId of ["role_c_visible", "role_c_manager"] as const) {
+    const saved = await prisma.roleLibraryScope.findMany({ where: { roleId } });
+    await rebuildScopePoliciesTx(prisma, roleId, saved.map((r) => ({
+      roleId: r.roleId, libraryKind: r.libraryKind, libraryId: r.libraryId,
+      canManage: r.canManage, visible: r.visible, canShare: r.canShare, config: r.config,
+    })), "seed");
+  }
 }, 120000);
 
 afterAll(async () => {

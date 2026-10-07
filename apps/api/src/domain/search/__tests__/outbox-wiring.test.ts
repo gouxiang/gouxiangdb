@@ -71,6 +71,10 @@ beforeAll(async () => {
     h.prisma.knowledgeBase.create({ data: { id: KB, name: "w kb", createdBy: OWNER, shareEnabled: 1 } }),
     h.prisma.kbMember.create({ data: { id: "m5w_km", kbId: KB, userId: OWNER, role: "owner" } }),
   ]);
+  // 引擎永久单一化后每个守卫都强制「资源 -> nav 节点反查」。上面 base/table/kb 全是裸 Prisma
+  // 建的，没有 nav 节点 -> 连超管都 fail-closed。补一次全量 nav 同步把节点补齐。
+  const { syncNavFromEntitiesTx } = await import("../../nav/sync.js");
+  await h.prisma.$transaction((tx) => syncNavFromEntitiesTx(tx));
   // 显式超时：makeNavHarness 内含建库与迁移播种，机器高负载时容易超过 vitest 默认
   // 10s 的 hook 超时，整个文件会被判 Failed Suite 而一条用例都跑不到。
 }, 120000);

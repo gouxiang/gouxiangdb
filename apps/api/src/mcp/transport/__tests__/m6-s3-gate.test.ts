@@ -93,14 +93,16 @@ afterAll(async () => {
 
 describe("S3 四身份 tools/list 快照", () => {
   // 语义适配（P3）：原 4 条快照的区分轴是"令牌 scope 宽不宽"，该轴已下线；现在的区分轴是
-  // 【签发者的实际能力】。uFull 是 b1/库一的创建者（创建者兜底带出 c/u/d），故它签发的令牌
-  // 无论 scope 如何，注册集都一样且含写工具。
+  // 【签发者的实际能力】。uFull 是 b1/库一的创建者（创建者兜底带出 r/c/u/d/comment/manage_share
+  // 及结构设计 manage_schema），故它签发的令牌无论 scope 如何，注册集都一样且含写工具。
+  // 但【不含 table.update_table / table.delete_table】：这两枚走 manage_table（纯组织管理权），
+  // 资源 owner 的动作串里本就没有（ADR-0039 §2.2），创建者被摘下管理权后不得凭兜底拿回。
   const FULL_SET = [
     "field.create_field", "field.delete_field", "field.update_field",
     "base.create_base",
     "ping_echo", "record.create_record", "record.delete_record", "record.list_records",
     "record.query_records", "record.update_record", "table.create_table",
-    "table.delete_table", "table.get_schema", "table.list_bases", "table.update_table",
+    "table.get_schema", "table.list_bases",
     "view.create_view", "view.delete_view", "view.update_view", "kb.create_kb",
   ].sort();
 

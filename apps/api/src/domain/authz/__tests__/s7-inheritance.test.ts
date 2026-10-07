@@ -14,7 +14,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupS7Fixture, OWNER, ADMIN, DIRECT, NOBODY, type S7Fixture } from "./s7Harness.js";
 import { nodeId } from "../../nav/backfill.js";
 import { json } from "../../nav/__tests__/characterization/charHarness.js";
@@ -29,10 +29,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await fx.cleanup();
-});
-
-beforeEach(() => {
-  process.env.GX_AUTHZ_ENGINE = "on";
 });
 
 const impactUrl = (node: string, tail = ""): string => `/api/v1/nodes/${node}/inheritance/impact${tail}`;

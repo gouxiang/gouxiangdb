@@ -10,17 +10,6 @@ import { fileURLToPath } from "node:url";
 
 type NodeEnv = "development" | "test" | "production";
 
-// M4 权限引擎模式解析/阶段门抽到独立纯函数文件（保 config.ts 单文件行数门禁）；此处 re-export
-// 供既有 import { ... } from "./config.js" 调用方无感，真源唯一在 configAuthz.ts。
-export type { AuthzEngineMode } from "./configAuthz.js";
-export {
-  AUTHZ_ENFORCE_READY,
-  resolveAuthzEngineMode,
-  effectiveAuthzMode,
-  authzShadowActive,
-} from "./configAuthz.js";
-import { resolveAuthzEngineMode, type AuthzEngineMode } from "./configAuthz.js";
-
 // M5 统一检索总门（GX_M5_SEARCH 三态）真源在 configM5Search.ts；re-export 供
 // import { ... } from "./config.js" 调用方使用，与 configAuthz 同款无感接线。
 export type { M5SearchFlag } from "./configM5Search.js";
@@ -298,11 +287,6 @@ interface AppConfig {
   socketPath: string;
   basePath: string;
   webDist: string;
-  /**
-   * M4 权限引擎模式（GX_AUTHZ_ENGINE），启动期解析的原始值（未知回 off；test 默认 off）。
-   * 仅用于启动行日志；守卫运行时改调 effectiveAuthzMode() 以经阶段门并支持测试按用例切 env。
-   */
-  authzEngine: AuthzEngineMode;
 }
 
 function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
@@ -372,7 +356,6 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     socketPath: env.GX_SOCKET_PATH?.trim() ?? "",
     basePath: normalizeBasePath(env.GX_BASE_PATH),
     webDist: env.GX_WEB_DIST?.trim() ?? "",
-    authzEngine: resolveAuthzEngineMode(env),
   };
 }
 

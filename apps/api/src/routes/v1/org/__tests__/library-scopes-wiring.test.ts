@@ -68,6 +68,12 @@ beforeAll(async () => {
       updatedBy: "u-wire-owner",
     },
   });
+
+  // 引擎永久单一化后守卫强制「资源 -> nav 节点反查」。上面 base/table/kb 全是裸 Prisma
+  // 建的，没有 nav 节点。补一次全量同步：否则⑥ GET /api/records 解析 table 节点失败 ->
+  // fail-closed，返回错误体而非 records 形状。（列表 /api/bases 不逐资源解析节点，故前几例没暴露。）
+  const { syncNavFromEntitiesTx } = await import("../../../../domain/nav/sync.js");
+  await h.prisma.$transaction((tx) => syncNavFromEntitiesTx(tx));
 });
 
 afterAll(async () => {

@@ -196,10 +196,12 @@ describe("S7 真路由响应形状对拍", () => {
     expect(Array.isArray(body.items)).toBe(true);
     const node = (body.items as Array<Record<string, unknown>>).find((n) => n.id === g1);
     expect(node).toBeTruthy();
+    // owner（超级管理员）持 manage_menu/manage_share：空 group 依永久 A-6 规则保留并标 dimmed。
     expect(Object.keys(node!).sort()).toEqual(
-      ["createdAt", "deletedAt", "depth", "iconName", "id", "isSystem", "kind", "name", "ord", "parentId", "path", "resourceId", "resourceType", "updatedAt", "workspaceId"].sort(),
+      ["createdAt", "deletedAt", "depth", "dimmed", "iconName", "id", "isSystem", "kind", "name", "ord", "parentId", "path", "resourceId", "resourceType", "updatedAt", "workspaceId"].sort(),
     );
     expect(node!.kind).toBe("group");
+    expect(node!.dimmed).toBe(true);
   });
 
   it("GET menu = {workspaceId,menuVersion,items[]}", async () => {

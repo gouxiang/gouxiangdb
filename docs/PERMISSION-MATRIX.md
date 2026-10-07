@@ -1,14 +1,14 @@
 # 权限体系现状盘点（PERMISSION-MATRIX）
 
-> ## ⚠️ 2026-10-06 状态更新（先读这条，正文为历史快照）
+> ## ✅ 2026-10-06 状态更新（先读这条，正文为历史快照）
 >
-> 下方盘点正文冻结于 **2026-09-20 / 基线 `ca2a530`**，其中「总门 `AUTHZ_ENFORCE_READY=false`、M4 默认不生效、KB 路由未接 authority」等结论**已被后续工作改变**。截至 2026-10-06：
+> 下方盘点正文冻结于 **2026-09-20 / 基线 `ca2a530`**，其中「总门、三态开关、shadow 对拍、READY 门」等描述的**机制已被整体删除**。截至 2026-10-06：
 >
-> - **节点守卫总门已翻开**：`apps/api/src/configAuthz.ts` 的 `AUTHZ_ENFORCE_READY = true`（commit `138933f`，2026-10-05 戴总下令「直接通电接管」）。env `GX_AUTHZ_ENGINE` **默认仍 `off`，生产行为零变化、可逆**；部署侧显式置 `on` 后引擎即为权威，不再降级 shadow。
-> - **第 11 枚资源动作 `share_link`（建链位）已落地**（commit `a629b98`）：拆开此前 `manage_share` 一位的重载（总闸 vs 建单条外发链接）。`manage_share` 仅 canManage 投影；`share_link` 在 canManage=1 **或** canShare=1 时投影到 kb 节点。
-> - **KB 七路由已全部接 authority**：`routes/kb/index.ts`、`docs.ts`、`recycle.ts`、`sharing.ts` 等经 `enforceKbAuthority` 走 `enforceOrLegacy`，旧 shadow 缝 `shadowKbAction` 已删除。
-> - **真实进程 `on` 通电冒烟已通过**（独立临时库，未碰真实数据）：启动行 `configured=on effective=on`；owner 建库/建表/加字段/建记录/读回全放行，合法外部人全 403、坏/无 token 401，零 `authz_enforce_error`、零 unresolved。
-> - 权威操作步骤以 **`docs/runbooks/authz-engine-flip-on.md`** 为准（其「现状边界」段已同步更新）。
+> - **引擎永久单一化**：M4 引擎（`engine.decide()`，读 `auth_policies` + `nav_nodes`）是唯一、无条件、永久生效的执法路径（ADR-0057）。三态开关 `GX_AUTHZ_ENGINE`、三个 READY 门（`AUTHZ_ENFORCE_READY` / `FIELD_MASK_ENFORCE_READY` / `NAV_PRUNE_ENFORCE_READY`）、shadow 对拍/drift 账本**全部物理删除**（`configAuthz.ts`、`shadow.ts` 文件已删）。
+> - **fail-closed**：引擎抛错 → 503 `权限服务暂不可用`（记 `authz_engine_error`，不回落旧决策）；资源无活 nav 节点 → 403（记 `authz_engine_unresolved`）。删库/删知识库仍走 conjunction（只减不增）。
+> - **恒定执行**：字段掩码五出口、行级条件、tree/menu/面包屑剪枝随引擎永久生效，无开关。
+> - **能力层保留**：`libraryPolicy` 为引擎之上的能力/UI 形状层；`authzManage` 与执法正交；`share_link` 建链位已落地。第一代旧三表仅为台账、不参与放行。
+> - 权威结论以 **ADR-0057** 与 README 文首为准。
 >
 > 正文（§0 起）作为时点证据原样保留，行号均对应 2026-09-20 基线，**勿据其当前值操作**。
 

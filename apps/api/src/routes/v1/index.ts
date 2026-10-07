@@ -39,9 +39,8 @@ export const v1 = new Hono();
  * 显式列出两个管理角色，manage_* 分支保留给「持旧粗粒度动作的自定义角色」（迁移
  * 20260921010000 会把它们补进细粒度动作但保留旧位，故这些角色仍走 manage_* 命中）。
  *
- * **不挂在 GX_AUTHZ_ENGINE 总门上**：新权限引擎默认 off / 降级 shadow，实际鉴权决策走旧三表；
- * 挂总门会让管理员在任何环境看到的都还是「权限编辑未在本环境开放」的只读视图——
- * 这正是本字段要修掉的那个现象。能力位只回答「这个人是不是组织权限管理者」，与引擎 readiness 正交。
+ * **与引擎执法正交**：`authzManage` 只回答「这个人是不是组织权限管理者」，
+ * 用于决定权限管理面板是否可写；它不参与引擎对具体资源的放行裁决。
  *
  * fail-closed：查询抛错一律 false，不让 /meta（能力探针）因此 500。
  */
@@ -63,7 +62,7 @@ async function authzManageFlag(userId: string): Promise<boolean> {
 v1.use("*", requireActiveUser);
 
 // M4/S4：权限引擎只读探针（本人可查；查他人需工作区 owner）。随企业面 v1 挂载，
-// 不受 GX_AUTHZ_ENGINE off/shadow 影响——它直接计算 auth_policies/nav_nodes，不经七守卫。
+// 直接在 auth_policies/nav_nodes 上批量计算，不经七守卫。
 v1.route("/authz", authzRoutes);
 
 if (config.enterpriseOrg) {
@@ -77,7 +76,7 @@ if (config.enterpriseOrg) {
     return c.json({
       apiVersion: "v1",
       enterpriseOrg: true,
-      // 权限管理写能力位。见 authzManageFlag 的口径注释：与 GX_AUTHZ_ENGINE 总门解耦。
+      // 权限管理写能力位。见 authzManageFlag 的口径注释：与引擎执法正交。
       authzManage: await authzManageFlag(auth.userId),
       auth: {
         userId: auth.userId,

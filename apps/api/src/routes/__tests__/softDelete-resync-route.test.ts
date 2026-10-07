@@ -94,6 +94,11 @@ async function seed(baseName: string): Promise<void> {
   const base = await prisma.base.create({ data: { name: baseName, createdBy: OWNER } });
   baseId = base.id;
   await prisma.member.create({ data: { baseId, userId: OWNER, role: "owner" } });
+  // 引擎永久单一化后，守卫反查资源必须命中活 nav 节点，否则 fail-closed。裸建 base 后补一次
+  // 标准 nav 同步（与建库服务同口径）。超管 u1 的放行靠 isWorkspaceOwner 硬短路，不依赖投影。
+  const { withWriteTx } = await import("../../db.js");
+  const { syncNavFromEntitiesTx } = await import("../../domain/nav/sync.js");
+  await withWriteTx("test.baseNav", (tx) => syncNavFromEntitiesTx(tx));
 
   const created = await request("POST", `/tables?baseId=${baseId}`, { name: "t1" });
   expect(created.status).toBe(201);

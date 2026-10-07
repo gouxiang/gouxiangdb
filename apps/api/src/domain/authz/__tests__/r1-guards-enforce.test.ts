@@ -1,28 +1,17 @@
-// M4/R1 七守 enforce 接线端到端（真迁移临时库 + 真 createApp/真 JWT/真守卫，不 mock auth）：
-//   off / shadow 两态：七守响应与接线前逐值一致（状态码全等），off 且零引擎 SQL；
-//   on 态（总门 AUTHZ_ENFORCE_READY 仍为 false，生产物理降级 shadow，故用 vi.mock 强制
-//   effectiveAuthzMode=on 演练——这是 R1 接线的验收重点，翻门仍由总监另做）：
-//     · 引擎 allow/deny 分别导致放行/403，旧决策与引擎不一致时以引擎为准（双向都验）；
-//     · 403 文案与 code 逐字保持；
-//     · requireCanDeleteBase 走 conjunction：引擎给了 d 也不放行（防删库越权），超管照删；
-//     · nodeId 为 null -> fail-closed 403 并计 UNRESOLVED_NODE；
-//     · 引擎抛错 -> 回落旧决策（不 500）+ 计 authz_enforce_error。
-// 末两条 spy Prisma delegate（restore 后该 delegate 失效，同 shadow-integration 坑），故置尾。
+// 七守 enforce 接线端到端（真迁移临时库 + 真 createApp/真 JWT/真守卫，不 mock auth/引擎）：
+// 引擎永久单一化后恒定由引擎权威裁决，无 off/shadow/on、无对拍/drift/回落。
+//   · 引擎 allow/deny 分别导致放行/403；
+//   · 403 文案与 code 逐字保持；
+//   · requireCanEditData：引擎给 edit_data 放行、撤掉即 403；
+//   · requireCanToggleShare：引擎给 manage_share 放行、无则 403；
+//   · requireCanDeleteBase 走 conjunction：引擎给了 d 也不放行（防删库越权），超管照删；
+//   · nodeId 为 null（资源反查不到活节点）-> fail-closed 403；
+//   · 管理员凭硬规则进库（P0 已闭合）：库门 enter 已投影、无内容 r、未勾 canManage 无 edit_data。
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupCharHarness, json, type CharHarness } from "../../nav/__tests__/characterization/charHarness.js";
-import { driftRegistry } from "../shadow.js";
 import { projectImplicitAdmin } from "../implicitAdminProject.js";
 import { rebuildScopePoliciesTx } from "../scopeDoubleWrite.js";
-
-const forced = vi.hoisted(() => ({ mode: null as null | "off" | "shadow" | "on" }));
-vi.mock("../../../configAuthz.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../configAuthz.js")>();
-  return {
-    ...actual,
-    effectiveAuthzMode: (env?: NodeJS.ProcessEnv) => forced.mode ?? actual.effectiveAuthzMode(env),
-  };
-});
 
 let h: CharHarness;
 let baseId: string;
@@ -68,8 +57,6 @@ const navNodeIdOf = async (resourceId: string): Promise<string> =>
   })).id;
 
 beforeAll(async () => {
-  delete process.env.GX_AUTHZ_ENGINE;
-  forced.mode = null;
   h = await setupCharHarness("gx-r1-guards-");
 
   for (const u of [OWNER, MEMBER, OUTSIDER, ADMIN]) await h.createUser(u);
@@ -100,7 +87,7 @@ beforeAll(async () => {
   baseNodeId = await navNodeIdOf(baseId);
   base2NodeId = await navNodeIdOf(base2Id);
 
-  // 引擎侧授权：MEMBER 在主库有 enter 库门（与旧视野一致 -> 零漂移基线）。
+  // 引擎侧授权：MEMBER 在主库有 enter 库门（与旧视野一致）。
   await setPolicy(baseNodeId, MEMBER, "enter");
 
   // 无 nav 节点的库（数据缺口形态，M3 reconcile 归口，此处验证 fail-closed）。
@@ -109,70 +96,25 @@ beforeAll(async () => {
 }, 120000);
 
 afterAll(async () => {
-  delete process.env.GX_AUTHZ_ENGINE;
-  forced.mode = null;
   await h.cleanup();
 });
 
-beforeEach(() => driftRegistry.reset());
-afterEach(() => {
-  forced.mode = null;
-  delete process.env.GX_AUTHZ_ENGINE;
-});
-
-/** 七守读探针：主库列表（requireCanView）+ 建记录（requireCanEditData 的只读替身不用）。 */
-async function readSnapshot(): Promise<Record<string, number>> {
-  return {
-    owner: await status("GET", tablesUrl(baseId), OWNER),
-    member: await status("GET", tablesUrl(baseId), MEMBER),
-    outsider: await status("GET", tablesUrl(baseId), OUTSIDER),
-  };
-}
-
-describe("1. off 基线：七守仍以旧决策为准，引擎零接入", () => {
-  it("超管 200 / 可见成员 200 / 无视野者 403，compared=0", async () => {
-    forced.mode = "off";
-    expect(await readSnapshot()).toEqual({ owner: 200, member: 200, outsider: 403 });
-    expect(driftRegistry.snapshot().compared).toBe(0);
-  });
-});
-
-describe("2. shadow：响应逐值不变，正向对拍双零", () => {
-  it("同一批探针与 off 全等；overDeny/overAllow=0 且 compared>0，方向为 forward", async () => {
-    forced.mode = "off";
-    const offSnap = await readSnapshot();
-    forced.mode = "shadow";
-    expect(await readSnapshot()).toEqual(offSnap);
-    const s = driftRegistry.snapshot();
-    expect(s.compared).toBeGreaterThan(0);
-    expect(s.overDeny + s.overAllow).toBe(0);
-    expect(s.comparedReverse).toBe(0);
-  });
-});
-
-describe("3. on：引擎为权威（放行与拒绝两个方向）", () => {
-  beforeEach(() => { forced.mode = "on"; });
-
-  it("三身份基线：comparedReverse 计数且方向标记进环形缓冲", async () => {
-    expect(await readSnapshot()).toEqual({ owner: 200, member: 200, outsider: 403 });
-    const s = driftRegistry.snapshot();
-    expect(s.comparedReverse).toBeGreaterThanOrEqual(3);
-    expect(s.compared).toBe(s.comparedReverse);
+describe("1. 引擎为权威（放行与拒绝）", () => {
+  it("三身份基线：超管 200 / 可见成员 200 / 无视野者 403", async () => {
+    expect(await status("GET", tablesUrl(baseId), OWNER)).toBe(200);
+    expect(await status("GET", tablesUrl(baseId), MEMBER)).toBe(200);
+    expect(await status("GET", tablesUrl(baseId), OUTSIDER)).toBe(403);
   });
 
-  it("引擎 deny 即 403：撤掉成员策略后，旧决策仍允也拒绝，记 OVERDENY(reverse)", async () => {
+  it("引擎 deny 即 403：撤掉成员策略后，旧决策仍允也拒绝", async () => {
     await clearPolicy(baseNodeId, MEMBER);
     expect(await status("GET", tablesUrl(baseId), MEMBER)).toBe(403);
-    const s = driftRegistry.snapshot();
-    expect(s.overDeny).toBeGreaterThanOrEqual(1);
-    expect(s.recent.at(-1)!.direction).toBe("reverse");
     await setPolicy(baseNodeId, MEMBER, "enter");
   });
 
-  it("引擎 allow 即放行：给无视野者插 enter 策略，旧决策仍拒也放行，记 OVERALLOW(reverse)", async () => {
+  it("引擎 allow 即放行：给无视野者插 enter 策略，旧决策仍拒也放行", async () => {
     await setPolicy(baseNodeId, OUTSIDER, "enter");
     expect(await status("GET", tablesUrl(baseId), OUTSIDER)).toBe(200);
-    expect(driftRegistry.snapshot().overAllow).toBeGreaterThanOrEqual(1);
     await clearPolicy(baseNodeId, OUTSIDER);
   });
 
@@ -181,9 +123,11 @@ describe("3. on：引擎为权威（放行与拒绝两个方向）", () => {
     expect(res.status).toBe(403);
     expect(await json<{ error: string; code: string }>(res)).toEqual({ error: "无权访问该 Base", code: "FORBIDDEN" });
   });
+});
 
+describe("2. requireCanEditData / requireCanToggleShare", () => {
   it("requireCanEditData：引擎给 edit_data 即放行（旧视野拒绝），撤掉即 403 且文案不变", async () => {
-    // 库节点只需聚合位：写入守判 edit_data（= canManage 或任一活表可写），不再判单表单动作的 u。
+    // 库节点只需聚合位：写入守判 edit_data（= canManage 或任一活表可写），不判单表单动作的 u。
     await setPolicy(baseNodeId, MEMBER, "enter,edit_data");
     expect(await status("POST", `/api/records?tableId=${tableId}`, MEMBER, { fields: {} })).toBe(201);
     await setPolicy(baseNodeId, MEMBER, "enter");
@@ -202,9 +146,11 @@ describe("3. on：引擎为权威（放行与拒绝两个方向）", () => {
     expect(await status("PATCH", `/api/bases/${baseId}/share-enabled`, MEMBER, { enabled: true })).toBe(200);
     await setPolicy(baseNodeId, MEMBER, "enter");
   });
+});
 
-  it("requireCanDeleteBase（conjunction）：引擎给 d 也不放行删库，超管照删", async () => {
-    // 旧硬规则 A：非超管一律不可删库；引擎侧给他 d，authority 语义下这里会是 200（越权）。
+describe("3. requireCanDeleteBase（conjunction）：引擎给 d 也不放行删库，超管照删", () => {
+  it("非超管：引擎给 d，旧硬规则拒 -> 仍 403；超管旧允+引擎兜底 -> 200", async () => {
+    // 旧硬规则 A：非超管一律不可删库；conjunction 下 legacy 拒即不放行。
     await setPolicy(base2NodeId, MEMBER, "d");
     const res = await call("DELETE", `/api/bases/${base2Id}`, MEMBER);
     expect(res.status).toBe(403);
@@ -214,24 +160,26 @@ describe("3. on：引擎为权威（放行与拒绝两个方向）", () => {
     // 超管：旧允 + 引擎 workspace owner 兜底 -> 放行。
     expect(await status("DELETE", `/api/bases/${base2Id}`, OWNER)).toBe(200);
   });
-
-  it("nodeId 为 null（资源反查不到活节点）：fail-closed 403 并计 UNRESOLVED_NODE", async () => {
-    expect(await status("GET", tablesUrl(base3Id), OWNER)).toBe(403); // 超管旧决策为允
-    const s = driftRegistry.snapshot();
-    expect(s.unresolvedNode).toBeGreaterThanOrEqual(1);
-    expect(s.enforceUnresolved).toBeGreaterThanOrEqual(1);
-  });
 });
 
 // P0 缺口【已闭合】（2026-10-03 核出 -> 同日由两枚库级聚合位 enter/edit_data 修掉）：
-// 管理员 base 节点原先只有管理位、没有任何库级准入位，而 requireCanView 判数据动作 r，
-// 故 on 态全体管理员被锁在库门外。现 requireCanView 改判 enter（= legacy access.visible），
-// 投影侧已在库节点 emit enter。本组断言由「冻结现状」翻转为【期望值】，不得再回退。
+// 管理员 base 节点原先只有管理位、没有任何库级准入位，requireCanView 判数据动作 r，
+// 故管理员被锁在库门外。现 requireCanView 改判 enter（= legacy access.visible），
+// 投影侧已在库节点 emit enter。本组断言为【期望值】，不得再回退。
 // 依据 docs/decisions/AUTHZ-ENGINE-ON-LIBRARY-SEMANTICS.md §6 第 3 条。
-describe("3.5 管理员 requireCanView：库门 enter 已投影（P0 已闭合）", () => {
-  it("3.5-1 修法证据：管理员 base 节点持 enter，且不持内容 r；未勾 canManage 时不持 edit_data", async () => {
-    // 空 scope 行集：管理员覆盖本就不依赖行存在，最纯粹的「凭硬规则进库」形态。
-    await rebuildScopePoliciesTx(h.prisma, "role_admin", [], "seed");
+describe("4. 管理员 requireCanView：库门 enter 已投影（P0 已闭合）", () => {
+  it("修法证据：管理员 base 节点持 enter、manage_share，不持内容 r；未勾 canManage 时不持 edit_data", async () => {
+    // 构造「主库 role_admin 未勾 canManage」形态：建库 seed 给 role_admin 落过 canManage=1 行，
+    // 这里删掉该行并重算投影（管理员进库靠硬规则，删行不影响 enter/manage_share，但不再 emit edit_data）。
+    await h.prisma.roleLibraryScope.deleteMany({
+      where: { roleId: "role_admin", libraryKind: "base", libraryId: baseId },
+    });
+    const saved = await h.prisma.roleLibraryScope.findMany({ where: { roleId: "role_admin" } });
+    await rebuildScopePoliciesTx(h.prisma, "role_admin", saved.map((r) => ({
+      roleId: r.roleId, libraryKind: r.libraryKind, libraryId: r.libraryId,
+      canManage: r.canManage, visible: r.visible, canShare: r.canShare, config: r.config,
+    })), "seed");
+
     const pol = await h.prisma.authPolicy.findUnique({
       where: {
         nodeId_subjectType_subjectId: {
@@ -254,47 +202,13 @@ describe("3.5 管理员 requireCanView：库门 enter 已投影（P0 已闭合�
     expect(kbActs).not.toContain("edit_data");
   });
 
-  it("3.5-2 shadow 态：管理员 200，且正向对拍零漂移", async () => {
-    forced.mode = "shadow";
+  it("管理员 200：凭硬规则进库（引擎侧无 scope 行也有视野）", async () => {
     expect(await status("GET", tablesUrl(baseId), ADMIN)).toBe(200);
-    const s = driftRegistry.snapshot();
-    expect(s.overDeny + s.overAllow).toBe(0);
-    expect(s.compared).toBeGreaterThan(0);
-  });
-
-  it("3.5-3 on 态：管理员 200，OVERDENY 归零（P0 已闭合）", async () => {
-    forced.mode = "on";
-    const res = await call("GET", tablesUrl(baseId), ADMIN);
-    expect(res.status).toBe(200);
-    const s = driftRegistry.snapshot();
-    expect(s.overDeny).toBe(0);
-    expect(s.overAllow).toBe(0);
-    // 走了 enforce 路径且以引擎结论为权威（零漂移时 recent 为空，故看计数而非环形缓冲）。
-    expect(s.comparedReverse).toBeGreaterThan(0);
   });
 });
 
-describe("4. on + 引擎故障：回落旧决策，不 500", () => {
-  it("workspace 版本查询抛错 -> 超管仍 200，enforceErrors=1", async () => {
-    forced.mode = "on";
-    vi.spyOn(h.prisma.workspace, "findUnique").mockRejectedValue(new Error("engine boom"));
-    expect(await status("GET", tablesUrl(baseId), OWNER)).toBe(200);
-    expect(driftRegistry.snapshot().enforceErrors).toBeGreaterThanOrEqual(1);
-    vi.restoreAllMocks(); // 该 delegate 此后失效，故本条为倒数第二条
-  });
-});
-
-// 放文件最末：Prisma delegate spy restore 后失效，其后不得再跑任何引擎查询。
-describe("5. off 零引擎 SQL（delegate 层硬证据）", () => {
-  it("off 态 navNode/authPolicy/workspace 零查询", async () => {
-    forced.mode = "off";
-    const delegates = h.prisma as unknown as Record<string, Record<string, unknown>>;
-    const spies = ["findUnique", "findFirst", "findMany", "count"].flatMap((m) =>
-      ["navNode", "authPolicy", "workspace"].map(
-        (d) => vi.spyOn(delegates[d]!, m as never) as unknown as ReturnType<typeof vi.fn>,
-      ),
-    );
-    expect(await readSnapshot()).toEqual({ owner: 200, member: 200, outsider: 403 });
-    expect(spies.reduce((n, s) => n + s.mock.calls.length, 0)).toBe(0);
+describe("5. nodeId 为 null（资源反查不到活节点）：fail-closed 403", () => {
+  it("无 nav 节点的库 -> 超管旧决策为允也 403", async () => {
+    expect(await status("GET", tablesUrl(base3Id), OWNER)).toBe(403);
   });
 });

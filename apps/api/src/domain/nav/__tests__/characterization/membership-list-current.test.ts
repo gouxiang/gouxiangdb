@@ -37,6 +37,22 @@ async function grantVisible(userId: string, kind: "base" | "kb", libraryId: stri
   });
 }
 
+/**
+ * 引擎永久单一化后，裸建实体无 nav 节点、裸插视野无节点投影 -> 守卫 fail-closed。
+ * 统一收口：nav 全量同步 + 重算该用户专属角色的节点策略投影。
+ */
+async function resync(userId: string): Promise<void> {
+  const roleId = `role_${userId}`;
+  const { syncNavFromEntitiesTx } = await import("../../sync.js");
+  await h.prisma.$transaction((tx) => syncNavFromEntitiesTx(tx));
+  const { rebuildScopePoliciesTx } = await import("../../../authz/scopeDoubleWrite.js");
+  const saved = await h.prisma.roleLibraryScope.findMany({ where: { roleId } });
+  await rebuildScopePoliciesTx(h.prisma, roleId, saved.map((r) => ({
+    roleId: r.roleId, libraryKind: r.libraryKind, libraryId: r.libraryId,
+    canManage: r.canManage, visible: r.visible, canShare: r.canShare, config: r.config,
+  })), "seed");
+}
+
 async function mkBase(owner: string, name: string, createdAt: Date) {
   const b = await h.prisma.base.create({ data: { name, createdBy: owner, createdAt } });
   await h.prisma.member.create({ data: { baseId: b.id, userId: owner, role: "owner", joinedAt: createdAt } });
@@ -81,6 +97,8 @@ describe("GET /api/tables?baseId 排序与守卫", () => {
       data: { baseId, name: "已删表", primaryFieldId: "", createdBy: "u_a", createdAt: new Date("2026-01-03T00:00:00Z") },
     });
     await h.prisma.table.update({ where: { id: gone.id }, data: { deletedAt: new Date() } });
+    // 补建三张额外表后的 nav 节点 + u_a 角色投影（裸建表无节点会让列表/守卫 fail-closed）。
+    await resync("u_a");
 
     const forbidden = await h.app.request(`/api/tables?baseId=${baseId}`, { headers: await h.auth("u_out") });
     expect(forbidden.status).toBe(403);
@@ -137,6 +155,8 @@ describe("GET /api/kb/:id/docs 排序与守卫", () => {
         createdAt: new Date("2026-03-01T00:00:00Z"), updatedAt: new Date("2026-03-01T00:00:00Z") },
     });
     await h.prisma.kbDoc.update({ where: { id: canvas.id }, data: { deletedAt: new Date(), deletedBy: "u_a" } });
+    // 补建三个文档后的 nav 节点 + u_a 角色投影（grantVisible 裸插视野也在此一并投影）。
+    await resync("u_a");
 
     const forbidden = await h.app.request(`/api/kb/${kbId}/docs`, { headers: await h.auth("u_out") });
     expect(forbidden.status).toBe(403);

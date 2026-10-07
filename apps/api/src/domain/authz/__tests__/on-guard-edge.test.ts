@@ -1,7 +1,7 @@
-// M4/R1 阶段 C：on 态边界对抗（同 __tests__/on-guard-exhaustive.test.ts 分工见下）。
+// on 态边界对抗（同 __tests__/on-guard-exhaustive.test.ts 分工见下）。
 //
-// 分工：那份跑「身份 × 七守」全矩阵（9 身份逐格比对 legacy 期望 + off 同矩阵零 IO 对照）；
-// 本文件跑它【覆盖不到】的四类边界，都是翻 on 前必须闭合、而在全矩阵里会被平均值盖住的：
+// 分工：那份跑「身份 × 七守」全矩阵（8 身份逐格比对期望）；
+// 本文件跑它【覆盖不到】的四类边界，都会被全矩阵的平均值盖住：
 //   1) P1 的判别力前提：管理员两种形态必须打【两个库】——同一 role_admin 在同一库里
 //      要么全都有 canManage 行、要么全都没有，单库夹具会在两边同时失真（见用例 1）；
 //   2) 空库：enter 不依赖活表（零表库库门必须开），而 edit_data 在无活表时必须不成立；
@@ -9,24 +9,13 @@
 //      但 readSources【只收 r】，故聚合位一条都进不了能力并集，hidden 字段仍不可见；
 //   4) table 中断继承后，库门 enter 仍成立（库之上无业务祖先），内容读回归自身节点 r。
 //
-// 同样是强制 on（mock effectiveAuthzMode 绕过 AUTHZ_ENFORCE_READY 降级）跑真守卫；
-// shadow 干净 ≠ on 安全，理由见 AUTHZ-ENGINE-ON-LIBRARY-SEMANTICS.md §7.1。
+// 引擎永久单一化后恒定跑真守卫，无开关/对拍/drift。
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupCharHarness, json, type CharHarness } from "../../nav/__tests__/characterization/charHarness.js";
-import { driftRegistry } from "../shadow.js";
 import { rebuildScopePoliciesTx } from "../scopeDoubleWrite.js";
 import { fieldCapability } from "../fieldMask.js";
 import { nodeId } from "../../nav/backfill.js";
-
-const forced = vi.hoisted(() => ({ mode: null as null | "off" | "shadow" | "on" }));
-vi.mock("../../../configAuthz.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../configAuthz.js")>();
-  return {
-    ...actual,
-    effectiveAuthzMode: (env?: NodeJS.ProcessEnv) => forced.mode ?? actual.effectiveAuthzMode(env),
-  };
-});
 
 let h: CharHarness;
 /** 库 A：role_admin 对该库【无 scope 行】（凭硬规则进库的管理员）。 */
@@ -34,7 +23,6 @@ let libA: string;
 let tableA: string;
 /** 库 B：role_admin 对该库有 canManage=1 行（勾了管理权的管理员）。 */
 let libB: string;
-let tableB: string;
 /** 库 E：空库（零活表）。 */
 let libE: string;
 
@@ -78,8 +66,6 @@ async function upsertScope(row: {
 const VIEWER_ROW = { visible: 1, canManage: 0, canShare: 0, config: "{}" };
 
 beforeAll(async () => {
-  delete process.env.GX_AUTHZ_ENGINE;
-  forced.mode = null;
   h = await setupCharHarness("gx-authz-on-edge-");
 
   for (const u of [OWNER, ADMIN, VIEWER]) await h.createUser(u);
@@ -101,7 +87,6 @@ beforeAll(async () => {
     const t = await call("GET", `/api/tables?baseId=${id}`, OWNER);
     const tables = (await json<{ tables: Array<{ id: string }> }>(t)).tables;
     if (key === "A") tableA = tables[0]!.id;
-    if (key === "B") tableB = tables[0]!.id;
     if (key === "E") {
       // 空库：删掉默认表，构造零活表形态（enter 不依赖活表，正是这一格要证明的）。
       expect(await status("DELETE", `/api/tables/${tables[0]!.id}`, OWNER)).toBe(200);
@@ -130,15 +115,7 @@ beforeAll(async () => {
 }, 180000);
 
 afterAll(async () => {
-  forced.mode = null;
-  delete process.env.GX_AUTHZ_ENGINE;
   await h.cleanup();
-});
-
-beforeEach(() => driftRegistry.reset());
-afterEach(() => {
-  forced.mode = null;
-  delete process.env.GX_AUTHZ_ENGINE;
 });
 
 const libPolicy = async (nodeIdValue: string, subjectId: string) =>
@@ -148,15 +125,13 @@ const libPolicy = async (nodeIdValue: string, subjectId: string) =>
 const actionsOf = (stored: string | null): string[] =>
   (stored ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
-describe("on 态边界对抗（补全矩阵覆盖不到的四类形态）", () => {
+describe("边界对抗（补全矩阵覆盖不到的四类形态）", () => {
   it("1) P1：同一管理员在两库形态不同——无行库拿不到管理权，有 canManage 行的库拿得到", async () => {
-    forced.mode = "on";
     // 库 A：role_admin 无 scope 行 -> 库节点无 manage_table -> 库门开、管理权拒（P1 修法生效）。
     expect(await status("GET", `/api/tables?baseId=${libA}`, ADMIN)).toBe(200);
     expect(await status("PATCH", `/api/bases/${libA}`, ADMIN, { name: `A${Date.now()}` })).toBe(403);
     // 库 B：role_admin 有 canManage 行 -> 同一用户在这库有完整管理权。
     expect(await status("PATCH", `/api/bases/${libB}`, ADMIN, { name: `B${Date.now()}` })).toBe(200);
-    expect(driftRegistry.snapshot().overAllow + driftRegistry.snapshot().overDeny).toBe(0);
 
     // 并核对投影本身确实如此（不是碰巧 403）：A 库节点无 manage_table，B 库节点有。
     const actsA = actionsOf((await libPolicy(nodeId("base", libA), "role_admin"))?.actions ?? null);
@@ -169,16 +144,13 @@ describe("on 态边界对抗（补全矩阵覆盖不到的四类形态）", () =
   });
 
   it("2) 空库：enter 不依赖活表（库门开），但无活表时拿不到 edit_data", async () => {
-    forced.mode = "on";
     const libActs = actionsOf((await libPolicy(nodeId("base", libE), "role_e_viewer"))?.actions ?? null);
     expect(libActs).toContain("enter"); // 零表库也 emit enter：这是运行时活表并集做不到的一格
     expect(libActs).not.toContain("edit_data");
     expect(await status("GET", `/api/tables?baseId=${libE}`, VIEWER)).toBe(200);
-    expect(driftRegistry.snapshot().overDeny).toBe(0);
   });
 
   it("3) 聚合位不进字段能力并集（A-4 防线）：库节点 enter/edit_data 带空 mask 也不放宽可见面", async () => {
-    forced.mode = "on";
     const hiddenField = "f_edge_hidden";
     // 给 VIEWER 在 A 库表上手插一条带 fieldMask 的窄策略（不含 hidden 字段）。
     await h.prisma.authPolicy.upsert({
@@ -227,7 +199,6 @@ describe("on 态边界对抗（补全矩阵覆盖不到的四类形态）", () =
   });
 
   it("4) table 中断继承：库门 enter 不受影响，内容读回归该表自身节点的 r", async () => {
-    forced.mode = "on";
     const tNode = await h.prisma.navNode.findUniqueOrThrow({
       where: {
         workspaceId_resourceType_resourceId: {
@@ -239,7 +210,6 @@ describe("on 态边界对抗（补全矩阵覆盖不到的四类形态）", () =
     try {
       // 库门不看库内表，也不看库的继承开关 -> 仍放行。
       expect(await status("GET", `/api/tables?baseId=${libA}`, VIEWER)).toBe(200);
-      expect(driftRegistry.snapshot().overDeny).toBe(0);
     } finally {
       await h.prisma.navNode.update({ where: { id: tNode.id }, data: { inheritAncestors: 1 } });
     }

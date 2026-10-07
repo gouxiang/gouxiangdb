@@ -110,10 +110,11 @@ describe("B 根因修复后的判定（投影 + 判定两层都已接线）", ()
 
     const r = evaluatePreflight(data, wiredFacts(true));
     expect(r.blocking.some((b) => b.includes("库节点缺席可见集"))).toBe(false);
-    expect(r.verdict).toBe("READY"); // 语义面与数据面齐；唯一剩余门仅在 enforceReady=false 时挡
-    const gated = evaluatePreflight(data, wiredFacts(false));
-    expect(gated.verdict).toBe("NOT_READY");
-    expect(gated.blocking.some((b) => b.includes("AUTHZ_ENFORCE_READY"))).toBe(true);
+    expect(r.verdict).toBe("READY"); // 语义面与数据面齐即 READY：引擎永久单一化，无总门再挡
+    // enforceReady 仅为稳定报告结构保留，传 false 也不再产生 AUTHZ_ENFORCE_READY 阻断。
+    const alsoReady = evaluatePreflight(data, wiredFacts(false));
+    expect(alsoReady.blocking.some((b) => b.includes("AUTHZ_ENFORCE_READY"))).toBe(false);
+    expect(alsoReady.verdict).toBe("READY");
   });
 
   it("聚合位 parity：抽样覆盖 r1/role_admin × b1/b2，逐值引擎==legacy", async () => {

@@ -1,34 +1,21 @@
-// M4/ADR-0056 §7：on 态穷举「身份 × 七守」矩阵（翻 AUTHZ_ENFORCE_READY 前最重要的一道网）。
+// 「身份 × 七守」穷举矩阵（权限引擎永久单一化后最重要的一道授权正确性网）。
 //
-// 方法论盲区（必须写在文件头）：shadow 态响应恒等于 legacy，引擎结论只计数、不参与放行。
-// 只有强制 on（mock effectiveAuthzMode='on'，绕过总门 AUTHZ_ENFORCE_READY 的物理降级）跑
-// 真 JWT/真守卫，引擎结论才真正决定放行；因此「shadow 干净 ≠ on 安全」。本文件不造近似：
-//   - 探针路由在测试内挂载真实的七守（requireCan*），不重写判定、不 mock 引擎；
-//   - 期望值表逐格直接由第二代 legacy 口径推导（resolveBaseAccess + permit，见 EXPECT），
-//     要求 on 态结果与 legacy 完全一致、双向 drift 全 0；
-//   - 同矩阵再强制 off 跑一遍：状态码与 on 全等且 compared=0（off 零引擎 IO 的既有保证）。
+// 引擎已永久、无条件生效，无 off/shadow/on、无对拍/drift。本文件不造近似：
+//   - 探针路由在测试内挂载真实的七守（requireCan*），不重写判定、不 mock 引擎/配置；
+//   - 期望值表逐格直接由第二代口径推导（resolveBaseAccess + permit，见 EXPECT），
+//     要求真实引擎裁决与该期望完全一致。
 //
 // 外部只读分享链接者不进本矩阵：其请求走 routes/public.ts 分享态路径、不持用户账号、
 // 不经过七守（硬规则 D 由公开路由单独强制），放入即假覆盖。
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import { setupCharHarness, json, type CharHarness } from "../../nav/__tests__/characterization/charHarness.js";
-import { driftRegistry } from "../shadow.js";
 import { rebuildScopePoliciesTx } from "../scopeDoubleWrite.js";
 // guards.js 必须在夹具注入 globalThis.__gx_prisma【之后】动态 import：
 // 顶层静态 import 会经 guards -> db.ts 在 beforeAll 前实例化指向默认库的 prisma，
 // 守卫查错库 -> 401（scopeDoubleWrite 的依赖图不碰 db.ts，故 r1 文件无此问题）。
 import type * as GuardsMod from "../../../guards.js";
-
-const forced = vi.hoisted(() => ({ mode: null as null | "off" | "shadow" | "on" }));
-vi.mock("../../../configAuthz.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../configAuthz.js")>();
-  return {
-    ...actual,
-    effectiveAuthzMode: (env?: NodeJS.ProcessEnv) => forced.mode ?? actual.effectiveAuthzMode(env),
-  };
-});
 
 // 七守探针列：[列名, HTTP 方法, 探针路径, 守卫在 guards 模块上的导出名]。
 type GuardFn = (c: any, baseId: string) => Promise<unknown>;
@@ -44,7 +31,7 @@ const PROBES: Probe[] = [
 ];
 
 /**
- * 期望值表：身份 -> 七列状态码。逐格按第二代 legacy 口径推导（不看引擎实现）：
+ * 期望值表：身份 -> 七列状态码。逐格按第二代口径推导（不看引擎实现）：
  *   super 全 200（硬规则 + workspace owner 兜底）；
  *   admin 无 scope：仅 visible（库门 enter）+ 硬给的 canToggleShare；
  *   admin canManage / 库管理员：除删库外全 200（删库硬规则 A 仅超管）；
@@ -69,14 +56,10 @@ const IDENTITIES = Object.keys(EXPECT);
 let h: CharHarness;
 let probeApp: Hono;
 let guards: typeof GuardsMod;
-let baseId: string;
-let tableId: string;
 /** 身份 -> 被测库：adminCanManage 走 N，其余走 M。 */
 let baseOfIdentity: Record<string, string>;
 
 beforeAll(async () => {
-  delete process.env.GX_AUTHZ_ENGINE;
-  forced.mode = null;
   h = await setupCharHarness("gx-authz-on-exhaust-");
   // 夹具已注入临时 prisma，再加载真实守卫模块。
   guards = await import("../../../guards.js");
@@ -111,8 +94,6 @@ beforeAll(async () => {
     return { baseId: newBaseId, tableId: (await json<{ tables: Array<{ id: string }> }>(t)).tables[0]!.id };
   }
   const M = await createBase("穷举主库");
-  baseId = M.baseId;
-  tableId = M.tableId;
   const N = await createBase("穷举管理员管理库");
 
   // 建库事务（libraryScopeSeed.seedAdminScopeTx）会给每个新库自动落 role_admin canManage=1
@@ -192,15 +173,7 @@ beforeAll(async () => {
 }, 120000);
 
 afterAll(async () => {
-  forced.mode = null;
-  delete process.env.GX_AUTHZ_ENGINE;
   await h.cleanup();
-});
-
-beforeEach(() => driftRegistry.reset());
-afterEach(() => {
-  forced.mode = null;
-  delete process.env.GX_AUTHZ_ENGINE;
 });
 
 /** 以某身份按一列探针打一次，返回状态码（被测库按身份绑定，adminCanManage 走 N）。 */
@@ -210,33 +183,16 @@ async function probe(identity: string, method: string, prefix: string): Promise<
   return res.status;
 }
 
-describe("on 态穷举：身份 × 七守，逐格等于 legacy 期望，drift 全 0", () => {
+describe("穷举：身份 × 七守，逐格等于期望", () => {
   it.each(IDENTITIES)("%s：七列状态码与 EXPECT 完全一致", async (identity) => {
-    forced.mode = "on";
     const got: number[] = [];
     for (const [, method, prefix] of PROBES) got.push(await probe(identity, method, prefix));
     expect(got).toEqual(EXPECT[identity]);
-    const s = driftRegistry.snapshot();
-    expect(s.overDeny + s.overAllow).toBe(0);
-    // 除全 403 身份外至少走过一次 reverse 对拍；全 403 身份的引擎拒绝也计入 comparedReverse。
-    expect(s.comparedReverse).toBeGreaterThan(0);
   });
 
   it("三个关键格：无行管理员 view=200（P0-A）；未勾 canManage 管理员 manage=403（P1）；纯只读 edit=403", async () => {
-    forced.mode = "on";
     expect(await probe("adminNoScope", "GET", "/view")).toBe(200);
     expect(await probe("adminNoScope", "POST", "/manage")).toBe(403);
     expect(await probe("viewer", "POST", "/edit")).toBe(403);
-    expect(driftRegistry.snapshot().overDeny + driftRegistry.snapshot().overAllow).toBe(0);
-  });
-});
-
-describe("off 同矩阵：状态码与 on 期望全等，零对拍计数", () => {
-  it.each(IDENTITIES)("%s：off 七列与 EXPECT 一致、compared=0", async (identity) => {
-    forced.mode = "off";
-    const got: number[] = [];
-    for (const [, method, prefix] of PROBES) got.push(await probe(identity, method, prefix));
-    expect(got).toEqual(EXPECT[identity]);
-    expect(driftRegistry.snapshot().compared).toBe(0);
   });
 });

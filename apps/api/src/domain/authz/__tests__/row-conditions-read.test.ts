@@ -1,7 +1,6 @@
 // P1-S8b-2 行级可见行条件（RowConditions）【列表 / 详情 / 写入口】读求值端到端。
 // 复用 navRouteHarness 真 app/真库夹具；策略经 PUT /api/v1/nodes/<table>/policies 写入，
-// 请求带目标用户真 JWT（不自造鉴权）。GX_AUTHZ_ENGINE=on 时 fieldMask 门（同源于此门）
-// 与行级条件一起生效；off 态断言零差异。
+// 请求带目标用户真 JWT（不自造鉴权）。引擎永久单一化后 fieldMask 门与行级条件恒生效（无开关）。
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -75,8 +74,6 @@ async function insertRow(fields: Record<string, unknown>, createdBy = "owner"): 
 }
 
 beforeAll(async () => {
-  // 建库阶段 off：引擎不介入，保证夹具干净。
-  delete process.env.GX_AUTHZ_ENGINE;
   h = await makeNavHarness("gx-s8b-read-");
   await h.createUser("owner", { email: "s8br-owner@x.com", displayName: "所有者" });
   await h.createUser("target", { email: "s8br-target@x.com", displayName: "目标用户" });
@@ -142,7 +139,6 @@ describe("RowConditions 读求值（on 态）", () => {
         reason: "test:gate", createdBy: "owner",
       },
     });
-    process.env.GX_AUTHZ_ENGINE = "on";
   }, 120000);
 
   it("列表：窄条件只命中部分行，records/filteredTotal 收窄、total 仍为物理总数", async () => {
@@ -264,7 +260,7 @@ describe("RowConditions 读求值（on 态）", () => {
     const gone = await h.prisma.record.findFirst({ where: { id: missId, deletedAt: null } });
     expect(gone).toBeNull();
 
-    // 恢复 missId（无关联行，直接撤销软删），供后续 off 态计数。
+    // 恢复 missId（撤销软删），保持夹具数据完整。
     await h.prisma.record.update({ where: { id: missId }, data: { deletedAt: null } });
 
     // otherRowId 不命中任一来源 -> 403 且仍存在。
@@ -272,19 +268,5 @@ describe("RowConditions 读求值（on 态）", () => {
     expect(bad.status).toBe(403);
     const still = await h.prisma.record.findFirst({ where: { id: otherRowId, deletedAt: null } });
     expect(still).not.toBeNull();
-  });
-
-  it("off 态零差异：不设 GX_AUTHZ_ENGINE 时 conditions 不生效，全量返回/不命中详情 200", async () => {
-    // off 态在独立库验证：同一进程切 env 不影响已构造的响应路径（resolveTableMask
-    // per-call 读 env，故直接置 off 即可）。
-    process.env.GX_AUTHZ_ENGINE = "off";
-    const body = await listAs("target");
-    expect(body.total).toBe(3);
-    expect(body.filteredTotal).toBe(3);
-    expect(body.records.length).toBe(3);
-    const bad = await detailAs("target", otherRowId);
-    expect(bad.status).toBe(200);
-    // 还原 on，避免影响同文件潜在后续。
-    process.env.GX_AUTHZ_ENGINE = "on";
   });
 });

@@ -2,6 +2,7 @@
 // 补上本专题要用的表/字段/读写辅助。单独成文件只为守单文件 <=300 行门禁。
 
 import { setupHarness, type Harness } from "./_realApp.js";
+import { rebuildScopePoliciesTx } from "../../domain/authz/scopeDoubleWrite.js";
 
 export const OWNER_ID = "u1";
 export const VIEWER_ID = "u2";
@@ -103,6 +104,14 @@ export async function setupRecordChangesHarness(): Promise<RecordChangesHarness>
         config: JSON.stringify({ tables: {}, fields: { [tableId]: { [fSecret]: "hidden" } } }),
       },
     });
+    // 引擎永久单一化后放行只认节点策略：给角色配库权限在产品里会同事务经
+    // rebuildScopePoliciesTx 把视野投影到 nav 节点。夹具裸插 scope 后必须补这一步，
+    // 否则 legacy 层认为可见、引擎节点上无策略 -> fail-closed 403。
+    const saved = await h.prisma.roleLibraryScope.findMany({ where: { roleId: MASKED_ROLE } });
+    await rebuildScopePoliciesTx(h.prisma, MASKED_ROLE, saved.map((r) => ({
+      roleId: r.roleId, libraryKind: r.libraryKind, libraryId: r.libraryId,
+      canManage: r.canManage, visible: r.visible, canShare: r.canShare, config: r.config,
+    })), "seed");
   };
 
   return {

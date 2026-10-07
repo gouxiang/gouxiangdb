@@ -1,16 +1,16 @@
-// M4/S7 裁决 A-6 端到端：tree/menu 服务端剪枝 + 三通道 + 面包屑中性截断 + S6 缺口闭合。
+// 裁决 A-6 端到端：tree/menu 服务端剪枝 + 三通道 + 面包屑中性截断 + S6 缺口闭合。
+// 引擎永久单一化后剪枝恒定生效（无 off/shadow/on、无开关），本文件只验证剪枝后的正确行为。
 //
 // 覆盖：
-//   - off/shadow 字节一致：tree/menu/breadcrumb 两态 Response.text() 完全相同且无 dimmed 键；
-//   - A-6 三通道（父 kb 无权、子 doc 直授有权）：on 态 tree 无子位置（不造伪父链）、
-//     menu shortcut 正常显示且摘要 alive、旧守卫 URL 直达 200；
-//   - 面包屑：on 态链无无权父名且 truncatedAbove=true；自身无 r -> 403；缺失 -> 404；
+//   - A-6 三通道（父 kb 无权、子 doc 直授有权）：tree 无子位置（不造伪父链）、
+//     menu shortcut 正常显示且摘要 alive、旧守卫 URL 直达 403（退役 ACL 断链不放行）；
+//   - 面包屑：链无无权父名且 truncatedAbove=true；自身无 r -> 403；缺失 -> 404；
 //   - S6 缺口闭合：无任何来源用户的 base/table/doc 在 tree/menu 真正被剪（items 空）；
 //   - 空容器：普通成员隐藏、管理能力者保留 dimmed:true；资源节点永不下发 dimmed；
 //   - 子树锚点自身不可见 -> 403（防存在性探测，不返回空壳 200）；all=1 管理员不剪枝；
 //   - shortcut 只看节点自身 r：父无权不影响 shortcut 可见。
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupS7Fixture, insertShortcut, OWNER, ADMIN, DIRECT, NOBODY, type S7Fixture } from "./s7Harness.js";
 import { nodeId } from "../../nav/backfill.js";
 import { json } from "../../nav/__tests__/characterization/charHarness.js";
@@ -26,10 +26,6 @@ afterAll(async () => {
   await fx.cleanup();
 });
 
-beforeEach(() => {
-  delete process.env.GX_AUTHZ_ENGINE;
-});
-
 const TREE = "/api/v1/workspaces/current/tree?parentId=root&maxDepth=3";
 const MENU = "/api/v1/workspaces/current/menu";
 
@@ -41,41 +37,10 @@ interface TreeNode { id: string; parentId: string | null; kind: string; dimmed?:
 interface TreeBody { items: TreeNode[]; navVersion: number }
 interface MenuBody { items: Array<{ id: string; type: string; nodeId: string | null; node: { state: string } | null }> }
 
-describe("off/shadow 与 M3 金标准字节一致（独立门关闭，零剪枝）", () => {
-  it("tree/menu/breadcrumb 在 off 与 shadow 下逐字节相同，且不下发 dimmed/truncatedAbove=true", async () => {
-    const d1Node = nodeId("doc", I().d1);
-    process.env.GX_AUTHZ_ENGINE = "off";
-    const off = {
-      tree: await (await get(DIRECT, TREE)).text(),
-      menu: await (await get(DIRECT, MENU)).text(),
-      crumb: await (await get(DIRECT, `/api/v1/nodes/${d1Node}/breadcrumb`)).text(),
-    };
-    process.env.GX_AUTHZ_ENGINE = "shadow";
-    const shadow = {
-      tree: await (await get(DIRECT, TREE)).text(),
-      menu: await (await get(DIRECT, MENU)).text(),
-      crumb: await (await get(DIRECT, `/api/v1/nodes/${d1Node}/breadcrumb`)).text(),
-    };
-    expect(shadow.tree).toBe(off.tree);
-    expect(shadow.menu).toBe(off.menu);
-    expect(shadow.crumb).toBe(off.crumb);
-    expect(off.tree).not.toContain("dimmed");
-    expect(off.menu).not.toContain("dimmed");
-    // off 态面包屑是完整物理链（kb -> d1），无截断。
-    const crumb = JSON.parse(off.crumb) as { truncatedAbove: boolean; chain: Array<{ id: string }> };
-    expect(crumb.truncatedAbove).toBe(false);
-    expect(crumb.chain.map((n) => n.id)).toEqual([nodeId("kb", I().kb), d1Node]);
-  });
-});
-
 describe("A-6 三通道：父 kb 无权、子 doc 直授（ACL）有权", () => {
   beforeAll(async () => {
     await insertShortcut(fx, nodeId("doc", I().d1), "s7_sc_d1", 1);
     await insertShortcut(fx, nodeId("table", I().table), "s7_sc_table", 2);
-  });
-
-  beforeEach(() => {
-    process.env.GX_AUTHZ_ENGINE = "on";
   });
 
   it("通道1 权威树：d1 无位置（连透明路径不造伪父链），kb 也不可见", async () => {
@@ -104,8 +69,8 @@ describe("A-6 三通道：父 kb 无权、子 doc 直授（ACL）有权", () => 
     expect(ownerBody.items.some((m) => m.nodeId === nodeId("table", I().table))).toBe(true);
   });
 
-  it("通道3 URL 直达：引擎权威下仅 doc-node r（无 kb enter）不放行，DIRECT/NOBODY 均 403", async () => {
-    // 通电后（READY=true）旧守卫按 doc ACL「断链直达」已退役：DIRECT 只在 d1 doc 节点持
+  it("通道3 URL 直达：仅 doc-node r（无 kb enter）不放行，DIRECT/NOBODY 均 403", async () => {
+    // 旧守卫按 doc ACL「断链直达」已退役：DIRECT 只在 d1 doc 节点持
     // legacy:acl r、kb 节点零来源；requireDocAccess ref 对齐 kb 节点，故 doc-node r 不足以
     // 放行，权威判定 403（fail-closed，防退役 ACL 借断链偷偷进入）。NOBODY 同样 403。
     const allowed = await fx.call("GET", `/api/kb/docs/${I().d1}`, DIRECT);
@@ -134,11 +99,7 @@ describe("A-6 三通道：父 kb 无权、子 doc 直授（ACL）有权", () => 
   });
 });
 
-describe("on 态剪枝：S6 缺口闭合 + 空容器 dimmed + 锚点 403 + all=1 不剪", () => {
-  beforeEach(() => {
-    process.env.GX_AUTHZ_ENGINE = "on";
-  });
-
+describe("剪枝：S6 缺口闭合 + 空容器 dimmed + 锚点 403 + all=1 不剪", () => {
   it("S6 登记缺口闭合：无来源用户的 base/table/view/kb/doc 在树与菜单全部不可达", async () => {
     const body = await json<TreeBody>(await get(NOBODY, TREE));
     expect(body.items).toEqual([]); // 无任何资源可见 -> 所有 group 子树也无内容，普通成员全隐藏

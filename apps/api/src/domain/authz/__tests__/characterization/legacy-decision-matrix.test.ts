@@ -11,6 +11,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KB_CONTENT_KEY } from "@gx/shared-types";
 import { setupCharHarness, json, type CharHarness } from "../../../nav/__tests__/characterization/charHarness.js";
+import { rebuildScopePoliciesTx } from "../../scopeDoubleWrite.js";
 
 let h: CharHarness;
 const LEGACY_ROLES = ["owner", "creator", "editor", "commenter", "viewer"] as const;
@@ -32,6 +33,15 @@ async function call(method: string, url: string, userId: string | null, body?: u
 }
 async function status(method: string, url: string, userId: string | null, body?: unknown): Promise<number> {
   return (await call(method, url, userId, body)).status;
+}
+
+/** 引擎永久单一化后放行只认节点策略：裸插视野行后按标准口径重算该角色节点投影。 */
+async function resyncRole(roleId: string): Promise<void> {
+  const saved = await h.prisma.roleLibraryScope.findMany({ where: { roleId } });
+  await rebuildScopePoliciesTx(h.prisma, roleId, saved.map((r) => ({
+    roleId: r.roleId, libraryKind: r.libraryKind, libraryId: r.libraryId,
+    canManage: r.canManage, visible: r.visible, canShare: r.canShare, config: r.config,
+  })), "seed");
 }
 
 describe("旧三表不再参与放行（members.role / kb_members.role / kb_doc_acls）", () => {
@@ -74,6 +84,7 @@ describe("旧三表不再参与放行（members.role / kb_members.role / kb_doc_
         }),
       },
     });
+    await resyncRole("dm_role_scope");
     // 与成员档无关：五个人拿的是同一枚角色，结果必须完全一致。
     for (const r of LEGACY_ROLES.filter((x) => x !== "owner")) {
       expect(await status("GET", `/api/tables?baseId=${baseId}`, `bu_${r}`)).toBe(200);
@@ -136,6 +147,8 @@ describe("知识库：文档一律跟随知识库的角色配置，单篇 ACL �
           }) },
       ],
     });
+    await resyncRole("dm_role_kb_ro");
+    await resyncRole("dm_role_kb_rw");
     const ro = await call("GET", `/api/kb/docs/${docId}`, "ku_member");
     expect(ro.status).toBe(200);
     expect((await json<{ doc: { canEdit: boolean } }>(ro)).doc.canEdit).toBe(false);

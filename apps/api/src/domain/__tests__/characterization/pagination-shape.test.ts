@@ -53,6 +53,28 @@ vi.mock("../../../db.js", () => ({
         role: { id: "role_owner", systemKey: "super_admin", name: "超级管理员", isSystem: 1, permissions: "[]", deletedAt: null },
       }]),
     },
+    // 引擎永久单一化后，守卫必经资源 -> nav 节点反查 + 祖先链收集（超管在 subject 解析后
+    // 硬短路放行，但节点反查/链收集这几步 IO 仍会发生）。补最小 nav 桩，构自闭环单节点。
+    navNode: {
+      findUnique: () => Promise.resolve({ id: "nav_t1", deletedAt: null }),
+      findFirst: () => Promise.resolve({
+        id: "nav_t1", workspaceId: "ws_default", parentId: null, kind: "table",
+        resourceType: "table", resourceId: "T1", name: "T", path: "/nav_t1/", depth: 1,
+        inheritAncestors: 1, deletedAt: null,
+      }),
+      findMany: () => Promise.resolve([{
+        id: "nav_t1", workspaceId: "ws_default", parentId: null, kind: "table",
+        resourceType: "table", resourceId: "T1", name: "T", path: "/nav_t1/", depth: 1,
+        inheritAncestors: 1, deletedAt: null,
+      }]),
+    },
+    workspace: {
+      findUnique: () => Promise.resolve({ navVersion: 1 }),
+    },
+    // 超管判定短路，但节点收集仍会查候选策略；返回空即可（放行靠 isWorkspaceOwner）。
+    authPolicy: {
+      findMany: () => Promise.resolve([]),
+    },
     field: {
       findMany: () => Promise.resolve(fieldRows),
     },

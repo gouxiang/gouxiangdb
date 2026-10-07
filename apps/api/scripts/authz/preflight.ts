@@ -14,7 +14,7 @@
 //   4 库节点是否在 S4 可见集里：表可见而库不可见 -> 通电后库整层从导航/检索消失；
 //   5 legacy 残留：说明现状，不自动删；
 //   6 双写接线：静态扫描 apps/api/src（不含 __tests__）的钩子调用点，不靠记忆；
-//   7 门：AUTHZ_ENFORCE_READY 常量（只读，不翻门）。
+//   7 引擎姿态：引擎永久单一化、无条件生效（只读展示，无开关）。
 //
 // 退出码与 scripts/authz/reconcile-policies.ts 同口径：0=READY，1=NOT_READY，64=用法错。
 
@@ -23,7 +23,6 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { resolveDatabaseFile } from "../../src/db/databaseFile.js";
-import { AUTHZ_ENFORCE_READY } from "../../src/configAuthz.js";
 import {
   computePreflightData,
   evaluatePreflight,
@@ -103,7 +102,7 @@ async function main(): Promise<number> {
   const prisma = new PrismaClient();
   try {
     const data = await prisma.$transaction((tx) => computePreflightData(tx), TX_OPTS);
-    const facts: PreflightFacts = { enforceReady: AUTHZ_ENFORCE_READY, hooks: scanWiring() };
+    const facts: PreflightFacts = { enforceReady: true, hooks: scanWiring() };
     const report = evaluatePreflight(data, facts);
 
     if (process.argv.includes("--json")) {
@@ -152,8 +151,7 @@ function printHuman(r: PreflightReport): void {
   if (rc.errors > 0) console.log(`    引擎判定抛错 ${rc.errors} 次（nav 节点缺失？先跑 reconcile-nav）`);
 
   console.log("[4] 库节点是否在可见集（S4 同源内核；非空即库整层消失）");
-  console.log("    触发条件：GX_AUTHZ_ENGINE=on 即生效，与 AUTHZ_ENFORCE_READY 无关"
-    + "（navPruneEnforceEffective 读原始 env，configAuthz.ts:85）");
+  console.log("    引擎永久单一化：剪枝无条件生效，无任何环境变量开关");
   const sv = r.data.scopeVisibility;
   console.log(
     `    非 owner 用户抽样=${sv.sampledUsers}（跳过 owner ${sv.ownerSkipped}）`
@@ -192,8 +190,8 @@ function printHuman(r: PreflightReport): void {
     console.log(`    [${tag}] ${h.hook}（${h.why}）：${where}`);
   }
 
-  console.log("[7] 门");
-  console.log(`    AUTHZ_ENFORCE_READY=${r.facts.enforceReady}（本脚本只读，不翻门）`);
+  console.log("[7] 引擎姿态");
+  console.log(`    引擎永久单一化=${r.facts.enforceReady}（无条件生效，无开关、无 READY 门）`);
 
   console.log(`阻断项（${r.blocking.length}）：`);
   for (const b of r.blocking) console.log(`  - ${b}`);
@@ -204,7 +202,7 @@ function printHuman(r: PreflightReport): void {
 
   console.log(
     r.verdict === "READY"
-      ? "判定：READY（数据面与门均就绪；翻门仍需项目总监下令）"
+      ? "判定：READY（数据面就绪；引擎已永久生效）"
       : `判定：NOT_READY（阻断 ${r.blocking.length} 项）`,
   );
 }

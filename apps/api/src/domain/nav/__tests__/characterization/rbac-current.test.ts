@@ -13,6 +13,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { KB_CONTENT_KEY } from "@gx/shared-types";
 import { setupCharHarness, json, type CharHarness } from "./charHarness.js";
+import { rebuildScopePoliciesTx } from "../../../authz/scopeDoubleWrite.js";
 
 let h: CharHarness;
 
@@ -43,6 +44,18 @@ async function scope(
       config: JSON.stringify({ tables, fields: {} }),
     },
   });
+  // 引擎永久单一化后放行只认节点策略：给角色配视野在产品里同事务经 rebuildScopePoliciesTx
+  // 投影到 nav 节点。裸插视野后必须补投影，否则 legacy 可见、节点无策略 -> fail-closed 403。
+  await resyncRole(roleId);
+}
+
+/** 读取该角色全部视野行并按标准口径重算其节点策略投影。 */
+async function resyncRole(roleId: string): Promise<void> {
+  const saved = await h.prisma.roleLibraryScope.findMany({ where: { roleId } });
+  await rebuildScopePoliciesTx(h.prisma, roleId, saved.map((r) => ({
+    roleId: r.roleId, libraryKind: r.libraryKind, libraryId: r.libraryId,
+    canManage: r.canManage, visible: r.visible, canShare: r.canShare, config: r.config,
+  })), "seed");
 }
 
 beforeAll(async () => {
@@ -107,6 +120,8 @@ describe("Base 守卫：档位由「角色 × 库」决定，成员档不再参�
   it("成员档自身不授予任何权限：未配视野的角色一律 403", async () => {
     // bu_commenter/bu_viewer 在配视野前什么都没有——先验证"只有成员行"确实无效。
     await h.prisma.roleLibraryScope.deleteMany({ where: { roleId: "rb_read" } });
+    // 删视野行后同步收敛其节点投影（否则残留策略仍放行，收权不生效）。
+    await resyncRole("rb_read");
     expect(await status("GET", `/api/tables?baseId=${baseId}`, "bu_commenter")).toBe(403);
     expect(await status("GET", `/api/tables?baseId=${baseId}`, "bu_viewer")).toBe(403);
     await scope("rb_read", "base", baseId, false);

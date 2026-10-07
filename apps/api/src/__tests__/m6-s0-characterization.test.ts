@@ -103,6 +103,11 @@ beforeAll(async () => {
   });
   docId = doc.id;
 
+  // 引擎永久单一化后每个守卫强制「资源 -> nav 节点反查」。上面 base/table/kb 全是裸 Prisma
+  // 建的，没有 nav 节点 -> 连超管都 fail-closed。补一次全量 nav 同步把节点补齐。
+  const { syncNavFromEntitiesTx } = await import("../domain/nav/sync.js");
+  await prisma.$transaction((tx) => syncNavFromEntitiesTx(tx));
+
   const now = Math.floor(Date.now() / 1000);
   token = await sign({ userId: U, tv: 0, iat: now, exp: now + TOKEN_TTL }, JWT_SECRET, "HS256");
 

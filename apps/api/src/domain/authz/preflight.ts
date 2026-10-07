@@ -8,7 +8,7 @@
 //   3) legacy 残留：只报告不删（退役是后续切片）。
 //
 // 判定分两级，避免「有噪声就等于不能通电」的假红：
-//   - blocking：投影缺失/逐值不等/结构非法/legacy 悬挂/总门未翻/双写主路径未接线 —— 命中即 NOT_READY；
+//   - blocking：投影缺失/逐值不等/结构非法/legacy 悬挂/双写主路径未接线 —— 命中即 NOT_READY；
 //   - advisory：A3（按 runbook 只报不改，且 scope 投影动作串本就可能等于旧档，属已知噪声）、
 //     legacy 残留（user 主体，引擎按 user/role 并集取；是否越权由 B 段判定）。
 //
@@ -106,9 +106,9 @@ interface PreflightData {
   plan: ScopeBackfillPlan;
 }
 
-/** 静态事实（由 CLI 注入）：总门与双写代码接线，本文件不读盘、不读 env。 */
+/** 静态事实（由 CLI 注入）：引擎接线与双写代码接线，本文件不读盘、不读 env。 */
 export interface PreflightFacts {
-  /** src/configAuthz.ts 的 AUTHZ_ENFORCE_READY（false = 总门未翻，on 会降级 shadow）。 */
+  /** 引擎永久单一化后恒为 true（保留字段以稳定 CLI/报告结构）。 */
   enforceReady: boolean;
   hooks: Array<{
     hook: string;
@@ -280,9 +280,7 @@ export function evaluatePreflight(data: PreflightData, facts: PreflightFacts): P
     blocking.push(
       `库节点缺席可见集：${data.scopeVisibility.orphanTableUsers}/${data.scopeVisibility.sampledUsers} 个抽样用户`
         + `【表/视图可见、但库节点一个都不可见】（库节点抽样 ${data.scopeVisibility.visible}`
-        + `/${data.scopeVisibility.checked} 可见）——这不是"翻门后才会发生"的未来态：剪枝门 `
-        + `navPruneEnforceEffective 读【原始 env】（configAuthz.ts:85，不经 on->shadow 降级），`
-        + `**GX_AUTHZ_ENGINE=on 即生效、与 AUTHZ_ENFORCE_READY 无关**，运维改一个环境变量就能进。`
+        + `/${data.scopeVisibility.checked} 可见）——剪枝恒定生效（引擎永久单一化后无开关），`
         + `后果是 M5「先收敛后召回」与 M3 导航剪枝把库整层抹掉，且 nav/prune.ts 的 `
         + `resourceAncestorsPass 沿 parentId 向上"任一资源祖先不可见即拒"——库被剪则库内表/视图`
         + `一并消失，不是"能看表点不进库"而是"库连同库内资源一起消失"。`
@@ -313,9 +311,6 @@ export function evaluatePreflight(data: PreflightData, facts: PreflightFacts): P
     advisory.push(`非 legacy 策略行 ${otherCount} 行（${detail}）：非本次投影产物，保持原样`);
   }
 
-  if (!facts.enforceReady) {
-    blocking.push("AUTHZ_ENFORCE_READY=false（总门未翻）：env=on 会被运行时降级 shadow，此刻翻门是空转");
-  }
   for (const h of facts.hooks) {
     if (h.callSites.length === 0) {
       const msg = `双写钩子 ${h.hook}（${h.why}）无生产调用点`;

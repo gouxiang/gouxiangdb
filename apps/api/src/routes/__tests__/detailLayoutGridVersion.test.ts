@@ -93,6 +93,11 @@ beforeAll(async () => {
     data: { tableId: table.id, name: "表格", type: "grid", order: 0, config: "{}", lockMode: "collaborative" },
   });
   gridViewId = grid.id;
+
+  // 引擎永久单一化后，base/table/view 裸建无 nav 节点 -> 守卫反查 fail-closed。补 nav 同步。
+  // u1 是超管（isWorkspaceOwner 硬短路），不依赖节点策略投影。
+  const { syncNavFromEntitiesTx } = await import("../../domain/nav/sync.js");
+  await prisma.$transaction((tx) => syncNavFromEntitiesTx(tx));
 });
 
 afterAll(async () => {

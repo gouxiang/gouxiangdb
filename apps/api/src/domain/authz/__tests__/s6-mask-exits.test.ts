@@ -1,8 +1,8 @@
-// M4/S6 AC-M4-3 六通道（前 4 通道 + 写键）：on 态字段掩码五出口端到端。
-// 真库真 HTTP 真 JWT；GX_AUTHZ_ENGINE=on 读【原始】模式，节点守卫全局门仍降级 shadow
-//（AUTHZ_ENFORCE_READY=false），故 u_mask 凭旧 members editor 照常进入出口，字段门独立生效。
+// M4/S6 AC-M4-3 六通道（前 4 通道 + 写键）：字段掩码五出口端到端。
+// 真库真 HTTP 真 JWT；引擎永久单一化后字段掩码恒生效（无开关），u_mask 凭旧 members editor
+// 照常进入出口，字段门独立执行。
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { json } from "../../nav/__tests__/characterization/charHarness.js";
 import { setupS6MaskFixture, OWNER, MASK, type S6Fixture } from "./s6MaskHarness.js";
 
@@ -13,12 +13,7 @@ beforeAll(async () => {
 }, 120000);
 
 afterAll(async () => {
-  delete process.env.GX_AUTHZ_ENGINE;
   await fx.h.cleanup();
-});
-
-beforeEach(() => {
-  process.env.GX_AUTHZ_ENGINE = "on";
 });
 
 interface ListBody {
@@ -163,26 +158,5 @@ describe("写键守卫：隐藏/只读键 403 FORBIDDEN_FIELD 且整行未改", 
     const owner = await getList(OWNER);
     const a2 = owner.body.records.find((r) => r.id === fx.rec.A2)!;
     expect(a2.fields[fx.f.salary]).toBe(888); // 未被改成 999
-  });
-});
-
-describe("off/shadow 掩码门短路（字节一致证据）", () => {
-  it("shadow 与 off 下列表/详情/导出响应逐字节一致（shadow 仅对拍不改响应）", async () => {
-    delete process.env.GX_AUTHZ_ENGINE;
-    const offList = await (await fx.call("GET", `/api/records?tableId=${fx.A}&viewId=${fx.viewA}`, MASK)).text();
-    const offDetail = await (await fx.call("GET", `/api/records/${fx.rec.A1}`, MASK)).text();
-    const offCsv = await (await fx.call("GET", `/api/tables/${fx.A}/export.csv?viewId=${fx.viewA}`, MASK)).text();
-    process.env.GX_AUTHZ_ENGINE = "shadow";
-    const shList = await (await fx.call("GET", `/api/records?tableId=${fx.A}&viewId=${fx.viewA}`, MASK)).text();
-    const shDetail = await (await fx.call("GET", `/api/records/${fx.rec.A1}`, MASK)).text();
-    const shCsv = await (await fx.call("GET", `/api/tables/${fx.A}/export.csv?viewId=${fx.viewA}`, MASK)).text();
-    expect(shList).toBe(offList);
-    expect(shDetail).toBe(offDetail);
-    expect(shCsv).toBe(offCsv);
-    // off 态 u_mask 凭 editor 旧权限可见隐藏列（字段门短路、未实例化掩码会话）。
-    // 视图 filter=salary isNotEmpty：A1(null) 被滤除，A2(888) 在，故其机密值应出现在响应中。
-    expect(offList).toContain(fx.f.salary);
-    expect(offList).toContain("机密-2");
-    expect(offList).toContain("888");
   });
 });

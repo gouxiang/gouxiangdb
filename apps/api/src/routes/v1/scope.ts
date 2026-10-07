@@ -1,8 +1,8 @@
 // /api/v1/authz M4 权限引擎探针端点（M4/S4）。
 //
 // GET /authz/visible-scope：引擎侧只读可见集（M5 先收敛后召回的契约探针 / 前端"无权列表"诊断）。
-// 挂在 v1 鉴权链（requireActiveUser）之后；旧 /api 不感知本端点，GX_AUTHZ_ENGINE off/shadow/on
-// 均不影响其可用性——它直接读 auth_policies/nav_nodes 计算，不经过七守卫的 shadow 门。
+// 挂在 v1 鉴权链（requireActiveUser）之后；旧 /api 不感知本端点。
+// 它直接读 auth_policies/nav_nodes 计算，不经过七守卫。
 //
 // 授权：默认查本人；显式传 userId 查他人是工作区级排障，要求当前主体持工作区 role_owner
 // （manage_share 的工作区兜底形态；资源级 owner 不自动获得跨用户全局诊断权，fail-closed）。

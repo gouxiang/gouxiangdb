@@ -226,7 +226,7 @@ describe("GET /api/v1/workspaces/current/menu", () => {
     expect(res.status).toBe(401);
   });
 
-  it("容器/真名/别名不覆盖真名/多处引用/state 三态", async () => {
+  it("容器/真名/别名不覆盖真名/多处引用；dangling/broken shortcut 永久剪枝", async () => {
     const res = await h.app.request("/api/v1/workspaces/current/menu", {
       headers: await h.auth("owner"),
     });
@@ -259,26 +259,20 @@ describe("GET /api/v1/workspaces/current/menu", () => {
     expect(refs.length).toBe(3);
     expect(refs.every((m) => m.node?.state === "alive")).toBe(true);
 
-    const soft = byId.get(ids.softShortcut)!;
-    expect(soft.node?.state).toBe("soft_dangling");
-    expect(soft.node?.id).toBe(nodeId("doc", ids.softDoc));
-    expect(soft.node?.kind).toBe("doc");
-
-    const broken = byId.get(ids.brokenShortcut)!;
-    expect(broken.node?.state).toBe("broken");
-    expect(broken.node?.kind).toBeNull();
-    expect(broken.node?.resourceId).toBeNull();
-    expect(broken.node?.name).toBe("");
+    // A-6 永久剪枝：目标节点自身 r 不成立的 shortcut 一律剔除（无权访问已删/不存在内容），
+    // 超管也一样——soft_dangling / broken 不进入菜单，菜单里根本找不到这两项。
+    expect(byId.has(ids.softShortcut)).toBe(false);
+    expect(byId.has(ids.brokenShortcut)).toBe(false);
   });
 
-  it("state 对无任何成员关系/角色的用户逐字段同值（M3 零剪枝）", async () => {
-    const [a, b] = await Promise.all([
-      h.app.request("/api/v1/workspaces/current/menu", { headers: await h.auth("owner") }),
-      h.app.request("/api/v1/workspaces/current/menu", { headers: await h.auth("outsider") }),
-    ]);
-    const ba = await json<MenuTreeDTO>(a);
-    const bb = await json<MenuTreeDTO>(b);
-    expect(bb.items.length).toBe(ba.items.length);
-    expect(bb).toEqual(ba);
+  it("剪枝对所有登录用户一视同仁：无角色 outsider 只拿到空菜单（无 dangling/broken）", async () => {
+    const res = await h.app.request("/api/v1/workspaces/current/menu", {
+      headers: await h.auth("outsider"),
+    });
+    expect(res.status).toBe(200);
+    const bb = await json<MenuTreeDTO>(res);
+    // outsider 无任何角色 -> 无可见 shortcut，容器随之收空：菜单为空。
+    expect(bb.items).toEqual([]);
+    expect(bb.workspaceId).toBe("ws_default");
   });
 });

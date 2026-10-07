@@ -81,9 +81,8 @@ async function createRecord(h: CharHarness, tableId: string, fields: Record<stri
   return (await json<{ record: { id: string } }>(res)).record.id;
 }
 
-/** 建实体阶段固定 off（引擎不介入）；返回的 call 供用例自行切 GX_AUTHZ_ENGINE。 */
+/** 建实体阶段掩码恒生效（引擎永久单一化，无开关可切）；call 供用例自行使用。 */
 export async function setupS6MaskFixture(): Promise<S6Fixture> {
-  delete process.env.GX_AUTHZ_ENGINE;
   delete process.env.GX_M1_SIDECAR_READ;
   delete process.env.GX_M1_KEYSET;
   const h = await setupCharHarness("gx-m4-s6-");

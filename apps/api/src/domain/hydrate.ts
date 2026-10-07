@@ -48,8 +48,8 @@ export interface HydrateDeps {
    */
   resolveUserNames?(userIds: string[]): Promise<Record<string, string>>;
   /**
-   * M4/S6 可选字段掩码（fieldMask 五出口，仅 GX_AUTHZ_ENGINE=on 且字段门就绪时由
-   * authz/maskSession 注入；off/shadow 不提供 -> 所有跨表取值行为与 M3 一字不变）。
+   * M4/S6 可选字段掩码（fieldMask 五出口，引擎永久单一化后恒由
+   * authz/maskSession 注入）。
    * 返回 null=该表不裁剪；否则给表级可见性与可见字段集（空集=表级完全不可见）。
    * 结构类型（不 import authz 域，避免 hydrate -> authz 反向依赖）。
    */

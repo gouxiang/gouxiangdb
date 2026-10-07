@@ -655,8 +655,8 @@ components:
         dimmed:
           type: boolean
           description: >-
-            M4/S7 仅 GX_AUTHZ_ENGINE=on 剪枝响应可能出现：空容器 group 对管理能力者保留时 true（前端标灰）；
-            off/shadow 响应不含本键。
+            剪枝响应中空容器 group 对管理能力者（manage_menu/manage_share）保留时为 true（前端标灰）；
+            非空容器与资源节点不含本键。
     NavTree:
       type: object
       required: [workspaceId, navVersion, items, truncated]
@@ -1118,7 +1118,7 @@ paths:
       tags: [authz]
       summary: |
         M4/S4 权限引擎只读探针：返回目标用户在预算内可见的 nav 节点集（M5 先收敛后召回的契约面）。
-        不经 GX_AUTHZ_ENGINE off/shadow 门，直接由引擎在 auth_policies/nav_nodes 上批量计算，
+        直接由引擎在 auth_policies/nav_nodes 上批量计算，
         与逐节点 decide 共用同一判定内核（零分叉）。
       description: |
         - 默认查本人（供前端"无权列表"诊断）；显式传 userId 查他人是工作区级排障，

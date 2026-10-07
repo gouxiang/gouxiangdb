@@ -7,7 +7,6 @@
 // 纯域：只依赖注入 client，不 import Hono。判定内核与 scope/decide 同源（零分叉）。
 
 import type { BreadcrumbNodeDTO, NodeBreadcrumbDTO } from "@gx/shared-types";
-import { navPruneEnforceEffective } from "../../configAuthz.js";
 import { NavChainCache, navVersionOf } from "./nodes.js";
 import { prepareScope, nodeVisibleInPrepared } from "./scope.js";
 import { pruneBreadcrumb } from "../nav/prune.js";
@@ -40,17 +39,6 @@ export async function visibleBreadcrumb(
 
   const version = await navVersionOf(client);
   const chainLeafFirst = await new NavChainCache().ancestorChain(client, nodeId, version);
-
-  // off/shadow（独立剪枝门关闭，S10 前的默认姿态）：不实例化 scope、零引擎 SQL，
-  // 回全物理祖先链且 truncatedAbove=false，与 M3 金标准一致（任何登录用户均可解析面包屑，
-  // 与 tree/menu M3 零剪枝姿态对齐；内容能否打开仍由旧守卫决定）。
-  if (!navPruneEnforceEffective()) {
-    return {
-      nodeId,
-      chain: [...chainLeafFirst].reverse().map(toDto),
-      truncatedAbove: false,
-    };
-  }
 
   const prepared = await prepareScope(client, userId);
   const targetAsNode = target as unknown as AuthzNode;

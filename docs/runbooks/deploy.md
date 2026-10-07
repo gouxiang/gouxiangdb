@@ -179,8 +179,7 @@ sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
 
 M4-S2 起，`prisma migrate deploy` 应用回填迁移 `20260916110000_authz_policies_backfill`，把旧三表
 （members / kb_members / kb_doc_acls）活行幂等投影到 `auth_policies`。**升级后、接流量前必须跑一次
-authz 对账**确认 0 漂移（A=旧表缺/不一致投影、B=悬挂/虚高投影、C=结构非法；D 类逐请求决策对拍见 §6.8
-`GX_AUTHZ_ENGINE=shadow`）：
+authz 对账**确认 0 漂移（A=旧表缺/不一致投影、B=悬挂/虚高投影、C=结构非法）：
 
 ```bash
 cd /srv/gouxiangdb/current/api
@@ -205,13 +204,13 @@ sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
   是否随 esbuild 进生产发布包属 M4-S11 出口收口范围，在那之前目标机按实际可用的 node/tsx 运行环境执行，
   不要臆造 `dist/cli` 路径。
 
-## 6.7.1 通电前存量 scope 投影与体检（翻 enforce 门之前必跑）
+## 6.7.1 存量 scope 投影（升级后接流量前必跑）
 
-**为什么单列一节**：双写（第二代 `role_library_scope` -> `auth_policies`）只挂在写路径上
-（PUT `/api/v1/org/library-scopes`、建库 seed、建表、字段变更），双写上线之前就存在的存量 scope 行
-从未被投影过——无迁移全量回填、无启动回填。引擎通电瞬间只认 `auth_policies` 里有什么，
-不补这段存量就等于把用户配好的权限整体抹掉。实测（开发库）：`role_library_scope` 203 行、
-`auth_policies` 里 `reason='scope:role'` 0 行、对账 S=31。
+**为什么单列一节**：第二代 `role_library_scope` -> `auth_policies` 的投影只挂在写路径上
+（PUT `/api/v1/org/library-scopes`、建库 seed、建表、字段变更），投影上线之前就存在的存量 scope 行
+从未被投影过——无迁移全量回填、无启动回填。引擎永久单一化后只认 `auth_policies` 里有什么（引擎是
+唯一执法路径、fail-closed），不补这段存量就等于把用户配好的权限整体拒绝。实测（开发库）：
+`role_library_scope` 203 行、`auth_policies` 里 `reason='scope:role'` 0 行、对账 S=31。
 
 ```bash
 cd /srv/gouxiangdb/current/api
@@ -231,65 +230,30 @@ sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
   只写 `reason='scope:role'` 行，不碰 `legacy:*` / `policy:v1` / user 行。
 - `preflight.ts` 逐项输出：① 覆盖（scope 行数 vs `scope:role` 行数 vs 期望，缺口必须为 0）、
   ② 对账 A/B/C/S 四段、③ 库级判定可达性（七守按库节点判 vs 投影把数据动作挂表节点）、
-  ④ 库节点是否在 S4 可见集（表可见而库全不可见 = 通电后库整层从导航/检索消失）、
+  ④ 库节点是否在 S4 可见集（表可见而库全不可见 = 导航/检索中库整层消失）、
   ⑤ legacy 残留（只报告不删）、⑥ 双写接线（静态扫描 `apps/api/src` 真实调用点）、
-  ⑦ 门 `AUTHZ_ENFORCE_READY`。阻断项全空才 READY；A3（只报不改）与 legacy 残留是提示项，不阻断。
+  ⑦ 引擎姿态（永久生效、只读展示）。阻断项全空才 READY；A3（只报不改）与 legacy 残留是提示项，不阻断。
 - ③④ 是同一根因（引擎缺「库级可见性」一等表达）的两层失效，两条直觉修法均已证伪并锁死在测试里：
   投影层给库节点补 `r` 会淹没逐表字段收窄（OVERALLOW，`fieldMask.ts:97`）；
   enforceGate 改走库内活表并集则与 S4 可见集分叉（`scope.ts:174`，撞零分叉门禁）。
-  两项归零前不得通电，修法待架构裁决。
-- **④ 是现存可触发态，不需要翻总门**：剪枝门 `navPruneEnforceEffective` 读原始 env
-  （`configAuthz.ts:85`，`NAV_PRUNE_ENFORCE_READY=true`，不经 on→shadow 降级），
-  故 `GX_AUTHZ_ENGINE=on` 而 `AUTHZ_ENFORCE_READY=false` 时，**剪枝已按 on 生效、七守仍 shadow**。
-  且 `nav/prune.ts` 的 `resourceAncestorsPass` 沿 parentId 向上「任一资源祖先不可见即拒」，
-  库被剪 ⇒ 库内表/视图一并消失。**④ 归零前 `GX_AUTHZ_ENGINE` 不得置 on**（不是"翻门要谨慎"，
-  是"连 on 都不能设"）。详见 [authz-engine-flip-on.md §1.5.0](authz-engine-flip-on.md#150-风险当前可触发4-不需要翻总门envon-即发生)。
+  两项归零前不得接流量，修法待架构裁决。
 - 顺序：先 `reconcile-policies.ts --apply`（修 A1/A2/B），再 `project-scope.ts --apply`（补存量），
   最后 `preflight.ts` 收口。三者都幂等，可以重复跑。
 
-## 6.8 权限引擎 shadow 对拍（GX_AUTHZ_ENGINE，M4-S3 起）
+## 6.8 权限引擎执法（唯一、永久，无开关）
 
-M4-S3 在七个旧守卫（`guards.ts` 的 requireCanView/EditData/ManageSchema/ManageBase/Comment，
-`routes/kb.ts` 的 requireKb/requireDocAccess）内挂了新旧决策对拍，默认完全关闭、旧行为零变化：
+权限引擎已永久单一化（ADR-0057）：七守与 KB 全路由统一经 `domain/authz/enforceGate.ts` 的
+`enforceOrLegacy` 调引擎 `decide`，旧三态开关 `GX_AUTHZ_ENGINE` 与 READY 阶段门、shadow 对拍/drift
+账本均已物理删除。现行行为：
 
-| 取值 | 行为 |
-|---|---|
-| `off`（默认，含未设置/未知值） | 七守只走旧三表决策，不实例化引擎、零新增 SQL。回滚态。 |
-| `shadow` | 旧决策为准并照常返回；额外 `await` 新引擎同上下文（同主体/nav 节点/动作）对拍，差异只计数+脱敏日志，**绝不改响应、不抛错**。引擎自身抛错也只记 metric，旧响应照常（fail-open 仅限观测层）。 |
-| `on` | **S3-S5 阶段不可真正生效**：阶段门 `AUTHZ_ENFORCE_READY=false`，运行时一律降级为 `shadow` 并在启动行打一次 warn；S6 完成且 M4 计划 §4.8 翻门五条件全满足、仅由项目总监下令后才会以引擎为准。 |
+- **引擎为准**：allow 放行，deny 返 403。无第二套放行路径，也不做新旧对拍。
+- **fail-closed（引擎抛错）**：返 503 `权限服务暂不可用`，记结构化事件 `authz_engine_error`，
+  **绝不回落旧决策**。
+- **fail-closed（无活节点）**：资源反查不到活 nav 节点 -> 403，记 `authz_engine_unresolved`；
+  节点缺口归 M3 `reconcile-nav`。
+- **conjunction 只减不增**：删库/删知识库借 `d` 作必要条件（legacy ∧ engine）。
 
-开启影子观测（升级并跑完 §6.7 对账、A/B/C=0 后）：
-
-```bash
-# systemd EnvironmentFile 或环境注入；重启后看启动行：
-#   [authz] GX_AUTHZ_ENGINE configured=shadow effective=shadow
-GX_AUTHZ_ENGINE=shadow
-```
-
-观测口径（不落盘、不含响应体；userId 只存 sha256 前 12 位短哈希）：
-
-- 结构化日志事件 `authz_drift`：字段 `kind/direction/guard/action/nodeId/userHash/old/engine/ts`。
-  - `DRIFT_OVERDENY` = 旧允新拒（引擎更严，可能把用户锁外，可用性风险）；
-  - `DRIFT_OVERALLOW` = 旧拒新允（引擎更宽，越权风险，**零容忍**）；
-  - `direction=forward` = 影子期（旧为准、引擎只对比）；`direction=reverse` = enforce 期
-    （引擎为准、旧决策只作对比基准；R1 接线后 on 态才可能出现）。两个方向的分类口径完全一致。
-- `authz_shadow_error` = 引擎对拍自身异常（旧响应未受影响），错误明文仅进进程内环形缓冲供现场排查。
-- enforce 期专属事件（仅生效模式真正为 `on` 时可能出现）：
-  - `authz_enforce_error` = 引擎在**放行链上**抛错，该请求已回落旧决策（`fallback=legacy`，
-    请求不受影响）。与 `authz_shadow_error` 同族同机制（同一环形缓冲），但**必须单独告警**：
-    它意味着"这一条请求实际没走引擎"，影子期的同类事件只意味着"少了一次对拍"。
-  - `authz_enforce_unresolved` = 资源反查不到活 nav 节点，该请求已按 fail-closed 拒绝
-    （`denied=true`），节点缺口归 M3 `reconcile-nav`，不当授权漂移。
-- 进程内最近 200 条漂移/错误环形缓冲 + 分类计数（含 `comparedReverse`/`enforceErrors`/
-  `enforceUnresolved`），供运维接口/现场诊断（M4 不单独落盘）。
-- 翻门纪律（§4.8）：shadow 连续一个迭代 `DRIFT_OVERALLOW=0` 且 `DRIFT_OVERDENY=0` 双零，才允许评估切 on。
-
-回滚：`GX_AUTHZ_ENGINE=off` 重启即恢复纯旧守卫，适配分支保留无副作用（无数据迁移、无双写）。
-
-切 on（enforce）操作面：七守真正以引擎为准需要独立的 enforce 接线构建 + 翻就绪门 + 项目总监
-按 §4.8 五前置下令，操作清单与签收/回滚纪律见
-[authz-engine-flip-on.md](authz-engine-flip-on.md)，规模门与翻转演练证据见
-`docs/baseline/2026-09-16-m4-gate.md`。M4 出口姿态为代码默认 off、生产建议 shadow。
+升级后若出现本应放行却 403，多半是存量 scope 未投影，按 §6.7.1 跑 `project-scope.ts --apply`。
 
 ## 6.9 Prisma Client 生成（含新增迁移时，源码同步通道必须先生成再重启）
 

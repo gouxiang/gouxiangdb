@@ -92,9 +92,15 @@ export async function setupHarness(prefix: string, routes: HarnessRoutes = "reco
     return app.request(url, init);
   };
 
+  // 动态 import 标准编排服务：它们经 db.ts 单例拿上面注入的临时 prisma。
+  // 必须走标准服务而非裸插 base/table——引擎永久单一化后，放行依赖建库/建表事务里
+  // 同步出的 nav 节点与 owner 策略投影；裸插行会让新引擎反查不到节点策略而 fail-closed 403。
+  const { createBase, createKb } = await import("../../domain/libraryService.js");
+  const { createTable } = await import("../../domain/tableService.js");
+
   async function makeBase(name = "b"): Promise<string> {
-    const base = await prisma.base.create({ data: { name, createdBy: OWNER_ID } });
-    await prisma.member.create({ data: { baseId: base.id, userId: OWNER_ID, role: "owner" } });
+    // withStarter:false：保持夹具"只建空库，表由随后的 makeTable 显式建"的原形状。
+    const base = await createBase({ name, withStarter: false }, OWNER_ID);
     return base.id;
   }
 
@@ -102,19 +108,12 @@ export async function setupHarness(prefix: string, routes: HarnessRoutes = "reco
     baseId: string,
     name: string,
   ): Promise<{ id: string; primaryFieldId: string }> {
-    const table = await prisma.table.create({
-      data: { baseId, name, primaryFieldId: "", createdBy: OWNER_ID },
-    });
-    const primary = await prisma.field.create({
-      data: { tableId: table.id, name: "名称", type: "singleLineText", order: 0 },
-    });
-    await prisma.table.update({ where: { id: table.id }, data: { primaryFieldId: primary.id } });
-    return { id: table.id, primaryFieldId: primary.id };
+    const t = await createTable({ baseId, name }, OWNER_ID);
+    return { id: t.tableId, primaryFieldId: t.primaryFieldId };
   }
 
   async function makeKb(name = "kb"): Promise<string> {
-    const kb = await prisma.knowledgeBase.create({ data: { name, createdBy: OWNER_ID } });
-    await prisma.kbMember.create({ data: { kbId: kb.id, userId: OWNER_ID, role: "owner" } });
+    const kb = await createKb({ name }, OWNER_ID);
     return kb.id;
   }
 

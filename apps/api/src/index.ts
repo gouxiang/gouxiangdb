@@ -10,7 +10,7 @@ import { createServer, type Server } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 
-import { config, effectiveAuthzMode } from "./config.js";
+import { config } from "./config.js";
 import { createApp } from "./app.js";
 import { prisma } from "./db.js";
 import { startSearchWorker, stopSearchWorker } from "./domain/search/workerRuntime.js";
@@ -35,12 +35,6 @@ function bootSearchWorker(): void {
 }
 
 const { app, webRoot } = createApp();
-
-// M4/S3：权限引擎模式进启动运行日志（策略变更审计事件在 S5；此处仅模式行）。
-console.log(
-  `[authz] GX_AUTHZ_ENGINE configured=${config.authzEngine} effective=${effectiveAuthzMode()}`
-  + (config.authzEngine === "on" && effectiveAuthzMode() !== "on" ? " (on 阶段降级 shadow)" : ""),
-);
 
 const port = config.port;
 

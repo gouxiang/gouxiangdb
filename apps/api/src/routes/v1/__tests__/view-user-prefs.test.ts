@@ -78,6 +78,12 @@ beforeAll(async () => {
     create: { roleId: "role_viewer", libraryKind: "base", libraryId: seeded.baseId, visible: 1, canManage: 0, canShare: 0 },
     update: { visible: 1, canManage: 0 },
   });
+  // 上面 scope 行在 seedBaseWithStarter 已同步后才写入，节点上无 role_viewer 投影。
+  // 按该行重建，否则 viewer 读列表 / 改 prefs 都 fail-closed 403。
+  const { rebuildScopePoliciesTx } = await import("../../../domain/authz/scopeDoubleWrite.js");
+  const viewerScopes = await h.prisma.roleLibraryScope.findMany({ where: { roleId: "role_viewer" } });
+  await h.prisma.$transaction((tx) =>
+    rebuildScopePoliciesTx(tx as never, "role_viewer", viewerScopes as never, "seed"));
 
   const title = await h.prisma.field.create({
     data: { tableId, name: "标题", type: "singleLineText", order: 0 },

@@ -129,6 +129,13 @@ export async function setupAttachmentHarness(prefix = "gx-attachment-"): Promise
     return null;
   };
 
+  // 引擎永久单一化后，守卫反查资源必须命中活 nav 节点，否则 fail-closed。裸建实体后补一次
+  // 标准 nav 同步。超管 u1 的放行靠 isWorkspaceOwner 硬短路，不依赖节点策略投影。
+  async function syncNav(): Promise<void> {
+    const { syncNavFromEntitiesTx } = await import("../../domain/nav/sync.js");
+    await prisma.$transaction((tx) => syncNavFromEntitiesTx(tx));
+  }
+
   const auditFile = path.join(auditDir, "audit.logl");
   const readAudit = (): Record<string, any>[] => {
     if (!fs.existsSync(auditFile)) return [];
@@ -146,12 +153,14 @@ export async function setupAttachmentHarness(prefix = "gx-attachment-"): Promise
     makeBase: async (name = "b") => {
       const base = await prisma.base.create({ data: { name, createdBy: OWNER_ID } });
       await prisma.member.create({ data: { baseId: base.id, userId: OWNER_ID, role: "owner" } });
+      await syncNav();
       return base.id;
     },
     makeRecord: async (baseId: string, fieldsJson: string) => {
       const table = await prisma.table.create({
         data: { baseId, name: "T", primaryFieldId: "", createdBy: OWNER_ID },
       });
+      await syncNav();
       const rec = await prisma.record.create({
         data: { tableId: table.id, fields: fieldsJson, createdBy: OWNER_ID, updatedBy: OWNER_ID },
       });

@@ -12,9 +12,9 @@ M0 生产基座的可执行运维流程。所有手册与仓内脚本/配置一�
 | [wal-crash-recovery.md](wal-crash-recovery.md) | SQLite WAL/-shm 崩溃恢复纪律（禁止凭感觉手删旁路文件） | 库文件三件套处理流程 |
 | [m1-sidecar.md](m1-sidecar.md) | M1 数据底座：sidecar 巡检/重建、功能 flag 回退、大表与搜索有界预览边界 | `scripts/bench/{check,backfill}-sidecar.ts`、`GX_M1_*` flag |
 | [org-contacts.md](org-contacts.md) | M2 组织通讯录：flag off 紧急收回、停用后仍可访问排查、默认工作区/owner 修复、邀请重发、只增不删回滚姿态 | `GX_ENTERPRISE_ORG`、`GX_AUTH_STATE_TTL_MS`、`/api/v1/org/*` |
-| [authz-policy-dual-write.md](authz-policy-dual-write.md) | M4 权限引擎：auth_policies 与旧三表同事务双写、GX_AUTHZ_ENGINE 开关往返、legacyUnmappable 恢复路径、purge 清孤儿策略 | `GX_AUTHZ_ENGINE`、`/api/v1/nodes/:id/{policies,effective}`、`scripts/authz/reconcile-policies.ts` |
-| [authz-engine-flip-on.md](authz-engine-flip-on.md) | M4 权限引擎切 on（enforce）操作清单：五条前置、双零证据、一步回滚、总监下令签收（含 S10 前 enforce 接线未就位的现状边界） | `GX_AUTHZ_ENGINE=on`、就绪门、drift 双零、回滚 = env 回 off |
-| [authz-drift-and-incidents.md](authz-drift-and-incidents.md) | M4 权限应急四章：D 类决策漂移排查（shadow drift 与 reconcile A/B/C 分工）、成员锁外/误授两条处置路线、inheritance 误关恢复、旧表投影不一致修复 | driftRegistry/authz_drift、reconcile-policies.ts、effective/impact 端点 |
+| ~~[authz-policy-dual-write.md](authz-policy-dual-write.md)~~（已退役，保留防死链） | 原 M4 双写/开关往返手册；现行 authz 对账与 scope 投影见 deploy.md §6.7/§6.7.1 | — |
+| ~~[authz-engine-flip-on.md](authz-engine-flip-on.md)~~（已退役，保留防死链） | 原"切 on 操作清单"；引擎已永久生效、无开关，现行执法见 deploy.md §6.8 | — |
+| ~~[authz-drift-and-incidents.md](authz-drift-and-incidents.md)~~（已退役，保留防死链） | 原 shadow drift/应急手册；现行误授/误拒处置见 deploy.md §6.7/§6.7.1/§6.8 | — |
 | [ci.md](ci.md) | 平台中立质量门、真 ESLint 基线、本地复现 CI、Gitee Go 开通与 runner | `scripts/ci-quality.sh`、`eslint.config.mjs`、`.workflow/ci.yml` |
 | [m5-search.md](m5-search.md) | M5 统一检索：off/cloud 零外网抓包验收（AC-M5-5）、search.db 损坏自愈与降级审计判读、vec0/musl/NFS/资产边界、reindex 与 model 切换、**S13 真机压测（一条命令 + 三杠杆参数 + 容量指引）** | `GX_M5_SEARCH`、`GX_EMBEDDING_MODE`、`GX_VEC_EXT_PATH`、`/api/v1/admin/{reindex,search/status,embedding/config}`、`scripts/bench/m5-gate.ts --mode|--k|--scope-caps` |
 | [mcp.md](mcp.md) | M6 鉴权 MCP 服务：PAT 签发/吊销与停用连带吊销、`GX_ENTERPRISE_ORG` 门控与紧急收回、HTTP `/mcp` 与 `dist/mcp-stdio.js` 两入口、11MB/限流/超时三旋钮调档（含 Caddy 12MB 余量）、401 六态判读、审计四事件字段与"永不记录"清单、常见故障（stdio 退出码 2 / 429 退避 / 超时不挂连接） | `GX_ENTERPRISE_ORG`、`GX_MCP_BODY_LIMIT`、`GX_MCP_RATE_{IP,PAT,PAT_REST}_MAX`、`GX_MCP_TOOL_TIMEOUT_MS`、`/mcp`、`/api/v1/pats`、`GX_MCP_TOKEN` + `dist/mcp-stdio.js` |

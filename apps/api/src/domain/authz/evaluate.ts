@@ -16,6 +16,23 @@ import type {
   ScopedPolicy,
 } from "./types.js";
 
+/**
+ * creator 兜底【不覆盖】的纯组织管理动作。
+ *
+ * manage_table（表重命名/删表/清空/回收站/可见行配置入口）是纯组织管理权，只来自
+ * 「角色 × role_library_scope」的 canManage——资源 owner 的动作串（ADR-0039 §2.2：
+ * r,c,u,d,comment + manage_share，base owner 另有 manage_schema）里【本就没有
+ * manage_table】。故建库/建表后即使把创建人降权（摘下管理权），他也不得再凭
+ * "东西是我建的"拿回 manage_table，否则一旦授权后被收回，收权永久失效。
+ *
+ * 注意：manage_schema 不在此列。创建人对自己资源保留结构设计权（ADR-0039 §2.2
+ * 明示 base owner 另有 manage_schema；MCP field/view/table 写工具据此向创建者放行）。
+ * 内容级动作（r/c/u/d/comment/share_link/enter）同样由 creator 兜底承载。
+ */
+const ADMIN_ACTIONS: ReadonlySet<ResourceAction> = new Set<ResourceAction>([
+  "manage_table",
+]);
+
 /** 由全量活节点索引构建目标节点的祖先链（叶->根，chain[0]=自身）；缺失段容错跳过。 */
 export function buildChain(target: AuthzNode, byId: ReadonlyMap<string, AuthzNode>): AuthzNode[] {
   const ids = target.path.split("/").filter(Boolean).reverse();
@@ -95,7 +112,8 @@ interface ChainEvaluationInput {
  */
 export function evaluateChainDecision(input: ChainEvaluationInput): Decision {
   const { subject, node, chain, policies, action, ctx, isCreator } = input;
-  if (isCreator) return fallbackDecision(node, "creator", action);
+  // creator 兜底只承载内容所有权，不覆盖纯组织/结构管理动作（见 ADMIN_ACTIONS）。
+  if (isCreator && !ADMIN_ACTIONS.has(action)) return fallbackDecision(node, "creator", action);
   if (subject.isWorkspaceOwner) return fallbackDecision(node, "workspace_owner", action);
 
   const sources = policies

@@ -1,6 +1,6 @@
 // M4/S6 fieldMask 五出口编排层（计划 §4.4/§7-S6，裁决 A-4）。
 //
-// 在 GX_AUTHZ_ENGINE=on 且字段门就绪（fieldMaskEnforceEffective）时，由路由为单请求主体构造
+// 引擎永久单一化后字段掩码恒生效，由路由为单请求主体构造
 // 一次本会话，加载 table 节点 cutoff 链命中策略 -> fieldCapability，供五出口使用：
 //   1. 列表/详情/CSV：visibleFields() 子集喂 hydrate（隐藏物理列在 merged 缺席，公式引用它时
 //      buildFormulaSource 找不到字段天然返回 FNULL——零新求值分支，mask-null 与真空值不可区分）；
@@ -65,7 +65,7 @@ export class FieldMaskSession {
     this.deps = { client, workspaceId: "ws_default", resolveCreatedBy: makeCreatedByResolver(client) };
   }
 
-  /** 工厂：仅 fieldMaskEnforceEffective()=true 后由路由构造（off/shadow 不实例化、零 SQL）。 */
+  /** 工厂：路由为每个请求主体构造（引擎永久生效）。 */
   static async create(client: AuthzClient, userId: string): Promise<FieldMaskSession> {
     return new FieldMaskSession(client, userId);
   }

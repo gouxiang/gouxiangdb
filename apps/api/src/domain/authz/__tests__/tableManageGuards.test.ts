@@ -40,6 +40,19 @@ beforeAll(async () => {
     data: { roleId: "r_view", libraryKind: "base", libraryId: "b1", visible: 1, canManage: 0, config: "{}" },
   });
 
+  // 引擎永久单一化后，b1/t1 固定 id 裸建无 nav 节点 -> 连超管都 fail-closed。补 nav 同步；
+  // 并按标准口径重算 r_mgr/r_view 的节点投影（super/admin 靠硬规则，mgr/viewer 靠角色策略）。
+  const { syncNavFromEntitiesTx } = await import("../../nav/sync.js");
+  await prisma.$transaction((tx) => syncNavFromEntitiesTx(tx));
+  const { rebuildScopePoliciesTx } = await import("../scopeDoubleWrite.js");
+  for (const roleId of ["r_mgr", "r_view"] as const) {
+    const saved = await prisma.roleLibraryScope.findMany({ where: { roleId } });
+    await rebuildScopePoliciesTx(prisma, roleId, saved.map((r) => ({
+      roleId: r.roleId, libraryKind: r.libraryKind, libraryId: r.libraryId,
+      canManage: r.canManage, visible: r.visible, canShare: r.canShare, config: r.config,
+    })), "seed");
+  }
+
   HttpErrorCtor = (await import("../../../httpError.js")).HttpError;
   guards = await import("../tableManageGuards.js");
 }, 120000);

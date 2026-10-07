@@ -92,14 +92,49 @@ async function main() {
     content: "# zephyrmarker doc\n\n回滚门可检索正文。\n",
   });
 
-  // 7) 把第二用户授权为该 base 的 viewer（旧 members 表面，R3 allow）
-  const invite = await j(
-    "POST",
+  // 7) 把第二用户授权为该 base 的 viewer：现代模型 = 角色 × 库视野。
+  //    ① 给内置 role_viewer 追加该 base 的可见视野（先读现有 scopes，整体替换，避免清掉别的库）；
+  //    ② 把 member（自助注册默认是受限成员）分配到 role_viewer。
+  const existingViewerScopes = await j(
+    "GET",
     base,
-    `/api/bases/${encodeURIComponent(baseId)}/members`,
+    `/api/v1/org/library-scopes?roleId=role_viewer`,
     ownerToken,
-    { email: "member@rollback.local", role: "viewer" },
   );
+  const scopeItems = [
+    ...(existingViewerScopes.scopes ?? []).map((s) => ({
+      libraryKind: s.libraryKind,
+      libraryId: s.libraryId,
+      canManage: s.canManage,
+      visible: s.visible,
+      canShare: s.canShare,
+      config: s.tables || s.fields ? { tables: s.tables ?? {}, fields: s.fields ?? {} } : undefined,
+    })),
+    { libraryKind: "base", libraryId: baseId, visible: true },
+  ];
+  const scopePut = await j("PUT", base, `/api/v1/org/library-scopes`, ownerToken, {
+    roleId: "role_viewer",
+    items: scopeItems,
+  });
+
+  // ② GET role_viewer 现有主体（返回裸数组；保留，避免清掉别的授予），追加 member 后整体替换。
+  const memberId = member.user.id;
+  const existingAssignments = await j(
+    "GET",
+    base,
+    `/api/v1/org/roles/role_viewer/assignments`,
+    ownerToken,
+  );
+  const subjects = [
+    ...(Array.isArray(existingAssignments) ? existingAssignments : []).map((a) => ({
+      subjectType: a.subjectType,
+      subjectId: a.subjectId,
+    })),
+    { subjectType: "user", subjectId: memberId },
+  ];
+  const invite = await j("PUT", base, `/api/v1/org/roles/role_viewer/assignments`, ownerToken, {
+    subjects,
+  });
 
   const ctx = {
     baseUrl: base,

@@ -2,7 +2,7 @@
 //
 // authz 侧唯一构造点：复用 S4 scope 的 prepareScope（与 visible-scope/decide 同一判定内核，
 // 零第二套判定）预算主体 r 可见的全量活节点集，包成 nav/prune 需要的结构类型 PruneIndex。
-// 调 gate（navPruneEnforceEffective）在路由侧；off/shadow 不调本文件，零新增 SQL。
+// 引擎永久单一化后路由恒定调本文件构造剪枝索引（无开关、无 off/shadow）。
 //
 // 纯域：只依赖注入 client，不 import Hono/guards。
 

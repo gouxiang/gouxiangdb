@@ -29,7 +29,6 @@ let enforceOrLegacy: typeof import("../enforceGate.js")["enforceOrLegacy"];
 let resolveVisibleNodeIds: typeof import("../scope.js")["resolveVisibleNodeIds"];
 
 const BASE_ID = "b1";
-const TABLE_ID = "t1";
 const USER_ID = "u1";
 
 beforeAll(async () => {
@@ -58,7 +57,7 @@ beforeEach(async () => {
 });
 
 /**
- * on 态下守卫对【库节点】的结论（mode 显式覆盖仅单测用，生产走 effectiveAuthzMode）。
+ * 守卫对【库节点】的结论：引擎永久单一化后恒定由引擎裁决。
  * 动作位必须与守卫现状一致：requireCanView 判 enter（= legacy access.visible），
  * 内容 r 只投影在 table 节点上，库节点判 r 恒假 —— 用 r 会让本哨兵退化成恒 false 的空转。
  */
@@ -70,7 +69,6 @@ async function guardVerdict(): Promise<boolean> {
     action: "enter",
     legacyAllowed: true, // 第二代口径：visible=1，旧决策放行
     client: prisma as never,
-    mode: "on",
   });
   return out.allowed;
 }
