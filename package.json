@@ -1,6 +1,6 @@
 {
   "name": "gouxiangdb-v2",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "前后端分离 · 客户端壳化 · 多端复用 · 1:1 复刻构想工作台 v1 体验",
   "packageManager": "pnpm@9.0.0",
