@@ -72,7 +72,11 @@ export type AuditEventName =
   // R2 附件外置：服务端上传/删除（detail 只带 id/bytes/mime 等元数据，绝不落文件内容）。
   // 删除被「仍被记录引用」挡下时同样记 attachment_delete，status=409。
   | "attachment_upload"
-  | "attachment_delete";
+  | "attachment_delete"
+  // 应用版本更新（owner 手动触发；detail 只带通道/版本/裁决/源种类/耗时，
+  // 绝不含 url、GX_UPDATE_TOKEN、Authorization，见 update DESIGN §5.5）。
+  | "update_checked"
+  | "update_downloaded";
 
 interface AuditInput {
   event: AuditEventName;

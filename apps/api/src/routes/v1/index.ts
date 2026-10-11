@@ -22,6 +22,7 @@ import { inheritanceRoutes } from "./inheritance.js";
 import { authzRoutes } from "./scope.js";
 import { searchRoutes } from "./search.js";
 import { adminSearchRoutes } from "./adminSearch.js";
+import { adminUpdateRoutes } from "./adminUpdate.js";
 import { patRoutes } from "./pats.js";
 import { effectiveRoleRows } from "../../domain/org/authorization.js";
 
@@ -108,3 +109,9 @@ v1.route("/search", searchRoutes);
 //   运营/出网端点（reindex、search/status、test-connection）由总门判定，off 时 404 且不建库不出网；
 //   配置面端点（embedding config GET/PATCH、api-key）不受总门约束——search.enabled 要在那里被打开。
 v1.route("/admin", adminSearchRoutes);
+
+// 应用版本更新检查（DESIGN §6.1）：总开关默认 on，GX_UPDATE_ENABLED=off 时不注册 -> 落 v1 404。
+// 与 adminSearch 同前缀 /admin 不同路径分路由器叠加挂载（Hono 支持，项目已有 /nodes 多例先例）。
+if (config.update.enabled) {
+  v1.route("/admin", adminUpdateRoutes);
+}
