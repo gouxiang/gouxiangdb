@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "product": "gouxiangdb",
+  "generatedAt": "2026-10-15T08:00:00Z",
+  "channels": {
+    "fnos-fpk": {
+      "releases": [
+        {
+          "version": "0.2.3",
+          "publishedAt": "2026-10-15T08:00:00Z",
+          "prerelease": false,
+          "minVersion": "0.1.0",
+          "releaseNotes": {
+            "format": "markdown",
+            "zh": "## 0.2.3 更新说明\n\n- 修复数据表视图在部分筛选条件下计数不准的问题。\n- 优化知识库文档在弱网环境下的保存重试。\n- 升级底层依赖，提升大附件上传稳定性。\n\n升级由飞牛应用中心完成，升级前系统会自动备份，您的数据不会丢失。",
+            "en": "## 0.2.3\n\n- Fix view count under certain filters.\n- Improve document save retry on weak networks.\n- Upgrade dependencies for large attachment stability."
+          },
+          "artifacts": [
+            {
+              "arch": "x64",
+              "platform": "linux",
+              "filename": "gouxiangdb-0.2.3-x86.fpk",
+              "sizeBytes": 63074943,
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "download": {
+                "kind": "release-asset",
+                "asset": "gouxiangdb-0.2.3-x86.fpk"
+              },
+              "signature": null
+            }
+          ]
+        },
+        {
+          "version": "0.2.2",
+          "publishedAt": "2026-10-10T12:00:00Z",
+          "prerelease": false,
+          "minVersion": "0.1.0",
+          "releaseNotes": {
+            "format": "markdown",
+            "zh": "## 0.2.2 更新说明\n\n- 稳定性修复。",
+            "en": null
+          },
+          "artifacts": [
+            {
+              "arch": "x64",
+              "platform": "linux",
+              "filename": "gouxiangdb-0.2.2-x86.fpk",
+              "sizeBytes": 63074943,
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "download": {
+                "kind": "release-asset",
+                "asset": "gouxiangdb-0.2.2-x86.fpk"
+              },
+              "signature": null
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

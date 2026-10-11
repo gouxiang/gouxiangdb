@@ -35,3 +35,4 @@ export * from "./policy.js";
 export * from "./share.js";
 export * from "./collab.js";
 export * from "./layoutVersion.js";
+export * from "./update.js";

@@ -30,4 +30,44 @@ node node_modules/prisma/build/index.js migrate deploy --schema=prisma/schema.pr
 node dist/nav-reconcile.js --apply \
   || { echo "nav reconcile failed on upgrade" > "$TRIM_TEMP_LOGFILE"; exit 1; }
 
+# 4) 应用更新只读令牌轮换（设计稿 docs/design/2026-10-app-update/DESIGN.md §8.1 / D1）：
+#    首装生成的 gouxiangdb.env 在升级时整体保留（不重写，以免冲掉 JWT_SECRET），
+#    故新版内置的只读 Gitea 令牌要在这里【定点】同步进旧 env，只改 GX_UPDATE_TOKEN 一行。
+#    - 新令牌取自新包自带的 install_callback 模板（build-fpk.mjs 已把占位符替换成真实令牌）；
+#    - 模板里仍是占位符 __GX_UPDATE_TOKEN__ 或为空时跳过（本包未内置令牌，维持现状）；
+#    - 与现 env 相同则不动；
+#    - 逐行重建 + 临时文件原子 mv，不触碰 JWT_SECRET / DATABASE_URL 等任何其它行。
+NEW_TOKEN="$(sed -n 's/^GX_UPDATE_TOKEN=//p' "${TRIM_APPDEST}/cmd/install_callback" 2>/dev/null | head -n1 || true)"
+if [[ -n "$NEW_TOKEN" && "$NEW_TOKEN" != "__GX_UPDATE_TOKEN__" ]]; then
+  CUR_TOKEN="$(node -e '
+    const fs=require("fs");
+    const p=process.argv[1];
+    let v="";
+    if(fs.existsSync(p)){for(const l of fs.readFileSync(p,"utf8").split(/\r?\n/)){const m=l.match(/^GX_UPDATE_TOKEN=(.*)$/);if(m)v=m[1];}}
+    process.stdout.write(v);
+  ' "$ENV_FILE")"
+  if [[ "$NEW_TOKEN" != "$CUR_TOKEN" ]]; then
+    echo "刷新应用更新只读令牌（GX_UPDATE_TOKEN）"
+    umask 077
+    TMP_ENV="$(mktemp "${ENV_FILE}.XXXXXX")"
+    # 读【现 env】→ 仅替换/追加 GX_UPDATE_TOKEN 一行 → 写临时文件，其它行逐字保留。
+    node -e '
+      const fs=require("fs");
+      const [srcFile,dstFile,newTok]=process.argv.slice(1);
+      const text=fs.readFileSync(srcFile,"utf8");
+      const nl=text.endsWith("\n")?"\n":"";
+      const lines=text.split(/\r?\n/);
+      if(nl)lines.pop();
+      let hit=false;
+      const out=lines.map((l)=>{
+        if(/^GX_UPDATE_TOKEN=/.test(l)){hit=true;return "GX_UPDATE_TOKEN="+newTok;}
+        return l;
+      });
+      if(!hit)out.push("GX_UPDATE_TOKEN="+newTok);
+      fs.writeFileSync(dstFile,out.join("\n")+"\n",{mode:0o600});
+    ' "$ENV_FILE" "$TMP_ENV" "$NEW_TOKEN"
+    mv "$TMP_ENV" "$ENV_FILE"
+  fi
+fi
+
 exit 0

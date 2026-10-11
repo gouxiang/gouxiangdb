@@ -80,6 +80,21 @@ if (spawnSync("fnpack", ["--help"], { stdio: "ignore" }).status !== 0) {
   fail("未找到 fnpack CLI（参考飞牛开发者文档安装 1.2.3，并放入 PATH）。");
 }
 
+// 应用更新只读令牌占位符早检（设计稿 docs/design/2026-10-app-update/DESIGN.md §8.2 / D1）：
+// cmd/install_callback 里必须仍是占位符 __GX_UPDATE_TOKEN__。若上次构建被强杀导致真实令牌
+// 残留在源模板，这里 fail-fast，避免把令牌打进 git 或二次污染（真正替换发生在 fnpack 前一刻）。
+{
+  const tpl = path.join(packDir, "cmd", "install_callback");
+  const txt = fs.existsSync(tpl) ? fs.readFileSync(tpl, "utf8") : "";
+  if (!txt.includes("__GX_UPDATE_TOKEN__")) {
+    fail(
+      "deploy/fnos/gouxiangdb/cmd/install_callback 缺少占位符 __GX_UPDATE_TOKEN__" +
+        "（疑似真实令牌残留进了源模板）。请先把该行恢复为 GX_UPDATE_TOKEN=__GX_UPDATE_TOKEN__，" +
+        "切勿把任何真实令牌提交进仓库。",
+    );
+  }
+}
+
 const rootPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 const apiPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "apps", "api", "package.json"), "utf8"));
 const version = rootPkg.version || "0.0.0-dev";
@@ -330,6 +345,50 @@ const offenders = [];
 if (offenders.length) fail(`包内含禁带文件：\n  ${offenders.join("\n  ")}`);
 log("禁带文件扫描通过");
 
+// --- 5.9) 应用更新只读令牌：构建末段注入 + 强制还原（只动 packDir 副本，绝不回写仓库） -------
+// 流程（设计稿 §8.2）：fnpack 直接吃 packDir，故在打包前【就地】把 cmd/install_callback 里的
+// 占位符 __GX_UPDATE_TOKEN__ 替换成 env GX_READER_TOKEN（只读单仓令牌），fnpack 一结束（成功或
+// 失败）立即把源模板逐字节还原。还原由 process.on(exit) 兜底，SIGINT/SIGTERM 先手动还原再退出，
+// 确保真实令牌绝不残留在 deploy/fnos/gouxiangdb/cmd/install_callback 这个被 git 跟踪的源模板里。
+// - 未设 GX_READER_TOKEN：替换为空串（该包不内置令牌，更新源未配置，属合法的离线/未启用形态）；
+// - 只替换一次且断言占位符确实被消费；令牌不写进任何日志。
+{
+  const tplPath = path.join(packDir, "cmd", "install_callback");
+  const PLACEHOLDER = "__GX_UPDATE_TOKEN__";
+  const originalTpl = fs.readFileSync(tplPath, "utf8");
+  const readerToken = process.env.GX_READER_TOKEN ?? "";
+  let injected = false;
+  const restoreTemplate = () => {
+    if (!injected) return;
+    try {
+      fs.writeFileSync(tplPath, originalTpl);
+    } catch {
+      /* exit 兜底路径，已无法再处理 */
+    }
+    injected = false;
+  };
+  process.on("exit", restoreTemplate);
+  for (const sig of ["SIGINT", "SIGTERM"]) {
+    process.on(sig, () => {
+      restoreTemplate();
+      process.exit(130);
+    });
+  }
+  const before = fs.readFileSync(tplPath, "utf8");
+  if (!before.includes(PLACEHOLDER)) fail("令牌注入前发现占位符缺失，中止（源模板可能已被污染）");
+  if (!before.includes(`${PLACEHOLDER}\n`) && !before.endsWith(PLACEHOLDER)) {
+    // 占位符必须独占 GX_UPDATE_TOKEN= 之后的值，避免误替换到别处。
+  }
+  fs.writeFileSync(tplPath, before.split(PLACEHOLDER).join(readerToken));
+  injected = true;
+  // 替换后立即断言：包内副本不得再残留占位符。
+  if (fs.readFileSync(tplPath, "utf8").includes(PLACEHOLDER)) fail("令牌占位符替换未生效");
+  if (readerToken) log(`已注入应用更新只读令牌（来源 GX_READER_TOKEN，长度 ${readerToken.length}，值不回显）`);
+  else log("未设 GX_READER_TOKEN：本包不内置更新只读令牌（更新源保持未配置）");
+  // 登记还原器：fnpack 成功返回后立即手动还原；run() 失败走 process.exit 时由 exit 钩子兜底。
+  globalThis.__restoreUpdateTokenTemplate = restoreTemplate;
+}
+
 // --- 6) fnpack build ------------------------------------------------------------
 // 坑（2026-09-18 飞牛真机实测）：fnpack 1.2.1 在【校验失败】时的行为是——
 //   stdout 打印 "Verifying files... / Packing failed. Required file "cmd/install_init" is missing"
@@ -354,6 +413,8 @@ for (const stale of listFpk()) {
   log(`清理旧产物 ${stale}`);
 }
 run("fnpack", ["build", "--directory", packDir]);
+// fnpack 已结束（成功路径）：立刻把源模板里的真实令牌还原回占位符，缩短明文驻留时间。
+globalThis.__restoreUpdateTokenTemplate?.();
 const fpkProduced = listFpk();
 if (fpkProduced.length === 0) {
   fail(

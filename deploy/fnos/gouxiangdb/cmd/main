@@ -52,6 +52,9 @@ start_app() {
   export BACKUP_DIR="$DATA_DIR/backups"
   export GX_AUDIT_DIR="${TRIM_PKGVAR}/log"
   export GX_MIGRATIONS_DIR="$APP_DIR/prisma/migrations"
+  # 应用更新机制的通道标识（设计稿 docs/design/2026-10-app-update/DESIGN.md §3.4）：
+  # node 进程读不到 TRIM_* 变量，必须在此显式声明「我是飞牛 fpk 安装」。
+  export GX_DEPLOY_CHANNEL="fnos-fpk"
   node dist/index.js >> "$LOG_FILE" 2>&1 &
   echo "$!" > "$PID_FILE"
 }

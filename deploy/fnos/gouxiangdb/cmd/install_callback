@@ -27,6 +27,10 @@ DATABASE_URL=file:${DATA_DIR}/app.db
 CORS_ORIGIN=${CORS_ORIGIN}
 PORT=3001
 GX_MIN_DISK_MB=1024
+# 应用更新机制：内置只读 Gitea 令牌（仅单仓 read 权限）。
+# 占位符 __GX_UPDATE_TOKEN__ 由 build-fpk.mjs 在打包副本中替换为真实只读令牌，
+# 仓库里的源模板【绝不】写死令牌；升级不重写本文件，轮换走 upgrade_callback 定点刷新。
+GX_UPDATE_TOKEN=__GX_UPDATE_TOKEN__
 EOF
 fi
 
