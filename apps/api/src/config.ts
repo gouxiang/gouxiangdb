@@ -20,6 +20,10 @@ export { publicSignupOpen } from "./configSignup.js";
 // 记录变更历史（数据日志）写入开关（GX_RECORD_CHANGES）真源在 configRecordChanges.ts：
 // 同样是运行时函数而非启动期快照——写路径每次判定读 env，运维打开即生效、无需重启。
 export { parseRecordChangesFlag, recordChangesEnabled } from "./configRecordChanges.js";
+// 应用更新机制（第 2 章）配置真源在 configUpdate.ts（DESIGN §5.3）：纯函数解析 + 启动期快照。
+export type { UpdateConfig, UpdateSourceKind } from "./configUpdate.js";
+export { parseUpdateConfig, UPDATE_DEFAULTS } from "./configUpdate.js";
+import { parseUpdateConfig, type UpdateConfig } from "./configUpdate.js";
 import {
   parseM5SearchFlag, parseM5ShadowStrict, parseSearchWorkerFlag, type M5SearchFlag,
 } from "./configM5Search.js";
@@ -287,6 +291,12 @@ interface AppConfig {
   socketPath: string;
   basePath: string;
   webDist: string;
+  /**
+   * 应用更新机制配置（DESIGN §5.3，全部可选适配，默认 on）：
+   * 零轮询/零定时器/零后台出网，唯一出网发生在 owner 手动点「检查更新」瞬间；
+   * 不配任何 GX_UPDATE_* 时不影响既有功能，off 时更新子路由不注册（404）。
+   */
+  update: UpdateConfig;
 }
 
 function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
@@ -356,6 +366,7 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     socketPath: env.GX_SOCKET_PATH?.trim() ?? "",
     basePath: normalizeBasePath(env.GX_BASE_PATH),
     webDist: env.GX_WEB_DIST?.trim() ?? "",
+    update: parseUpdateConfig(env).config,
   };
 }
 
@@ -376,6 +387,12 @@ if (startupIssues.length > 0) {
 }
 
 const resolved = buildConfig(process.env);
+
+// 更新机制配置的非致命问题（非法回退默认）只 warn、绝不退出；与迁移目录缺失同款。
+// parseUpdateConfig 是纯函数，此处再算一次仅为取 warnings（buildConfig 内已取 config）。
+for (const w of parseUpdateConfig(process.env).warnings) {
+  console.warn(`[config] ${w}`);
+}
 
 // 迁移目录缺失不阻断启动（只读提示）；readyz 探针会给出权威失败结论。
 if (!fs.existsSync(resolved.migrationsDir)) {
