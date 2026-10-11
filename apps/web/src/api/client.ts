@@ -80,6 +80,8 @@ import type {
   /** 文档/画布中嵌入的数据表预览响应形状（GET /api/public/s/:token/embed/:tableId） */
   EmbeddedTablePayload,
 } from "@gx/shared-types";
+// 应用更新机制（DESIGN §5.2/§6.3）：DTO 真源在 shared-types，web 只消费不改形状。
+import type { UpdateStatusDTO } from "@gx/shared-types";
 import { resolveApiBase, withBase as joinBase } from "../lib/base";
 import { saveSessionFrom } from "../lib/session-from";
 import { authHeaders } from "./authHeader";
@@ -1799,5 +1801,38 @@ export const PatsApi = {
       throw new ApiError(res.status, body, parseRetryAfter(res.headers.get("Retry-After")));
     }
   },
+};
+
+// ============ 应用更新 /api/v1/admin/update（GX_UPDATE_ENABLED 门控；role_owner） ============
+//
+// 两段式下载（DESIGN §6.2/§6.3）：status / download-ticket 走 apiFetch（JWT + JSON + 统一超时）；
+// 真正的文件下载不经 fetch——createDownloadTicket 拿到 downloadPath 后由调用方拼 withBase()
+// 交 window.location 原生导航（浏览器带不了 X-GX-Token 头，下载端点只验 HMAC 票）。
+
+export interface UpdateDownloadTicket {
+  ticket: string;
+  expiresAt: string;
+  downloadPath: string;
+}
+
+export const AdminUpdateApi = {
+  /** 检查更新（owner）。默认走后端 5 分钟 TTL 缓存；force=true 旁路缓存（?force=1）。 */
+  status: (params?: { channel?: string; arch?: string; platform?: string; force?: boolean }) =>
+    apiFetch<UpdateStatusDTO>(
+      `/api/v1/admin/update/status${qs({
+        channel: params?.channel,
+        arch: params?.arch,
+        platform: params?.platform,
+        force: params?.force ? "1" : undefined,
+      })}`,
+      { timeoutMs: 15_000 },
+    ),
+  /** 第一段：现场重算后换 120s 下载票。body 可空（服务端自识别通道）。 */
+  createDownloadTicket: (body: { channel?: string; arch?: string; platform?: string } = {}) =>
+    apiFetch<UpdateDownloadTicket>("/api/v1/admin/update/download-ticket", {
+      method: "POST",
+      body: JSON.stringify(body),
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
 };
 

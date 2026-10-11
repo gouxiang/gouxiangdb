@@ -25,13 +25,14 @@ import { PatListPanel } from "../settings/PatListPanel";
 import { useEnterpriseOrgFlag } from "../settings/pat-hooks";
 // 上传限制：本机浏览器生效、跨全部知识库，属全局设置 → 上提到工作区层（原挂知识库设置页）。
 import { UploadLimitsPanel } from "../kb/UploadLimitsPanel";
+import { UpdatePanel } from "../update/UpdatePanel";
 import { toast } from "../../components/ui";
 
 // 「通讯录」分区已移除：一级导航底部已有通讯录入口（/workspace/contacts），设置里不再重复。
 // 「资产」分区已移除：单个库/知识库的深度设置改由一级导航条目行尾的「…」菜单进入。
 // 「回收站」分区已移除：与数据库（/base/:id/trash）、知识库（/kb/:id/trash）各自的回收站重复，
 //   聚合入口不再列；两个模块自己的回收站页面与其侧边栏就近入口保留不动。
-type Section = "general" | "authz" | "search" | "mcp";
+type Section = "general" | "authz" | "search" | "mcp" | "update";
 
 const SECTIONS: {
   key: Section;
@@ -55,6 +56,9 @@ const SECTIONS: {
   //   开/关总门，ownerOnly 会把他们一起挡在外面。口径与 canSeeWorkspaceSettings 同一处，owner 恒可见。
   { key: "search", label: "语义检索", icon: "sparkles", desc: "云端语义检索与索引覆盖度", manageOnly: true },
   { key: "mcp", label: "MCP 接入", icon: "keyRound", desc: "为 AI 客户端签发访问令牌", enterpriseOnly: true },
+  // ownerOnly：应用版本更新只由工作区所有者操作（下载票据也只签给 owner）；
+  // 总开关默认 on，GX_UPDATE_ENABLED=off 时面板检查得 404 自行隐藏（见 UpdatePanel onUnregistered）。
+  { key: "update", label: "系统更新", icon: "download", desc: "检查并下载新版本安装包", ownerOnly: true },
 ];
 
 const SECTION_KEYS: string[] = SECTIONS.map((s) => s.key);
@@ -115,6 +119,8 @@ export function WorkspaceSettingsPage() {
   const [reindexOpen, setReindexOpen] = useState(false);
   // <1024 时左二级折叠成唤出条；仅窄屏可见，展开选中后自动收起。
   const [navOpen, setNavOpen] = useState(false);
+  // 系统更新总开关 off（status 404）时隐藏分区；默认 on 故初始 false（挂载不发请求，无探测闪烁）。
+  const [updateUnregistered, setUpdateUnregistered] = useState(false);
   const reindex = useReindex();
 
   // 子页由 URL 驱动（/workspace/settings/<section>）：刷新/直访落到同一子页，链接可分享。
@@ -135,7 +141,8 @@ export function WorkspaceSettingsPage() {
       (!s.ownerOnly || isOwner) &&
       (!s.manageOnly || canSeeSearch) &&
       (!s.enterpriseOnly || enterpriseOn) &&
-      (s.key !== "authz" || canManageAuthz),
+      (s.key !== "authz" || canManageAuthz) &&
+      (s.key !== "update" || !updateUnregistered),
   );
 
   // 单一口径：分区不在 visibleSections 里（非 owner 直戳 search、非企业直戳 mcp、
@@ -282,6 +289,10 @@ export function WorkspaceSettingsPage() {
               </div>
               <PatListPanel />
             </div>
+          )}
+
+          {effectiveSection === "update" && (
+            <UpdatePanel onUnregistered={() => setUpdateUnregistered(true)} />
           )}
         </div>
       </div>

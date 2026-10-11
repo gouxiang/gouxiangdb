@@ -43,6 +43,11 @@ vi.mock("../authz/PermPanel", () => ({
   default: () => <div data-perm-panel-embedded="1" />,
 }));
 
+// 系统更新面板本体有自己的五态测试；门控用例只关心分区显隐，桩掉避免拉真实 query。
+vi.mock("../update/UpdatePanel", () => ({
+  UpdatePanel: () => <div data-update-panel="1">检查并下载新版本安装包</div>,
+}));
+
 vi.mock("../settings/pat-hooks", () => ({
   useEnterpriseOrgFlag: () => enterpriseOn,
   usePatList: () => ({ data: [], isLoading: false }),
@@ -136,6 +141,22 @@ describe("B. gated 分区只看 effectiveSection（不看 URL 原始 section）"
   it("企业环境直戳 /mcp 仍然进得去", () => {
     enterpriseOn = true;
     expect(renderPage("/workspace/settings/mcp")).toContain("为 AI 客户端签发访问令牌");
+  });
+
+  // 系统更新分区 ownerOnly：与「权限管理」同口径，非 owner 不做 disabled 假入口。
+  it("非 owner：左栏不出现系统更新分区，直戳 /update 回落通用", () => {
+    isOwner = false;
+    const nav = renderPage();
+    expect(nav).not.toContain("系统更新");
+    const direct = renderPage("/workspace/settings/update");
+    expect(direct).toContain(GENERAL);
+    expect(direct).not.toContain("data-update-panel");
+  });
+
+  it("owner：左栏出现系统更新分区，直戳 /update 进得去", () => {
+    isOwner = true;
+    expect(renderPage()).toContain("系统更新");
+    expect(renderPage("/workspace/settings/update")).toContain("data-update-panel");
   });
 
   // 通讯录、资产与回收站分区已移除（一级导航已有通讯录入口；单库设置改由 L1「…」菜单进入；
