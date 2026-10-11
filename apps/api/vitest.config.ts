@@ -18,5 +18,11 @@ export default defineConfig({
     // 真库用例本身只测一次真实写：5000ms 在 2900+ 用例并发、磁盘高负载时会偶发超时
     //（隔离复跑即过）。提到 30s 消除该 flaky；挂死仍由 spec 内显式超时用例证明，不被掩盖。
     testTimeout: 30_000,
+    // 暴露 gc 供更新下载流式代理的「整包不进内存」断言在传输前后强制回收、测 heapUsed 增量
+    //（domain update S4）。仅多开一个 Node 开关，对其它用例零行为影响。
+    pool: "forks",
+    poolOptions: {
+      forks: { execArgv: ["--expose-gc"] },
+    },
   },
 });

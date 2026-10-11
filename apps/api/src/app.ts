@@ -33,6 +33,7 @@ import { kb } from "./routes/kb/index.js";
 import { pub } from "./routes/public.js";
 import { search } from "./routes/search.js";
 import { v1 } from "./routes/v1/index.js";
+import { adminUpdateDownloadRoutes } from "./routes/v1/adminUpdateDownload.js";
 import { inviteRoutes } from "./routes/v1/authInvite.js";
 import { mcpApp } from "./mcp/transport/mcpApp.js";
 import { health } from "./routes/health.js";
@@ -183,6 +184,12 @@ function createMount(webRoot: string | null): Hono {
       // GX_ENTERPRISE_ORG 门控；off 即不挂载 -> 顶层 404）。挂进 mount 即自动获得
       // /mcp 与 {basePath}/mcp 双路径（spike §2.1 实测路径不参与协议）。
       mount.route("/mcp", mcpApp);
+    }
+    // 应用更新下载代理（仅验票的公开路由）：必须在 v1（全局 requireActiveUser）之前挂载，
+    // 否则浏览器原生导航下载不带登录头会被 401；与 v1 内的 status/download-ticket（owner 闸）
+    // 共用同一 UpdateService 单例。总开关默认 on，GX_UPDATE_ENABLED=off 时不注册 -> 404。
+    if (config.update.enabled) {
+      mount.route("/api/v1/admin/update", adminUpdateDownloadRoutes);
     }
     mount.route("/api/v1", v1);
   }

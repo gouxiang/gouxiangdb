@@ -445,3 +445,147 @@ describe("UpdateService 身份快照（供错误审计）", () => {
     });
   });
 });
+
+// ---- S4 resolveDownload -------------------------------------------------
+
+class CapturingSource extends FakeSource {
+  built: BuildArtifactArgs[] = [];
+  override buildArtifactRequest(args: BuildArtifactArgs): ArtifactRequest {
+    this.built.push(args);
+    return { url: `http://example.invalid/${args.artifact.filename}`, authed: true };
+  }
+}
+
+describe("UpdateService.resolveDownload（S4 凭票现场定位）", () => {
+  const target = {
+    channel: "fnos-fpk", arch: "x64", platform: "linux",
+    version: "0.2.3", filename: "gouxiangdb-0.2.3-x86.fpk",
+  };
+
+  it("upgrade 且匹配资产 -> 返回上游请求 + 资产 + sourceKind", async () => {
+    const src = new CapturingSource(() =>
+      manifest({ "fnos-fpk": { releases: [release()] } }));
+    const svc = service(src);
+    const r = await svc.resolveDownload(target);
+    expect(r).not.toBeNull();
+    expect(r!.version).toBe("0.2.3");
+    expect(r!.sourceKind).toBe("gitea");
+    expect(r!.artifact.filename).toBe(target.filename);
+    expect(r!.request.authed).toBe(true);
+    expect(r!.request.url).toContain(target.filename);
+    expect(src.built).toHaveLength(1);
+  });
+
+  it("unknown 通道 -> null（零出网：FakeSource 计数不增）", async () => {
+    const src = new FakeSource(() => manifest({ "fnos-fpk": { releases: [release()] } }));
+    const r = await service(src).resolveDownload({ ...target, channel: "nope" });
+    expect(r).toBeNull();
+    expect(src.calls).toBe(0);
+  });
+
+  it("票载版本不在清单 -> null", async () => {
+    const src = new FakeSource(() => manifest({ "fnos-fpk": { releases: [release()] } }));
+    const r = await service(src).resolveDownload({ ...target, version: "0.9.9" });
+    expect(r).toBeNull();
+  });
+
+  it("当前版本已不低于票载（非 upgrade）-> null", async () => {
+    const src = new FakeSource(() => manifest({ "fnos-fpk": { releases: [release()] } }));
+    const r = await service(src, { currentVersion: "0.2.3" }).resolveDownload(target);
+    expect(r).toBeNull();
+  });
+
+  it("低于 minVersion -> null", async () => {
+    const src = new FakeSource(() =>
+      manifest({ "fnos-fpk": { releases: [release({ minVersion: "0.3.0" })] } }));
+    const r = await service(src).resolveDownload(target);
+    expect(r).toBeNull();
+  });
+
+  it("arch/platform 无匹配资产 -> null", async () => {
+    const src = new FakeSource(() => manifest({ "fnos-fpk": { releases: [release()] } }));
+    expect(await service(src).resolveDownload({ ...target, arch: "arm64" })).toBeNull();
+    expect(await service(src).resolveDownload({ ...target, platform: "darwin" })).toBeNull();
+  });
+
+  it("票载 filename 与清单资产不一致 -> null（票只能取这一个文件）", async () => {
+    const src = new FakeSource(() => manifest({ "fnos-fpk": { releases: [release()] } }));
+    const r = await service(src).resolveDownload({ ...target, filename: "other.fpk" });
+    expect(r).toBeNull();
+  });
+
+  it("newerSchema 清单 -> null", async () => {
+    const src = new FakeSource(() =>
+      manifest({ "fnos-fpk": { releases: [release()] } }, true));
+    const r = await service(src).resolveDownload(target);
+    expect(r).toBeNull();
+  });
+
+  it("通道段缺失/空 -> null", async () => {
+    const s1 = new FakeSource(() => manifest({}));
+    const s2 = new FakeSource(() => manifest({ "fnos-fpk": { releases: [] } }));
+    expect(await service(s1).resolveDownload(target)).toBeNull();
+    expect(await service(s2).resolveDownload(target)).toBeNull();
+  });
+
+  it("rc 默认不放行；allowPrerelease 后放行", async () => {
+    const rc = release({ prerelease: true });
+    const sOff = new FakeSource(() => manifest({ "fnos-fpk": { releases: [rc] } }));
+    expect(await service(sOff).resolveDownload(target)).toBeNull();
+    const sOn = new FakeSource(() => manifest({ "fnos-fpk": { releases: [rc] } }));
+    expect(await service(sOn, {}, { allowPrerelease: true }).resolveDownload(target)).not.toBeNull();
+  });
+
+  it("源错误原样抛（不吞）", async () => {
+    const src = new FakeSource(() => {
+      throw new UpdateSourceError("UPDATE_SOURCE_AUTH", "boom");
+    });
+    await expect(service(src).resolveDownload(target)).rejects.toBeInstanceOf(UpdateSourceError);
+  });
+
+  it("吃缓存：连续定位只拉一次清单", async () => {
+    const src = new FakeSource(() =>
+      manifest({ "fnos-fpk": { releases: [release()] } }));
+    const svc = service(src);
+    await svc.resolveDownload(target);
+    await svc.resolveDownload(target);
+    expect(src.calls).toBe(1);
+  });
+});
+
+describe("UpdateService.upstreamHeaders（S4 下载代理）", () => {
+  const resolved = {
+    request: { url: "http://example.invalid/a.fpk", authed: true },
+    artifact: artifact(),
+    version: "0.2.3",
+    sourceKind: "gitea" as const,
+  };
+
+  it("authed 资产带 Authorization（token 取自注入 cfg）+ 合法 Range", () => {
+    const src = new FakeSource(() => manifest({}));
+    const h = service(src).upstreamHeaders(resolved, "bytes=0-1023");
+    expect(h.Authorization).toBe("token t");
+    expect(h.Range).toBe("bytes=0-1023");
+  });
+
+  it("非法 Range 不透传", () => {
+    const src = new FakeSource(() => manifest({}));
+    const h = service(src).upstreamHeaders(resolved, "rows=0-9");
+    expect(h).not.toHaveProperty("Range");
+  });
+
+  it("无 Range 时不带该头", () => {
+    const src = new FakeSource(() => manifest({}));
+    const h = service(src).upstreamHeaders(resolved, null);
+    expect(h).not.toHaveProperty("Range");
+  });
+
+  it("非鉴权资产（static 公开镜像）不带 Authorization", () => {
+    const src = new FakeSource(() => manifest({}));
+    const h = service(src).upstreamHeaders(
+      { ...resolved, request: { url: "http://x/a.fpk", authed: false } },
+      null,
+    );
+    expect(h).not.toHaveProperty("Authorization");
+  });
+});

@@ -18,7 +18,9 @@
 
 import {
   compareVersions,
+  decideUpdate,
   parseVersion,
+  type ArtifactManifest,
   type UpdateInfoDTO,
   type UpdateStatusDTO,
 } from "@gx/shared-types";
@@ -27,7 +29,7 @@ import { HttpError } from "../../httpError.js";
 import type { UpdateConfig } from "../../configUpdate.js";
 import { detectChannel } from "./channel.js";
 import { createUpdateSource, type SourceDeps } from "./sourceFactory.js";
-import type { FetchLike, UpdateSource } from "./source.js";
+import type { ArtifactRequest, FetchLike, UpdateSource } from "./source.js";
 import type { ParsedManifest } from "./manifest.js";
 import { UpdateSourceError } from "./types.js";
 import { localStrategy, declarableStrategy } from "./strategies/registry.js";
@@ -48,6 +50,14 @@ export interface CheckResult {
   /** 命中的候选版本（无候选为 null）；审计用，禁放 url/token。 */
   candidateVersion: string | null;
   /** 实际使用的更新源种类（gitea/static），审计用。 */
+  sourceKind: UpdateSource["kind"];
+}
+
+/** 一次可下载定位结果：真实上游请求 + 命中资产元信息（供下载代理与审计）。 */
+export interface ResolvedDownload {
+  request: ArtifactRequest;
+  artifact: ArtifactManifest;
+  version: string;
   sourceKind: UpdateSource["kind"];
 }
 
@@ -96,6 +106,8 @@ export class UpdateService {
   private readonly currentVersion: string;
   private readonly now: () => Date;
   private readonly source: UpdateSource;
+  /** 实际出网 fetch（注入桩优先，否则全局）；下载代理复用同一实例以便测试统一拦截。 */
+  readonly fetchImpl: FetchLike;
   private readonly cache = new Map<string, CacheEntry>();
 
   constructor(
@@ -108,6 +120,7 @@ export class UpdateService {
     this.currentVersion = deps.currentVersion ?? VERSION;
     this.now = deps.now ?? (() => new Date());
     const sourceDeps: SourceDeps = deps.fetch ? { fetch: deps.fetch } : {};
+    this.fetchImpl = deps.fetch ?? (globalThis.fetch as FetchLike);
     this.source = deps.createSource
       ? deps.createSource(cfg, sourceDeps)
       : createUpdateSource(cfg, sourceDeps);
@@ -248,6 +261,82 @@ export class UpdateService {
       "upgrade",
       release.version,
     );
+  }
+
+  // -- 下载（S4） -----------------------------------------------------------
+
+  /**
+   * 凭下载票据里的身份重新现场定位「可下载资产 + 上游请求」（§6.2 第二段步骤 1）。
+   *
+   * 与 check 相同的口径重新过一遍，防止拿旧 DTO/旧票长期换下载：
+   *   通道须为本地注册表策略 -> 拉清单（吃 TTL 缓存，不 force）-> 找到票载 version 的 release
+   *   -> 仍对当前版本构成 upgrade 且过 minVersion 门槛 -> 匹配 arch/platform 资产
+   *   -> 资产 filename 必须与票载一致（票据不可被用来取别的文件）-> 构建上游请求。
+   * 任一不满足返回 null（路由映射 409 UPDATE_NOT_AVAILABLE / 票据失效）；源错误原样抛。
+   */
+  async resolveDownload(target: {
+    channel: string;
+    arch: string;
+    platform: string;
+    version: string;
+    filename: string;
+  }): Promise<ResolvedDownload | null> {
+    const strategy = localStrategy(target.channel);
+    if (!strategy) return null;
+
+    const identity: Identity = {
+      channelId: strategy.channelId,
+      arch: target.arch,
+      platform: target.platform,
+      strategy,
+    };
+    const parsed = await this.fetchManifest(false, identity);
+    if (parsed.newerSchema) return null;
+
+    const segment = parsed.manifest.channels[strategy.channelId];
+    if (!segment || segment.releases.length === 0) return null;
+
+    const release = segment.releases.find((r) => r.version === target.version);
+    if (!release) return null;
+
+    // 仍构成升级（rc 放行口径与 check 一致）；当前版本不可解析/已升级/降级不放下载。
+    const verdict = decideUpdate({
+      currentVersion: this.currentVersion,
+      candidateVersion: release.version,
+      allowPrerelease: this.cfg.allowPrerelease,
+      candidatePrerelease: release.prerelease,
+    });
+    if (verdict !== "upgrade") return null;
+
+    const minVersion = release.minVersion ?? "0.0.0";
+    const minCmp = compareVersions(this.currentVersion, minVersion);
+    if (minCmp === null || minCmp < 0) return null; // below min：不给下载
+
+    const artifact = strategy.resolveArtifact(release, target.arch, target.platform);
+    if (!artifact) return null;
+    // 票载 filename 必须与清单实际资产一致：票据只授权这一个文件。
+    if (artifact.filename !== target.filename) return null;
+
+    return {
+      request: this.source.buildArtifactRequest({ artifact, version: release.version }),
+      artifact,
+      version: release.version,
+      sourceKind: this.source.kind,
+    };
+  }
+
+  /**
+   * 构建下载代理发往上游的请求头：仅在资产要求鉴权时带 GX_UPDATE_TOKEN，
+   * 并透传浏览器 Range（断点续传）。令牌知识收口在 domain（cfg 注入处），
+   * 路由只负责搬运，绝不读取/记录 token。
+   */
+  upstreamHeaders(resolved: ResolvedDownload, rangeHeader: string | null): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (resolved.request.authed) headers.Authorization = `token ${this.cfg.token}`;
+    if (rangeHeader && /^bytes=\d*-\d*(,\d*-\d*)*$/.test(rangeHeader.trim())) {
+      headers.Range = rangeHeader.trim();
+    }
+    return headers;
   }
 
   // -- 内部 -----------------------------------------------------------------

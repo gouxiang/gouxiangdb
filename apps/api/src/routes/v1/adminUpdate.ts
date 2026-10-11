@@ -14,27 +14,17 @@ import { config } from "../../config.js";
 import { prisma } from "../../db.js";
 import { HttpError } from "../../guards.js";
 import { resolveSubject } from "../../domain/authz/subjects.js";
-import { UpdateService, type CheckParams } from "../../domain/update/service.js";
+import type { CheckParams, UpdateService } from "../../domain/update/service.js";
+import { issueDownloadTicket } from "../../domain/update/download.js";
 import {
   UpdateSourceError,
   type UpdateSourceErrorCode,
 } from "../../domain/update/types.js";
 import { writeAudit, type AuditEventName } from "../../audit/audit.js";
 import { sourceIp } from "../../utils/client-ip.js";
+import { updateService } from "./updateRuntime.js";
 
 export const adminUpdateRoutes = new Hono();
-
-// 进程内单例：service 持有清单 TTL 缓存（§5.4），必须跨请求复用，不能每请求新建。
-// env 在【模块加载期】快照冻结：通道身份（GX_UPDATE_CHANNEL/GX_DEPLOY_CHANNEL/TRIM_*）是
-// 进程启动期事实，运行期不会变；且必须在加载期取而非请求期，避免请求间 process.env 漂移。
-const STARTUP_ENV: NodeJS.ProcessEnv = { ...process.env };
-let serviceSingleton: UpdateService | null = null;
-function updateService(): UpdateService {
-  if (!serviceSingleton) {
-    serviceSingleton = new UpdateService(config.update, { env: STARTUP_ENV });
-  }
-  return serviceSingleton;
-}
 
 const ARCHES = new Set(["x64", "arm64"]);
 const PLATFORMS = new Set(["linux", "darwin", "win32"]);
@@ -152,4 +142,50 @@ adminUpdateRoutes.get("/update/status", async (c) => {
     }
     throw err;
   }
+});
+
+// POST /admin/update/download-ticket —— 第一段：owner 现场重算后换 120s HMAC 下载票。
+adminUpdateRoutes.post("/update/download-ticket", async (c) => {
+  const userId = c.get("auth").userId;
+  await assertOwner(userId);
+
+  // 请求体可选；解析失败/非对象按空身份处理（服务端自识别通道）。
+  let rawBody: unknown = {};
+  try {
+    rawBody = await c.req.json();
+  } catch {
+    rawBody = {};
+  }
+  const body = (rawBody && typeof rawBody === "object" ? rawBody : {}) as Record<string, unknown>;
+  const params = parseQuery({
+    channel: typeof body.channel === "string" ? body.channel : undefined,
+    arch: typeof body.arch === "string" ? body.arch : undefined,
+    platform: typeof body.platform === "string" ? body.platform : undefined,
+  });
+
+  const service = updateService();
+  // 现场重算一次「有更新且 eligible 且 artifact 存在」，防止拿旧 DTO 反复换票（§6.2）。
+  const result = await service.check(params);
+  const info = result.dto.update;
+  if (result.verdict !== "upgrade" || !info || !info.eligible || !info.artifact) {
+    throw new HttpError(409, "当前没有可下载的更新", "UPDATE_NOT_AVAILABLE");
+  }
+  const identity = service.identitySnapshot(params);
+
+  const { ticket, expiresAt } = issueDownloadTicket({
+    secret: config.jwtSecret,
+    uid: userId,
+    channel: identity.channel,
+    arch: identity.arch,
+    platform: identity.platform,
+    version: info.version,
+    filename: info.artifact.filename,
+    ttlMs: config.update.ticketTtlMs,
+  });
+
+  return c.json({
+    ticket,
+    expiresAt: new Date(expiresAt).toISOString(),
+    downloadPath: `/api/v1/admin/update/download?ticket=${encodeURIComponent(ticket)}`,
+  });
 });
