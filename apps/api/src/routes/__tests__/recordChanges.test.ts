@@ -234,8 +234,15 @@ describe("开关与分页", () => {
   it("limit/cursor 翻页正确，且严格倒序", async () => {
     const t = await h.makeTableWithFields();
     const id = await h.createRecord(t.tableId, { [t.fName]: "甲" });
-    // 直接播种 5 条不同时刻的历史（避免依赖毫秒级墙钟，翻页断言才稳定）
-    const base = Date.UTC(2026, 9, 10, 0, 0, 0);
+    // 把 create 条目钉到 1 小时前，使下面 5 条播种严格更新。
+    // 旧实现把种子播在硬编码的未来日期（2026-10-10），一旦墙钟越过该日期，
+    // create 的「甲」反而最新、排序翻转，断言确定性失败（日期炸弹）。全部改为相对过去时刻。
+    await h.prisma.recordChange.updateMany({
+      where: { recordId: id, op: "create" },
+      data: { changedAt: new Date(Date.now() - 3600_000) },
+    });
+    // 直接播种 5 条不同时刻的历史（相对墙钟、间隔 1s，不依赖毫秒精度，翻页断言才稳定）
+    const base = Date.now() - 60_000;
     for (let i = 0; i < 5; i++) {
       await h.prisma.recordChange.create({
         data: {
