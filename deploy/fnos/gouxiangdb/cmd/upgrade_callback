@@ -37,7 +37,27 @@ node dist/nav-reconcile.js --apply \
 #    - 模板里仍是占位符 __GX_UPDATE_TOKEN__ 或为空时跳过（本包未内置令牌，维持现状）；
 #    - 与现 env 相同则不动；
 #    - 逐行重建 + 临时文件原子 mv，不触碰 JWT_SECRET / DATABASE_URL 等任何其它行。
-NEW_TOKEN="$(sed -n 's/^GX_UPDATE_TOKEN=//p' "${TRIM_APPDEST}/cmd/install_callback" 2>/dev/null | head -n1 || true)"
+#
+#    ★ install_callback 路径自定位（2026-10-12 真机 0.2.1→0.2.3-rc1 演练抓到的 bug）：
+#      fnOS 1.2.0604 真机生命周期脚本落地在 /var/apps/<app>/cmd/，并不在
+#      ${TRIM_APPDEST}(=/vol1/@appcenter/<app>)/cmd/ 下（后者在真机不存在）。
+#      旧写法只读 ${TRIM_APPDEST}/cmd/install_callback → 文件不存在 → 令牌静默不刷新。
+#      改为：优先本脚本同目录（与 install_callback 并列，最可靠），再回退两种历史/他版布局。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_CB=""
+for cand in \
+  "${SCRIPT_DIR}/install_callback" \
+  "${TRIM_APPDEST}/cmd/install_callback" \
+  "/var/apps/${TRIM_APPNAME:-gouxiangdb}/cmd/install_callback"; do
+  if [ -f "$cand" ]; then INSTALL_CB="$cand"; break; fi
+done
+if [ -z "$INSTALL_CB" ]; then
+  echo "[upgrade] 未找到 install_callback，跳过 GX_UPDATE_TOKEN 刷新（不影响升级）" > "$TRIM_TEMP_LOGFILE"
+fi
+NEW_TOKEN=""
+if [ -n "$INSTALL_CB" ]; then
+  NEW_TOKEN="$(sed -n 's/^GX_UPDATE_TOKEN=//p' "$INSTALL_CB" 2>/dev/null | head -n1 | tr -d '\r' || true)"
+fi
 if [[ -n "$NEW_TOKEN" && "$NEW_TOKEN" != "__GX_UPDATE_TOKEN__" ]]; then
   CUR_TOKEN="$(node -e '
     const fs=require("fs");
