@@ -177,7 +177,7 @@ async function main() {
   for (const up of uploads) {
     const existing = (release.assets || []).find((a) => a.name === up.name);
     if (existing) {
-      await client.deleteAsset(existing.id);
+      await client.deleteAsset(release.id, existing.id);
       console.log(`[publish] 已删除旧资产 ${up.name}`);
     }
     const content = up.content ?? readFileSync(up.path);

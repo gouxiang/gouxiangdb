@@ -114,3 +114,19 @@ test("headReleaseAsset：非 2xx 抛净化错误", async () => {
   const c = makeClient(fetchImpl);
   await assert.rejects(() => c.headReleaseAsset("v0.2.3", "a.fpk"), GiteaApiError);
 });
+
+test("deleteAsset：DELETE 路径必须带 release_id（/releases/{rid}/assets/{aid}），成功 204", async () => {
+  const { fetchImpl, calls } = mockFetch(async (url, init) => {
+    assert.equal(init.method, "DELETE");
+    assert.ok(
+      url.includes("/repos/GouXiang/gouxiangdb/releases/9/assets/6"),
+      `删除资产路径错误：${url}`,
+    );
+    assert.ok(!url.includes("/releases/assets/"), "不得使用旧的无 release_id 端点（Gitea 404）");
+    assert.equal(init.headers.Authorization, "token secret-token");
+    return new Response(null, { status: 204 });
+  });
+  const c = makeClient(fetchImpl);
+  assert.equal(await c.deleteAsset(9, 6), null);
+  assert.equal(calls.length, 1);
+});

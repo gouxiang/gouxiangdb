@@ -114,9 +114,18 @@ export function createGiteaClient({ baseUrl, token, owner, repo, fetchImpl }) {
       return Array.isArray(list) ? list : [];
     },
 
-    /** 删除资产（同名资产先删后传，保证幂等）。 */
-    async deleteAsset(assetId) {
-      return call("DELETE", `/releases/assets/${encodeURIComponent(String(assetId))}`);
+    /**
+     * 删除资产（同名资产先删后传，保证幂等）。
+     * Gitea 删除 release 附件的正确端点必须带 release_id：
+     *   DELETE /repos/{owner}/{repo}/releases/{release_id}/assets/{attachment_id}（204）
+     * 旧写法 DELETE /releases/assets/{id} 在 Gitea 1.27 不存在，返回 404（首次发布无旧
+     * 资产故未暴露，幂等重发删旧包时才踩到）。
+     */
+    async deleteAsset(releaseId, assetId) {
+      return call(
+        "DELETE",
+        `/releases/${encodeURIComponent(String(releaseId))}/assets/${encodeURIComponent(String(assetId))}`,
+      );
     },
 
     /**
