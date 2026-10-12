@@ -42,14 +42,17 @@ export function createGiteaClient({ baseUrl, token, owner, repo, fetchImpl }) {
 
   const apiBase = `${base}/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
 
-  async function call(method, urlPath, { body, raw, contentType, accept } = {}) {
+  async function call(method, urlPath, { body, raw, accept } = {}) {
+    // JSON body（body 选项）默认带 application/json——Gitea 对 POST/PATCH 缺该头直接 422
+    // "Unsupported Content-Type"。raw（FormData 上传）必须不设 Content-Type，边界由 fetch 生成。
+    const isRaw = raw !== undefined;
     let res;
     try {
       res = await fetchFn(`${apiBase}${urlPath}`, {
         method,
         headers: {
           Authorization: `token ${token}`,
-          ...(contentType ? { "Content-Type": contentType } : {}),
+          ...(isRaw ? {} : { "Content-Type": "application/json" }),
           ...(accept ? { Accept: accept } : {}),
         },
         body: raw ?? (body !== undefined ? JSON.stringify(body) : undefined),
