@@ -6,14 +6,16 @@
 //   - 下载不走 fetch：createDownloadTicket 成功后 window.location.assign(withBase(downloadPath))，
 //     浏览器以 Content-Disposition 接收文件，不会跳走当前页面；
 //   - off 态（路由不注册 → 404）按「未注册功能」处理：面板用于判断是否隐藏分区，不弹错误。
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { UpdatePrefetchDTO, UpdateStatusDTO } from "@gx/shared-types";
 import {
   AdminUpdateApi,
   ApiError,
   ApiTimeoutError,
   withBase,
 } from "../../api/client";
-import { updateErrorMessage } from "./update-copy";
+import { prefetchActionMessage, updateErrorMessage } from "./update-copy";
 
 export const UPDATE_QK = {
   status: ["admin", "update", "status"] as const,
@@ -81,4 +83,72 @@ export function useUpdateDownload(onNavigate?: (href: string) => void) {
 export function describeUpdateError(e: unknown): string {
   if (e instanceof ApiTimeoutError) return updateErrorMessage(e, () => "UPDATE_SOURCE_TIMEOUT");
   return updateErrorMessage(e, errorCode);
+}
+
+// ---------------------------------------------------------------------------
+// 方案 A：后台预缓存（owner 触发后端在 NAS 本地分块预拉；就绪后下载本地秒取）
+// ---------------------------------------------------------------------------
+
+/** running 态轮询间隔：非 force status（后端只对 update 结论做 5 分钟 TTL 缓存，
+ *  prefetch 快照每次实时附加），故高频轮询不会反复打上游。 */
+const PREFETCH_POLL_MS = 1000;
+
+export interface UseUpdatePrefetch {
+  /** 当前 status 缓存里的预缓存快照（可能为 null：旧端/未检查）。 */
+  prefetch: UpdatePrefetchDTO | null;
+  /** 触发一次后台预下载（幂等：后端对 running/ready 分别返回 202/200）。 */
+  startPrefetch: () => void;
+  isStarting: boolean;
+  /** 触发动作本身的错误中文短句（409 busy / 网络等）；非后台下载失败（后者在快照里）。 */
+  startError: string | null;
+  /** 最近一次触发的受理结果（onSuccess 后才有），供面板一次性 toast；busy 走 startError。 */
+  lastDecision: "started" | "running" | "ready" | "busy" | null;
+}
+
+/**
+ * 预缓存控制器：
+ *  - 通过【同一个】status queryKey 订阅缓存，enabled:false 表示本 hook 挂载不主动请求，
+ *    只实时读取面板检查后（或轮询回写后）缓存里的 prefetch 快照；
+ *  - startPrefetch 成功后立即把受理快照并入 status 缓存，UI 秒切 running，不必等首个轮询；
+ *  - running 期间每 1s 做一次【非 force】status refetch；ready/failed 即自动停轮询。
+ */
+export function useUpdatePrefetch(): UseUpdatePrefetch {
+  const qc = useQueryClient();
+  const statusQ = useQuery({
+    queryKey: UPDATE_QK.status,
+    queryFn: () => AdminUpdateApi.status(),
+    enabled: false,
+    staleTime: 30_000,
+    retry: false,
+  });
+  const { refetch } = statusQ;
+  const prefetch = statusQ.data?.prefetch ?? null;
+  const running = prefetch?.state === "running";
+
+  const mutation = useMutation({
+    mutationFn: () => AdminUpdateApi.startPrefetch(),
+    onSuccess: (res) => {
+      // 受理即回写：running/ready 立刻反映，避免首个 1s 轮询前的空窗。
+      qc.setQueryData<UpdateStatusDTO>(UPDATE_QK.status, (old) =>
+        old ? { ...old, prefetch: res.prefetch } : old,
+      );
+    },
+  });
+
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => {
+      // 非 force：结论走后端 TTL 缓存，prefetch 快照实时，不重复打上游。
+      void refetch();
+    }, PREFETCH_POLL_MS);
+    return () => clearInterval(timer);
+  }, [running, refetch]);
+
+  return {
+    prefetch,
+    startPrefetch: () => mutation.mutate(),
+    isStarting: mutation.isPending,
+    startError: mutation.error ? prefetchActionMessage(mutation.error) : null,
+    lastDecision: mutation.data?.decision ?? null,
+  };
 }

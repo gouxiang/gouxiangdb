@@ -42,6 +42,20 @@ export const UPDATE_COPY = {
   preUpgradeTitle: "升级前请注意",
   notesTitle: "更新说明",
   failedTitle: "检查失败",
+  // ---- 方案 A：NAS 本地后台预缓存 ----
+  prefetchHint:
+    "安装包较大，直接在面板内下载可能因网关超时失败。可先让系统在后台把安装包下载到本机，完成后再下载会很快。",
+  prefetchStart: "后台预下载",
+  prefetchStarting: "正在启动后台预下载…",
+  prefetchRunning: "后台预下载中…",
+  prefetchReady: "已预下载到本机，可快速下载安装",
+  prefetchFailed: "后台预下载失败，可重试或直接下载",
+  prefetchStale: "本机预下载的不是当前版本，可重新预下载",
+  prefetchRetry: "重新预下载",
+  prefetchDownloadReady: "立即下载（本机秒取）",
+  prefetchDownloadDirect: "直接下载",
+  prefetchBusy: "已有其他预下载任务在进行，请等待其完成",
+  prefetchStartedToast: "已开始后台预下载，可稍后回到本页查看进度",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -95,6 +109,13 @@ export const UPDATE_ERROR_MESSAGES: Record<string, string> = {
   UPDATE_MANIFEST_INVALID: "更新清单暂时不可用，请联系支持",
   UPDATE_TICKET_INVALID: "下载链接已失效，请返回重新点击下载",
   UPDATE_NOT_AVAILABLE: "当前没有可下载的更新，请重新检查更新后再试",
+  // 方案 A：后台预缓存稳定错误码（与 prefetch.ts 的 prefetchCode / 路由收敛逐字对齐）。
+  PREFETCH_AUTH: "更新源凭证无效，请联系部署人员",
+  PREFETCH_UNREACHABLE: "暂时无法连接更新服务，您可以稍后重试",
+  PREFETCH_TIMEOUT: "下载长时间无进展已暂停，已保留进度，可重试续传",
+  PREFETCH_CHECKSUM: "下载的安装包校验未通过，已丢弃，请重新预下载",
+  PREFETCH_DISK: "本机存储空间不足或写入失败，请清理后重试",
+  PREFETCH_BAD_STATE: "本地缓存状态异常，无法继续，请重新预下载",
 };
 
 /** 网络层 / 超时（前端 ApiTimeoutError 无 code）专用文案。 */
@@ -126,4 +147,51 @@ function statusOf(e: unknown): number {
     return typeof s === "number" ? s : 0;
   }
   return 0;
+}
+
+/** 从 ApiError 形态取 body（鸭子类型）。 */
+function bodyOf(e: unknown): { code?: unknown; decision?: unknown } | null {
+  if (e && typeof e === "object" && "body" in e) {
+    const b = (e as { body?: unknown }).body;
+    return b && typeof b === "object" ? (b as { code?: unknown; decision?: unknown }) : null;
+  }
+  return null;
+}
+
+/**
+ * 预缓存后台失败（state==="failed"，快照带 errorCode）的中文短句；
+ * 未知码给中性兜底，绝不透出上游细节。
+ */
+export function prefetchFailureMessage(code: string | null): string {
+  if (code && UPDATE_ERROR_MESSAGES[code]) return UPDATE_ERROR_MESSAGES[code]!;
+  return UPDATE_COPY.prefetchFailed;
+}
+
+/**
+ * 预缓存进度百分比 [0,100]：
+ *  - 总字节未知/非正 → null（面板不显示条，只显示已下载字节）；
+ *  - 超限钳到 100，负值视为 0。
+ */
+export function prefetchPercent(received: number, size: number | null): number | null {
+  if (!Number.isFinite(received) || received < 0) return null;
+  if (size === null || !Number.isFinite(size) || size <= 0) return null;
+  return Math.max(0, Math.min(100, Math.round((received / size) * 100)));
+}
+
+/**
+ * 归一「触发后台预下载」动作的错误为中文短句。
+ * 与检查/换票错误共用映射表，额外处理两种 409：
+ *  - body.decision==="busy"（已有别的预下载任务）→ 专用文案；
+ *  - body.code==="UPDATE_NOT_AVAILABLE" 已在总表内。
+ */
+export function prefetchActionMessage(e: unknown): string {
+  const body = bodyOf(e);
+  if (body?.decision === "busy") return UPDATE_COPY.prefetchBusy;
+  const code = typeof body?.code === "string" ? body.code : null;
+  if (code && UPDATE_ERROR_MESSAGES[code]) return UPDATE_ERROR_MESSAGES[code]!;
+  const status = statusOf(e);
+  if (status === 403) return UPDATE_FORBIDDEN_MESSAGE;
+  if (status === 408 || code === "UPDATE_SOURCE_TIMEOUT") return UPDATE_TIMEOUT_ERROR_MESSAGE;
+  if (status === 0) return UPDATE_NETWORK_ERROR_MESSAGE;
+  return UPDATE_FALLBACK_ERROR_MESSAGE;
 }

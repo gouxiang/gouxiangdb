@@ -6,6 +6,9 @@ import {
   channelLabel,
   formatDateTime,
   formatSize,
+  prefetchActionMessage,
+  prefetchFailureMessage,
+  prefetchPercent,
   updateErrorMessage,
 } from "../update-copy";
 
@@ -85,5 +88,37 @@ describe("updateErrorMessage 错误码映射", () => {
   it("未知错误 fail-closed 兜底，不透出 body", () => {
     const msg = updateErrorMessage({ status: 500, code: "SOMETHING_INTERNAL" }, getCode);
     expect(msg).toBe("检查更新失败，请稍后重试");
+  });
+});
+
+describe("方案A 预缓存纯函数", () => {
+  it("prefetchPercent：正常比例、钳到 0/100、未知总字节回 null", () => {
+    expect(prefetchPercent(50, 100)).toBe(50);
+    expect(prefetchPercent(0, 100)).toBe(0);
+    expect(prefetchPercent(120, 100)).toBe(100);
+    expect(prefetchPercent(50, null)).toBeNull();
+    expect(prefetchPercent(50, 0)).toBeNull();
+    expect(prefetchPercent(-1, 100)).toBeNull();
+  });
+
+  it("prefetchFailureMessage：六枚 PREFETCH 码逐字映射，未知码中性兜底", () => {
+    expect(prefetchFailureMessage("PREFETCH_TIMEOUT")).toContain("已保留进度");
+    expect(prefetchFailureMessage("PREFETCH_CHECKSUM")).toContain("校验未通过");
+    expect(prefetchFailureMessage("PREFETCH_DISK")).toContain("存储空间不足");
+    expect(prefetchFailureMessage("PREFETCH_AUTH")).toContain("凭证无效");
+    expect(prefetchFailureMessage("PREFETCH_UNREACHABLE")).toContain("无法连接更新服务");
+    expect(prefetchFailureMessage("PREFETCH_BAD_STATE")).toContain("缓存状态异常");
+    expect(prefetchFailureMessage(null)).toContain("后台预下载失败");
+    expect(prefetchFailureMessage("WEIRD")).toContain("后台预下载失败");
+  });
+
+  it("prefetchActionMessage：busy 409 给专用文案；UPDATE_NOT_AVAILABLE 走总表；网络层兜底", () => {
+    expect(prefetchActionMessage({ status: 409, body: { decision: "busy" } })).toContain("已有其他预下载任务");
+    expect(prefetchActionMessage({ status: 409, body: { code: "UPDATE_NOT_AVAILABLE" } })).toContain(
+      "没有可下载的更新",
+    );
+    expect(prefetchActionMessage({ status: 403, body: {} })).toContain("仅工作区所有者");
+    expect(prefetchActionMessage(new Error("net"))).toContain("网络异常");
+    expect(prefetchActionMessage({ status: 500, body: { code: "INTERNAL" } })).toBe("检查更新失败，请稍后重试");
   });
 });

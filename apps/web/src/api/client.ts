@@ -81,7 +81,7 @@ import type {
   EmbeddedTablePayload,
 } from "@gx/shared-types";
 // 应用更新机制（DESIGN §5.2/§6.3）：DTO 真源在 shared-types，web 只消费不改形状。
-import type { UpdateStatusDTO } from "@gx/shared-types";
+import type { UpdatePrefetchDTO, UpdateStatusDTO } from "@gx/shared-types";
 import { resolveApiBase, withBase as joinBase } from "../lib/base";
 import { saveSessionFrom } from "../lib/session-from";
 import { authHeaders } from "./authHeader";
@@ -1815,6 +1815,16 @@ export interface UpdateDownloadTicket {
   downloadPath: string;
 }
 
+/**
+ * 方案 A：POST /admin/update/prefetch 响应。
+ * decision 与后端 prefetcher.start 的四种结果逐字对齐；HTTP 202（started/running）/
+ * 200（ready）/409（busy 或当前无可预缓存更新）。
+ */
+export interface UpdatePrefetchStart {
+  decision: "started" | "running" | "ready" | "busy";
+  prefetch: UpdatePrefetchDTO;
+}
+
 export const AdminUpdateApi = {
   /** 检查更新（owner）。默认走后端 5 分钟 TTL 缓存；force=true 旁路缓存（?force=1）。 */
   status: (params?: { channel?: string; arch?: string; platform?: string; force?: boolean }) =>
@@ -1830,6 +1840,16 @@ export const AdminUpdateApi = {
   /** 第一段：现场重算后换 120s 下载票。body 可空（服务端自识别通道）。 */
   createDownloadTicket: (body: { channel?: string; arch?: string; platform?: string } = {}) =>
     apiFetch<UpdateDownloadTicket>("/api/v1/admin/update/download-ticket", {
+      method: "POST",
+      body: JSON.stringify(body),
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
+  /**
+   * 方案 A：owner 触发后端【后台】分块预拉更新包到 NAS 本地。202 即已受理，真正进度
+   * 靠随后的 status 轮询（prefetch 快照）反映；body 可空（服务端自识别通道）。
+   */
+  startPrefetch: (body: { channel?: string; arch?: string; platform?: string } = {}) =>
+    apiFetch<UpdatePrefetchStart>("/api/v1/admin/update/prefetch", {
       method: "POST",
       body: JSON.stringify(body),
       timeoutMs: WRITE_TIMEOUT_MS,

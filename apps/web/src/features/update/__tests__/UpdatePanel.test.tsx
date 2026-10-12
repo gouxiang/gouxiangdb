@@ -3,7 +3,7 @@
 // newerSchema 弱提示；版本不可解析弱提示；下载 pending 禁用文案；text 格式更新说明。
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { UpdateStatusDTO, UpdateInfoDTO, CurrentIdentityDTO } from "@gx/shared-types";
+import type { UpdateStatusDTO, UpdateInfoDTO, CurrentIdentityDTO, UpdatePrefetchDTO } from "@gx/shared-types";
 
 type StatusReturn = {
   isFetching: boolean;
@@ -15,9 +15,31 @@ type StatusReturn = {
 
 let statusReturn: StatusReturn;
 let downloadPending = false;
+let prefetchReturn: ReturnType<typeof makeIdlePrefetch>;
 const checkSpy = vi.fn();
 const mutateSpy = vi.fn();
+const startPrefetchSpy = vi.fn();
 const onUnregistered = vi.fn();
+
+function makeIdlePrefetch(over: Partial<UpdatePrefetchDTO> = {}) {
+  return {
+    prefetch: {
+      state: "idle",
+      sha256: null,
+      version: null,
+      filename: null,
+      sizeBytes: null,
+      receivedBytes: 0,
+      errorCode: null,
+      updatedAt: null,
+      ...over,
+    } as UpdatePrefetchDTO,
+    startPrefetch: startPrefetchSpy,
+    isStarting: false,
+    startError: null,
+    lastDecision: null,
+  };
+}
 
 vi.mock("../../../api/client", () => ({
   // copyText 由 clipboard 入口 mock；这里仅需保证模块可导入。
@@ -33,6 +55,7 @@ vi.mock("../update-hooks", () => ({
     error: null,
     isSuccess: false,
   }),
+  useUpdatePrefetch: () => prefetchReturn,
   isUpdateNotEnabled: (e: unknown) =>
     typeof e === "object" && e !== null && (e as { status?: number }).status === 404,
   describeUpdateError: (e: unknown) =>
@@ -137,8 +160,10 @@ function render(): string {
 beforeEach(() => {
   checkSpy.mockClear();
   mutateSpy.mockClear();
+  startPrefetchSpy.mockClear();
   onUnregistered.mockClear();
   downloadPending = false;
+  prefetchReturn = makeIdlePrefetch();
   statusReturn = { isFetching: false, isError: false, error: null, data: undefined, check: checkSpy };
 });
 
@@ -256,5 +281,122 @@ describe("UpdatePanel 五态", () => {
     };
     const html = render();
     expect(html).toContain("未识别的部署方式");
+  });
+});
+
+describe("UpdatePanel 方案A 后台预缓存", () => {
+  const SHA = "a".repeat(64);
+
+  it("idle：eligible 卡片显示「后台预下载」入口、说明与直接下载按钮", () => {
+    prefetchReturn = makeIdlePrefetch();
+    statusReturn = { ...statusReturn, data: makeStatus({ update: info() }) };
+    const html = render();
+    expect(html).toContain("后台预下载");
+    expect(html).toContain("可先让系统在后台把安装包下载到本机");
+    // 未就绪：主按钮仍是「下载 <文件名>」，旁注可直接下载。
+    expect(html).toContain("下载 gouxiangdb-0.2.3-x86.fpk");
+    expect(html).toContain("直接下载");
+    expect(html).not.toContain("本机秒取");
+  });
+
+  it("running：显示进度条、百分比与已下载/总字节", () => {
+    prefetchReturn = makeIdlePrefetch({
+      state: "running",
+      sha256: SHA,
+      version: "0.2.3",
+      filename: "gouxiangdb-0.2.3-x86.fpk",
+      sizeBytes: 62_586_880,
+      receivedBytes: 31_293_440,
+    });
+    statusReturn = { ...statusReturn, data: makeStatus({ update: info() }) };
+    const html = render();
+    expect(html).toContain("后台预下载中");
+    expect(html).toContain("50%");
+    expect(html).toContain("29.8 MiB / 59.7 MiB");
+    expect(html).toContain('role="progressbar"');
+    expect(html).toContain('aria-valuenow="50"');
+  });
+
+  it("running 且总字节未知：不显示百分号，进度条给最小可见宽度，仅显示已下载", () => {
+    prefetchReturn = makeIdlePrefetch({
+      state: "running",
+      sha256: SHA,
+      version: "0.2.3",
+      filename: "x.fpk",
+      sizeBytes: null,
+      receivedBytes: 2048,
+    });
+    statusReturn = { ...statusReturn, data: makeStatus({ update: info() }) };
+    const html = render();
+    // 总字节未知：右侧标签是「2 KiB」而不是百分号（aria-valuenow 归 0），条给最小可见宽度。
+    expect(html).toContain(">2 KiB</span>");
+    expect(html).not.toContain(">0%<");
+    expect(html).toContain('aria-valuenow="0"');
+    expect(html).toContain('style="width:5%"');
+    expect(html).toContain("后台预下载中");
+  });
+
+  it("ready（sha 匹配）：显示就绪徽标，主按钮变「立即下载（本机秒取）」，无直接下载旁注", () => {
+    prefetchReturn = makeIdlePrefetch({
+      state: "ready",
+      sha256: SHA,
+      version: "0.2.3",
+      filename: "gouxiangdb-0.2.3-x86.fpk",
+      sizeBytes: 62_586_880,
+      receivedBytes: 62_586_880,
+    });
+    statusReturn = { ...statusReturn, data: makeStatus({ update: info() }) };
+    const html = render();
+    expect(html).toContain("已预下载到本机，可快速下载安装");
+    expect(html).toContain("立即下载（本机秒取）");
+    expect(html).not.toContain("下载 gouxiangdb-0.2.3-x86.fpk");
+    expect(html).not.toContain(">直接下载<");
+  });
+
+  it("failed（本版本）：显示错误码中文与「重新预下载」", () => {
+    prefetchReturn = makeIdlePrefetch({
+      state: "failed",
+      sha256: SHA,
+      version: "0.2.3",
+      filename: "gouxiangdb-0.2.3-x86.fpk",
+      sizeBytes: 62_586_880,
+      receivedBytes: 100,
+      errorCode: "PREFETCH_TIMEOUT",
+    });
+    statusReturn = { ...statusReturn, data: makeStatus({ update: info() }) };
+    const html = render();
+    expect(html).toContain("下载长时间无进展已暂停");
+    expect(html).toContain("重新预下载");
+  });
+
+  it("ready 但 sha 不匹配（旧版本残留）：提示非当前版本，主按钮仍直接下载当前包", () => {
+    prefetchReturn = makeIdlePrefetch({
+      state: "ready",
+      sha256: "b".repeat(64),
+      version: "0.2.2",
+      filename: "old.fpk",
+      sizeBytes: 1000,
+      receivedBytes: 1000,
+    });
+    statusReturn = { ...statusReturn, data: makeStatus({ update: info() }) };
+    const html = render();
+    expect(html).toContain("本机预下载的不是当前版本");
+    expect(html).toContain("后台预下载");
+    expect(html).toContain("下载 gouxiangdb-0.2.3-x86.fpk");
+    expect(html).not.toContain("本机秒取");
+  });
+
+  it("另一版本仍在后台预下载：显示 busy 说明", () => {
+    prefetchReturn = makeIdlePrefetch({
+      state: "running",
+      sha256: "b".repeat(64),
+      version: "9.9.9",
+      filename: "other.fpk",
+      sizeBytes: 1000,
+      receivedBytes: 100,
+    });
+    statusReturn = { ...statusReturn, data: makeStatus({ update: info() }) };
+    const html = render();
+    expect(html).toContain("已有其他预下载任务在进行");
   });
 });

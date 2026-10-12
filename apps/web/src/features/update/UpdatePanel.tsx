@@ -4,7 +4,7 @@
 // 五态：idle / checking / latest / available（内部按 eligible 分下载或联系支持）/ error。
 // 分区显隐由 WorkspaceSettingsPage 的 ownerOnly + updateEnabled 探针控制，本组件假定可见即可用。
 import { useEffect, useState } from "react";
-import type { CurrentIdentityDTO, UpdateInfoDTO, UpdateStatusDTO } from "@gx/shared-types";
+import type { CurrentIdentityDTO, UpdateInfoDTO, UpdatePrefetchDTO, UpdateStatusDTO } from "@gx/shared-types";
 import { Button, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { MdContent } from "../../components/MdContent";
@@ -15,8 +15,16 @@ import {
   channelLabel,
   formatDateTime,
   formatSize,
+  prefetchFailureMessage,
+  prefetchPercent,
 } from "./update-copy";
-import { describeUpdateError, isUpdateNotEnabled, useUpdateDownload, useUpdateStatus } from "./update-hooks";
+import {
+  describeUpdateError,
+  isUpdateNotEnabled,
+  useUpdateDownload,
+  useUpdatePrefetch,
+  useUpdateStatus,
+} from "./update-hooks";
 import { UpdateInstallGuide } from "./UpdateInstallGuide";
 
 type UiState =
@@ -83,8 +91,114 @@ async function copySha(sha: string) {
   }
 }
 
+function PrefetchControl({
+  sha,
+  pf,
+}: {
+  sha: string;
+  pf: ReturnType<typeof useUpdatePrefetch>;
+}) {
+  const snap: UpdatePrefetchDTO | null = pf.prefetch;
+  const isCurrent = snap?.sha256 === sha;
+  const state = isCurrent ? snap?.state : snap?.state === "running" ? "stale-running" : "idle";
+
+  const trigger = () => pf.startPrefetch();
+
+  // running（且就是本版本）：进度条 + 已下载/总字节。
+  if (state === "running") {
+    const received = snap?.receivedBytes ?? 0;
+    const total = snap?.sizeBytes ?? null;
+    const pct = prefetchPercent(received, total);
+    return (
+      <div className="rounded-gx-lg border border-gx-border bg-gx-surface px-3 py-2.5">
+        <div className="mb-1.5 flex items-center justify-between gap-2 text-gx-12 text-gx-text-secondary">
+          <span className="flex items-center gap-1.5">
+            <Icon name="refresh" size={13} className="shrink-0 animate-spin text-gx-accent" />
+            {UPDATE_COPY.prefetchRunning}
+          </span>
+          <span className="shrink-0 tabular-nums text-gx-text-tertiary">
+            {pct !== null ? `${pct}%` : formatSize(received)}
+          </span>
+        </div>
+        <div
+          className="h-2 w-full overflow-hidden rounded-full bg-gx-row-hover"
+          role="progressbar"
+          aria-valuenow={pct ?? 0}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <div
+            className="h-full rounded-full bg-gx-accent transition-[width] duration-300"
+            style={{ width: `${pct ?? 5}%` }}
+          />
+        </div>
+        {total !== null && (
+          <p className="mt-1 text-gx-11 tabular-nums text-gx-text-hint">
+            {formatSize(received)} / {formatSize(total)}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // 另一个版本的预下载仍在跑：后端会以 busy 409 拒绝，先在 UI 上禁用并说明。
+  if (state === "stale-running") {
+    return (
+      <p className="flex items-start gap-2 text-gx-12 text-gx-text-tertiary">
+        <Icon name="clock" size={13} className="mt-0.5 shrink-0 text-gx-text-hint" />
+        {UPDATE_COPY.prefetchBusy}
+      </p>
+    );
+  }
+
+  // failed（且就是本版本）：失败原因 + 重试；仍可在下方直接下载。
+  if (state === "failed") {
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-gx-lg border border-gx-border bg-gx-control px-3 py-2.5">
+        <p className="flex min-w-0 flex-1 items-start gap-2 text-gx-12 text-gx-danger">
+          <Icon name="alertCircle" size={13} className="mt-0.5 shrink-0" />
+          {prefetchFailureMessage(snap?.errorCode ?? null)}
+        </p>
+        <Button variant="secondary" size="sm" icon="refresh" loading={pf.isStarting} onClick={trigger}>
+          {UPDATE_COPY.prefetchRetry}
+        </Button>
+      </div>
+    );
+  }
+
+  // ready（且就是本版本）：就绪徽标；下载按钮在下方变「本机秒取」。
+  if (state === "ready" && isCurrent) {
+    return (
+      <p className="flex items-center gap-2 text-gx-13 text-gx-success">
+        <Icon name="check" size={15} className="shrink-0" />
+        {UPDATE_COPY.prefetchReady}
+      </p>
+    );
+  }
+
+  // idle（含无快照 / 旧版本非运行残留）：解释 + 启动按钮。
+  return (
+    <div className="rounded-gx-lg border border-gx-border bg-gx-surface px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="flex min-w-[12rem] flex-1 items-start gap-2 text-gx-12 leading-5 text-gx-text-tertiary">
+          <Icon name="download" size={14} className="mt-0.5 shrink-0 text-gx-text-hint" />
+          {UPDATE_COPY.prefetchHint}
+        </p>
+        <Button variant="secondary" size="sm" icon="download" loading={pf.isStarting} onClick={trigger}>
+          {pf.isStarting ? UPDATE_COPY.prefetchStarting : UPDATE_COPY.prefetchStart}
+        </Button>
+      </div>
+      {pf.startError && <p className="mt-2 text-gx-12 text-gx-danger">{pf.startError}</p>}
+      {!isCurrent && snap?.state === "ready" && (
+        <p className="mt-2 text-gx-11 text-gx-text-hint">{UPDATE_COPY.prefetchStale}</p>
+      )}
+    </div>
+  );
+}
+
 function AvailableBody({ info }: { info: UpdateInfoDTO }) {
   const download = useUpdateDownload();
+  const pf = useUpdatePrefetch();
   const [failed, setFailed] = useState<string | null>(null);
 
   useEffect(() => {
@@ -98,7 +212,18 @@ function AvailableBody({ info }: { info: UpdateInfoDTO }) {
     if (download.isSuccess) setFailed(null);
   }, [download.isSuccess]);
 
+  // 预下载受理（仅「确有新任务」toast 一次；running/ready 幂等不打扰）；失败动作 toast。
+  const lastDecision = pf.lastDecision;
+  const startError = pf.startError;
+  useEffect(() => {
+    if (lastDecision === "started") toast(UPDATE_COPY.prefetchStartedToast, "success");
+  }, [lastDecision]);
+  useEffect(() => {
+    if (startError) toast(startError, "error");
+  }, [startError]);
+
   const artifact = info.artifact;
+  const cacheReady = pf.prefetch?.state === "ready" && pf.prefetch.sha256 === artifact?.sha256;
   return (
     <div className="flex flex-col gap-3 rounded-gx-lg border border-gx-border bg-gx-control px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -134,6 +259,9 @@ function AvailableBody({ info }: { info: UpdateInfoDTO }) {
               </Button>
             </span>
           </div>
+
+          <PrefetchControl sha={artifact.sha256} pf={pf} />
+
           <div>
             <Button
               variant="primary"
@@ -145,8 +273,15 @@ function AvailableBody({ info }: { info: UpdateInfoDTO }) {
                 download.mutate();
               }}
             >
-              {download.isPending ? UPDATE_COPY.downloadPrepare : `${UPDATE_COPY.downloadPrefix} ${artifact.filename}`}
+              {download.isPending
+                ? UPDATE_COPY.downloadPrepare
+                : cacheReady
+                  ? UPDATE_COPY.prefetchDownloadReady
+                  : `${UPDATE_COPY.downloadPrefix} ${artifact.filename}`}
             </Button>
+            {!cacheReady && !download.isPending && (
+              <span className="ml-3 text-gx-12 text-gx-text-hint">{UPDATE_COPY.prefetchDownloadDirect}</span>
+            )}
             {failed && <p className="mt-2 text-gx-12 text-gx-danger">{failed}</p>}
           </div>
           <UpdateInstallGuide guide={info.manualInstallGuide} />
