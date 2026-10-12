@@ -90,6 +90,12 @@ export interface PrefetcherDeps {
   now?: () => Date;
   /** 注入存储门面（测试注入故障用）；默认真 fs。 */
   store?: PrefetchStore;
+  /**
+   * 后台任务【真正落定】（ready/failed）回调；start 幂等命中 ready/running/busy 不触发。
+   * 路由层据此写 update_prefetch_completed/failed 审计（携带触发者 context）。
+   * 回调内异常不得影响下载器，装配方须自行 try/catch。
+   */
+  onSettle?: (e: PrefetchSettle) => void;
 }
 
 /** start() 的同步裁决结果（后台任务异步跑，状态走 snapshot）。 */
@@ -99,12 +105,30 @@ export type PrefetchStartResult =
   | { kind: "ready"; sha256: string }
   | { kind: "busy"; sha256: string };
 
+/** 触发一次后台预取的操作者上下文（透传给落定回调，供路由写审计；domain 不读用户表）。 */
+export interface PrefetchContext {
+  actorId: string;
+  ip: string;
+  /** 票/检查同口径身份（仅透传给审计 detail，domain 不解释）。 */
+  channel: string;
+  arch: string;
+  platform: string;
+}
+
+/** 后台任务真正落定（ready/failed）时回调；start 幂等命中 ready/running/busy 不触发。 */
+export interface PrefetchSettle {
+  outcome: "completed" | "failed";
+  snapshot: UpdatePrefetchDTO;
+  context: PrefetchContext | null;
+}
+
 interface Job {
   sha: string;
   version: string;
   filename: string;
   sizeBytes: number | null;
   received: number;
+  context: PrefetchContext | null;
 }
 
 /** 把上游 HTTP 状态收敛为预缓存错误码（401/403→AUTH，其余非 2xx/206→UNREACHABLE）。 */
@@ -124,6 +148,7 @@ export class UpdatePrefetcher {
   private readonly fetchImpl: FetchLike;
   private readonly now: () => Date;
   private readonly store: PrefetchStore;
+  private readonly onSettle: ((e: PrefetchSettle) => void) | null;
 
   private state: UpdatePrefetchDTO["state"] = "idle";
   private sha: string | null = null;
@@ -143,13 +168,15 @@ export class UpdatePrefetcher {
     this.fetchImpl = deps.fetch ?? (globalThis.fetch as FetchLike);
     this.now = deps.now ?? (() => new Date());
     this.store = deps.store ?? createDefaultStore(deps.dir);
+    this.onSettle = deps.onSettle ?? null;
   }
 
   /**
    * 触发一次后台预取（同步返回裁决，真正下载在后台异步跑）。
    * 同一 sha 正在跑→running；已就绪→ready；另有任务在跑→busy。
+   * context 透传触发者，后台落定时交路由写审计（幂等命中不触发审计）。
    */
-  start(resolved: ResolvedDownload): PrefetchStartResult {
+  start(resolved: ResolvedDownload, context: PrefetchContext | null = null): PrefetchStartResult {
     const sha = resolved.artifact.sha256?.trim().toLowerCase();
     if (!sha || !SHA_RE.test(sha)) {
       // 清单 sha 非法属发布事故：不作为可下载目标（download 票同口径也拦）。
@@ -170,6 +197,7 @@ export class UpdatePrefetcher {
       filename: resolved.artifact.filename,
       sizeBytes: Number.isFinite(resolved.artifact.sizeBytes) ? resolved.artifact.sizeBytes : null,
       received: 0,
+      context,
     };
     this.job = job;
     this.transition("running", {
@@ -390,6 +418,17 @@ export class UpdatePrefetcher {
       received: job.sizeBytes ?? job.received,
       error: null,
     });
+    this.emitSettle("completed", job.context);
+  }
+
+  /** 落定回调：回调内异常绝不影响下载器/不改变状态。 */
+  private emitSettle(outcome: PrefetchSettle["outcome"], context: PrefetchContext | null): void {
+    if (!this.onSettle) return;
+    try {
+      this.onSettle({ outcome, snapshot: this.snapshot(), context });
+    } catch {
+      // 审计失败不影响预缓存本身；下载器不感知 audit。
+    }
   }
 
   /** 416 后不带 Range 重取一次（仍带 watchdog）。 */
@@ -437,6 +476,7 @@ export class UpdatePrefetcher {
     });
     // 服务端排障细节（不含 token/url）：错误码 + 名称。
     console.warn(`[update-prefetch] ${code} (${(err as Error)?.name ?? "Error"})`);
+    this.emitSettle("failed", job.context);
   }
 
   private prefetchError(code: UpdatePrefetchErrorCode, detail: string): Error & { prefetchCode: string } {

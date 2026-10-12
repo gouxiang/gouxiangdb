@@ -234,11 +234,16 @@ describe("admin/update/status：unknown 通道零出网", () => {
     const body = await res.json();
     expect(fetchCalls).toBe(before); // 零出网
     expect(Object.keys(body).sort()).toEqual(
-      ["checkedAt", "current", "enabled", "newerSchema", "update"].sort(),
+      ["checkedAt", "current", "enabled", "newerSchema", "prefetch", "update"].sort(),
     );
     expect(body.enabled).toBe(true);
     expect(body.newerSchema).toBe(false);
     expect(body.update).toBeNull();
+    // 方案 A：默认 on 时恒附预缓存快照；从未触发过 → idle 且不含任何 url/token。
+    expect(body.prefetch.state).toBe("idle");
+    expect(body.prefetch.sha256).toBeNull();
+    expect(body.prefetch.receivedBytes).toBe(0);
+    expect(JSON.stringify(body.prefetch)).not.toMatch(/token|https?:\/\//);
     expect(body.current.channel).toBe("unknown");
     expect(body.current).toHaveProperty("versionUnparseable");
     expect(typeof body.checkedAt).toBe("string");

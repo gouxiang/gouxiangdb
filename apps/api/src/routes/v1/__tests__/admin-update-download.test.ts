@@ -8,11 +8,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import { sign } from "hono/jwt";
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
 import { issueDownloadTicket } from "../../../domain/update/download.js";
+import type { UpdatePrefetchDTO } from "@gx/shared-types";
 
 const JWT_SECRET = "update-dl-secret-at-least-16-chars!";
 const TOKEN_TTL = 7 * 24 * 60 * 60;
@@ -165,6 +167,8 @@ function setEnv(extra: Record<string, string | undefined>): void {
     "GX_UPDATE_TOKEN", "GX_UPDATE_MANIFEST_URL", "GX_UPDATE_SOURCE",
     "GX_UPDATE_ALLOW_PRERELEASE", "GX_UPDATE_CHANNEL", "GX_UPDATE_ENABLED",
     "GX_UPDATE_DOWNLOAD_IDLE_TIMEOUT_MS", "GX_UPDATE_TICKET_TTL_MS",
+    "GX_UPDATE_PREFETCH_ENABLED", "GX_UPDATE_PREFETCH_DIR",
+    "GX_UPDATE_PREFETCH_IDLE_TIMEOUT_MS",
   ]) delete process.env[k];
   for (const [k, v] of Object.entries(extra)) {
     if (v === undefined) delete process.env[k];
@@ -424,7 +428,7 @@ describe("download 中断/空闲审计", () => {
     expect(rows.length).toBeGreaterThan(0);
     for (const r of rows) {
       const d = r.detail as Record<string, unknown>;
-      const allowed = new Set(["channel", "version", "arch", "platform", "filename", "bytes", "errorCode"]);
+      const allowed = new Set(["channel", "version", "arch", "platform", "filename", "bytes", "errorCode", "source"]);
       for (const k of Object.keys(d)) expect(allowed.has(k), `非法审计字段 ${k}`).toBe(true);
       const flat = JSON.stringify(d).toLowerCase();
       expect(flat).not.toContain("url");
@@ -435,6 +439,198 @@ describe("download 中断/空闲审计", () => {
     const done = rows.find((r) => r.status === 200);
     expect(done, "应有 200 完成行").toBeTruthy();
     expect((done!.detail as Record<string, unknown>).bytes).toBe(TOTAL);
+  });
+});
+
+// ===========================================================================
+// 方案 A 后台预缓存 + 本地命中秒取（独立模块图：注入 linux/x64 身份 + 小文件真实 sha）
+// ===========================================================================
+describe("方案A：POST /prefetch 后台预取 → download 本地命中", () => {
+  const PF_FILENAME = "gouxiangdb-0.2.3-x86.fpk";
+  const PF_BODY = Buffer.alloc(5000, 0x61);
+  const PF_SHA = createHash("sha256").update(PF_BODY).digest("hex");
+  let pfRuntime: typeof import("../updateRuntime.js");
+  let pfDataDir: string;
+  let pfCalls = 0;
+  const pfUrls: string[] = [];
+
+  function pfManifest(): unknown {
+    return {
+      schemaVersion: 1, product: "gouxiangdb", generatedAt: "2026-10-20T08:00:00.000Z",
+      channels: {
+        "fnos-fpk": { releases: [{
+          version: "0.2.3", publishedAt: "2026-10-20T08:00:00.000Z", prerelease: false,
+          minVersion: null, releaseNotes: { format: "text", zh: "x", en: null },
+          artifacts: [{
+            arch: "x64", platform: "linux", filename: PF_FILENAME,
+            sizeBytes: PF_BODY.length, sha256: PF_SHA,
+            download: { kind: "release-asset", asset: PF_FILENAME }, signature: null,
+          }],
+        }] },
+      },
+    };
+  }
+
+  async function pfFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+    pfCalls += 1;
+    const url = String(input);
+    pfUrls.push(url);
+    if (url.includes("/releases?")) {
+      return new Response(JSON.stringify([{ tag_name: "v0.2.3", assets: [{ name: "update-manifest.json" }] }]), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url.endsWith("/update-manifest.json")) {
+      return new Response(JSON.stringify(pfManifest()), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url.includes("/releases/download/")) {
+      // prefetcher 首次不带 Range（无 .part）→ 200 全量；校验 Authorization 带 token。
+      const h = new Headers(init?.headers as HeadersInit | undefined);
+      expect(h.get("Authorization")).toBe("token reader-token");
+      return new Response(new Uint8Array(PF_BODY), {
+        status: 200, headers: { "Content-Length": String(PF_BODY.length), "Accept-Ranges": "bytes" },
+      });
+    }
+    throw new Error(`unexpected pf fetch: ${url}`);
+  }
+
+  beforeAll(async () => {
+    pfDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "gx-pf-cache-"));
+    vi.resetModules();
+    // dataDir 独立隔离 update-cache（成品落这里）；审计仍写主 .audit（auditRows 可读）。
+    // 库仍用主 beforeAll 已迁移 + dl-owner 的同一个临时库。
+    setEnv({
+      GX_UPDATE_CHANNEL: "fnos-fpk",
+      GX_UPDATE_TOKEN: "reader-token",
+      GX_DATA_DIR: pfDataDir,
+    });
+    // setEnv 默认把库指到不存在的 u.db；独立模块图必须连回主 beforeAll 迁移+建 owner 的 d.db。
+    process.env.DATABASE_URL = `file:${path.join(tmpDir, "d.db")}`;
+    pfRuntime = await import("../updateRuntime.js");
+    // darwin 机注入 linux/x64 身份，走「linux fpk 升级」全链路；fetch 用本 describe 的可控桩。
+    pfRuntime.__setUpdateRuntimeForTest({ nodeArch: "x64", nodePlatform: "linux", fetch: pfFetch });
+  }, 120000);
+
+  // 同一模块图（未再 resetModules）：req 每次新建 app，但 updateRuntime 单例已被测试缝替换。
+  async function req(url: string, init?: RequestInit): Promise<Response> {
+    const mod = await import("../../../app.js");
+    const a = mod.createApp().app as unknown as App;
+    return a.request(url, init);
+  }
+
+  afterAll(() => {
+    fs.rmSync(pfDataDir, { recursive: true, force: true });
+  });
+
+  it("非 owner 触发预缓存 -> 403", async () => {
+    const res = await req("/api/v1/admin/update/prefetch", {
+      method: "POST", headers: userH(), body: "{}",
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("owner 触发 -> 202 started，轮询 status 到 ready（真实拉取+sha校验落地）", async () => {
+    const res = await req("/api/v1/admin/update/prefetch", {
+      method: "POST", headers: owner(), body: "{}",
+    });
+    expect(res.status).toBe(202);
+    const j = await res.json();
+    expect(j.decision).toBe("started");
+    expect(j.prefetch.state).toBe("running");
+
+    // 轮询 status（非 force）直到 ready。
+    let snap: UpdatePrefetchDTO | null = null;
+    for (let i = 0; i < 200; i += 1) {
+      const s = await req("/api/v1/admin/update/status", { headers: owner() });
+      const b = await s.json() as { prefetch: UpdatePrefetchDTO };
+      snap = b.prefetch;
+      if (snap?.state === "ready") break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(snap?.state).toBe("ready");
+    expect(snap?.sha256).toBe(PF_SHA);
+    expect(snap?.receivedBytes).toBe(PF_BODY.length);
+    // 成品落在独立缓存目录。
+    expect(fs.existsSync(path.join(pfDataDir, "update-cache", `${PF_SHA}.fpk`))).toBe(true);
+  }, 30000);
+
+  it("重复触发已就绪 -> 200 ready 幂等，不重复出网", async () => {
+    const before = pfCalls;
+    const res = await req("/api/v1/admin/update/prefetch", {
+      method: "POST", headers: owner(), body: "{}",
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).decision).toBe("ready");
+    expect(pfCalls).toBe(before);
+  });
+
+  it("download 本地命中：凭票 200 秒取，字节一致，审计 source=cache", async () => {
+    const ticket = directTicket();
+    const res = await req(`/api/v1/admin/update/download?ticket=${encodeURIComponent(ticket)}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Disposition")).toContain(PF_FILENAME);
+    expect(res.headers.get("Content-Length")).toBe(String(PF_BODY.length));
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.equals(PF_BODY)).toBe(true);
+    // 本地命中不应再打资产 URL（本用例全程无新 releases/download）。
+    expect(pfUrls.some((u) => u.includes("/releases/download/"))).toBe(true); // ready 阶段拉过一次
+
+    const rows = auditRows().filter((r) => r.event === "update_downloaded" && r.status === 200);
+    const cacheRow = rows.find((r) => (r.detail as Record<string, unknown>).source === "cache");
+    expect(cacheRow, "应有 source=cache 的 200 审计").toBeTruthy();
+    expect((cacheRow!.detail as Record<string, unknown>).bytes).toBe(PF_BODY.length);
+    const flat = JSON.stringify(cacheRow!.detail).toLowerCase();
+    expect(flat).not.toContain("token");
+    expect(flat).not.toContain("http");
+  });
+
+  it("download 本地命中支持 Range：bytes=10-19 -> 206/10 字节", async () => {
+    const ticket = directTicket();
+    const res = await req(`/api/v1/admin/update/download?ticket=${encodeURIComponent(ticket)}`, {
+      headers: { Range: "bytes=10-19" },
+    });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("Content-Range")).toBe(`bytes 10-19/${PF_BODY.length}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.length).toBe(10);
+    expect(buf.equals(PF_BODY.subarray(10, 20))).toBe(true);
+  });
+
+  it("审计：prefetch started/completed detail 白名单且无 url/token/http", async () => {
+    const started = auditRows().filter((r) => r.event === "update_prefetch_started");
+    const completed = auditRows().filter((r) => r.event === "update_prefetch_completed");
+    expect(started.length).toBe(1);
+    expect(completed.length).toBe(1);
+    const allowed = new Set(["channel", "arch", "platform", "version", "filename", "sha256", "state", "totalBytes", "bytes", "errorCode"]);
+    for (const r of [...started, ...completed]) {
+      const d = r.detail as Record<string, unknown>;
+      for (const k of Object.keys(d)) expect(allowed.has(k), `非法审计字段 ${k}`).toBe(true);
+      const flat = JSON.stringify(d).toLowerCase();
+      expect(flat).not.toContain("token");
+      expect(flat).not.toContain("http");
+    }
+    expect((completed[0].detail as Record<string, unknown>).state).toBe("ready");
+  });
+});
+
+describe("方案A：GX_UPDATE_PREFETCH_ENABLED=off -> 路由 404", () => {
+  it("POST /prefetch 返回 404（owner 已通过，门控在 handler）", async () => {
+    vi.resetModules();
+    setEnv({
+      GX_UPDATE_CHANNEL: "fnos-fpk",
+      GX_UPDATE_TOKEN: "reader-token",
+      GX_UPDATE_PREFETCH_ENABLED: "off",
+    });
+    // 连回主库，使 owner JWT 有效（先过鉴权，再由 handler 的 prefetch 门返回 404）。
+    process.env.DATABASE_URL = `file:${path.join(tmpDir, "d.db")}`;
+    const mod = await import("../../../app.js");
+    const offApp = mod.createApp().app as unknown as App;
+    const res = await offApp.request("/api/v1/admin/update/prefetch", {
+      method: "POST", headers: owner(), body: "{}",
+    });
+    expect(res.status).toBe(404);
   });
 });
 

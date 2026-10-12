@@ -22,7 +22,7 @@ import {
 } from "../../domain/update/types.js";
 import { writeAudit, type AuditEventName } from "../../audit/audit.js";
 import { sourceIp } from "../../utils/client-ip.js";
-import { updateService } from "./updateRuntime.js";
+import { updateService, updatePrefetcher, updatePrefetcherReady } from "./updateRuntime.js";
 
 export const adminUpdateRoutes = new Hono();
 
@@ -125,6 +125,11 @@ adminUpdateRoutes.get("/update/status", async (c) => {
       sourceKind: result.sourceKind,
       durationMs: Date.now() - startedAt,
     });
+    // 方案 A：on 时附加后台预缓存快照（off 时不附，响应与旧版逐字节一致）。
+    if (config.update.prefetchEnabled) {
+      await updatePrefetcherReady();
+      result.dto.prefetch = updatePrefetcher().snapshot();
+    }
     return c.json(result.dto);
   } catch (err) {
     if (err instanceof UpdateSourceError) {
@@ -188,4 +193,90 @@ adminUpdateRoutes.post("/update/download-ticket", async (c) => {
     expiresAt: new Date(expiresAt).toISOString(),
     downloadPath: `/api/v1/admin/update/download?ticket=${encodeURIComponent(ticket)}`,
   });
+});
+
+// POST /admin/update/prefetch —— 方案 A：owner 触发后端【后台】分块预拉更新包到 NAS 本地。
+// 现场重算「有更新且 eligible 且 artifact 存在」（与换票同门），再凭本地身份 resolveDownload
+// 定位真实资产，交给 prefetcher 后台下载；同步返回 202/200/409 + 当前快照。
+// 完成/失败审计由 updateRuntime 的 onSettle 回调在后台落定时写（update_prefetch_completed/failed）。
+adminUpdateRoutes.post("/update/prefetch", async (c) => {
+  const userId = c.get("auth").userId;
+  await assertOwner(userId);
+
+  // 预缓存独立开关：off 时等同未注册（下载仍可走上游代理），返回 404。
+  if (!config.update.prefetchEnabled) {
+    throw new HttpError(404, "未启用后台预缓存", "NOT_FOUND");
+  }
+
+  let rawBody: unknown = {};
+  try {
+    rawBody = await c.req.json();
+  } catch {
+    rawBody = {};
+  }
+  const body = (rawBody && typeof rawBody === "object" ? rawBody : {}) as Record<string, unknown>;
+  const params = parseQuery({
+    channel: typeof body.channel === "string" ? body.channel : undefined,
+    arch: typeof body.arch === "string" ? body.arch : undefined,
+    platform: typeof body.platform === "string" ? body.platform : undefined,
+  });
+
+  const service = updateService();
+  const result = await service.check(params);
+  const info = result.dto.update;
+  if (result.verdict !== "upgrade" || !info || !info.eligible || !info.artifact) {
+    throw new HttpError(409, "当前没有可预缓存的更新", "UPDATE_NOT_AVAILABLE");
+  }
+  const identity = service.identitySnapshot(params);
+
+  // 凭本地身份定位真实资产（与下载票第二段同口径，内部再过一遍 upgrade/minVersion/filename）。
+  const resolved = await service.resolveDownload({
+    channel: identity.channel,
+    arch: identity.arch,
+    platform: identity.platform,
+    version: info.version,
+    filename: info.artifact.filename,
+  });
+  if (!resolved) {
+    throw new HttpError(409, "当前没有可预缓存的更新", "UPDATE_NOT_AVAILABLE");
+  }
+
+  await updatePrefetcherReady();
+  const prefetcher = updatePrefetcher();
+  let decision;
+  try {
+    decision = prefetcher.start(resolved, {
+      actorId: userId,
+      ip: sourceIp(c),
+      channel: identity.channel,
+      arch: identity.arch,
+      platform: identity.platform,
+    });
+  } catch {
+    // 清单 sha 非法等本地状态异常：不暴露细节。
+    throw new HttpError(409, "更新包状态异常，无法预缓存", "UPDATE_NOT_AVAILABLE");
+  }
+
+  // 仅「确有新任务受理」写 started 审计；幂等命中 running/ready/busy 不重复打点。
+  if (decision.kind === "started") {
+    writeAudit(config.auditDir, {
+      event: "update_prefetch_started" as AuditEventName,
+      actorId: userId,
+      ip: sourceIp(c),
+      method: "POST",
+      path: "/api/v1/admin/update/prefetch",
+      status: 202,
+      detail: {
+        channel: identity.channel,
+        arch: identity.arch,
+        platform: identity.platform,
+        version: resolved.version,
+        filename: resolved.artifact.filename,
+        sha256: resolved.artifact.sha256,
+      },
+    });
+  }
+
+  const status = decision.kind === "ready" ? 200 : decision.kind === "busy" ? 409 : 202;
+  return c.json({ decision: decision.kind, prefetch: prefetcher.snapshot() }, status as 200 | 202 | 409);
 });

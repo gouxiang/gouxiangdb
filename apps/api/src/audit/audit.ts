@@ -76,7 +76,14 @@ export type AuditEventName =
   // 应用版本更新（owner 手动触发；detail 只带通道/版本/裁决/源种类/耗时，
   // 绝不含 url、GX_UPDATE_TOKEN、Authorization，见 update DESIGN §5.5）。
   | "update_checked"
-  | "update_downloaded";
+  | "update_downloaded"
+  // 应用更新【后台预缓存】（方案 A；owner 触发。detail 只带 channel/version/arch/platform/
+  // filename/sha256/state/bytes?/errorCode?，绝不含 url、GX_UPDATE_TOKEN、Authorization）。
+  // started：POST /update/prefetch 已受理（同步记）；completed：后台分块拉取并校验落地成功；
+  // failed：后台拉取失败（带稳定 PREFETCH_* errorCode，断点保留可续传）。
+  | "update_prefetch_started"
+  | "update_prefetch_completed"
+  | "update_prefetch_failed";
 
 interface AuditInput {
   event: AuditEventName;

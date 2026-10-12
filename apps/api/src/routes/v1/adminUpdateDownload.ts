@@ -22,7 +22,8 @@ import { sourceIp } from "../../utils/client-ip.js";
 import { verifyDownloadTicket } from "../../domain/update/download.js";
 import { UpdateSourceError } from "../../domain/update/types.js";
 import { mapUpstreamStatus } from "../../domain/update/source.js";
-import { updateService } from "./updateRuntime.js";
+import { updateService, updatePrefetcher, updatePrefetcherReady } from "./updateRuntime.js";
+import { serveLocalArtifact } from "./serveLocalArtifact.js";
 
 export const adminUpdateDownloadRoutes = new Hono();
 
@@ -87,6 +88,36 @@ adminUpdateDownloadRoutes.get("/download", async (c) => {
     platform: ticket.platform,
     filename: ticket.filename,
   };
+
+  // 2.5) 方案 A 本地命中优先：prefetcher 已把成品落盘（sha 内容寻址）时从 NAS 本地秒取，
+  //      绕开 CGI 30s/慢公网；审计标 source=cache。未命中或预缓存关闭则回退下面的上游代理。
+  if (config.update.prefetchEnabled) {
+    await updatePrefetcherReady();
+    const prefetcher = updatePrefetcher();
+    const sha = resolved.artifact.sha256;
+    if (await prefetcher.isReady(sha)) {
+      const localPath = prefetcher.readyPath(sha);
+      try {
+        const { response, done } = await serveLocalArtifact(
+          c.req.raw,
+          localPath,
+          ticket.filename,
+        );
+        // 流式结束后按 200/206 完成 / 499 客户端断 / 500 本地错记账（source=cache，禁路径/token）。
+        void done.then(({ status, bytes }) => {
+          recordDownloaded(status, ticket.uid, ip, {
+            ...baseDetail,
+            source: "cache",
+            ...(bytes > 0 ? { bytes } : {}),
+            ...(status === 500 ? { errorCode: "PREFETCH_BAD_STATE" } : {}),
+          });
+        });
+        return response;
+      } catch {
+        // 本地文件竞态消失/IO 错：安全回退上游代理（下方原逻辑），不向浏览器暴露本地路径。
+      }
+    }
+  }
 
   // 3) 发起上游 GET（token 仅在此头内，绝不转发浏览器）。透传浏览器 Range。
   const rangeHeader = c.req.raw.headers.get("Range");
@@ -153,6 +184,7 @@ adminUpdateDownloadRoutes.get("/download", async (c) => {
     clearIdle();
     recordDownloaded(status, ticket.uid, ip, {
       ...baseDetail,
+      source: "upstream",
       ...(bytes > 0 ? { bytes } : {}),
       ...(extra ?? {}),
     });
