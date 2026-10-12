@@ -87,6 +87,9 @@ function baseConfig(over: Partial<UpdateConfig> = {}): UpdateConfig {
     downloadIdleTimeoutMs: 30000,
     cacheTtlMs: 300000,
     ticketTtlMs: 120000,
+    prefetchEnabled: true,
+    prefetchIdleTimeoutMs: 60000,
+    prefetchDir: "",
     ...over,
   };
 }

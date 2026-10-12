@@ -119,11 +119,38 @@ describe("parseUpdateConfig 集成与缺省", () => {
     expect(config.downloadIdleTimeoutMs).toBe(30000);
     expect(config.cacheTtlMs).toBe(300000);
     expect(config.ticketTtlMs).toBe(120000);
+    // 方案 A 预缓存：默认 on；空闲超时默认 60000；纯函数层目录留空（dataDir 兜底在 config.ts）。
+    expect(config.prefetchEnabled).toBe(true);
+    expect(config.prefetchIdleTimeoutMs).toBe(60000);
+    expect(config.prefetchDir).toBe("");
     expect(warnings).toEqual([]);
   });
 
   it("精确小写 off 关闭", () => {
     expect(parseUpdateConfig({ GX_UPDATE_ENABLED: "off" }).config.enabled).toBe(false);
+  });
+
+  it("预缓存：精确小写 off 关、默认 on、大写不识别按 on", () => {
+    expect(parseUpdateConfig({ GX_UPDATE_PREFETCH_ENABLED: "off" }).config.prefetchEnabled).toBe(false);
+    expect(parseUpdateConfig({ GX_UPDATE_PREFETCH_ENABLED: "  off  " }).config.prefetchEnabled).toBe(false);
+    expect(parseUpdateConfig({ GX_UPDATE_PREFETCH_ENABLED: "OFF" }).config.prefetchEnabled).toBe(true);
+    expect(parseUpdateConfig({ GX_UPDATE_PREFETCH_ENABLED: "on" }).config.prefetchEnabled).toBe(true);
+  });
+
+  it("预缓存：空闲超时只认正整数毫秒，非法回退默认 60000 并 warn", () => {
+    const ok = parseUpdateConfig({ GX_UPDATE_PREFETCH_IDLE_TIMEOUT_MS: "12000" });
+    expect(ok.config.prefetchIdleTimeoutMs).toBe(12000);
+    expect(ok.warnings).toEqual([]);
+    for (const bad of ["0", "-1", "abc", "1.5"]) {
+      const r = parseUpdateConfig({ GX_UPDATE_PREFETCH_IDLE_TIMEOUT_MS: bad });
+      expect(r.config.prefetchIdleTimeoutMs).toBe(60000);
+      expect(r.warnings.join("\n")).toContain("GX_UPDATE_PREFETCH_IDLE_TIMEOUT_MS");
+    }
+  });
+
+  it("预缓存：目录 env trim 透传；未设为空串（交由 config.ts 兜底）", () => {
+    expect(parseUpdateConfig({ GX_UPDATE_PREFETCH_DIR: " /data/cache " }).config.prefetchDir).toBe("/data/cache");
+    expect(parseUpdateConfig({ GX_UPDATE_PREFETCH_DIR: "   " }).config.prefetchDir).toBe("");
   });
 
   it("非法源/URL/repo/数值累积多条 warning，值全部回退默认", () => {

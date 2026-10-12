@@ -233,6 +233,61 @@ export interface UpdateInfoDTO {
   manualInstallGuide: ManualInstallGuideDTO;
 }
 
+// ---------------------------------------------------------------------------
+// 后台预缓存快照（方案 A：NAS 本地后台预取更新包，面板点下载时本地秒取）
+//
+// 背景：飞牛 CGI 反代对单次请求硬限 ~30s 且整包缓冲，公网慢时面板内直连下载 63MB 必 502。
+// 改为 owner 触发后端在后台分块把包预拉到 NAS 本地，就绪后浏览器凭原下载票从本地秒取。
+// 本快照只暴露进度与稳定状态，【不含】任何 url / token / 上游错误体。
+// ---------------------------------------------------------------------------
+
+/**
+ * 预缓存状态机：
+ *  - idle    从未对任何目标开始过（无 .part / 无成品）；
+ *  - running 正在后台分块拉取（receivedBytes/sizeBytes 为进度）；
+ *  - ready   已拉完并通过 sha256 校验，download 端点可本地命中秒取；
+ *  - failed  最近一次尝试失败（保留 .part，可续传重试），带稳定 errorCode。
+ */
+export type UpdatePrefetchState = "idle" | "running" | "ready" | "failed";
+
+export interface UpdatePrefetchDTO {
+  state: UpdatePrefetchState;
+  /**
+   * 内容寻址键（= 资产 sha256）。前端据此与 update.artifact.sha256 对齐，
+   * 判断「就绪包是不是当前候选版本」；idle 时为 null。
+   */
+  sha256: string | null;
+  /** 预缓存目标版本；idle 时为 null。 */
+  version: string | null;
+  /** 预缓存目标文件名（仅安全字符，同下载票口径）；idle 时为 null。 */
+  filename: string | null;
+  /** 清单声明的包总字节；未知时为 null。 */
+  sizeBytes: number | null;
+  /** 已落盘字节（含可续传的 .part 部分）；idle/未开始为 0。 */
+  receivedBytes: number;
+  /** state==="failed" 时的稳定错误码（中性、可展示），其余状态为 null。 */
+  errorCode: UpdatePrefetchErrorCode | null;
+  /** 最近一次状态变更时间（ISO 字符串）；从未开始为 null。 */
+  updatedAt: string | null;
+}
+
+/**
+ * 预缓存稳定错误码（收敛上游细节，绝不透传上游错误体）：
+ *  - PREFETCH_AUTH            上游凭证无效/过期；
+ *  - PREFETCH_UNREACHABLE     上游不可达 / HTTP 非 2xx-206；
+ *  - PREFETCH_TIMEOUT         拉取空闲超时（.part 保留，可续传）；
+ *  - PREFETCH_CHECKSUM        落盘后 sha256 校验不符（成品不落地）；
+ *  - PREFETCH_DISK            磁盘空间/写入失败；
+ *  - PREFETCH_BAD_STATE       本地缓存目录状态异常（无法安全续传）。
+ */
+export type UpdatePrefetchErrorCode =
+  | "PREFETCH_AUTH"
+  | "PREFETCH_UNREACHABLE"
+  | "PREFETCH_TIMEOUT"
+  | "PREFETCH_CHECKSUM"
+  | "PREFETCH_DISK"
+  | "PREFETCH_BAD_STATE";
+
 export interface UpdateStatusDTO {
   enabled: true;
   current: CurrentIdentityDTO;
@@ -240,6 +295,11 @@ export interface UpdateStatusDTO {
   checkedAt: string;
   /** 清单 schemaVersion 高于本端认识值时 true（面板弱提示，不报错）。 */
   newerSchema: boolean;
+  /**
+   * 后台预缓存快照（方案 A）。可选：旧端/未接入该机制时缺省；新版 status 路由恒带此字段。
+   * 前端据 prefetch.sha256 与 update.artifact.sha256 判定就绪包是否对应当前候选。
+   */
+  prefetch?: UpdatePrefetchDTO | null;
 }
 
 export interface UpdateDisabledDTO {

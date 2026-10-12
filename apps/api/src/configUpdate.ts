@@ -41,6 +41,22 @@ export interface UpdateConfig {
   cacheTtlMs: number;
   /** 下载票据有效期（ms），默认 120000（2 分钟）。 */
   ticketTtlMs: number;
+  /**
+   * 后台预缓存总开关（方案 A）：默认 on，仅 trim 后精确小写 "off" 关闭（同 enabled 纪律）。
+   * off 时不注册 prefetch 触发路由、status 不附 prefetch 快照；download 仍走原有上游代理，
+   * 即「关闭预缓存＝退回方案 A 之前的逐字节行为」。
+   */
+  prefetchEnabled: boolean;
+  /**
+   * 后台预缓存拉取【空闲】超时（ms，非总时长；NAS↔上游不过 CGI 30s 门，故可比下载代理宽）。
+   * 默认 60000（60s）。超时仅中止本次拉取、保留 .part，下次续传重试。
+   */
+  prefetchIdleTimeoutMs: number;
+  /**
+   * 预缓存落盘目录（成品 <sha>.fpk + 断点 <sha>.part）。env 显式配置时 trim 原样使用；
+   * 留空时由 config.ts 兜底为 `<dataDir>/update-cache`（真机即 …/data/update-cache）。
+   */
+  prefetchDir: string;
 }
 
 export const UPDATE_DEFAULTS = {
@@ -51,6 +67,7 @@ export const UPDATE_DEFAULTS = {
   downloadIdleTimeoutMs: 30000,
   cacheTtlMs: 300000,
   ticketTtlMs: 120000,
+  prefetchIdleTimeoutMs: 60000,
 } as const;
 
 /**
@@ -186,6 +203,15 @@ export function parseUpdateConfig(env: NodeJS.ProcessEnv = process.env): {
       `GX_UPDATE_TICKET_TTL_MS 必须为正整数毫秒，已回退默认 ${UPDATE_DEFAULTS.ticketTtlMs}`,
     );
   }
+  const prefetchIdle = parsePositiveIntMs(
+    env.GX_UPDATE_PREFETCH_IDLE_TIMEOUT_MS,
+    UPDATE_DEFAULTS.prefetchIdleTimeoutMs,
+  );
+  if (prefetchIdle.fellBack) {
+    warnings.push(
+      `GX_UPDATE_PREFETCH_IDLE_TIMEOUT_MS 必须为正整数毫秒，已回退默认 ${UPDATE_DEFAULTS.prefetchIdleTimeoutMs}`,
+    );
+  }
 
   const config: UpdateConfig = {
     enabled: parseUpdateEnabled(env.GX_UPDATE_ENABLED),
@@ -200,6 +226,11 @@ export function parseUpdateConfig(env: NodeJS.ProcessEnv = process.env): {
     downloadIdleTimeoutMs: idle.value,
     cacheTtlMs: cache.value,
     ticketTtlMs: ticket.value,
+    // 后台预缓存：同「精确小写 off 关、默认 on」纪律，复用总开关解析口径。
+    prefetchEnabled: parseUpdateEnabled(env.GX_UPDATE_PREFETCH_ENABLED),
+    prefetchIdleTimeoutMs: prefetchIdle.value,
+    // env 显式目录 trim 原样；留空由 config.ts 用 <dataDir>/update-cache 兜底（此处不掌握 dataDir）。
+    prefetchDir: env.GX_UPDATE_PREFETCH_DIR?.trim() ?? "",
   };
 
   return { config, warnings };

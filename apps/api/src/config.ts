@@ -306,6 +306,12 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
   const uploadRoot = env.UPLOAD_ROOT?.trim() || path.join(dataDir, "uploads");
   const migrationsDir = env.GX_MIGRATIONS_DIR?.trim()
     || path.resolve(apiRoot, "prisma/migrations");
+  // 更新机制配置：parseUpdateConfig 不掌握 dataDir，故 prefetchDir 留空时在此兜底为
+  // <dataDir>/update-cache（真机即 …/data/update-cache），env 显式配置则原样采用（方案 A）。
+  const updateConfig = parseUpdateConfig(env).config;
+  if (!updateConfig.prefetchDir) {
+    updateConfig.prefetchDir = path.join(dataDir, "update-cache");
+  }
   return {
     nodeEnv: (env.NODE_ENV === "production" || env.NODE_ENV === "test"
       ? env.NODE_ENV
@@ -366,7 +372,7 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     socketPath: env.GX_SOCKET_PATH?.trim() ?? "",
     basePath: normalizeBasePath(env.GX_BASE_PATH),
     webDist: env.GX_WEB_DIST?.trim() ?? "",
-    update: parseUpdateConfig(env).config,
+    update: updateConfig,
   };
 }
 
