@@ -124,9 +124,18 @@ function setEnv(extra: Record<string, string | undefined>): void {
   }
 }
 
-async function loadApp(extra: Record<string, string | undefined>): Promise<App> {
+async function loadApp(
+  extra: Record<string, string | undefined>,
+  runtime?: { nodeArch?: string; nodePlatform?: string },
+): Promise<App> {
   vi.resetModules();
   setEnv(extra);
+  // 显式注入部署身份，使这些集成用例与【宿主机平台】解耦：在 darwin/linux CI 上结论一致。
+  // 必须在 import app.js 之前、同一全新模块图内取 runtime 句柄，二者共享同一 service 单例。
+  if (runtime) {
+    const rt = await import("../updateRuntime.js");
+    rt.__setUpdateRuntimeForTest(runtime);
+  }
   const mod = await import("../../../app.js");
   return mod.createApp().app as unknown as App;
 }
@@ -170,7 +179,12 @@ beforeAll(async () => {
   vi.stubGlobal("fetch", controlledFetch);
 
   unknownApp = await loadApp({});
-  fnosApp = await loadApp({ GX_UPDATE_CHANNEL: "fnos-fpk", GX_UPDATE_TOKEN: "reader-token" });
+  // fnos 通道这些用例断言「清单仅含 linux fpk，而部署身份=darwin -> no_artifact」。
+  // 显式钉死 darwin/x64，避免在 linux 宿主上 process.platform=linux 反而命中而误红。
+  fnosApp = await loadApp(
+    { GX_UPDATE_CHANNEL: "fnos-fpk", GX_UPDATE_TOKEN: "reader-token" },
+    { nodeArch: "x64", nodePlatform: "darwin" },
+  );
   offApp = await loadApp({ GX_UPDATE_CHANNEL: "fnos-fpk", GX_UPDATE_ENABLED: "off" });
 }, 120000);
 

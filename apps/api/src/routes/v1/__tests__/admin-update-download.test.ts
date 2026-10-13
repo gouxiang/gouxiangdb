@@ -221,6 +221,11 @@ beforeAll(async () => {
     // 块间隔远小于 300ms，不会误触发。
     GX_UPDATE_DOWNLOAD_IDLE_TIMEOUT_MS: "300",
   });
+  // 钉死部署身份 darwin/x64：换票现场闸门用例断言「显式传 linux 也按部署身份 darwin 重算 ->
+  // 匹配不到 linux fpk -> 409」。注入后该结论与宿主机平台解耦（linux CI 上同样 409）。
+  // 必须在 import app.js 前、同一全新模块图内注入，二者共享同一 service 单例。
+  const dlRuntime = await import("../updateRuntime.js");
+  dlRuntime.__setUpdateRuntimeForTest({ nodeArch: "x64", nodePlatform: "darwin" });
   const mod = await import("../../../app.js");
   app = mod.createApp().app as unknown as App;
 }, 120000);
