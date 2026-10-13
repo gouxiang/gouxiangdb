@@ -196,8 +196,17 @@ export async function computeAuthzReconcile(client: AuthzClient): Promise<Reconc
         }
       }
     }
-    // A3 非 legacy 行但动作串恰等于旧角色档（疑似手工污染，只报不改）
-    if (!p.reason?.startsWith("legacy:") && knownActionStrings.has(normalizeActions(rawTokens).join(","))) {
+    // A3 非 legacy、非机器投影的【手工】行但动作串恰等于旧角色档（疑似手工污染，只报不改）。
+    // 必须豁免 reason="scope:role"：那是 project-scope / scopeProjectionTx 的机器投影行（其
+    // actions 合法地会命中旧档，如 table 节点投影恰为 base creator 档），其漂移由下方 S 段
+    // computeScopeProjectionReconcile 对账（S1-S4），不能既被 S 段管理又被 A3 判手工污染，
+    // 否则 project-scope --apply 补出的投影会恒定触发 A3 且只报不改、rc 永远非 0。
+    // 注意：以 reason 判定而非 createdBy/operator——机器行 createdBy 可能是真实操作人用户 id。
+    if (
+      !p.reason?.startsWith("legacy:") &&
+      p.reason !== "scope:role" &&
+      knownActionStrings.has(normalizeActions(rawTokens).join(","))
+    ) {
       A.push({ code: "A3_MANUAL_MATCHES_LEGACY", message: "非 legacy 行动作串等于某旧角色档（疑似手工污染，不自动改）", ref: p.id });
     }
 

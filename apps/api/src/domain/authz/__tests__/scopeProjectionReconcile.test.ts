@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeNavHarness, json, type CharHarness } from "../../../domain/nav/__tests__/navRouteHarness.js";
 import { nodeId } from "../../../domain/nav/backfill.js";
 import { projectAdminForNewLibraryTx } from "../scopeDoubleWrite.js";
+import { legacyActionString } from "../backfill.js";
 import type { AuthzClient } from "../types.js";
 
 const projectAdminForLibrary = (client: AuthzClient, id: string): Promise<void> =>
@@ -245,5 +246,41 @@ describe("C5 行级条件放行", () => {
     expect(c5.some((d) => d.ref === "pol_c5_badjson")).toBe(true);
     expect(c5.some((d) => d.ref === "pol_c5_badop")).toBe(true);
     expect(c5.some((d) => d.ref === "pol_c5_valid")).toBe(false);
+  });
+});
+
+// P1/S8a 接线缺陷回归：A3「疑似手工污染」不得命中机器投影 scope:role 行，否则与 S 段互斥、
+// project-scope --apply 补出的投影恒定触发 A3 且只报不改、reconcile rc 永远非 0。
+describe("A3 豁免机器 scope:role 投影（仍抓真手工行）", () => {
+  it("(a) scope:role 行动作串恰等于 base creator 旧档：不报 A3，但 S4 仍把它当多余投影对账", async () => {
+    // 真实缺陷现场：project-scope 在 table 节点补出的角色投影动作串恰为 base creator 档。
+    const creatorActions = legacyActionString("base", "creator");
+    const scopeNode = nodeId("base", "base_no_scope_a3");
+    await h.prisma.authPolicy.create({
+      data: {
+        id: "pol_a3_scope_role", workspaceId: "ws_default", nodeId: scopeNode,
+        subjectType: "role", subjectId: "r1", actions: creatorActions,
+        reason: "scope:role", createdBy: "owner", // 机器行 createdBy 是真实操作人，故豁免只认 reason
+      },
+    });
+
+    const r = await compute(tx);
+    expect(r.A.some((d) => d.code === "A3_MANUAL_MATCHES_LEGACY" && d.ref === "pol_a3_scope_role")).toBe(false);
+    // S 段照常管理 scope:role 漂移：无期望节点上的投影 -> S4_ORPHAN，一个都不许豁免。
+    expect(r.S.some((d) => d.code === "S4_ORPHAN" && d.ref === `r1|${scopeNode}`)).toBe(true);
+  });
+
+  it("(b) 非 legacy、非 scope:role 的手工行动作串命中旧档：仍报 A3（豁免未扩大到手工行）", async () => {
+    const creatorActions = legacyActionString("base", "creator");
+    await h.prisma.authPolicy.create({
+      data: {
+        id: "pol_a3_manual", workspaceId: "ws_default", nodeId: nodeId("table", "tbl_a3_manual"),
+        subjectType: "user", subjectId: "owner", actions: creatorActions,
+        reason: "manual-grant", createdBy: "owner",
+      },
+    });
+
+    const r = await compute(tx);
+    expect(r.A.some((d) => d.code === "A3_MANUAL_MATCHES_LEGACY" && d.ref === "pol_a3_manual")).toBe(true);
   });
 });
