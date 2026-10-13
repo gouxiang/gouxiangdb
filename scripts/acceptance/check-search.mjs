@@ -124,6 +124,10 @@ async function main() {
   const logFile = path.join(outDir, "search-server.log");
   const commonEnv = {
     GX_M5_SEARCH: "on",
+    // 显式关闭随 API 自启的内嵌索引 worker：本脚本要精确演练"首启 index=null 缺库语义"，
+    // 再由 HTTP POST /reindex 显式推进（202+status 轮询）。生产默认 worker 随 GX_M5_SEARCH=on
+    // 自启（parseSearchWorkerFlag 默认 on），不关会在首启前抢建 search.db，使缺库断言失真。
+    GX_SEARCH_WORKER: "off",
     GX_SEARCH_DB_PATH: searchDb,
     GX_EMBEDDING_MODE: "off",
     GX_DATA_DIR: dataDir,

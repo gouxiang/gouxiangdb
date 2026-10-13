@@ -90,8 +90,8 @@ L.push("> 实体 id 从各 HTTP 响应与旧库快照采集进 manifest，升级
 L.push("");
 L.push("## 2. 直升与迁移");
 L.push(`- 二次 migrate deploy：exit=${nav?.steps?.secondMigrate?.exit}，alreadyInSync=${nav?.steps?.secondMigrate?.alreadyInSync}`);
-L.push(`- B5 自举：applied=${boot?.ledger?.applied}（期望 23），rolled_back=${boot?.ledger?.rolledBack}（期望 0）`);
-L.push(`- workspaces=${bootChecks.workspaces_single_default?.pass ? 1 : "?"}，系统角色 5 枚有序=${bootChecks.roles_five_system?.pass ? "是" : "否"}，`
+L.push(`- B5 自举：applied=${boot?.ledger?.applied}（期望 ${boot?.expectedMigrations}，按迁移目录动态计数），rolled_back=${boot?.ledger?.rolledBack}（期望 0）`);
+L.push(`- workspaces=${bootChecks.workspaces_single_default?.pass ? 1 : "?"}，系统角色 7 枚有序=${bootChecks.roles_seven_system?.pass ? "是" : "否"}，`
   + `owner 唯一且最早=${bootChecks.role_owner_single_earliest?.pass ? "是" : "否"}`);
 L.push(`- auth_policies reason 三态分布（纯迁移投影）: ${reasonDist ? JSON.stringify(reasonDist) : "?"}`);
 L.push(`- change_events 播种: rec=${ce?.seededRec}/活records=${ce?.liveRecords}，doc=${ce?.seededDoc}/活docs=${ce?.liveDocs}`
@@ -124,7 +124,11 @@ if (golden?.summary) {
 } else L.push("- golden-result.json 缺失");
 L.push("");
 L.push("## 6. 旧分享链接 R7（升级后 curl 对抗矩阵）");
-L.push(`- PASS=${sharePassLine[1] ?? "?"} FAIL=${sharePassLine[2] ?? "?"}（有效 token 直开、已删 404、超深/越界 403、未级联 404、匿名写边界、只读分享写 403）`);
+L.push(`- PASS=${sharePassLine[1] ?? "?"} FAIL=${sharePassLine[2] ?? "?"}（有效 token 直开、已删 404、超深/越界 403、未级联 404、旧 editor 分享匿名写 fail-closed 403、只读分享写 403）`);
+const legacyEditorFc = /PASS \[legacy-editor-anon-write-403\]/.test(shareLog);
+L.push(`- 旧版创建(shareCreatedBy=NULL)的 editor 档链接升级后匿名写一律 403 fail-closed=${legacyEditorFc ? "已固化" : "缺失/失败"}`
+  + "（有意安全收紧，迁移 20260922010000 + shareCaps.ts:97；GET 可开不受影响）");
+L.push("- 新建可编辑分享的匿名写 200/400（10MB zod 上界）与默认档 >1MiB 413 字节边界归第8节 check-body-limits B1/B2/A4 覆盖");
 L.push("");
 L.push("## 7. 搜索 FTS-only（补强④，embedding=off 零外网；vec0 hybrid=P1 不阻塞）");
 L.push(`- 首启 index=${search?.steps?.preStatus?.indexNull ? "null(缺库语义)" : "?"}，embedding=${search?.steps?.preStatus?.embeddingMode}，vecLoaded=${search?.steps?.preStatus?.vecLoaded}`);

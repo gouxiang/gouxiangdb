@@ -5,10 +5,14 @@
 // 运行时点 = migrate deploy 两次 + nav-reconcile 之后、verify-golden 构造新策略之前。
 //
 // 固定期望：
-//   1) _prisma_migrations：applied(finished)=23、rolled_back=0、无失败（finished_at IS NULL）
+//   1) _prisma_migrations：applied(finished)=迁移目录动态计数（随版本增长，当前=40）、
+//      rolled_back=0、无失败（finished_at IS NULL）
 //   2) workspaces=1（ws_default）；departments 仅可能无（v010 播不出部门）
-//   3) roles=5 系统角色，systemKey 有序 [commenter,creator,editor,owner,viewer]
-//   4) role_owner user 级恰好一行，授予最早注册用户（owner 唯一）
+//   3) roles=7 系统角色，systemKey 有序
+//      [admin,commenter,creator,editor,restricted,super_admin,viewer]
+//      （2026-09-21 commit 9a96364 角色模型重构：新增 admin/restricted，
+//        原 role_owner 行 id 保留、systemKey 由 owner 升为 super_admin——故 #4 仍查 role_owner）
+//   4) role_owner user 级恰好一行，授予最早注册用户（owner 唯一；该行 systemKey=super_admin）
 //   5) auth_policies reason 三态 legacy:member / legacy:kb_member / legacy:acl 均 >0，
 //      且除三态外无别的 reason（纯迁移投影，无手工策略污染）
 //   6) change_events：id 前缀仅 cev_seed_rec_/cev_seed_doc_，op='upsert'、status='pending'、
@@ -23,8 +27,19 @@ import fs from "node:fs";
 import path from "node:path";
 import { openDb, migrationLedger, countOf } from "./lib/db.mjs";
 
-const EXPECTED_MIGRATIONS = 23;
-const SYSTEM_ROLE_KEYS = ["commenter", "creator", "editor", "owner", "viewer"];
+// 迁移期望不写死：随版本增长（23→…→40），从 apps/api/prisma/migrations 目录动态计数，
+// 与 ledger.finished 对拍。口径与 run-upgrade-drill.sh 的 `find migrations -mindepth 1
+// -maxdepth 1 -type d | wc -l` 完全一致（全部直接子目录）。脚本位于 <repo>/scripts/acceptance。
+const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+const MIGRATIONS_DIR = path.join(REPO_ROOT, "apps", "api", "prisma", "migrations");
+function countMigrationDirs() {
+  if (!fs.existsSync(MIGRATIONS_DIR)) return -1;
+  return fs.readdirSync(MIGRATIONS_DIR, { withFileTypes: true }).filter((e) => e.isDirectory()).length;
+}
+const EXPECTED_MIGRATIONS = countMigrationDirs();
+// 2026-09-21 commit 9a96364 角色模型重构后的 7 枚系统角色（systemKey 升序）：
+// 新增 admin/restricted；role_owner 行 id 不变、systemKey 升为 super_admin。
+const SYSTEM_ROLE_KEYS = ["admin", "commenter", "creator", "editor", "restricted", "super_admin", "viewer"];
 const SEARCH_TABLE_RE = /(^|_)(fts|vec|search|chunks|embedding)(_|$)|fts5?|vec0/i;
 
 function arg(name, fallback) {
@@ -54,7 +69,7 @@ async function main() {
   const failedRow = db.prepare(
     "SELECT count(*) c FROM _prisma_migrations WHERE finished_at IS NULL",
   ).get().c;
-  add("migrations_applied_23", ledger.finished === EXPECTED_MIGRATIONS,
+  add("migrations_applied_expected", ledger.finished === EXPECTED_MIGRATIONS,
     { applied: ledger.finished, expect: EXPECTED_MIGRATIONS, total: ledger.total });
   add("migrations_zero_rolled_back", ledger.rolledBack === 0, { rolledBack: ledger.rolledBack });
   add("migrations_no_unfinished", failedRow === 0, { unfinished: failedRow });
@@ -66,7 +81,7 @@ async function main() {
 
   // 3) roles
   const sysRoles = db.prepare("SELECT systemKey FROM roles WHERE isSystem=1 AND deletedAt IS NULL ORDER BY systemKey").all().map((r) => r.systemKey);
-  add("roles_five_system", sysRoles.length === 5
+  add("roles_seven_system", sysRoles.length === SYSTEM_ROLE_KEYS.length
     && JSON.stringify(sysRoles) === JSON.stringify(SYSTEM_ROLE_KEYS), { systemKeys: sysRoles });
 
   // 4) owner 唯一且最早

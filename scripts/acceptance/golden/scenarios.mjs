@@ -1,57 +1,61 @@
 // scripts/acceptance/golden/scenarios.mjs
 // B2~B5：升级后经 v1 API 构造 v0.1.0 无法播种的新结构并断言（写操作，在纯净态 golden/LCG 之后跑）。
-//   B2 g7 多源并集（base commenter + 部门授予 c/u）
-//   B3 部门子树（子部门成员命中祖先部门授予，外人不命中）
+//   B2 g7 多源并集（table 内容节点：base commenter 继承 + 部门授予 c/u）
+//   B3 部门子树（table 内容节点：子部门成员命中祖先部门授予，外人不命中）
 //   B4 继承中断（未确认 409 / confirmed 200 / 孙节点失权 / 幂等 impact.count=0）
 //   B5 g8 停用闭环（旧 token 401、重登 401、members 投影行保留）
+//
+// 注：2026-09-21 commit 9a96364 库门重构后，base 库门节点不再接受裸 c/u/r（actionLegalForNode
+// 仅收聚合位 enter/edit_data/manage_*），故 B2/B3 的内容动作授予与断言一律下放到 table 内容节点；
+// 内容动作在表节点仍按引擎正常沿 base 继承/判定，多源并集与部门子树语义不变。
 
 const SUBJECT_PASSWORD = "drill-pass-2026";
 const norm = (actions) => [...actions].sort();
 const eqSet = (a, b) => JSON.stringify(norm(a)) === JSON.stringify(norm(b));
 const nodeId = (kind, rid) => `nav_${kind}_${rid}`;
 
-// ---------- B2：g7 多源并集 ----------
+// ---------- B2：g7 多源并集（table 内容节点） ----------
 export async function scenarioUnion(api, ctx) {
-  const { userByEmail, effective, byTag, gLegacy, base1, record } = ctx;
+  const { userByEmail, effective, byTag, gLegacy, table1, record } = ctx;
   const g7 = await userByEmail(byTag[gLegacy.g7.tag]);
-  const before = await effective(g7, "base", base1);
+  const before = await effective(g7, "table", table1);
   const dept = await api.post("/api/v1/org/departments", { name: "黄金g7-授权部" });
-  await api.put(`/api/v1/nodes/${nodeId("base", base1)}/policies`, {
+  await api.put(`/api/v1/nodes/${nodeId("table", table1)}/policies`, {
     upserts: [{ subjectType: "dept", subjectId: dept.id, actions: ["c", "u"] }],
   });
   await api.post(`/api/v1/org/members/${g7}/departments`, { add: [dept.id] });
-  const after = await effective(g7, "base", base1);
+  const after = await effective(g7, "table", table1);
   record({
-    case: "g7 并集前仅 commenter", tag: gLegacy.g7.tag, node: `base:${base1}`,
+    case: "g7 并集前 commenter 沿 base 继承到 table", tag: gLegacy.g7.tag, node: `table:${table1}`,
     want: ["r", "comment"], got: before.actions, httpStatus: before.status,
     pass: before.status === 200 && eqSet(before.actions, ["r", "comment"]),
   });
   record({
-    case: "g7 多源并集(commenter+dept c/u)", tag: gLegacy.g7.tag, node: `base:${base1}`,
+    case: "g7 多源并集(commenter继承+dept c/u)", tag: gLegacy.g7.tag, node: `table:${table1}`,
     want: norm(["r", "comment", "c", "u"]), got: after.actions, httpStatus: after.status, deptId: dept.id,
     pass: after.status === 200 && eqSet(after.actions, ["r", "comment", "c", "u"]),
   });
 }
 
-// ---------- B3：部门子树祖先闭包 ----------
-// 必须选对目标 base【无任何既有角色】的干净主体，否则 creator/owner 兜底会盖过部门 r。
+// ---------- B3：部门子树祖先闭包（table 内容节点） ----------
+// 必须选对目标 base 之 table【无任何既有继承角色】的干净主体，否则 creator/owner 继承会盖过部门 r。
 // base2 上 s09 本就是 creator（脏）、s13 editor、s20/s08 viewer；s12 的 base 角色在 base3、
-// s10 无任何 base2 角色——二者对 base2 均干净（授权全集见 manifest randomGrants/goldenLegacy）。
+// s10 无任何 base2 角色——二者对 base2 的 table 均干净（授权全集见 manifest randomGrants/goldenLegacy）。
 export async function scenarioDeptSubtree(api, ctx) {
-  const { userByEmail, effective, byTag, base2 } = ctx;
+  const { userByEmail, effective, byTag, table2 } = ctx;
   const parent = await api.post("/api/v1/org/departments", { name: "黄金-子树父部" });
   const child = await api.post("/api/v1/org/departments", { name: "黄金-子树子部", parentId: parent.id });
   const inside = await userByEmail(byTag.s12);
   const outside = await userByEmail(byTag.s10);
   await api.post(`/api/v1/org/members/${inside}/departments`, { add: [child.id] });
-  await api.put(`/api/v1/nodes/${nodeId("base", base2)}/policies`, {
+  await api.put(`/api/v1/nodes/${nodeId("table", table2)}/policies`, {
     upserts: [{ subjectType: "dept", subjectId: parent.id, actions: ["r"] }],
   });
-  const inGot = await effective(inside, "base", base2);
-  const outGot = await effective(outside, "base", base2);
+  const inGot = await effective(inside, "table", table2);
+  const outGot = await effective(outside, "table", table2);
   return {
     parentDept: parent.id, childDept: child.id, insideTag: "s12", outsideTag: "s10",
-    inside: inGot.actions, outside: outGot.actions,
+    node: `table:${table2}`, inside: inGot.actions, outside: outGot.actions,
     pass: inGot.status === 200 && eqSet(inGot.actions, ["r"])
       && outGot.status === 200 && eqSet(outGot.actions, []),
   };

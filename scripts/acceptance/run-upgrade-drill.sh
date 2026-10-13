@@ -235,6 +235,24 @@ step "6c-diff-snapshot" "$NODE_BIN" "$AC_DIR/diff-snapshot.mjs" "$BEFORE_DIR" "$
 step "6d-check-bootstrap" "$NODE_BIN" "$AC_DIR/check-bootstrap.mjs" \
   --db "$UPGRADED_DB" --out "$AFTER_DIR"
 
+# ---------------- 阶段6e：通电前 authz 存量投影（runbook §6.7.1 钦定序列） ----------------
+# 必须排在 6d【之后】：6d 断言纯迁移态 reason 恰为三态 legacy:*、无 scope:role，先投影会污染。
+# 必须排在起候选服务（阶段7）之前：让首次对外服务时 scope:role 投影已就位，模拟真实升级流程。
+# 顺序固定为 reconcile-policies --apply -> project-scope --apply：
+#   前者修 legacy 投影漂移（A1/A2/B1-B3，顺带按 S 段重建 scope 角色）；
+#   后者是 runbook §6.7.1 指定的【存量 scope 投影】专用入口（单事务幂等，只写 scope:role）。
+# 两 CLI 无 dist 发布入口（禁止为此改 build.mjs），用仓内 tsx 直跑源码，cwd=apps/api。
+# 注：role_owner 被 scopeBackfill 硬短路、永不投 scope:role（owner 授权走 legacy:member），
+# 故投影主体仅 role_admin；A3 已豁免机器 scope:role 行（其漂移只由 S 段对账）。
+step "6e1-reconcile-policies-apply" bash -c \
+  "cd '$API_DIR' && DATABASE_URL='file:$UPGRADED_DB' '$NODE_BIN' '$TSX_NEW' scripts/authz/reconcile-policies.ts --apply"
+step "6e2-project-scope-apply" bash -c \
+  "cd '$API_DIR' && DATABASE_URL='file:$UPGRADED_DB' '$NODE_BIN' '$TSX_NEW' scripts/authz/project-scope.ts --apply"
+# 二次只读复核：project-scope 已幂等（no changes，rc=0）。reconcile 的 A/B/C/S 全 0 + no changes
+# 由阶段7a verify-golden 的 D 段在服务流量介入前再独立复核一次。
+step "6e3-project-scope-readonly-idempotent" bash -c \
+  "cd '$API_DIR' && DATABASE_URL='file:$UPGRADED_DB' '$NODE_BIN' '$TSX_NEW' scripts/authz/project-scope.ts --json"
+
 # ---------------- 阶段7：候选服务 -> golden + share ----------------
 start_new() {
   log "起候选 dist 服务 port=$NEW_PORT"

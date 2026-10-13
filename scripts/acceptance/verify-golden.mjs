@@ -3,7 +3,7 @@
 // 门② G2 补强②：M4 升级后权限引擎黄金值核验（硬编码期望判定表，禁止循环论证）。
 //
 //   D. 回填对账幂等（reconcile-policies 只读 A/B/C=0 + --apply no changes）—— golden/reconcile.mjs
-//   A. 自举证据（owner 恰一行 role_owner、21 drill 用户 ACTIVE、ws_default、五系统角色）—— golden/bootstrapEvidence.mjs
+//   A. 自举证据（owner 恰一行 role_owner、21 drill 用户 ACTIVE、ws_default、七系统角色）—— golden/bootstrapEvidence.mjs
 //   B1. g1..g6 旧库侧黄金主体（硬编码期望，本文件）
 //   C. 12 LCG 随机主体：独立 legacyExpect.mjs 裸 SQL 推导 vs 引擎 effective 对拍（本文件）
 //   B2~B5. 多源并集/部门子树/继承中断/停用闭环（升级后新结构）—— golden/scenarios.mjs
@@ -81,9 +81,13 @@ async function main() {
   const byTag = Object.fromEntries(S.users.map((u) => [u.tag, u.email]));
   const gLegacy = Object.fromEntries(S.goldenLegacy.map((g) => [g.scenario.split("-")[0], g]));
   const base1 = S.base1; const base2 = S.base2; const kbId = S.kbId;
+  // B2/B3 的内容动作授予与断言落在【table 内容节点】：base 库门 2026-09-21 重构后不接受
+  // 裸 c/u/r（actionLegalForNode 仅收聚合位），而内容动作在表节点仍按引擎正常判定/继承。
+  const table1 = manifest.bases[0].plain;
+  const table2 = manifest.bases[1].plain;
   const ctx = {
     userByEmail, effective, byTag, gLegacy, base1, base2, kbId, db, baseUrl,
-    createClient, nodeId, record,
+    createClient, nodeId, record, table1, table2,
   };
 
   // ---------- D. 回填对账幂等（必须在任何新策略构造之前） ----------
@@ -96,18 +100,26 @@ async function main() {
   if (!results.bootstrap.pass) failed += 1;
 
   // ---------- B1. g1..g6：旧库侧黄金主体（不新增授予，直接对硬编码期望） ----------
+  // 2026-09-21 commit 9a96364 库门重构后：base/kb 库门节点 effective【只呈现聚合/管理位】，
+  // 不再呈现内容动作 r/c/u/d/comment；存量普通成员（role_restricted、无 role_library_scope
+  // 投影行）库门仅可能残留旧档携带的 manage_schema（base creator/owner）/manage_share（owner）。
+  // 内容动作仍在 table/doc 内容节点按 legacyExpect 黄金值对拍。
   const goldenChecks = [
-    { tag: gLegacy.g1.tag, name: "g1 base viewer 在 base1", kind: "base", rid: base1, want: ["r"] },
-    { tag: gLegacy.g2.tag, name: "g2 base editor 在 base1", kind: "base", rid: base1, want: ["r", "c", "u", "d", "comment"] },
-    { tag: gLegacy.g3.tag, name: "g3 base creator 在 base1", kind: "base", rid: base1, want: ["r", "c", "u", "d", "comment", "manage_schema"] },
+    // 库门（base）：viewer/editor 无任何库门呈现位；creator 残留 manage_schema。
+    { tag: gLegacy.g1.tag, name: "g1 base viewer 库门(无scope投影)", kind: "base", rid: base1, want: [] },
+    { tag: gLegacy.g2.tag, name: "g2 base editor 库门(无scope投影)", kind: "base", rid: base1, want: [] },
+    { tag: gLegacy.g3.tag, name: "g3 base creator 库门仅 manage_schema", kind: "base", rid: base1, want: ["manage_schema"] },
+    // 内容节点 table 沿 base 继承：viewer 仍仅 r（内容动作在表节点呈现，不随库门重构改变）。
     { tag: gLegacy.g1.tag, name: "g1 base viewer 在 table 节点(沿base继承)", kind: "table", rid: manifest.bases[0].plain, want: ["r"] },
-    { tag: gLegacy.g4.tag, name: "g4 kb viewer 在 kb 节点", kind: "kb", rid: kbId, want: ["r"] },
+    // 库门（kb）：普通成员无 scope 投影行，库门呈现位全空（内容动作在 doc 节点验）。
+    { tag: gLegacy.g4.tag, name: "g4 kb viewer 库门(无scope投影)", kind: "kb", rid: kbId, want: [] },
     { tag: gLegacy.g4.tag, name: "g4 kb viewer 继承到 aclDoc", kind: "doc", rid: S.aclDocId, want: ["r"] },
     { tag: gLegacy.g5.tag, name: "g5 kb viewer+acl editor 取较高(aclDoc)", kind: "doc", rid: S.aclDocId, want: ["r", "c", "u", "d", "comment"] },
-    { tag: gLegacy.g5.tag, name: "g5 kb viewer 在 kb 节点仍仅 r", kind: "kb", rid: kbId, want: ["r"] },
-    { tag: gLegacy.g6.tag, name: "g6 kb editor 在 kb 节点", kind: "kb", rid: kbId, want: ["r", "c", "u", "d", "comment"] },
-    { tag: gLegacy.g6.tag, name: "g6 creator 兜底全动作(自建doc)", kind: "doc", rid: S.creatorDocId,
-      want: ["r", "c", "u", "d", "comment", "manage_share", "manage_schema"] },
+    { tag: gLegacy.g5.tag, name: "g5 kb viewer 库门仍空", kind: "kb", rid: kbId, want: [] },
+    { tag: gLegacy.g6.tag, name: "g6 kb editor 库门(无scope投影)", kind: "kb", rid: kbId, want: [] },
+    // 内容节点自建 doc：creator 兜底除 manage_table 外 10 枚（evaluate.ADMIN_ACTIONS 有意）。
+    { tag: gLegacy.g6.tag, name: "g6 creator 兜底(自建doc,除manage_table外10枚)", kind: "doc", rid: S.creatorDocId,
+      want: ["r", "c", "u", "d", "comment", "manage_share", "manage_schema", "enter", "edit_data", "share_link"] },
   ];
   for (const c of goldenChecks) {
     const uid = await userByEmail(byTag[c.tag]);

@@ -11,9 +11,14 @@
 #   - 5 个 token GET /api/public/s/<token>：有效 4 个 200；deleted-doc 404（这是硬期望，不计入"可开"）
 #   - 深 3：layer2/layer3 200；layer4_forbidden 403；independentForbidden 403
 #   - doc-viewer 根未级联：GET /s/<token>/doc/<nonCascadeChild> = 404
-#   - 匿名写：editor scratch PUT 1,000,000 字符=200；1,100,000=按全局 body 上限（默认 1MB -> 413）
-#     用独立 scratch 写，不污染 golden 正文
+#   - 旧版创建（v0.1.0，shareCreatedBy=NULL）的 editor 档链接：匿名 PUT 一律 403 fail-closed
+#     （有意安全收紧，见迁移 20260922010000 头注释与 domain/share/shareCaps.ts:97——无分享人则
+#     恒 VIEW_ONLY；档位检查早于 body/乐观锁，故带占位 baseUpdatedAt 仍 403）。GET 可开不受影响。
 #   - viewer token PUT = 403（只读分享不可写）
+#
+# 注：匿名【字节边界】不在本脚本测——旧分享恒只读、档位早于 body，已不适合承载字节边界。
+#   公开匿名写的 200/400（10MB zod 上界）与默认档 >1MiB -> 413 统一归 check-body-limits.mjs
+#   B1/B2 与 A4 覆盖（运行时新建、带分享人的 editor 分享）。
 #
 # 退出码：0 全过；1 任一不符；64 参数/环境错。
 
@@ -105,19 +110,17 @@ CHILD=$(field doc-viewer nonCascadeChild)
 code=$(curl -s -o /dev/null -w '%{http_code}' "$PUB/s/$T_DOC/doc/$CHILD")
 [[ "$code" == "404" ]] && ok "non-cascade-child" "includeChildren=false 访问子文档 404" || bad "non-cascade-child" "/doc child" 404 "$code"
 
-echo "===== 匿名写边界（独立 editor scratch，不碰 golden 正文）====="
-# 1,000,000 字符：默认 1MB 全局上限边缘（1M 字符 UTF-8 约 1MB），预期 200
-code=$(put_code "/s/$T_EDIT/doc/$(field doc-editor-scratch rootId)/content" 1000000)
-[[ "$code" == "200" ]] && ok "anon-write-1M" "匿名 PUT 1,000,000 字符 200" || bad "anon-write-1M" "PUT 1M" 200 "$code"
-# 1,100,000 字符：超过默认 1MB body 上限 -> 413（若服务以 GX_BODY_LIMIT_JSON>=3 启动，路由 zod 2MB 内仍 200）
-code=$(put_code "/s/$T_EDIT/doc/$(field doc-editor-scratch rootId)/content" 1100000)
-if [[ "$code" == "413" ]]; then
-  ok "anon-write-1.1M-413" "默认 1MB body 上限拦截 413"
-elif [[ "$code" == "200" ]]; then
-  ok "anon-write-1.1M-200" "body 上限已调大（GX_BODY_LIMIT_JSON>=3），1.1M 在 zod 2MB 内 200"
-else
-  bad "anon-write-1.1M" "PUT 1.1M" "413 或 200" "$code"
-fi
+echo "===== 旧 editor 分享匿名写 = fail-closed 403（有意安全收紧）====="
+# doc-editor-scratch 由 v0.1.0 旧服务创建，升级后 shareCreatedBy=NULL。迁移 20260922010000 头注释
+# 明示"存量行 createdBy 为 NULL 一律按只读，宁可窄不凭空给写权限"，shareCaps.ts:97 无分享人即 VIEW_ONLY。
+# 用小 body（几百字符）且【带上占位 baseUpdatedAt】：档位 403 早于 body zod / 乐观锁，带了占位仍应 403；
+# 若变成别的码（如 400/409）说明 fail-closed 失效或判据顺序变了，判 FAIL 而非放过。
+legacy_code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'Content-Type: application/json' \
+  --data-binary @<(node -e 'process.stdout.write(JSON.stringify({content:"x".repeat(300),baseUpdatedAt:"1970-01-01T00:00:00.000Z"}))') \
+  "$PUB/s/$T_EDIT/doc/$(field doc-editor-scratch rootId)/content")
+[[ "$legacy_code" == "403" ]] \
+  && ok "legacy-editor-anon-write-403" "旧 editor 分享(shareCreatedBy=NULL)匿名写 403 fail-closed（占位乐观锁仍档位拒绝）" \
+  || bad "legacy-editor-anon-write-403" "旧 editor 匿名 PUT" 403 "$legacy_code"
 
 echo "===== 只读分享写 = 403 ====="
 code=$(put_code "/s/$T_DOC/doc/$(field doc-viewer rootId)/content" 100)

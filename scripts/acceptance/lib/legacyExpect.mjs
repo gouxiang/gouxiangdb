@@ -8,6 +8,24 @@
 // 资源动作全集（与 packages/shared-types/src/authz.ts 同序，字典序）。
 export const ALL_ACTIONS = ["r", "c", "u", "d", "comment", "manage_share", "manage_schema"];
 
+// 内容节点（table/doc/canvas/view）呈现面 11 枚中 creator 兜底所得：evaluate.ts 的 ADMIN_ACTIONS
+// 只排除 manage_table（纯组织管理权，收权后不得凭"东西是我建的"拿回），其余 10 枚全给。
+// 这是 2026-09-21 库门/动作集扩展后的独立第二份拷贝（故意不 import @gx 包）。
+export const CREATOR_FALLBACK_ACTIONS = [
+  "r", "c", "u", "d", "comment",
+  "manage_share", "manage_schema", "enter", "edit_data", "share_link",
+];
+
+// 库门节点（base/kb）effective 只呈现聚合/管理位，不呈现内容动作 r/c/u/d/comment
+// （policyQuery.explainEffective 对库节点过滤；2026-09-21 commit 9a96364 有意重构）。
+// 旧七动作档（members/kb_members 裸 SQL）里只有 manage_share/manage_schema 会落进库门呈现位：
+//   enter/edit_data 仅由 role_library_scope 投影产生（本计算器刻意不读 scope——存量普通成员均为
+//   role_restricted、无 scope 行，故其库门不出现 enter/edit_data）；share_link 旧档从不携带。
+// 因此旧逐库成员在库门上的期望 = 旧档动作 ∩ 该库门【旧档可命中】的呈现位。
+// base 旧档可能命中 manage_share(owner)/manage_schema(owner,creator)；kb 仅 manage_share(owner)。
+const BASE_GATE_FROM_LEGACY = ["manage_share", "manage_schema"];
+const KB_GATE_FROM_LEGACY = ["manage_share"];
+
 // 旧三档角色动作（逐字抄自 shared-types/authz.ts BASE/KB/DOC 三张表；此处是独立第二份拷贝，
 // 故意不 import @gx 包——若将来映射漂移，本门会发现，而不是自证）。
 const BASE_ROLE = {
@@ -77,21 +95,29 @@ export function loadLegacyGrants(db) {
  */
 export function expectedActionsFor(g, userId, node) {
   if (node.kind === "base") {
-    return BASE_ROLE[g.baseMembers.get(`${node.resourceId}|${userId}`)] ?? [];
+    // 库门呈现位（2026-09-21 重构）：旧逐库成员档只有 manage_share/manage_schema 会落到
+    // 库门 effective；内容动作 r/c/u/d/comment 不在库门呈现，enter/edit_data 仅 scope 投影
+    // （存量普通成员无 scope 行）。故 viewer/editor/commenter→[]，creator→[manage_schema]，
+    // owner→[manage_share,manage_schema]。
+    const legacy = BASE_ROLE[g.baseMembers.get(`${node.resourceId}|${userId}`)] ?? [];
+    return ALL_ACTIONS.filter((a) => BASE_GATE_FROM_LEGACY.includes(a) && legacy.includes(a));
   }
   if (node.kind === "table") {
-    // 表/视图/记录动作在旧版一律按其 base 成员档（无逐表授权）。
+    // 表/视图/记录是内容节点：effective 呈现全部内容动作 + manage_schema，仍按 base 成员档。
     const baseId = g.tableBase.get(node.resourceId);
     return baseId ? (BASE_ROLE[g.baseMembers.get(`${baseId}|${userId}`)] ?? []) : [];
   }
   if (node.kind === "kb") {
-    return KB_ROLE[g.kbMembers.get(`${node.resourceId}|${userId}`)] ?? [];
+    // kb 库门呈现位：旧 kb 成员档仅 owner 的 manage_share 落呈现位；内容动作不在库门呈现，
+    // enter/share_link 仅 scope 投影。故 viewer/editor/commenter→[]，owner→[manage_share]。
+    const legacy = KB_ROLE[g.kbMembers.get(`${node.resourceId}|${userId}`)] ?? [];
+    return ALL_ACTIONS.filter((a) => KB_GATE_FROM_LEGACY.includes(a) && legacy.includes(a));
   }
   if (node.kind === "doc" || node.kind === "canvas") {
     const meta = g.docMeta.get(node.resourceId);
     if (!meta || meta.deletedAt) return [];
-    // creator 兜底：文档创建者拿全七动作（引擎 creator fallback 对七动作恒 allow）。
-    if (g.docOwner.get(node.resourceId) === userId) return [...ALL_ACTIONS];
+    // creator 兜底：内容节点上除 manage_table（ADMIN_ACTIONS）外 10 枚全给（含新聚合位/建链位）。
+    if (g.docOwner.get(node.resourceId) === userId) return [...CREATOR_FALLBACK_ACTIONS];
     const kbSet = KB_ROLE[g.kbMembers.get(`${meta.kbId}|${userId}`)] ?? [];
     const aclSet = DOC_ROLE[g.docAcls.get(`${node.resourceId}|${userId}`)] ?? [];
     // 旧版 kb 成员档与 doc ACL「取较高」= 并集（editor 是 viewer 超集，并集即取高）。
