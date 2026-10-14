@@ -13,6 +13,7 @@ import type {
   RecordDTO,
   GroupBucketDTO,
   CommentDTO,
+  CreateCommentRequest,
   ShareLinkDTO,
   ViewDTO,
   ViewConfig,
@@ -825,10 +826,10 @@ export const Records = {
     }),
 
   comments: (recordId: string) => apiFetch<{ comments: CommentDTO[] }>(`/api/records/${recordId}/comments`),
-  addComment: (recordId: string, body: string) =>
+  addComment: (recordId: string, data: CreateCommentRequest) =>
     apiFetch<{ comment: CommentDTO }>(`/api/records/${recordId}/comments`, {
       method: "POST",
-      body: JSON.stringify({ body }),
+      body: JSON.stringify(data),
       timeoutMs: WRITE_TIMEOUT_MS,
     }),
   removeComment: (commentId: string) =>

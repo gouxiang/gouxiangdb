@@ -2,7 +2,7 @@
 // 附件服务端通道：上传（XHR 带进度）/ 取字节 / 删除。
 //
 // 端点契约（apps/api/src/routes/attachments.ts）：
-//   POST   /api/attachments          multipart，字段名 file（可重复）+ baseId/tableId/fieldId/recordId
+//   POST   /api/attachments          multipart，字段名 file（可重复）+ baseId/tableId/fieldId/recordId[/purpose]
 //   GET    /api/attachments/:id/content  鉴权后回字节
 //   DELETE /api/attachments/:id      软删；仍被记录引用时 409
 //
@@ -17,12 +17,17 @@ import { withBase } from "../../api/client";
 import { uploadCodeHint } from "./policy";
 import type { AttachmentDTO } from "@gx/shared-types";
 
-/** 上传上下文：baseId 必填（后端鉴权就靠它），其余用于溯源。 */
+/**
+ * 上传上下文：baseId 必填（后端鉴权就靠它），其余用于溯源。
+ * purpose 标记附件用途：记录字段附件（默认，省略即沿用旧通道语义）或评论附件（"comment"）。
+ * 仅在显式传入时才随 FormData 上送，存量字段附件调用不传 = 行为零变化。
+ */
 export interface AttachmentUploadContext {
   baseId: string;
   tableId?: string;
   fieldId?: string;
   recordId?: string;
+  purpose?: "record" | "comment";
 }
 
 /** 上传响应里服务端给出的错误体。 */
@@ -108,6 +113,7 @@ export function uploadAttachmentFile(
     if (ctx.tableId) fd.append("tableId", ctx.tableId);
     if (ctx.fieldId) fd.append("fieldId", ctx.fieldId);
     if (ctx.recordId) fd.append("recordId", ctx.recordId);
+    if (ctx.purpose) fd.append("purpose", ctx.purpose);
     xhr.send(fd);
   });
 }

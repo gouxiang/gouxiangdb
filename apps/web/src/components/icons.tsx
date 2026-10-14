@@ -122,7 +122,10 @@ export type IconName =
   | "linkExternal"
   // 菜单精细化（L1 个人区）：首页 / 待办
   | "home"
-  | "checkSquare";
+  | "checkSquare"
+  // 评论：@ 提及 / 回复
+  | "at"
+  | "reply";
 
 const PATHS: Record<IconName, string[]> = {
   chevronDown: ["M6 9l6 6 6-6"],
@@ -334,6 +337,10 @@ const PATHS: Record<IconName, string[]> = {
   home: ["M3 10.5L12 3l9 7.5", "M5.5 9.6V20h13V9.6", "M9.5 20v-5.5h5V20"],
   // 待办（L1 个人区「我的待办」）：方框 + 对勾
   checkSquare: ["M4 5h16v14H4z", "M8 12.5l2.6 2.6L16.5 9"],
+  // 评论 @ 提及：@ 符号（外环 + 内回绕）
+  at: ["M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z", "M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.9 7.9"],
+  // 回复：转弯箭头（与 cornerDownRight 同语义，独立名便于评论内引用）
+  reply: ["M15 10l5 5-5 5", "M4 4v7a4 4 0 0 0 4 4h12"],
 };
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {

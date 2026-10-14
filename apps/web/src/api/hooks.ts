@@ -44,6 +44,7 @@ import type {
   ViewType,
   LockMode,
   CommentDTO,
+  CreateCommentRequest,
   ShareLinkDTO,
   CSVImportResult,
   TrashItemDTO,
@@ -645,8 +646,8 @@ export function useGXMutations() {
 
     // --- comments ---
     addComment: useMutation({
-      mutationFn: async (p: { recordId: string; body: string }) =>
-        (await Records.addComment(p.recordId, p.body)).comment,
+      mutationFn: async (p: { recordId: string; data: CreateCommentRequest }) =>
+        (await Records.addComment(p.recordId, p.data)).comment,
       onSuccess: (_d, v) => void qc.invalidateQueries({ queryKey: QK.comments(v.recordId) }),
     }),
     removeComment: useMutation({

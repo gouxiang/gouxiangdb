@@ -2,30 +2,30 @@
 // 记录抽屉：所有视图共用的右侧详情/编辑面板
 //  - 从右侧滑出（transition-transform + translate-x-full/0）
 //  - 逐字段内联编辑，失焦即保存
-//  - 评论面板（useComments + addComment/removeComment）
+//  - 评论面板委托给 features/comments/CommentSection（@/附件/两级回复/倒序）
 //  - 系统信息 + 上一条/下一条 + 删除/新建
 //  - Esc 关闭
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { useRecord, useRecords, useFields, useTables, useViews, useComments, useGXMutations } from "../../api/hooks";
-import { useAuthStore } from "../../store/auth";
-import type { CellValue, FieldDTO, PermissionSet } from "@gx/shared-types";
+import type { CellValue, PermissionSet } from "@gx/shared-types";
 import {
   Button,
   FieldIcon,
   IconButton,
   Spinner,
-  Textarea,
   toast,
 } from "../../components/ui";
 import { DetailLayoutEditor, DetailLayoutRenderer } from "../detail/DetailLayout";
-import { Icon } from "../../components/icons";
 // 底部元信息的时间口径与单元格一致（含秒），不再各写一份 toLocaleString
 import { fmtDateTime } from "../cells/format";
 // 创建人存的是裸 userId，过成员名册解析成人名
 import { useMemberRoster } from "../contacts/member-roster";
 import { RecordChangesModal } from "./RecordChangesModal";
+// 记录详情评论增强：@ 成员 / 附件拖拽粘贴预览 / 两级回复 / 倒序
+import { CommentSection } from "../comments/CommentSection";
+import { totalComments } from "../comments/logic";
 // 阶段 4：删除走 L2 确认 + 统一撤销 toast；写操作走在途守卫（R-D-23 / R-I-08 / R-I-26）
 import { confirmSoftDelete } from "../../components/feedback";
 import { toastDeleted, useWriteGuard } from "../../components/interaction";
@@ -156,12 +156,10 @@ function RecordDrawer({
   const currentView = viewId ? views?.find((v) => v.id === viewId) : views?.[0];
   const [layoutEditing, setLayoutEditing] = useState(false);
 
-  const user = useAuthStore((s) => s.user);
-  const [draftComment, setDraftComment] = useState("");
   const [showComments, setShowComments] = useState(true);
   // 数据日志弹窗：默认关，打开时才发 GET /api/records/:id/changes
   const [showChanges, setShowChanges] = useState(false);
-  // R-I-26 写操作在途守卫：删除 / 发评论 / 删评论各按 key 去重，防双击重复提交
+  // R-I-26 写操作在途守卫：删除记录按 key 去重，防双击重复提交（评论发送/删除在 CommentSection 内自持守卫）
   const guard = useWriteGuard();
 
   // 抽屉宽度：localStorage 持久化，clamp 到 [340, 960]
@@ -206,30 +204,6 @@ function RecordDrawer({
     if (!open) setShowChanges(false);
   }, [open]);
 
-  const submitComment = async () => {
-    const body = draftComment.trim();
-    if (!body || !currentId) return;
-    await guard.run("comment:add", async () => {
-      try {
-        await m.addComment.mutateAsync({ recordId: currentId, body });
-        setDraftComment("");
-      } catch (err) {
-        toast((err as Error).message || "评论失败", "error");
-      }
-    });
-  };
-
-  const removeComment = async (commentId: string) => {
-    if (!currentId) return;
-    await guard.run(`comment:del:${commentId}`, async () => {
-      try {
-        await m.removeComment.mutateAsync({ commentId, recordId: currentId });
-      } catch (err) {
-        toast((err as Error).message || "删除失败", "error");
-      }
-    });
-  };
-
   const handleDelete = async () => {
     if (!currentId || !permissions.canEditData) return;
     const deletedId = currentId;
@@ -257,14 +231,6 @@ function RecordDrawer({
     });
   };
 
-  // 抽屉内联编辑后刷新当前记录展示
-  const refreshRecord = () => {
-    /* useRecord 会自动随 mutation 失效刷新，无需手动操作 */
-  };
-
-  const canDeleteComment = (commentUserId: string) =>
-    permissions.canManageSchema || permissions.canManageBase || commentUserId === user?.id;
-
   return (
     <>
       {/* 背景遮罩：R-F-22 rgba(22,32,58,.35)（令牌未收录该值，按 SPEC 走内联） */}
@@ -276,10 +242,10 @@ function RecordDrawer({
         />
       )}
 
-      {/* 抽屉面板：R-F-23 贴右全高；R-D-06 阴影 lg；浮层圆角 12 只在左缘（贴右侧不圆角） */}
+      {/* 抽屉面板：R-F-23 贴右全高；R-D-06 阴影 lg；贴右侧与视口边缘，左右缘均不圆角 */}
       <div
         className={
-          "fixed right-0 top-0 gx-z-drawer flex h-full max-w-full flex-col overflow-hidden rounded-l-gx-2xl bg-gx-surface shadow-gx-lg transition-transform duration-200 " +
+          "fixed right-0 top-0 gx-z-drawer flex h-full max-w-full flex-col overflow-hidden bg-gx-surface shadow-gx-lg transition-transform duration-200 " +
           (open ? "translate-x-0" : "translate-x-full pointer-events-none")
         }
         style={{ width: drawerWidth }}
@@ -385,7 +351,7 @@ function RecordDrawer({
             </div>
           )}
 
-          {/* 评论面板：发丝线分区；头部为整行可点的折叠开关 */}
+          {/* 评论面板：发丝线分区；头部为整行可点的折叠开关。计数=根+回复总数 */}
           <div className="border-t border-gx-hairline">
             <button
               type="button"
@@ -393,67 +359,16 @@ function RecordDrawer({
               className="flex w-full items-center gap-2 px-4 py-2 text-gx-13 font-medium text-gx-text-secondary transition-colors duration-[120ms] hover:bg-gx-row-hover"
             >
               <FieldIcon type="comment" size={14} />
-              评论 {comments ? `(${comments.length})` : ""}
+              评论 ({totalComments(comments)})
               <span className="ml-auto text-gx-text-hint">{showComments ? "收起" : "展开"}</span>
             </button>
             {showComments && (
-              <div className="px-4 pb-4">
-                {permissions.canComment && (
-                  <div className="mb-3 flex flex-col gap-2">
-                    <Textarea
-                      value={draftComment}
-                      onChange={(e) => setDraftComment(e.target.value)}
-                      placeholder="写下评论…"
-                      rows={2}
-                      disabled={!currentId}
-                    />
-                    {!currentId && (
-                      <div className="flex items-center gap-1.5 text-gx-12 text-gx-text-hint">
-                        <Icon name="alertCircle" size={13} />
-                        请先选择一条记录后再发表评论
-                      </div>
-                    )}
-                    <div className="flex justify-end">
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        disabled={!currentId || !draftComment.trim()}
-                        loading={guard.isBusy("comment:add")}
-                        onClick={() => void submitComment()}
-                      >
-                        发表
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                {!comments || comments.length === 0 ? (
-                  <div className="py-2 text-gx-12 text-gx-text-hint">暂无评论</div>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    {comments.map((c) => (
-                      <div key={c.id} className="flex flex-col gap-0.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-gx-12 font-medium text-gx-text-primary">{c.displayName}</span>
-                          <span className="text-gx-11 text-gx-text-hint">
-                            {new Date(c.createdAt).toLocaleString("zh-CN")}
-                          </span>
-                          {canDeleteComment(c.userId) && (
-                            <button
-                              type="button"
-                              onClick={() => void removeComment(c.id)}
-                              disabled={guard.isBusy(`comment:del:${c.id}`)}
-                              className="ml-auto text-gx-11 text-gx-text-hint hover:text-gx-danger"
-                            >
-                              删除
-                            </button>
-                          )}
-                        </div>
-                        <div className="text-gx-13 text-gx-text-primary">{c.body}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <CommentSection
+                baseId={baseId}
+                tableId={tableId}
+                recordId={currentId}
+                permissions={permissions}
+              />
             )}
           </div>
         </div>
