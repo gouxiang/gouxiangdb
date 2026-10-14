@@ -37,7 +37,7 @@ import { useEnterpriseOrgFlag } from "../settings/pat-hooks";
 // 上传限制：本机浏览器生效、跨全部知识库，属全局设置 → 上提到工作区层（原挂知识库设置页）。
 import { UploadLimitsPanel } from "../kb/UploadLimitsPanel";
 import { UpdatePanel } from "../update/UpdatePanel";
-import { BrandingPanel } from "../branding/BrandingPanel";
+import { BrandingSettingsPanel } from "../branding/BrandingSettingsPanel";
 import { toast } from "../../components/ui";
 
 // 「通讯录」分区已移除：一级导航底部已有通讯录入口（/workspace/contacts），设置里不再重复。
@@ -340,7 +340,7 @@ export function WorkspaceSettingsPage() {
                   自定义全站产品名、版权信息与登录页广告图；保存后对所有用户立即生效。
                 </p>
               </div>
-              <BrandingPanel />
+              <BrandingSettingsPanel />
             </div>
           )}
 

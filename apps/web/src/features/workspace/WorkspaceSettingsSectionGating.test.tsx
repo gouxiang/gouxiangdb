@@ -51,12 +51,9 @@ vi.mock("../update/UpdatePanel", () => ({
   UpdatePanel: () => <div data-update-panel="1">检查并下载新版本安装包</div>,
 }));
 
-// 品牌外观面板有自己的 SSR/纯函数测试；门控用例只关心 ownerOnly 分区显隐与回落。
-vi.mock("../branding/BrandingPanel", () => ({
-  BrandingPanel: () => (
-    <div data-branding-panel="1">产品名、版权信息与登录页广告图</div>
-  ),
-}));
+// 品牌外观面板：门控用例走真实挂载（BrandingSettingsPanel 内部 useIsWorkspaceOwner 复用本文件
+// 对 contacts-hooks 的 mock，SSR 下 adminConfig queryFn 不执行、有 placeholderData 兜底，可稳挂；
+// 面板自身的 owner 双保险/字段渲染由 branding/BrandingSettingsPanel.test.tsx 专测。
 
 vi.mock("../settings/pat-hooks", () => ({
   useEnterpriseOrgFlag: () => enterpriseOn,
@@ -170,14 +167,16 @@ describe("B. gated 分区只看 effectiveSection（不看 URL 原始 section）"
     expect(nav).not.toContain("品牌外观");
     const direct = renderPage("/workspace/settings/branding");
     expect(direct).toContain(GENERAL);
-    expect(direct).not.toContain("data-branding-panel");
+    // 真挂面板：非 owner 时组件双保险 return null，不应出现面板字段
+    expect(direct).not.toContain("产品显示名称");
   });
 
   it("owner：左栏出现品牌外观分区（在通用之下），直戳 /branding 进得去", () => {
     isOwner = true;
     expect(renderPage()).toContain("品牌外观");
     const direct = renderPage("/workspace/settings/branding");
-    expect(direct).toContain("data-branding-panel");
+    // 真挂面板（非桩）：owner 下出现面板字段锚点
+    expect(direct).toContain("产品显示名称");
     expect(direct).toContain("自定义全站产品名、版权信息与登录页广告图");
   });
 
@@ -217,7 +216,9 @@ describe("B. gated 分区只看 effectiveSection（不看 URL 原始 section）"
 
   it("effectiveSection 由 visibleSections 反查得出（单一真源）", () => {
     // 容忍 prettier 对长表达式的换行排版
-    expect(pageSrc).toMatch(/visibleSections\.some\(\s*\(s\)\s*=>\s*s\.key\s*===\s*section/);
+    expect(pageSrc).toMatch(
+      /visibleSections\.some\(\s*\(s\)\s*=>\s*s\.key\s*===\s*section/,
+    );
     expect(pageSrc).not.toContain('section === "search" && !isOwner');
   });
 
