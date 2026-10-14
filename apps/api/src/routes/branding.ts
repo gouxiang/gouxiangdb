@@ -1,9 +1,11 @@
-// 品牌外观路由（0.2.4-rc）：产品名 / 版权串 / 登录广告图后台可自定义。
+// 品牌外观路由（0.2.4）：产品名 / 版权串 / 登录广告图 / 访客自主注册开关后台可自定义。
 //
 // 两个独立 Hono 实例（均无条件挂在主 api 实例，绝不进 /api/v1 企业门）：
 //   publicBranding —— GET /api/auth/branding，匿名公开，任何异常 fail-closed 返回默认 DTO；
 //   adminBranding  —— /api/admin/branding，仅超级管理员(super_admin)/管理员(admin)/旧库残留
 //                     systemKey="owner" 可写。不认 actions.manage_*，不认任何资源角色。
+// 自主注册开关（auth.public_signup）虽在本设置处维护，但它是登录/访问策略：
+//   有效态 = env GX_ALLOW_PUBLIC_SIGNUP 显式开放 OR KV "on"（见 configSignup + branding store）。
 // 写操作一律走 withWriteTx（进程串行写铁律），事务提交后失效品牌缓存并写审计。
 
 import { Hono, type Context } from "hono";
@@ -71,6 +73,9 @@ const patchSchema = z
       .string()
       .max(BRANDING_LIMITS.copyrightMax, `版权信息不能超过 ${BRANDING_LIMITS.copyrightMax} 字符`)
       .optional(),
+    // 访客自主注册开关：KV 仅认 "on"/"off"（store 侧只把 "on" 当开放），布尔由 zod 保证；
+    // 非布尔（字符串/数字/null）一律 400，绝不做 truthy 隐式转换。
+    signupOpen: z.boolean().optional(),
   })
   .strict();
 
@@ -113,7 +118,7 @@ adminBranding.get("/", async (c) => {
   return c.json(await getBranding());
 });
 
-// PATCH /：更新产品名/版权串（仅 upsert 实际提供的键；空对象 400）。
+// PATCH /：更新产品名/版权串/自主注册开关（仅 upsert 实际提供的键；空对象 400）。
 adminBranding.patch("/", async (c) => {
   const userId = await requireBrandingAuth(c);
   await assertBrandingAdmin(userId);
@@ -135,6 +140,11 @@ adminBranding.patch("/", async (c) => {
     }
     if (parsed.data.copyright !== undefined) {
       await upsertBrandingKeyTx(tx, BRANDING_KEYS.copyright, parsed.data.copyright);
+    }
+    if (parsed.data.signupOpen !== undefined) {
+      // 关闭也显式写 "off"（而非删行/留空）：保证关掉后绝不残留历史 "on"，
+      // 且 KV 行的存在本身可被运维审计（store 侧仅 "on" 判开放，"off" 等同关闭）。
+      await upsertBrandingKeyTx(tx, BRANDING_KEYS.publicSignup, parsed.data.signupOpen ? "on" : "off");
     }
   });
   invalidateBrandingCache();

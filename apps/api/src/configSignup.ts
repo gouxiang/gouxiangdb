@@ -24,3 +24,18 @@ export function publicSignupOpen(env: NodeJS.ProcessEnv = process.env): boolean 
   if (raw === undefined) return false;
   return OPEN_VALUES.has(raw.trim().toLowerCase());
 }
+
+/**
+ * 纯函数：app_settings KV「auth.public_signup」原始值 → 后台自主注册开关是否开放。
+ *
+ * 与 env 侧刻意不同的口径——KV 侧只认字面量 "on"（trim 后小写比较）：
+ *   - KV 行只由后台 PATCH /api/admin/branding 写入（signupOpen true→"on" / false→"off"），
+ *     不存在运维手写 env 时 "true"/"1"/"yes" 之类的多字面量宽容需求；
+ *   - 只认单一明确字面量可避免「两套开关语义集合混淆」：若 KV 也接受 "true"/"1"，
+ *     读代码的人必须时刻区分当前值来自 env 还是 KV 才能判断是否开放；
+ *   - fail-closed：缺行（null/undefined）、空串、"off"、以及任何意外值一律 false，
+ *     与全新/升级实例默认关闭、行为与历史一致的口径吻合。
+ */
+export function publicSignupAllowedByKv(raw: string | null | undefined): boolean {
+  return typeof raw === "string" && raw.trim().toLowerCase() === "on";
+}

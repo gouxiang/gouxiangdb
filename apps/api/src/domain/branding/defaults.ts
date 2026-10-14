@@ -9,11 +9,16 @@
 /** 默认产品名：未配置任何品牌 KV、或读取失败时的全站回退值。 */
 export const DEFAULT_PRODUCT_NAME = "构想工作台";
 
-/** 品牌三键（app_settings KV 表的 k；零迁移复用既有表）。 */
+/**
+ * 品牌外观 + 登录访问策略键（app_settings KV 表的 k；零迁移复用既有表）。
+ * 第四键用 auth. 前缀：自主注册是登录/访问策略而非纯品牌外观，仅因产品定案与品牌外观
+ * 放在同一设置处才同居此模块；存储上与三键同为 app_settings 行。
+ */
 export const BRANDING_KEYS = {
   productName: "branding.product_name",
   copyright: "branding.copyright",
   loginHero: "branding.login_hero",
+  publicSignup: "auth.public_signup",
 } as const;
 
 /**

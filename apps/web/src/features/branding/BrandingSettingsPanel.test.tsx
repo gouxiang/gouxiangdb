@@ -60,6 +60,7 @@ describe("owner + 自定义品牌 dto", () => {
     productName: "星表私有云",
     copyright: "© {year} 星表科技",
     heroUrl: "/uploads/branding/hero.png?v=1",
+    signupOpen: true,
   });
 
   it("三行标签与头行操作齐全，产品名直接回填（哪怕等于默认名也回填）", () => {
@@ -70,6 +71,14 @@ describe("owner + 自定义品牌 dto", () => {
     expect(html).toContain(">保存<");
     expect(html).toContain('id="branding-product-name"');
     expect(html).toContain('value="星表私有云"');
+  });
+
+  it("访客自主注册第四行可见：标签 + 说明文案齐全；signupOpen=true 时开关轨为强调色", () => {
+    expect(html).toContain("允许访客自主注册");
+    expect(html).toContain("默认普通成员，由管理员分配权限");
+    expect(html).toContain("系统首次初始化创建超管不受此开关影响");
+    // Switch 选中态：轨道走 bg-gx-accent（未选中为 bg-gx-border-strong）。
+    expect(html).toContain("bg-gx-accent");
   });
 
   it("版权回填为 textarea 子文本，{year} 实时预览为当前年份，计数走单一真源", () => {
@@ -107,6 +116,26 @@ describe("owner + 默认品牌（heroUrl=null / 默认产品名）", () => {
   it("空名无法保存的引导文案在（恢复默认请点头部按钮）", () => {
     expect(html).toContain("留空无法保存");
   });
+
+  it("注册开关默认关（DEFAULT_BRANDING.signupOpen=false）：轨道非强调色，行仍可见", () => {
+    // 默认 dto 未显式给 signupOpen，checked = config?.signupOpen === true → false。
+    expect(html).toContain("允许访客自主注册");
+    expect(html).toContain("bg-gx-border-strong");
+  });
+});
+
+describe("访客自主注册开关 checked 反映 config.signupOpen", () => {
+  it("signupOpen=false（显式）→ 开关轨为非强调色", () => {
+    const html = render({
+      productName: "星表私有云",
+      copyright: "",
+      heroUrl: null,
+      signupOpen: false,
+    });
+    expect(html).toContain("允许访客自主注册");
+    expect(html).toContain("bg-gx-border-strong");
+    expect(html).not.toMatch(/relative h-5 w-9 rounded-full[^"]*bg-gx-accent/);
+  });
 });
 
 describe("双保险：非 owner / 探针未回 → return null", () => {
@@ -116,9 +145,11 @@ describe("双保险：非 owner / 探针未回 → return null", () => {
       productName: "星表私有云",
       copyright: "© x",
       heroUrl: "/u/h.png",
+      signupOpen: true,
     });
     expect(html).toBe("");
     expect(html).not.toContain("产品显示名称");
+    expect(html).not.toContain("允许访客自主注册");
   });
 
   it("isLoading=true（角色探针未回）同样渲染空串，避免闪现", () => {

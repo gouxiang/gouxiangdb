@@ -90,8 +90,14 @@ export function useBrandingAdmin({ enabled }: { enabled: boolean }) {
     mutationFn: () => Branding.resetHero(),
     onSuccess: invalidateBranding,
   });
+  // 访客自主注册开关：即时保存（与文本「保存」按钮的 dirty 态解耦）。
+  // 只透传布尔，不在前端拼 env 逻辑——有效态（env 强制开 OR 后台开关）由后端单一计算。
+  const setSignupOpen = useMutation({
+    mutationFn: (open: boolean) => Branding.update({ signupOpen: open }),
+    onSuccess: invalidateBranding,
+  });
 
-  return { configQuery, updateBranding, uploadHero, resetHero };
+  return { configQuery, updateBranding, uploadHero, resetHero, setSignupOpen };
 }
 
 /** 默认图地址导出给非 hook 场景（测试/后续 #753 登录页改版）复用，避免拼法散落。 */

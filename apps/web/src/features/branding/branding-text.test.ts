@@ -40,11 +40,16 @@ describe("renderCopyright", () => {
 });
 
 describe("DEFAULT_BRANDING", () => {
-  it("与后端缺省回退同值：默认产品名、空版权、null 广告图", () => {
+  it("与后端缺省回退同值：默认产品名、空版权、null 广告图、注册默认关", () => {
     expect(DEFAULT_BRANDING).toEqual({
       productName: "构想工作台",
       copyright: "",
       heroUrl: null,
+      signupOpen: false,
     });
+  });
+
+  it("DEFAULT_BRANDING.signupOpen === false（加载/失败占位 fail-closed）", () => {
+    expect(DEFAULT_BRANDING.signupOpen).toBe(false);
   });
 });

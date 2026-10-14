@@ -15,6 +15,8 @@ export const DEFAULT_BRANDING: BrandingConfigDTO = {
   productName: "构想工作台",
   copyright: "",
   heroUrl: null,
+  // 加载/失败占位默认关闭访客自主注册（fail-closed）；有效态由后端计算，前端只透传。
+  signupOpen: false,
 };
 
 /**

@@ -12,7 +12,8 @@ import { withWriteTx } from "./db.js";
 import { bootstrapFirstOwnerTx, grantDefaultRoleTx } from "./domain/org/members.js";
 import { DEFAULT_WORKSPACE_ID } from "./domain/org/workspace.js";
 import { config } from "./config.js";
-import { publicSignupOpen } from "./configSignup.js";
+import { publicSignupAllowedByKv, publicSignupOpen } from "./configSignup.js";
+import { BRANDING_KEYS } from "./domain/branding/defaults.js";
 
 // token 有效期常量与 JWT/状态解析核心已下沉到 domain/org/authState.ts（旧 /api 与 v1 共享）。
 export type Role = "owner" | "creator" | "editor" | "commenter" | "viewer";
@@ -30,16 +31,33 @@ const signupSchema = z.object({
 });
 
 /**
+ * 解析访客自主注册有效态（0.2.4）：env GX_ALLOW_PUBLIC_SIGNUP 显式开放 OR 后台 KV
+ * auth.public_signup="on"，两者皆缺=关闭（默认，与历史版本一致）。
+ *
+ * 纪律：env 已开放就短路返回 true、零额外查询（开放态与 0.1.6 及更早完全等价）；
+ * 仅 env 关时做一次 appSetting 主键 findUnique。本 helper 留在 auth.ts 而不是
+ * configSignup.ts，是为了让 configSignup.ts 保持零 db 依赖（纯函数模块，可在任何
+ * 无库上下文单测）。直接 import defaults.js 的 BRANDING_KEYS（零依赖模块），
+ * 不经过 branding/store.js，避免与品牌缓存模块产生任何耦合。
+ */
+async function resolveSignupOpen(): Promise<boolean> {
+  if (publicSignupOpen()) return true;
+  const row = await prisma.appSetting.findUnique({ where: { k: BRANDING_KEYS.publicSignup } });
+  return publicSignupAllowedByKv(row?.v);
+}
+
+/**
  * GET /bootstrap-status：免鉴权公开引导状态（前端据此决定渲染「创建首个管理员」还是登录页）。
  *
  * 只回两个布尔，绝不回邮箱/数量/任何账号信息——未部署实例上任何账号细节都可能被枚举：
  *   initialized = users 表是否已有任何用户（count>0，走 COUNT 不 hydrate）；
- *   signupOpen  = 公开注册开关 GX_ALLOW_PUBLIC_SIGNUP 的判定（未设置则为关闭，见 configSignup.ts）。
+ *   signupOpen  = 访客自主注册有效态：env GX_ALLOW_PUBLIC_SIGNUP 显式开放 OR 后台 KV
+ *                 auth.public_signup="on"（见 configSignup.ts；env 开时零额外查询）。
  * 与 signup 同为免鉴权路由（在 requireActiveUser 之外，v1 路由见 routes/v1/index.ts:28）。
  */
 auth.get("/bootstrap-status", async (c) => {
-  const userCount = await prisma.user.count();
-  return c.json({ initialized: userCount > 0, signupOpen: publicSignupOpen() });
+  const [userCount, signupOpen] = await Promise.all([prisma.user.count(), resolveSignupOpen()]);
+  return c.json({ initialized: userCount > 0, signupOpen });
 });
 
 auth.post("/signup", async (c) => {
@@ -49,10 +67,13 @@ auth.post("/signup", async (c) => {
     return c.json({ error: "Invalid input", details: parsed.error.issues }, 400);
   }
   const { email, password, displayName } = parsed.data;
-  // 注册开关（0.1.7）：关闭时仅【空库】放行——首用户引导必须永远可行（否则重装/回滚会自举
-  // 死锁，首账号自举见 bootstrapFirstOwnerTx）；非空库一律 403 SIGNUP_CLOSED。
-  // 仅在关闭态多一次 count（开放态零新增查询，与 0.1.6 及更早完全等价）。
-  if (!publicSignupOpen() && (await prisma.user.count()) > 0) {
+  // 注册开关（0.2.4 后台开关与 env 取或；0.1.7 仅有 env）：关闭时仅【空库】放行——首用户
+  // 引导必须永远可行（否则重装/回滚会自举死锁，首账号自举见 bootstrapFirstOwnerTx）；
+  // 非空库一律 403 SIGNUP_CLOSED。纪律：env 已开放时 resolveSignupOpen 内部短路、零查询；
+  // 仅 env 关时查一次 KV，仍关闭才 count——开放态（env 或 KV 任一）不做无谓 count，
+  // 与 0.1.6 及更早完全等价。
+  const signupOpen = await resolveSignupOpen();
+  if (!signupOpen && (await prisma.user.count()) > 0) {
     return c.json({ error: "注册已关闭，请联系管理员邀请", code: "SIGNUP_CLOSED" }, 403);
   }
   const existing = await prisma.user.findUnique({ where: { email } });

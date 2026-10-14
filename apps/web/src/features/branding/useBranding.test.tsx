@@ -61,6 +61,7 @@ const CUSTOM: BrandingConfigDTO = {
   productName: "定制品牌名",
   copyright: "© {year} 定制公司",
   heroUrl: "/uploads/branding/hero.png?v=1728000000",
+  signupOpen: true,
 };
 
 /** SSR 下把 hook 结果拍成一行文本断言。 */
@@ -162,6 +163,7 @@ interface AdminHolder {
   updateBranding?: { mutateAsync(data: BrandingUpdateInput): Promise<unknown> };
   uploadHero?: { mutateAsync(file: File): Promise<unknown> };
   resetHero?: { mutateAsync(): Promise<unknown> };
+  setSignupOpen?: { mutateAsync(open: boolean): Promise<unknown> };
 }
 
 function AdminProbe({
@@ -175,6 +177,7 @@ function AdminProbe({
   holder.updateBranding = admin.updateBranding;
   holder.uploadHero = admin.uploadHero;
   holder.resetHero = admin.resetHero;
+  holder.setSignupOpen = admin.setSignupOpen;
   return <span>admin</span>;
 }
 
@@ -220,5 +223,29 @@ describe("useBrandingAdmin：写成功后失效共享 branding 缓存（全站�
     const qc = makeClient();
     withClient(qc, <AdminProbe holder={{}} enabled={false} />);
     expect(adminConfig).not.toHaveBeenCalled();
+  });
+
+  it("setSignupOpen(true) → 仅 PATCH {signupOpen:true}，成功后失效 branding 键", async () => {
+    const qc = makeClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    update.mockResolvedValue({ ...CUSTOM, signupOpen: true });
+    const holder: AdminHolder = {};
+    withClient(qc, <AdminProbe holder={holder} enabled={false} />);
+
+    await holder.setSignupOpen!.mutateAsync(true);
+    expect(update).toHaveBeenCalledWith({ signupOpen: true });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: QK.branding });
+  });
+
+  it("setSignupOpen(false) → 仅 PATCH {signupOpen:false}（关闭自主注册）", async () => {
+    const qc = makeClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    update.mockResolvedValue({ ...CUSTOM, signupOpen: false });
+    const holder: AdminHolder = {};
+    withClient(qc, <AdminProbe holder={holder} enabled={false} />);
+
+    await holder.setSignupOpen!.mutateAsync(false);
+    expect(update).toHaveBeenCalledWith({ signupOpen: false });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: QK.branding });
   });
 });

@@ -8,7 +8,7 @@
 // 空库首账号引导不受影响：auth.ts 只在 userCount>0 时才用本开关挡注册。
 
 import { describe, expect, it } from "vitest";
-import { publicSignupOpen } from "../configSignup.js";
+import { publicSignupAllowedByKv, publicSignupOpen } from "../configSignup.js";
 
 describe("publicSignupOpen（fail-closed）", () => {
   it("未设置 / 空字符串一律关闭", () => {
@@ -27,5 +27,29 @@ describe("publicSignupOpen（fail-closed）", () => {
     for (const closed of ["off", "OFF", " off ", "false", "FALSE", "0", " 0\t", "yes", "open", "opne", "onn", "2", " truex "]) {
       expect(publicSignupOpen({ GX_ALLOW_PUBLIC_SIGNUP: closed }), closed).toBe(false);
     }
+  });
+});
+
+describe("publicSignupAllowedByKv（后台 KV 开关，只认明确 on）", () => {
+  it("仅 trim 后小写等于 on 判开放（大小写/首尾空白不敏感）", () => {
+    for (const open of ["on", "ON", "On", " on ", "\ton\n"]) {
+      expect(publicSignupAllowedByKv(open), open).toBe(true);
+    }
+  });
+
+  it("env 侧接受的 true/1 在 KV 侧一律关闭（两套语义不混淆）", () => {
+    for (const closed of ["true", "TRUE", "1", " 1 ", "yes", "open", "onn", "opn"]) {
+      expect(publicSignupAllowedByKv(closed), closed).toBe(false);
+    }
+  });
+
+  it("off/空串/空白/null/undefined 一律关闭（fail-closed，缺行即默认关闭）", () => {
+    expect(publicSignupAllowedByKv("off")).toBe(false);
+    expect(publicSignupAllowedByKv("OFF")).toBe(false);
+    expect(publicSignupAllowedByKv(" off ")).toBe(false);
+    expect(publicSignupAllowedByKv("")).toBe(false);
+    expect(publicSignupAllowedByKv("   ")).toBe(false);
+    expect(publicSignupAllowedByKv(null)).toBe(false);
+    expect(publicSignupAllowedByKv(undefined)).toBe(false);
   });
 });

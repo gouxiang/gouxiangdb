@@ -58,10 +58,15 @@ async function upload(file: File, userId = "admin"): Promise<Response> {
 }
 
 describe("品牌外观：匿名公开读", () => {
-  it("无 KV 时匿名 GET 200 默认 DTO（产品名默认/版权空/heroUrl null）", async () => {
+  it("无 KV 时匿名 GET 200 默认 DTO（产品名默认/版权空/heroUrl null/注册默认关）", async () => {
     const res = await h.app.request("/api/auth/branding");
     expect(res.status).toBe(200);
-    expect(await json(res)).toEqual({ productName: "构想工作台", copyright: "", heroUrl: null });
+    expect(await json(res)).toEqual({
+      productName: "构想工作台",
+      copyright: "",
+      heroUrl: null,
+      signupOpen: false,
+    });
   });
 
   it("匿名写操作一律 401 UNAUTHORIZED", async () => {

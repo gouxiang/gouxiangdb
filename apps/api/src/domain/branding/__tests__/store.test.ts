@@ -41,11 +41,12 @@ describe("renderCopyright", () => {
 });
 
 describe("BRANDING_KEYS", () => {
-  it("三键固定（app_settings 存储契约）", () => {
+  it("四键固定（app_settings 存储契约；注册开关用 auth. 前缀）", () => {
     expect(BRANDING_KEYS).toEqual({
       productName: "branding.product_name",
       copyright: "branding.copyright",
       loginHero: "branding.login_hero",
+      publicSignup: "auth.public_signup",
     });
   });
 });

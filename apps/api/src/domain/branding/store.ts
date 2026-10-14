@@ -1,9 +1,15 @@
-// 品牌外观配置域层（0.2.4-rc）：复用 app_settings KV 表，零迁移、零新增依赖。
+// 品牌外观配置域层（0.2.4）：复用 app_settings KV 表，零迁移、零新增依赖。
 //
-// 三键：
+// 四键：
 //   branding.product_name  自定义产品名（trim 后非空；缺行/空串 -> 默认产品名）
 //   branding.copyright     版权原始串（缺行="；空串=前端不渲染；支持 {year} 占位）
 //   branding.login_hero    登录广告图文件名（hero.jpg|hero.png|hero.webp；空串=前端内置默认图）
+//   auth.public_signup     访客自主注册开关（"on"=开放；缺行/其它值=关闭；auth. 前缀因为
+//                          这是登录/访问策略，只是与品牌外观同处一个后台设置页）
+//
+// signupOpen 有效态：环境变量 GX_ALLOW_PUBLIC_SIGNUP 显式开放（运维强制旁路）OR KV "on"，
+// 见 configSignup.ts 两个纯函数。两者皆缺=关闭（默认，行为与历史一致）；空库首账号
+// 自举永远放行，由 auth.ts 单独处理，与本开关无关。
 //
 // 匿名登录页/顶栏高频读：进程内整体 TTL 缓存（默认 60s），所有写路径事务提交后必须调
 // invalidateBrandingCache()，保证 PATCH 后下一次匿名 GET 立即读到新值。
@@ -13,6 +19,7 @@
 // 保持品牌模块对外只有一个导入入口。
 
 import type { BrandingConfigDTO } from "@gx/shared-types";
+import { publicSignupAllowedByKv, publicSignupOpen } from "../../configSignup.js";
 import { prisma, type DbTx } from "../../db.js";
 import { BRANDING_KEYS, DEFAULT_PRODUCT_NAME, normalizeProductName } from "./defaults.js";
 
@@ -34,8 +41,15 @@ export function invalidateBrandingCache(): void {
   cache = null;
 }
 
-/** 由 KV 行组装 DTO（纯函数，updatedAt 仅用于广告图缓存击穿参数）。 */
-function assemble(rows: Array<{ k: string; v: string; updatedAt: Date }>): BrandingConfigDTO {
+/**
+ * 由 KV 行组装 DTO（纯函数，updatedAt 仅用于广告图缓存击穿参数）。
+ * signupOpen 不在本函数内读 env/DB：有效态（env 强制开 OR KV on）由 getBranding 计算后
+ * 作为第二参注入，保持 assemble 是纯函数（rows + 标量 -> DTO，便于单测与缓存一致）。
+ */
+function assemble(
+  rows: Array<{ k: string; v: string; updatedAt: Date }>,
+  signupOpen: boolean,
+): BrandingConfigDTO {
   const byKey = new Map(rows.map((r) => [r.k, r]));
   const productName = normalizeProductName(byKey.get(BRANDING_KEYS.productName)?.v ?? "");
   const copyright = byKey.get(BRANDING_KEYS.copyright)?.v ?? "";
@@ -44,16 +58,20 @@ function assemble(rows: Array<{ k: string; v: string; updatedAt: Date }>): Brand
   const heroUrl = heroRow && heroFile
     ? `/uploads/branding/${heroFile}?v=${heroRow.updatedAt.getTime()}`
     : null;
-  return { productName, copyright, heroUrl };
-}
-
-/** 默认 DTO（未配置任何 KV 或读取失败时的回退形态）。 */
-export function defaultBranding(): BrandingConfigDTO {
-  return { productName: DEFAULT_PRODUCT_NAME, copyright: "", heroUrl: null };
+  return { productName, copyright, heroUrl, signupOpen };
 }
 
 /**
- * 读品牌配置（一次 findMany 取三键）。
+ * 默认 DTO（未配置任何 KV 或读取失败时的回退形态）。
+ * 无 KV 行时仍尊重 env 强制开放（运维旁路在品牌读取失败时也不能被意外吞掉）；
+ * 默认 env 未设 -> signupOpen=false，与历史行为一致。
+ */
+export function defaultBranding(): BrandingConfigDTO {
+  return { productName: DEFAULT_PRODUCT_NAME, copyright: "", heroUrl: null, signupOpen: publicSignupOpen() };
+}
+
+/**
+ * 读品牌配置（一次 findMany 取四键）。
  * 命中 TTL 缓存时零查询；client 传入事务实例时不使用缓存（事务内需要最新视图）。
  */
 export async function getBranding(client?: BrandingClient): Promise<BrandingConfigDTO> {
@@ -61,9 +79,21 @@ export async function getBranding(client?: BrandingClient): Promise<BrandingConf
     return cache.value;
   }
   const rows = await (client ?? prisma).appSetting.findMany({
-    where: { k: { in: [BRANDING_KEYS.productName, BRANDING_KEYS.copyright, BRANDING_KEYS.loginHero] } },
+    where: {
+      k: {
+        in: [
+          BRANDING_KEYS.productName,
+          BRANDING_KEYS.copyright,
+          BRANDING_KEYS.loginHero,
+          BRANDING_KEYS.publicSignup,
+        ],
+      },
+    },
   });
-  const value = assemble(rows);
+  // env 已显式开放即短路为 true（此时不关心 KV 值）；env 关时 KV 仅认明确 "on"。
+  const kvRow = rows.find((r) => r.k === BRANDING_KEYS.publicSignup);
+  const signupOpen = publicSignupOpen() || publicSignupAllowedByKv(kvRow?.v);
+  const value = assemble(rows, signupOpen);
   if (!client) cache = { value, at: Date.now() };
   return value;
 }

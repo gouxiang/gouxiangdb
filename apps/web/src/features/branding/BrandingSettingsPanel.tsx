@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BRANDING_LIMITS } from "@gx/shared-types";
 import { ApiError, withBase } from "../../api/client";
-import { Button, Input, Textarea, toast } from "../../components/ui";
+import { Button, Input, Switch, Textarea, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { useIsWorkspaceOwner } from "../contacts/contacts-hooks";
 import { useBrandingAdmin, DEFAULT_HERO_URL } from "./useBranding";
@@ -44,7 +44,7 @@ interface TextDraft {
 export function BrandingSettingsPanel() {
   // 双保险：非 owner / 探针未回都不渲染（fail-closed，不闪现管理面板）。
   const { isOwner, isLoading } = useIsWorkspaceOwner();
-  const { configQuery, updateBranding, uploadHero, resetHero } =
+  const { configQuery, updateBranding, uploadHero, resetHero, setSignupOpen } =
     useBrandingAdmin({ enabled: isOwner });
   const config = configQuery.data;
 
@@ -137,6 +137,17 @@ export function BrandingSettingsPanel() {
       toast("已恢复默认广告图", "success");
     } catch (err) {
       toast(errorText(err, "恢复失败，请重试"), "error");
+    }
+  }
+
+  // 访客自主注册开关：切换即时保存（独立 mutation，不进文本 draft/textDirty），
+  // 成功后 invalidate branding，登录页 bootstrap-status 下一轮即反映新有效态。
+  async function toggleSignupOpen(next: boolean) {
+    try {
+      await setSignupOpen.mutateAsync(next);
+      toast("设置已保存", "success");
+    } catch (err) {
+      toast(errorText(err, "保存失败，请重试"), "error");
     }
   }
 
@@ -273,6 +284,24 @@ export function BrandingSettingsPanel() {
               支持 PNG/JPG/WebP，不超过 5MB；建议竖版 2:3，画面避免文字
             </span>
           </div>
+        </div>
+
+        {/* d. 访客自主注册开关（即时保存，独立于文本「保存」按钮） */}
+        <div className="flex items-start justify-between gap-4 px-4 py-3">
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-gx-13 text-gx-text-primary">
+              允许访客自主注册
+            </span>
+            <span className="text-gx-11 text-gx-text-hint">
+              开启后，未登录访客可在登录页自行注册账号（默认普通成员，由管理员分配权限）；关闭则只能由管理员邀请建号。系统首次初始化创建超管不受此开关影响。
+            </span>
+          </div>
+          <Switch
+            checked={config?.signupOpen === true}
+            onChange={(v) => void toggleSignupOpen(v)}
+            disabled={setSignupOpen.isPending}
+            title={setSignupOpen.isPending ? "保存中…" : undefined}
+          />
         </div>
       </div>
     </div>
