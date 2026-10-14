@@ -45,6 +45,8 @@ vi.mock("./canvas/GxCanvas", async () => {
   };
 });
 vi.mock("./DocOutline", () => ({ DocOutline: () => null }));
+// 品牌产品名 hook 走 react-query；本 SSR 回归不挂 QueryClientProvider，给默认名桩。
+vi.mock("../branding/useBranding", () => ({ useProductName: () => "构想工作台" }));
 
 import PublicSharePage from "./PublicSharePage";
 import { PublicDocView } from "./PublicDocView";

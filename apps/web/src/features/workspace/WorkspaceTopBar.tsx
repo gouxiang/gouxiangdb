@@ -7,6 +7,7 @@ import { Icon } from "../../components/icons";
 import { useAuthStore } from "../../store/auth";
 import { AVATAR_PALETTE } from "@gx/design-tokens";
 import { PersonalCenterDrawer } from "../settings/PersonalCenterDrawer";
+import { useProductName } from "../branding/useBranding";
 
 function avatarColor(seed: string): string {
   let h = 0;
@@ -17,6 +18,7 @@ function avatarColor(seed: string): string {
 export function WorkspaceTopBar({ onOpenSearch }: { onOpenSearch: () => void }) {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const productName = useProductName();
   const [personalCenterOpen, setPersonalCenterOpen] = useState(false);
 
   return (
@@ -27,10 +29,10 @@ export function WorkspaceTopBar({ onOpenSearch }: { onOpenSearch: () => void }) 
         type="button"
         onClick={() => navigate("/")}
         className="flex shrink-0 items-center gap-1.5 rounded-gx-sm px-1 py-1 hover:bg-gx-bg"
-        title="构想工作台"
+        title={productName}
       >
         <Icon name="database" size={16} className="text-gx-accent" />
-        <span className="hidden text-gx-13 font-semibold text-gx-text-primary lg:inline">构想工作台</span>
+        <span className="hidden text-gx-13 font-semibold text-gx-text-primary lg:inline">{productName}</span>
       </button>
 
       {/*

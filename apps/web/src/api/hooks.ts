@@ -75,6 +75,9 @@ export const QK = {
   trash: (baseId: string) => ["trash", baseId] as const,
   search: (baseId: string, q: string) => ["search", baseId, q] as const,
   globalSearch: (q: string) => ["globalSearch", q] as const,
+  // 品牌外观（0.2.4-rc）：匿名读与管理员读共用同一缓存键，管理员保存后整体失效，
+  // 登录页/顶栏/公开分享页等匿名读组件立即拿到新配置（features/branding/useBranding.ts）。
+  branding: ["branding"] as const,
 };
 
 function enabledOf(v: string | null | undefined): boolean {

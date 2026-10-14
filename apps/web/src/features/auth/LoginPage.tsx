@@ -15,6 +15,7 @@ import {
   useBootstrapStatus,
   validateBootstrapForm,
 } from "./login-bootstrap";
+import { useProductName } from "../branding/useBranding";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -22,6 +23,8 @@ export default function LoginPage() {
 
   const bootstrapStatus = useBootstrapStatus();
   const entry = resolveLoginEntry(bootstrapStatus);
+  // 品牌产品名后台可自定义；探针未完成/失败时 hook 以内置默认名占位（#753 再做双栏改版）
+  const productName = useProductName();
 
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
@@ -105,7 +108,7 @@ export default function LoginPage() {
         )}
         {/* 品牌区 */}
         <div className="mb-5 text-center">
-          <div className="text-gx-18 font-semibold text-gx-text-primary">构想工作台</div>
+          <div className="text-gx-18 font-semibold text-gx-text-primary">{productName}</div>
           <div className="mt-1 text-gx-12 text-gx-text-hint">
             {entry.bootstrap ? "初始化工作台 · 创建超级管理员" : "智能表格 · 前后端分离重写"}
           </div>

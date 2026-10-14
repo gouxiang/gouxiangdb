@@ -38,6 +38,7 @@ import ContactsPage from "./features/contacts/ContactsPage";
 import InviteAcceptPage from "./features/contacts/InviteAcceptPage";
 import HelpCenterPage from "./features/help/HelpCenterPage";
 import { ShellGate } from "./features/workspace/ShellGate";
+import { BrandingTitle } from "./features/branding/BrandingTitle";
 import { WorkspaceSettingsPage } from "./features/workspace/WorkspaceSettingsPage";
 import PermPanel from "./features/authz/PermPanel";
 
@@ -128,6 +129,8 @@ export default function App() {
     <>
       {/* R-D-19 离线横幅：在线时渲染 null（零布局影响）；恢复后自动消失 */}
       <OfflineBanner />
+      {/* 浏览器标题跟随后台品牌产品名（所有路由共享，含登录页/公开分享页） */}
+      <BrandingTitle />
       <Routes>
       <Route path="/login" element={token ? <Navigate to="/" replace /> : <LoginPage />} />
       {/* 首次登录强制改密：需要登录态，但不套业务壳（壳内接口会被闸门 403 挡住） */}

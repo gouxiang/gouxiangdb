@@ -12,6 +12,8 @@ import { StaticRouter } from "react-router-dom/server";
 
 vi.mock("../../components/LibrarySwitcher", () => ({ LibrarySwitcher: () => null }));
 vi.mock("../settings/PersonalCenterDrawer", () => ({ PersonalCenterDrawer: () => null }));
+// 品牌产品名 hook 走 react-query；本 SSR 回归不挂 QueryClientProvider，给默认名桩即可。
+vi.mock("../branding/useBranding", () => ({ useProductName: () => "构想工作台" }));
 
 import { WorkspaceTopBar } from "./WorkspaceTopBar";
 

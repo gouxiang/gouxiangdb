@@ -83,6 +83,9 @@ import type {
 } from "@gx/shared-types";
 // 应用更新机制（DESIGN §5.2/§6.3）：DTO 真源在 shared-types，web 只消费不改形状。
 import type { UpdatePrefetchDTO, UpdateStatusDTO } from "@gx/shared-types";
+// 品牌外观（0.2.4-rc）：匿名读 + 管理员写。契约真源 packages/shared-types/src/branding.ts，
+// 端点真源 apps/api/src/routes/branding.ts。
+import type { BrandingConfigDTO, BrandingUpdateInput } from "@gx/shared-types";
 import { resolveApiBase, withBase as joinBase } from "../lib/base";
 import { saveSessionFrom } from "../lib/session-from";
 import { authHeaders } from "./authHeader";
@@ -1857,3 +1860,49 @@ export const AdminUpdateApi = {
     }),
 };
 
+
+// ============ Branding（品牌外观：匿名读 + 管理员写，0.2.4-rc） ============
+//
+// GET  /api/auth/branding        匿名公开（fail-closed 永返默认 DTO，不会 401）
+// GET  /api/admin/branding       登录 + 超管/管理员
+// PATCH /api/admin/branding      改名/版权（至少一键）
+// POST  /api/admin/branding/hero multipart 字段名 file（jpg/png/webp，≤5MB）
+// DELETE /api/admin/branding/hero 恢复内置默认图
+//
+// 上传不能走 apiFetch：它强制注入 Content-Type: application/json（见上方 apiFetch），
+// multipart 请求必须让浏览器自行带 boundary，故手写 fetch；鉴权统一用 X-GX-Token
+// （authHeaders），不要照抄 Auth.uploadAvatar 的 Authorization 写法——那是飞牛网关
+// 踩坑前的旧代码（见 api/authHeader.ts 头注释）。
+export const Branding = {
+  /** 匿名读公开品牌配置（产品名/版权/广告图）。 */
+  publicConfig: () => apiFetch<BrandingConfigDTO>("/api/auth/branding"),
+  /** 管理员读当前品牌配置（含与公开口同形状的 DTO；后端在此口做角色校验）。 */
+  adminConfig: () => apiFetch<BrandingConfigDTO>("/api/admin/branding"),
+  /** 改产品名/版权；空对象后端 400「没有需要更新的字段」。 */
+  update: (data: BrandingUpdateInput) =>
+    apiFetch<BrandingConfigDTO>("/api/admin/branding", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  /** 上传登录广告图（multipart，字段名 file）；返回保存后的最新 DTO。 */
+  uploadHero: async (file: File): Promise<BrandingConfigDTO> => {
+    const token = useAuthStore.getState().token;
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`${BASE_URL}/api/admin/branding/hero`, {
+      method: "POST",
+      // 注意：不设 Content-Type，由浏览器带 multipart/form-data; boundary=...
+      headers: authHeaders(token),
+      body: fd,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 401) handleUnauthorized();
+      throw new ApiError(res.status, body);
+    }
+    return (await res.json()) as BrandingConfigDTO;
+  },
+  /** 恢复内置默认广告图；返回最新 DTO。 */
+  resetHero: () =>
+    apiFetch<BrandingConfigDTO>("/api/admin/branding/hero", { method: "DELETE" }),
+};

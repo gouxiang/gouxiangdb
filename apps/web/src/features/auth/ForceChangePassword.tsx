@@ -15,6 +15,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Auth, ApiError } from "../../api/client";
 import { useAuthStore } from "../../store/auth";
 import { Button, Input, toast } from "../../components/ui";
+import { useProductName } from "../branding/useBranding";
 
 /**
  * 本地校验（与后端 zod 的 8~72 对齐，apps/api/src/auth.ts:150-153）。
@@ -38,6 +39,8 @@ export default function ForceChangePassword() {
   const setAuth = useAuthStore((s) => s.setAuth);
   const updateUser = useAuthStore((s) => s.updateUser);
   const qc = useQueryClient();
+  // 品牌产品名后台可自定义；探针未完成/失败时 hook 以内置默认名占位
+  const productName = useProductName();
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -85,10 +88,9 @@ export default function ForceChangePassword() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gx-bg px-4">
       <div className="w-[360px] rounded-gx-xl bg-gx-surface p-6 shadow-lg">
-        {/* 品牌区：与登录页一致 */}
+        {/* 品牌区：与登录页一致。副标题不重复——下方警示框已有「请先修改初始密码」标题 */}
         <div className="mb-5 text-center">
-          <div className="text-gx-18 font-semibold text-gx-text-primary">构想工作台</div>
-          <div className="mt-1 text-gx-12 text-gx-text-hint">智能表格 · 前后端分离重写</div>
+          <div className="text-gx-18 font-semibold text-gx-text-primary">{productName}</div>
         </div>
 
         {/* 为什么必须改 */}

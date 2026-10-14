@@ -18,11 +18,14 @@ import { PublicApi } from "../../api/client";
 import { usePublicShare } from "./kb-hooks";
 import { PublicShareTree } from "./PublicShareTree";
 import { PublicDocView, type RemoteDoc } from "./PublicDocView";
+import { useProductName } from "../branding/useBranding";
 
 export default function PublicSharePage() {
   const { token, docId: routeDocId } = useParams();
   const navigate = useNavigate();
   const { data, isLoading, error } = usePublicShare(token);
+  // 匿名页同样在 QueryClientProvider 内，品牌探针公开可读
+  const productName = useProductName();
 
   const [activeDocId, setActiveDocId] = useState<string | undefined>(undefined);
   const [remoteDoc, setRemoteDoc] = useState<RemoteDoc | null>(null);
@@ -106,7 +109,7 @@ export default function PublicSharePage() {
           onClick={() => navigate("/login")}
           className="mt-2 rounded-gx-lg bg-gx-accent px-4 py-2 text-gx-13 font-medium text-white hover:brightness-95"
         >
-          返回构想工作台
+          返回{productName}
         </button>
       </div>
     );

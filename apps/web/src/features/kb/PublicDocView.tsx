@@ -13,6 +13,7 @@ import { GxCanvas } from "./canvas/GxCanvas";
 import { DocKindIcon } from "./kb-ui";
 import { DocOutline } from "./DocOutline";
 import { usePublicDocEditing } from "./usePublicDocEditing";
+import { useProductName } from "../branding/useBranding";
 
 export interface RemoteDoc {
   id: string;
@@ -37,6 +38,8 @@ export function PublicDocView({
 }) {
   const navigate = useNavigate();
   const canEdit = doc.canEdit === true;
+  // 公开页品牌名由匿名探针提供（QueryClientProvider 包住公开分享路由）
+  const productName = useProductName();
   const editing = usePublicDocEditing({
     token,
     docId: doc.id,
@@ -72,7 +75,7 @@ export function PublicDocView({
           onClick={() => navigate("/login")}
           className="rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-bg"
         >
-          在构想工作台中打开
+          在{productName}中打开
         </button>
       </header>
 
