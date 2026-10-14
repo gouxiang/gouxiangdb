@@ -8,6 +8,8 @@
 //     artifact 缺席场景）时用通用占位，绝不输出 undefined。
 
 import type { InstallGuideKind, ManualInstallGuideDTO } from "@gx/shared-types";
+// 零依赖默认名（不 import branding/store.js：避免 db.js 被拖进 update 纯单测模块图）。
+import { DEFAULT_PRODUCT_NAME } from "../branding/defaults.js";
 
 /** fnos-upload 升级前提示（备份/数据保留口径 + 失败处置，两段）。 */
 const FNOS_PRE_UPGRADE_NOTE = [
@@ -16,14 +18,14 @@ const FNOS_PRE_UPGRADE_NOTE = [
   "若安装过程中平台提示失败，请不要重复强制安装，携带本页面显示的当前版本与架构信息联系支持。",
 ].join("\n\n");
 
-function fnosSteps(version: string, filename: string): string[] {
+function fnosSteps(version: string, filename: string, productName: string): string[] {
   return [
     `点击上方按钮，将 ${filename} 下载到本机；`,
     "打开飞牛 fnOS 的「应用中心」；",
     "选择「手动安装 / 上传安装包」（不同 fnOS 版本文案可能略有差异）；",
     "选中刚下载的 .fpk 文件并确认安装，平台将自动完成升级"
       + "（包含数据库迁移，期间服务会短暂重启）；",
-    `安装完成后重新打开构想工作台，在本页面确认版本号已变为 ${version}。`,
+    `安装完成后重新打开${productName}，在本页面确认版本号已变为 ${version}。`,
   ];
 }
 
@@ -31,15 +33,19 @@ function fnosSteps(version: string, filename: string): string[] {
  * 装配飞牛 fpk 手动上传安装指引。
  * @param version 目标发布版本（步骤 5 提示的版本号）。
  * @param filename 目标 artifact 文件名；null 时用通用占位（below-min：artifact 缺席）。
+ * @param productName 品牌产品名（0.2.4-rc 收口）；缺省回退默认产品名，保持纯函数既有行为。
  */
 export function renderFnosUploadGuide(
   version: string,
   filename: string | null,
+  productName: string = DEFAULT_PRODUCT_NAME,
 ): ManualInstallGuideDTO {
   const name = filename ?? "升级包（.fpk）";
+  // 品牌名仅做 trim 兜底；空串回退默认（KV 缺行理论上已由 getBranding 归一，此处双保险）。
+  const safeName = productName.trim() === "" ? DEFAULT_PRODUCT_NAME : productName.trim();
   return {
     kind: "fnos-upload" satisfies InstallGuideKind,
-    steps: fnosSteps(version, name),
+    steps: fnosSteps(version, name, safeName),
     preUpgradeNote: FNOS_PRE_UPGRADE_NOTE,
   };
 }

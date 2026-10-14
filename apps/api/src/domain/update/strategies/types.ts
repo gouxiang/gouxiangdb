@@ -27,6 +27,8 @@ export interface SelectReleaseContext {
 export interface InstallGuideContext {
   version: string;
   filename: string | null;
+  /** 品牌产品名（0.2.4-rc 收口；由 service 读品牌配置后注入，缺省为默认产品名）。 */
+  productName: string;
 }
 
 /**

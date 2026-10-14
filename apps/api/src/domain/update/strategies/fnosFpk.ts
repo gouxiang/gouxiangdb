@@ -75,6 +75,6 @@ export const fnosFpkStrategy: UpdateStrategy = {
   },
 
   renderInstallGuide(ctx: InstallGuideContext): ManualInstallGuideDTO {
-    return renderFnosUploadGuide(ctx.version, ctx.filename);
+    return renderFnosUploadGuide(ctx.version, ctx.filename, ctx.productName);
   },
 };

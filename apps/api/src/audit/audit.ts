@@ -83,7 +83,11 @@ export type AuditEventName =
   // failed：后台拉取失败（带稳定 PREFETCH_* errorCode，断点保留可续传）。
   | "update_prefetch_started"
   | "update_prefetch_completed"
-  | "update_prefetch_failed";
+  | "update_prefetch_failed"
+  // 0.2.4-rc 品牌外观（仅超级管理员/管理员；detail 只带字段名/扩展名/字节数/动作，
+  // 不带产品名/版权串新旧值内容）。
+  | "branding_update"
+  | "branding_hero_update";
 
 interface AuditInput {
   event: AuditEventName;

@@ -154,6 +154,33 @@ describe("UpdateService happy / latest", () => {
     expect(dto.update!.manualInstallGuide.steps).toHaveLength(5);
     expect(dto.update!.manualInstallGuide.steps[0]).toContain("gouxiangdb-0.2.3-x86.fpk");
     expect(dto.update!.manualInstallGuide.preUpgradeNote).toContain("在线备份");
+    // 0.2.4-rc 品牌收口：未注入 branding 时安装指引步骤 5 用默认产品名（不触库）。
+    expect(dto.update!.manualInstallGuide.steps[4]).toContain("重新打开构想工作台");
+  });
+
+  it("注入 branding 提供者 -> 安装指引步骤 5 使用品牌产品名（0.2.4-rc 收口）", async () => {
+    const src = new FakeSource(() =>
+      manifest({ "fnos-fpk": { releases: [release()] } }));
+    const r = await new UpdateService(baseConfig(), deps(src, {
+      branding: async () => ({ productName: "蓝奏云" }),
+    })).check();
+    expect(r.dto.update).not.toBeNull();
+    expect(r.dto.update!.manualInstallGuide.steps[4]).toContain("重新打开蓝奏云");
+  });
+
+  it("branding 提供者抛错/返回空名 -> 回退默认产品名（更新检查不因品牌读取失败而坏）", async () => {
+    const src = new FakeSource(() =>
+      manifest({ "fnos-fpk": { releases: [release()] } }));
+    const boom = new UpdateService(baseConfig(), deps(src, {
+      branding: async () => {
+        throw new Error("db locked");
+      },
+    }));
+    const blank = new UpdateService(baseConfig(), deps(src, {
+      branding: async () => ({ productName: "   " }),
+    }));
+    expect((await boom.check()).dto.update!.manualInstallGuide.steps[4]).toContain("构想工作台");
+    expect((await blank.check()).dto.update!.manualInstallGuide.steps[4]).toContain("构想工作台");
   });
 
   it("候选不高于当前 -> latest / update=null", async () => {

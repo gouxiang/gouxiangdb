@@ -13,6 +13,7 @@ import { config } from "../../config.js";
 import { writeAudit } from "../../audit/audit.js";
 import { UpdateService } from "../../domain/update/service.js";
 import { UpdatePrefetcher, type PrefetchSettle } from "../../domain/update/prefetch.js";
+import { getBranding } from "../../domain/branding/store.js";
 
 export const STARTUP_ENV: NodeJS.ProcessEnv = { ...process.env };
 
@@ -20,7 +21,12 @@ let serviceSingleton: UpdateService | null = null;
 
 export function updateService(): UpdateService {
   if (!serviceSingleton) {
-    serviceSingleton = new UpdateService(config.update, { env: STARTUP_ENV });
+    // 0.2.4-rc：安装指引文案产品名收口到品牌配置（getBranding 自带 60s 缓存；读取异常由
+    // UpdateService.brandedProductName 兜底默认名）。
+    serviceSingleton = new UpdateService(config.update, {
+      env: STARTUP_ENV,
+      branding: () => getBranding(),
+    });
   }
   return serviceSingleton;
 }
@@ -96,6 +102,8 @@ export function __setUpdateRuntimeForTest(overrides: {
   }
   serviceSingleton = new UpdateService(config.update, {
     env: STARTUP_ENV,
+    // 与生产单例同源注入品牌名，保证测试替换 runtime 后安装指引文案仍取品牌配置。
+    branding: () => getBranding(),
     ...(overrides.nodeArch ? { nodeArch: overrides.nodeArch } : {}),
     ...(overrides.nodePlatform ? { nodePlatform: overrides.nodePlatform } : {}),
     ...(overrides.currentVersion ? { currentVersion: overrides.currentVersion } : {}),

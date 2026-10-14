@@ -34,6 +34,8 @@ import type { ParsedManifest } from "./manifest.js";
 import { UpdateSourceError } from "./types.js";
 import { localStrategy, declarableStrategy } from "./strategies/registry.js";
 import type { UpdateStrategy } from "./strategies/types.js";
+// 只取零依赖默认名（不 import ../branding/store.js——那会把 db.js 拖进纯单测模块图）。
+import { DEFAULT_PRODUCT_NAME } from "../branding/defaults.js";
 
 /** 审计裁决词（§5.5 verdict；服务端内部词汇，测试逐字锁定）。 */
 export type UpdateVerdictKind =
@@ -81,6 +83,11 @@ export interface UpdateServiceDeps {
   fetch?: FetchLike;
   /** 源工厂注入缝（默认 sourceFactory 的 createUpdateSource）。 */
   createSource?: (cfg: UpdateConfig, deps: SourceDeps) => UpdateSource;
+  /**
+   * 品牌产品名提供者（0.2.4-rc：安装指引文案收口到品牌配置）。
+   * 默认回退常量、不触库，保持本服务在纯单测中无 DB 副作用；生产由 updateRuntime 注入 getBranding。
+   */
+  branding?: () => Promise<{ productName: string }>;
 }
 
 interface Identity {
@@ -108,6 +115,8 @@ export class UpdateService {
   private readonly source: UpdateSource;
   /** 实际出网 fetch（注入桩优先，否则全局）；下载代理复用同一实例以便测试统一拦截。 */
   readonly fetchImpl: FetchLike;
+  /** 品牌产品名提供者（生产注入 getBranding；缺省回退默认名，不触库）。 */
+  private readonly branding: () => Promise<{ productName: string }>;
   private readonly cache = new Map<string, CacheEntry>();
 
   constructor(
@@ -124,6 +133,18 @@ export class UpdateService {
     this.source = deps.createSource
       ? deps.createSource(cfg, sourceDeps)
       : createUpdateSource(cfg, sourceDeps);
+    // 0.2.4-rc：默认不触库（纯单测模块图无 db 副作用）；生产由 updateRuntime 注入 getBranding。
+    this.branding = deps.branding ?? (async () => ({ productName: DEFAULT_PRODUCT_NAME }));
+  }
+
+  /** 品牌产品名（安装指引文案收口）；任何异常回退默认名，更新检查绝不因品牌读取失败而坏。 */
+  private async brandedProductName(): Promise<string> {
+    try {
+      const { productName } = await this.branding();
+      return productName?.trim() ? productName.trim() : DEFAULT_PRODUCT_NAME;
+    } catch {
+      return DEFAULT_PRODUCT_NAME;
+    }
   }
 
   /**
@@ -207,6 +228,7 @@ export class UpdateService {
     const minVersion = release.minVersion ?? "0.0.0";
     const minCmp = compareVersions(this.currentVersion, minVersion);
     if (minCmp !== null && minCmp < 0) {
+      const productName = await this.brandedProductName();
       const update: UpdateInfoDTO = {
         version: release.version,
         publishedAt: release.publishedAt,
@@ -218,6 +240,7 @@ export class UpdateService {
         manualInstallGuide: strategy.renderInstallGuide({
           version: release.version,
           filename: null,
+          productName,
         }),
       };
       return this.result(
@@ -237,6 +260,7 @@ export class UpdateService {
       );
     }
 
+    const productName = await this.brandedProductName();
     const update: UpdateInfoDTO = {
       version: release.version,
       publishedAt: release.publishedAt,
@@ -254,6 +278,7 @@ export class UpdateService {
       manualInstallGuide: strategy.renderInstallGuide({
         version: release.version,
         filename: artifact.filename,
+        productName,
       }),
     };
     return this.result(

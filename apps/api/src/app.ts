@@ -35,6 +35,7 @@ import { search } from "./routes/search.js";
 import { v1 } from "./routes/v1/index.js";
 import { adminUpdateDownloadRoutes } from "./routes/v1/adminUpdateDownload.js";
 import { inviteRoutes } from "./routes/v1/authInvite.js";
+import { publicBranding, adminBranding } from "./routes/branding.js";
 import { mcpApp } from "./mcp/transport/mcpApp.js";
 import { health } from "./routes/health.js";
 import { healthz } from "./routes/healthz.js";
@@ -48,6 +49,7 @@ import { rateLimitMiddleware } from "./middleware/rateLimit.js";
 import { mustChangePasswordMiddleware } from "./middleware/mustChangePassword.js";
 import { benchMetricsMiddleware } from "./ops/benchMetrics.js";
 import { createWebStaticMiddleware, resolveWebDist } from "./ops/serveWeb.js";
+import { getBranding, DEFAULT_PRODUCT_NAME } from "./domain/branding/store.js";
 
 // 上传文件静态服务：GET /uploads/avatars/<filename>（node:fs 手写，防穿越，与重构前逐字一致）。
 const AVATAR_MIME: Record<string, string> = {
@@ -56,6 +58,14 @@ const AVATAR_MIME: Record<string, string> = {
   ".png": "image/png",
   ".webp": "image/webp",
   ".gif": "image/gif",
+};
+
+// 品牌登录广告图静态服务：GET /uploads/branding/<filename>，只放位图三格式（不收 gif）。
+const BRANDING_MIME: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
 };
 
 function createMount(webRoot: string | null): Hono {
@@ -76,6 +86,27 @@ function createMount(webRoot: string | null): Hono {
     if (!fs.existsSync(filePath)) return c.json({ error: "文件不存在" }, 404);
     const ext = path.extname(filename).toLowerCase();
     const mime = AVATAR_MIME[ext] ?? "application/octet-stream";
+    const buf = await fs.promises.readFile(filePath);
+    return new Response(buf, {
+      headers: {
+        "Content-Type": mime,
+        "Cache-Control": "public, max-age=31536000, immutable",
+      },
+    });
+  });
+
+  // 品牌登录广告图公开通道：与 avatars 同款防穿越/扩展名 MIME 映射；只放 jpg/jpeg/png/webp。
+  // 覆盖上传靠 DTO 返回的 ?v=<epoch> 破 immutable 缓存。
+  mount.get("/uploads/branding/:filename", async (c) => {
+    const filename = c.req.param("filename");
+    if (!filename || filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
+      return c.json({ error: "非法文件名" }, 400);
+    }
+    const filePath = path.join(uploadRoot, "branding", filename);
+    if (!fs.existsSync(filePath)) return c.json({ error: "文件不存在" }, 404);
+    const ext = path.extname(filename).toLowerCase();
+    const mime = BRANDING_MIME[ext];
+    if (!mime) return c.json({ error: "不支持的文件类型" }, 400);
     const buf = await fs.promises.readFile(filePath);
     return new Response(buf, {
       headers: {
@@ -123,9 +154,16 @@ function createMount(webRoot: string | null): Hono {
   //  - 全栈同进程托管（webRoot 有效，Docker/飞牛）不注册精确 "/"，让给末尾 SPA 静态处理器，
   //    否则 Hono 精确匹配优先，GET / 会被这段 JSON 抢占、前端首页只能在非根路径回退（容器实测发现）。
   if (!webRoot) {
-    mount.get("/", (c) =>
-      c.json({
-        name: "构想工作台 API",
+    mount.get("/", async (c) => {
+      // 产品名收口到品牌配置（app_settings KV）；读取失败回退默认名，不让根 JSON 500。
+      let productName = DEFAULT_PRODUCT_NAME;
+      try {
+        ({ productName } = await getBranding());
+      } catch {
+        productName = DEFAULT_PRODUCT_NAME;
+      }
+      return c.json({
+        name: `${productName} API`,
         version: VERSION,
         endpoints: [
           "/api/health",
@@ -138,8 +176,8 @@ function createMount(webRoot: string | null): Hono {
           "/api/records",
           "/api/views",
         ],
-      }),
-    );
+      });
+    });
   }
 
   const api = new Hono();
@@ -171,6 +209,10 @@ function createMount(webRoot: string | null): Hono {
   api.route("/kb", kb);
   api.route("/public", pub);
   api.route("/search", search);
+  // 品牌外观（0.2.4-rc）：匿名公开读 + 管理员写，均无条件挂主 api 实例（绝不进 /api/v1
+  // 企业门——双 flag 全 off 时品牌端点仍须可达）。叠加挂载模式同 meAvatar。
+  api.route("/auth/branding", publicBranding);
+  api.route("/admin/branding", adminBranding);
   mount.route("/api", api);
 
   // M2/M3 企业面：/api/v1 与 /api 平级独立实例；两个 flag 任一 on 即挂载，

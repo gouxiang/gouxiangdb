@@ -3,6 +3,7 @@
 // 全局 JSON 默认 GX_BODY_LIMIT_JSON（1MB）；上传类端点走独立放宽档：
 //   · /api/auth/me/avatar      → GX_BODY_LIMIT_UPLOAD（6MB，对齐业务 5MB + 余量）
 //   · /api/attachments         → GX_BODY_LIMIT_ATTACHMENT（40MB，【整包】档）
+//   · /api/admin/branding/hero → GX_BODY_LIMIT_UPLOAD（6MB，登录广告图业务上限 5MB）
 // 三档互斥精确路径，JSON 档不放宽。超限统一返回 413 与机器码，不放行堆栈。
 // 附件的【单文件】校验（默认 20MB）不在本文件，见 domain/attachmentStore.ts。
 // 必须在任何 body 解析之前挂载。
@@ -56,6 +57,8 @@ const mcpLimit = bodyLimit({
 const UPLOAD_LIMIT_PATHS: Record<string, "avatar" | "attachment"> = {
   "/api/auth/me/avatar": "avatar",
   "/api/attachments": "attachment",
+  // 品牌登录广告图（0.2.4-rc）：业务上限 5MB，复用头像 6MB 档。
+  "/api/admin/branding/hero": "avatar",
 };
 
 function isUploadPath(c: Context): "avatar" | "attachment" | null {
