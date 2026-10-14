@@ -3,8 +3,8 @@
 > 私有化部署的智能表格 + 知识库 + 画布一体化工作台，前后端分离 · 客户端壳化 · 多端复用。
 
 - **产品名**：「**构想工作台**」。飞牛应用包名 / 目录 / monorepo 根包名仍为 `gouxiangdb` / `gouxiangdb-v2`，仅为技术标识，界面与清单展示名一律为「构想工作台」。
-- **当前版本**：**`v0.2.1`**（单一真源 = 根 `package.json` 的 `version` 字段；运行时禁止再出现硬编码版本字面）。
-- **当前阶段**：M0–M6 已全部收口（生产基座 / 数据底座 / 组织通讯录 / 统一导航 / 权限引擎 / 向量检索 / 鉴权 MCP），**M7 企业版总验收进行中**（门⑦⑧未完成）。
+- **当前版本**：**`v0.2.3`**（单一真源 = 根 `package.json` 的 `version` 字段；与 fpk `manifest.version`、esbuild `GX_VERSION` 同源，运行时禁止再出现硬编码版本字面）。封版 tag `v0.2.3`（`7881a88`）。
+- **当前阶段**：M0–M7 全部收口，企业版已封版发布。**v0.2.3 主题＝可扩展的应用版本更新机制**：应用内检查更新、安装包服务端代理下载、大包后台预缓存「本机秒取」、只读更新凭证随包交付与升级自动刷新。详见根目录 **`RELEASE.md`**（v0.2.3 完整发版说明）。
 
 > **✅ 权限当前真实状态（唯一执法者，无开关）**：
 > 实际执法的是 **M4 统一权限引擎**——`apps/api/src/domain/authz/engine.ts` 的 `decide()`，读
@@ -97,13 +97,13 @@ bash scripts/ci-quality.sh                   # CI 用质量门
 
 | 包 | 实测值 | **记录日期** | 来源 |
 |---|---|---|---|
-| `apps/api` | **2976 passed / 0 failed**（290 files，2 files 本地 skip）；大资源规模门 VM15 跑 10/10 | 2026-10-05 | 本轮全量复跑（HEAD 59f49f5） |
-| `apps/web` | **1636 passed / 0 failed**（129 files） | 2026-10-05 | 本轮全量复跑 |
-| `@gx/shared-types` | **103 passed** | 2026-10-05 | 本轮复跑 |
-| `@gx/canvas` | **51 passed** | 2026-10-05 | 本轮复跑 |
+| `apps/api` | **3180 passed / 0 failed / 14 skipped**（302 files passed，2 files skip） | 2026-10-14 | v0.2.3 收口全量复跑（HEAD `dab64f7`，VM15） |
+| `apps/web` | **1717 passed / 0 failed** | 2026-10-13 | v0.2.3 质量门（VM15） |
+| `@gx/shared-types` | **172 passed / 0 failed** | 2026-10-13 | v0.2.3 质量门 |
+| `@gx/canvas` | **51 passed / 0 failed** | 2026-10-13 | v0.2.3 质量门 |
 
 > 本表是**带日期的历史实测记录**，不是当前断言——数字会随迭代变化，**以实际重跑为准**，请勿当作现状承诺。
-> 三包 `typecheck` 零错误、`eslint` **0 error**（web 100 / api 4 均为历史既有 warning）。
+> v0.2.3 收口：四包 `tsc --noEmit` 零错误、`eslint` **0 error**（仅历史 warning，低于卡控阈值）；迁移干跑 **40/40** 应用、`integrity_check=ok`（本版零新增迁移）。
 > 内存/资源占用大的规模门与压测**不在本机跑**，放预览机 VM15；需要权威出口数字请查 `docs/baseline/` 最新报告。
 
 ---
@@ -126,7 +126,7 @@ bash scripts/ci-quality.sh                   # CI 用质量门
 
 | 想找什么 | 去哪 |
 |---|---|
-| **现行规范 / 架构决策** | `docs/adr/`（ADR-0001~0056，决策唯一权威）；权限专项另见 `docs/decisions/` |
+| **现行规范 / 架构决策** | `docs/adr/`（ADR-0001~0057，决策唯一权威）；权限专项另见 `docs/decisions/` |
 | **出口证据 / 实测基线** | `docs/baseline/`（含 M7 门①~⑥ 证据、gate6 三环境证据） |
 | **运维手册** | `docs/runbooks/`（deploy / backup / restore / ci / m1-sidecar / m5-search / mcp / authz-*） |
 | **接口契约** | `docs/api/openapi.yaml`（冻结）+ `docs/api/m4-error-codes.md` |
@@ -204,7 +204,7 @@ v1（Swift）与当前版本零代码依赖。
 | **`KNOWN-ISSUES.md`** | 历史问题 / Bug 回归清单 + 误报与踩坑速查（条数见其主表标题行实时统计） | 每次发版回归前；发现新问题时追加 |
 | **`ARCHIVE-LOG.md`** | 已归档文档的原路径 → 归档位置 → 理由 → 「⚠️ 未被继承的信息」 | 找不到某份历史文档时；改被归档模块前 |
 | **`PENDING-DECISIONS.md`** | 待主理人裁决项（含瘦身清理：截图 / 临时产物 / 疑似冗余组件） | 清理仓库前；口径未定时 |
-| **`RELEASE.md`** | 发版记录（注：现内容为 2026-09-04 迭代的历史档案，非当前发版依据） | 追溯历史发版 |
+| **`RELEASE.md`** | 发版记录（现行＝ **v0.2.3** 应用更新机制发版说明：用户可见变化、质量门实数、真机实证、配置项与接口、升级须知） | 每次发版；追溯历史发版 |
 
 - 架构选型与重大变更走 ADR 流程：**`docs/adr/`**。
 - 悬而未决项登记在 `PENDING-DECISIONS.md`，关闭前不擅自实施。
