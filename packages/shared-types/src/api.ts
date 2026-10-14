@@ -370,18 +370,51 @@ export interface UpdateMemberRequest {
 
 // ============ Comment ============
 
+/** 评论里 @ 到的成员（落库为用户 id，展示名随评论快照返回）。 */
+export interface CommentMentionDTO {
+  userId: string;
+  displayName: string;
+}
+
+/**
+ * 评论 / 回复。
+ * - 根评论：parentId 为 null，replies 为其一层回复（按时间升序）。
+ * - 回复：parentId 指向根评论；replyToUserId/replyToDisplayName 标记被回复人。
+ * 仅支持两级结构：回复只能挂在根评论上，不能回复回复。
+ */
 export interface CommentDTO {
   id: string;
   recordId: RecordIdT;
   userId: string;
   displayName: string;
+  avatarUrl: string | null;
   body: string;
+  /** 附件引用（图片可直接预览，非图片走文件行），恒为数组、旧评论为空数组。 */
+  attachments: AttachmentDTO[];
+  /** @ 提及成员，恒为数组。 */
+  mentions: CommentMentionDTO[];
+  /** 根评论为 null；回复为其根评论 id。 */
+  parentId: string | null;
+  /** 仅回复：被回复用户 id / 展示名。 */
+  replyToUserId: string | null;
+  replyToDisplayName: string | null;
+  /** 仅根评论：其一层回复，按 createdAt 升序。 */
+  replies?: CommentDTO[];
   createdAt: string;
   updatedAt: string;
 }
 
+/**
+ * 创建评论 / 回复。
+ * - body 可空（允许纯图片/纯附件评论），但 body 与 attachmentIds 至少一个非空。
+ * - parentId 非空即回复；回复必须同时给 replyToUserId。
+ */
 export interface CreateCommentRequest {
-  body: string;
+  body?: string;
+  attachmentIds?: string[];
+  mentionIds?: string[];
+  parentId?: string | null;
+  replyToUserId?: string | null;
 }
 
 // ============ CSV ============

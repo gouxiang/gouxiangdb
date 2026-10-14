@@ -56,6 +56,7 @@ import {
 // 记录变更历史（数据日志）：读端点编排在本文件，取数/掩码/可读化在 domain/recordChanges。
 import { queryRecordChanges, parseChangesCursor, parseChangesLimit } from "../domain/recordChanges/query.js";
 import { appendRecordChangeTx, purgeRecordChangesTx, purgeTableRecordChangesTx } from "../domain/recordChanges/store.js";
+import { hydrateCommentThreads, hydrateSingleComment } from "../domain/commentThreads.js";
 
 export const records = new Hono();
 
@@ -860,57 +861,121 @@ records.get("/:recordId/changes", async (c) => {
   return c.json(page);
 });
 
-// ============ 评论 ============
+// ============ 评论（两级回复 / 附件 / @ 提及） ============
 
 records.get("/:recordId/comments", async (c) => {
   const recordId = c.req.param("recordId");
   const baseId = await baseIdOfRecord(recordId);
   await requireCanView(c, baseId);
 
+  // 一次取该记录全部评论（升序），分组/排序/作者/附件/@ 全在内存组装（见 domain/commentThreads）。
   const rows = await prisma.comment.findMany({
     where: { recordId },
-    include: { user: { select: { displayName: true } } },
     orderBy: { createdAt: "asc" },
   });
-  return c.json({
-    comments: rows.map((x) => ({
-      id: x.id,
-      recordId: x.recordId,
-      userId: x.userId,
-      displayName: x.user.displayName,
-      body: x.body,
-      createdAt: x.createdAt.toISOString(),
-      updatedAt: x.updatedAt.toISOString(),
-    })),
-  });
+  const comments = await hydrateCommentThreads(prisma, rows);
+  return c.json({ comments });
 });
 
-const commentSchema = z.object({ body: z.string().min(1).max(2000) });
+const commentCreateSchema = z.object({
+  body: z.string().trim().max(2000).optional(),
+  attachmentIds: z.array(z.string().min(1)).max(10).optional(),
+  mentionIds: z.array(z.string().min(1)).max(50).optional(),
+  parentId: z.string().min(1).nullable().optional(),
+  replyToUserId: z.string().min(1).nullable().optional(),
+});
+
+/** 保序去重字符串数组。 */
+function dedupePreserveOrder(ids: readonly string[]): string[] {
+  return [...new Set(ids)];
+}
 
 records.post("/:recordId/comments", async (c) => {
   const recordId = c.req.param("recordId");
   const baseId = await baseIdOfRecord(recordId);
   const { userId } = await requireCanComment(c, baseId);
 
-  const parsed = commentSchema.safeParse(await c.req.json().catch(() => ({})));
-  if (!parsed.success) return c.json({ error: "评论内容不能为空" }, 400);
+  const parsed = commentCreateSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
+  const input = parsed.data;
 
-  const x = await prisma.comment.create({ data: { recordId, userId, body: parsed.data.body } });
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { displayName: true } });
-  return c.json(
-    {
-      comment: {
-        id: x.id,
+  const bodyTrim = (input.body ?? "").trim();
+  const attachmentIds = dedupePreserveOrder(input.attachmentIds ?? []);
+  const mentionIds = dedupePreserveOrder(input.mentionIds ?? []);
+
+  // body 与附件至少一个非空（允许纯图片/纯附件评论）。
+  if (bodyTrim.length === 0 && attachmentIds.length === 0) {
+    return c.json({ error: "评论内容不能为空" }, 400);
+  }
+
+  const parentId = input.parentId ?? null;
+  const replyToUserId = input.replyToUserId ?? null;
+  let root: { userId: string } | null = null;
+
+  if (parentId !== null) {
+    // 回复两级封顶：父必须存在、同记录、自身是根（parentId 为 null）。
+    const parent = await prisma.comment.findUnique({
+      where: { id: parentId },
+      select: { id: true, recordId: true, parentId: true, userId: true },
+    });
+    if (!parent || parent.recordId !== recordId || parent.parentId !== null) {
+      return c.json({ error: "只能回复根评论" }, 400);
+    }
+    // 回复必须指明被回复人。
+    if (!replyToUserId) return c.json({ error: "缺少被回复成员" }, 400);
+    root = { userId: parent.userId };
+
+    // 被回复人必须是该 thread 参与者（根作者，或已存在于该根某条回复的作者）。
+    if (replyToUserId !== root.userId) {
+      const existing = await prisma.comment.findFirst({
+        where: { parentId, userId: replyToUserId },
+        select: { id: true },
+      });
+      if (!existing) return c.json({ error: "被回复成员不在该讨论中" }, 400);
+    }
+  } else if (replyToUserId) {
+    // 非回复（根评论）不允许带 replyToUserId，避免落出语义不明的数据。
+    return c.json({ error: "根评论不能指定被回复成员" }, 400);
+  }
+
+  // 附件：必须全部属于本库本记录且未删除。请求里有但查不到（跨库/跨记录/已删）一律 400。
+  if (attachmentIds.length > 0) {
+    const found = await prisma.attachment.findMany({
+      where: { id: { in: attachmentIds }, baseId, recordId, deletedAt: null },
+      select: { id: true },
+    });
+    if (found.length !== attachmentIds.length) {
+      return c.json({ error: "附件不可用" }, 400);
+    }
+  }
+
+  // @ 提及：必须全部是该 base 成员（fail-closed，任一非成员即 400）。
+  if (mentionIds.length > 0) {
+    const members = await prisma.member.findMany({
+      where: { baseId, userId: { in: mentionIds } },
+      select: { userId: true },
+    });
+    if (members.length !== mentionIds.length) {
+      return c.json({ error: "存在非本库成员，无法 @ 提及" }, 400);
+    }
+  }
+
+  const created = await runWrite("comment.create", () =>
+    prisma.comment.create({
+      data: {
         recordId,
         userId,
-        displayName: user?.displayName ?? "",
-        body: x.body,
-        createdAt: x.createdAt.toISOString(),
-        updatedAt: x.updatedAt.toISOString(),
+        body: bodyTrim,
+        parentId,
+        replyToUserId,
+        attachments: JSON.stringify(attachmentIds),
+        mentions: JSON.stringify(mentionIds),
       },
-    },
-    201,
+    }),
   );
+
+  const comment = await hydrateSingleComment(prisma, created);
+  return c.json({ comment }, 201);
 });
 
 records.delete("/comments/:commentId", async (c) => {
@@ -924,7 +989,12 @@ records.delete("/comments/:commentId", async (c) => {
   if (comment.userId !== userId && role !== "owner" && role !== "creator") {
     throw new HttpError(403, "无权删除他人评论");
   }
-  await prisma.comment.delete({ where: { id: commentId } });
+
+  // 无 DB 外键：应用层级联，先删回复再删根。删评论只解除附件引用，不删 attachment 行/物理文件。
+  await runWrite("comment.delete", async () => {
+    await prisma.comment.deleteMany({ where: { parentId: commentId } });
+    await prisma.comment.delete({ where: { id: commentId } });
+  });
   return c.json({ ok: true });
 });
 

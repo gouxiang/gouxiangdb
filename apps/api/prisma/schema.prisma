@@ -302,13 +302,21 @@ model Comment {
   id        String   @id @default(cuid())
   recordId  String
   userId    String
+  // body 列维持必填：纯附件评论写空串（SQLite 加可选列麻烦，默认值/应用层兜底）。
   body      String
+  // 两级回复：parentId 指向根评论；replyToUserId 标记被回复人。无 Prisma 自关联/外键。
+  parentId      String?
+  replyToUserId String?
+  // 附件：attachmentId 的 JSON 字符串数组（保序）；@ 提及：userId 的 JSON 字符串数组（保序）。
+  attachments   String   @default("[]")
+  mentions      String   @default("[]")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([recordId])
+  @@index([parentId])
   @@map("comments")
 }
 

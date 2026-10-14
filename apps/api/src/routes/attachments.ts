@@ -15,7 +15,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import fs from "node:fs";
 import { prisma, withWriteTx } from "../db.js";
-import { requireCanEditData, requireCanView, HttpError } from "../guards.js";
+import { requireCanEditData, requireCanView, requireCanComment, resolveBaseIdByRecord, HttpError } from "../guards.js";
 import { audit as recordAudit } from "../audit/emit.js";
 import type { AttachmentDTO } from "@gx/shared-types";
 import {
@@ -40,6 +40,8 @@ const uploadMetaSchema = z.object({
   tableId: z.string().min(1).optional(),
   fieldId: z.string().min(1).optional(),
   recordId: z.string().min(1).optional(),
+  // record=数据格附件（默认，需编辑数据权）；comment=记录评论附件（仅需评论权）。
+  purpose: z.enum(["record", "comment"]).default("record"),
 });
 
 /** 文件名只取 basename 并限长，去掉路径分隔符（防脏名落进展示层）。 */
@@ -88,14 +90,27 @@ attachments.post("/", async (c) => {
     tableId: firstString(body.tableId as string | string[] | undefined),
     fieldId: firstString(body.fieldId as string | string[] | undefined),
     recordId: firstString(body.recordId as string | string[] | undefined),
+    purpose: firstString(body.purpose as string | string[] | undefined),
   });
   if (!parsed.success) {
     return c.json({ error: "参数不合法", details: parsed.error.issues }, 400);
   }
   const meta = parsed.data;
 
-  // 权限：能编辑该库数据者才能往里传附件（这里先鉴权再读文件，避免匿名大文件写盘）。
-  const { userId } = await requireCanEditData(c, meta.baseId);
+  // 权限分流（先鉴权再读文件，避免匿名大文件写盘）：
+  //   comment 通道：评论附件必须绑定记录、且该记录确实属于此 base，只需评论权（无编辑数据权亦可）；
+  //   record 通道（默认）：维持需编辑数据权不变。
+  let userId: string;
+  if (meta.purpose === "comment") {
+    if (!meta.recordId) return c.json({ error: "评论附件必须绑定记录" }, 400);
+    const recordBaseId = await resolveBaseIdByRecord(meta.recordId);
+    if (!recordBaseId || recordBaseId !== meta.baseId) {
+      return c.json({ error: "评论附件必须绑定记录" }, 400);
+    }
+    ({ userId } = await requireCanComment(c, meta.baseId));
+  } else {
+    ({ userId } = await requireCanEditData(c, meta.baseId));
+  }
 
   const files = collectFiles(body as Record<string, string | string[] | File | File[]>);
   if (files.length === 0) {
@@ -215,6 +230,25 @@ attachments.delete("/:id", async (c) => {
     });
     return c.json(
       { error: "该附件仍被记录引用，请先从记录中移除后再删除", code: "ATTACHMENT_IN_USE" },
+      409,
+    );
+  }
+
+  // 评论引用判据：任一评论的 attachments JSON（attachmentId 数组串）里出现带双引号的该 id。
+  // id 为 cuid 全局唯一，JSON 子串 '"<id>"' 精确命中，无需 base 过滤。命中即 409 且不删物理文件。
+  const usedByComment = await prisma.comment.findFirst({
+    where: { attachments: { contains: `"${row.id}"` } },
+    select: { id: true },
+  });
+  if (usedByComment) {
+    recordAudit(c, {
+      event: "attachment_delete",
+      status: 409,
+      actorId: userId,
+      detail: { id: row.id, baseId: row.baseId, reason: "in_use_by_comment" },
+    });
+    return c.json(
+      { error: "该附件仍被评论引用，请先删除对应评论", code: "ATTACHMENT_IN_USE" },
       409,
     );
   }

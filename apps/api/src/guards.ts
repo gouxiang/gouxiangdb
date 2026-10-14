@@ -230,10 +230,18 @@ export async function requireCanToggleShare(c: Context, baseId: string): Promise
 export async function requireCanComment(c: Context, baseId: string): Promise<BaseGuardResult> {
   const g = await loadBaseAccess(c, baseId);
   const legacyAllowed = g.access.visible && g.perm.canComment;
-  // legacy canComment 恒等于 canEditData（见 permit），故评论守直接判 edit_data，
-  // 不再用 comment：该位在引擎词表里是内容动作、只投影到 table 节点。见定稿 §2.4。
-  const allowed = await enforceBase("requireCanComment", g.userId, baseId, "edit_data", legacyAllowed);
-  if (!allowed) {
+  // 编辑档：库节点 edit_data（legacy canComment 恒等于 canEditData，见 permit）。
+  const editAllowed = await enforceBase("requireCanComment", g.userId, baseId, "edit_data", legacyAllowed);
+  if (editAllowed) return g;
+  // 纯评论档：评论者持内容动作 comment 但不持 edit_data。第二代 scope 模型里 comment 只随
+  // c/u/d 投影（必同时派生 edit_data），故唯一真正"只评论不可编辑"的来源是库节点上的 comment
+  // 授权（旧成员投影 comment,r / 直接 comment 授予）。引擎读判定不按节点 kind 过滤动作，
+  // 在 base 节点判 comment 即精确承接该来源；viewer 的 enter 档不含 comment，仍被拒。
+  // 注意不要去枚举子表节点：scope 的表级 comment 必伴生库级 edit_data，上面已覆盖。
+  const commentOnlyAllowed = await enforceBase(
+    "requireCanComment", g.userId, baseId, "comment", false,
+  );
+  if (!commentOnlyAllowed) {
     throw new HttpError(403, g.access.visible ? "当前角色无权评论" : "无权访问该 Base");
   }
   return g;
