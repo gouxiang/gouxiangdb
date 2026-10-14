@@ -44,7 +44,7 @@ function SlotCard({
       data-gx-comment-attachment={slot.status}
       title={slot.name}
       className={clsx(
-        "relative flex w-28 flex-col gap-1 rounded-gx-md border p-1.5",
+        "relative flex w-28 flex-col gap-1 rounded-gx-lg border p-1.5",
         slot.status === "error" ? "border-gx-danger" : "border-gx-hairline",
       )}
     >

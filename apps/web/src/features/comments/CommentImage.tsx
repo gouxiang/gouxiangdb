@@ -57,7 +57,7 @@ export function CommentImage({
   if (!url) {
     return (
       <span
-        className="inline-flex items-center justify-center rounded-gx-md bg-gx-row-hover text-gx-text-hint"
+        className="inline-flex items-center justify-center rounded-gx-lg bg-gx-row-hover text-gx-text-hint"
         style={{ width: 96, height: 72 }}
       >
         <Spinner size={14} />
@@ -70,7 +70,7 @@ export function CommentImage({
       onClick={() => openFilePreview(file)}
       title={`预览 ${file.name}`}
       aria-label={`预览图片 ${file.name}`}
-      className="block overflow-hidden rounded-gx-md border border-gx-hairline transition-opacity duration-[120ms] hover:opacity-90"
+      className="block overflow-hidden rounded-gx-lg border border-gx-hairline transition-opacity duration-[120ms] hover:opacity-90"
     >
       <img
         src={url}
