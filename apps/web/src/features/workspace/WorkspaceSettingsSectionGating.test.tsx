@@ -19,7 +19,10 @@ let isOwner = false;
 let manageMenu = false;
 
 vi.mock("../contacts/contacts-hooks", () => ({
-  useMyOrgActions: () => ({ actions: new Set(manageMenu ? ["manage_menu"] : []), isLoading: false }),
+  useMyOrgActions: () => ({
+    actions: new Set(manageMenu ? ["manage_menu"] : []),
+    isLoading: false,
+  }),
   useIsWorkspaceOwner: () => ({ isOwner, isLoading: false }),
 }));
 
@@ -48,6 +51,13 @@ vi.mock("../update/UpdatePanel", () => ({
   UpdatePanel: () => <div data-update-panel="1">检查并下载新版本安装包</div>,
 }));
 
+// 品牌外观面板有自己的 SSR/纯函数测试；门控用例只关心 ownerOnly 分区显隐与回落。
+vi.mock("../branding/BrandingPanel", () => ({
+  BrandingPanel: () => (
+    <div data-branding-panel="1">产品名、版权信息与登录页广告图</div>
+  ),
+}));
+
 vi.mock("../settings/pat-hooks", () => ({
   useEnterpriseOrgFlag: () => enterpriseOn,
   usePatList: () => ({ data: [], isLoading: false }),
@@ -71,7 +81,10 @@ function renderPage(location = "/workspace/settings"): string {
     <QueryClientProvider client={qc}>
       <StaticRouter location={location}>
         <Routes>
-          <Route path="/workspace/settings/*" element={<WorkspaceSettingsPage />} />
+          <Route
+            path="/workspace/settings/*"
+            element={<WorkspaceSettingsPage />}
+          />
         </Routes>
       </StaticRouter>
     </QueryClientProvider>,
@@ -121,14 +134,18 @@ describe("B. gated 分区只看 effectiveSection（不看 URL 原始 section）"
 
   it("owner 直戳 /search 仍然进得去（守卫没有反向误杀）", () => {
     isOwner = true;
-    expect(renderPage("/workspace/settings/search")).toContain("配置云端语义检索");
+    expect(renderPage("/workspace/settings/search")).toContain(
+      "配置云端语义检索",
+    );
   });
 
   // 门控放宽：语义检索从 ownerOnly 改为「持任一 manage_* 组织动作」（canSeeWorkspaceSettings 同口径）。
   it("非 owner 但持任一 manage_* 动作：/search 进得去（放宽不是收紧）", () => {
     isOwner = false;
     manageMenu = true;
-    expect(renderPage("/workspace/settings/search")).toContain("配置云端语义检索");
+    expect(renderPage("/workspace/settings/search")).toContain(
+      "配置云端语义检索",
+    );
   });
 
   it("非 owner 且无任一管理动作：左栏不出现语义检索分区（fail-closed，不做 disabled 假入口）", () => {
@@ -140,7 +157,28 @@ describe("B. gated 分区只看 effectiveSection（不看 URL 原始 section）"
 
   it("企业环境直戳 /mcp 仍然进得去", () => {
     enterpriseOn = true;
-    expect(renderPage("/workspace/settings/mcp")).toContain("为 AI 客户端签发访问令牌");
+    expect(renderPage("/workspace/settings/mcp")).toContain(
+      "为 AI 客户端签发访问令牌",
+    );
+  });
+
+  // 品牌外观分区 ownerOnly（#754）：后端只认 super_admin/admin/legacy owner，不认 manage_*。
+  it("非 owner：左栏不出现品牌外观分区，直戳 /branding 回落通用", () => {
+    isOwner = false;
+    manageMenu = true; // 即便持 manage_* 动作也不见（ownerOnly，不是 manageOnly）
+    const nav = renderPage();
+    expect(nav).not.toContain("品牌外观");
+    const direct = renderPage("/workspace/settings/branding");
+    expect(direct).toContain(GENERAL);
+    expect(direct).not.toContain("data-branding-panel");
+  });
+
+  it("owner：左栏出现品牌外观分区（在通用之下），直戳 /branding 进得去", () => {
+    isOwner = true;
+    expect(renderPage()).toContain("品牌外观");
+    const direct = renderPage("/workspace/settings/branding");
+    expect(direct).toContain("data-branding-panel");
+    expect(direct).toContain("自定义全站产品名、版权信息与登录页广告图");
   });
 
   // 系统更新分区 ownerOnly：与「权限管理」同口径，非 owner 不做 disabled 假入口。
@@ -156,7 +194,9 @@ describe("B. gated 分区只看 effectiveSection（不看 URL 原始 section）"
   it("owner：左栏出现系统更新分区，直戳 /update 进得去", () => {
     isOwner = true;
     expect(renderPage()).toContain("系统更新");
-    expect(renderPage("/workspace/settings/update")).toContain("data-update-panel");
+    expect(renderPage("/workspace/settings/update")).toContain(
+      "data-update-panel",
+    );
   });
 
   // 通讯录、资产与回收站分区已移除（一级导航已有通讯录入口；单库设置改由 L1「…」菜单进入；
@@ -176,7 +216,8 @@ describe("B. gated 分区只看 effectiveSection（不看 URL 原始 section）"
   });
 
   it("effectiveSection 由 visibleSections 反查得出（单一真源）", () => {
-    expect(pageSrc).toContain("visibleSections.some((s) => s.key === section)");
+    // 容忍 prettier 对长表达式的换行排版
+    expect(pageSrc).toMatch(/visibleSections\.some\(\s*\(s\)\s*=>\s*s\.key\s*===\s*section/);
     expect(pageSrc).not.toContain('section === "search" && !isOwner');
   });
 
@@ -197,7 +238,9 @@ describe("回收站聚合入口已下线（各模块自己的回收站保留）"
 
   it("聚合入口组件文件已删除，页面不再 import 它", () => {
     expect(pageSrc).not.toContain("WorkspaceSettingsSections");
-    expect(existsSync(new URL("./WorkspaceSettingsSections.tsx", import.meta.url))).toBe(false);
+    expect(
+      existsSync(new URL("./WorkspaceSettingsSections.tsx", import.meta.url)),
+    ).toBe(false);
   });
 
   it("数据库与知识库各自的回收站路由仍在（删聚合入口 ≠ 删模块回收站）", () => {
