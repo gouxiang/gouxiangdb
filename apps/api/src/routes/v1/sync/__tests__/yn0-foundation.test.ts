@@ -123,8 +123,8 @@ describe("D/E. 开关 on：门放行，鉴权独立，探针 200", () => {
       }>(res);
       expect(body.apiVersion).toBe("v1");
       expect(body.sync).toBe(true);
-      // 阶段标识随 YN 推进刷新（当前 YN5：+权限裁决/隔离/同步中心/visibility/审计）。
-      expect(body.phase).toBe("YN5");
+      // 阶段标识随 YN 推进刷新（当前 YN6：+冲突双版本/resolve/resolved 审计）。
+      expect(body.phase).toBe("YN6");
       expect(typeof body.serverVersion).toBe("string");
       expect(body.auth.userId).toBe("yn0_user");
     }));

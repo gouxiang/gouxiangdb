@@ -29,12 +29,14 @@
 //   另外在 sync_op_log 落事实（其 clientOpId 亦 @unique，双保险唯一约束）。重试先查 sync_incoming，
 //   命中即回同一结果，绝不重复应用；唯一约束是并发竞态下的兜底（撞了重读已存回执）。
 
+import { randomUUID } from "node:crypto";
 import type { LibraryAccessDTO, ResourceAction } from "@gx/shared-types";
 import { prisma, withWriteTx, runWrite, type DbTx } from "../../db.js";
 import { HttpError } from "../../httpError.js";
 import { resolveBaseAccess, fieldWriteGate } from "../authz/libraryPolicy.js";
 import { enforceOrLegacy } from "../authz/enforceGate.js";
 import { resolveTableMask } from "../authz/maskGate.js";
+import { fieldScopeOf, stripHiddenFromRecords } from "../authz/fieldScope.js";
 import { evaluateRowFilter } from "../authz/rowFilter.js";
 import { loadTableFields, hydrateRecordById } from "../recordService.js";
 import { runMaskWriteGate, createRecordTx, updateRecordTx, softDeleteRecordTx, restoreRecordTx } from "../recordWrite.js";
@@ -59,6 +61,12 @@ export interface IncomingOp {
   /** 客户端提交时所基于的实体版本（字符串承载 BigInt，路由保证 /^\d+$/）。 */
   baseVersion: bigint;
   payload: Record<string, unknown>;
+  /**
+   * 【内部，路由永不设置】YN6：非空表示这是冲突人工解决产生的 resolve op，值＝被解决的原始冲突
+   * clientOpId。仅由 resolveConflict 在域内构造 op 时挂；replayPatchTx 据此把 oplog 记为
+   * result="resolved"/conflictOf。普通 push 的 op 恒无此字段。
+   */
+  _resolveOf?: string;
 }
 
 /** 单条裁决回执（§13 push.results[i]）。BigInt 序列化为字符串由路由层负责。 */
@@ -86,6 +94,12 @@ export interface PushResult {
   entityId?: string;
   /** conflict：服务端当前版本，供客户端做双版本弹窗（YN6）。 */
   serverVersion?: bigint;
+  /**
+   * 【内部，路由层不序列化】conflict 时按当前权限脱敏后的服务端当前记录快照（YN6 双版本弹窗
+   * 右侧）。recordIncomingTx 把它 JSON 序列化进 sync_incoming.conflictServerPayload；不回字段明文
+   * 到 push 回执（前端经 GET /incoming 取本人冲突项时才带），与 §7.2 一致。
+   */
+  _conflictServerPayload?: Record<string, unknown>;
   /**
    * 【内部，路由层不序列化】accepted 后做事务外默认值补偿所需上下文（autoNumber/static/
    * lookup/formula 初值、序号缓存、反向 formula 联动），与在线 POST/PATCH/DELETE 事务后补偿同构。
@@ -123,6 +137,9 @@ const RC = {
   MALFORMED: "SYNC_MALFORMED_PAYLOAD",
   INCOMING_NOT_FOUND: "SYNC_INCOMING_NOT_FOUND",
   INCOMING_STATE: "SYNC_INCOMING_INVALID_STATE",
+  RESOLVE_BAD_DECISION: "SYNC_RESOLVE_BAD_DECISION",
+  RESOLVE_NOT_CONFLICT: "SYNC_RESOLVE_NOT_CONFLICT",
+  RESOLVE_MALFORMED: "SYNC_RESOLVE_MALFORMED",
 } as const;
 
 /** 本期回放支持的 record 操作（YN5 起接入 restore，见 replayRestoreTx）。 */
@@ -226,6 +243,10 @@ async function recordIncomingTx(
       reasonCode: r.reasonCode ?? null,
       reasonDetail: r.reasonDetail ?? null,
       serverVersion: r.serverVersion ?? r.newVersion ?? 0n,
+      // YN6：conflict 时存按当前权限脱敏的服务端快照，供前端双版本弹窗（GET /incoming 透出）。
+      conflictServerPayload: r._conflictServerPayload
+        ? JSON.stringify(r._conflictServerPayload)
+        : null,
       attempts: 1,
       decidedBy: actorId,
       decidedAt: new Date(),
@@ -302,6 +323,62 @@ async function assertRowVisible(
   });
   if (!before || !evaluateRowFilter(ctx.mask.rowFilter, before, ctx.fields, userId)) {
     throw new HttpError(403, "该记录已不在你的可编辑范围内", RC.ROW_NOT_VISIBLE);
+  }
+}
+
+/**
+ * conflict 时构建【服务端当前版本快照】（YN6 §7.2 双版本弹窗右侧），按【当前 token】权限脱敏：
+ * 走与 snapshot/visibility 同源的 fieldScopeOf → resolveTableMask → hydrate(单条) → rowFilter →
+ * stripHidden 管线，绝不回吐掩码外/隐藏字段明文。仅用于展示与字段对照，只读、不推进任何版本。
+ *
+ * 失败软处理：快照仅为弹窗展示，构建失败绝不能阻断 conflict 终态落库（那会弄丢用户的离线改动）；
+ * 出错时返回最小占位 {unavailable:true}，前端仍可凭 serverVersion 让用户选「采用服务端」。
+ */
+async function buildConflictServerPayload(
+  userId: string,
+  baseId: string,
+  o: IncomingOp,
+  serverVersion: bigint,
+): Promise<Record<string, unknown>> {
+  const base = { version: serverVersion.toString(), serverTime: new Date().toISOString() };
+  try {
+    const rec = await prisma.record.findUnique({
+      where: { id: o.entityId },
+      select: { id: true, tableId: true, deletedAt: true, table: { select: { baseId: true } } },
+    });
+    if (!rec) return { ...base, exists: false, fields: {} };
+    if (rec.table.baseId !== baseId) return { ...base, exists: false, fields: {} };
+    const fields = await loadTableFields(rec.tableId);
+    const access = await resolveBaseAccess(userId, baseId);
+    const scope = fieldScopeOf(access, rec.tableId, fields);
+    const scopeFields = scope.active ? scope.fields : fields;
+    const mask = await resolveTableMask(userId, rec.tableId, scopeFields);
+    if (mask && mask.mask.cap.visible === false) {
+      return { ...base, tableId: rec.tableId, tableReadable: false, fields: {} };
+    }
+    const queryFields = mask ? mask.visibleFields : scopeFields;
+    const hydrated = await hydrateRecordById(rec.tableId, rec.id, {
+      fields: queryFields,
+      deps: mask?.hydrateDeps,
+    });
+    if (!hydrated) return { ...base, tableId: rec.tableId, rowVisible: false, fields: {} };
+    if (mask?.rowFilter && !evaluateRowFilter(mask.rowFilter, hydrated, fields, userId)) {
+      return { ...base, tableId: rec.tableId, rowVisible: false, fields: {} };
+    }
+    const [stripped] = stripHiddenFromRecords([hydrated], scope.hiddenIds);
+    return {
+      ...base,
+      tableId: rec.tableId,
+      exists: true,
+      isDeleted: rec.deletedAt !== null,
+      tableReadable: true,
+      rowVisible: true,
+      // 已按当前权限裁剪/脱敏的平铺字段（key=fieldId），与快照同一口径。
+      fields: (stripped?.fields ?? {}) as Record<string, unknown>,
+    };
+  } catch (e) {
+    console.error("[sync.push] build conflictServerPayload failed:", o.clientOpId, e);
+    return { ...base, unavailable: true };
   }
 }
 
@@ -679,6 +756,23 @@ async function replayOneTx(
   return await replayDeleteTx(tx, userId, clientId, baseId, access, o);
 }
 
+/** 冲突终态：构建按当前权限脱敏的服务端快照（YN6 双版本弹窗右侧）后只落 incoming。 */
+async function conflictTerminalInTx(
+  tx: DbTx,
+  userId: string,
+  clientId: string,
+  baseId: string,
+  o: IncomingOp,
+  currentVersion: bigint,
+): Promise<PushResult> {
+  const snap = await buildConflictServerPayload(userId, baseId, o, currentVersion);
+  return await terminalInTx(tx, userId, clientId, baseId, o, {
+    clientOpId: o.clientOpId, status: "conflict", reasonCode: RC.VERSION_CONFLICT,
+    reasonDetail: `记录版本已变化（本地基于 ${o.baseVersion.toString()}，服务端 ${currentVersion.toString()}）`,
+    serverVersion: currentVersion, _conflictServerPayload: snap,
+  });
+}
+
 /** 终结分支：在当前事务内只落 incoming（不写主数据），返回事务提交后即生效的回执。 */
 async function terminalInTx(
   tx: DbTx,
@@ -825,11 +919,7 @@ async function replayPatchTx(
   }
   const currentVersion = versionRow?.version ?? 0n;
   if (o.baseVersion !== currentVersion) {
-    return await terminalInTx(tx, userId, clientId, baseId, o, {
-      clientOpId: o.clientOpId, status: "conflict", reasonCode: RC.VERSION_CONFLICT,
-      reasonDetail: `记录版本已变化（本地基于 ${o.baseVersion.toString()}，服务端 ${currentVersion.toString()}）`,
-      serverVersion: currentVersion,
-    });
+    return await conflictTerminalInTx(tx, userId, clientId, baseId, o, currentVersion);
   }
   if (rec.table.baseId !== baseId) {
     return await terminalInTx(tx, userId, clientId, baseId, o, {
@@ -877,7 +967,10 @@ async function replayPatchTx(
         identity: {
           clientId, clientOpId: o.clientOpId,
           clientBaseVersion: o.baseVersion, expectedBaseVersion: currentVersion,
+          // YN6：冲突人工解决的 resolve op → oplog result=resolved + conflictOf 溯源（§7.2）。
+          ...(o._resolveOf ? { result: "resolved" as const, conflictOf: o._resolveOf } : {}),
         },
+        // resolve 仍落结构化 patch（op=patch），只是 oplog 结果标记为 resolved。
         op: "patch",
       },
     });
@@ -931,11 +1024,7 @@ async function replayDeleteTx(
   }
   const currentVersion = versionRow?.version ?? 0n;
   if (o.baseVersion !== currentVersion) {
-    return await terminalInTx(tx, userId, clientId, baseId, o, {
-      clientOpId: o.clientOpId, status: "conflict", reasonCode: RC.VERSION_CONFLICT,
-      reasonDetail: `记录版本已变化（本地基于 ${o.baseVersion.toString()}，服务端 ${currentVersion.toString()}）`,
-      serverVersion: currentVersion,
-    });
+    return await conflictTerminalInTx(tx, userId, clientId, baseId, o, currentVersion);
   }
   if (rec.table.baseId !== baseId) {
     return await terminalInTx(tx, userId, clientId, baseId, o, {
@@ -960,6 +1049,8 @@ async function replayDeleteTx(
       identity: {
         clientId, clientOpId: o.clientOpId,
         clientBaseVersion: o.baseVersion, expectedBaseVersion: currentVersion,
+        // YN6：冲突人工解决的 resolve 删除 → oplog result=resolved + conflictOf 溯源（§7.2）。
+        ...(o._resolveOf ? { result: "resolved" as const, conflictOf: o._resolveOf } : {}),
       },
       op: "delete",
     });
@@ -1023,11 +1114,7 @@ async function replayRestoreTx(
   }
   const currentVersion = versionRow?.version ?? 0n;
   if (o.baseVersion !== currentVersion) {
-    return await terminalInTx(tx, userId, clientId, baseId, o, {
-      clientOpId: o.clientOpId, status: "conflict", reasonCode: RC.VERSION_CONFLICT,
-      reasonDetail: `记录版本已变化（本地基于 ${o.baseVersion.toString()}，服务端 ${currentVersion.toString()}）`,
-      serverVersion: currentVersion,
-    });
+    return await conflictTerminalInTx(tx, userId, clientId, baseId, o, currentVersion);
   }
 
   // 逐表【当前】manage_table 重判（§9.1，与在线 requireTableManage 同源）。纯读 preflight：
@@ -1249,4 +1336,233 @@ export async function retryIncoming(
     data: { attempts: nextAttempts },
   });
   return { ...result, attempts: nextAttempts, baseId };
+}
+
+// ───────────────────── YN6：冲突人工解决（mine/theirs/custom，§7.2/§12/§13） ─────────────────────
+
+/** POST /resolve 的三种人工裁决。 */
+export type ResolveDecision = "mine" | "theirs" | "custom";
+export interface ResolveConflictInput {
+  /** 被解决的原始冲突操作的 clientOpId（sync_incoming 中 status=conflict 行）。 */
+  resolveOf: string;
+  decision: ResolveDecision;
+  /**
+   * mine/custom 时新 resolve 操作的幂等键（客户端造，全局唯一）。缺省由服务端以 res- 前缀生成。
+   * theirs 不产生新写操作，忽略此项。
+   */
+  clientOpId?: string;
+  /** decision=custom：字段级挑选后拼出的 patch（形状同 push patch 的 payload，须含非空 changed）。 */
+  patch?: Record<string, unknown>;
+}
+
+export interface ResolveConflictResult {
+  resolveOf: string;
+  decision: ResolveDecision;
+  /** theirs=dropped；mine/custom 成功=accepted。 */
+  status: PushResult["status"];
+  baseId: string;
+  entityId: string;
+  /** mine/custom：新 resolve op 的幂等键（其 oplog result=resolved/conflictOf=resolveOf）。 */
+  newClientOpId?: string;
+  /** mine/custom 接受后的 seq/newVersion（字符串化由路由负责）。 */
+  seq?: bigint;
+  newVersion?: bigint;
+  /**
+   * 【内部，路由层不序列化】mine/custom 重放产生的新鲜终态（可能再次 rejected/conflict/quarantined）。
+   * 仅当 accepted 才把原冲突行置 resolved；否则原冲突行保留，用户可改选 theirs 或重试。
+   */
+  replay?: PushResult;
+  /**
+   * 【内部，路由层不序列化】true＝本次是对【已解决冲突】的幂等回读（重发同一 resolveOf），
+   * 未做任何新写；路由据此不重复发 sync_conflict_resolved 审计（§8.1/§9.5）。
+   */
+  _idempotent?: boolean;
+}
+
+/**
+ * 解决一条 record 版本冲突（YN6 冲突弹窗，§7.2）。服务端不自动覆盖，一切由用户显式三选一：
+ *
+ *   - theirs（采用服务端）：放弃本地改动，原冲突行置 dropped 留痕（与同步中心 discard 同口径，
+ *     不删行、decidedBy/decidedAt 记账），不产生新写、服务端数据不动。
+ *   - mine（采用我的）：以原冲突 op 的 patch/delete 为内容，基于【服务端当前版本】重造一条新 op
+ *     （新 clientOpId、baseVersion=current.version、_resolveOf=原 op），重走完整当前权限裁决；
+ *   - custom（逐字段挑选）：用请求里的 patch 作为内容，其余同 mine。
+ *
+ * 安全顺序（绝不丢用户离线改动）：先重放新 resolve op，【只有 accepted】才条件删除原冲突行；
+ * 重放若被当前权限 rejected、再次 conflict（版本又前进）或 quarantined，原冲突行原样保留，
+ * 把新终态回执返回给客户端，用户可改选 theirs 或稍后重试。整个过程用户显式选择，系统不静默合并。
+ *
+ * 身份/状态：仅本人 actorId 且 status=conflict 的行可解决；别人的/不存在统一 404（不泄存在性）；
+ * 非 conflict 态 409；custom 缺 changed/400；mine 要求原 op 是 patch/delete，否则 409。
+ */
+/**
+ * 对一条【已是 resolve 终态】的原冲突行做幂等回读（§8.1：POST /resolve 网络超时重发不重复落地）。
+ *   - 原行 status=dropped（themselves/theirs 放弃过）→ 回 dropped（theirs 语义）；
+ *   - 原行 status=resolved（mine/custom 接受过）→ 从 sync_op_log 按 conflictOf 反查那条 resolve op，
+ *     回 accepted + 首次的 newClientOpId/seq/newVersion；oplog 缺失（理论不应发生）按 accepted 回，
+ *     绝不重放（重复重放会在已推进的版本上再造一次写）。
+ * 回读结果不带 _freshTerminal，路由据此不重复发 sync_conflict_resolved 审计。
+ */
+async function readResolvedReceipt(
+  row: { id: string; clientOpId: string; baseId: string | null; entityId: string; status: string; op: string },
+  decision: ResolveDecision,
+): Promise<ResolveConflictResult> {
+  const baseId = row.baseId ?? "";
+  if (row.status === "dropped") {
+    return {
+      resolveOf: row.clientOpId, decision: "theirs", status: "dropped",
+      baseId, entityId: row.entityId, _idempotent: true,
+    };
+  }
+  // resolved：反查首次 resolve op（result=resolved + conflictOf=原 clientOpId，取最早一条）。
+  const opLog = await prisma.syncOpLog.findFirst({
+    where: { conflictOf: row.clientOpId, result: "resolved" },
+    orderBy: { seq: "asc" },
+    select: { clientOpId: true, seq: true, newVersion: true },
+  });
+  return {
+    resolveOf: row.clientOpId, decision, status: "accepted", baseId,
+    entityId: row.entityId, _idempotent: true,
+    ...(opLog ? { newClientOpId: opLog.clientOpId, seq: opLog.seq, newVersion: opLog.newVersion } : {}),
+  };
+}
+
+export async function resolveConflict(
+  userId: string,
+  input: ResolveConflictInput,
+): Promise<ResolveConflictResult> {
+  const decision = input.decision;
+  if (decision !== "mine" && decision !== "theirs" && decision !== "custom") {
+    throw new HttpError(400, "decision 必须是 mine/theirs/custom", RC.RESOLVE_BAD_DECISION);
+  }
+
+  // ① 读原冲突行并做身份/状态校验（非事务纯读）。
+  const row = await prisma.syncIncoming.findUnique({
+    where: { clientOpId: input.resolveOf },
+  });
+  if (!row || row.actorId !== userId) {
+    throw new HttpError(404, "冲突项不存在", RC.INCOMING_NOT_FOUND);
+  }
+  // 幂等回读（§8.1）：该冲突项已被解决过（网络超时重发同一 resolveOf）→ 回首次结果，绝不重复落地。
+  if (row.status === "resolved" || row.status === "dropped") {
+    return await readResolvedReceipt(row, decision);
+  }
+  if (row.status !== "conflict") {
+    throw new HttpError(409, `当前状态为 ${row.status}，不能解决（仅冲突项可解决）`, RC.RESOLVE_NOT_CONFLICT);
+  }
+  const baseId = row.baseId;
+  if (!baseId) throw new HttpError(409, "冲突项缺少 base 归属，无法解决", RC.RESOLVE_NOT_CONFLICT);
+
+  // ② theirs：放弃本地 → 原冲突行 dropped 留痕（不删行、不产生写）。
+  if (decision === "theirs") {
+    const upd = await prisma.syncIncoming.updateMany({
+      where: { id: row.id, actorId: userId, status: "conflict" },
+      data: { status: "dropped", decidedBy: userId, decidedAt: new Date() },
+    });
+    if (upd.count === 0) {
+      throw new HttpError(409, "冲突项状态已变化，请刷新后重试", RC.RESOLVE_NOT_CONFLICT);
+    }
+    return {
+      resolveOf: input.resolveOf, decision, status: "dropped",
+      baseId, entityId: row.entityId,
+    };
+  }
+
+  // ③ mine/custom：解析要重放的内容。
+  let origPayload: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(row.payload);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      origPayload = parsed as Record<string, unknown>;
+    }
+  } catch {
+    throw new HttpError(409, "冲突项原始操作已损坏，无法按我的版本解决（可选择采用服务端）", RC.RESOLVE_NOT_CONFLICT);
+  }
+
+  let replayPayload: Record<string, unknown>;
+  let replayOp: string;
+  if (decision === "custom") {
+    const patchPayload = asRecord(input.patch);
+    const changed = patchPayload ? asRecord(patchPayload.changed) : null;
+    if (!patchPayload || !changed || Object.keys(changed).length === 0) {
+      throw new HttpError(400, "custom 解决需提供非空 patch.changed", RC.RESOLVE_MALFORMED);
+    }
+    // custom 一律是 patch；tableId 缺省沿用原 op（patch 必带或可由记录推出）。
+    replayOp = "patch";
+    replayPayload = {
+      tableId: str(patchPayload.tableId) ?? str(origPayload.tableId) ?? undefined,
+      changed,
+    };
+  } else {
+    // mine：沿用原操作类型与内容（patch 重放我的字段改动；delete 重放删除）。
+    if (row.op !== "patch" && row.op !== "delete") {
+      throw new HttpError(
+        409,
+        `原冲突操作是 ${row.op}，不能「采用我的」重放（请逐字段挑选或采用服务端）`,
+        RC.RESOLVE_NOT_CONFLICT,
+      );
+    }
+    replayOp = row.op;
+    replayPayload = origPayload;
+  }
+
+  // 服务端当前版本＝新 resolve op 的 baseVersion（乐观锁从此对齐；原行 serverVersion 是冲突时快照）。
+  const versionRow = await prisma.syncEntityVersion.findUnique({
+    where: { id: row.entityId },
+    select: { version: true },
+  });
+  const currentVersion = versionRow?.version ?? row.serverVersion ?? 0n;
+
+  const newClientOpId = input.clientOpId?.trim() || `res-${randomUUID()}`;
+  if (newClientOpId === input.resolveOf) {
+    throw new HttpError(400, "resolve 的 clientOpId 不能与原冲突操作相同", RC.RESOLVE_MALFORMED);
+  }
+
+  const resolveOp: IncomingOp = {
+    clientOpId: newClientOpId,
+    entityType: row.entityType,
+    entityId: row.entityId,
+    op: replayOp,
+    baseVersion: currentVersion,
+    payload: replayPayload,
+    _resolveOf: input.resolveOf,
+  };
+
+  // ④ 当前库门探测（可能抛引擎 503 fail-closed；此时未删原冲突行，原样保留）。
+  const gate = await probeBaseEnter(userId, row.clientId, baseId);
+
+  // ⑤ 重放新 resolve op（同一条 push 裁决链：逐表当前权限重判 + 行/字段/掩码写闸 + 乐观锁）。
+  const replay = gate.allowed
+    ? await replayOne(userId, row.clientId, baseId, gate.access, resolveOp, new Map())
+    : await replayGatedOut(userId, row.clientId, baseId, resolveOp, gate.everSubscribed);
+  if (replay.status === "accepted" && replay._afterCommit) {
+    await runPostCommitCompensation(userId, replay);
+  }
+
+  // ⑥ 只有 accepted 才把原冲突行置 resolved（只增状态、留痕不删行，owner+conflict 双条件）；
+  //    其余终态（rejected/conflict/quarantined）保留原冲突行，用户可改选 theirs 或稍后重试。
+  if (replay.status !== "accepted") {
+    return {
+      resolveOf: input.resolveOf, decision, status: replay.status, baseId,
+      entityId: row.entityId, newClientOpId, replay,
+    };
+  }
+  const upd = await prisma.syncIncoming.updateMany({
+    where: { id: row.id, actorId: userId, status: "conflict" },
+    data: { status: "resolved", decidedBy: userId, decidedAt: new Date() },
+  });
+  if (upd.count === 0) {
+    // 并发下原冲突行已被另一请求解决：幂等回读其首次结果，不报错、不重复落地（§8.1）。
+    const fresh = await prisma.syncIncoming.findUnique({ where: { id: row.id } });
+    if (fresh && (fresh.status === "resolved" || fresh.status === "dropped")) {
+      return await readResolvedReceipt(fresh, decision);
+    }
+    throw new HttpError(409, "冲突项状态已变化，请刷新后重试", RC.RESOLVE_NOT_CONFLICT);
+  }
+
+  return {
+    resolveOf: input.resolveOf, decision, status: "accepted", baseId,
+    entityId: row.entityId, newClientOpId,
+    seq: replay.seq, newVersion: replay.newVersion, replay,
+  };
 }

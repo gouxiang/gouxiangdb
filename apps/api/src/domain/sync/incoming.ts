@@ -17,7 +17,7 @@ import { HttpError } from "../../httpError.js";
 /** 同步中心默认展示的"待处理"状态（accepted/dropped 是终态，不出现在待办里）。 */
 const PENDING_STATUSES = ["quarantined", "conflict", "rejected", "pending_approval"] as const;
 
-/** 可被显式放弃（→ dropped）的状态：隔离项、未生效改动、冲突项；accepted/dropped 不可放弃。 */
+/** 可被显式放弃（→ dropped）的状态：隔离项、未生效改动、冲突项；accepted/dropped/resolved 不可放弃。 */
 const DISCARDABLE_STATUSES = new Set(["quarantined", "rejected", "conflict", "pending_approval"]);
 
 /** 列表项（payload 解析回对象，供同步中心展示"我当时改了什么"；这是本人自己的操作，回传本人）。 */
@@ -34,6 +34,11 @@ export interface IncomingItem {
   reasonCode: string | null;
   reasonDetail: string | null;
   serverVersion: string;
+  /**
+   * YN6：conflict 项按当前权限脱敏的服务端当前版本快照（双版本弹窗右侧）；非 conflict 项为 null。
+   * 这是本人自己操作涉及的记录、按本人当前权限裁剪后的视图，与 GET /snapshot 同一脱敏口径。
+   */
+  conflictServerPayload: Record<string, unknown> | null;
   attempts: number;
   createdAt: string;
   decidedAt: string | null;
@@ -49,7 +54,7 @@ export interface IncomingList {
 function normalizeStatusFilter(raw: string | null): string[] {
   if (!raw) return [...PENDING_STATUSES];
   const wanted = raw.split(",").map((s) => s.trim()).filter(Boolean);
-  const allowed = new Set([...PENDING_STATUSES, "accepted", "dropped", "received"]);
+  const allowed = new Set([...PENDING_STATUSES, "accepted", "dropped", "resolved", "received"]);
   for (const s of wanted) {
     if (!allowed.has(s)) {
       throw new HttpError(400, `不支持的 status 过滤值：${s}`, "SYNC_BAD_REQUEST");
@@ -92,6 +97,18 @@ export async function listIncoming(
     } catch {
       payload = {};
     }
+    // YN6：仅 conflict 项解析服务端快照（本人自己的操作、按本人当前权限脱敏，回传本人）。
+    let conflictServerPayload: Record<string, unknown> | null = null;
+    if (row.status === "conflict" && row.conflictServerPayload) {
+      try {
+        const parsedSnap: unknown = JSON.parse(row.conflictServerPayload);
+        if (parsedSnap && typeof parsedSnap === "object" && !Array.isArray(parsedSnap)) {
+          conflictServerPayload = parsedSnap as Record<string, unknown>;
+        }
+      } catch {
+        conflictServerPayload = null;
+      }
+    }
     return {
       id: row.id,
       clientOpId: row.clientOpId,
@@ -105,6 +122,7 @@ export async function listIncoming(
       reasonCode: row.reasonCode,
       reasonDetail: row.reasonDetail,
       serverVersion: row.serverVersion.toString(),
+      conflictServerPayload,
       attempts: row.attempts,
       createdAt: row.createdAt.toISOString(),
       decidedAt: row.decidedAt ? row.decidedAt.toISOString() : null,

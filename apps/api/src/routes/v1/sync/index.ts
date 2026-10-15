@@ -11,8 +11,8 @@
 //
 // 分期：YN0 立总门 + 鉴权 + 能力探针；subscribe/snapshot/pull 在 YN2 接入；push 在 YN4 接入；
 // YN5 接入逐 op 当前权限裁决 + rejected/quarantined 隔离 + incoming 同步中心（retry/discard）+
-// visibility 失权对账可见集 + 审计；resolve 冲突弹窗在 YN6 接入。未落地的路径不在此预注册，以免
-// 客户端把"还没做"误当成"已支持"。
+// visibility 失权对账可见集 + 审计；YN6 接入冲突双版本快照 + 人工 resolve（mine/theirs/custom）+
+// sync_conflict_resolved 审计。未落地的路径不在此预注册，以免客户端把"还没做"误当成"已支持"。
 
 import { Hono } from "hono";
 import { syncServerEnabled } from "../../../configSync.js";
@@ -23,7 +23,7 @@ import { audit } from "../../../audit/emit.js";
 import type { AuditEventName } from "../../../audit/audit.js";
 import { buildBaseSnapshot, markSnapshotDone, subscribeBase, authorizeBaseRead } from "../../../domain/sync/snapshot.js";
 import { pullBaseOps } from "../../../domain/sync/pull.js";
-import { pushBaseOps, retryIncoming, type IncomingOp, type PushResult } from "../../../domain/sync/push.js";
+import { pushBaseOps, retryIncoming, resolveConflict, type IncomingOp, type PushResult } from "../../../domain/sync/push.js";
 import { listIncoming, discardIncoming } from "../../../domain/sync/incoming.js";
 import { buildVisibilityReport } from "../../../domain/sync/visibility.js";
 
@@ -49,7 +49,7 @@ syncRoutes.get("/", (c) => {
     apiVersion: "v1",
     sync: true,
     // 阶段标识随 YN 推进刷新；客户端据此判断可用端点集。
-    phase: "YN5",
+    phase: "YN6",
     serverVersion: VERSION,
     auth: {
       userId: auth.userId,
@@ -261,6 +261,82 @@ syncRoutes.post("/incoming/:id/discard", async (c) => {
   const confirm = body?.confirm === true;
   const r = await discardIncoming(auth.userId, id, confirm);
   return c.json({ result: r });
+});
+
+// ───────────────── YN6：冲突人工解决（mine/theirs/custom，双版本弹窗） ─────────────────
+
+/**
+ * POST /resolve {resolveOf:<冲突 clientOpId>, decision:"mine"|"theirs"|"custom", clientOpId?, patch?}
+ *   → {result:{resolveOf, decision, status, newClientOpId?, seq?, newVersion?, entityId, baseId}}
+ * 冲突不静默：服务端只按用户显式选择重放（§7.2）。mine/custom 成功（accepted）或 theirs（dropped）
+ * 都发 sync_conflict_resolved 审计；若重放因当前权限/版本再次未接受，原冲突行保留、不发 resolved
+ * 审计，把新终态（rejected/conflict/quarantined）如实回给客户端改选。BigInt 序列化为字符串。
+ */
+syncRoutes.post("/resolve", async (c) => {
+  const auth = c.get("auth");
+  const body = (await c.req.json().catch(() => null)) as {
+    resolveOf?: unknown; decision?: unknown; clientOpId?: unknown; patch?: unknown;
+  } | null;
+  const resolveOf = typeof body?.resolveOf === "string" ? body.resolveOf.trim() : "";
+  if (!resolveOf) throw new HttpError(400, "缺少 resolveOf（要解决的冲突 clientOpId）", "SYNC_BAD_REQUEST");
+  const decision = body?.decision;
+  if (decision !== "mine" && decision !== "theirs" && decision !== "custom") {
+    throw new HttpError(400, "decision 必须是 mine/theirs/custom", "SYNC_RESOLVE_BAD_DECISION");
+  }
+  const clientOpId = typeof body?.clientOpId === "string" ? body.clientOpId.trim() : undefined;
+  // custom 必须带非空 patch 对象；mine/theirs 忽略 patch（theirs 本就不重放）。
+  let patch: Record<string, unknown> | undefined;
+  if (decision === "custom") {
+    const rawPatch = body?.patch;
+    if (!rawPatch || typeof rawPatch !== "object" || Array.isArray(rawPatch)) {
+      throw new HttpError(400, "custom 解决需提供 patch 对象", "SYNC_RESOLVE_MALFORMED");
+    }
+    patch = rawPatch as Record<string, unknown>;
+  }
+
+  const r = await resolveConflict(auth.userId, { resolveOf, decision, clientOpId, patch });
+
+  // 仅在冲突【本次被真正解决】（theirs→dropped，或 mine/custom 重放 accepted）时打点；
+  // 幂等回读（_idempotent，重发同一 resolveOf）或重放再被拒/再冲突都不发 resolved 审计。
+  const settled = !r._idempotent
+    && (r.status === "accepted" || (r.decision === "theirs" && r.status === "dropped"));
+  if (settled) {
+    audit(c, {
+      event: "sync_conflict_resolved",
+      status: 200,
+      actorId: auth.userId,
+      detail: {
+        baseId: r.baseId,
+        resolveOf: r.resolveOf,
+        decision: r.decision,
+        entityId: r.entityId,
+        ...(r.newClientOpId ? { clientOpId: r.newClientOpId } : {}),
+      },
+    });
+  }
+
+  return c.json({
+    result: {
+      resolveOf: r.resolveOf,
+      decision: r.decision,
+      status: r.status,
+      baseId: r.baseId,
+      entityId: r.entityId,
+      ...(r.newClientOpId ? { newClientOpId: r.newClientOpId } : {}),
+      ...(r.seq !== undefined ? { seq: r.seq.toString() } : {}),
+      ...(r.newVersion !== undefined ? { newVersion: r.newVersion.toString() } : {}),
+      // 重放未接受时把新终态原因带回（原冲突行保留，客户端可改选 theirs/稍后重试）。
+      ...(r.replay && r.status !== "accepted"
+        ? {
+            reasonCode: r.replay.reasonCode,
+            ...(r.replay.reasonDetail ? { reasonDetail: r.replay.reasonDetail } : {}),
+            ...(r.replay.serverVersion !== undefined
+              ? { serverVersion: r.replay.serverVersion.toString() }
+              : {}),
+          }
+        : {}),
+    },
+  });
 });
 
 // ───────────────── YN5：失权对账可见集（差集擦除在 Mac 侧车执行） ─────────────────

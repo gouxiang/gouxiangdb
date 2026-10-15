@@ -98,6 +98,16 @@ export interface ReplaySyncIdentity {
   clientOpId: string;
   clientBaseVersion: bigint;
   expectedBaseVersion?: bigint;
+  /**
+   * YN6：冲突人工解决产生的 resolve 操作记账时传 "resolved"（默认普通回放恒 "accepted"）。
+   * 仅落到 sync_op_log.result，不影响版本/seq 分配。
+   */
+  result?: "accepted" | "resolved";
+  /**
+   * YN6：resolve 操作溯源——它解决的那条原始冲突 clientOpId（sync_op_log.conflictOf）。
+   * 普通回放/在线写恒 null。
+   */
+  conflictOf?: string | null;
 }
 
 /**
@@ -112,7 +122,7 @@ export interface ReplaySyncIdentity {
 export async function writeSyncOpTx(
   tx: DbTx,
   input: RecordSyncOpInput,
-  identity: { clientId: string; clientOpId: string; clientBaseVersion: bigint; expectedBaseVersion?: bigint },
+  identity: ReplaySyncIdentity,
 ): Promise<RecordSyncOpResult> {
   // 订阅分片键：显式传入优先（物理删表等点查不到 table 的场景）；否则同事务点查 table.baseId。
   let baseId: string | null;
@@ -186,7 +196,10 @@ export async function writeSyncOpTx(
       baseVersion: identity.clientBaseVersion,
       newVersion,
       payload,
-      result: "accepted",
+      // YN6：resolve 操作记 result="resolved"；普通回放/在线恒 "accepted"（§7.2 留痕）。
+      result: identity.result ?? "accepted",
+      // YN6：resolve 操作溯源到原始冲突 clientOpId；其余恒 null。
+      conflictOf: identity.conflictOf ?? null,
     },
   });
 
