@@ -6,6 +6,7 @@
 - 适用版本基线：根 `package.json` 0.2.x；monorepo = `apps/api`（Hono + Prisma5 + SQLite 单文件）+ `apps/web`（React18 + Vite + TS + TanStack Query + Zustand）+ `packages/{shared-types,canvas,blocks,design-tokens}`
 - 需求来源：产品负责人戴总——单机自部署产品在登录环节提供两种可选运行模式：**本地节点（服务端）** 与 **远程节点（瘦客户端）**，两模式自由切换、界面完全一致，唯一差异是数据来源
 - 关联文档：`docs/design/2026-10-app-update/DESIGN.md`（同体例、同 env 门控/默认关闭/零迁移模式）、`docs/deployment/fnos-native.md`、`deploy/caddy/Caddyfile`
+- 桌面承载：macOS 独立桌面 App（Tauri v2 壳，承载本设计的"壳即浏览器"+ 本地/远程切换）与一键更新方案见同目录 **`DESIGN-MACOS-APP.md`**；本主文档的路线 A、S1 数据源抽象等结论继续有效，不被改写
 
 ---
 
