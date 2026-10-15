@@ -18,6 +18,8 @@ import { syncServerEnabled } from "../../../configSync.js";
 import { HttpError } from "../../../httpError.js";
 import { requireActiveUser } from "../../../middleware/authActive.js";
 import { VERSION } from "../../../version.js";
+import { buildBaseSnapshot, markSnapshotDone, subscribeBase, authorizeBaseRead } from "../../../domain/sync/snapshot.js";
+import { pullBaseOps } from "../../../domain/sync/pull.js";
 
 export const syncRoutes = new Hono();
 
@@ -41,11 +43,67 @@ syncRoutes.get("/", (c) => {
     apiVersion: "v1",
     sync: true,
     // 阶段标识随 YN 推进刷新；客户端据此判断可用端点集。
-    phase: "YN0",
+    phase: "YN2",
     serverVersion: VERSION,
     auth: {
       userId: auth.userId,
       workspaceId: auth.workspaceId,
     },
   });
+});
+
+// ───────────────────────── YN2a：订阅 + 权限裁剪基线快照 ─────────────────────────
+
+/** POST /subscribe {clientId, scopeType:"base", scopeId:<baseId>} → 订阅记账 + 当前游标/权限版本。 */
+syncRoutes.post("/subscribe", async (c) => {
+  const auth = c.get("auth");
+  const body = (await c.req.json().catch(() => null)) as
+    | { clientId?: unknown; scopeType?: unknown; scopeId?: unknown }
+    | null;
+  const clientId = typeof body?.clientId === "string" ? body.clientId.trim() : "";
+  const scopeType = body?.scopeType;
+  const scopeId = typeof body?.scopeId === "string" ? body.scopeId.trim() : "";
+  if (!clientId || !scopeId) throw new HttpError(400, "缺少 clientId 或 scopeId", "SYNC_BAD_REQUEST");
+  // YN2 只支持按 base 订阅（kb/doc 走协同轨，后续阶段）。
+  if (scopeType !== "base") throw new HttpError(400, "本期仅支持 scopeType=base", "SYNC_BAD_SCOPE");
+
+  const result = await subscribeBase(auth.userId, clientId, scopeId);
+  return c.json({ result });
+});
+
+/** GET /snapshot?baseId=&clientId=&limit= → 按【当前权限】裁剪的基线快照（与在线列表同口径）。 */
+syncRoutes.get("/snapshot", async (c) => {
+  const auth = c.get("auth");
+  const baseId = (c.req.query("baseId") ?? "").trim();
+  if (!baseId) throw new HttpError(400, "缺少 baseId", "SYNC_BAD_REQUEST");
+  const limitRaw = Number(c.req.query("limit") ?? "");
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : undefined;
+  // clientId 可选：带了就把该订阅标记为快照已完成（游标推进由 pull 的 after 负责）。
+  const clientId = (c.req.query("clientId") ?? "").trim() || null;
+
+  const page = await buildBaseSnapshot(auth.userId, baseId, limit ? { limit } : {});
+  // clientId 可选：带了就标记快照完成（订阅尚未建立时 updateMany 命中 0 行，不影响快照成功）。
+  if (clientId) await markSnapshotDone(clientId, baseId);
+  return c.json({ result: page });
+});
+
+/**
+ * GET /pull?baseId=&after=<seq>&clientId=&limit= → 游标增量 oplog，按【当前权限】逐条过滤。
+ * after 缺省 0（未做过快照的客户端会从最早 op 拉，但通常先 snapshot 再以 snapshotSeq 为起点）。
+ */
+syncRoutes.get("/pull", async (c) => {
+  const auth = c.get("auth");
+  const baseId = (c.req.query("baseId") ?? "").trim();
+  if (!baseId) throw new HttpError(400, "缺少 baseId", "SYNC_BAD_REQUEST");
+  const afterRaw = (c.req.query("after") ?? "0").trim();
+  if (!/^\d+$/.test(afterRaw)) throw new HttpError(400, "after 必须是非负整数", "SYNC_BAD_CURSOR");
+  const after = BigInt(afterRaw);
+  const limitRaw = Number(c.req.query("limit") ?? "");
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 500;
+  const clientId = (c.req.query("clientId") ?? "").trim() || null;
+
+  // 当前库门裁决（enter）；pull 内部再逐表按当前 r/行/字段权限二次过滤。
+  const access = await authorizeBaseRead(auth.userId, baseId);
+  const page = await pullBaseOps(auth.userId, access, clientId, baseId, after, limit);
+  return c.json({ result: page });
 });
