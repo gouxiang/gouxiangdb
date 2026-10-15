@@ -9,9 +9,9 @@
 //     旧行为逐字节不变；on -> 继续鉴权链与各子端点。
 //   - 运维改 env 后无需重启即生效；测试也能在同一进程内切开/关（config 是冻结快照）。
 //
-// 分期：YN0 只立总门 + 鉴权 + 能力探针（证明可达性与开关语义）；subscribe/snapshot/pull
-// 在 YN2 接入，push/resolve/incoming/visibility 在 YN4/YN5 接入。未落地的路径不在此预注册，
-// 以免客户端把"还没做"误当成"已支持"。
+// 分期：YN0 立总门 + 鉴权 + 能力探针；subscribe/snapshot/pull 在 YN2 接入；push 在 YN4 接入；
+// resolve/incoming/visibility 在 YN5/YN6 接入。未落地的路径不在此预注册，以免客户端把
+// "还没做"误当成"已支持"。
 
 import { Hono } from "hono";
 import { syncServerEnabled } from "../../../configSync.js";
@@ -20,6 +20,7 @@ import { requireActiveUser } from "../../../middleware/authActive.js";
 import { VERSION } from "../../../version.js";
 import { buildBaseSnapshot, markSnapshotDone, subscribeBase, authorizeBaseRead } from "../../../domain/sync/snapshot.js";
 import { pullBaseOps } from "../../../domain/sync/pull.js";
+import { pushBaseOps, type IncomingOp } from "../../../domain/sync/push.js";
 
 export const syncRoutes = new Hono();
 
@@ -43,7 +44,7 @@ syncRoutes.get("/", (c) => {
     apiVersion: "v1",
     sync: true,
     // 阶段标识随 YN 推进刷新；客户端据此判断可用端点集。
-    phase: "YN2",
+    phase: "YN4",
     serverVersion: VERSION,
     auth: {
       userId: auth.userId,
@@ -106,4 +107,67 @@ syncRoutes.get("/pull", async (c) => {
   const access = await authorizeBaseRead(auth.userId, baseId);
   const page = await pullBaseOps(auth.userId, access, clientId, baseId, after, limit);
   return c.json({ result: page });
+});
+
+// ───────────────────────── YN4：push 回放 + 幂等/顺序 + 接受 ─────────────────────────
+
+/** 单批 push 上限（超大库保护；超出客户端应拆批，§14「分批 + 写队列 + 限流」）。 */
+const PUSH_MAX_OPS = 1000;
+
+/**
+ * POST /push {baseId, clientId, ops:[{clientOpId,entityType,entityId,op,baseVersion,payload}]}
+ *   → {results:[{clientOpId,status,reasonCode?,reasonDetail?,seq?,newVersion?,entityId?,serverVersion?}]}
+ * 每条 op 独立裁决、部分接受（§8.5）；BigInt 全部序列化为字符串（与 pull 同口径）。
+ */
+syncRoutes.post("/push", async (c) => {
+  const auth = c.get("auth");
+  const body = (await c.req.json().catch(() => null)) as
+    | { baseId?: unknown; clientId?: unknown; ops?: unknown }
+    | null;
+
+  const baseId = typeof body?.baseId === "string" ? body.baseId.trim() : "";
+  const clientId = typeof body?.clientId === "string" ? body.clientId.trim() : "";
+  if (!baseId || !clientId) throw new HttpError(400, "缺少 baseId 或 clientId", "SYNC_BAD_REQUEST");
+  if (!Array.isArray(body?.ops)) throw new HttpError(400, "ops 必须是数组", "SYNC_BAD_REQUEST");
+  if (body.ops.length === 0) throw new HttpError(400, "ops 不能为空", "SYNC_BAD_REQUEST");
+  if (body.ops.length > PUSH_MAX_OPS) {
+    throw new HttpError(400, `单批最多 ${PUSH_MAX_OPS} 条操作，请拆批`, "SYNC_BAD_REQUEST");
+  }
+
+  // 逐条结构校验（在任何 DB 访问之前）：形状不对整单 400（客户端 bug，不进幂等表）。
+  const ops: IncomingOp[] = [];
+  for (const raw of body.ops) {
+    const o = raw as Record<string, unknown> | null;
+    if (!o || typeof o !== "object") throw new HttpError(400, "op 必须是对象", "SYNC_BAD_REQUEST");
+    const clientOpId = typeof o.clientOpId === "string" ? o.clientOpId.trim() : "";
+    const entityType = typeof o.entityType === "string" ? o.entityType.trim() : "";
+    const entityId = typeof o.entityId === "string" ? o.entityId.trim() : "";
+    const op = typeof o.op === "string" ? o.op.trim() : "";
+    const baseVersionRaw = typeof o.baseVersion === "string" ? o.baseVersion.trim() : "";
+    if (!clientOpId || !entityType || !entityId || !op) {
+      throw new HttpError(400, "op 缺少 clientOpId/entityType/entityId/op", "SYNC_BAD_REQUEST");
+    }
+    if (!/^\d+$/.test(baseVersionRaw)) {
+      throw new HttpError(400, `op ${clientOpId} 的 baseVersion 必须是非负整数串`, "SYNC_BAD_CURSOR");
+    }
+    const payload = o.payload && typeof o.payload === "object" && !Array.isArray(o.payload)
+      ? (o.payload as Record<string, unknown>)
+      : {};
+    ops.push({ clientOpId, entityType, entityId, op, baseVersion: BigInt(baseVersionRaw), payload });
+  }
+
+  const outcome = await pushBaseOps(auth.userId, clientId, baseId, ops);
+
+  // BigInt → 字符串（JSON 安全）；与 pull 输出一致，客户端统一按字符串解析版本/seq。
+  const results = outcome.results.map((r) => ({
+    clientOpId: r.clientOpId,
+    status: r.status,
+    ...(r.reasonCode ? { reasonCode: r.reasonCode } : {}),
+    ...(r.reasonDetail ? { reasonDetail: r.reasonDetail } : {}),
+    ...(r.seq !== undefined ? { seq: r.seq.toString() } : {}),
+    ...(r.newVersion !== undefined ? { newVersion: r.newVersion.toString() } : {}),
+    ...(r.entityId ? { entityId: r.entityId } : {}),
+    ...(r.serverVersion !== undefined ? { serverVersion: r.serverVersion.toString() } : {}),
+  }));
+  return c.json({ result: { baseId: outcome.baseId, results } });
 });

@@ -18,7 +18,7 @@ import { HttpError } from "../guards.js";
 import { loadTableFields } from "./recordService.js";
 import { deleteRecordsTx, syncRecordsTx } from "./fieldIndex/sync.js";
 import { enqueueChangeEventTx } from "./search/outbox.js";
-import { recordSyncOpTx } from "./sync/oplog.js";
+import { recordSyncOpTx, writeSyncOpTx, type ReplaySyncIdentity, type SyncOp } from "./sync/oplog.js";
 import { sidecarUniqueMatch, findUniqueConflictTx } from "./queryPlan/uniqueSidecar.js";
 import { diffRecordFields } from "./recordChanges/diff.js";
 import { appendRecordChangeTx } from "./recordChanges/store.js";
@@ -352,7 +352,13 @@ async function assertUniqueFullScan(
  * 调用方职责：前置存在性/权限校验、事务包裹（withWriteTx("record.softDelete")）、
  * 事务后的 invalidateOrdinalCache 与 defaults 反向重算（保持既有顺序不变）。
  */
-export async function softDeleteRecordTx(tx: DbTx, recordId: string, actorId: string | null = null): Promise<void> {
+export async function softDeleteRecordTx(
+  tx: DbTx,
+  recordId: string,
+  actorId: string | null = null,
+  /** YN4 push 回放记账覆盖；在线路径缺省（服务端身份、不断言版本、op=delete）。 */
+  sync?: SyncWriteOverride,
+): Promise<{ sync: Awaited<ReturnType<typeof writeSyncOpTx>> | null }> {
   // select 出 tableId：变更历史行要带 tableId（按表清理/巡检用），靠 update 的返回顺带取回，零额外 IO。
   const deleted = await tx.record.update({
     where: { id: recordId },
@@ -374,10 +380,31 @@ export async function softDeleteRecordTx(tx: DbTx, recordId: string, actorId: st
     entityType: "record", entityId: recordId, op: "delete", version: BigInt(Date.now()),
   });
   // YN1：同步版本切面——置墓碑、version+1、追加 delete oplog（pull 以 delete+墓碑下发删除事实，§6.4）。
+  // YN4：push 回放改用客户端身份/幂等键 + 期望版本断言（op=delete），只记一次账（§8.5）。
+  if (sync) {
+    const result = await writeSyncOpTx(tx, {
+      entityType: "record", entityId: recordId, tableId: deleted.tableId,
+      op: sync.op ?? "delete", actorId, changes: [],
+    }, sync.identity);
+    return { sync: result };
+  }
   await recordSyncOpTx(tx, {
     entityType: "record", entityId: recordId, tableId: deleted.tableId,
     op: "delete", actorId, changes: [],
   });
+  return { sync: null };
+}
+
+/**
+ * YN4 push 回放对「同步记账」的覆盖。在线路径一律不传 → 走 recordSyncOpTx（服务端身份、
+ * 服务端造 srv- 键、不断言版本），逐字节保持旧行为。回放路径传入时：
+ *   - 仅记【一次】账，但改用 writeSyncOpTx（客户端 clientId/clientOpId/baseVersion + 乐观锁断言）；
+ *   - op 允许把本次写登记为结构化 patch（语义同 update，仅 oplog 词表不同）；
+ *   - 绝不同时调在线切面，否则同一写会产生两条 oplog、版本 +2。
+ */
+export interface SyncWriteOverride {
+  identity: ReplaySyncIdentity;
+  op?: SyncOp;
 }
 
 /** createRecordTx 入参（MCP 与 REST 同口径；显式传参、无 Hono Context）。 */
@@ -386,6 +413,14 @@ interface CreateRecordParams {
   payloadFields: Record<string, unknown>;
   fields: Awaited<ReturnType<typeof loadTableFields>>;
   userId: string;
+  /**
+   * YN4：保留客户端 cuid 作为权威 id（§8.4，免去关联重映射）。在线路径不传 → record.create
+   * 仍由 Prisma 生成 cuid，旧行为不变。回放时传入；若该 id 已存在且非同一 clientOpId，
+   * 乐观锁/唯一约束会让本事务失败（外层落冲突/拒绝），绝不静默覆盖。
+   */
+  recordId?: string;
+  /** YN4 push 回放记账覆盖；在线路径缺省。 */
+  sync?: SyncWriteOverride;
   /**
    * 字段级写闸：由调用方从「角色 × 库」裁决结果派生，收到待写字段名后自行决定抛什么错。
    * 只挡【人】的写入——公式/自动关联等系统自动计算走 applyFieldWrites 内部的
@@ -401,7 +436,7 @@ interface CreateRecordParams {
  * 顺序未改：draft 跳过必填兜底 -> assertRequiredOnCreate -> assertUnique（事务内防 TOCTOU）-> record.create
  * -> applyFieldWrites（含 links/sidecar）-> outbox upsert。调用方负责 defaults 补偿写与写后 hydrate。
  */
-export async function createRecordTx(tx: DbTx, params: CreateRecordParams): Promise<{ id: string; tableId: string }> {
+export async function createRecordTx(tx: DbTx, params: CreateRecordParams): Promise<{ id: string; tableId: string; sync: Awaited<ReturnType<typeof writeSyncOpTx>> | null }> {
     // draft 模式（就地新建空行草稿）跳过，与编辑期允许临时为空保持一致。
     if (!params.isDraft) {
       await assertRequiredOnCreate(params.fields, params.payloadFields);
@@ -411,7 +446,11 @@ export async function createRecordTx(tx: DbTx, params: CreateRecordParams): Prom
     // unique 校验放进事务内，避免并发下检查与写入之间被插队（TOCTOU）
     await assertUnique(params.tableId, params.fields, params.payloadFields, undefined, undefined, tx);
     const created = await tx.record.create({
-      data: { tableId: params.tableId, fields: "{}", createdBy: params.userId, updatedBy: params.userId },
+      // YN4：回放时采用客户端 cuid（§8.4）；在线路径不传 recordId，仍由 Prisma 生成，零变化。
+      data: {
+        ...(params.recordId ? { id: params.recordId } : {}),
+        tableId: params.tableId, fields: "{}", createdBy: params.userId, updatedBy: params.userId,
+      },
     });
     let fieldChanges: FieldChange[] = [];
     if (Object.keys(params.payloadFields).length > 0) {
@@ -426,11 +465,20 @@ export async function createRecordTx(tx: DbTx, params: CreateRecordParams): Prom
     });
     // YN1：同步版本切面（仅 GX_SYNC_SERVER=on 时写，off 零行为）。即便没有物理字段，
     // 记录本身被建出来也是一次真实 create，必须推进版本并登记 oplog。
-    await recordSyncOpTx(tx, {
-      entityType: "record", entityId: created.id, tableId: params.tableId,
-      op: "create", actorId: params.userId, changes: fieldChanges,
-    });
-    return created;
+    // YN4：push 回放时改用客户端身份/幂等键 + 乐观锁断言，只记一次账（§8.4/§8.5）。
+    let syncResult: Awaited<ReturnType<typeof writeSyncOpTx>> | null = null;
+    if (params.sync) {
+      syncResult = await writeSyncOpTx(tx, {
+        entityType: "record", entityId: created.id, tableId: params.tableId,
+        op: params.sync.op ?? "create", actorId: params.userId, changes: fieldChanges,
+      }, params.sync.identity);
+    } else {
+      await recordSyncOpTx(tx, {
+        entityType: "record", entityId: created.id, tableId: params.tableId,
+        op: "create", actorId: params.userId, changes: fieldChanges,
+      });
+    }
+    return { id: created.id, tableId: params.tableId, sync: syncResult };
 }
 
 /** updateRecordTx 入参（MCP 与 REST 同口径；显式传参、无 Hono Context）。 */
@@ -443,6 +491,8 @@ interface UpdateRecordParams {
   userId: string;
   /** 同 CreateRecordParams.fieldGate：字段级写闸（只挡人的写入）。 */
   fieldGate?: (fieldIds: readonly string[]) => void;
+  /** YN4 push 回放记账覆盖；在线路径缺省（服务端身份、不断言版本）。 */
+  sync?: SyncWriteOverride;
 }
 
 /**
@@ -450,7 +500,10 @@ interface UpdateRecordParams {
  * 顺序未改：assertUnique（排除自身）-> applyFieldWrites（含 links/sidecar）-> record.update(updatedBy)
  * -> outbox upsert。调用方负责 defaults 联动、写后 hydrate 与掩码投影。
  */
-export async function updateRecordTx(tx: DbTx, params: UpdateRecordParams): Promise<void> {
+export async function updateRecordTx(tx: DbTx, params: UpdateRecordParams): Promise<{
+  changes: FieldChange[];
+  sync: Awaited<ReturnType<typeof writeSyncOpTx>> | null;
+}> {
     // 字段级写闸先于任何写：与批量路径的 runMaskWriteGate 同口径——整批要么全过要么不写。
     params.fieldGate?.(Object.keys(params.patch));
     await assertUnique(params.tableId, params.fields, params.patch, params.recordId, undefined, tx);
@@ -464,8 +517,18 @@ export async function updateRecordTx(tx: DbTx, params: UpdateRecordParams): Prom
     });
     // YN1：同步版本切面。在线 update 无条件推进 per-entity version（即便本次字段级 diff 为空，
     // updatedBy/links 等也可能变化；保证离线端 baseVersion 与服务端不会漏比），payload 只带字段 diff。
-    await recordSyncOpTx(tx, {
-      entityType: "record", entityId: params.recordId, tableId: params.tableId,
-      op: "update", actorId: params.userId, changes,
-    });
+    // YN4：push 回放改用客户端身份/幂等键 + 期望版本断言（op=patch），只记一次账（§8.5）。
+    let syncResult: Awaited<ReturnType<typeof writeSyncOpTx>> | null = null;
+    if (params.sync) {
+      syncResult = await writeSyncOpTx(tx, {
+        entityType: "record", entityId: params.recordId, tableId: params.tableId,
+        op: params.sync.op ?? "patch", actorId: params.userId, changes,
+      }, params.sync.identity);
+    } else {
+      await recordSyncOpTx(tx, {
+        entityType: "record", entityId: params.recordId, tableId: params.tableId,
+        op: "update", actorId: params.userId, changes,
+      });
+    }
+    return { changes, sync: syncResult };
 }
