@@ -25,6 +25,7 @@ import { adminSearchRoutes } from "./adminSearch.js";
 import { adminUpdateRoutes } from "./adminUpdate.js";
 import { patRoutes } from "./pats.js";
 import { effectiveRoleRows } from "../../domain/org/authorization.js";
+import { syncServerEnabled } from "../../configSync.js";
 
 export const v1 = new Hono();
 
@@ -77,6 +78,9 @@ if (config.enterpriseOrg) {
     return c.json({
       apiVersion: "v1",
       enterpriseOrg: true,
+      // 离线同步能力位（additive，老客户端忽略）：与企业 flag 正交，单独读 GX_SYNC_SERVER。
+      // 客户端据其决定能否对本节点订阅/离线同步；权威探针亦可见 GET /api/v1/sync/。
+      sync: syncServerEnabled(),
       // 权限管理写能力位。见 authzManageFlag 的口径注释：与引擎执法正交。
       authzManage: await authzManageFlag(auth.userId),
       auth: {

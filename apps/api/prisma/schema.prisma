@@ -854,6 +854,129 @@ model RecordChange {
 }
 
 // ============================================================================
+// 离线优先 + 操作级双向同步（YN0 起，只增；GX_SYNC_SERVER 默认 off，off 时不写一行）
+// 设计权威：docs/design/2026-10-node-mode/DESIGN-OFFLINE-SYNC.md §4.1
+// 纪律：列名 camelCase（@@map 只改表名不改列名）；刻意不加物理外键（SQLite 旧库
+// deploy 外键校验会失败，悬挂行由应用层清理）；不回填存量；BigInt 对齐 ChangeEvent.version。
+// ============================================================================
+
+/// 服务端正向操作日志（已接受/历史），按全局 seq 排序，是增量 pull 的事实源。
+model SyncOpLog {
+  id          String   @id @default(cuid())
+  /// 服务端单调递增全局序号（每节点独立序列），pull 游标
+  seq         BigInt
+  workspaceId String   @default("ws_default")
+  /// 订阅分片：所属 base（doc 为 kbId 映射）；元数据类可 null
+  baseId      String?
+  /// record | linkrow | doc_tombstone(预留) ...（开放词表，新模块向同步轨注册表登记）
+  entityType  String
+  entityId    String
+  /// create | update | patch | delete | restore | resolve
+  op          String
+  /// 服务端按当前 token 认定的真实 actor（不信任客户端自报）
+  actorId     String?
+  /// 提交设备/客户端实例 id
+  clientId    String
+  /// 全局幂等键，重放去重
+  clientOpId  String   @unique
+  /// 客户端提交时所基于的实体版本
+  baseVersion BigInt   @default(0)
+  /// 应用后实体新版本
+  newVersion  BigInt
+  /// JSON：操作的字段级内容（create=全字段, patch=字段子集, delete=软删）
+  payload     String
+  /// accepted | resolved（冲突后人工接受）
+  result      String   @default("accepted")
+  /// 若为 resolve 操作，记录它解决的原始 clientOpId
+  conflictOf  String?
+  createdAt   DateTime @default(now())
+
+  @@index([seq])
+  @@index([baseId, seq])
+  @@index([entityType, entityId, seq])
+  @@map("sync_op_log")
+}
+
+/// 每实体权威版本与墓碑（结构化记录）。与 records 并存、只增不改存量；懒初始化不回填。
+model SyncEntityVersion {
+  /// = entityId（recordId），1:1
+  id          String   @id
+  entityType  String   @default("record")
+  baseId      String?
+  /// 服务端权威版本（逻辑时钟，不用 wall clock 定生死），客户端不能自授
+  version     BigInt   @default(0)
+  /// 最近一次改动对应 sync_op_log.seq
+  lastSeq     BigInt   @default(0)
+  /// 墓碑
+  isDeleted   Boolean  @default(false)
+  deletedBy   String?
+  updatedAt   DateTime @updatedAt
+
+  @@index([baseId, version])
+  @@map("sync_entity_versions")
+}
+
+/// push 进来但尚未终态的操作（冲突/隔离/挂起暂存，供同步中心与双版本弹窗）。
+model SyncIncoming {
+  id                    String    @id @default(cuid())
+  clientId              String
+  clientOpId            String    @unique
+  workspaceId           String    @default("ws_default")
+  baseId                String?
+  entityType            String
+  entityId              String
+  op                    String
+  /// 原始操作 JSON（保留，供弹窗双版本展示与重试）
+  payload               String
+  baseVersion           BigInt
+  /// push 时 token 认定
+  actorId               String?
+  /// received | accepted | conflict | rejected | quarantined | pending_approval | dropped
+  status                String    @default("received")
+  /// PERMISSION_REVOKED / ROW_NO_LONGER_VISIBLE / ENTITY_DELETED / VERSION_CONFLICT
+  reasonCode            String?
+  /// 脱敏的人类可读原因（入回执与通知，不泄密）
+  reasonDetail          String?
+  /// 裁决时服务端当前版本（conflict 用）
+  serverVersion         BigInt    @default(0)
+  /// 冲突时服务端当前版本快照（供前端展示另一版本）
+  conflictServerPayload String?
+  /// 未来审批：审批策略/流程实例 id（本期恒 null，不建审批实体表）
+  reviewBaseId          String?
+  /// 未来审批人 / 或处理隔离项的管理员
+  decidedBy             String?
+  decidedAt             DateTime?
+  attempts              Int       @default(0)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([status, baseId])
+  @@index([actorId, status])
+  @@index([baseId, entityType, entityId])
+  @@map("sync_incoming")
+}
+
+/// 客户端订阅与拉取游标（服务端侧记账）。
+model SyncSubscription {
+  id           String    @id @default(cuid())
+  clientId     String
+  /// base | kb（按库订阅）
+  scopeType    String
+  scopeId      String
+  /// 订阅时的用户；拉取按"当前"权限二次过滤
+  actorId      String?
+  /// 已确认收到的最大 seq
+  cursorSeq    BigInt    @default(0)
+  snapshotDone Boolean   @default(false)
+  subscribedAt DateTime  @default(now())
+  lastPullAt   DateTime?
+
+  @@unique([clientId, scopeType, scopeId])
+  @@index([scopeType, scopeId, cursorSeq])
+  @@map("sync_subscriptions")
+}
+
+// ============================================================================
 // 手写维护表（不经 Prisma 管理，禁止在此添加 model）
 // ============================================================================
 // record_field_index —— M1/S3 起存在的 EAV 旁路索引（records.fields JSON 的

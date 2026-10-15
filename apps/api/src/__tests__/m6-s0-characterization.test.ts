@@ -173,6 +173,8 @@ describe("S0-3 GET /api/v1/meta 200 形状", () => {
       enterpriseOrg: true,
       // 后加的写能力位（与 GX_AUTHZ_ENGINE 总门解耦），形状测试只锁它存在且是布尔。
       authzManage: expect.any(Boolean),
+      // YN0 离线同步能力位（additive，GX_SYNC_SERVER 默认 off → false；老客户端忽略）。
+      sync: expect.any(Boolean),
       auth: { userId: U, status: "ACTIVE", workspaceId: "ws_default" },
     });
   });

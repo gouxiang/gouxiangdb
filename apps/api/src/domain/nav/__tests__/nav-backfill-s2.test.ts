@@ -37,7 +37,7 @@ beforeAll(async () => {
   fs.mkdirSync(path.join(tmpRoot, "migrations"));
   fs.copyFileSync(path.resolve("prisma/schema.prisma"), path.join(tmpRoot, "schema-legacy.prisma"));
   const dirs = migDirs();
-  expect(dirs.length).toBe(41); // M6 起 PAT/mcp_idempotency 使 22 -> 23，首次部署管理员初始化再 +1，实体 icon/iconColor DDL 再 +1，owner create_library 补位再 +1，通讯录五件套再 +1，权限核心模型角色升级再 +1，角色×库视野表再 +1，分享链接对象化再 +1，协同 collab_docs 旁路表再 +1，角色×库独立「可分享」位 canShare 再 +1，表单设计器布局版本表再 +1，A3 autoNumber 高水位计数表 +1，A4 库名部分唯一索引 +1，A6 shareEnabled 回填 +1，视图管理员配置层 adminConfig 列 +1，视图每用户个性化 view_user_prefs 表 +1，R2 附件表 attachments +1，记录变更历史 record_changes 表 +1，评论回复/附件/@ threads 表扩列 +1
+  expect(dirs.length).toBe(42); // 历史累计 41（PAT/mcp_idempotency、首管初始化、实体 icon、owner create_library、通讯录五件套、权限角色模型、角色×库视野表、分享链接对象化、collab_docs 旁路表、canShare 独立分享位、表单布局版本、A3 autoNumber、A4 库名唯一、A6 shareEnabled 回填、view adminConfig、view_user_prefs、attachments、record_changes、评论 threads 扩列）；YN0 离线同步 sync_* 四表 +1。注意：下面 slice(0, PRE_ORG_COUNT=12) 是构造旧库的历史切点，不可随本数改动。
   for (const name of dirs.slice(0, PRE_ORG_COUNT)) {
     fs.cpSync(path.resolve("prisma/migrations", name), path.join(tmpRoot, "migrations", name), { recursive: true });
   }
@@ -84,10 +84,10 @@ afterAll(async () => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-describe("12 -> 41 直升回填（nav 迁移 B SQL 首跑；含 A3/A4/A6 三条新迁移后总数 36，视图管理员配置层 +1，视图每用户个性化 +1，附件表 +1，记录变更历史表 +1，评论 threads 扩列 +1）", () => {
-  it("迁移全 applied（41，含角色×库 canShare 独立分享位与 A3/A4/A6 及视图管理员配置层、视图每用户个性化、附件表、记录变更历史表、评论回复/附件/@ threads），活实体节点数精确，软删/无视图表不产生悬挂", async () => {
+describe("12 -> 42 直升回填（nav 迁移 B SQL 首跑；历史 41 见前版说明，YN0 离线同步四表再 +1）", () => {
+  it("迁移全 applied（42，含历史全部组织/nav/搜索/权限/视图/附件/记录变更/评论迁移，与 YN0 sync_* 四表），活实体节点数精确，软删/无视图表不产生悬挂", async () => {
     const applied = await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) n FROM _prisma_migrations WHERE rolled_back_at IS NULL`;
-    expect(Number(applied[0].n)).toBe(41);
+    expect(Number(applied[0].n)).toBe(42);
 
     const nodes = await prisma.navNode.findMany({ where: { deletedAt: null } });
     // 活实体：b1 + t1 + t2 + v1 + k1 + d1 + d2 + c1 = 8（b2 软删不回填）。

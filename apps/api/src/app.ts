@@ -33,6 +33,7 @@ import { kb } from "./routes/kb/index.js";
 import { pub } from "./routes/public.js";
 import { search } from "./routes/search.js";
 import { v1 } from "./routes/v1/index.js";
+import { syncRoutes } from "./routes/v1/sync/index.js";
 import { adminUpdateDownloadRoutes } from "./routes/v1/adminUpdateDownload.js";
 import { inviteRoutes } from "./routes/v1/authInvite.js";
 import { publicBranding, adminBranding } from "./routes/branding.js";
@@ -214,6 +215,14 @@ function createMount(webRoot: string | null): Hono {
   api.route("/auth/branding", publicBranding);
   api.route("/admin/branding", adminBranding);
   mount.route("/api", api);
+
+  // 离线同步面（YN0 起）：与企业双 flag 正交，恒挂载到 mount；是否可达由组首中间件
+  // per-request 读 GX_SYNC_SERVER 决定（默认 off → 组内首闸在任何 DB 访问前 404 SYNC_DISABLED）。
+  // 刻意不放进下面的企业门：同步是 Mac App/节点能力，不依赖组织/导航企业面。
+  // ★ 必须挂在企业 v1【之前】：v1.use("*", requireActiveUser) 会拦所有 /api/v1/*（含 /sync），
+  //   若 v1 先注册，未登录请求会被它先判 401，同步组自己的"off→404 在鉴权前"闸就永远到不了。
+  //   同步组自带 gate + requireActiveUser 两道，路径 /api/v1/sync 与 invite/update 不重叠。
+  mount.route("/api/v1/sync", syncRoutes);
 
   // M2/M3 企业面：/api/v1 与 /api 平级独立实例；两个 flag 任一 on 即挂载，
   // 子路由在 v1/index.ts 内按各自 flag 条件挂载，未启用的子面请求落入 notFound 404。
