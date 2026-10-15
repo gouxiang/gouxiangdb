@@ -10,17 +10,22 @@
 //   - 运维改 env 后无需重启即生效；测试也能在同一进程内切开/关（config 是冻结快照）。
 //
 // 分期：YN0 立总门 + 鉴权 + 能力探针；subscribe/snapshot/pull 在 YN2 接入；push 在 YN4 接入；
-// resolve/incoming/visibility 在 YN5/YN6 接入。未落地的路径不在此预注册，以免客户端把
-// "还没做"误当成"已支持"。
+// YN5 接入逐 op 当前权限裁决 + rejected/quarantined 隔离 + incoming 同步中心（retry/discard）+
+// visibility 失权对账可见集 + 审计；resolve 冲突弹窗在 YN6 接入。未落地的路径不在此预注册，以免
+// 客户端把"还没做"误当成"已支持"。
 
 import { Hono } from "hono";
 import { syncServerEnabled } from "../../../configSync.js";
 import { HttpError } from "../../../httpError.js";
 import { requireActiveUser } from "../../../middleware/authActive.js";
 import { VERSION } from "../../../version.js";
+import { audit } from "../../../audit/emit.js";
+import type { AuditEventName } from "../../../audit/audit.js";
 import { buildBaseSnapshot, markSnapshotDone, subscribeBase, authorizeBaseRead } from "../../../domain/sync/snapshot.js";
 import { pullBaseOps } from "../../../domain/sync/pull.js";
-import { pushBaseOps, type IncomingOp } from "../../../domain/sync/push.js";
+import { pushBaseOps, retryIncoming, type IncomingOp, type PushResult } from "../../../domain/sync/push.js";
+import { listIncoming, discardIncoming } from "../../../domain/sync/incoming.js";
+import { buildVisibilityReport } from "../../../domain/sync/visibility.js";
 
 export const syncRoutes = new Hono();
 
@@ -44,7 +49,7 @@ syncRoutes.get("/", (c) => {
     apiVersion: "v1",
     sync: true,
     // 阶段标识随 YN 推进刷新；客户端据此判断可用端点集。
-    phase: "YN4",
+    phase: "YN5",
     serverVersion: VERSION,
     auth: {
       userId: auth.userId,
@@ -115,6 +120,37 @@ syncRoutes.get("/pull", async (c) => {
 const PUSH_MAX_OPS = 1000;
 
 /**
+ * 对本次请求【新落】的终态回执发审计（§9.5）。只认 _freshTerminal（幂等重放回执不带，不刷审计）。
+ * accepted/rejected/quarantined 三态落 sync_push_*；conflict 属 YN6（sync_conflict_resolved 在用户
+ * 弹窗裁决时才产生，单纯版本冲突不在 push 打点）。detail 只带标识与原因码，【绝不落字段明文】。
+ */
+function auditFreshTerminal(
+  c: Parameters<typeof audit>[0],
+  r: PushResult,
+  actorId: string,
+  baseId: string,
+): void {
+  if (!r._freshTerminal) return;
+  let event: AuditEventName | null = null;
+  let httpStatus = 200;
+  if (r.status === "accepted") { event = "sync_push_accepted"; httpStatus = 200; }
+  else if (r.status === "rejected") { event = "sync_push_rejected"; httpStatus = 403; }
+  else if (r.status === "quarantined") { event = "sync_push_quarantined"; httpStatus = 200; }
+  if (!event) return;
+  audit(c, {
+    event,
+    status: httpStatus,
+    actorId,
+    detail: {
+      baseId,
+      clientOpId: r.clientOpId,
+      ...(r.entityId ? { entityId: r.entityId } : {}),
+      ...(r.reasonCode ? { reasonCode: r.reasonCode } : {}),
+    },
+  });
+}
+
+/**
  * POST /push {baseId, clientId, ops:[{clientOpId,entityType,entityId,op,baseVersion,payload}]}
  *   → {results:[{clientOpId,status,reasonCode?,reasonDetail?,seq?,newVersion?,entityId?,serverVersion?}]}
  * 每条 op 独立裁决、部分接受（§8.5）；BigInt 全部序列化为字符串（与 pull 同口径）。
@@ -158,6 +194,9 @@ syncRoutes.post("/push", async (c) => {
 
   const outcome = await pushBaseOps(auth.userId, clientId, baseId, ops);
 
+  // 审计：对本批【新落】终态逐条发 sync_push_accepted/rejected/quarantined（幂等重放不刷，§9.5）。
+  for (const r of outcome.results) auditFreshTerminal(c, r, auth.userId, baseId);
+
   // BigInt → 字符串（JSON 安全）；与 pull 输出一致，客户端统一按字符串解析版本/seq。
   const results = outcome.results.map((r) => ({
     clientOpId: r.clientOpId,
@@ -170,4 +209,71 @@ syncRoutes.post("/push", async (c) => {
     ...(r.serverVersion !== undefined ? { serverVersion: r.serverVersion.toString() } : {}),
   }));
   return c.json({ result: { baseId: outcome.baseId, results } });
+});
+
+// ───────────────── YN5：同步中心（隔离/未生效/冲突列表 + 重试 + 放弃） ─────────────────
+
+/**
+ * GET /incoming?status=&baseId=&limit= → 当前用户的待处理项（只看本人）。
+ * status 缺省＝quarantined/conflict/rejected/pending_approval 四态；可逗号组合，或含 accepted/dropped。
+ */
+syncRoutes.get("/incoming", async (c) => {
+  const auth = c.get("auth");
+  const statusCsv = c.req.query("status") ?? null;
+  const baseId = (c.req.query("baseId") ?? "").trim() || null;
+  const limitRaw = Number(c.req.query("limit") ?? "");
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : undefined;
+  const page = await listIncoming(auth.userId, { statusCsv, baseId, limit });
+  return c.json({ result: page });
+});
+
+/**
+ * POST /incoming/:id/retry → 重新授权后重试一条隔离项。按【当前】权限重裁：
+ * accepted（已生效）/ rejected（仍无权）/ quarantined（仍被移出）/ conflict（交 YN6 弹窗）。
+ */
+syncRoutes.post("/incoming/:id/retry", async (c) => {
+  const auth = c.get("auth");
+  const id = c.req.param("id");
+  const r = await retryIncoming(auth.userId, id);
+  // 重试产生的是一次【新裁决】，按其新鲜终态发审计（_freshTerminal 由重放路径置位；幂等命中不刷）。
+  if (r.baseId) auditFreshTerminal(c, r, auth.userId, r.baseId);
+  return c.json({
+    result: {
+      id,
+      clientOpId: r.clientOpId,
+      status: r.status,
+      attempts: r.attempts,
+      ...(r.reasonCode ? { reasonCode: r.reasonCode } : {}),
+      ...(r.reasonDetail ? { reasonDetail: r.reasonDetail } : {}),
+      ...(r.seq !== undefined ? { seq: r.seq.toString() } : {}),
+      ...(r.newVersion !== undefined ? { newVersion: r.newVersion.toString() } : {}),
+      ...(r.entityId ? { entityId: r.entityId } : {}),
+      ...(r.serverVersion !== undefined ? { serverVersion: r.serverVersion.toString() } : {}),
+    },
+  });
+});
+
+/** POST /incoming/:id/discard {confirm:true} → 显式放弃（留痕 dropped，绝不静默丢）。 */
+syncRoutes.post("/incoming/:id/discard", async (c) => {
+  const auth = c.get("auth");
+  const id = c.req.param("id");
+  const body = (await c.req.json().catch(() => null)) as { confirm?: unknown } | null;
+  const confirm = body?.confirm === true;
+  const r = await discardIncoming(auth.userId, id, confirm);
+  return c.json({ result: r });
+});
+
+// ───────────────── YN5：失权对账可见集（差集擦除在 Mac 侧车执行） ─────────────────
+
+/**
+ * GET /visibility?baseId= → 按【当前权限】收敛的可见集（逐表 readable + visibleEntityIds +
+ * visibleFieldIds）+ authzVersion。服务端不算差集（不持有客户端副本状态）；侧车拿它与本地副本
+ * 对比，把不再可见的 record/字段擦除；库门 403 由侧车解释为"整节点失权＝销毁加密镜像"（§9.3/§18.3）。
+ */
+syncRoutes.get("/visibility", async (c) => {
+  const auth = c.get("auth");
+  const baseId = (c.req.query("baseId") ?? "").trim();
+  if (!baseId) throw new HttpError(400, "缺少 baseId", "SYNC_BAD_REQUEST");
+  const report = await buildVisibilityReport(auth.userId, baseId);
+  return c.json({ result: report });
 });

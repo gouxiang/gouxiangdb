@@ -16,7 +16,7 @@
 import { prisma, type DbTx } from "../db.js";
 import { HttpError } from "../guards.js";
 import { loadTableFields } from "./recordService.js";
-import { deleteRecordsTx, syncRecordsTx } from "./fieldIndex/sync.js";
+import { deleteRecordsTx, restoreRecordsTx, syncRecordsTx } from "./fieldIndex/sync.js";
 import { enqueueChangeEventTx } from "./search/outbox.js";
 import { recordSyncOpTx, writeSyncOpTx, type ReplaySyncIdentity, type SyncOp } from "./sync/oplog.js";
 import { sidecarUniqueMatch, findUniqueConflictTx } from "./queryPlan/uniqueSidecar.js";
@@ -391,6 +391,81 @@ export async function softDeleteRecordTx(
   await recordSyncOpTx(tx, {
     entityType: "record", entityId: recordId, tableId: deleted.tableId,
     op: "delete", actorId, changes: [],
+  });
+  return { sync: null };
+}
+
+/**
+ * 恢复记录后回填关联关系（**从 routes/records.ts 原样下移**，在线恢复与 YN5 push 回放共用）。
+ *
+ * linkRow 在「删除记录」时只打软删标记（不清行），恢复时必须把关联重新置有效，否则出现
+ * 「记录恢复了但关联全丢」的静默数据丢失。仅恢复两端记录都存活的关联：对端仍在回收站的，
+ * 等它自己被恢复时再回填。
+ */
+export async function restoreLinkRows(
+  client: Pick<DbTx, "linkRow" | "record">,
+  recordIds: string[],
+): Promise<void> {
+  if (recordIds.length === 0) return;
+  const rows = await client.linkRow.findMany({
+    where: {
+      OR: [{ parentRowId: { in: recordIds } }, { childRowId: { in: recordIds } }],
+      deletedAt: { not: null },
+    },
+    select: { id: true, parentRowId: true, childRowId: true },
+  });
+  if (rows.length === 0) return;
+  const peerIds = Array.from(new Set(rows.flatMap((r) => [r.parentRowId, r.childRowId])));
+  const alive = await client.record.findMany({
+    where: { id: { in: peerIds }, deletedAt: null }, select: { id: true },
+  });
+  const aliveSet = new Set(alive.map((r) => r.id));
+  const ids = rows
+    .filter((r) => aliveSet.has(r.parentRowId) && aliveSet.has(r.childRowId))
+    .map((r) => r.id);
+  if (ids.length > 0) await client.linkRow.updateMany({ where: { id: { in: ids } }, data: { deletedAt: null } });
+}
+
+/**
+ * 恢复记录的事务体（softDeleteRecordTx 的逆操作；在线 /trash/:id/restore 与 YN5 push restore
+ * 回放共用同一事务体，避免两条恢复语义漂移）。调用方职责：存在性/是否在回收站/权限（在线为
+ * table 节点 manage_table，回放为逐表 manage_table 重判）校验、事务包裹、事务后补偿。
+ *
+ * 顺序与在线恢复逐字同构：撤墓碑 -> 回填关联 -> sidecar 重建 -> 变更历史(op=restore,changes=[])
+ * -> outbox upsert -> 同步版本切面（撤墓碑、version+1、op=restore）。
+ */
+export async function restoreRecordTx(
+  tx: DbTx,
+  recordId: string,
+  tableId: string,
+  actorId: string | null = null,
+  /** YN5 push 回放记账覆盖（客户端 clientId/clientOpId/期望版本）；在线路径缺省。 */
+  sync?: SyncWriteOverride,
+): Promise<{ sync: Awaited<ReturnType<typeof writeSyncOpTx>> | null }> {
+  await tx.record.update({ where: { id: recordId }, data: { deletedAt: null } });
+  await restoreLinkRows(tx, [recordId]);
+  // M1/S4：记录恢复后按最新 fields 重建 sidecar（只对仍活记录）。
+  await restoreRecordsTx(tx, tableId, [recordId]);
+  // 变更历史：恢复是独立写点（不走 applyFieldWrites），整行出回收站、无字段级前后值 → changes 恒空。
+  await appendRecordChangeTx(tx, {
+    tableId, recordId, op: "restore", actorId, changes: [],
+  });
+  // M5/S1：恢复登记 upsert（worker 重建派生检索行）；与实体写共生死。
+  await enqueueChangeEventTx(tx, {
+    entityType: "record", entityId: recordId, op: "upsert", version: BigInt(Date.now()),
+  });
+  // 同步版本切面——撤墓碑、version+1、追加 restore oplog。YN5 回放用客户端身份/幂等键
+  // + 期望版本断言（op=restore），只记一次账（§8.5/§9.1）。
+  if (sync) {
+    const result = await writeSyncOpTx(tx, {
+      entityType: "record", entityId: recordId, tableId,
+      op: "restore", actorId, changes: [],
+    }, sync.identity);
+    return { sync: result };
+  }
+  await recordSyncOpTx(tx, {
+    entityType: "record", entityId: recordId, tableId,
+    op: "restore", actorId, changes: [],
   });
   return { sync: null };
 }

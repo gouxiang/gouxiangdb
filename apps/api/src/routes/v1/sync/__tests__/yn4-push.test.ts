@@ -160,11 +160,12 @@ describe("A. 门/鉴权/参数", () => {
       expect(res.status).toBe(401);
     }));
 
-  it("无库权限用户 -> 403 SYNC_PERMISSION_REVOKED", () =>
+  it("无库权限陌生用户 -> 200 但该 op rejected=SYNC_PERMISSION_REVOKED（YN5 起逐 op 分流，不整批 403）", () =>
     withEnv("GX_SYNC_SERVER", "on", async () => {
       const r = await push([op("a-perm", "create", "x", "0", { tableId, fields: {} })], OTHER);
-      expect(r.status).toBe(403);
-      expect(r.code).toBe("SYNC_PERMISSION_REVOKED");
+      expect(r.status).toBe(200);
+      expect(r.results![0]!.status).toBe("rejected");
+      expect(r.results![0]!.reasonCode).toBe("SYNC_PERMISSION_REVOKED");
     }));
 
   it("缺 baseId/clientId、空 ops、坏 baseVersion -> 400", () =>
@@ -392,10 +393,7 @@ describe("G. 冲突 / 实体已删 / 非法操作", () => {
     expect(patch404.results![0]!.reasonCode).toBe("SYNC_ENTITY_NOT_FOUND");
   });
 
-  it("不支持的 op/实体 -> rejected OP_UNSUPPORTED，不写主数据", async () => {
-    const r = await push([op("op-restore", "restore", ID, "1", {})]);
-    expect(r.results![0]!.status).toBe("rejected");
-    expect(r.results![0]!.reasonCode).toBe("SYNC_OP_UNSUPPORTED");
+  it("非 record 实体 -> rejected OP_UNSUPPORTED，不写主数据（restore 自 YN5 起已支持，见 yn5 G）", async () => {
     const r2 = await push([op("op-kb", "create", "x", "0", {}, "kb_doc")]);
     expect(r2.results![0]!.status).toBe("rejected");
     expect(r2.results![0]!.reasonCode).toBe("SYNC_OP_UNSUPPORTED");

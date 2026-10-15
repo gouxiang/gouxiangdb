@@ -66,8 +66,8 @@ export interface SnapshotPage extends AuthzTag {
   serverTime: string;
 }
 
-/** 读当前权限版本（workspaces.policyVersion；缺省 0）。 */
-async function readAuthzVersion(): Promise<number> {
+/** 读当前权限版本（workspaces.policyVersion；缺省 0）。visibility 对账（§9.3）同样以它为版本戳。 */
+export async function readAuthzVersion(): Promise<number> {
   const ws = await prisma.workspace.findUnique({
     where: { id: WORKSPACE_ID },
     select: { policyVersion: true },

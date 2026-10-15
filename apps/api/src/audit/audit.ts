@@ -87,7 +87,16 @@ export type AuditEventName =
   // 0.2.4-rc 品牌外观（仅超级管理员/管理员；detail 只带字段名/扩展名/字节数/动作，
   // 不带产品名/版权串新旧值内容）。
   | "branding_update"
-  | "branding_hero_update";
+  | "branding_hero_update"
+  // YN5 离线同步裁决（push 到达按【当前】权限唯一裁决；detail 只带 actorId/baseId/clientId/
+  // clientOpId/op/reasonCode/tableId 等标识，绝不落字段值/payload 明文，DESIGN-OFFLINE-SYNC §9.5）。
+  // 本阶段产生 accepted/rejected/quarantined 三枚；conflict_resolved（YN6 人工选版本）、
+  // visibility_purged（侧车失权擦除完成）枚举先就位、本阶段不打点。
+  | "sync_push_accepted"
+  | "sync_push_rejected"
+  | "sync_push_quarantined"
+  | "sync_conflict_resolved"
+  | "sync_visibility_purged";
 
 interface AuditInput {
   event: AuditEventName;

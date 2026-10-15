@@ -6,7 +6,7 @@ import { z } from "zod";
 import { applyUserPrefs, resolveViewConfig, type FilterNode } from "@gx/shared-types";
 import { andFilters, evaluateRowFilter } from "../domain/authz/rowFilter.js";
 import { SEARCH_PREVIEW_LIMIT, boundedPreviewMarker } from "./searchBounds.js";
-import { prisma, withWriteTx, runWrite, type DbTx } from "../db.js";
+import { prisma, withWriteTx, runWrite } from "../db.js";
 import {
   requireCanView,
   requireCanEditData,
@@ -55,13 +55,13 @@ import {
 } from "../domain/authz/fieldScope.js";
 // 记录变更历史（数据日志）：读端点编排在本文件，取数/掩码/可读化在 domain/recordChanges。
 import { queryRecordChanges, parseChangesCursor, parseChangesLimit } from "../domain/recordChanges/query.js";
-import { appendRecordChangeTx, purgeRecordChangesTx, purgeTableRecordChangesTx } from "../domain/recordChanges/store.js";
+import { purgeRecordChangesTx, purgeTableRecordChangesTx } from "../domain/recordChanges/store.js";
 import { hydrateCommentThreads, hydrateSingleComment } from "../domain/commentThreads.js";
 
 export const records = new Hono();
 
 // M6/S4：写原语已移入 domain/recordWrite.ts（纯移动）+ re-export 保持既有导入点不变。
-import { applyFieldWrites, assertUnique, createRecordTx, parseStoredFields, runMaskWriteGate, softDeleteRecordTx, updateRecordTx } from "../domain/recordWrite.js";
+import { applyFieldWrites, assertUnique, createRecordTx, parseStoredFields, restoreLinkRows, restoreRecordTx, runMaskWriteGate, softDeleteRecordTx, updateRecordTx } from "../domain/recordWrite.js";
 import { recordSyncOpTx, recordSyncOpsTx } from "../domain/sync/oplog.js";
 import { fieldWriteGate } from "../domain/authz/libraryPolicy.js";
 export { assertRequiredOnCreate, assertUnique } from "../domain/recordWrite.js";
@@ -1019,33 +1019,6 @@ records.delete("/comments/:commentId", async (c) => {
 
 const restoreSchema = z.object({ kind: z.enum(["record", "table", "field"]) });
 
-/**
- * 恢复记录后回填关联关系。
- *
- * linkRow 在「删除记录」时只打软删标记（不清行），因此恢复记录时必须把关联重新置为有效，
- * 否则会出现「记录恢复了但关联全丢」的静默数据丢失。
- * 仅恢复两端记录都存活的关联：对端仍在回收站的，等它自己被恢复时再回填。
- */
-async function restoreLinkRows(
-  client: Pick<DbTx, "linkRow" | "record">,
-  recordIds: string[],
-): Promise<void> {
-  if (recordIds.length === 0) return;
-  const rows = await client.linkRow.findMany({
-    where: {
-      OR: [{ parentRowId: { in: recordIds } }, { childRowId: { in: recordIds } }],
-      deletedAt: { not: null },
-    },
-    select: { id: true, parentRowId: true, childRowId: true },
-  });
-  if (rows.length === 0) return;
-  const peerIds = Array.from(new Set(rows.flatMap((r) => [r.parentRowId, r.childRowId])));
-  const alive = await client.record.findMany({ where: { id: { in: peerIds }, deletedAt: null }, select: { id: true } });
-  const aliveSet = new Set(alive.map((r) => r.id));
-  const ids = rows.filter((r) => aliveSet.has(r.parentRowId) && aliveSet.has(r.childRowId)).map((r) => r.id);
-  if (ids.length > 0) await client.linkRow.updateMany({ where: { id: { in: ids } }, data: { deletedAt: null } });
-}
-
 records.post("/trash/:id/restore", async (c) => {
   const id = c.req.param("id");
   const parsed = restoreSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -1061,25 +1034,8 @@ records.post("/trash/:id/restore", async (c) => {
     // 恢复与彻底删除同档（可管理库）：普通编辑者不能自行恢复已删除的数据。
     const { userId: restorerId } = await requireTableManage(c, rec.tableId);
     // M5/S1：原 record.update + linkRow + sidecar 三段裸写收紧进单事务，承载 outbox upsert。
-    await withWriteTx("record.restore", async (tx) => {
-      await tx.record.update({ where: { id }, data: { deletedAt: null } });
-      await restoreLinkRows(tx, [id]);
-      // M1/S4：记录恢复后按最新 fields 重建 sidecar（只对仍活记录）。
-      if (rec) await restoreRecordsTx(tx, rec.tableId, [id]);
-      // 变更历史：恢复是独立写点（不走 applyFieldWrites），整行出回收站、无字段级前后值 → changes 恒空。
-      await appendRecordChangeTx(tx, {
-        tableId: rec.tableId, recordId: id, op: "restore", actorId: restorerId, changes: [],
-      });
-      // M5/S1：恢复登记 upsert（worker 重建派生检索行）。
-      await enqueueChangeEventTx(tx, {
-        entityType: "record", entityId: id, op: "upsert", version: BigInt(Date.now()),
-      });
-      // YN1：恢复同样推进同步版本并撤墓碑（isDeleted=false），op=restore（开关 off 零写）。
-      await recordSyncOpTx(tx, {
-        entityType: "record", entityId: id, tableId: rec.tableId,
-        op: "restore", actorId: restorerId, changes: [],
-      });
-    });
+    // YN5：事务体下移领域层 restoreRecordTx，在线恢复与 push restore 回放共用同一实现（防语义漂移）。
+    await withWriteTx("record.restore", (tx) => restoreRecordTx(tx, id, rec.tableId, restorerId));
   } else if (parsed.data.kind === "field") {
     const f = await prisma.field.findUnique({
       where: { id },
