@@ -140,8 +140,12 @@ describe("B. on pull 增量内容与形状", () => {
       expect(page.hasMore).toBe(false);
       expect(typeof page.authzVersion).toBe("number");
 
-      const ops = page.ops;
+      // YN7 起 pull 同流也下发结构 op（建表时在线切面会先产一条 create_table）。本用例只验
+      // 记录轨（YN2b 的主题），故按 entityType=record 过滤后再对记录序列断言；结构轨由 yn7 覆盖。
+      const ops = page.ops.filter((o) => o.entityType === "record");
       expect(ops.map((o) => o.op)).toEqual(["create", "create", "create", "update", "delete"]);
+      // 建表的结构 op 也在同一条 oplog 流里（YN7 §19.2：结构时钟滴答须随 pull 下发）。
+      expect(page.ops.some((o) => o.entityType === "table" && o.op === "create_table")).toBe(true);
       // seq 严格升序、连续正整数串
       const seqs = ops.map((o) => BigInt(o.seq));
       for (let i = 1; i < seqs.length; i++) expect(seqs[i]! > seqs[i - 1]!).toBe(true);
@@ -184,11 +188,13 @@ describe("C. keyset 分页", () => {
         cursor = page.nextCursor;
         if (++guard > 20) throw new Error("分页不收敛");
       }
-      // 与一次性全量拉取的结果（顺序、内容）完全一致。
+      // 与一次性全量拉取的结果（顺序、内容）完全一致（分页与全量都含同一条结构 op，不影响等价）。
       const full = await pull(`baseId=${baseId}&after=0&limit=500`);
       const fullOps = full.result!.ops;
       expect(all.map((o) => o.seq)).toEqual(fullOps.map((o) => o.seq));
-      expect(all.map((o) => o.op)).toEqual(["create", "create", "create", "update", "delete"]);
+      // 记录轨序列仍为 3 create + update + delete（结构 op 不在本用例断言范围）。
+      expect(all.filter((o) => o.entityType === "record").map((o) => o.op))
+        .toEqual(["create", "create", "create", "update", "delete"]);
       const seqSet = new Set(all.map((o) => o.seq));
       expect(seqSet.size).toBe(all.length); // 无重复
     }));

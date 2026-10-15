@@ -8,6 +8,7 @@
 import { withWriteTx } from "../db.js";
 import { invalidateOrdinalCache } from "./prismaDeps.js";
 import { createTableTx, softDeleteTableTx, updateTableTx } from "./tableServiceTx.js";
+import { recordStructureOpTx } from "./sync/structureOplog.js";
 
 export {
   assertTableNameFree,
@@ -33,14 +34,21 @@ export async function createTable(input: CreateTableInput, operatorUserId: strin
   const name = input.name.trim();
   if (name === "") throw new Error("表名不能为空");
   // U-9：建表多步写事务化——任何一步失败整体回滚，不留无 primaryField / 无视图的半截表。
-  const result = await withWriteTx("table.create", (tx) =>
-    createTableTx(tx, {
+  const result = await withWriteTx("table.create", async (tx) => {
+    const r = await createTableTx(tx, {
       baseId: input.baseId,
       name,
       withDefaults: input.withDefaults ?? false,
       userId: operatorUserId,
-    }),
-  );
+    });
+    // YN7 §8.6：在线结构写也推进 table_schema 钟 + oplog（off 时第一行 return null，零 IO）。
+    await recordStructureOpTx(tx, {
+      entityType: "table", entityId: r.table.id, tableId: r.table.id, baseId: input.baseId,
+      op: "create_table", actorId: operatorUserId,
+      payload: { name, withDefaults: input.withDefaults ?? false, primaryFieldId: r.primaryFieldId },
+    });
+    return r;
+  });
   return { tableId: result.table.id, primaryFieldId: result.primaryFieldId, createdAt: result.table.createdAt };
 }
 
@@ -59,16 +67,18 @@ interface UpdateTableResult {
   iconColor: string | null;
 }
 
-/** 更新表元数据：仅在显式传 name 时改名（trim + 事务内查重排除自己）。 */
+/** 更新表元数据：仅在显式传 name 时改名（trim + 事务内查重排除自己）。
+ * operatorUserId 可选（YN7 oplog actor）；旧调用方不传 → actor=null，行为不变。 */
 export async function updateTable(
   tableId: string,
   baseId: string,
   patch: UpdateTableInput,
+  operatorUserId?: string | null,
 ): Promise<UpdateTableResult> {
   const trimmedName = patch.name?.trim();
   const renaming = patch.name !== undefined;
-  const t = await withWriteTx("table.update", (tx) =>
-    updateTableTx(tx, {
+  const t = await withWriteTx("table.update", async (tx) => {
+    const updated = await updateTableTx(tx, {
       tableId,
       baseId,
       name: trimmedName,
@@ -76,8 +86,20 @@ export async function updateTable(
       icon: patch.icon,
       iconColor: patch.iconColor,
       renaming,
-    }),
-  );
+    });
+    // YN7 §8.6：改名走 rename_table；其它（主字段/图标）走 update_table_settings；off 时零 IO。
+    const op = renaming ? "rename_table" : "update_table_settings";
+    const payload: Record<string, unknown> = {};
+    if (renaming && trimmedName !== undefined) payload.name = trimmedName;
+    if (patch.primaryFieldId !== undefined) payload.primaryFieldId = patch.primaryFieldId;
+    if (patch.icon !== undefined) payload.icon = patch.icon;
+    if (patch.iconColor !== undefined) payload.iconColor = patch.iconColor;
+    await recordStructureOpTx(tx, {
+      entityType: "table", entityId: tableId, tableId, baseId,
+      op, actorId: operatorUserId ?? null, payload,
+    });
+    return updated;
+  });
   if (renaming) invalidateOrdinalCache(tableId);
   return {
     id: t.id,
@@ -89,8 +111,23 @@ export async function updateTable(
 }
 
 /** 软删表（级联软删记录/字段、nav 子树、outbox 登记、库节点聚合位重算）。 */
-export async function softDeleteTable(tableId: string, operatorUserId: string): Promise<void> {
-  await withWriteTx("table.softDelete", (tx) =>
-    softDeleteTableTx(tx, tableId, operatorUserId));
+export async function softDeleteTable(
+  tableId: string,
+  operatorUserId: string,
+  baseId?: string,
+): Promise<void> {
+  await withWriteTx("table.softDelete", async (tx) => {
+    await softDeleteTableTx(tx, tableId, operatorUserId);
+    // YN7 §8.6：删表推进 table_schema 钟 + oplog（baseId 可由调用方传入，避免软删后点查不到）。
+    const resolvedBase = baseId
+      ?? (await tx.table.findUnique({ where: { id: tableId }, select: { baseId: true } }))?.baseId
+      ?? null;
+    if (resolvedBase) {
+      await recordStructureOpTx(tx, {
+        entityType: "table", entityId: tableId, tableId, baseId: resolvedBase,
+        op: "delete_table", actorId: operatorUserId, payload: {},
+      });
+    }
+  });
   invalidateOrdinalCache(tableId);
 }

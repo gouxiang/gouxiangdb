@@ -105,6 +105,11 @@ export interface CreateTableTxInput {
   /** 是否同时建数量/状态/日期/备注四个默认字段。 */
   withDefaults: boolean;
   userId: string;
+  /**
+   * YN7 同步回放可选：保留离线端生成的表 cuid 作权威主键（§8.4/§19.3，与 record 回放同策略）。
+   * 在线建表恒不传 → Prisma 照常生成 cuid，默认行为逐字节不变。
+   */
+  tableId?: string;
 }
 
 interface CreateTableTxResult {
@@ -124,6 +129,8 @@ export async function createTableTx(tx: DbTx, input: CreateTableTxInput): Promis
   const owner = await tx.base.findUnique({ where: { id: baseId }, select: { shareEnabled: true } });
   const t = await tx.table.create({
     data: {
+      // YN7 回放带 tableId 时保留离线 cuid（撞 id 由 Prisma P2002 冒到回放层归一成 conflict）。
+      ...(input.tableId ? { id: input.tableId } : {}),
       baseId,
       name,
       primaryFieldId: "",

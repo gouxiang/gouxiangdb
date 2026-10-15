@@ -152,7 +152,7 @@ tables.get("/:tableId", async (c) => {
 tables.patch("/:tableId", async (c) => {
   const tableId = c.req.param("tableId");
   const baseId = await baseIdOf(tableId);
-  await requireTableManage(c, tableId);
+  const { userId } = await requireTableManage(c, tableId);
 
   const parsed = updateSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
@@ -169,7 +169,7 @@ tables.patch("/:tableId", async (c) => {
     primaryFieldId: parsed.data.primaryFieldId,
     icon: parsed.data.icon,
     iconColor: parsed.data.iconColor,
-  });
+  }, userId);
   return c.json({
     table: {
       id: t.id,
@@ -183,11 +183,12 @@ tables.patch("/:tableId", async (c) => {
 
 tables.delete("/:tableId", async (c) => {
   const tableId = c.req.param("tableId");
-  await baseIdOf(tableId);
+  const baseId = await baseIdOf(tableId);
   const { userId } = await requireTableManage(c, tableId);
 
   // M3/S3 #6：删表收紧进事务（domain/tableService）；table 及视图节点整棵软删。
-  await softDeleteTable(tableId, userId);
+  // baseId 传入供 YN7 结构 oplog（软删后同事务点查仍可见，但显式传更稳）。
+  await softDeleteTable(tableId, userId, baseId);
   return c.json({ ok: true });
 });
 

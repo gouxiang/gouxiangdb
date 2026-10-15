@@ -20,6 +20,13 @@ import {
   deleteFieldTx,
 } from "./fieldServiceTx.js";
 import { resyncTableMaskTx } from "./authz/scopeProjectionTx.js";
+import { recordStructureOpTx } from "./sync/structureOplog.js";
+
+/** 事务内取表所属 base（结构 oplog 的订阅分片键）；取不到返回 null。 */
+async function baseIdOfTableTx(tx: Parameters<typeof resyncTableMaskTx>[0], tableId: string): Promise<string | null> {
+  const t = await tx.table.findUnique({ where: { id: tableId }, select: { baseId: true } });
+  return t?.baseId ?? null;
+}
 
 export type { RelationKind } from "./fieldServiceTx.js";
 export { reverseRelation } from "./fieldServiceTx.js";
@@ -120,13 +127,33 @@ export async function createField(
   // 全部结构写（普通字段一写；links/subtable 的反向占位→正向→回填互指三写）收进单个
   // 交互事务：任一步失败整体回滚，绝不留孤立反向占位字段或单向链。RC-10 写路径全事务化。
   // P1/S7 #7/#8：结构写后重算受影响表 scope:role mask（反向字段建在 relatedTableId）。
-  const result = await withWriteTx("field.create", async (tx) => {
-    const r = isLinkPair
-      ? await createLinkFieldPairTx(tx, input)
-      : await createSimpleFieldTx(tx, input);
+  const result = await withWriteTx("field.create", async (tx): Promise<CreateFieldResult> => {
+    // 普通字段一写 / links-subtable 成对三写；先拿到正向字段（与可选反向字段）。
+    let forwardMeta: FieldMeta;
+    let reverseMeta: FieldMeta | undefined;
+    if (isLinkPair) {
+      const pair = await createLinkFieldPairTx(tx, input);
+      forwardMeta = pair.field;
+      reverseMeta = pair.reverseField;
+    } else {
+      forwardMeta = (await createSimpleFieldTx(tx, input)).field;
+    }
     await resyncTableMaskTx(tx, input.tableId, operatorUserId);
     if (isLinkPair) await resyncTableMaskTx(tx, input.relatedTableId!, operatorUserId);
-    return r;
+    // YN7 §8.6：结构 oplog + table_schema 钟（off 时零 IO）。普通/成对都以正向字段为实体，
+    // 成对用 create_link_field 一个 op 表达（含 reverseFieldId），保持正/反两字段原子（§19.1）。
+    const baseId = await baseIdOfTableTx(tx, input.tableId);
+    if (baseId) {
+      await recordStructureOpTx(tx, {
+        entityType: "field", entityId: forwardMeta.id, tableId: input.tableId, baseId,
+        op: isLinkPair ? "create_link_field" : "add_field", actorId: operatorUserId,
+        payload: {
+          tableId: input.tableId, name: input.name, type: input.type,
+          ...(reverseMeta ? { reverseFieldId: reverseMeta.id } : {}),
+        },
+      });
+    }
+    return reverseMeta ? { field: forwardMeta, reverseField: reverseMeta } : { field: forwardMeta };
   });
 
   // 缓存失效只能在事务提交成功后做（纯同步内存操作，不经写队列）。
@@ -160,6 +187,46 @@ export interface UpdateFieldInput {
   numberRule?: unknown | null;
 }
 
+/**
+ * 由「现有字段行 + 字段子集 patch」组装 Prisma field.update 的 data 对象（§20.6 单一事实来源）。
+ * 在线 updateField 编排与 YN7 同步回放（structureRegistry 的 alter_field）共用同一套
+ * 「!== undefined 才入列、JSON 列自行 stringify、null 表清空、关联表仅未配对时可写」规则，
+ * 杜绝两条写路径对字段子集的解释漂移。纯函数，不读不写库。
+ */
+export function buildFieldUpdateData(
+  existing: { type: string; linkFieldId: string | null },
+  patch: UpdateFieldInput,
+): Record<string, unknown> {
+  const data: Record<string, unknown> = {};
+  if (patch.name !== undefined) data["name"] = patch.name;
+  if (patch.description !== undefined) data["description"] = patch.description ?? "";
+  if (patch.required !== undefined) data["required"] = patch.required;
+  if (patch.unique !== undefined) data["unique"] = patch.unique;
+  if (patch.order !== undefined) data["order"] = patch.order;
+  if (patch.options !== undefined) data["options"] = patch.options ? JSON.stringify(patch.options) : null;
+  if (patch.precision !== undefined) data["precision"] = patch.precision;
+  if (patch.maxLength !== undefined) data["maxLength"] = patch.maxLength;
+  if (patch.defaultNow !== undefined) data["defaultNow"] = patch.defaultNow;
+  if (patch.recordFilter !== undefined) data["recordFilter"] = patch.recordFilter ? JSON.stringify(patch.recordFilter) : null;
+  // 关联表只在「尚未建立双向配对」时允许设置（首次补配）；已配对后改表会断链，忽略。
+  const linkLikeExisting = existing.type === "links" || existing.type === "subtable";
+  if (patch.relatedTableId !== undefined && !(linkLikeExisting && existing.linkFieldId)) {
+    data["relatedTableId"] = patch.relatedTableId;
+  }
+  if (patch.relationKind !== undefined) data["relationKind"] = patch.relationKind;
+  if (patch.linkDisplayFieldId !== undefined) data["linkDisplayFieldId"] = patch.linkDisplayFieldId;
+  if (patch.lookupFieldId !== undefined) data["lookupFieldId"] = patch.lookupFieldId;
+  if (patch.linkFieldId !== undefined) data["linkFieldId"] = patch.linkFieldId;
+  if (patch.rollupFunction !== undefined) data["rollupFunction"] = patch.rollupFunction;
+  if (patch.formula !== undefined) data["formula"] = patch.formula;
+  if (patch.tabsConfig !== undefined) data["tabsConfig"] = patch.tabsConfig ? JSON.stringify(patch.tabsConfig) : null;
+  if (patch.displayedFieldIds !== undefined) data["displayedFieldIds"] = patch.displayedFieldIds ? JSON.stringify(patch.displayedFieldIds) : null;
+  if (patch.visibleFieldIds !== undefined) data["visibleFieldIds"] = patch.visibleFieldIds ? JSON.stringify(patch.visibleFieldIds) : null;
+  if (patch.defaultConfig !== undefined) data["defaultConfig"] = patch.defaultConfig ? JSON.stringify(patch.defaultConfig) : null;
+  if (patch.numberRule !== undefined) data["numberRule"] = patch.numberRule ? JSON.stringify(patch.numberRule) : null;
+  return data;
+}
+
 export async function updateField(
   fieldId: string,
   patch: UpdateFieldInput,
@@ -181,35 +248,8 @@ export async function updateField(
     patch = { ...patch, name: trimmed };
   }
 
-  const data: Record<string, unknown> = {};
-  if (patch.name !== undefined) data["name"] = patch.name;
-  // description 列为非空 String（@default("")），显式 null（清空提示）落库为 ""
-  if (patch.description !== undefined) data["description"] = patch.description ?? "";
-  if (patch.required !== undefined) data["required"] = patch.required;
-  if (patch.unique !== undefined) data["unique"] = patch.unique;
-  if (patch.order !== undefined) data["order"] = patch.order;
-  if (patch.options !== undefined) data["options"] = patch.options ? JSON.stringify(patch.options) : null;
-  if (patch.precision !== undefined) data["precision"] = patch.precision;
-  if (patch.maxLength !== undefined) data["maxLength"] = patch.maxLength;
-  if (patch.defaultNow !== undefined) data["defaultNow"] = patch.defaultNow;
-  if (patch.recordFilter !== undefined) data["recordFilter"] = patch.recordFilter ? JSON.stringify(patch.recordFilter) : null;
-  // 关联表只在「尚未建立双向配对」时允许设置（首次补配）；已配对后改表会导致反向字段与
-  // link_row 仍指旧表而断链，故忽略（前端也已锁定下拉）。需改表请删除重建。
-  const linkLikeExisting = existing.type === "links" || existing.type === "subtable";
-  if (patch.relatedTableId !== undefined && !(linkLikeExisting && existing.linkFieldId)) {
-    data["relatedTableId"] = patch.relatedTableId;
-  }
-  if (patch.relationKind !== undefined) data["relationKind"] = patch.relationKind;
-  if (patch.linkDisplayFieldId !== undefined) data["linkDisplayFieldId"] = patch.linkDisplayFieldId;
-  if (patch.lookupFieldId !== undefined) data["lookupFieldId"] = patch.lookupFieldId;
-  if (patch.linkFieldId !== undefined) data["linkFieldId"] = patch.linkFieldId;
-  if (patch.rollupFunction !== undefined) data["rollupFunction"] = patch.rollupFunction;
-  if (patch.formula !== undefined) data["formula"] = patch.formula;
-  if (patch.tabsConfig !== undefined) data["tabsConfig"] = patch.tabsConfig ? JSON.stringify(patch.tabsConfig) : null;
-  if (patch.displayedFieldIds !== undefined) data["displayedFieldIds"] = patch.displayedFieldIds ? JSON.stringify(patch.displayedFieldIds) : null;
-  if (patch.visibleFieldIds !== undefined) data["visibleFieldIds"] = patch.visibleFieldIds ? JSON.stringify(patch.visibleFieldIds) : null;
-  if (patch.defaultConfig !== undefined) data["defaultConfig"] = patch.defaultConfig ? JSON.stringify(patch.defaultConfig) : null;
-  if (patch.numberRule !== undefined) data["numberRule"] = patch.numberRule ? JSON.stringify(patch.numberRule) : null;
+  // 字段子集 → Prisma data 的组装与 YN7 结构回放共用 buildFieldUpdateData（单一事实来源）。
+  const data = buildFieldUpdateData(existing, patch);
 
   const isLinkLike = existing.type === "links" || existing.type === "subtable";
   const backfilled =
@@ -226,6 +266,15 @@ export async function updateField(
     const r = await updateFieldTx(tx, fieldId, existing, patch, data, isLinkLike);
     await resyncTableMaskTx(tx, existing.tableId, operatorUserId);
     if (backfilled) await resyncTableMaskTx(tx, patch.relatedTableId!, operatorUserId);
+    // YN7 §8.6：alter_field 结构 oplog（只记被改子集 changed；off 时零 IO）。
+    const baseId = await baseIdOfTableTx(tx, existing.tableId);
+    if (baseId) {
+      await recordStructureOpTx(tx, {
+        entityType: "field", entityId: fieldId, tableId: existing.tableId, baseId,
+        op: "alter_field", actorId: operatorUserId,
+        payload: { tableId: existing.tableId, changed: patch },
+      });
+    }
     return r;
   });
 
@@ -259,6 +308,15 @@ export async function deleteField(
       if (f) tableIds.add(f.tableId);
     }
     for (const tid of tableIds) await resyncTableMaskTx(tx, tid, operatorUserId);
+    // YN7 §8.6：delete_field 结构 oplog（含级联删除 id；off 时零 IO）。
+    const baseId = await baseIdOfTableTx(tx, field.tableId);
+    if (baseId) {
+      await recordStructureOpTx(tx, {
+        entityType: "field", entityId: fieldId, tableId: field.tableId, baseId,
+        op: "delete_field", actorId: operatorUserId,
+        payload: { tableId: field.tableId, deleted: deletedIds },
+      });
+    }
     return deletedIds;
   });
 

@@ -108,7 +108,31 @@ export async function pullBaseOps(
 
   const ops: PullOp[] = [];
   for (const row of page) {
-    // YN2 只下发记录轨；其它实体类型（未来 doc/结构轨）出现时跳过，不猜测其可见性。
+    // YN7 结构轨（table/field/view）：结构 op 不含记录行明文（只含字段/视图元数据），且每个订阅
+    // 该 base 的端都必须收到结构时钟滴答，否则其本地 schemaVersion 与服务端分叉、无法正确计算数据
+    // op 的 baseSchemaVersion（§19.2）。本函数调用方（路由）已过 base enter；结构 op 即对 base
+    // 内所有订阅端下发，payload 原样透传（结构可见性＝进得去库即可见库结构，与导航树同口径）。
+    if (row.entityType === "table" || row.entityType === "field" || row.entityType === "view") {
+      ops.push({
+        seq: row.seq.toString(),
+        baseId: row.baseId,
+        entityType: row.entityType,
+        entityId: row.entityId,
+        op: row.op,
+        actorId: row.actorId,
+        clientId: row.clientId,
+        clientOpId: row.clientOpId,
+        baseVersion: row.baseVersion.toString(),
+        newVersion: row.newVersion.toString(),
+        payload: safeParsePayload(row.payload),
+        result: row.result,
+        conflictOf: row.conflictOf,
+        createdAt: row.createdAt.toISOString(),
+      });
+      continue;
+    }
+
+    // YN2 记录轨：逐表按当前 r/行/字段权限裁剪；其它实体类型（nav 随 YN8、doc 走协同轨）跳过。
     if (row.entityType !== "record") continue;
 
     const payloadObj = safeParsePayload(row.payload) as { tableId?: unknown };

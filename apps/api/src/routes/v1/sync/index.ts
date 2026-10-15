@@ -49,7 +49,7 @@ syncRoutes.get("/", (c) => {
     apiVersion: "v1",
     sync: true,
     // 阶段标识随 YN 推进刷新；客户端据此判断可用端点集。
-    phase: "YN6",
+    phase: "YN7",
     serverVersion: VERSION,
     auth: {
       userId: auth.userId,

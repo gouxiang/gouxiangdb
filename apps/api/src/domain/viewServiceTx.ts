@@ -18,8 +18,14 @@ interface CreateViewTxInput {
   config?: Record<string, unknown>;
 }
 
-/** 建视图：maxOrder+1 -> 合并默认配置 -> create -> 同步 nav 节点。 */
-export async function createViewTx(tx: DbTx, input: CreateViewTxInput) {
+/**
+ * 建视图：maxOrder+1 -> 合并默认配置 -> create -> 同步 nav 节点。
+ * YN7 同步回放可经 input.viewId 保留离线 cuid（§8.4）；在线路径不传 → Prisma 生成 id。
+ */
+export async function createViewTx(
+  tx: DbTx,
+  input: CreateViewTxInput & { viewId?: string },
+) {
   const maxOrder = await tx.view.findFirst({
     where: { tableId: input.tableId },
     orderBy: { order: "desc" },
@@ -32,6 +38,8 @@ export async function createViewTx(tx: DbTx, input: CreateViewTxInput) {
   };
   const created = await tx.view.create({
     data: {
+      // YN7 回放带 viewId 时保留离线 cuid（§8.4）；建表事务内派生的默认视图不传 → 生成 id。
+      ...(input.viewId ? { id: input.viewId } : {}),
       tableId: input.tableId,
       name: input.name,
       type: input.type,

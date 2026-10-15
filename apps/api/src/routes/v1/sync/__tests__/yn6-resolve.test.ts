@@ -167,11 +167,11 @@ afterAll(async () => {
 });
 
 describe("A. 探针阶段", () => {
-  it("phase 刷到 YN6", async () => {
+  it("phase 刷到 YN7（YN6 冲突解决能力仍在）", async () => {
     const res = await h.app.request("/api/v1/sync", { headers: await h.auth(ED) });
     const body = await res.json();
     expect(res.status).toBe(200);
-    expect(body.phase).toBe("YN6");
+    expect(body.phase).toBe("YN7");
   });
 });
 

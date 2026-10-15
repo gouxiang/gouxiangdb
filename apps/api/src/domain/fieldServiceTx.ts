@@ -30,11 +30,22 @@ export function reverseRelation(kind: RelationKind): RelationKind {
   }
 }
 
-type ExistingFieldRow = NonNullable<Awaited<ReturnType<DbTx["field"]["findUnique"]>>>;
+export type ExistingFieldRow = NonNullable<Awaited<ReturnType<DbTx["field"]["findUnique"]>>>;
+
+/**
+ * YN7 同步回放可选：保留离线端生成的字段 cuid（§8.4/§19.3）。在线路径恒不传 → Prisma 生成 id。
+ */
+export interface CreateFieldPreserveOpt {
+  /** 普通字段/正向字段保留的主键。 */
+  id?: string;
+  /** links/subtable 成对创建时，反向字段保留的主键。 */
+  reverseId?: string;
+}
 
 export async function createSimpleFieldTx(
   tx: DbTx,
   input: CreateFieldInput,
+  preserve?: CreateFieldPreserveOpt,
 ): Promise<{ field: ReturnType<typeof toFieldMeta> }> {
   const maxOrder = await tx.field.findFirst({
     where: { tableId: input.tableId, deletedAt: null },
@@ -52,6 +63,8 @@ export async function createSimpleFieldTx(
 
   const created = await tx.field.create({
     data: {
+      // YN7 回放带 preserve.id 时保留离线 cuid（§8.4）；在线路径不传 → Prisma 生成 id。
+      ...(preserve?.id ? { id: preserve.id } : {}),
       tableId: input.tableId,
       name: input.name,
       type: input.type,
@@ -84,6 +97,7 @@ export async function createSimpleFieldTx(
 export async function createLinkFieldPairTx(
   tx: DbTx,
   input: CreateFieldInput,
+  preserve?: CreateFieldPreserveOpt,
 ): Promise<{ field: ReturnType<typeof toFieldMeta>; reverseField: ReturnType<typeof toFieldMeta> }> {
   const kind = input.relationKind!;
   const reverseKind = reverseRelation(kind);
@@ -113,6 +127,8 @@ export async function createLinkFieldPairTx(
   // 先建反向字段（占位，稍后回填 reverseFieldId）；与正向保持同一类型
   const reverseField = await tx.field.create({
     data: {
+      // YN7 回放：保留反向字段离线 cuid（§8.4/§19.1 成对原子）；在线不传 → 生成 id。
+      ...(preserve?.reverseId ? { id: preserve.reverseId } : {}),
       tableId: relatedTableId,
       name: `${input.name}（反向）`,
       type: input.type,
@@ -127,6 +143,8 @@ export async function createLinkFieldPairTx(
   // 再建正向字段，linkFieldId 指向反向字段（v1 同构：正向.linkFieldId = 反向字段 id）
   const forwardField = await tx.field.create({
     data: {
+      // YN7 回放：保留正向字段离线 cuid（§8.4）；在线不传 → 生成 id。
+      ...(preserve?.id ? { id: preserve.id } : {}),
       tableId: input.tableId,
       name: input.name,
       type: input.type,

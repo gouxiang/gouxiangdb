@@ -49,6 +49,13 @@ import {
 import { invalidateOrdinalCache } from "../prismaDeps.js";
 import type { FieldMeta } from "../types.js";
 import { SyncVersionConflictError } from "./oplog.js";
+import { writeStructureOpTx } from "./structureOplog.js";
+import {
+  getStructureOpHandler,
+  isStructureEntityType,
+  type StructureOpHandler,
+  type StructureResolution,
+} from "./structureRegistry.js";
 
 // ───────────────────────────────── 信封类型 ─────────────────────────────────
 
@@ -140,6 +147,8 @@ const RC = {
   RESOLVE_BAD_DECISION: "SYNC_RESOLVE_BAD_DECISION",
   RESOLVE_NOT_CONFLICT: "SYNC_RESOLVE_NOT_CONFLICT",
   RESOLVE_MALFORMED: "SYNC_RESOLVE_MALFORMED",
+  // YN7 结构轨（§19.2/§19.3）：结构版本分叉（表结构已被他人改变）。
+  STRUCTURE_CONFLICT: "SYNC_STRUCTURE_VERSION_CONFLICT",
 } as const;
 
 /** 本期回放支持的 record 操作（YN5 起接入 restore，见 replayRestoreTx）。 */
@@ -634,12 +643,17 @@ async function replayOne(
   if (prior) return prior;
 
   // ② 实体/操作白名单（不支持的操作明确拒绝、不静默；restore 随 YN5）。
-  if (o.entityType !== "record" || !SUPPORTED_RECORD_OPS.has(o.op)) {
+  //    YN7：table/field/view 结构族【放行】进事务，由 replayOneTx 经 §20.1 注册表分派——
+  //    具体 op 是否登记由注册表判定（未登记回 OP_UNSUPPORTED）；此处不能再用 record-only 闸门
+  //    提前拦截，否则结构 op 永远到不了注册表。nav/menu（YN8）等未登记实体仍在此明确拒绝。
+  const isRecordEntity = o.entityType === "record";
+  const isStructureEntity = isStructureEntityType(o.entityType);
+  if (!isStructureEntity && (!isRecordEntity || !SUPPORTED_RECORD_OPS.has(o.op))) {
     return await commitTerminal(userId, clientId, baseId, o, {
       clientOpId: o.clientOpId, status: "rejected",
       reasonCode: RC.OP_UNSUPPORTED,
-      reasonDetail: o.entityType !== "record"
-        ? `本期仅支持 record 实体，收到 ${o.entityType}`
+      reasonDetail: !isRecordEntity
+        ? `暂不支持实体类型 ${o.entityType}`
         : `本期回放暂不支持 op=${o.op}`,
     });
   }
@@ -749,11 +763,111 @@ async function replayOneTx(
   o: IncomingOp,
   idMap: Map<string, string>,
 ): Promise<PushResult> {
+  // YN7 结构轨（table/field/view）：经 §20.1 注册表分派，引擎不写具体模块分支。
+  if (isStructureEntityType(o.entityType)) {
+    return await replayStructureTx(tx, userId, clientId, baseId, o);
+  }
+  if (o.entityType !== "record") {
+    // 未登记实体（nav/menu 随 YN8；doc 走协同轨）→ 明确拒绝，不静默吞。
+    return await terminalInTx(tx, userId, clientId, baseId, o, {
+      clientOpId: o.clientOpId, status: "rejected", reasonCode: RC.OP_UNSUPPORTED,
+      reasonDetail: `暂不支持实体类型 ${o.entityType}`,
+    });
+  }
   if (o.op === "create") return await replayCreateTx(tx, userId, clientId, baseId, access, o, idMap);
   if (o.op === "patch") return await replayPatchTx(tx, userId, clientId, baseId, access, o);
   if (o.op === "restore") return await replayRestoreTx(tx, userId, clientId, baseId, access, o);
   // delete
   return await replayDeleteTx(tx, userId, clientId, baseId, access, o);
+}
+
+/**
+ * YN7 结构 op 回放（在 replayOneTx 的同一写事务内）：
+ *   ① 查注册表拿处理器（未登记 → OP_UNSUPPORTED，明确拒绝）；
+ *   ② 处理器 resolve（纯读：目标表归属）→ 对返回的 base/table 节点按【当前】角色裁决
+ *      manage_schema/manage_table（§19.4，与在线 requireSchemaDesign/requireCreateTable 同动作词），
+ *      403 → rejected=PERMISSION_REVOKED、引擎 503 冒泡 fail-closed；
+ *   ③ apply 复用现有 tableServiceTx/fieldServiceTx/viewServiceTx 原语（跑现有校验/nav/mask），
+ *      结构写失败可能毒化事务 → abortFromWrite 穿界，由外层新短事务落终态；
+ *   ④ 同事务推进该表 table_schema 版本钟 + oplog（客户端 baseSchemaVersion 乐观断言）；版本分叉 →
+ *      AbortReplay(conflict=STRUCTURE_CONFLICT) 穿界，外层落冲突终态、主数据随回滚不生效。
+ */
+async function replayStructureTx(
+  tx: DbTx,
+  userId: string,
+  clientId: string,
+  baseId: string,
+  o: IncomingOp,
+): Promise<PushResult> {
+  const handler: StructureOpHandler | null = getStructureOpHandler(o.entityType, o.op);
+  if (!handler) {
+    return await terminalInTx(tx, userId, clientId, baseId, o, {
+      clientOpId: o.clientOpId, status: "rejected", reasonCode: RC.OP_UNSUPPORTED,
+      reasonDetail: `暂不支持结构操作 ${o.entityType}.${o.op}`,
+    });
+  }
+
+  // ② 写前纯读：解析目标表/权限挂载点 + 当前权限裁决（只读，未毒化事务，可同事务落终态）。
+  let resolution: StructureResolution;
+  try {
+    resolution = await handler.resolve(tx, baseId, o);
+    const decided = await enforceOrLegacy({
+      guard: `sync.push.${o.entityType}.${o.op}`,
+      userId,
+      action: resolution.action,
+      legacyAllowed: false,
+      ref: { resourceType: resolution.ref.resourceType, resourceId: resolution.ref.resourceId },
+    });
+    if (!decided.allowed) {
+      throw new HttpError(403, "当前角色已无权修改该表结构（权限可能在离线期间被收回）", RC.PERMISSION_REVOKED);
+    }
+  } catch (e) {
+    return await rejectFromPreflightTx(tx, userId, clientId, baseId, o, e);
+  }
+
+  // ③ 应用结构主写（复用现有事务体；内部失败可能已毒化 → 穿界由外层落终态）。
+  let applied;
+  try {
+    applied = await handler.apply(tx, userId, baseId, o);
+  } catch (e) {
+    abortFromWrite(e, o.clientOpId);
+  }
+
+  // ④ 同事务结构版本钟 + oplog（乐观断言 baseSchemaVersion；分叉穿界落结构冲突，主数据回滚）。
+  let ledger: Awaited<ReturnType<typeof writeStructureOpTx>>;
+  try {
+    ledger = await writeStructureOpTx(
+      tx,
+      {
+        entityType: applied.entityType,
+        entityId: applied.entityId,
+        tableId: applied.tableId,
+        baseId,
+        op: applied.op,
+        actorId: userId,
+        payload: applied.payload,
+      },
+      { clientId, clientOpId: o.clientOpId, clientBaseVersion: o.baseVersion, expectedBaseVersion: o.baseVersion },
+    );
+  } catch (e) {
+    if (e instanceof SyncVersionConflictError) {
+      throw new AbortReplayError({
+        clientOpId: o.clientOpId,
+        status: "conflict",
+        reasonCode: RC.STRUCTURE_CONFLICT,
+        reasonDetail: `表结构已变化（本地基于结构版本 ${o.baseVersion.toString()}，服务端 ${e.currentVersion.toString()}）；请刷新结构后人工解决`,
+        serverVersion: e.currentVersion,
+      });
+    }
+    abortFromWrite(e, o.clientOpId);
+  }
+
+  const r: PushResult = {
+    clientOpId: o.clientOpId, status: "accepted",
+    seq: ledger.seq, newVersion: ledger.newVersion, entityId: applied.entityId,
+  };
+  await recordIncomingTx(tx, o, clientId, baseId, userId, { ...r, serverVersion: undefined });
+  return r;
 }
 
 /** 冲突终态：构建按当前权限脱敏的服务端快照（YN6 双版本弹窗右侧）后只落 incoming。 */

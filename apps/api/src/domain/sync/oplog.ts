@@ -40,7 +40,10 @@ export const SYNC_DEFAULT_WORKSPACE = "ws_default";
 /** 在线（非同步客户端）写的来源标识；push 回放的来源是具体设备 clientId。 */
 export const SERVER_CLIENT_ID = "__server__";
 
-/** 同步跟踪的实体类型（开放词表，新模块向同步轨注册表登记，见 §20.1）。YN1/YN4 只落 record。 */
+/** 同步跟踪的实体类型（开放词表，新模块向同步轨注册表登记，见 §20.1）。
+ *  record 轨（YN1/YN4）落 "record"；结构轨（YN7，table/field/view）的 per-table schemaVersion
+ *  版本钟与 oplog 由 structureOplog.ts 写（entityType="table"/"field"/"view"，版本钟行
+ *  entityType="table_schema"）。这里只保留 record 轨自身用到的字面量类型。 */
 export type SyncEntityType = "record";
 /** 操作词表（§4.1.1）。patch 是离线 update 的结构化形态；resolve 待 YN6。 */
 export type SyncOp = "create" | "update" | "patch" | "delete" | "restore" | "resolve";
@@ -111,6 +114,18 @@ export interface ReplaySyncIdentity {
 }
 
 /**
+ * 分配下一条全局单调 seq（pull 游标）。record 轨与结构轨（YN7 table/field/view）共用同一条
+ * sync_op_log 序列，故所有轨都必须经本原语取号，禁止各轨自行 MAX+1（否则 seq 撞号、pull 乱序）。
+ * 串行写队列并发度恒 1，MAX+1 无并发竞争；seq 从 1 起（0 保留给「尚无任何操作」的游标）。
+ */
+export async function allocateSyncSeqTx(tx: DbTx): Promise<bigint> {
+  const maxRows = await tx.$queryRawUnsafe<Array<{ m: bigint | null }>>(
+    `SELECT MAX("seq") AS m FROM "sync_op_log"`,
+  );
+  return (maxRows[0]?.m ?? 0n) + 1n;
+}
+
+/**
  * 同步记账核心（在调用方写事务内）：推进 sync_entity_versions + 追加 sync_op_log。
  *
  * 同一时刻只在串行写队列的单个写事务里被调（在线切面 / push 回放皆然），故 MAX(seq)+1 与
@@ -136,11 +151,8 @@ export async function writeSyncOpTx(
     baseId = table?.baseId ?? null;
   }
 
-  // 1) 全局单调 seq：串行写队列内 MAX+1 无并发竞争。seq 从 1 起（0 保留给「尚未有任何操作」的游标）。
-  const maxRows = await tx.$queryRawUnsafe<Array<{ m: bigint | null }>>(
-    `SELECT MAX("seq") AS m FROM "sync_op_log"`,
-  );
-  const seq = (maxRows[0]?.m ?? 0n) + 1n;
+  // 1) 全局单调 seq（record 轨与结构轨共用同一条 pull 游标，§8.2）。
+  const seq = await allocateSyncSeqTx(tx);
 
   // 2) 读当前 per-entity 权威版本（= entityId 1:1）。
   const existing = await tx.syncEntityVersion.findUnique({ where: { id: input.entityId } });

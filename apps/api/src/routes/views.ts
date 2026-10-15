@@ -118,7 +118,7 @@ views.post("/", async (c) => {
   const tableId = c.req.query("tableId");
   if (!tableId) return c.json({ error: "缺少 tableId" }, 400);
   await baseIdOfTable(tableId);
-  await requireSchemaDesign(c, tableId);
+  const { userId: createUserId } = await requireSchemaDesign(c, tableId);
 
   const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法", details: parsed.error.issues }, 400);
@@ -128,7 +128,7 @@ views.post("/", async (c) => {
     name: parsed.data.name,
     type: parsed.data.type,
     config: parsed.data.config,
-  });
+  }, createUserId);
   const row = await prisma.view.findUniqueOrThrow({ where: { id: v.id } });
   return c.json({ view: serializeView(row) }, 201);
 });
@@ -206,7 +206,7 @@ views.patch("/:viewId", async (c) => {
     snapshot: configChanged
       ? { userId, tableId: v.tableId, viewType: v.type, skipIfIdentical: true }
       : null,
-  });
+  }, userId);
   // #561：PATCH 返回也带当前用户的个性化（视图默认 config 被改不影响该用户已固化的偏好）。
   const userPrefs = await loadUserPrefs(prisma, viewId, userId);
   return c.json({ view: serializeView(updated, userPrefs) });
@@ -221,10 +221,10 @@ views.delete("/:viewId", async (c) => {
     select: { tableId: true },
   });
   if (!viewRow) throw new HttpError(404, "视图不存在");
-  await requireSchemaDesign(c, viewRow.tableId);
+  const { userId: deleteUserId } = await requireSchemaDesign(c, viewRow.tableId);
 
   // 至少保留一个视图 + 清 nav 节点/布局版本 + 物理删：统一由领域服务承载（单一真源）。
-  await purgeView(viewId);
+  await purgeView(viewId, deleteUserId);
   return c.json({ ok: true });
 });
 
