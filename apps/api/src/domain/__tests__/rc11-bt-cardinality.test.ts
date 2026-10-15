@@ -105,9 +105,10 @@ describe("RC-11 bt（多对一）正向字段基数约束", () => {
     } as unknown as DbTx;
 
     const f = linkField({ relationKind: "bt" });
+    // links 走 linkRow、无物理字段，applyFieldWrites 返回空字段 diff（YN1 起返回 {changes}）。
     await expect(
       applyFieldWrites("tblA", "a1", { f_link: ["b1"] }, [f], db),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ changes: [] });
 
     expect(created).toHaveLength(1);
     // 正向字段：源记录为 parent，目标为 child
@@ -133,7 +134,7 @@ describe("RC-11 bt（多对一）正向字段基数约束", () => {
     const f = linkField({ relationKind: "mm" });
     await expect(
       applyFieldWrites("tblA", "a1", { f_link: ["b1", "b2", "b3"] }, [f], db),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ changes: [] });
     expect(created).toEqual(["b1", "b2", "b3"]);
   });
 });

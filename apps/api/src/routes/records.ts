@@ -62,6 +62,7 @@ export const records = new Hono();
 
 // M6/S4：写原语已移入 domain/recordWrite.ts（纯移动）+ re-export 保持既有导入点不变。
 import { applyFieldWrites, assertUnique, createRecordTx, parseStoredFields, runMaskWriteGate, softDeleteRecordTx, updateRecordTx } from "../domain/recordWrite.js";
+import { recordSyncOpTx, recordSyncOpsTx } from "../domain/sync/oplog.js";
 import { fieldWriteGate } from "../domain/authz/libraryPolicy.js";
 export { assertRequiredOnCreate, assertUnique } from "../domain/recordWrite.js";
 
@@ -601,6 +602,11 @@ records.post("/bulk-delete", async (c) => {
     await enqueueChangeEventsTx(tx, scopedIds.map((id) => ({
       entityType: "record" as const, entityId: id, op: "delete" as const, version: BigInt(now.getTime()),
     })));
+    // YN1：批量软删同事务逐条推进同步版本/墓碑 + oplog（开关 off 时原语内部零写）。
+    await recordSyncOpsTx(tx, scopedIds.map((id) => ({
+      entityType: "record" as const, entityId: id, tableId: first.tableId, baseId,
+      op: "delete" as const, actorId: userId, changes: [],
+    })));
   });
   invalidateOrdinalCache(first.tableId);
 
@@ -656,10 +662,15 @@ records.post("/bulk-update", async (c) => {
   // 一批记录要么全部写成功，要么全部回滚（避免「前几条改了后几条失败」的半成品）
   await withWriteTx("record.bulkUpdate", async (tx) => {
     for (const id of scopedIds) {
-      await applyFieldWrites(first.tableId, id, parsed.data.fields, fields, tx, false, {
+      // YN1：逐行取字段 diff 并在同事务推进同步版本/oplog（开关 off 时原语内部零写）。
+      const { changes: rowChanges } = await applyFieldWrites(first.tableId, id, parsed.data.fields, fields, tx, false, {
         op: "update", actorId: userId,
       });
       await tx.record.update({ where: { id }, data: { updatedBy: userId } });
+      await recordSyncOpTx(tx, {
+        entityType: "record", entityId: id, tableId: first.tableId,
+        op: "update", actorId: userId, changes: rowChanges,
+      });
     }
     // M1/S4：整批 fields 在同一事务内统一重建一次 sidecar（避免逐行重复删插）。
     await syncRecordsTx(tx, first.tableId, scopedIds);
@@ -793,7 +804,7 @@ records.post("/csv-import", async (c) => {
         const rec = await tx.record.create({
           data: { tableId, fields: "{}", createdBy: userId, updatedBy: userId },
         });
-        await applyFieldWrites(tableId, rec.id, payload, allFields, tx, true, {
+        const { changes: rowChanges } = await applyFieldWrites(tableId, rec.id, payload, allFields, tx, true, {
           op: "create", actorId: userId,
         });
         // 唯一校验在同一行事务内、用 tx 做：unique 字段与存量记录（含本次导入此前各行）
@@ -802,6 +813,11 @@ records.post("/csv-import", async (c) => {
         // M5/S1：导入新建记录同事务登记 upsert。
         await enqueueChangeEventTx(tx, {
           entityType: "record", entityId: rec.id, op: "upsert", version: BigInt(Date.now()),
+        });
+        // YN1：导入新建也推进同步版本/oplog（开关 off 时原语内部零写）。
+        await recordSyncOpTx(tx, {
+          entityType: "record", entityId: rec.id, tableId,
+          op: "create", actorId: userId, changes: rowChanges,
         });
       });
       createdRecords += 1;
@@ -1058,6 +1074,11 @@ records.post("/trash/:id/restore", async (c) => {
       await enqueueChangeEventTx(tx, {
         entityType: "record", entityId: id, op: "upsert", version: BigInt(Date.now()),
       });
+      // YN1：恢复同样推进同步版本并撤墓碑（isDeleted=false），op=restore（开关 off 零写）。
+      await recordSyncOpTx(tx, {
+        entityType: "record", entityId: id, tableId: rec.tableId,
+        op: "restore", actorId: restorerId, changes: [],
+      });
     });
   } else if (parsed.data.kind === "field") {
     const f = await prisma.field.findUnique({
@@ -1150,6 +1171,11 @@ records.post("/trash/:id/restore", async (c) => {
         const restoreVersion = BigInt(Date.now());
         await enqueueChangeEventsTx(tx, restoredIds.map((rid) => ({
           entityType: "record" as const, entityId: rid, op: "upsert" as const, version: restoreVersion,
+        })));
+        // YN1：整表恢复的记录逐条推进同步版本、撤墓碑（op=restore，显式传 baseId；开关 off 零写）。
+        await recordSyncOpsTx(tx, restoredIds.map((rid) => ({
+          entityType: "record" as const, entityId: rid, tableId: id, baseId: t.baseId,
+          op: "restore" as const, actorId: userId, changes: [],
         })));
       }
       // 删表时视图被置 order=-1 隐藏，恢复时按原序无关地重置为可见顺序

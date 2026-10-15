@@ -18,9 +18,11 @@ import { HttpError } from "../guards.js";
 import { loadTableFields } from "./recordService.js";
 import { deleteRecordsTx, syncRecordsTx } from "./fieldIndex/sync.js";
 import { enqueueChangeEventTx } from "./search/outbox.js";
+import { recordSyncOpTx } from "./sync/oplog.js";
 import { sidecarUniqueMatch, findUniqueConflictTx } from "./queryPlan/uniqueSidecar.js";
 import { diffRecordFields } from "./recordChanges/diff.js";
 import { appendRecordChangeTx } from "./recordChanges/store.js";
+import type { FieldChange } from "./recordChanges/types.js";
 import type { resolveTableMask } from "./authz/maskGate.js";
 import { AuthzFieldError } from "./authz/fieldMask.js";
 import { isNumberRuleEmpty } from "@gx/shared-types";
@@ -163,7 +165,7 @@ export async function applyFieldWrites(
   // 避免 N 次重复删插；单条 create/update/CSV 行级事务用默认 true。
   syncSidecar = true,
   trace?: FieldWriteTrace,
-): Promise<void> {
+): Promise<{ changes: FieldChange[] }> {
   const byId = new Map(fields.map((f) => [f.id, f]));
   const physical: Record<string, unknown> = {};
 
@@ -207,14 +209,18 @@ export async function applyFieldWrites(
     const before = parseStoredFields(current?.fields);
     const merged = { ...before, ...physical };
     await db.record.update({ where: { id: recordId }, data: { fields: JSON.stringify(merged) } });
-    // 变更历史：before/after 已在这三行里全部在内存，前后值零额外 IO 即可推出。
-    // 与字段写同事务共生死（字段写回滚则日志一并回滚，绝不会出现"日志说改了、实际没改"）。
+    // 字段级前后值：before/after 已在这三行里全部在内存，前后值零额外 IO 即可推出。
+    // create=初始值快照；update=仅被改字段。无论是否落「变更历史」都算出来返回，
+    // 供同事务的同步 oplog 切面复用同一份 diff（§5.2，不重复查库）。
+    const changes = diffRecordFields({
+      op: trace?.op ?? "update", beforeFields: before, afterFields: merged, fields,
+    });
+    // 变更历史：与字段写同事务共生死（字段写回滚则日志一并回滚，绝不会出现"日志说改了、实际没改"）。
     // 两道兜底保证它不成为业务写的失败点：
     //   - GX_RECORD_CHANGES 显式 off 时 appendRecordChangeTx 内部直接 return，零开销；
     //   - 写库抛错时它内部 try/catch 吞掉并只告警一次（真旁路），本事务照常提交。
     //   开关默认开启（历史不可回溯补写），见 configRecordChanges.ts 的翻转理由。
     if (trace) {
-      const changes = diffRecordFields({ op: trace.op, beforeFields: before, afterFields: merged, fields });
       // update 且一个字段都没真变 → 不落行：「点了保存但什么都没改」不该在日志里刷屏，
       // 更不该留下一条 changes 为空、读侧还要靠"空则不返回"兜底的条目。
       // create 不受此限：记录本身被建出来了，即便没落到物理字段也是一次真实的新建。
@@ -229,8 +235,10 @@ export async function applyFieldWrites(
     // 调用方事务末统一 sync；全局 client（defaults 补偿写）时 sync 自成语句；
     // 内存 mock 缺 $executeRawUnsafe 时 sync 自动跳过。
     if (syncSidecar) await syncRecordsTx(db, tableId, [recordId]);
+    return { changes };
   }
   void tableId;
+  return { changes: [] };
 }
 
 /**
@@ -365,6 +373,11 @@ export async function softDeleteRecordTx(tx: DbTx, recordId: string, actorId: st
   await enqueueChangeEventTx(tx, {
     entityType: "record", entityId: recordId, op: "delete", version: BigInt(Date.now()),
   });
+  // YN1：同步版本切面——置墓碑、version+1、追加 delete oplog（pull 以 delete+墓碑下发删除事实，§6.4）。
+  await recordSyncOpTx(tx, {
+    entityType: "record", entityId: recordId, tableId: deleted.tableId,
+    op: "delete", actorId, changes: [],
+  });
 }
 
 /** createRecordTx 入参（MCP 与 REST 同口径；显式传参、无 Hono Context）。 */
@@ -400,14 +413,22 @@ export async function createRecordTx(tx: DbTx, params: CreateRecordParams): Prom
     const created = await tx.record.create({
       data: { tableId: params.tableId, fields: "{}", createdBy: params.userId, updatedBy: params.userId },
     });
+    let fieldChanges: FieldChange[] = [];
     if (Object.keys(params.payloadFields).length > 0) {
-      await applyFieldWrites(params.tableId, created.id, params.payloadFields, params.fields, tx, true, {
+      const r = await applyFieldWrites(params.tableId, created.id, params.payloadFields, params.fields, tx, true, {
         op: "create", actorId: params.userId,
       });
+      fieldChanges = r.changes;
     }
     // M5/S1：同事务登记检索 outbox（实体建，upsert）。失败随本事务整体回滚。
     await enqueueChangeEventTx(tx, {
       entityType: "record", entityId: created.id, op: "upsert", version: BigInt(Date.now()),
+    });
+    // YN1：同步版本切面（仅 GX_SYNC_SERVER=on 时写，off 零行为）。即便没有物理字段，
+    // 记录本身被建出来也是一次真实 create，必须推进版本并登记 oplog。
+    await recordSyncOpTx(tx, {
+      entityType: "record", entityId: created.id, tableId: params.tableId,
+      op: "create", actorId: params.userId, changes: fieldChanges,
     });
     return created;
 }
@@ -433,12 +454,18 @@ export async function updateRecordTx(tx: DbTx, params: UpdateRecordParams): Prom
     // 字段级写闸先于任何写：与批量路径的 runMaskWriteGate 同口径——整批要么全过要么不写。
     params.fieldGate?.(Object.keys(params.patch));
     await assertUnique(params.tableId, params.fields, params.patch, params.recordId, undefined, tx);
-    await applyFieldWrites(params.tableId, params.recordId, params.patch, params.fields, tx, true, {
+    const { changes } = await applyFieldWrites(params.tableId, params.recordId, params.patch, params.fields, tx, true, {
       op: "update", actorId: params.userId,
     });
     await tx.record.update({ where: { id: params.recordId }, data: { updatedBy: params.userId } });
     // M5/S1：记录改，同事务登记 upsert（与物理字段写共生死）。
     await enqueueChangeEventTx(tx, {
       entityType: "record", entityId: params.recordId, op: "upsert", version: BigInt(Date.now()),
+    });
+    // YN1：同步版本切面。在线 update 无条件推进 per-entity version（即便本次字段级 diff 为空，
+    // updatedBy/links 等也可能变化；保证离线端 baseVersion 与服务端不会漏比），payload 只带字段 diff。
+    await recordSyncOpTx(tx, {
+      entityType: "record", entityId: params.recordId, tableId: params.tableId,
+      op: "update", actorId: params.userId, changes,
     });
 }
