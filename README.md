@@ -4,7 +4,7 @@
 >
 > 适合想用飞书多维表格 / Airtable / Notion，又希望数据完全自控的个人、家庭与小团队。
 
-- **当前版本**：**`v0.2.4`**
+- **当前版本**：**`v0.2.5`**（离线优先 + 操作级双向同步「服务端地基」**测试版**，同步面 `GX_SYNC_SERVER` 默认关闭、对现网零影响）
 - **产品名**：构想工作台。技术标识（飞牛应用包名 / 目录 / 仓库名）为 `gouxiangdb`，仅用于开发与安装包，界面一律显示「构想工作台」。
 - **运行形态**：单进程同时提供 Web 界面与后端接口，内置 SQLite 数据库，**无需外部数据库 / Redis**；浏览器打开即用，电脑、平板、手机自适应。
 
@@ -141,12 +141,16 @@ bash scripts/ci-quality.sh                     # CI 质量门
 
 | 包 | 实测值 | 记录日期 | 来源 |
 |---|---|---|---|
-| `apps/api` | **3244 passed / 0 failed / 14 skipped**（308 files passed，2 skipped） | 2026-10-14 | v0.2.4 收口全量四门（VM15） |
-| `apps/web` | **1836 passed / 0 failed**（143 files） | 2026-10-14 | v0.2.4 收口全量四门（VM15） |
-| `@gx/shared-types` | **172 passed / 0 failed**（9 files） | 2026-10-14 | v0.2.4 质量门 |
-| `@gx/canvas` | **51 passed / 0 failed**（2 files） | 2026-10-14 | v0.2.4 质量门 |
+| `apps/api` | **【封版回填中】passed / 0 failed**（VM15 全量重跑） | 2026-10-16 | v0.2.5 收口全量四门（VM15） |
+| `apps/web` | **【封版回填中】passed / 0 failed**（含 node/ 三个新模块测试） | 2026-10-16 | v0.2.5 收口全量四门（VM15） |
+| `@gx/shared-types` | **【封版回填中】passed / 0 failed** | 2026-10-16 | v0.2.5 质量门 |
+| `@gx/canvas` | **【封版回填中】passed / 0 failed** | 2026-10-16 | v0.2.5 质量门 |
+| `apps/api` | 3244 passed / 0 failed / 14 skipped（308 files passed，2 skipped） | 2026-10-14 | v0.2.4 收口全量四门（VM15） |
+| `apps/web` | 1836 passed / 0 failed（143 files） | 2026-10-14 | v0.2.4 收口全量四门（VM15） |
+| `@gx/shared-types` | 172 passed / 0 failed（9 files） | 2026-10-14 | v0.2.4 质量门 |
+| `@gx/canvas` | 51 passed / 0 failed（2 files） | 2026-10-14 | v0.2.4 质量门 |
 
-本表是历史记录、非当前断言。v0.2.4 收口：四包 `tsc --noEmit` 零错误、`eslint` 0 error（告警低于各包卡控阈值）、`rounded-gx-md` 生产码零命中、web build 成功；迁移 **41 枚**（本版注册开关复用 `app_settings` KV，**零新增迁移**）。内存 / 压测类重活不在本机跑，放预览机 VM15；权威出口数字见 `docs/baseline/`。
+本表是历史记录、非当前断言。v0.2.5 收口（实数封版二次提交回填）：四包 `tsc --noEmit` 零错误、`eslint` 0 error（告警低于各包卡控阈值）、web build 成功；迁移 **42 枚**（本版**只增 1 枚** `sync_server_foundation` 建四张 `sync_*` 表，**同步面 `GX_SYNC_SERVER` 默认关闭，不触数据**）。v0.2.4 为 41 枚（注册开关复用 `app_settings` KV，零新增迁移）。内存 / 压测 / 全量测试类重活不在本机跑，放预览机 VM15；权威出口数字见 `docs/baseline/`。
 
 </details>
 
@@ -204,7 +208,7 @@ v1 为 Swift 实现，与当前版本零代码依赖。核心模型（字段、h
 | **运维手册** | `docs/runbooks/`（deploy / backup / restore / ci / m5-search / mcp / authz-*） |
 | **接口契约** | `docs/api/openapi.yaml`（冻结）+ `docs/api/m4-error-codes.md` |
 | **出口证据 / 实测基线** | `docs/baseline/` |
-| **发版记录** | 根目录 **`RELEASE.md`**（现行＝v0.2.4 品牌外观与访客自助注册开关发版说明） |
+| **发版记录** | 根目录 **`RELEASE.md`**（现行＝v0.2.5 离线同步服务端地基**测试版**，默认关闭；历史归档 `docs/release-notes/`） |
 | **已知问题 / Bug 回归清单** | 根目录 **`KNOWN-ISSUES.md`**（发版前按表回归；条数以该文件标题行实时统计为准） |
 | **待裁决事项（含瘦身清理）** | 根目录 `PENDING-DECISIONS.md` |
 | **历史归档（M0–M6 计划、被取代报告）** | 根目录 `ARCHIVE-LOG.md`（索引摘要）→ 全文副本 `docs/_archive/originals/` |
