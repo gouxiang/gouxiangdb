@@ -21,8 +21,8 @@ import { requireActiveUser } from "../../../middleware/authActive.js";
 import { VERSION } from "../../../version.js";
 import { audit } from "../../../audit/emit.js";
 import type { AuditEventName } from "../../../audit/audit.js";
-import { buildBaseSnapshot, markSnapshotDone, subscribeBase, authorizeBaseRead } from "../../../domain/sync/snapshot.js";
-import { pullBaseOps } from "../../../domain/sync/pull.js";
+import { buildBaseSnapshot, markSnapshotDone, subscribeBase, subscribeTree, authorizeBaseRead } from "../../../domain/sync/snapshot.js";
+import { pullBaseOps, pullTreeOps } from "../../../domain/sync/pull.js";
 import { pushBaseOps, pushTreeOps, retryIncoming, resolveConflict, type IncomingOp, type PushResult } from "../../../domain/sync/push.js";
 import { listIncoming, discardIncoming } from "../../../domain/sync/incoming.js";
 import { buildVisibilityReport } from "../../../domain/sync/visibility.js";
@@ -60,7 +60,12 @@ syncRoutes.get("/", (c) => {
 
 // ───────────────────────── YN2a：订阅 + 权限裁剪基线快照 ─────────────────────────
 
-/** POST /subscribe {clientId, scopeType:"base", scopeId:<baseId>} → 订阅记账 + 当前游标/权限版本。 */
+/**
+ * POST /subscribe {clientId, scopeType, scopeId} → 订阅记账 + 当前游标/权限版本。
+ *   - scopeType="base"           scopeId=<baseId>：库订阅，过当前库门，回 cursorSeq/authzVersion（YN2）。
+ *   - scopeType="workspace_tree" scopeId="ws_default"：工作区导航树订阅（YN8），跨库、不过 base 库门，
+ *                                另回当前 treeVersion；写树仍由 /push/tree 按 manage_menu 裁决。
+ */
 syncRoutes.post("/subscribe", async (c) => {
   const auth = c.get("auth");
   const body = (await c.req.json().catch(() => null)) as
@@ -70,9 +75,18 @@ syncRoutes.post("/subscribe", async (c) => {
   const scopeType = body?.scopeType;
   const scopeId = typeof body?.scopeId === "string" ? body.scopeId.trim() : "";
   if (!clientId || !scopeId) throw new HttpError(400, "缺少 clientId 或 scopeId", "SYNC_BAD_REQUEST");
-  // YN2 只支持按 base 订阅（kb/doc 走协同轨，后续阶段）。
-  if (scopeType !== "base") throw new HttpError(400, "本期仅支持 scopeType=base", "SYNC_BAD_SCOPE");
 
+  // YN8：工作区导航树订阅（本期单工作区，仅收 ws_default）。
+  if (scopeType === "workspace_tree") {
+    if (scopeId !== "ws_default") {
+      throw new HttpError(400, "workspace_tree 订阅的 scopeId 必须是 ws_default", "SYNC_BAD_SCOPE");
+    }
+    const result = await subscribeTree(auth.userId, clientId, scopeId);
+    return c.json({ result });
+  }
+
+  // YN2 base 订阅。
+  if (scopeType !== "base") throw new HttpError(400, "scopeType 仅支持 base 或 workspace_tree", "SYNC_BAD_SCOPE");
   const result = await subscribeBase(auth.userId, clientId, scopeId);
   return c.json({ result });
 });
@@ -111,6 +125,23 @@ syncRoutes.get("/pull", async (c) => {
   // 当前库门裁决（enter）；pull 内部再逐表按当前 r/行/字段权限二次过滤。
   const access = await authorizeBaseRead(auth.userId, baseId);
   const page = await pullBaseOps(auth.userId, access, clientId, baseId, after, limit);
+  return c.json({ result: page });
+});
+
+/**
+ * GET /pull/tree?after=<seq>&clientId=&limit= → 工作区导航树（navnode）游标增量。
+ * 读操作：登录成员即可（同步总门 + requireActiveUser），不过 base 库门、不做记录裁剪；
+ * 回当前 treeVersion。after 缺省 0；clientId 可选，带了就推进 workspace_tree 订阅游标。
+ */
+syncRoutes.get("/pull/tree", async (c) => {
+  const afterRaw = (c.req.query("after") ?? "0").trim();
+  if (!/^\d+$/.test(afterRaw)) throw new HttpError(400, "after 必须是非负整数", "SYNC_BAD_CURSOR");
+  const after = BigInt(afterRaw);
+  const limitRaw = Number(c.req.query("limit") ?? "");
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 500;
+  const clientId = (c.req.query("clientId") ?? "").trim() || null;
+
+  const page = await pullTreeOps(clientId, after, limit);
   return c.json({ result: page });
 });
 

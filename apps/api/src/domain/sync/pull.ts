@@ -17,6 +17,8 @@
 import type { LibraryAccessDTO } from "@gx/shared-types";
 import { prisma } from "../../db.js";
 import { buildTableVisibility, visibleIdSet, type TableVisibility } from "./snapshot.js";
+import { TREE_WORKSPACE_ID, readTreeVersion } from "./treeOplog.js";
+import { TREE_ENTITY_TYPES } from "./navRegistry.js";
 
 const WORKSPACE_ID = "ws_default";
 
@@ -182,12 +184,111 @@ export async function pullBaseOps(
   return { baseId, ops, nextCursor: nextCursor.toString(), hasMore, authzVersion };
 }
 
+// ─────────────────── YN8：工作区导航树（navnode）游标增量拉取 ───────────────────
+
+export interface TreePullPage {
+  scope: "workspace_tree";
+  scopeId: string;
+  ops: PullOp[];
+  /** 本页最后一条 seq；无数据时回显 after。 */
+  nextCursor: string;
+  hasMore: boolean;
+  /** 当前工作区 treeVersion（钟值）；客户端据此判断本地树是否落后。 */
+  treeVersion: string;
+  authzVersion: number;
+}
+
+/**
+ * 拉取工作区导航树在游标 after 之后的增量 op（baseId 恒 null 的 navnode op）。
+ *
+ * 权限口径（读，区别于 push 的 manage_menu）：同步总门 + requireActiveUser 已保证是登录成员。
+ * 树是跨库工作区资源、不隶属任何 base，故【不过 base 库门】，也不做记录轨那种逐表 r/行/字段裁剪：
+ *   - nav op 的 payload 只含导航结构元数据（节点 id/父子/ord/分组名/删除策略），无任何记录行/文档明文；
+ *   - 回放（尤其 nav_reorder 的 orderedIds 强集合）要求兄弟集合完整，逐条按资源可见性裁剪会让离线端
+ *     集合对不上而无法重放；结构 op 下发同此理（见 pullBaseOps 结构轨注释）。
+ * 因此登录成员即可拉全树结构增量，与在线 GET /workspaces/current/tree「登录即可见树骨架」一致。
+ *
+ * @param clientId 订阅方实例；用于推进 scopeType=workspace_tree 订阅游标（记账，不参与授权）。
+ * @param after    上次收到的最大 seq（seq keyset，不信客户端时钟），从其后一条开始。
+ * @param limit    本页最多 op 数（默认 500，硬上限 2000）。
+ */
+export async function pullTreeOps(
+  clientId: string | null,
+  after: bigint,
+  limit = 500,
+): Promise<TreePullPage> {
+  const max = Math.max(1, Math.min(limit, 2000));
+
+  // 树 op：baseId 恒 null、entityType∈注册表树实体集（本期仅 navnode）。多取 1 条判 hasMore。
+  const rows = await prisma.syncOpLog.findMany({
+    where: {
+      baseId: null,
+      entityType: { in: [...TREE_ENTITY_TYPES] },
+      seq: { gt: after },
+    },
+    orderBy: { seq: "asc" },
+    take: max + 1,
+  });
+  const hasMore = rows.length > max;
+  const page = hasMore ? rows.slice(0, max) : rows;
+
+  const ops: PullOp[] = page.map((row) => ({
+    seq: row.seq.toString(),
+    baseId: row.baseId,
+    entityType: row.entityType,
+    entityId: row.entityId,
+    op: row.op,
+    actorId: row.actorId,
+    clientId: row.clientId,
+    clientOpId: row.clientOpId,
+    baseVersion: row.baseVersion.toString(),
+    newVersion: row.newVersion.toString(),
+    payload: safeParsePayloadAny(row.payload),
+    result: row.result,
+    conflictOf: row.conflictOf,
+    createdAt: row.createdAt.toISOString(),
+  }));
+
+  const nextCursor = page.length > 0 ? page[page.length - 1]!.seq : after;
+  const [treeVersion, authzVersion] = await Promise.all([
+    readTreeVersion(TREE_WORKSPACE_ID),
+    readPolicyVersion(),
+  ]);
+
+  // 记账：推进工作区树订阅游标（与 pushTreeOps 的游标推进同一 scope，pull/push 双向都不回拉自己）。
+  if (clientId && page.length > 0) {
+    await prisma.syncSubscription.updateMany({
+      where: { clientId, scopeType: "workspace_tree", scopeId: TREE_WORKSPACE_ID },
+      data: { cursorSeq: nextCursor, snapshotDone: true, lastPullAt: new Date() },
+    });
+  }
+
+  return {
+    scope: "workspace_tree",
+    scopeId: TREE_WORKSPACE_ID,
+    ops,
+    nextCursor: nextCursor.toString(),
+    hasMore,
+    treeVersion: treeVersion.toString(),
+    authzVersion,
+  };
+}
+
 async function readPolicyVersion(): Promise<number> {
   const ws = await prisma.workspace.findUnique({
     where: { id: WORKSPACE_ID },
     select: { policyVersion: true },
   });
   return ws?.policyVersion ?? 0;
+}
+
+/** 树 op payload 不做字段裁剪：原样 JSON 解析（损坏回退 {}，不让整次 pull 失败）。 */
+function safeParsePayloadAny(raw: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return {};
+  }
 }
 
 function safeParsePayload(raw: string): { tableId?: unknown } {

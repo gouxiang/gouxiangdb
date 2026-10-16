@@ -26,6 +26,7 @@ import { fieldScopeOf, stripHiddenFromRecords } from "../authz/fieldScope.js";
 import { resolveTableMask } from "../authz/maskGate.js";
 import { loadTableFields, queryRecords, parseViewConfig } from "../recordService.js";
 import type { HydratedRecord } from "../types.js";
+import { readTreeVersion } from "./treeOplog.js";
 
 /** 单工作区，与 oplog/outbox 同口径。 */
 const WORKSPACE_ID = "ws_default";
@@ -254,4 +255,53 @@ export async function markSnapshotDone(clientId: string, baseId: string): Promis
     where: { clientId, scopeType: "base", scopeId: baseId },
     data: { snapshotDone: true },
   });
+}
+
+// ─────────────────── YN8：工作区导航树订阅（跨库资源，不做 base 库门） ───────────────────
+
+/** 树订阅结果：比 base 订阅多回当前工作区 treeVersion（树无权限裁剪快照，snapshotDone 恒置 true）。 */
+export interface TreeSubscribeResult extends SubscribeResult {
+  scope: "workspace_tree";
+  treeVersion: string;
+}
+
+/**
+ * 订阅工作区导航树（按 clientId+workspace_tree:ws_default upsert 记账）。幂等：重复订阅不重置游标。
+ *
+ * 与 subscribeBase 的区别：树是跨库工作区资源、不隶属任何 base，故【不过 base 库门】；调用方
+ * （路由）已过同步总门 + 登录。读树是任何登录成员的基本能力（与在线 GET /workspaces/current/tree
+ * 同口径），写树才要求 manage_menu（见 pushTreeOps）。树无记录级权限快照，订阅即视为无需基线快照。
+ */
+export async function subscribeTree(
+  userId: string,
+  clientId: string,
+  workspaceId: string = "ws_default",
+): Promise<TreeSubscribeResult> {
+  await prisma.syncSubscription.upsert({
+    where: {
+      clientId_scopeType_scopeId: { clientId, scopeType: "workspace_tree", scopeId: workspaceId },
+    },
+    create: {
+      clientId, scopeType: "workspace_tree", scopeId: workspaceId, actorId: userId,
+      cursorSeq: 0n, snapshotDone: true,
+    },
+    // 幂等：已订阅只刷新 actorId（换账号登录同设备），绝不动游标。
+    update: { actorId: userId },
+  });
+  const [sub, authzVersion, treeVersion] = await Promise.all([
+    prisma.syncSubscription.findUniqueOrThrow({
+      where: { clientId_scopeType_scopeId: { clientId, scopeType: "workspace_tree", scopeId: workspaceId } },
+      select: { cursorSeq: true, snapshotDone: true },
+    }),
+    readAuthzVersion(),
+    readTreeVersion(workspaceId),
+  ]);
+  return {
+    clientId, scopeType: "workspace_tree", scopeId: workspaceId,
+    cursorSeq: sub.cursorSeq.toString(),
+    snapshotDone: sub.snapshotDone,
+    authzVersion,
+    scope: "workspace_tree",
+    treeVersion: treeVersion.toString(),
+  };
 }
