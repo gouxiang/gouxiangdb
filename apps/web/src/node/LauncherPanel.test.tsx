@@ -57,4 +57,15 @@ describe("LauncherPanel", () => {
     // 列表视图下不再内联添加表单
     expect(html).not.toContain("节点网址");
   });
+
+  it("列表视图为每个节点提供行内重命名入口", () => {
+    const store = makeStore();
+    store.connectLocal();
+    store.addRemote({ nodeId: "abc123def456", baseURL: "http://nas:3001", label: "公司库" });
+    const html = renderToStaticMarkup(
+      React.createElement(LauncherPanel, { store }),
+    );
+    // 本地 + 远端各一枚重命名按钮。
+    expect(html.match(/aria-label="重命名"/g)?.length).toBe(2);
+  });
 });

@@ -15,6 +15,8 @@ export interface NodeRow {
   nodeId: string;
   /** 主标题：自定义名称优先；本地缺省「本机」，远端缺省取其 host。 */
   title: string;
+  /** 原始自定义名（null＝用默认名）；重命名编辑框据此预填，清空保存即回落默认名。 */
+  label: string | null;
   /** 副标题：远端显示完整基址；本地显示「本机数据」。 */
   subtitle: string;
   baseURL: string;
@@ -60,6 +62,7 @@ function toRow(
       kind: "local",
       nodeId: LOCAL_NODE_ID,
       title: entry.label?.trim() || "本机",
+      label: entry.label,
       subtitle: "本机数据",
       baseURL: "",
       active,
@@ -75,6 +78,7 @@ function toRow(
     kind: "remote",
     nodeId: entry.nodeId,
     title: entry.label?.trim() || hostLabel(entry.baseURL) || entry.nodeId,
+    label: entry.label,
     subtitle: entry.baseURL,
     baseURL: entry.baseURL,
     active,

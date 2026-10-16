@@ -7,18 +7,31 @@
 // 注册表层面的状态与「使用本机」连接动作；真正的进程起停留待桌面壳接入后补按钮（默认不渲染
 // 一个点了无效的控件，遵守 R-D-09 不做假入口）。
 
-import { Button } from "../components/ui";
+import { Button, IconButton, Input } from "../components/ui";
 import { Icon, type IconName } from "../components/icons";
 import type { NodeRow } from "./launcherViewModel";
+import { hostLabel } from "./launcherViewModel";
+
+/** 某行正在重命名的受控状态：nodeId + 当前草稿。null＝无编辑行。 */
+export interface NodeRenameState {
+  nodeId: string;
+  value: string;
+}
 
 export interface NodeListProps {
   rows: NodeRow[];
   /** 正在进行连接/断开的节点 id（按钮 loading/禁用）；无则 null。 */
   busyNodeId?: string | null;
+  /** 当前处于行内重命名的节点与草稿（受控，由面板持有）；无则 null。 */
+  rename?: NodeRenameState | null;
   onConnectRemote?: (nodeId: string) => void;
   onDisconnect?: (nodeId: string) => void;
   onRemove?: (nodeId: string) => void;
   onConnectLocal?: () => void;
+  onStartRename?: (nodeId: string) => void;
+  onRenameChange?: (value: string) => void;
+  onRenameCommit?: (nodeId: string) => void;
+  onRenameCancel?: () => void;
 }
 
 function statusText(row: NodeRow): string {
@@ -27,13 +40,23 @@ function statusText(row: NodeRow): string {
   return row.localDesired === "stopped" ? "已停止" : "未连接";
 }
 
+/** 清空自定义名后回落的默认名（本地「本机」；远端取 host）。 */
+function defaultName(row: NodeRow): string {
+  return row.kind === "local" ? "本机" : hostLabel(row.baseURL) || row.nodeId;
+}
+
 export function NodeList({
   rows,
   busyNodeId = null,
+  rename = null,
   onConnectRemote,
   onDisconnect,
   onRemove,
   onConnectLocal,
+  onStartRename,
+  onRenameChange,
+  onRenameCommit,
+  onRenameCancel,
 }: NodeListProps) {
   if (rows.length === 0) {
     return (
@@ -46,6 +69,7 @@ export function NodeList({
     <ul className="flex flex-col gap-1.5">
       {rows.map((row) => {
         const busy = busyNodeId === row.nodeId;
+        const editing = rename?.nodeId === row.nodeId;
         const icon: IconName = row.kind === "local" ? "database" : "globe";
         return (
           <li
@@ -62,17 +86,50 @@ export function NodeList({
             </span>
 
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className="truncate text-gx-14 font-medium text-gx-text-primary">
-                  {row.title}
-                </span>
-                {row.active && (
-                  <span className="inline-flex items-center gap-0.5 text-gx-12 text-gx-accent">
-                    <Icon name="check" size={12} />
-                    {statusText(row)}
+              {editing ? (
+                <Input
+                  value={rename?.value ?? ""}
+                  // 节点名无安全顾虑；autoFocus 在 SSR 仅落属性，客户端水合后聚焦。
+                  autoFocus
+                  inputMode="text"
+                  maxLength={40}
+                  placeholder={defaultName(row)}
+                  aria-label="节点名称"
+                  className="h-7"
+                  disabled={busy}
+                  onChange={(e) => onRenameChange?.(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      onRenameCommit?.(row.nodeId);
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      onRenameCancel?.();
+                    }
+                  }}
+                />
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <span className="truncate text-gx-14 font-medium text-gx-text-primary">
+                    {row.title}
                   </span>
-                )}
-              </div>
+                  {onStartRename && (
+                    <IconButton
+                      icon="edit"
+                      size={13}
+                      label="重命名"
+                      disabled={busy}
+                      onClick={() => onStartRename(row.nodeId)}
+                    />
+                  )}
+                  {row.active && (
+                    <span className="inline-flex items-center gap-0.5 text-gx-12 text-gx-accent">
+                      <Icon name="check" size={12} />
+                      {statusText(row)}
+                    </span>
+                  )}
+                </div>
+              )}
               <div className="truncate text-gx-12 text-gx-text-tertiary">
                 {row.kind === "remote" ? row.subtitle : statusText(row)}
                 {row.kind === "remote" && row.account ? ` · ${row.account}` : ""}
@@ -81,7 +138,24 @@ export function NodeList({
             </div>
 
             <div className="flex shrink-0 items-center gap-1">
-              {row.active ? (
+              {editing ? (
+                <>
+                  <IconButton
+                    icon="check"
+                    size={15}
+                    label="保存名称"
+                    disabled={busy}
+                    onClick={() => onRenameCommit?.(row.nodeId)}
+                  />
+                  <IconButton
+                    icon="close"
+                    size={15}
+                    label="取消"
+                    disabled={busy}
+                    onClick={() => onRenameCancel?.()}
+                  />
+                </>
+              ) : row.active ? (
                 <Button
                   size="sm"
                   variant="secondary"
@@ -112,7 +186,7 @@ export function NodeList({
                   连接
                 </Button>
               )}
-              {row.removable && (
+              {!editing && row.removable && (
                 <Button
                   size="sm"
                   variant="ghost"

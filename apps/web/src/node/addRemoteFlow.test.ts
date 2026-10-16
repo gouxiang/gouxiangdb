@@ -11,7 +11,12 @@ import {
   addNodeErrorMessage,
   type AddNodeFormErrorCode,
 } from "./nodeMessages";
-import { addAndConnectRemote, connectExistingRemote, type AddRemoteStorePort } from "./addRemoteFlow";
+import {
+  addAndConnectRemote,
+  connectExistingRemote,
+  normalizeNodeLabel,
+  type AddRemoteStorePort,
+} from "./addRemoteFlow";
 import {
   HandshakeError,
   RemoteLoginError,
@@ -430,5 +435,17 @@ describe("connectExistingRemote", () => {
     );
     expect(r).toEqual({ kind: "error", error: { stage: "login", code: "invalid_credentials" } });
     expect(store.activeNodeId).toBeNull();
+  });
+});
+
+describe("normalizeNodeLabel", () => {
+  it("null/undefined/空白 → null（回落默认名），否则去首尾空格", () => {
+    expect(normalizeNodeLabel(null)).toBeNull();
+    expect(normalizeNodeLabel(undefined)).toBeNull();
+    expect(normalizeNodeLabel("")).toBeNull();
+    expect(normalizeNodeLabel("   ")).toBeNull();
+    expect(normalizeNodeLabel("  家里的库 ")).toBe("家里的库");
+    // 内部空格保留。
+    expect(normalizeNodeLabel("a  b")).toBe("a  b");
   });
 });

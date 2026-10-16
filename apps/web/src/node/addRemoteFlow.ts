@@ -69,8 +69,11 @@ function formFail(code: AddNodeFormErrorCode): AddRemoteResult {
   return { kind: "error", error: { stage: "form", code } };
 }
 
-/** 规范化可选显示名：空白/纯空格 → null（表示用默认名），否则去首尾空格。 */
-function normalizeLabel(label: string | null | undefined): string | null {
+/**
+ * 规范化节点显示名（添加节点与重命名共用的唯一口径）：
+ * 空白/纯空格 → null（表示回落到默认名：本地「本机」/远端 host），否则去首尾空格。
+ */
+export function normalizeNodeLabel(label: string | null | undefined): string | null {
   if (label == null) return null;
   const t = label.trim();
   return t === "" ? null : t;
@@ -91,7 +94,7 @@ export async function addAndConnectRemote(
   const email = input.email.trim();
   if (!email || input.password === "") return formFail("missing_credentials");
 
-  const label = normalizeLabel(input.label);
+  const label = normalizeNodeLabel(input.label);
 
   // 3) 派生稳定 nodeId。
   const nodeIdFor = deps.nodeIdFor ?? nodeIdFromBaseURL;

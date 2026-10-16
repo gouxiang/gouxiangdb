@@ -8,6 +8,7 @@ import type { NodeRow } from "./launcherViewModel";
 function row(over: Partial<NodeRow> & Pick<NodeRow, "nodeId" | "kind">): NodeRow {
   return {
     title: over.nodeId,
+    label: null,
     subtitle: "",
     baseURL: "",
     active: false,
@@ -102,5 +103,71 @@ describe("NodeList", () => {
       { busyNodeId: "abc" },
     );
     expect(html).toContain('aria-busy="true"');
+  });
+
+  it("未传 onStartRename 时不渲染重命名入口（保持纯展示可选）", () => {
+    const html = render([
+      row({ kind: "remote", nodeId: "abc", title: "公司库", subtitle: "x", baseURL: "x" }),
+    ]);
+    expect(html).not.toContain("重命名");
+  });
+
+  it("传入 onStartRename 后每行出现重命名按钮", () => {
+    const html = render(
+      [
+        row({ kind: "local", nodeId: "local", title: "本机", localDesired: "running" }),
+        row({
+          kind: "remote",
+          nodeId: "abc",
+          title: "公司库",
+          subtitle: "http://nas:3001",
+          baseURL: "http://nas:3001",
+        }),
+      ],
+      { onStartRename: () => {} },
+    );
+    // 两行各一枚重命名按钮。
+    expect(html.match(/aria-label="重命名"/g)?.length).toBe(2);
+  });
+
+  it("远端行进入编辑态：输入框预填草稿+占位默认 host，出保存/取消，隐藏连接与删除", () => {
+    const html = render(
+      [
+        row({
+          kind: "remote",
+          nodeId: "abc",
+          title: "公司库",
+          subtitle: "http://nas:3001",
+          baseURL: "http://nas:3001",
+        }),
+      ],
+      {
+        rename: { nodeId: "abc", value: "新名字" },
+        onRenameChange: () => {},
+        onRenameCommit: () => {},
+        onRenameCancel: () => {},
+      },
+    );
+    expect(html).toContain('aria-label="节点名称"');
+    expect(html).toContain('value="新名字"');
+    expect(html).toContain('placeholder="nas:3001"');
+    expect(html).toContain('aria-label="保存名称"');
+    expect(html).toContain('aria-label="取消"');
+    expect(html).not.toContain(">连接<");
+    expect(html).not.toContain(">删除<");
+    expect(html).not.toContain("重命名");
+  });
+
+  it("本地行编辑态占位符回落本机", () => {
+    const html = render(
+      [row({ kind: "local", nodeId: "local", title: "本机", localDesired: "running" })],
+      {
+        rename: { nodeId: "local", value: "" },
+        onRenameChange: () => {},
+        onRenameCommit: () => {},
+        onRenameCancel: () => {},
+      },
+    );
+    expect(html).toContain('placeholder="本机"');
   });
 });

@@ -13,9 +13,10 @@ import { useState } from "react";
 import { Button } from "../components/ui";
 import { useLauncher } from "./useLauncher";
 import type { LauncherStore } from "./launcherStore";
-import { NodeList } from "./NodeList";
+import { NodeList, type NodeRenameState } from "./NodeList";
 import { AddRemoteNodeForm } from "./AddRemoteNodeForm";
 import { ConnectNodeForm } from "./ConnectNodeForm";
+import { normalizeNodeLabel } from "./addRemoteFlow";
 import type { NodeRow } from "./launcherViewModel";
 
 type View =
@@ -34,6 +35,25 @@ export function LauncherPanel({ store, onEnterWorkspace }: LauncherPanelProps) {
   const { vm, store: resolved } = useLauncher(store);
   const [view, setView] = useState<View>({ mode: "list" });
   const [busyNodeId, setBusyNodeId] = useState<string | null>(null);
+  const [rename, setRename] = useState<NodeRenameState | null>(null);
+
+  // 切到添加/重连等非列表视图时退出编辑态，避免回来仍停在改名框。
+  function openView(next: View) {
+    setRename(null);
+    setView(next);
+  }
+
+  function startRename(nodeId: string) {
+    const row = vm.rows.find((r) => r.nodeId === nodeId);
+    // 预填自定义名；默认名（本机/host）行从空串开始，占位符提示回落的默认名。
+    setRename({ nodeId, value: row?.label ?? "" });
+  }
+
+  function commitRename(nodeId: string) {
+    if (!rename) return;
+    resolved.rename(nodeId, normalizeNodeLabel(rename.value));
+    setRename(null);
+  }
 
   // 有活动节点时面板其实不应停留在连接界面（挂载层会把界面交给业务壳）；
   // 仍安全处理：通知挂载层进入工作区。
@@ -54,7 +74,7 @@ export function LauncherPanel({ store, onEnterWorkspace }: LauncherPanelProps) {
   async function quickConnectRemote(row: NodeRow) {
     // 有已存会话 → 免密直连；无会话 → 展开凭据表单。
     if (!row.connected) {
-      setView({ mode: "connect", nodeId: row.nodeId, title: row.title, baseURL: row.baseURL });
+      openView({ mode: "connect", nodeId: row.nodeId, title: row.title, baseURL: row.baseURL });
       return;
     }
     setBusyNodeId(row.nodeId);
@@ -68,12 +88,13 @@ export function LauncherPanel({ store, onEnterWorkspace }: LauncherPanelProps) {
 
   function disconnect(nodeId: string) {
     const out = resolved.disconnect(nodeId);
-    if (!out.active) setView({ mode: "list" });
+    if (!out.active) openView({ mode: "list" });
   }
 
   function removeRemote(nodeId: string) {
     resolved.removeRemote(nodeId);
-    if (view.mode === "connect" && view.nodeId === nodeId) setView({ mode: "list" });
+    if (rename?.nodeId === nodeId) setRename(null);
+    if (view.mode === "connect" && view.nodeId === nodeId) openView({ mode: "list" });
   }
 
   // 全新安装空注册表：直接落到「添加节点」首屏（戴总硬规则 #1）。
@@ -119,6 +140,7 @@ export function LauncherPanel({ store, onEnterWorkspace }: LauncherPanelProps) {
           <NodeList
             rows={vm.rows}
             busyNodeId={busyNodeId}
+            rename={rename}
             onConnectLocal={() => void connectLocal()}
             onConnectRemote={(nodeId) => {
               const row = vm.rows.find((r) => r.nodeId === nodeId);
@@ -126,9 +148,15 @@ export function LauncherPanel({ store, onEnterWorkspace }: LauncherPanelProps) {
             }}
             onDisconnect={disconnect}
             onRemove={removeRemote}
+            onStartRename={startRename}
+            onRenameChange={(value) =>
+              setRename((cur) => (cur ? { ...cur, value } : cur))
+            }
+            onRenameCommit={commitRename}
+            onRenameCancel={() => setRename(null)}
           />
           <div>
-            <Button variant="secondary" icon="plus" onClick={() => setView({ mode: "add" })}>
+            <Button variant="secondary" icon="plus" onClick={() => openView({ mode: "add" })}>
               添加网络节点
             </Button>
           </div>
