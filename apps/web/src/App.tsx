@@ -44,6 +44,7 @@ import PermPanel from "./features/authz/PermPanel";
 import { NodeLauncherGate } from "./node/NodeLauncherGate";
 import { launcherEnabled } from "./node/desktopGate";
 import { useRemoteSessionActive } from "./node/useActiveSession";
+import { LauncherBubble } from "./node/LauncherBubble";
 
 function Loading() {
   return (
@@ -140,6 +141,8 @@ export default function App() {
       <OfflineBanner />
       {/* 浏览器标题跟随后台品牌产品名（所有路由共享，含登录页/公开分享页） */}
       <BrandingTitle />
+      {/* 桌面节点悬浮入口：门控关闭（浏览器/fnOS）恒为 null，零布局影响；门控开才显示当前源 */}
+      <LauncherBubble />
       <Routes>
       <Route path="/login" element={token ? <Navigate to="/" replace /> : <LoginPage />} />
       {/*

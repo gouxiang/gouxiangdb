@@ -116,17 +116,22 @@ export interface LauncherViewModel {
   hasLocal: boolean;
   /** 全新安装：注册表为空（戴总硬规则 #1，直接进「添加节点」首屏）。 */
   isEmpty: boolean;
+  /** 当前活动节点行（无活动为 null），供悬浮气泡等显示「当前在看哪个节点」。 */
+  activeRow: NodeRow | null;
 }
 
 export function buildLauncherViewModel(
   state: NodeRegistryState,
   sessions: ReadonlyMap<string, RemoteSessionView>,
 ): LauncherViewModel {
+  const rows = buildNodeRows(state, sessions);
+  const activeNodeId = state.activeNodeId;
   return {
-    rows: buildNodeRows(state, sessions),
-    activeNodeId: state.activeNodeId,
-    hasActive: state.activeNodeId !== null,
+    rows,
+    activeNodeId,
+    hasActive: activeNodeId !== null,
     hasLocal: state.entries.some((e) => e.kind === "local"),
     isEmpty: state.entries.length === 0,
+    activeRow: activeNodeId ? (rows.find((r) => r.nodeId === activeNodeId) ?? null) : null,
   };
 }
