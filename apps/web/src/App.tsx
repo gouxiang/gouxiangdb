@@ -41,6 +41,7 @@ import { ShellGate } from "./features/workspace/ShellGate";
 import { BrandingTitle } from "./features/branding/BrandingTitle";
 import { WorkspaceSettingsPage } from "./features/workspace/WorkspaceSettingsPage";
 import PermPanel from "./features/authz/PermPanel";
+import { NodeLauncherGate } from "./node/NodeLauncherGate";
 
 function Loading() {
   return (
@@ -133,6 +134,12 @@ export default function App() {
       <BrandingTitle />
       <Routes>
       <Route path="/login" element={token ? <Navigate to="/" replace /> : <LoginPage />} />
+      {/*
+        桌面节点启动器（DESIGN-MACOS §8.5）：仅桌面构建注入 VITE_NODE_LAUNCHER=1 时可进入；
+        浏览器/fnOS/服务器构建下 NodeLauncherGate 内部直接重定向回 "/"，本路由对现网零行为变化。
+        放在 RequireAuth 外：纯远端/首启用户在本地登录态与任何节点连接之前就要能打开启动器。
+      */}
+      <Route path="/launcher" element={<NodeLauncherGate />} />
       {/* 首次登录强制改密：需要登录态，但不套业务壳（壳内接口会被闸门 403 挡住） */}
       <Route
         path={CHANGE_PASSWORD_PATH}

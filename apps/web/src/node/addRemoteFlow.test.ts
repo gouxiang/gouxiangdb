@@ -108,6 +108,10 @@ describe("desktopGate", () => {
     expect(launcherEnabled("0")).toBe(false);
     expect(launcherEnabled("1")).toBe(true);
   });
+  it("默认构建（未注入 VITE_NODE_LAUNCHER）恒为关闭——现网零变化的总闸", () => {
+    // vitest 不注入该 env，锁死默认必须是 false（桌面需显式 VITE_NODE_LAUNCHER=1）。
+    expect(launcherEnabled()).toBe(false);
+  });
 });
 
 describe("nodeMessages", () => {
