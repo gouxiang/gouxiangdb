@@ -245,3 +245,29 @@ describe("D. 读写分离：无 manage_menu 的登录成员", () => {
     expect(await h.prisma.navNode.findUnique({ where: { id: "yn8c_grp_u3x" } })).toBeNull();
   });
 });
+
+describe("E. 在线改树 → 离线端 pull 得到（__server__ op 双向贯通）", () => {
+  it("同步 on 时在线 HTTP 建组落 clientId=__server__ 的 navnode op，订阅方 pull 能拉到", async () => {
+    // 在线 UI 建组（走 /api/v1/nav/groups，manage_menu；A 片在线切面记 __server__ op）。
+    const created = await h.app.request("/api/v1/nav/groups", {
+      method: "POST",
+      headers: await headers(U1),
+      body: JSON.stringify({ name: "在线建给离线端的组", parentId: "root" }),
+    });
+    expect(created.status).toBe(201);
+    const { id: onlineGid } = (await created.json()) as { id: string };
+
+    // 离线订阅方（U2 的设备 C2）从 0 全量拉，应能找到该在线 op（pull 不按 clientId 裁剪，
+    // 故 __server__ 在线变更与他人 push 的变更一样下发）。
+    const got = await pullTree(U2, C2, "0");
+    expect(got.status).toBe(200);
+    const serverOp = got.body.result.ops.find(
+      (o) => o.entityId === onlineGid && o.op === "nav_create_group",
+    );
+    expect(serverOp).toBeTruthy();
+    expect(serverOp?.clientId).toBe("__server__");
+    expect(serverOp?.baseId).toBeNull();
+    // 钟值随在线写推进。
+    expect(BigInt(got.body.result.treeVersion)).toBeGreaterThanOrEqual(BigInt(serverOp!.newVersion));
+  });
+});
