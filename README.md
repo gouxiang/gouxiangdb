@@ -141,16 +141,16 @@ bash scripts/ci-quality.sh                     # CI 质量门
 
 | 包 | 实测值 | 记录日期 | 来源 |
 |---|---|---|---|
-| `apps/api` | **【封版回填中】passed / 0 failed**（VM15 全量重跑） | 2026-10-16 | v0.2.5 收口全量四门（VM15） |
-| `apps/web` | **【封版回填中】passed / 0 failed**（含 node/ 三个新模块测试） | 2026-10-16 | v0.2.5 收口全量四门（VM15） |
-| `@gx/shared-types` | **【封版回填中】passed / 0 failed** | 2026-10-16 | v0.2.5 质量门 |
-| `@gx/canvas` | **【封版回填中】passed / 0 failed** | 2026-10-16 | v0.2.5 质量门 |
+| `apps/api` | **3390 passed / 0 failed / 14 skipped**（324 files passed，2 skipped） | 2026-10-16 | v0.2.5 收口全量四门 gate-025f（VM15） |
+| `apps/web` | **1910 passed / 0 failed**（146 files；含 node/ 三个新模块 69 测试） | 2026-10-16 | v0.2.5 收口全量四门 gate-025f（VM15） |
+| `@gx/shared-types` | **181 passed / 0 failed**（10 files） | 2026-10-16 | v0.2.5 质量门 gate-025f（VM15） |
+| `@gx/canvas` | **51 passed / 0 failed**（2 files） | 2026-10-16 | v0.2.5 质量门 gate-025f（VM15） |
 | `apps/api` | 3244 passed / 0 failed / 14 skipped（308 files passed，2 skipped） | 2026-10-14 | v0.2.4 收口全量四门（VM15） |
 | `apps/web` | 1836 passed / 0 failed（143 files） | 2026-10-14 | v0.2.4 收口全量四门（VM15） |
 | `@gx/shared-types` | 172 passed / 0 failed（9 files） | 2026-10-14 | v0.2.4 质量门 |
 | `@gx/canvas` | 51 passed / 0 failed（2 files） | 2026-10-14 | v0.2.4 质量门 |
 
-本表是历史记录、非当前断言。v0.2.5 收口（实数封版二次提交回填）：四包 `tsc --noEmit` 零错误、`eslint` 0 error（告警低于各包卡控阈值）、web build 成功；迁移 **42 枚**（本版**只增 1 枚** `sync_server_foundation` 建四张 `sync_*` 表，**同步面 `GX_SYNC_SERVER` 默认关闭，不触数据**）。v0.2.4 为 41 枚（注册开关复用 `app_settings` KV，零新增迁移）。内存 / 压测 / 全量测试类重活不在本机跑，放预览机 VM15；权威出口数字见 `docs/baseline/`。
+本表是历史记录、非当前断言。v0.2.5 收口实数已封版锁定（gate-025f，VM15，2026-10-16）：四包 `tsc --noEmit` 零错误、`eslint` 0 error、web build 成功；迁移 **42 枚**（本版**只增 1 枚** `sync_server_foundation` 建四张 `sync_*` 表，**同步面 `GX_SYNC_SERVER` 默认关闭，不触数据**）。v0.2.5 飞牛 x86 安装包已在 VM15 构建并解包复核（`gouxiangdb-0.2.5-x86.fpk`，65,128,252 B / 62.11 MiB，sha256 `c46df44f…f91910`，42 枚迁移、四入口齐全、不内置更新令牌），指纹与升级须知见根 `RELEASE.md`。v0.2.4 为 41 枚（注册开关复用 `app_settings` KV，零新增迁移）。内存 / 压测 / 全量测试类重活不在本机跑，放预览机 VM15；权威出口数字见 `docs/baseline/`。
 
 </details>
 
