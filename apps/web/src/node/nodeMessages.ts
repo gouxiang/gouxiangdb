@@ -47,6 +47,7 @@ export type AddNodeFormErrorCode =
   | "invalid_url" // 网址规范化失败（空/含空格/非法 host/非 http(s)）
   | "duplicate" // 同规范化基址的远端节点已在注册表
   | "missing_credentials" // 需要登录但没给账号或密码
+  | "node_not_found" // 目标节点不在注册表/不是远端（列表过期等边界）
   | "label_invalid"; // 可选显示名非法（空白串等）
 
 export function formErrorMessage(code: AddNodeFormErrorCode): string {
@@ -57,6 +58,8 @@ export function formErrorMessage(code: AddNodeFormErrorCode): string {
       return "该节点已在列表中，直接连接即可";
     case "missing_credentials":
       return "请输入该节点的账号和密码";
+    case "node_not_found":
+      return "该节点已不在列表中，请重新添加";
     case "label_invalid":
     default:
       return "节点名称无效";

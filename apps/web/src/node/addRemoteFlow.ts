@@ -139,3 +139,51 @@ export async function addAndConnectRemote(
 
 // 重新导出哈希类型，便于装配处/测试在不直接依赖 resolve 的情况下引用。
 export type { StringHasher };
+
+/** 连接「已在注册表」的远端节点所需的最小仓库面（LauncherStore 结构上满足）。 */
+export interface ConnectExistingPort {
+  getNode(nodeId: string): { kind: "local" | "remote" } | null;
+  connectRemote(nodeId: string, creds?: RemoteCredentials): Promise<SwitchOutcome>;
+}
+
+export interface ConnectExistingInput {
+  nodeId: string;
+  email: string;
+  password: string;
+}
+
+export type ConnectExistingResult =
+  | { kind: "connected"; nodeId: string; outcome: SwitchOutcome }
+  | { kind: "error"; error: AddNodeErrorKind };
+
+/**
+ * 对已注册但当前无有效会话（从未登录 / 已断开 / 401 被踢）的远端节点，带当次凭据登录并连接。
+ * 与 addAndConnectRemote 的区别：不规范化网址、不握手、不入册（条目已存在），只走登录换 JWT。
+ * 有有效会话的免密重连应直接调 store.connectRemote(nodeId)，不经本函数。
+ * 密码同样只在内存透传，不持久化。
+ */
+export async function connectExistingRemote(
+  input: ConnectExistingInput,
+  port: ConnectExistingPort,
+): Promise<ConnectExistingResult> {
+  const entry = port.getNode(input.nodeId);
+  if (!entry || entry.kind !== "remote") {
+    return { kind: "error", error: { stage: "form", code: "node_not_found" } };
+  }
+  const email = input.email.trim();
+  if (!email || input.password === "") {
+    return { kind: "error", error: { stage: "form", code: "missing_credentials" } };
+  }
+  try {
+    const outcome = await port.connectRemote(input.nodeId, {
+      email,
+      password: input.password,
+    });
+    return { kind: "connected", nodeId: input.nodeId, outcome };
+  } catch (err) {
+    if (err instanceof RemoteLoginError) {
+      return { kind: "error", error: { stage: "login", code: err.code } };
+    }
+    return { kind: "error", error: { stage: "login", code: "error" } };
+  }
+}

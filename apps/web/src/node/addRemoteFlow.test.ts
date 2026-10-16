@@ -11,7 +11,7 @@ import {
   addNodeErrorMessage,
   type AddNodeFormErrorCode,
 } from "./nodeMessages";
-import { addAndConnectRemote, type AddRemoteStorePort } from "./addRemoteFlow";
+import { addAndConnectRemote, connectExistingRemote, type AddRemoteStorePort } from "./addRemoteFlow";
 import {
   HandshakeError,
   RemoteLoginError,
@@ -34,6 +34,7 @@ interface FakeStore extends AddRemoteStorePort {
   activeNodeId: string | null;
   entries: StoredNodeEntry[];
   calls: string[];
+  getNode(nodeId: string): StoredNodeEntry | null;
 }
 
 function makeStore(opts: {
@@ -51,6 +52,7 @@ function makeStore(opts: {
       activeNodeId: store.activeNodeId,
       localDesired: null,
     }),
+    getNode: (nodeId: string) => entries.find((e) => e.nodeId === nodeId) ?? null,
     addRemote(input) {
       entries.push({
         kind: "remote",
@@ -142,6 +144,7 @@ describe("nodeMessages", () => {
       "invalid_url",
       "duplicate",
       "missing_credentials",
+      "node_not_found",
       "label_invalid",
     ];
     for (const c of codes) expect(formErrorMessage(c).length).toBeGreaterThan(2);
@@ -350,5 +353,78 @@ describe("addAndConnectRemote", () => {
       "http://192.168.1.5:3001/api/auth/bootstrap-status",
       "http://192.168.1.5:3001/api/v1/meta",
     ]);
+  });
+});
+
+describe("connectExistingRemote", () => {
+  function seeded(login?: NonNullable<Parameters<typeof makeStore>[0]>["login"]): FakeStore {
+    return makeStore({
+      existing: [
+        {
+          kind: "remote",
+          nodeId: "abcdef012345",
+          baseURL: "http://nas:3001",
+          label: null,
+          lastConnectedAt: null,
+        },
+      ],
+      login,
+    });
+  }
+
+  it("目标不存在 / 非远端 → node_not_found", async () => {
+    const store = seeded();
+    const r1 = await connectExistingRemote(
+      { nodeId: "nope", email: "a@b.com", password: "pw" },
+      store,
+    );
+    expect(r1).toEqual({ kind: "error", error: { stage: "form", code: "node_not_found" } });
+    expect(store.calls).toEqual([]);
+  });
+
+  it("缺账号或密码 → missing_credentials，不调用连接", async () => {
+    const store = seeded();
+    for (const patch of [{ email: " " }, { password: "" }]) {
+      const r = await connectExistingRemote(
+        { nodeId: "abcdef012345", email: "a@b.com", password: "pw", ...patch },
+        store,
+      );
+      expect(r).toEqual({
+        kind: "error",
+        error: { stage: "form", code: "missing_credentials" },
+      });
+    }
+    expect(store.calls).toEqual([]);
+  });
+
+  it("凭据正确 → 登录连接成功，邮箱去空格", async () => {
+    const login = vi.fn(
+      async (_e: StoredNodeEntry, _c?: { email: string; password: string }) => ({
+        token: "t",
+        user: { id: "u" } as RemoteLoginResult["user"],
+      }),
+    );
+    const store = seeded(login);
+    const r = await connectExistingRemote(
+      { nodeId: "abcdef012345", email: "  a@b.com ", password: "pw" },
+      store,
+    );
+    expect(r.kind).toBe("connected");
+    expect(login.mock.calls[0]![1]?.email).toBe("a@b.com");
+    expect(store.activeNodeId).toBe("abcdef012345");
+  });
+
+  it("401 → invalid_credentials，活动源不切换", async () => {
+    const store = seeded(
+      vi.fn(async () => {
+        throw new RemoteLoginError("invalid_credentials", 401, {});
+      }),
+    );
+    const r = await connectExistingRemote(
+      { nodeId: "abcdef012345", email: "a@b.com", password: "bad" },
+      store,
+    );
+    expect(r).toEqual({ kind: "error", error: { stage: "login", code: "invalid_credentials" } });
+    expect(store.activeNodeId).toBeNull();
   });
 });
