@@ -9,6 +9,7 @@ import type { KvStorage } from "./remoteSessions";
 import { LOCAL_NODE_ID } from "./resolve";
 import { addLocalNode, connectNode, addRemoteNode, emptyRegistry } from "./registry";
 import type { NodeRegistryState } from "./registry";
+import { createDataSourceResolver } from "./datasource";
 
 class MemStorage implements KvStorage {
   m = new Map<string, string>();
@@ -140,6 +141,58 @@ describe("远端连接 / 切换", () => {
     expect(controller.getActiveNode()).toBeNull();
     expect(controller.resolver().current().kind).toBe("local");
     expect(storage.getItem("gx-node-session:aaaa1111bbbb")).toBeNull();
+  });
+
+  it("无已存会话：当次凭据原样透传给 loginRemote", async () => {
+    const login = vi.fn(async () => ({ token: "remote-jwt", user: null }));
+    const { controller } = makeController(seededWithRemote(), login);
+    const creds = { email: "a@b.c", password: "secret" };
+    await controller.connectRemote("aaaa1111bbbb", creds);
+    expect(login).toHaveBeenCalledOnce();
+    const [entryArg, credsArg] = login.mock.calls[0]!;
+    expect(entryArg.baseURL).toBe("http://nas:3001");
+    expect(credsArg).toBe(creds);
+  });
+
+  it("已存会话（跨重启记住/断开未删）：免密直连，不调用 loginRemote", async () => {
+    const login = vi.fn(async () => ({ token: "should-not-be-used", user: null }));
+    const { controller, storage } = makeController(seededWithRemote(), login);
+    // 预置一份有效会话（模拟上次登录已记住）
+    storage.setItem(
+      "gx-node-session:aaaa1111bbbb",
+      JSON.stringify({ version: 1, token: "saved-rt", user: null }),
+    );
+
+    const out = await controller.connectRemote("aaaa1111bbbb"); // 不传凭据
+    expect(login).not.toHaveBeenCalled();
+    expect(out.active?.kind).toBe("remote");
+    expect(out.active?.token).toBe("saved-rt");
+    expect(controller.getActiveNode()?.nodeId).toBe("aaaa1111bbbb");
+  });
+
+  it("注入 resolver 单例：connectRemote 驱动的是传入的那个 resolver（生产网络层共用）", async () => {
+    const login = vi.fn(async () => ({ token: "rt", user: null }));
+    const storage = new MemStorage();
+    const sharedResolver = createDataSourceResolver({
+      getLocalBase: () => "",
+      getOrigin: () => "http://127.0.0.1:5999",
+      getLocalToken: () => "local-jwt",
+    });
+    const controller = newLauncherController({
+      storage,
+      getLocalBase: () => "",
+      getOrigin: () => "http://127.0.0.1:5999",
+      getLocalToken: () => "local-jwt",
+      now: () => "2026-10-17T00:00:00.000Z",
+      initialRegistry: seededWithRemote(),
+      loginRemote: login,
+      resolver: sharedResolver,
+    });
+    await controller.connectRemote("aaaa1111bbbb");
+    // 启动器控制器的 resolver 与注入的是同一实例，且已切到远端
+    expect(controller.resolver()).toBe(sharedResolver);
+    expect(sharedResolver.current().kind).toBe("remote");
+    expect(sharedResolver.current().token).toBe("rt");
   });
 
   it("从远端切回本地：活动变 local、远端会话仍保留（切回免登）", async () => {

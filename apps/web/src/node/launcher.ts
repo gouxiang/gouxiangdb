@@ -41,10 +41,24 @@ export interface RemoteLoginResult {
 }
 
 /**
- * 由注入完成"连到某远端并登录"的网络动作。失败应 throw（控制器不切换活动数据源）。
- * 纯逻辑测试注入假实现；生产实现走 client.ts 握手 + /api/auth/login（S3）。
+ * 用户当次提交的远端凭据（仅在内存中传给登录网络动作，注册表/会话层绝不持久化密码）。
+ * 跨重启"记住连接"走已签发的会话 JWT，不依赖密码。
  */
-export type RemoteLoginFn = (entry: StoredNodeEntry) => Promise<RemoteLoginResult>;
+export interface RemoteCredentials {
+  email: string;
+  password: string;
+}
+
+/**
+ * 由注入完成"连到某远端并登录"的网络动作。失败应 throw（控制器不切换活动数据源）。
+ * @param entry 目标远端节点条目（含 baseURL）
+ * @param creds 当次凭据；**已存在有效会话的免密重连路径不会传 creds**（为 undefined）。
+ * 纯逻辑测试注入假实现；生产实现走 handshake.ts loginRemoteNode(entry.baseURL, creds)。
+ */
+export type RemoteLoginFn = (
+  entry: StoredNodeEntry,
+  creds?: RemoteCredentials,
+) => Promise<RemoteLoginResult>;
 
 export interface LauncherDeps extends ResolverDeps {
   storage: KvStorage;
@@ -53,6 +67,11 @@ export interface LauncherDeps extends ResolverDeps {
   now?: () => string;
   /** 初始注册表（从持久层 parse 后传入）；不传＝全新安装空册。 */
   initialRegistry?: NodeRegistryState;
+  /**
+   * 数据源解析器实例。生产浏览器/桌面必须传入 dataSourceResolver 单例，使启动器切换节点时
+   * 驱动的正是 api/client.ts + collab 读取的那一个；纯逻辑测试不传→内部新建独立 resolver。
+   */
+  resolver?: DataSourceResolverController;
 }
 
 export interface SwitchOutcome {
@@ -102,8 +121,12 @@ export interface LauncherController {
   connectLocal(): SwitchOutcome;
   /** 添加远端档案（不连接）。nodeId/baseURL 由 resolve 层规范化后传入。 */
   addRemote(input: { nodeId: string; baseURL: string; label?: string | null }): NodeRegistryState;
-  /** 连接远端：先跑注入登录拿 JWT 落会话，再切活动数据源；登录失败则不切换。 */
-  connectRemote(nodeId: string): Promise<SwitchOutcome>;
+  /**
+   * 连接远端：
+   *   - 已存在该节点的有效会话（跨重启"记住连接"/断开但未删）→ 免密直连，不跑 login；
+   *   - 否则用 creds 跑注入登录拿 JWT 落会话，再切活动数据源；creds 缺失或登录失败则 throw、不切换。
+   */
+  connectRemote(nodeId: string, creds?: RemoteCredentials): Promise<SwitchOutcome>;
   /** 断开：本地→期望停进程；远端→清其会话引用；活动指针回落后 resolver 回 local 兜底。 */
   disconnect(nodeId: string): SwitchOutcome;
   removeRemote(nodeId: string): NodeRegistryState;
@@ -116,7 +139,14 @@ export interface LauncherController {
 }
 
 export function newLauncherController(deps: LauncherDeps): LauncherController {
-  const resolver = createDataSourceResolver(deps);
+  // 生产注入 dataSourceResolver 单例（网络/collab 与启动器共用）；测试缺省新建独立实例。
+  const resolver =
+    deps.resolver ??
+    createDataSourceResolver({
+      getLocalBase: deps.getLocalBase,
+      getOrigin: deps.getOrigin,
+      getLocalToken: deps.getLocalToken,
+    });
   const getLocalBase =
     deps.getLocalBase ??
     (() =>
@@ -180,18 +210,25 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
       return state;
     },
 
-    async connectRemote(nodeId) {
+    async connectRemote(nodeId, creds) {
       const entry = getEntry(state, nodeId);
-      if (!entry || entry.kind !== "remote" || !deps.loginRemote) {
+      if (!entry || entry.kind !== "remote") {
         return { state, active: null };
       }
-      // 登录失败会 throw，控制器不在此改 state / resolver（调用方捕获提示）。
-      const result = await deps.loginRemote(entry);
-      writeRemoteSession(deps.storage, {
-        nodeId,
-        token: result.token,
-        user: result.user,
-      });
+      // 已存有效会话（跨重启记住/曾连过未删）→ 免密直连，不再跑登录。
+      // 需要强制换账号重登时，UI 先走 disconnect（清该节点会话）再带 creds 连接。
+      const existing = readRemoteSession(deps.storage, nodeId);
+      if (!existing) {
+        if (!deps.loginRemote) return { state, active: null };
+        // 登录失败会 throw，控制器在此之前不改 state / resolver / 会话（调用方捕获提示）。
+        // 生产 loginRemote 适配器在 creds 缺失时会因缺账号密码自然失败；纯逻辑测试可注入免参 mock。
+        const result = await deps.loginRemote(entry, creds);
+        writeRemoteSession(deps.storage, {
+          nodeId,
+          token: result.token,
+          user: result.user,
+        });
+      }
       const next = regConnect(state, nodeId, now()).state;
       state = next;
       return applyActive(next);

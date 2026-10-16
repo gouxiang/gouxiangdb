@@ -16,16 +16,27 @@ import {
 import {
   newLauncherController,
   type LauncherController,
+  type RemoteCredentials,
   type RemoteLoginFn,
   type SwitchOutcome,
 } from "./launcher";
-import type { ActiveDataSource, ResolverDeps } from "./datasource";
+import {
+  dataSourceResolver,
+  type ActiveDataSource,
+  type DataSourceResolverController,
+  type ResolverDeps,
+} from "./datasource";
 import type { KvStorage } from "./remoteSessions";
+import { resolveApiBase } from "../lib/base";
+import { useAuthStore } from "../store/auth";
+import { loginRemoteNode } from "./handshake";
 
 export interface LauncherStoreDeps extends ResolverDeps {
   storage: KvStorage;
   loginRemote?: RemoteLoginFn;
   now?: () => string;
+  /** 数据源解析器；生产传 dataSourceResolver 单例，缺省由控制器内部新建（测试）。 */
+  resolver?: DataSourceResolverController;
 }
 
 export interface LauncherStore {
@@ -38,7 +49,7 @@ export interface LauncherStore {
   // 动作（与控制器同名但在变更后自动持久化 + 通知）
   connectLocal(): SwitchOutcome;
   addRemote(input: { nodeId: string; baseURL: string; label?: string | null }): void;
-  connectRemote(nodeId: string): Promise<SwitchOutcome>;
+  connectRemote(nodeId: string, creds?: RemoteCredentials): Promise<SwitchOutcome>;
   disconnect(nodeId: string): SwitchOutcome;
   removeRemote(nodeId: string): void;
   rename(nodeId: string, label: string | null): void;
@@ -100,8 +111,8 @@ export function createLauncherStore(deps: LauncherStoreDeps): LauncherStore {
       controller.addRemote(input);
       afterAction(undefined);
     },
-    async connectRemote(nodeId) {
-      const outcome = await controller.connectRemote(nodeId);
+    async connectRemote(nodeId, creds) {
+      const outcome = await controller.connectRemote(nodeId, creds);
       persist();
       emit();
       return outcome;
@@ -123,16 +134,42 @@ export function createLauncherStore(deps: LauncherStoreDeps): LauncherStore {
 let browserSingleton: LauncherStore | null = null;
 
 /**
- * 浏览器单例（懒加载）。桌面 App 启动器 UI 与 S2 client 接线共用这一个仓库。
- * 需在桌面环境注入 getLocalBase/getLocalToken/loginRemote——默认实现：
- * local base/token 与现网一致（datasource 默认读 VITE/gx-auth）；loginRemote 待 S3 注入，
- * 未注入前 connectRemote 直接失败（不影响添加/本地/列表）。
+ * 浏览器/桌面生产默认依赖（DESIGN §8.5）：
+ *   - resolver 传 dataSourceResolver 单例，保证启动器切换驱动的正是 client.ts/collab 读的那一个；
+ *   - local base/origin/token 与 datasource 单例默认构建同口径（local 逐字节等价）；
+ *   - loginRemote 适配器：用节点条目 baseURL + 当次凭据调 handshake.loginRemoteNode 换远端 JWT。
+ * 任何字段都可被 overrides 覆盖（测试/桌面壳指向内核回环口时覆盖 getLocalBase）。
+ */
+function browserDefaultDeps(): Omit<LauncherStoreDeps, "storage"> {
+  return {
+    resolver: dataSourceResolver,
+    getLocalBase: () =>
+      resolveApiBase(
+        (import.meta.env.VITE_API_URL as string | undefined) ?? undefined,
+        import.meta.env.BASE_URL as string | undefined,
+      ),
+    getOrigin: () =>
+      (typeof window !== "undefined" ? window.location.origin : "http://localhost"),
+    getLocalToken: () => useAuthStore.getState().token ?? null,
+    loginRemote: async (entry, creds) => {
+      if (!creds) throw new Error("连接该远端节点需要账号密码");
+      return loginRemoteNode({
+        baseURL: entry.baseURL,
+        email: creds.email,
+        password: creds.password,
+      });
+    },
+  };
+}
+
+/**
+ * 浏览器单例（懒加载）。桌面 App 启动器 UI 与 S2 client 接线共用这一个仓库与同一个 resolver 单例。
  */
 export function getLauncherStore(overrides?: Partial<LauncherStoreDeps>): LauncherStore {
   if (browserSingleton) return browserSingleton;
   const storage = browserStorage();
   if (!storage) throw new Error("启动器仓库需要浏览器 localStorage 环境");
-  browserSingleton = createLauncherStore({ storage, ...overrides });
+  browserSingleton = createLauncherStore({ storage, ...browserDefaultDeps(), ...overrides });
   return browserSingleton;
 }
 
