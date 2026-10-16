@@ -222,6 +222,11 @@ export interface CreateGroupInput {
   parentId?: string | null;
   ord?: number;
   iconName?: string | null;
+  /**
+   * YN8 离线回放：保留客户端离线时造的分组 id（默认在线路径不传，服务端造 navgrp_ 前缀 id）。
+   * 仅同步回放经注册表传入；在线 POST /nav/groups 不透传此字段。
+   */
+  id?: string;
 }
 
 export type GroupDeleteStrategy = "move" | "retain";

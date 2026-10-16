@@ -12,6 +12,7 @@ import { withWriteTx, prisma } from "../../db.js";
 import { audit } from "../../audit/emit.js";
 import { createGroupTx, updateGroupTx, deleteGroupTx } from "../../domain/nav/groups.js";
 import { moveImpactTx, moveNodeTx } from "../../domain/nav/move.js";
+import { recordTreeOpTx } from "../../domain/sync/treeOplog.js";
 
 export const navRoutes = new Hono();
 export const nodeRoutes = new Hono();
@@ -26,17 +27,29 @@ function normalizeParent(raw: string): string | null {
 navRoutes.post("/groups", manageMenu, async (c) => {
   const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
   if (!body) return c.json({ error: "请求体必须是 JSON 对象", code: "BAD_REQUEST" }, 400);
-  const groupId = await withWriteTx("nav.group.create", (tx) =>
-    createGroupTx(tx, {
+  const actorId = c.get("auth").userId;
+  const parentId = body.parentId === undefined || body.parentId === null
+    ? null
+    : normalizeParent(body.parentId as string);
+  const groupId = await withWriteTx("nav.group.create", async (tx) => {
+    const gid = await createGroupTx(tx, {
       name: body.name as string,
-      parentId: body.parentId === undefined || body.parentId === null
-        ? null
-        : normalizeParent(body.parentId as string),
+      parentId,
       ord: body.ord as number | undefined,
       iconName: body.iconName as string | null | undefined,
-    }));
+    });
+    // YN8 在线切面（§8.6/§19.6）：手动建组记树 op + 推进 treeVersion；off 时 recordTreeOpTx 首行 return null。
+    await recordTreeOpTx(tx, {
+      entityType: "navnode", entityId: gid, op: "nav_create_group", actorId,
+      payload: {
+        name: body.name, parentId,
+        ...(typeof body.ord === "number" ? { ord: body.ord } : {}),
+      },
+    });
+    return gid;
+  });
   audit(c, {
-    event: "nav_group_created", status: 201, actorId: c.get("auth").userId, detail: { groupId },
+    event: "nav_group_created", status: 201, actorId, detail: { groupId },
   });
   return c.json({ id: groupId }, 201);
 });
@@ -45,7 +58,30 @@ navRoutes.patch("/groups/:id", manageMenu, async (c) => {
   const id = c.req.param("id")!;
   const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
   if (!body) return c.json({ error: "请求体必须是 JSON 对象", code: "BAD_REQUEST" }, 400);
-  await withWriteTx("nav.group.update", (tx) => updateGroupTx(tx, id, body));
+  const actorId = c.get("auth").userId;
+  await withWriteTx("nav.group.update", async (tx) => {
+    await updateGroupTx(tx, id, body);
+    // YN8 在线切面：改名记 nav_rename；改 ord 记该父位【当前全兄弟】有序列表的 nav_reorder
+    //（树 op 以集合为权威，离线端据此整组对账；不把单节点裸 ord 当 op）。
+    if (body.name !== undefined) {
+      await recordTreeOpTx(tx, {
+        entityType: "navnode", entityId: id, op: "nav_rename", actorId,
+        payload: { name: body.name },
+      });
+    }
+    if (body.ord !== undefined) {
+      const node = await tx.navNode.findUnique({ where: { id }, select: { parentId: true } });
+      const sibs = await tx.navNode.findMany({
+        where: { parentId: node?.parentId ?? null, deletedAt: null },
+        orderBy: [{ depth: "asc" }, { ord: "asc" }, { id: "asc" }],
+        select: { id: true },
+      });
+      await recordTreeOpTx(tx, {
+        entityType: "navnode", entityId: node?.parentId ?? "root", op: "nav_reorder", actorId,
+        payload: { parentId: node?.parentId ?? null, orderedIds: sibs.map((s) => s.id) },
+      });
+    }
+  });
   return c.json({ id });
 });
 
@@ -57,10 +93,22 @@ navRoutes.delete("/groups/:id", manageMenu, async (c) => {
     return c.json({ error: "strategy 只能是 move 或 retain", code: "BAD_REQUEST" }, 400);
   }
   const targetParentId = q.targetParentId ? normalizeParent(q.targetParentId) : null;
-  const result = await withWriteTx("nav.group.delete", (tx) =>
-    deleteGroupTx(tx, id, strategy, targetParentId));
+  const actorId = c.get("auth").userId;
+  const result = await withWriteTx("nav.group.delete", async (tx) => {
+    const r = await deleteGroupTx(tx, id, strategy, targetParentId);
+    // YN8 在线切面：手动删组记树 op（含子节点处置策略，离线端按同策略对账）。
+    await recordTreeOpTx(tx, {
+      entityType: "navnode", entityId: id, op: "nav_delete", actorId,
+      payload: {
+        ...(strategy ? { strategy } : {}),
+        ...(targetParentId ? { targetParentId } : {}),
+        moved: r.moved,
+      },
+    });
+    return r;
+  });
   audit(c, {
-    event: "nav_group_deleted", status: 200, actorId: c.get("auth").userId,
+    event: "nav_group_deleted", status: 200, actorId,
     detail: { groupId: id, strategy: strategy ?? "empty", moved: result.moved },
   });
   return c.json(result);
@@ -87,13 +135,21 @@ nodeRoutes.post("/:id/move", manageMenu, async (c) => {
     return c.json({ error: "move 必须带非空字符串 newParentId（移到根层用 root）", code: "BAD_REQUEST" }, 400);
   }
   const newParentId = normalizeParent(body.newParentId);
+  const actorId = c.get("auth").userId;
   if (!body.confirmed) {
     const impact = await prisma.$transaction((tx) => moveImpactTx(tx, id, newParentId));
     return c.json({ error: "移动需确认影响面后执行", code: "MOVE_NEEDS_CONFIRM", impact }, 409);
   }
-  await withWriteTx("nav.node.move", (tx) => moveNodeTx(tx, id, newParentId));
+  await withWriteTx("nav.node.move", async (tx) => {
+    await moveNodeTx(tx, id, newParentId);
+    // YN8 在线切面（§19.6）：手动移动记树 op（path/depth 已由 moveNodeTx 服务端重算，oplog 只存目标父）。
+    await recordTreeOpTx(tx, {
+      entityType: "navnode", entityId: id, op: "nav_move", actorId,
+      payload: { to: { parentId: newParentId } },
+    });
+  });
   audit(c, {
-    event: "nav_node_moved", status: 200, actorId: c.get("auth").userId,
+    event: "nav_node_moved", status: 200, actorId,
     detail: { nodeId: id, newParentId },
   });
   return c.json({ id, newParentId });

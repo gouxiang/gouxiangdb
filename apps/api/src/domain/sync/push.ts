@@ -58,6 +58,9 @@ import {
 } from "./structureRegistry.js";
 import { buildStructureSnapshot, resolveStructureTableId } from "./structureSnapshot.js";
 import { canConvertStoredValue, isEmptyStoredValue } from "./structureValidation.js";
+import { writeTreeOpTx, readTreeVersion, TREE_WORKSPACE_ID } from "./treeOplog.js";
+import { getTreeOpHandler, isTreeEntityType, type TreeOpHandler } from "./navRegistry.js";
+import { hasOrgAction } from "../org/authorization.js";
 
 // ───────────────────────────────── 信封类型 ─────────────────────────────────
 
@@ -259,7 +262,7 @@ async function recordIncomingTx(
   tx: DbTx,
   o: IncomingOp,
   clientId: string,
-  baseId: string,
+  baseId: string | null,
   actorId: string,
   r: PushResult,
 ): Promise<void> {
@@ -682,6 +685,157 @@ export async function pushBaseOps(
   return { baseId, results, maxAcceptedSeq };
 }
 
+// ─────────────────── YN8：工作区导航树轨（navnode；不属任何 base） ───────────────────
+
+/**
+ * 回放一批【工作区级】导航树 op（§19.6）。与 record/结构轨的区别：
+ *   - 不过 base 库门（树是跨库工作区资源），改成逐条按【当前】组织动作 manage_menu 裁决——
+ *     与在线 /api/v1/nav、/api/v1/nodes 路由的 requireOrgAction("manage_menu") 完全同口径；
+ *   - 乐观锁基线 o.baseVersion 复用为【工作区 treeVersion】（单工作区单钟，见 treeOplog）；
+ *   - sync_incoming / sync_op_log 的 baseId 恒 null；回执推进 scopeType="workspace_tree" 订阅游标；
+ *   - 每条 op 独立串行事务、部分接受（§8.5），幂等仍走全局 clientOpId。
+ * 无 manage_menu → 整批逐条 rejected=PERMISSION_REVOKED（组织动作无 quarantine 语义）。
+ */
+export async function pushTreeOps(
+  userId: string,
+  clientId: string,
+  ops: readonly IncomingOp[],
+): Promise<{ results: PushResult[]; maxAcceptedSeq: bigint | null }> {
+  const canManage = await hasOrgAction(userId, "manage_menu");
+
+  const results: PushResult[] = [];
+  let maxAcceptedSeq: bigint | null = null;
+
+  for (const o of ops) {
+    const result = canManage
+      ? await replayTreeOne(userId, clientId, o)
+      : await commitTerminal(userId, clientId, null, o, {
+          clientOpId: o.clientOpId, status: "rejected", reasonCode: RC.PERMISSION_REVOKED,
+          reasonDetail: "当前角色已无权管理导航树（权限可能在离线期间被收回）",
+        });
+    results.push(result);
+    if (result.status === "accepted" && result.seq !== undefined) {
+      if (maxAcceptedSeq === null || result.seq > maxAcceptedSeq) maxAcceptedSeq = result.seq;
+    }
+  }
+
+  // 推进工作区树订阅游标（客户端不必回拉自己刚推上的树变更）。
+  if (maxAcceptedSeq !== null) {
+    const sub = await prisma.syncSubscription.findUnique({
+      where: { clientId_scopeType_scopeId: { clientId, scopeType: "workspace_tree", scopeId: TREE_WORKSPACE_ID } },
+      select: { cursorSeq: true },
+    });
+    if (sub && maxAcceptedSeq > sub.cursorSeq) {
+      await prisma.syncSubscription.update({
+        where: { clientId_scopeType_scopeId: { clientId, scopeType: "workspace_tree", scopeId: TREE_WORKSPACE_ID } },
+        data: { cursorSeq: maxAcceptedSeq },
+      });
+    }
+  }
+
+  return { results, maxAcceptedSeq };
+}
+
+/** 裁决并应用单条树 op：先幂等，再进串行写事务（复用全局终态/幂等件，baseId 恒 null）。 */
+async function replayTreeOne(userId: string, clientId: string, o: IncomingOp): Promise<PushResult> {
+  const prior = await lookupIdempotentReceipt(o.clientOpId, o.entityId);
+  if (prior) return prior;
+
+  // 硬白名单：非树轨实体/未登记 op 在进事务前明确拒绝。
+  if (!isTreeEntityType(o.entityType)) {
+    return await commitTerminal(userId, clientId, null, o, {
+      clientOpId: o.clientOpId, status: "rejected", reasonCode: RC.OP_UNSUPPORTED,
+      reasonDetail: `工作区树通道暂不支持实体类型 ${o.entityType}`,
+    });
+  }
+
+  try {
+    return await withWriteTx("sync.replayTree", (tx) => replayTreeOneTx(tx, userId, clientId, o));
+  } catch (e) {
+    if (e instanceof AbortReplayError) {
+      return await commitTerminal(userId, clientId, null, o, e.receipt);
+    }
+    if (e instanceof HttpError && e.status >= 500) throw e;
+    if (e instanceof SyncVersionConflictError) {
+      return await commitTerminal(userId, clientId, null, o, {
+        clientOpId: o.clientOpId, status: "conflict", reasonCode: RC.STRUCTURE_CONFLICT,
+        reasonDetail: `导航树已变化（本地基于树版本 ${o.baseVersion.toString()}，服务端 ${e.currentVersion.toString()}）`,
+        serverVersion: e.currentVersion,
+      });
+    }
+    const code = e instanceof HttpError ? (e.code || RC.VALIDATION) : RC.VALIDATION;
+    const detail = e instanceof HttpError ? e.message : "回放导航操作时发生意外错误";
+    return await commitTerminal(userId, clientId, null, o, {
+      clientOpId: o.clientOpId, status: "rejected", reasonCode: code, reasonDetail: detail,
+    });
+  }
+}
+
+async function replayTreeOneTx(
+  tx: DbTx,
+  userId: string,
+  clientId: string,
+  o: IncomingOp,
+): Promise<PushResult> {
+  const handler: TreeOpHandler | null = getTreeOpHandler(o.entityType, o.op);
+  if (!handler) {
+    return await terminalInTx(tx, userId, clientId, null, o, {
+      clientOpId: o.clientOpId, status: "rejected", reasonCode: RC.OP_UNSUPPORTED,
+      reasonDetail: `暂不支持导航树操作 ${o.entityType}.${o.op}`,
+    });
+  }
+
+  // 写前纯读校验（只读，未毒化事务，可同事务落终态）。
+  try {
+    await handler.assertTx(tx, o);
+  } catch (e) {
+    return await rejectFromPreflightTx(tx, userId, clientId, null, o, e);
+  }
+
+  // 树主写（复用 domain/nav 的 *Tx：防环/深度/删除策略同事务生效；失败可能毒化事务 → 穿界）。
+  let applied;
+  try {
+    applied = await handler.applyTx(tx, userId, o);
+  } catch (e) {
+    abortFromWrite(e, o.clientOpId);
+  }
+
+  // 工作区 treeVersion +1 + oplog（乐观断言=o.baseVersion；分叉 → 树冲突人工裁决，§19.6）。
+  let ledger: Awaited<ReturnType<typeof writeTreeOpTx>>;
+  try {
+    ledger = await writeTreeOpTx(
+      tx,
+      { entityType: "navnode", entityId: applied.entityId, op: applied.op, actorId: userId, payload: applied.payload },
+      {
+        clientId, clientOpId: o.clientOpId, clientBaseVersion: o.baseVersion,
+        expectedBaseVersion: o.baseVersion,
+        ...(o._resolveOf ? { result: "resolved" as const, conflictOf: o._resolveOf } : {}),
+      },
+    );
+  } catch (e) {
+    if (e instanceof SyncVersionConflictError) {
+      throw new AbortReplayError({
+        clientOpId: o.clientOpId,
+        status: "conflict",
+        reasonCode: RC.STRUCTURE_CONFLICT,
+        reasonDetail: `导航树已变化（本地基于树版本 ${o.baseVersion.toString()}，服务端 ${e.currentVersion.toString()}）；请刷新导航树后人工解决`,
+        serverVersion: e.currentVersion,
+      });
+    }
+    abortFromWrite(e, o.clientOpId);
+  }
+
+  const r: PushResult = {
+    clientOpId: o.clientOpId, status: "accepted",
+    seq: ledger.seq, newVersion: ledger.newVersion, entityId: applied.entityId,
+  };
+  await recordIncomingTx(tx, o, clientId, null, userId, { ...r, serverVersion: undefined });
+  return r;
+}
+
+/** 事务外读当前工作区树版本（供树冲突 resolve mine 取最新基线）。 */
+export { readTreeVersion };
+
 /** 幂等命中（sync_incoming 已终态）时重建完全相同的回执。 */
 function idempotentReceipt(clientOpId: string, row: {
   status: string; reasonCode: string | null; reasonDetail: string | null; serverVersion: bigint;
@@ -745,7 +899,7 @@ async function lookupIdempotentReceipt(
 async function replayGatedOut(
   userId: string,
   clientId: string,
-  baseId: string,
+  baseId: string | null,
   o: IncomingOp,
   everSubscribed: boolean,
 ): Promise<PushResult> {
@@ -842,7 +996,7 @@ class AbortReplayError extends Error {
 async function commitTerminal(
   userId: string,
   clientId: string,
-  baseId: string,
+  baseId: string | null,
   o: IncomingOp,
   r: PushResult,
 ): Promise<PushResult> {
@@ -1054,7 +1208,7 @@ async function terminalInTx(
   tx: DbTx,
   userId: string,
   clientId: string,
-  baseId: string,
+  baseId: string | null,
   o: IncomingOp,
   r: PushResult,
 ): Promise<PushResult> {
@@ -1518,7 +1672,7 @@ async function rejectFromPreflightTx(
   tx: DbTx,
   userId: string,
   clientId: string,
-  baseId: string,
+  baseId: string | null,
   o: IncomingOp,
   e: unknown,
 ): Promise<PushResult> {

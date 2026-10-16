@@ -155,7 +155,7 @@ describe("A. 探针与同步中心", () => {
     const res = await h.app.request("/api/v1/sync", { headers: await h.auth(ED) });
     const body = await res.json();
     expect(res.status).toBe(200);
-    expect(body.phase).toBe("YN7");
+    expect(body.phase).toBe("YN8");
   });
 
   it("同步中心默认只返回本人待处理项（此刻为空）", async () => {

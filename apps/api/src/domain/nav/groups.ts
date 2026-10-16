@@ -43,7 +43,12 @@ export async function createGroupTx(tx: DbTx, input: CreateGroupInput): Promise<
     throw new HttpError(400, `导航层级不能超过 ${NAV_MAX_DEPTH} 层`, "NAV_DEPTH_EXCEEDED");
   }
   const ord = typeof input.ord === "number" && Number.isInteger(input.ord) ? input.ord : 0;
-  const id = `navgrp_${crypto.randomBytes(12).toString("hex")}`;
+  // YN8：离线回放保留客户端分组 id（§8.4）；在线路径 input.id 恒 undefined → 服务端造 navgrp_ id。
+  // 显式 id 只允许 cuid 风格安全字符（会拼进物化路径，禁 '/' 与空白），防止破坏路径/撞系统节点。
+  const explicitId = typeof input.id === "string" ? input.id.trim() : "";
+  const id = explicitId && /^[A-Za-z0-9_-]{8,64}$/.test(explicitId)
+    ? explicitId
+    : `navgrp_${crypto.randomBytes(12).toString("hex")}`;
   const parentPath = parentId === null
     ? null
     : (await tx.navNode.findUnique({ where: { id: parentId }, select: { path: true } }))?.path ?? null;

@@ -130,7 +130,7 @@ describe("A. 探针", () => {
     const r = await h.app.request("/api/v1/sync", { headers: await h.auth(OWNER) });
     expect(r.status).toBe(200);
     const body = await r.json();
-    expect(body.phase).toBe("YN7");
+    expect(body.phase).toBe("YN8");
   });
 });
 

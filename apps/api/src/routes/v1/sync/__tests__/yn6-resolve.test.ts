@@ -171,7 +171,7 @@ describe("A. 探针阶段", () => {
     const res = await h.app.request("/api/v1/sync", { headers: await h.auth(ED) });
     const body = await res.json();
     expect(res.status).toBe(200);
-    expect(body.phase).toBe("YN7");
+    expect(body.phase).toBe("YN8");
   });
 });
 

@@ -219,9 +219,14 @@ export async function moveImpactTx(
   };
 }
 
-/** 执行移动：改 parentId + 子树 path/depth 重写 + bump navVersion。 */
+/** 执行移动：改 parentId + 子树 path/depth 重写 +（可选）落位 ord + bump navVersion。
+ *  ord 仅供 YN8 离线回放（§19.6 nav_move 携带 to(parentId,ord)）；在线路径不传 → ord 原样保留，
+ *  与既有行为逐字节一致。ord 必须为整数（非法抛 400），兄弟集合归一化由 reorder 单独负责。 */
 export async function moveNodeTx(
-  tx: DbTx, nodeIdValue: string, newParentId: string | null,
+  tx: DbTx,
+  nodeIdValue: string,
+  newParentId: string | null,
+  ord?: number,
 ): Promise<void> {
   const { node, target } = await resolveMoveTargets(tx, nodeIdValue, newParentId);
   const rows = (await tx.navNode.findMany({ where: { deletedAt: null } })) as unknown as NodeForMove[];
@@ -234,7 +239,49 @@ export async function moveNodeTx(
     node.path,
     newSelfPath,
   );
-  await tx.navNode.update({ where: { id: nodeIdValue }, data: { parentId: newParentId } });
+  if (ord !== undefined && (typeof ord !== "number" || !Number.isInteger(ord))) {
+    throw new HttpError(400, "移动落位 ord 必须是整数", "NAV_BAD_ORD");
+  }
+  await tx.navNode.update({
+    where: { id: nodeIdValue },
+    data: { parentId: newParentId, ...(ord !== undefined ? { ord } : {}) },
+  });
   await applySubtreeRewriteTx(tx, updates);
+  await bumpNavVersionTx(tx);
+}
+
+/**
+ * YN8 兄弟集合重排（nav_reorder 回放专用，§19.6「对同一组兄弟排序」）。
+ *
+ * 权威顺序以 orderedIds（某一父下【全部】活兄弟的有序 id 列表，parentId=null 表根层）为准，
+ * 逐行写 ord=下标。强集合一致校验（与 reorderFieldsTx 同口径）：
+ *   - 长度相等、无重复、且每个 id 都是该父当前活兄弟 → 任一不满足抛 400（离线期间该组有增删/移动，
+ *     让树冲突浮现交人工裁决，绝不按部分列表静默重排导致丢节点序）；
+ * 不修改 parentId/path（纯排序）；末尾 bump 旧 int navVersion（treeVersion 由同步层另记）。
+ */
+export async function reorderNavSiblingsTx(
+  tx: DbTx,
+  parentId: string | null,
+  orderedIds: readonly string[],
+): Promise<void> {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    throw new HttpError(400, "nav_reorder 需要非空有序节点 id 列表", "NAV_BAD_REORDER");
+  }
+  if (new Set(orderedIds).size !== orderedIds.length) {
+    throw new HttpError(400, "nav_reorder 排序列表含重复节点", "NAV_BAD_REORDER");
+  }
+  const live = await tx.navNode.findMany({
+    where: { parentId, deletedAt: null },
+    select: { id: true },
+  });
+  const liveIds = live.map((x) => x.id);
+  const sameSet = liveIds.length === orderedIds.length
+    && orderedIds.every((id) => liveIds.includes(id));
+  if (!sameSet) {
+    throw new HttpError(400, "排序列表与当前同级节点集合不一致（可能离线期间有增删/移动），请刷新后重试", "NAV_BAD_REORDER");
+  }
+  for (let i = 0; i < orderedIds.length; i += 1) {
+    await tx.navNode.update({ where: { id: orderedIds[i] }, data: { ord: i } });
+  }
   await bumpNavVersionTx(tx);
 }

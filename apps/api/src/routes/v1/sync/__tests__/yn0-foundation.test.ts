@@ -124,7 +124,7 @@ describe("D/E. 开关 on：门放行，鉴权独立，探针 200", () => {
       expect(body.apiVersion).toBe("v1");
       expect(body.sync).toBe(true);
       // 阶段标识随 YN 推进刷新（当前 YN6：+冲突双版本/resolve/resolved 审计）。
-      expect(body.phase).toBe("YN7");
+      expect(body.phase).toBe("YN8");
       expect(typeof body.serverVersion).toBe("string");
       expect(body.auth.userId).toBe("yn0_user");
     }));

@@ -23,7 +23,7 @@ import { audit } from "../../../audit/emit.js";
 import type { AuditEventName } from "../../../audit/audit.js";
 import { buildBaseSnapshot, markSnapshotDone, subscribeBase, authorizeBaseRead } from "../../../domain/sync/snapshot.js";
 import { pullBaseOps } from "../../../domain/sync/pull.js";
-import { pushBaseOps, retryIncoming, resolveConflict, type IncomingOp, type PushResult } from "../../../domain/sync/push.js";
+import { pushBaseOps, pushTreeOps, retryIncoming, resolveConflict, type IncomingOp, type PushResult } from "../../../domain/sync/push.js";
 import { listIncoming, discardIncoming } from "../../../domain/sync/incoming.js";
 import { buildVisibilityReport } from "../../../domain/sync/visibility.js";
 
@@ -49,7 +49,7 @@ syncRoutes.get("/", (c) => {
     apiVersion: "v1",
     sync: true,
     // 阶段标识随 YN 推进刷新；客户端据此判断可用端点集。
-    phase: "YN7",
+    phase: "YN8",
     serverVersion: VERSION,
     auth: {
       userId: auth.userId,
@@ -128,7 +128,7 @@ function auditFreshTerminal(
   c: Parameters<typeof audit>[0],
   r: PushResult,
   actorId: string,
-  baseId: string,
+  baseId: string | null,
 ): void {
   if (!r._freshTerminal) return;
   let event: AuditEventName | null = null;
@@ -211,7 +211,61 @@ syncRoutes.post("/push", async (c) => {
   for (const r of outcome.results) auditFreshTerminal(c, r, auth.userId, baseId);
 
   // BigInt → 字符串（JSON 安全）；与 pull 输出一致，客户端统一按字符串解析版本/seq。
-  const results = outcome.results.map((r) => ({
+  const results = outcome.results.map(serializeResult);
+  return c.json({ result: { baseId: outcome.baseId, results } });
+});
+
+// ───────────────────────── YN8：工作区导航树 push（navnode，不属任何 base） ─────────────────────────
+
+/**
+ * POST /push/tree {clientId, ops:[navnode…]} → {results:[…]}
+ * 树 op 的 baseVersion 复用为工作区 treeVersion（客户端离线时所基于的树版本）；sync_incoming/oplog 的
+ * baseId 恒 null。信封形状/单批上限/逐条校验与 /push 一致；不接收 baseId/baseSchemaVersion。
+ */
+syncRoutes.post("/push/tree", async (c) => {
+  const auth = c.get("auth");
+  const body = (await c.req.json().catch(() => null)) as
+    | { clientId?: unknown; ops?: unknown }
+    | null;
+
+  const clientId = typeof body?.clientId === "string" ? body.clientId.trim() : "";
+  if (!clientId) throw new HttpError(400, "缺少 clientId", "SYNC_BAD_REQUEST");
+  if (!Array.isArray(body?.ops)) throw new HttpError(400, "ops 必须是数组", "SYNC_BAD_REQUEST");
+  if (body.ops.length === 0) throw new HttpError(400, "ops 不能为空", "SYNC_BAD_REQUEST");
+  if (body.ops.length > PUSH_MAX_OPS) {
+    throw new HttpError(400, `单批最多 ${PUSH_MAX_OPS} 条操作，请拆批`, "SYNC_BAD_REQUEST");
+  }
+
+  const ops: IncomingOp[] = [];
+  for (const raw of body.ops) {
+    const o = raw as Record<string, unknown> | null;
+    if (!o || typeof o !== "object") throw new HttpError(400, "op 必须是对象", "SYNC_BAD_REQUEST");
+    const clientOpId = typeof o.clientOpId === "string" ? o.clientOpId.trim() : "";
+    const entityType = typeof o.entityType === "string" ? o.entityType.trim() : "";
+    const entityId = typeof o.entityId === "string" ? o.entityId.trim() : "";
+    const op = typeof o.op === "string" ? o.op.trim() : "";
+    const baseVersionRaw = typeof o.baseVersion === "string" ? o.baseVersion.trim() : "";
+    if (!clientOpId || !entityType || !entityId || !op) {
+      throw new HttpError(400, "op 缺少 clientOpId/entityType/entityId/op", "SYNC_BAD_REQUEST");
+    }
+    if (!/^\d+$/.test(baseVersionRaw)) {
+      throw new HttpError(400, `op ${clientOpId} 的 baseVersion(treeVersion) 必须是非负整数串`, "SYNC_BAD_CURSOR");
+    }
+    const payload = o.payload && typeof o.payload === "object" && !Array.isArray(o.payload)
+      ? (o.payload as Record<string, unknown>)
+      : {};
+    ops.push({ clientOpId, entityType, entityId, op, baseVersion: BigInt(baseVersionRaw), payload });
+  }
+
+  const outcome = await pushTreeOps(auth.userId, clientId, ops);
+  // 树 op 无 baseId 归属，审计 detail 的 baseId 字段落 null（审计 schema 允许可空）。
+  for (const r of outcome.results) auditFreshTerminal(c, r, auth.userId, null as unknown as string);
+  return c.json({ result: { scope: "workspace_tree", results: outcome.results.map(serializeResult) } });
+});
+
+/** push 回执 BigInt → 字符串（/push 与 /push/tree 共用）。 */
+function serializeResult(r: PushResult): Record<string, unknown> {
+  return {
     clientOpId: r.clientOpId,
     status: r.status,
     ...(r.reasonCode ? { reasonCode: r.reasonCode } : {}),
@@ -220,9 +274,8 @@ syncRoutes.post("/push", async (c) => {
     ...(r.newVersion !== undefined ? { newVersion: r.newVersion.toString() } : {}),
     ...(r.entityId ? { entityId: r.entityId } : {}),
     ...(r.serverVersion !== undefined ? { serverVersion: r.serverVersion.toString() } : {}),
-  }));
-  return c.json({ result: { baseId: outcome.baseId, results } });
-});
+  };
+}
 
 // ───────────────── YN5：同步中心（隔离/未生效/冲突列表 + 重试 + 放弃） ─────────────────
 
