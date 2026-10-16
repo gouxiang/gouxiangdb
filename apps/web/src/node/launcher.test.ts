@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { newLauncherController, deriveActiveDataSource } from "./launcher";
+import type { RemoteLoginFn } from "./launcher";
 import type { KvStorage } from "./remoteSessions";
 import { LOCAL_NODE_ID } from "./resolve";
 import { addLocalNode, connectNode, addRemoteNode, emptyRegistry } from "./registry";
@@ -144,7 +145,12 @@ describe("远端连接 / 切换", () => {
   });
 
   it("无已存会话：当次凭据原样透传给 loginRemote", async () => {
-    const login = vi.fn(async () => ({ token: "remote-jwt", user: null }));
+    const login = vi.fn(
+      async (_entry: Parameters<RemoteLoginFn>[0], _creds?: Parameters<RemoteLoginFn>[1]) => ({
+        token: "remote-jwt",
+        user: null,
+      }),
+    );
     const { controller } = makeController(seededWithRemote(), login);
     const creds = { email: "a@b.c", password: "secret" };
     await controller.connectRemote("aaaa1111bbbb", creds);
