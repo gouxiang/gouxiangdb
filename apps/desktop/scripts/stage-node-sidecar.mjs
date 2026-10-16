@@ -121,6 +121,13 @@ log("放入随包 Node sidecar 二进制");
 // 4.2 api dist / web public / prisma / scripts（白名单）。
 copyDir(distSrc, path.join(serverDir, "dist"));
 copyDir(webDist, path.join(serverDir, "public"));
+// PoC-2 only（D 版删除）：同源探针页，内核经 GX_WEB_DIST 静态托管在 /poc2.html。
+// 默认不注入，仅 GX_POC2=1 自测时随包（与 Rust 侧启动门控同名）；正式 stage 产物不含探针。
+const poc2Src = path.join(desktopDir, "poc", "poc2.html");
+if (process.env.GX_POC2 === "1" && fs.existsSync(poc2Src)) {
+  copyFile(poc2Src, path.join(serverDir, "public", "poc2.html"));
+  log("GX_POC2=1：放入 PoC-2 同源探针页 public/poc2.html（自测专用，正式打包不带）");
+}
 copyFile(path.join(srcApi, "prisma", "schema.prisma"), path.join(serverDir, "prisma", "schema.prisma"));
 copyDir(path.join(srcApi, "prisma", "migrations"), path.join(serverDir, "prisma", "migrations"));
 copyDir(path.join(srcApi, "scripts", "backup"), path.join(serverDir, "scripts", "backup"));

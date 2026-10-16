@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PoC-2 WKWebView 同源探针</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 13px/1.55 -apple-system, "PingFang SC", system-ui, sans-serif; margin: 0; padding: 20px 24px; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  #env { color: #555; font-size: 12px; margin-bottom: 12px; word-break: break-all; }
+  .row { display: flex; gap: 8px; align-items: flex-start; padding: 5px 8px; border-radius: 6px; }
+  .pass { background: rgba(52,199,89,.14); }
+  .fail { background: rgba(255,69,58,.16); }
+  .tag { font-weight: 700; min-width: 52px; }
+  .pass .tag { color: #1c7a34; }
+  .fail .tag { color: #b4231c; }
+  .msg { flex: 1; word-break: break-word; }
+  #summary { margin-top: 14px; font-weight: 700; font-size: 14px; }
+  code { background: rgba(127,127,127,.16); padding: 0 4px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>PoC-2 · WKWebView 同源零 CORS 业务探针</h1>
+<div id="env"></div>
+<div id="rows"></div>
+<div id="summary"></div>
+<!--
+  本页由内核同源静态托管（GX_WEB_DIST/public/poc2.html），在 Tauri WKWebView 内打开。
+  目标：证明界面/API/WS/附件在同源 http://127.0.0.1:<port> 下全链路无 CORS/CORP/ATS 拦截。
+  结果通过同源 GET /__poc2/... 路径旁路写进 sidecar 访问日志（纯旁路，后端零改动）。
+-->
+<script>
+"use strict";
+// ---- 结果旁路通道：编码进同源 GET 路径，命中 SPA catch-all(200)，仅出现在访问日志里 ----
+var RESULTS = [];
+function b64url(s) {
+  var b64 = encodeURIComponent(s).replace(/%([0-9A-F]{2})/g, function (_, h) {
+    return String.fromCharCode(parseInt(h, 16));
+  });
+  try { b64 = btoa(b64); } catch (e) { b64 = "ENC_ERR"; }
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function emit(idx, ok, msg) {
+  RESULTS.push({ i: idx, ok: !!ok, msg: String(msg) });
+  drawRow(idx, ok, msg);
+  var seg = (ok ? "1" : "0") + "/" + idx + "/" + b64url(String(msg).slice(0, 600));
+  try { (new Image()).src = "/__poc2/s/" + seg + "&_=" + Date.now(); } catch (e) {}
+}
+function drawRow(idx, ok, msg) {
+  var d = document.createElement("div");
+  d.className = "row " + (ok ? "pass" : "fail");
+  d.innerHTML = '<span class="tag">' + (ok ? "PASS" : "FAIL") + ' #' + idx +
+    '</span><span class="msg"></span>';
+  d.querySelector(".msg").textContent = msg;
+  document.getElementById("rows").appendChild(d);
+}
+function finish(total) {
+  // 只统计核心步（emit 入 RESULTS 的 0..total-1）；观察项走 emitObs，不计入通过判定。
+  var core = RESULTS.filter(function (r) { return r.i < total; });
+  var passed = core.filter(function (r) { return r.ok; }).length;
+  var allOk = passed === total;
+  var el = document.getElementById("summary");
+  el.textContent = (allOk ? "全部通过 " : "存在失败 ") + passed + "/" + total;
+  el.style.color = allOk ? "#1c7a34" : "#b4231c";
+  try {
+    (new Image()).src = "/__poc2/DONE/" + total + "/" + (allOk ? "true" : "false") +
+      "/pass" + passed + "&_=" + Date.now();
+  } catch (e) {}
+}
+// 观察项：渲染 + 旁路落日志，但不计入核心通过数。
+function emitObs(idx, ok, msg) {
+  drawRow(idx, ok, "[观察] " + msg);
+  var seg = (ok ? "1" : "0") + "/" + idx + "/" + b64url("[观察] " + String(msg).slice(0, 560));
+  try { (new Image()).src = "/__poc2/s/" + seg + "&_=" + Date.now(); } catch (e) {}
+}
+
+// ---- 小工具 ----
+function api(path, opts) {
+  opts = opts || {};
+  var headers = opts.headers || {};
+  if (window.__TOKEN) headers["X-GX-Token"] = window.__TOKEN;
+  return fetch("/api" + path, Object.assign({}, opts, { headers: headers }));
+}
+function jpegPng() {
+  // 1x 蓝点 PNG
+  var b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+  var bin = atob(b64);
+  var u8 = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return new File([u8], "poc2.png", { type: "image/png" });
+}
+function decodeObjectUrl(obj) {
+  return new Promise(function (res, rej) {
+    var img = new Image();
+    img.onload = function () { res({ w: img.naturalWidth, h: img.naturalHeight }); };
+    img.onerror = function () { rej(new Error("image decode error")); };
+    img.src = obj;
+  });
+}
+// 私有图真实前端姿势：带 X-GX-Token fetch → blob → objectURL → <img> 解码（同源 CORP 不拦）
+function imgLoadAuth(url, token) {
+  return fetch(url, { headers: { "X-GX-Token": token } }).then(function (r) {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    var corp = r.headers.get("cross-origin-resource-policy");
+    return r.blob().then(function (b) {
+      return decodeObjectUrl(URL.createObjectURL(b)).then(function (d) {
+        return { w: d.w, h: d.h, corp: corp, type: b.type };
+      });
+    });
+  });
+}
+// 公开静态图：<img src> 直接加载（同源，无自定义头）
+function imgLoadPublic(url) {
+  return new Promise(function (res, rej) {
+    var img = new Image();
+    img.onload = function () { res({ w: img.naturalWidth, h: img.naturalHeight }); };
+    img.onerror = function () { rej(new Error("image load error")); };
+    img.src = url;
+  });
+}
+function wsOnce(url, wantClose) {
+  return new Promise(function (resolve) {
+    var ws, opened = false, done = false;
+    function fin(v) { if (done) return; done = true; clearTimeout(timer); resolve(v); }
+    try { ws = new WebSocket(url); } catch (e) { return fin({ err: "ctor:" + e.message }); }
+    var timer = setTimeout(function () {
+      try { ws.close(); } catch (e) {}
+      fin({ err: opened ? "timeout_after_open(未收到首帧)" : "timeout_before_open" });
+    }, 6000);
+    ws.binaryType = "arraybuffer";
+    // 注意：不能在 onopen 就下结论。服务端在 upgrade 完成后【主动】发 sync step1 +
+    // awareness 两个二进制帧（attach.ts serveConnection），必须等到 onmessage 才算业务连通。
+    ws.onopen = function () { opened = true; };
+    ws.onmessage = function (ev) {
+      var bytes = ev.data instanceof ArrayBuffer ? ev.data.byteLength : -1;
+      try { ws.close(1000, "poc-done"); } catch (e) {}
+      fin({ open: true, binary: ev.data instanceof ArrayBuffer, bytes: bytes, proto: ws.protocol || "(none)" });
+    };
+    ws.onclose = function (ev) {
+      // 坏票路径：服务端先完成握手（onopen 可能已触发）再 close(4401)，此处收口。
+      if (wantClose) fin({ closed: true, opened: opened, code: ev.code, reason: ev.reason });
+      else fin({ err: "closed code=" + ev.code + " " + ev.reason + (opened ? "(握手后关闭)" : "(未握手)") });
+    };
+    ws.onerror = function () { /* 具体结果由 onclose/onmessage 收口 */ };
+  });
+}
+
+var EMAIL = "poc2@example.local", PASS = "poc2-pass-123", NAME = "PoC2";
+var TOTAL = 12;
+
+function main() {
+  document.getElementById("env").textContent =
+    "location=" + location.href + " | origin=" + location.origin +
+    " | UA=" + navigator.userAgent + " | platform=" + (navigator.platform || "?");
+  emit(0, true, "WKWebView 已加载同源页 | origin=" + location.origin + " | UA=" + navigator.userAgent);
+
+  // 1) 引导状态（免鉴权，同源 fetch）
+  api("/auth/bootstrap-status").then(function (r) {
+    return r.json().then(function (j) {
+      if (r.ok && typeof j.initialized === "boolean") {
+        emit(1, true, "GET /auth/bootstrap-status 200 initialized=" + j.initialized + " signupOpen=" + j.signupOpen);
+        return j.initialized ? "login" : "signup";
+      }
+      throw new Error("HTTP " + r.status + " " + JSON.stringify(j));
+    });
+  }).then(function (mode) {
+    // 2) 空库首用户注册（自举 owner）；若已初始化则登录
+    var body = mode === "signup"
+      ? { email: EMAIL, password: PASS, displayName: NAME }
+      : { email: EMAIL, password: PASS };
+    return api("/auth/" + mode, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok || !j.token) throw new Error("HTTP " + r.status + " " + JSON.stringify(j).slice(0, 200));
+        window.__TOKEN = j.token;
+        emit(2, true, mode + " 200 拿到 X-GX-Token（前12位）=" + j.token.slice(0, 12) + "… user=" + (j.user && j.user.displayName));
+      });
+    });
+  }).then(function () {
+    // 3) /auth/me 带自定义头 X-GX-Token
+    return api("/auth/me").then(function (r) {
+      return r.json().then(function (j) {
+        if (r.ok && j.user && j.user.email === EMAIL) emit(3, true, "GET /auth/me 200（X-GX-Token 自定义头通过）email=" + j.user.email);
+        else throw new Error("HTTP " + r.status + " " + JSON.stringify(j).slice(0, 200));
+      });
+    });
+  }).then(function () {
+    // 4) 建 Base（写，含自定义头 + JSON）
+    return api("/bases", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "PoC2 库", icon: "database" }),
+    }).then(function (r) {
+      return r.json().then(function (j) {
+        if (r.status === 201 && j.base && j.base.id) {
+          window.__BASE = j.base;
+          emit(4, true, "POST /bases 201 id=" + j.base.id + " 默认表数=" + j.base.tableCount);
+        } else throw new Error("HTTP " + r.status + " " + JSON.stringify(j).slice(0, 200));
+      });
+    });
+  }).then(function () {
+    // 5) 列表读回
+    return api("/bases").then(function (r) {
+      return r.json().then(function (j) {
+        var hit = (j.bases || []).some(function (b) { return b.id === window.__BASE.id; });
+        if (r.ok && hit) emit(5, true, "GET /bases 200 含刚建库（n=" + (j.bases || []).length + "）CRUD 闭环同源 OK");
+        else throw new Error("未读回 base，HTTP " + r.status);
+      });
+    });
+  }).then(function () {
+    // 6) 头像 multipart 上传（自定义头 + multipart 同源）
+    var fd = new FormData();
+    fd.append("file", jpegPng());
+    return api("/auth/me/avatar", { method: "POST", body: fd }).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok || !(j.user && j.user.avatarUrl)) throw new Error("HTTP " + r.status + " " + JSON.stringify(j).slice(0, 200));
+        window.__AVATAR = j.user.avatarUrl;
+        emit(6, true, "POST /auth/me/avatar 200 multipart OK url=" + window.__AVATAR);
+      });
+    });
+  }).then(function () {
+    // 7) 头像公开静态图：<img src> 直接同源加载（/uploads/avatars 在鉴权前公开）
+    return imgLoadPublic(window.__AVATAR).then(function (info) {
+      emit(7, true, "公开头像 <img src> 同源加载解码 " + info.w + "x" + info.h + "（静态资源同源零 CORS）");
+    });
+  }).then(function () {
+    // 8) 附件 multipart 上传（业务实体附件通道，自定义头 + multipart）
+    var fd = new FormData();
+    fd.append("baseId", window.__BASE.id);
+    fd.append("purpose", "record");
+    fd.append("file", jpegPng());
+    return api("/attachments", { method: "POST", body: fd }).then(function (r) {
+      return r.json().then(function (j) {
+        if (r.status === 201 && j.files && j.files[0]) {
+          window.__ATT = j.files[0];
+          emit(8, true, "POST /attachments 201 multipart OK id=" + j.files[0].id + " url=" + j.files[0].url);
+        } else throw new Error("HTTP " + r.status + " " + JSON.stringify(j).slice(0, 200));
+      });
+    });
+  }).then(function () {
+    // 9) 私有附件带票 fetch → blob → <img> 解码（CORP same-origin 同源应放行）
+    return imgLoadAuth(window.__ATT.url, window.__TOKEN).then(function (info) {
+      emit(9, true, "GET /attachments/:id/content 带票 fetch+blob+<img> 解码 " + info.w + "x" + info.h +
+        " mime=" + info.type + " CORP=" + (info.corp || "(无)") + "（同源未被 CORP 拦）");
+    });
+  }).then(function () {
+    // 10) 无票访问私有附件应 401（证明附件鉴权真实生效、非公开泄漏）。
+    // 必须 no-store：附件 200 响应是 Cache-Control: private,max-age=60 且无 Vary: X-GX-Token，
+    // 第 9 步刚带票请求过，默认缓存会让同 URL 的无票请求复用 200（PoC-2 附带发现，已记入文档）。
+    return fetch(window.__ATT.url, { cache: "no-store" }).then(function (r) {
+      if (r.status === 401) emit(10, true, "无 X-GX-Token 访问私有附件 → 401（no-store 绕缓存；鉴权生效）");
+      else throw new Error("期望 401，实得 " + r.status);
+    });
+  }).then(function () {
+    // 11) 建知识库 + 文档，换协同短票，WS upgrade 并收首帧
+    return api("/kb", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "PoC2 知识库" }),
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      if (j.knowledgeBase) window.__KB = j.knowledgeBase.id;
+      return api("/kb/" + window.__KB + "/docs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "doc", title: "PoC2 协同文档" }),
+      });
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      var docId = (j.doc && j.doc.id) || j.id;
+      window.__DOC = docId;
+      if (!docId) throw new Error("建文档失败 " + JSON.stringify(j).slice(0, 200));
+      return api("/collab/ticket?roomId=" + encodeURIComponent("doc:" + docId));
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j.ticket) throw new Error("短票失败 " + JSON.stringify(j).slice(0, 200));
+      window.__WS_PATH = j.wsPath;
+      var proto = location.protocol === "https:" ? "wss:" : "ws:";
+      var url = proto + "//" + location.host + j.wsPath + "?t=" + encodeURIComponent(j.ticket);
+      return wsOnce(url, false);
+    }).then(function (res) {
+      if (res.open && res.binary) {
+        emit(11, true, "WebSocket " + window.__WS_PATH + " 握手成功并收到服务端首帧二进制 " +
+          res.bytes + "B（短票升级同源零 CORS，子协议=" + res.proto + "）");
+      } else throw new Error("WS 未达首帧：" + JSON.stringify(res));
+    });
+  }).then(function () {
+    // 12) 坏票/已核销票应被 4401 永久拒绝（安全对照）
+    var proto = location.protocol === "https:" ? "wss:" : "ws:";
+    var url = proto + "//" + location.host + window.__WS_PATH + "?t=invalid-ticket-xyz";
+    return wsOnce(url, true).then(function (res) {
+      if (res.closed && res.code === 4401) emit(12, true, "坏票 WS → 先握手再 close(4401 ticket_invalid)，拒绝纪律正确（非无限重连）");
+      else throw new Error("期望 4401，实得 " + JSON.stringify(res));
+    });
+  }).then(function () {
+    finish(TOTAL);
+  }).catch(function (e) {
+    var idx = RESULTS.length; // 失败在第几步
+    emit(idx < TOTAL ? idx : RESULTS.length, false, "异常中断：" + (e && e.message ? e.message : String(e)));
+    finish(TOTAL);
+  });
+}
+
+// 远程节点 ATS / CORS 观察（不计入通过数，只记录客观表现）。
+// 目标地址运行时写进同源 /poc2-node.json：{ "httpNode": "http://192.168.x.x:port", "httpsNode": "https://..." }。
+function remoteProbes() {
+  fetch("/poc2-node.json", { cache: "no-store" }).then(function (r) {
+    if (!r.ok) return null;
+    return r.json();
+  }).then(function (cfg) {
+    if (!cfg) { return; }
+    var targets = [];
+    if (cfg.httpNode) targets.push({ label: "明文 http 局域网节点", url: cfg.httpNode });
+    if (cfg.httpsNode) targets.push({ label: "https 节点", url: cfg.httpsNode });
+    if (!targets.length) { emitObs(91, true, "poc2-node.json 未配置目标，跳过远程观察"); return; }
+    targets.forEach(function (t, i) {
+      var code = 92 + i;
+      var t0 = performance.now();
+      fetch(t.url + (t.url.indexOf("?") < 0 ? "?" : "&") + "_=" + Date.now(), { mode: "cors" })
+        .then(function (resp) {
+          emitObs(code, true, t.label + " " + t.url + " → HTTP " + resp.status +
+            "（" + Math.round(performance.now() - t0) + "ms）未被 ATS 拦；跨域读取是否放行取决于对端 CORS 头");
+        })
+        .catch(function (e) {
+          emitObs(code, false, t.label + " " + t.url + " → fetch 失败：" + e.message +
+            "（" + Math.round(performance.now() - t0) + "ms；据错误名区分 ATS 明文拦截 / CORS / 不可达）");
+        });
+    });
+  }).catch(function () { emitObs(91, false, "读取 poc2-node.json 失败"); });
+}
+
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { main(); remoteProbes(); });
+else { main(); remoteProbes(); }
+</script>
+</body>
+</html>

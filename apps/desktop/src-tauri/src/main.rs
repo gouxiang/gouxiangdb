@@ -21,6 +21,9 @@ const BUNDLE_ID: &str = "cc.gouxiang.desktop";
 const NODE_BIN: &str = "gxnode-aarch64-apple-darwin";
 const SERVER_DIR: &str = "server";
 const EXIT_LOG: &str = "/tmp/gx-desktop-exit.log";
+/// PoC-2 门控（仅自测）：GX_POC2=1 时把 sidecar 输出落盘并导航到同源探针页 /poc2.html。
+/// 默认（无此 env）行为与 PoC-1 完全一致：日志丢弃、导航到 /。
+const POC2_SIDECAR_LOG: &str = "/tmp/gx-poc2-sidecar.log";
 
 fn dbg_log(msg: &str) {
   use std::io::Write;
@@ -42,12 +45,18 @@ fn main() {
       let window: WebviewWindow = app.get_webview_window("main").expect("main window");
       let resource_dir = app.path().resource_dir().expect("resource_dir");
       let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-      let data_dir = PathBuf::from(home)
-        .join("Library/Application Support")
-        .join(BUNDLE_ID);
+      // PoC-2：数据目录可由 GX_POC2_DATA_DIR 覆盖（隔离自测，绝不碰真实 Application Support）。
+      // 不能靠覆盖 HOME 隔离——会让 Tauri resource_dir() 解析失败（UnknownPath）。
+      let data_dir = match std::env::var("GX_POC2_DATA_DIR") {
+        Ok(p) if !p.trim().is_empty() => PathBuf::from(p),
+        _ => PathBuf::from(home)
+          .join("Library/Application Support")
+          .join(BUNDLE_ID),
+      };
 
       thread::spawn(move || {
-        if let Err(e) = boot_local_kernel(&window, &resource_dir, &data_dir) {
+        let poc2 = std::env::var("GX_POC2").map(|v| v == "1").unwrap_or(false);
+        if let Err(e) = boot_local_kernel(&window, &resource_dir, &data_dir, poc2) {
           eprintln!("[desktop] 本地内核启动失败: {e}");
           let _ = window.eval(&format!(
             "document.body.innerHTML='<pre style=\"padding:24px;color:#b00\">本地内核启动失败：{}</pre>'",
@@ -130,7 +139,11 @@ fn graceful_stop(pid: i32, timeout: Duration) {
   thread::sleep(Duration::from_millis(300));
 }
 
-fn boot_local_kernel(window: &WebviewWindow, resource_dir: &Path, data_dir: &Path) -> Result<String, String> {
+fn boot_local_kernel(window: &WebviewWindow, resource_dir: &Path, data_dir: &Path, poc2: bool) -> Result<String, String> {
+  if poc2 {
+    let _ = fs::remove_file(POC2_SIDECAR_LOG);
+    dbg_log(&format!("PoC-2 mode ON: sidecar log -> {POC2_SIDECAR_LOG}, nav /poc2.html, data={}", data_dir.display()));
+  }
   let node = resource_dir.join(NODE_BIN);
   let server = resource_dir.join(SERVER_DIR);
   if !node.exists() {
@@ -216,7 +229,15 @@ fn boot_local_kernel(window: &WebviewWindow, resource_dir: &Path, data_dir: &Pat
   let port = listener.local_addr().map_err(|e| format!("读端口失败: {e}"))?.port();
   drop(listener);
 
-  // 3) 起常驻内核。
+  // 3) 起常驻内核。PoC-2 时 stdout/stderr 落盘（探针经同源访问日志旁路回传结果）。
+  let open_log = || -> Stdio {
+    fs::OpenOptions::new()
+      .create(true).append(true)
+      .open(POC2_SIDECAR_LOG)
+      .map(Stdio::from)
+      .unwrap_or_else(|_| Stdio::null())
+  };
+  let (out_log, err_log) = if poc2 { (open_log(), open_log()) } else { (Stdio::null(), Stdio::null()) };
   let child = Command::new(&node)
     .current_dir(&server)
     .arg("dist/index.js")
@@ -230,8 +251,8 @@ fn boot_local_kernel(window: &WebviewWindow, resource_dir: &Path, data_dir: &Pat
     .env("JWT_SECRET", jwt_secret)
     .envs(common_env)
     .process_group(0) // sidecar 自成进程组（pgid=其 pid），退出时整组 SIGTERM
-    .stdout(Stdio::null())
-    .stderr(Stdio::null())
+    .stdout(out_log)
+    .stderr(err_log)
     .spawn()
     .map_err(|e| format!("启动内核失败: {e}"))?;
 
@@ -265,7 +286,9 @@ fn boot_local_kernel(window: &WebviewWindow, resource_dir: &Path, data_dir: &Pat
   std::mem::forget(child);
   dbg_log(&format!("sidecar ready pid={sidecar_pid} port={port}"));
 
-  let url = format!("http://127.0.0.1:{port}/");
+  // PoC-2：导航到同源探针页（由 stage 注入 public/poc2.html）；默认仍是首页 /。
+  let path = if poc2 { "/poc2.html" } else { "/" };
+  let url = format!("http://127.0.0.1:{port}{path}");
   // 5) WebView 跳到内核同源页（界面/API/WS/附件全同源，绕开自定义协议 CORS）。
   window
     .eval(&format!("window.location.replace('{url}');"))
