@@ -1,0 +1,27 @@
+[package]
+name = "gouxiangdb-desktop"
+# 仅占位；真实版本由 scripts/build-desktop.mjs 从根 package.json 单源注入（tauri.conf.json 覆盖）。
+version = "0.2.5"
+description = "GouXiangDB macOS desktop shell"
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# sidecar：用 Tauri shell 插件的 externalBin 拉起随包 Node 运行 apps/api。
+# 钉死 2.2.1：泛版本 "2" 范围内含已知安全漏洞版本（依赖安全闸门拦截）。
+tauri-plugin-shell = "=2.2.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+# PoC 阶段用 thin LTO + 多 codegen units：避免 fat LTO 最终链接在 16GB 机上产生内存尖峰；
+# 体积差异对壳二进制可忽略。正式发布前可再收紧为 fat LTO。编译并发另由 CARGO_BUILD_JOBS=2 限制。
+opt-level = "s"
+lto = "thin"
+codegen-units = 16
+panic = "abort"
+strip = true

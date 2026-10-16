@@ -287,10 +287,15 @@ interface AppConfig {
    * - basePath：网关前缀（如 "/app/gouxiangdb"），同一路由单元同时挂根与该前缀。env GX_BASE_PATH。
    * - webDist：web vite 产物目录；仅当目录存在且含 index.html 才托管 SPA 静态。env GX_WEB_DIST。
    * 三者均不进入生产 fail-closed 必填校验。
+   *
+   * bindHost：TCP 监听地址（env GX_BIND_HOST）。默认 "0.0.0.0"，与历史 server.listen(port)
+   * 行为一致；macOS 桌面 App 启动时显式设为 "127.0.0.1"，使本地内核只绑回环（DESIGN-MACOS-APP §6.2）。
+   * 同样是可选部署适配，不进生产必填校验。
    */
   socketPath: string;
   basePath: string;
   webDist: string;
+  bindHost: string;
   /**
    * 应用更新机制配置（DESIGN §5.3，全部可选适配，默认 on）：
    * 零轮询/零定时器/零后台出网，唯一出网发生在 owner 手动点「检查更新」瞬间；
@@ -372,6 +377,8 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     socketPath: env.GX_SOCKET_PATH?.trim() ?? "",
     basePath: normalizeBasePath(env.GX_BASE_PATH),
     webDist: env.GX_WEB_DIST?.trim() ?? "",
+    // 监听地址：默认 0.0.0.0＝历史 server.listen(port) 行为；桌面传 127.0.0.1 仅绑回环。
+    bindHost: env.GX_BIND_HOST?.trim() || "0.0.0.0",
     update: updateConfig,
   };
 }

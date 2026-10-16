@@ -1,0 +1,13 @@
+# macOS 桌面 PoC 构建产物（大文件 / 机器相关，不入库）
+# 注意：.stage 与 src-tauri/target 在本机被软链到 ~/Library/Caches（避开 iCloud 桌面），
+# 规则不带尾斜杠，确保软链本身也被忽略。
+.stage
+src-tauri/target
+src-tauri/gen/
+src-tauri/binaries/
+*.dmg
+*.app.tar.gz
+*.sig
+latest.json
+node_modules/
+dist/

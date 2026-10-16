@@ -41,10 +41,12 @@ const port = config.port;
 function startTcp(): void {
   const server: Server = createServer(getRequestListener(app.fetch));
   attachCollab(server);
-  server.listen(port, () => {
+  // bindHost 默认 0.0.0.0（与历史一致）；macOS 桌面 App 传 127.0.0.1 仅绑回环（DESIGN-MACOS-APP §6.2）。
+  server.listen(port, config.bindHost, () => {
+    const hostNote = config.bindHost && config.bindHost !== "0.0.0.0" ? ` host=${config.bindHost}` : "";
     const prefixNote = config.basePath ? ` basePath=${config.basePath}` : "";
     const webNote = webRoot ? ` web=${webRoot}` : "";
-    console.log(`[GouXiangDB API] http://localhost:${port}${prefixNote}${webNote}`);
+    console.log(`[GouXiangDB API] http://localhost:${port}${hostNote}${prefixNote}${webNote}`);
     bootSearchWorker();
   });
 
