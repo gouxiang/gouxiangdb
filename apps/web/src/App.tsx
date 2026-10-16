@@ -42,6 +42,8 @@ import { BrandingTitle } from "./features/branding/BrandingTitle";
 import { WorkspaceSettingsPage } from "./features/workspace/WorkspaceSettingsPage";
 import PermPanel from "./features/authz/PermPanel";
 import { NodeLauncherGate } from "./node/NodeLauncherGate";
+import { launcherEnabled } from "./node/desktopGate";
+import { useRemoteSessionActive } from "./node/useActiveSession";
 
 function Loading() {
   return (
@@ -66,8 +68,14 @@ function RequirePasswordChanged({ children }: { children: ReactNode }) {
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const token = useAuthStore((s) => s.token);
-  if (!token) return <Navigate to="/login" replace />;
-  return <>{children}</>;
+  // 桌面节点启动器（门控开启）下，连远端节点时本地 gx-auth 无 token，但 resolver 活动槽
+  // 是已登录远端会话（apiFetch 自动带远端 JWT）——此时也放行。门控关闭（浏览器/fnOS/服务器）
+  // 恒为 false，整个判定与今天逐字节一致。
+  const remoteActive = useRemoteSessionActive();
+  if (token) return <>{children}</>;
+  if (remoteActive) return <>{children}</>;
+  // 桌面未连任何节点 → 回启动器；现网门控关 → 回本地登录页（原行为）。
+  return <Navigate to={launcherEnabled() ? "/launcher" : "/login"} replace />;
 }
 
 /** / → 第一个 Base */
