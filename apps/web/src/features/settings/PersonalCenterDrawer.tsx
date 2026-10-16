@@ -24,10 +24,9 @@ import {
   useRemoveAvatar,
 } from "../../api/hooks";
 import type { UserDTO } from "@gx/shared-types";
-import { withBase } from "../../api/client";
+import { withBase, ApiError } from "../../api/client";
 import { AVATAR_PALETTE } from "@gx/design-tokens";
-import { ApiError } from "../../api/client";
-import { authHeaders } from "../../api/authHeader";
+import { dataSourceResolver } from "../../node/datasource";
 
 type Tab = "profile" | "account" | "password" | "avatar" | "danger";
 
@@ -802,13 +801,14 @@ function uploadAvatarXHR(
   mimeType: string,
   onProgress: (percent: number) => void,
 ): Promise<{ user: UserDTO }> {
-  const token = useAuthStore.getState().token;
   const ext = mimeType === "image/jpeg" ? "jpg" : mimeType.split("/")[1] ?? "jpg";
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", withBase("/api/auth/me/avatar"));
+    // S2：头像上传跟当前数据源（local 逐字节等价，X-GX-Token 头不变）。
+    xhr.open("POST", dataSourceResolver.baseFor("/api/auth/me/avatar"));
     // 飞牛 CGI 网关会把 Authorization 当自家令牌校验并吞掉请求，故统一用 X-GX-Token。
-    for (const [k, v] of Object.entries(authHeaders(token))) xhr.setRequestHeader(k, v);
+    for (const [k, v] of Object.entries(dataSourceResolver.headers()))
+      xhr.setRequestHeader(k, v);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
     };

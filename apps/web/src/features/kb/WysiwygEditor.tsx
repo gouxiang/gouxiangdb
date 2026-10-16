@@ -17,9 +17,7 @@ import { COPY_FAIL_HINT_LINK, copyText } from "../../lib/clipboard";
 import { MentionPicker, type MentionEmbedKind } from "./MentionPicker";
 import { CanvasEmbed } from "./CanvasEmbed";
 import { useLinkResolve } from "./hooks/useLinkResolve";
-import { useAuthStore } from "../../store/auth";
-import { withBase } from "../../api/client";
-import { authHeaders } from "../../api/authHeader";
+import { dataSourceResolver } from "../../node/datasource";
 import {
   Block,
   BlockType,
@@ -2544,10 +2542,8 @@ export function WysiwygEditor({
                 return;
               }
               const fallback = anchor;
-              // 修复 #3b：必须从 Zustand store 取 token（window.__gxAuth 在生产代码中从未赋值，
-              // 之前 fetch 永远无 Authorization → 401 → 文档拉不到 → title 退化为 anchor 字符串）
-              const token = useAuthStore.getState().token;
-              const headers: Record<string, string> = authHeaders(token);
+              // 修复 #3b：token 现由数据源解析器统一给出（local 下即 auth store），避免裸读过期凭据。
+              const headers: Record<string, string> = dataSourceResolver.headers();
               const docIdMatch = /\/kb\/[^/]+\/(?:doc|canvas)\/([^/?#]+)/.exec(path);
               const docId = docIdMatch?.[1];
               if (!docId) {
@@ -2555,7 +2551,7 @@ export function WysiwygEditor({
                 if (bid) syncBlock(bid);
                 return;
               }
-              fetch(withBase(`/api/kb/docs/${docId}`), { headers })
+              fetch(dataSourceResolver.baseFor(`/api/kb/docs/${docId}`), { headers })
                 .then((r) => r.ok ? r.json() : null)
                 .then((doc) => {
                   // 修复 #3b (round 3)：后端响应是 { doc: { content, title, ... } }，旧代码误读为 doc.content

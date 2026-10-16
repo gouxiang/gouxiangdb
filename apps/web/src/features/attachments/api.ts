@@ -11,9 +11,7 @@
 //      令牌校验并吞掉请求，见 api/authHeader.ts 顶部实测记录；
 //   ② 上传走 XHR 而不是 fetch：fetch 至今拿不到上传进度，大附件会「点了没反应」。
 
-import { useAuthStore } from "../../store/auth";
-import { authHeaders } from "../../api/authHeader";
-import { withBase } from "../../api/client";
+import { dataSourceResolver } from "../../node/datasource";
 import { uploadCodeHint } from "./policy";
 import type { AttachmentDTO } from "@gx/shared-types";
 
@@ -76,11 +74,12 @@ export function uploadAttachmentFile(
   ctx: AttachmentUploadContext,
   onProgress?: (percent: number) => void,
 ): Promise<AttachmentDTO> {
-  const token = useAuthStore.getState().token;
   return new Promise<AttachmentDTO>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", withBase("/api/attachments"));
-    for (const [k, v] of Object.entries(authHeaders(token))) xhr.setRequestHeader(k, v);
+    // S2：跟当前数据源（local 逐字节等价，X-GX-Token 头不变）。
+    xhr.open("POST", dataSourceResolver.baseFor("/api/attachments"));
+    for (const [k, v] of Object.entries(dataSourceResolver.headers()))
+      xhr.setRequestHeader(k, v);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
     };
@@ -163,12 +162,16 @@ export async function fetchAttachmentBytes(
   if (raw === "") throw new Error("附件地址为空");
   if (/^data:/i.test(raw)) return decodeDataUrl(raw);
 
-  const token = useAuthStore.getState().token;
+  // S2：跟当前数据源。resolver.baseFor 底层即 withBase——绝对 http(s)/blob 原样透传、
+  // 相对 /uploads 才拼当前 base，local 下与旧 withBase(raw) 逐字节等价。
   const controller = typeof AbortController === "function" ? new AbortController() : null;
   const timer = controller && typeof setTimeout === "function" ? setTimeout(() => controller.abort(), timeoutMs) : null;
   let res: Response;
   try {
-    res = await fetch(withBase(raw), { headers: { ...authHeaders(token) }, signal: controller?.signal });
+    res = await fetch(dataSourceResolver.baseFor(raw), {
+      headers: { ...dataSourceResolver.headers() },
+      signal: controller?.signal,
+    });
   } catch (e) {
     if (controller?.signal.aborted) throw new Error("下载超时，请重试");
     throw e;
@@ -214,11 +217,14 @@ export function toBlobUrl(bytes: Uint8Array, mime: string): string {
 export async function deleteAttachment(id: string): Promise<boolean> {
   if (!id) return false;
   try {
-    const token = useAuthStore.getState().token;
-    const res = await fetch(withBase(`/api/attachments/${encodeURIComponent(id)}`), {
-      method: "DELETE",
-      headers: { ...authHeaders(token) },
-    });
+    // S2：跟当前数据源（local 逐字节等价，X-GX-Token 头不变）。
+    const res = await fetch(
+      dataSourceResolver.baseFor(`/api/attachments/${encodeURIComponent(id)}`),
+      {
+        method: "DELETE",
+        headers: { ...dataSourceResolver.headers() },
+      },
+    );
     return res.ok;
   } catch {
     return false;

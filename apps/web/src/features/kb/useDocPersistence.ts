@@ -9,9 +9,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "../../components/ui";
-import { KbApi, API_BASE_URL, ApiError, type KbDocDTO } from "../../api/client";
-import { useAuthStore } from "../../store/auth";
-import { authHeaders } from "../../api/authHeader";
+import { KbApi, ApiError, type KbDocDTO } from "../../api/client";
+import { dataSourceResolver } from "../../node/datasource";
 import { saveDraft, loadDraft, clearDraft, hasRecoverableDraft, type Draft } from "./draft";
 
 /**
@@ -204,10 +203,14 @@ export function useDocPersistence(
     // 协同可用：整篇 PUT 会让本地快照与 CRDT 抢写（DESIGN §3.3），flush 一并让位
     if (collabActiveRef.current) return;
     try {
-      const token = useAuthStore.getState().token;
-      void fetch(`${API_BASE_URL}/api/kb/docs/${docIdRef.current}/content`, {
+      // S2：同步读当前数据源拼 URL/头（flush 可能在卸载关页时触发，不能 async 化）。
+      const dsUrl = dataSourceResolver.baseFor(
+        `/api/kb/docs/${docIdRef.current}/content`,
+      );
+      const dsHeaders = dataSourceResolver.headers();
+      void fetch(dsUrl, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...authHeaders(token) },
+        headers: { "Content-Type": "application/json", ...dsHeaders },
         body: JSON.stringify({ content, baseVersion: versionRef.current }),
         keepalive: true,
       })

@@ -8,10 +8,9 @@
 //   - 不阻塞点击：探测异步进行，结果回传后再决定是否 navigate
 //   - 失败不抛错；上层拿到 LinkResolveResult 自取 ok/toast
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useAuthStore } from "../../../store/auth";
-import { withBase } from "../../../api/client";
-import { authHeaders } from "../../../api/authHeader";
+import { dataSourceResolver } from "../../../node/datasource";
 
 export type LinkResolveKind = "ok" | "deleted" | "forbidden" | "network" | "external" | "unknown";
 
@@ -45,6 +44,8 @@ export function useLinkResolve() {
   useMemo(() => {
     if (!token) cache.clear();
   }, [token]);
+  // S2：数据源切换（local↔远端、远端 A↔B）后，旧节点的 ACL 探测结果不可复用，整池清空。
+  useEffect(() => dataSourceResolver.subscribe(() => cache.clear()), []);
 
   return useCallback(async (href: string): Promise<LinkResolveResult> => {
     const probe = probePath(href);
@@ -60,8 +61,8 @@ export function useLinkResolve() {
     }
 
     const result: LinkResolveResult = await new Promise((resolve) => {
-      const auth = useAuthStore.getState();
-      const tok = auth.token;
+      // S2：门控凭据取当前数据源（local 下即 auth store token；remote 下为远端会话 JWT）。
+      const tok = dataSourceResolver.current().token;
       if (!tok) {
         resolve({ ok: false, kind: "unknown", href, toast: "请先登录" });
         return;
@@ -71,9 +72,9 @@ export function useLinkResolve() {
       // 返回 200=可访问 / 404=已删除 / 403=无权限 / 401=未登录。
       // 不显式传 kbId：链接里的 kbId 可能因分享/复制产生漂移，以 docId 单维度探测更稳。
       void probe.kbId;
-      fetch(withBase(`/api/kb/docs/${probe.docId}/acl`), {
+      fetch(dataSourceResolver.baseFor(`/api/kb/docs/${probe.docId}/acl`), {
         method: "GET",
-        headers: authHeaders(tok),
+        headers: dataSourceResolver.headers(),
       })
         .then(async (r) => {
           if (r.status === 200) {
