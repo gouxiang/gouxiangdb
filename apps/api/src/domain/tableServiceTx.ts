@@ -19,6 +19,10 @@ import {
   resyncLibraryAggregateForAllScopesTx,
 } from "./authz/scopeProjectionTx.js";
 import { projectAdminForNewTableTx } from "./authz/scopeDoubleWrite.js";
+import { resolveTableRestoreName } from "./restoreName.js";
+import { restoreLinkRows } from "./recordWrite.js";
+import { restoreRecordsTx } from "./fieldIndex/sync.js";
+import { recordSyncOpsTx } from "./sync/oplog.js";
 
 // ============ 表名唯一性（同库 + 未软删 + trim 后精确匹配）============
 //
@@ -234,4 +238,76 @@ export async function softDeleteTableTx(
   // 删表后按当前活表形态整行覆盖重算库节点：唯一可写表被删时 edit_data 正确移除，
   // canManage 角色则由 projectScopeRow 继续导出 edit_data（见 ADR-0056）。
   await resyncLibraryAggregateForAllScopesTx(tx, "base", baseId, operatorUserId);
+}
+
+export interface RestoreTableTxResult {
+  baseId: string;
+  /** 恢复后的最终表名（与同名活表冲突时已自动改名去歧义）。 */
+  name: string;
+  /** 是否因同名冲突被自动改名。 */
+  renamed: boolean;
+  /** 本次连带恢复的记录 id（供编排层登记结构 oplog/失效缓存）。 */
+  restoredRecordIds: string[];
+}
+
+/**
+ * 恢复软删表（单事务）：表复活（同名自动改名）→ 连带复活字段/记录 → 回填两端存活关联、
+ * 重建记录 sidecar + 变更/同步版本登记 → 隐藏视图重排可见 → nav 子树原地复活 → scope 投影重建
+ * （补 role_admin 隐含策略）→ 库节点聚合位重算。
+ *
+ * 从 routes/records.ts 回收站恢复的 table 分支整体下沉，供【在线恢复】与【YN7 结构回放
+ * restore_table 处理器】共用同一事务体（§20.1 单一事实源，防语义漂移）。
+ * 铁律同本文件其它函数：只用传入 tx，回调内禁止再入写队列。
+ */
+export async function restoreTableTx(
+  tx: DbTx,
+  tableId: string,
+  operatorUserId: string,
+): Promise<RestoreTableTxResult> {
+  const t = await tx.table.findUnique({
+    where: { id: tableId },
+    select: { baseId: true, name: true },
+  });
+  if (!t) throw new HttpError(404, "数据表不存在");
+  const { baseId } = t;
+
+  // 同字段恢复：恢复前查同 base 下同名活表，冲突则自动改名（回收站恢复不能被 409 拒绝）。
+  const finalName = await resolveTableRestoreName(tx, tableId, baseId, t.name);
+  await tx.table.update({ where: { id: tableId }, data: { deletedAt: null, name: finalName } });
+  await tx.field.updateMany({ where: { tableId, deletedAt: { not: null } }, data: { deletedAt: null } });
+  // 先取回待恢复记录 id，恢复后按「两端都存活」回填关联。
+  const restoredRows = await tx.record.findMany({
+    where: { tableId, deletedAt: { not: null } },
+    select: { id: true },
+  });
+  await tx.record.updateMany({ where: { tableId, deletedAt: { not: null } }, data: { deletedAt: null } });
+  await restoreLinkRows(tx, restoredRows.map((r) => r.id));
+  const restoredIds = restoredRows.map((r) => r.id);
+  if (restoredRows.length > 0) {
+    // M1/S4：整表恢复后批量重建全部恢复记录的 sidecar。
+    await restoreRecordsTx(tx, tableId, restoredIds);
+    // M5/S1：整表恢复的记录逐条登记 upsert。
+    const restoreVersion = BigInt(Date.now());
+    await enqueueChangeEventsTx(tx, restoredIds.map((rid) => ({
+      entityType: "record" as const, entityId: rid, op: "upsert" as const, version: restoreVersion,
+    })));
+    // YN1：整表恢复的记录逐条推进同步版本、撤墓碑（op=restore，显式传 baseId；开关 off 零写）。
+    await recordSyncOpsTx(tx, restoredIds.map((rid) => ({
+      entityType: "record" as const, entityId: rid, tableId, baseId,
+      op: "restore" as const, actorId: operatorUserId, changes: [],
+    })));
+  }
+  // 删表时视图被置 order=-1 隐藏，恢复时按原序无关地重置为可见顺序。
+  const hiddenViews = await tx.view.findMany({ where: { tableId, order: -1 }, select: { id: true } });
+  for (let i = 0; i < hiddenViews.length; i++) {
+    await tx.view.update({ where: { id: hiddenViews[i]!.id }, data: { order: i } });
+  }
+  await syncNavFromEntitiesTx(tx);
+  // P1/S7 #5：表恢复同建表——为该库每条命中 scope 角色补齐恢复表节点策略 + role_admin 隐含投影。
+  await syncTableForAllScopesTx(tx, "base", baseId, tableId, "add", operatorUserId);
+  await projectAdminForNewTableTx(tx, baseId, tableId, operatorUserId);
+  // 与删表对称：恢复表后按现活表形态重算库节点聚合位，恢复可写表的 edit_data。
+  await resyncLibraryAggregateForAllScopesTx(tx, "base", baseId, operatorUserId);
+
+  return { baseId, name: finalName, renamed: finalName !== t.name, restoredRecordIds: restoredIds };
 }

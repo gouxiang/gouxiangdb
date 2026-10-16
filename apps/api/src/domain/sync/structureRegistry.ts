@@ -13,26 +13,38 @@
 // 本文件只做【结构写应用 + oplog 元数据准备】；版本钟推进/乐观锁/终态落库由 push.ts 的
 // replayStructureTx 统一经 structureOplog.writeStructureOpTx 完成（与 record 轨同一套状态机）。
 //
-// 分期诚实边界（YN7 首段＝#787：词表/结构版本门/回放原语 happy path）：
-//   - 已登记：create_table / rename_table / update_table_settings / delete_table、
-//     add_field / alter_field / delete_field / create_link_field、
+// 分期诚实边界（YN7＝#787 首段 + #788 续段）：
+//   - 已登记：create_table / rename_table / update_table_settings / delete_table / restore_table、
+//     add_field / alter_field / delete_field / restore_field / reorder_fields / create_link_field、
 //     create_view / alter_view / delete_view。
-//   - restore_table / restore_field / reorder_fields、结构分叉的人工 resolve、字段类型变更对
-//     存量数据的可转换校验（§19.3 场景 2/3/4/6）在 #788 落地；未登记 op 由引擎回
-//     SYNC_OP_UNSUPPORTED（明确拒绝、不静默、不假装支持）。
+//   - 结构分叉的人工 resolve、字段类型变更对存量数据的可转换校验（§19.3 场景 2/3/5/6）在 #788-C/D
+//     落地；未登记 op 由引擎回 SYNC_OP_UNSUPPORTED（明确拒绝、不静默、不假装支持）。
 
 import type { ResourceAction } from "@gx/shared-types";
 import type { DbTx } from "../../db.js";
 import { HttpError } from "../../httpError.js";
-import { createTableTx, updateTableTx, softDeleteTableTx } from "../tableServiceTx.js";
+import { createTableTx, updateTableTx, softDeleteTableTx, restoreTableTx } from "../tableServiceTx.js";
 import {
   createSimpleFieldTx,
   createLinkFieldPairTx,
   updateFieldTx,
   deleteFieldTx,
+  restoreFieldTx,
+  reorderFieldsTx,
 } from "../fieldServiceTx.js";
 import { createViewTx, updateViewTx, assertAndPurgeViewTx } from "../viewServiceTx.js";
 import { buildFieldUpdateData, type CreateFieldInput, type UpdateFieldInput } from "../fieldService.js";
+import type { SelectOption } from "../types.js";
+import {
+  isConvertibleSourceType,
+  isConvertibleTargetType,
+  parseSelectOptions,
+  scanTypeConversionBlockersTx,
+  throwIfBlocked,
+  assertPrimaryFieldPopulatedTx,
+  RC_TYPE_CHANGE_UNSUPPORTED,
+  RC_STRUCTURE_ENTITY_DELETED,
+} from "./structureValidation.js";
 import { resyncTableMaskTx } from "../authz/scopeProjectionTx.js";
 import { parseViewConfig } from "../recordService.js";
 import type { StructureEntityType } from "./structureOplog.js";
@@ -49,6 +61,10 @@ function str(v: unknown): string | null {
 }
 function bool(v: unknown, dft = false): boolean {
   return typeof v === "boolean" ? v : dft;
+}
+function safeJsonParse(raw: string | null | undefined): unknown {
+  if (!raw) return null;
+  try { return JSON.parse(raw) as unknown; } catch { return null; }
 }
 
 // ───────────────────────── 注册表类型 ─────────────────────────
@@ -154,6 +170,13 @@ const updateTableSettingsHandler: StructureOpHandler = {
     if (o.payload.primaryFieldId !== undefined) {
       const pf = str(o.payload.primaryFieldId);
       if (!pf) throw new HttpError(400, "update_table_settings.primaryFieldId 非法", "SYNC_MALFORMED_PAYLOAD");
+      // §19.3 场景 5：改主字段与在线同规则——目标字段须是本表活字段，且全表每条记录该字段非空。
+      const pfRow = await tx.field.findFirst({
+        where: { id: pf, tableId: o.entityId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!pfRow) throw new HttpError(400, "主字段必须是该数据表内未删除的字段", "SYNC_MALFORMED_PAYLOAD");
+      await assertPrimaryFieldPopulatedTx(tx, o.entityId, pf);
       data.primaryFieldId = pf;
     }
     if (Object.keys(o.payload).includes("icon")) {
@@ -186,6 +209,25 @@ const deleteTableHandler: StructureOpHandler = {
     return {
       entityType: "table", entityId: o.entityId, tableId: o.entityId, op: o.op,
       payload: {}, resyncMaskTables: [],
+    };
+  },
+};
+
+// 恢复软删表：表节点处于软删态、无法在 table 节点解析权限，故与在线 requireRestoreTable 同款，
+// 权限挂【base 节点】判 manage_schema（§19.4）；assertTableInBase 只校验归属、不因 deletedAt 拒绝。
+const restoreTableHandler: StructureOpHandler = {
+  entityType: "table",
+  async resolve(tx, baseId, o) {
+    await assertTableInBase(tx, o.entityId, baseId);
+    return { tableId: o.entityId, ref: { resourceType: "base", resourceId: baseId }, action: "manage_schema" };
+  },
+  async apply(tx, userId, _baseId, o) {
+    const r = await restoreTableTx(tx, o.entityId, userId);
+    return {
+      entityType: "table", entityId: o.entityId, tableId: o.entityId, op: o.op,
+      // 只落结构元数据 + 恢复记录条数（无记录行明文，§19.1 oplog payload 纪律）。
+      payload: { name: r.name, renamed: r.renamed, restoredRecords: r.restoredRecordIds.length },
+      resyncMaskTables: [],
     };
   },
 };
@@ -266,8 +308,13 @@ const alterFieldHandler: StructureOpHandler = {
       where: { id: o.entityId },
       select: { tableId: true, deletedAt: true, table: { select: { baseId: true } } },
     });
-    if (!existing || existing.deletedAt || existing.table.baseId !== baseId) {
+    if (!existing || existing.table.baseId !== baseId) {
       throw new HttpError(400, "字段不存在或不属于该 Base", "SYNC_ENTITY_NOT_FOUND");
+    }
+    // §19.3-2：我离线改的字段在服务端已被对方软删 → 结构冲突（可复合 restore_field+alter_field），
+    // 而非永久 rejected。用 409 + 专用码，replayStructureTx preflight 据此落 conflict（带结构快照）。
+    if (existing.deletedAt) {
+      throw new HttpError(409, "该字段已被删除（可能由他人在你离线期间操作）；可选择恢复并应用你的修改，或采用服务端", RC_STRUCTURE_ENTITY_DELETED);
     }
     return { tableId: existing.tableId, ref: { resourceType: "table", resourceId: existing.tableId }, action: "manage_schema" };
   },
@@ -287,8 +334,46 @@ const alterFieldHandler: StructureOpHandler = {
       if (trimmed === "") throw new HttpError(400, "字段名不能为空", "SYNC_MALFORMED_PAYLOAD");
       changed.name = trimmed;
     }
+
+    // §19.3 场景 3：alter_field 改类型——YN7 结构回放是第一条真正改 type 的路径（在线 PATCH 刻意
+    // 不支持）。接受前先做两道安全门：① 仅物理标量字段间可转（关联/计算/容器/附件/人员/自动编号/
+    // 系统字段明确拒绝，走新建字段）；② 扫描全表活记录存量值，任一非空值无法安全转换即 rejected
+    // （带阻碍数/示例），field 行不动、版本不推进。通过后只改 type 元数据、不重写存量 cells（值存
+    // records.fields JSON、非物理列，零破坏可回退）。
+    if (changed.type !== undefined && changed.type !== existing.type) {
+      const newType = str(changed.type);
+      if (!newType) throw new HttpError(400, "字段类型非法", "SYNC_MALFORMED_PAYLOAD");
+      if (!isConvertibleSourceType(existing.type) || !isConvertibleTargetType(newType)) {
+        throw new HttpError(
+          422,
+          `暂不支持把「${existing.type}」字段改为「${newType}」类型（关联/公式/查找引用/附件/人员/自动编号等请新建字段）`,
+          RC_TYPE_CHANGE_UNSUPPORTED,
+        );
+      }
+      // 目标为单选/多选时，存量值必须命中新选项集合；优先取本次 changed.options，否则沿用现有选项。
+      let targetOptions: SelectOption[] | null = null;
+      if (newType === "singleSelect" || newType === "multiSelect") {
+        if (changed.options !== undefined) {
+          const parsed = parseSelectOptions(changed.options);
+          if (!parsed) throw new HttpError(400, "选项 options 必须是 {id,name,color} 数组", "SYNC_MALFORMED_PAYLOAD");
+          targetOptions = parsed;
+        } else if (existing.options) {
+          targetOptions = parseSelectOptions(safeJsonParse(existing.options)) ?? [];
+        } else {
+          targetOptions = [];
+        }
+      }
+      const blockers = await scanTypeConversionBlockersTx(tx, existing.tableId, o.entityId, newType, targetOptions);
+      throwIfBlocked(blockers, newType);
+      // buildFieldUpdateData 不含 type（在线不支持改类型），此处作为 YN7 专属旁路显式落库。
+      (changed as Record<string, unknown>).type = newType;
+    }
+
     const patch = changed as UpdateFieldInput;
     const data = buildFieldUpdateData(existing, patch);
+    if (changed.type !== undefined && typeof (changed as Record<string, unknown>).type === "string") {
+      data["type"] = (changed as Record<string, unknown>).type;
+    }
     const isLinkLike = existing.type === "links" || existing.type === "subtable";
     const backfilled = isLinkLike && !existing.linkFieldId && !existing.isReverse
       && !!patch.relatedTableId && patch.relatedTableId !== existing.relatedTableId;
@@ -326,11 +411,70 @@ const deleteFieldHandler: StructureOpHandler = {
       const f = await tx.field.findUnique({ where: { id: did }, select: { tableId: true } });
       if (f) tableIds.add(f.tableId);
     }
-    for (const tid of tableIds) await resyncTableMaskTx(tx, tid, userId);
+    for (const tid of tableIds)     await resyncTableMaskTx(tx, tid, userId);
     return {
       entityType: "field", entityId: o.entityId, tableId: field.tableId, op: o.op,
       payload: { tableId: field.tableId, deleted: deletedIds },
       resyncMaskTables: [...tableIds],
+    };
+  },
+};
+
+// 恢复软删字段：目标字段本身可能处于软删态，不能用 alter_field 那套「活字段」解析。权限挂该字段
+// 所属表节点判 manage_schema（§19.4）；表已软删时字段恢复随整表恢复（§19.3-4），此处仍按归属校验。
+const restoreFieldHandler: StructureOpHandler = {
+  entityType: "field",
+  async resolve(tx, baseId, o) {
+    const existing = await tx.field.findUnique({
+      where: { id: o.entityId },
+      select: { tableId: true, table: { select: { baseId: true } } },
+    });
+    if (!existing || existing.table.baseId !== baseId) {
+      throw new HttpError(400, "字段不存在或不属于该 Base", "SYNC_ENTITY_NOT_FOUND");
+    }
+    return { tableId: existing.tableId, ref: { resourceType: "table", resourceId: existing.tableId }, action: "manage_schema" };
+  },
+  async apply(tx, userId, baseId, o) {
+    const field = await tx.field.findUnique({
+      where: { id: o.entityId },
+      select: { tableId: true, table: { select: { baseId: true } } },
+    });
+    if (!field || field.table.baseId !== baseId) {
+      throw new HttpError(400, "字段不存在或不属于该 Base", "SYNC_ENTITY_NOT_FOUND");
+    }
+    const r = await restoreFieldTx(tx, o.entityId);
+    for (const tid of r.maskTableIds) await resyncTableMaskTx(tx, tid, userId);
+    return {
+      entityType: "field", entityId: o.entityId, tableId: r.tableId, op: o.op,
+      payload: { tableId: r.tableId, name: r.name, renamed: r.renamed },
+      resyncMaskTables: r.maskTableIds,
+    };
+  },
+};
+
+// 整表字段重排：entityType=field 但作用对象是整张表，entityId 约定＝tableId（oplog 实体 id 取表），
+// 权威顺序以 payload.fieldIds（有序活字段 id 列表）为准；集合一致性由 reorderFieldsTx 强校验。
+const reorderFieldsHandler: StructureOpHandler = {
+  entityType: "field",
+  async resolve(tx, baseId, o) {
+    const tableId = str(o.payload.tableId) ?? o.entityId;
+    if (!tableId) throw new HttpError(400, "reorder_fields 缺少 tableId", "SYNC_MALFORMED_PAYLOAD");
+    await assertTableInBase(tx, tableId, baseId);
+    return { tableId, ref: { resourceType: "table", resourceId: tableId }, action: "manage_schema" };
+  },
+  async apply(tx, _userId, baseId, o) {
+    const tableId = str(o.payload.tableId) ?? o.entityId;
+    if (!tableId) throw new HttpError(400, "reorder_fields 缺少 tableId", "SYNC_MALFORMED_PAYLOAD");
+    await assertTableInBase(tx, tableId, baseId);
+    const raw = o.payload.fieldIds;
+    if (!Array.isArray(raw) || raw.length === 0 || raw.some((x) => typeof x !== "string" || !x)) {
+      throw new HttpError(400, "reorder_fields 需要非空有序 fieldId 列表", "SYNC_MALFORMED_PAYLOAD");
+    }
+    const fieldIds = raw as string[];
+    await reorderFieldsTx(tx, tableId, fieldIds);
+    return {
+      entityType: "field", entityId: tableId, tableId, op: o.op,
+      payload: { tableId, fieldIds }, resyncMaskTables: [],
     };
   },
 };
@@ -440,10 +584,13 @@ const REGISTRY = new Map<string, StructureOpHandler>([
   [`table:rename_table`, renameTableHandler],
   [`table:update_table_settings`, updateTableSettingsHandler],
   [`table:delete_table`, deleteTableHandler],
+  [`table:restore_table`, restoreTableHandler],
   [`field:add_field`, addFieldHandler],
   [`field:create_link_field`, addFieldHandler], // 同处理器，按 payload 是否成对分流
   [`field:alter_field`, alterFieldHandler],
   [`field:delete_field`, deleteFieldHandler],
+  [`field:restore_field`, restoreFieldHandler],
+  [`field:reorder_fields`, reorderFieldsHandler],
   [`view:create_view`, createViewHandler],
   [`view:alter_view`, alterViewHandler],
   [`view:delete_view`, deleteViewHandler],

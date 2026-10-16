@@ -63,7 +63,7 @@ async function auth(user: string): Promise<Record<string, string>> {
   return { ...(await h.auth(user)), "Content-Type": "application/json" };
 }
 
-async function pushAs(user: string, clientId: string, ops: ReturnType<typeof sop>[]): Promise<PushResp> {
+async function pushAs(user: string, clientId: string, ops: unknown[]): Promise<PushResp> {
   const res = await h.app.request("/api/v1/sync/push", {
     method: "POST",
     headers: await auth(user),
@@ -363,12 +363,19 @@ describe("H. 当前权限重判（manage_schema）", () => {
 });
 
 describe("I. 未登记/非法 op", () => {
-  it("restore_table（#788 才做）→ rejected=OP_UNSUPPORTED", async () => {
+  it("未登记结构 op（nav_create_group 属 YN8）→ rejected=OP_UNSUPPORTED", async () => {
     const r = await pushAs(OWNER, CLIENT, [
-      sop(cid("restore"), "table", "restore_table", "tbl_yn7_perm", "1", {}),
+      { clientOpId: cid("unsupp"), entityType: "navnode", entityId: "nav_x", op: "nav_create_group", baseVersion: "0", payload: { name: "分组" } },
     ]);
     expect(r.results![0]!.status).toBe("rejected");
     expect(r.results![0]!.reasonCode).toBe("SYNC_OP_UNSUPPORTED");
+  });
+
+  it("已登记但 payload 无法解析目标的 restore_field（字段不存在）→ rejected", async () => {
+    const r = await pushAs(OWNER, CLIENT, [
+      sop(cid("restore_missing"), "field", "restore_field", "fld_never_existed", "0", {}),
+    ]);
+    expect(r.results![0]!.status).toBe("rejected");
   });
 
   it("create_table 缺 name → rejected=MALFORMED，表不落地", async () => {

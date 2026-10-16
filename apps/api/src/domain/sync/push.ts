@@ -49,13 +49,15 @@ import {
 import { invalidateOrdinalCache } from "../prismaDeps.js";
 import type { FieldMeta } from "../types.js";
 import { SyncVersionConflictError } from "./oplog.js";
-import { writeStructureOpTx } from "./structureOplog.js";
+import { writeStructureOpTx, readSchemaVersionTx, readSchemaVersion } from "./structureOplog.js";
 import {
   getStructureOpHandler,
   isStructureEntityType,
   type StructureOpHandler,
   type StructureResolution,
 } from "./structureRegistry.js";
+import { buildStructureSnapshot, resolveStructureTableId } from "./structureSnapshot.js";
+import { canConvertStoredValue, isEmptyStoredValue } from "./structureValidation.js";
 
 // ───────────────────────────────── 信封类型 ─────────────────────────────────
 
@@ -67,6 +69,12 @@ export interface IncomingOp {
   op: string;
   /** 客户端提交时所基于的实体版本（字符串承载 BigInt，路由保证 /^\d+$/）。 */
   baseVersion: bigint;
+  /**
+   * 【additive，§19.2】仅 record op 可有：该记录所属表在客户端发起写时的 table_schema 结构版本。
+   * null＝旧客户端/未携带 → 不启用结构依赖门（默认零行为变化，不阻断任何现存调用方）。
+   * 携带且 < 服务端当前 schemaVersion → 数据 op 挂起为结构依赖冲突（等结构分叉先被人工解决）。
+   */
+  baseSchemaVersion?: bigint | null;
   payload: Record<string, unknown>;
   /**
    * 【内部，路由永不设置】YN6：非空表示这是冲突人工解决产生的 resolve op，值＝被解决的原始冲突
@@ -74,6 +82,14 @@ export interface IncomingOp {
    * result="resolved"/conflictOf。普通 push 的 op 恒无此字段。
    */
   _resolveOf?: string;
+  /**
+   * 【内部，路由永不设置】#788-D：true 表示这是一条曾因结构依赖挂起（STRUCTURE_DEPENDENCY）的数据
+   * op，在用户显式解决结构分叉后【按服务端当前新结构核对重放】。作用有二：
+   *   ① structureDependencyGateTx 见到此位不再因 baseSchemaVersion 落后而再次挂起（用户已确认对齐）；
+   *   ② create/patch 主写前对涉及字段按【当前类型/选项】做可转换核对：可转则显式转型后落库，
+   *      不可转（如「张三」→数字）或字段已被对方删除 → 落数据冲突，绝不静默丢/静默写脏值（§19.3-3）。
+   */
+  _reconcileSchema?: boolean;
 }
 
 /** 单条裁决回执（§13 push.results[i]）。BigInt 序列化为字符串由路由层负责。 */
@@ -149,6 +165,16 @@ const RC = {
   RESOLVE_MALFORMED: "SYNC_RESOLVE_MALFORMED",
   // YN7 结构轨（§19.2/§19.3）：结构版本分叉（表结构已被他人改变）。
   STRUCTURE_CONFLICT: "SYNC_STRUCTURE_VERSION_CONFLICT",
+  // #788-A 数据 op 的结构依赖（§19.2）：record op 携带的 baseSchemaVersion 落后于服务端当前
+  // table_schema 版本（离线期间表结构已被他人改变）→ 挂起，等结构分叉人工解决后按新结构重放。
+  STRUCTURE_DEPENDENCY: "SYNC_STRUCTURE_DEPENDENCY_CONFLICT",
+  // #788-A（§19.3 场景 4）：数据 op 所属表已被（对方）软删 → 依赖冲突，用户 restore_table 后整体重放。
+  TABLE_DELETED: "SYNC_TABLE_DELETED",
+  // #788-D（§19.3 场景 3）：挂起的数据 op 在结构分叉解决后按【新结构】核对，某字段已被对方删除或其
+  // 存量值无法安全转到新类型（如「张三」→数字）→ 转【数据冲突】弹窗，逐记录改值或放弃，绝不静默丢。
+  SCHEMA_REPLAY_VALUE: "SYNC_SCHEMA_REPLAY_VALUE_CONFLICT",
+  // #788-D：结构冲突的复合 resolve 载荷非法（steps 缺失/形状错）。
+  RESOLVE_STEPS_MALFORMED: "SYNC_RESOLVE_STEPS_MALFORMED",
 } as const;
 
 /** 本期回放支持的 record 操作（YN5 起接入 restore，见 replayRestoreTx）。 */
@@ -317,6 +343,118 @@ async function loadTableContext(
   runMaskWriteGate(mask, writableKeys);
   const fieldGate = fieldWriteGate(access, tableId, (id) => fields.find((f) => f.id === id)?.name ?? id);
   return { tableId, fields, fieldGate, mask };
+}
+
+/**
+ * #788-A 数据 op 的结构依赖门（§19.2/§19.3 场景 4），必须在回放事务内调用（同事务读到的
+ * table_schema 版本与随后的主写一致，避免事务外快照过期）。
+ *
+ *   - 父表已（被对方）软删 → 无条件落 conflict=SYNC_TABLE_DELETED（不论是否携带结构版本；
+ *     用户 restore_table 后这些数据 op 整体重放，§19.3-4）。表不存在/不属本 base 不在此判定，
+ *     交给既有 BAD_TABLE 校验（保持单一事实源）。
+ *   - 携带 baseSchemaVersion（新客户端）且与服务端当前 table_schema 版本不一致（落后为主，
+ *     超前亦拦——结构 op 尚未被服务端接受时数据不得抢先落库）→ conflict=STRUCTURE_DEPENDENCY，
+ *     挂起等结构分叉先被人工解决、再按新结构重放。
+ *   - baseSchemaVersion 为 null/缺省（旧客户端）→ 不启用版本门（additive、默认零行为变化）。
+ *
+ * 返回终态回执表示「应挂起/冲突，只落 incoming、不写主数据」；返回 null 表示通过、继续正常回放。
+ */
+async function structureDependencyGateTx(
+  tx: DbTx,
+  userId: string,
+  clientId: string,
+  baseId: string,
+  o: IncomingOp,
+  tableId: string,
+): Promise<PushResult | null> {
+  const table = await tx.table.findUnique({
+    where: { id: tableId },
+    select: { baseId: true, deletedAt: true },
+  });
+  // 场景 4：父表软删 → 依赖冲突（与表存在性/归属校验互不覆盖；此处只在确属本 base 的软删表上判）。
+  if (table && table.baseId === baseId && table.deletedAt) {
+    const schemaVersion = await readSchemaVersionTx(tx, tableId);
+    return await terminalInTx(tx, userId, clientId, baseId, o, {
+      clientOpId: o.clientOpId,
+      status: "conflict",
+      reasonCode: RC.TABLE_DELETED,
+      reasonDetail: "该数据表已被删除（可能由他人在你离线期间操作）；请先恢复数据表，你的这些数据改动会在恢复后整体重放",
+      serverVersion: schemaVersion,
+    });
+  }
+
+  // §19.2 结构版本依赖门：仅对显式携带 baseSchemaVersion 的新客户端启用。
+  if (!(o._reconcileSchema === true) && o.baseSchemaVersion !== null && o.baseSchemaVersion !== undefined) {
+    const currentSchemaVersion = await readSchemaVersionTx(tx, tableId);
+    if (o.baseSchemaVersion !== currentSchemaVersion) {
+      return await terminalInTx(tx, userId, clientId, baseId, o, {
+        clientOpId: o.clientOpId,
+        status: "conflict",
+        reasonCode: RC.STRUCTURE_DEPENDENCY,
+        reasonDetail: `表结构在你离线期间已变化（数据改动基于结构版本 ${o.baseSchemaVersion.toString()}，服务端当前 ${currentSchemaVersion.toString()}）；请先解决结构冲突，数据将按最新结构重新核对后应用`,
+        serverVersion: currentSchemaVersion,
+      });
+    }
+  }
+  return null;
+}
+
+/**
+ * #788-D 把可转换标量值显式转成【新类型】的规范形态（§19.3-3「如 "12"→12 则经用户确认后应用」）。
+ * 调用前已用 canConvertStoredValue 判定可转；此处只做无歧义转换：数字组→number、checkbox→boolean、
+ * 文本组→string、日期/单选/多选/JSON 原样（日期串与选项 id 本身就是规范存储形态）。
+ */
+function coerceValueToType(v: unknown, type: string): unknown {
+  if (["number", "currency", "percent", "duration", "rating"].includes(type)) {
+    if (typeof v === "boolean") return v ? 1 : 0;
+    if (typeof v === "string") return Number(v.trim());
+    return v;
+  }
+  if (type === "checkbox") {
+    if (typeof v === "boolean") return v;
+    if (typeof v === "number") return v !== 0;
+    if (typeof v === "string") {
+      const s = v.trim().toLowerCase();
+      if (["true", "1", "是", "yes"].includes(s)) return true;
+      if (["false", "0", "否", "no"].includes(s)) return false;
+    }
+    return v;
+  }
+  if (["singleLineText", "longText", "richText", "email", "url", "phone"].includes(type)) {
+    if (typeof v === "string") return v;
+    return String(v);
+  }
+  return v;
+}
+
+/**
+ * #788-D 结构分叉解决后，把一条挂起的数据 op 按【服务端当前新结构】核对（§19.3-3，只读、在主写前）：
+ *   - 负载里的字段已被对方删除（或已软删）→ 数据冲突（该列已不存在，需用户逐记录改值/放弃，绝不丢）；
+ *   - 非空值无法安全转到字段当前类型（如「张三」→number）→ 数据冲突，带首个原因；
+ *   - 可安全转换 → 就地把值规范成新类型（"12"→12），随后走正常 create/patch 主写与现有校验。
+ * 空值恒放行（清空不阻碍）。关联/计算等非标量字段不在此转换，交由既有写校验。
+ * @returns 冲突时返回面向用户的原因（调用方落 conflict）；通过返回 null。
+ */
+function reconcilePayloadToSchema(
+  fields: FieldMeta[],
+  payloadFields: Record<string, unknown>,
+): string | null {
+  for (const [fieldId, rawVal] of Object.entries(payloadFields)) {
+    // loadTableFields 只给活字段；查不到即该字段已在结构变化中被删。
+    const f = fields.find((x) => x.id === fieldId);
+    if (!f) {
+      return `字段（${fieldId}）在结构变化后已不存在，该记录改动需重新选择字段或放弃（不会自动丢弃你的数据）`;
+    }
+    if (isEmptyStoredValue(rawVal)) continue;
+    // loadTableFields 只给活字段、options 已是解析后的 SelectOption[]（非 JSON 串）。
+    const options = (f.type === "singleSelect" || f.type === "multiSelect") ? f.options : null;
+    const check = canConvertStoredValue(rawVal, f.type, options);
+    if (!check.ok) {
+      return `字段「${f.name}」已改为${f.type}类型，原值${check.reason ?? "无法转换"}，请逐记录改值或放弃该改动（不会自动写入不兼容的值）`;
+    }
+    payloadFields[fieldId] = coerceValueToType(rawVal, f.type);
+  }
+  return null;
 }
 
 /** 与在线 PATCH/DELETE 同构的行级 rowFilter 前置校验；不满足归 403（落 ROW_NOT_VISIBLE）。 */
@@ -822,6 +960,18 @@ async function replayStructureTx(
       throw new HttpError(403, "当前角色已无权修改该表结构（权限可能在离线期间被收回）", RC.PERMISSION_REVOKED);
     }
   } catch (e) {
+    // §19.3-2 结构实体被对方软删（如离线 rename 的字段已删）→ 落【结构冲突】（带服务端结构快照），
+    // 用户可复合 restore_field+alter_field；不走 classifyError（409 会被误归 NOT_UNIQUE rejected）。
+    if (e instanceof HttpError && e.code === RC.ENTITY_DELETED) {
+      const snap = await buildStructureSnapshot(baseId, o);
+      const tableIdForVersion = await resolveStructureTableId(o);
+      const serverVersion = tableIdForVersion ? await readSchemaVersion(tableIdForVersion) : 0n;
+      return await terminalInTx(tx, userId, clientId, baseId, o, {
+        clientOpId: o.clientOpId, status: "conflict", reasonCode: RC.ENTITY_DELETED,
+        reasonDetail: e.message, serverVersion,
+        _conflictServerPayload: snap,
+      });
+    }
     return await rejectFromPreflightTx(tx, userId, clientId, baseId, o, e);
   }
 
@@ -833,7 +983,11 @@ async function replayStructureTx(
     abortFromWrite(e, o.clientOpId);
   }
 
-  // ④ 同事务结构版本钟 + oplog（乐观断言 baseSchemaVersion；分叉穿界落结构冲突，主数据回滚）。
+  // ④ 同事务结构版本钟 + oplog。
+  //   普通结构 push：以 o.baseVersion 做乐观断言（分叉 → STRUCTURE_CONFLICT）；
+  //   #788-D resolve 重放（mine/复合）：用户是在结构冲突面板基于【服务端当前结构】做的决定，期望基线
+  //   必须对齐到重放前事务内读到的当前 schemaVersion（o.baseVersion 已由 resolveConflict 置为当前值），
+  //   oplog 记 result=resolved/conflictOf 溯源（§19.3 统一形态）。
   let ledger: Awaited<ReturnType<typeof writeStructureOpTx>>;
   try {
     ledger = await writeStructureOpTx(
@@ -847,16 +1001,24 @@ async function replayStructureTx(
         actorId: userId,
         payload: applied.payload,
       },
-      { clientId, clientOpId: o.clientOpId, clientBaseVersion: o.baseVersion, expectedBaseVersion: o.baseVersion },
+      {
+        clientId, clientOpId: o.clientOpId, clientBaseVersion: o.baseVersion,
+        expectedBaseVersion: o.baseVersion,
+        ...(o._resolveOf ? { result: "resolved" as const, conflictOf: o._resolveOf } : {}),
+      },
     );
   } catch (e) {
     if (e instanceof SyncVersionConflictError) {
+      // 结构版本分叉：回放事务已中止（主写随回滚）。结构快照只读、且必须在毒化事务外用 prisma 构建
+      // （§19.3 conflictServerPayload=服务端当前结构快照，供结构冲突面板双版本展示）。
+      const snap = await buildStructureSnapshot(baseId, o);
       throw new AbortReplayError({
         clientOpId: o.clientOpId,
         status: "conflict",
         reasonCode: RC.STRUCTURE_CONFLICT,
         reasonDetail: `表结构已变化（本地基于结构版本 ${o.baseVersion.toString()}，服务端 ${e.currentVersion.toString()}）；请刷新结构后人工解决`,
         serverVersion: e.currentVersion,
+        _conflictServerPayload: snap,
       });
     }
     abortFromWrite(e, o.clientOpId);
@@ -919,6 +1081,10 @@ async function replayCreateTx(
     });
   }
 
+  // #788-A 结构依赖门（§19.2/§19.3-4）：先于任何记录版本/主写判定——结构未对齐或父表已删时挂起。
+  const depConflict = await structureDependencyGateTx(tx, userId, clientId, baseId, o, tableId);
+  if (depConflict) return depConflict;
+
   // 版本/实体状态（权威，串行事务内读）：实体已存在（有版本行或记录行）即同 id 冲突。
   const versionRow = await tx.syncEntityVersion.findUnique({
     where: { id: o.entityId }, select: { version: true, isDeleted: true },
@@ -949,6 +1115,19 @@ async function replayCreateTx(
     });
   }
   const payloadFields = mergeLinksIntoFields(rawFields, links);
+
+  // #788-D 结构分叉解决后的按新结构核对重放（§19.3-3）：先于掩码/权限写闸——字段被对方删除或值
+  // 无法转到新类型应落【数据冲突】（可弹窗改值/放弃），而不是被写闸归成 FIELD_FORBIDDEN 拒绝。
+  if (o._reconcileSchema) {
+    const liveFields = await loadTableFields(tableId);
+    const why = reconcilePayloadToSchema(liveFields, payloadFields);
+    if (why) {
+      return await terminalInTx(tx, userId, clientId, baseId, o, {
+        clientOpId: o.clientOpId, status: "conflict", reasonCode: RC.SCHEMA_REPLAY_VALUE,
+        reasonDetail: why, serverVersion: await readSchemaVersionTx(tx, tableId),
+      });
+    }
+  }
 
   // 事务前同构校验（读）：逐表【当前】c 权限重判 + 表归属 + 字段掩码写闸（§9.1）。
   let ctx: TableContext;
@@ -1025,6 +1204,16 @@ async function replayPatchTx(
       reasonDetail: "要修改的记录不存在",
     });
   }
+  if (rec.table.baseId !== baseId) {
+    return await terminalInTx(tx, userId, clientId, baseId, o, {
+      clientOpId: o.clientOpId, status: "rejected", reasonCode: RC.BAD_TABLE,
+      reasonDetail: "记录不属于该 Base",
+    });
+  }
+  // #788-A 结构依赖门【最优先】（§19.2/§19.3-4）：必须先于记录墓碑/版本判定——整表被对方软删时
+  // 记录已随表级联成墓碑，若先走 ENTITY_DELETED 会把"等表恢复后整体重放"的离线改动误判成永久拒绝。
+  const depConflict = await structureDependencyGateTx(tx, userId, clientId, baseId, o, rec.tableId);
+  if (depConflict) return depConflict;
   if (rec.deletedAt || versionRow?.isDeleted) {
     return await terminalInTx(tx, userId, clientId, baseId, o, {
       clientOpId: o.clientOpId, status: "rejected", reasonCode: RC.ENTITY_DELETED,
@@ -1034,12 +1223,6 @@ async function replayPatchTx(
   const currentVersion = versionRow?.version ?? 0n;
   if (o.baseVersion !== currentVersion) {
     return await conflictTerminalInTx(tx, userId, clientId, baseId, o, currentVersion);
-  }
-  if (rec.table.baseId !== baseId) {
-    return await terminalInTx(tx, userId, clientId, baseId, o, {
-      clientOpId: o.clientOpId, status: "rejected", reasonCode: RC.BAD_TABLE,
-      reasonDetail: "记录不属于该 Base",
-    });
   }
 
   // changed: {fid:{from,to}} → 应用层 patch {fid:to}（容忍裸值）。
@@ -1061,6 +1244,19 @@ async function replayPatchTx(
   for (const [fid, v] of Object.entries(changed)) {
     const cell = asRecord(v);
     patch[fid] = cell && "to" in cell ? cell.to : v;
+  }
+
+  // #788-D 结构分叉解决后的按新结构核对重放（§19.3-3）：先于版本/掩码闸（版本对齐由 _reconcileSchema
+  // 放行），字段被删或值转不动 → 数据冲突弹窗，绝不静默写脏值或悄悄丢弃。
+  if (o._reconcileSchema) {
+    const liveFields = await loadTableFields(tableId);
+    const why = reconcilePayloadToSchema(liveFields, patch);
+    if (why) {
+      return await terminalInTx(tx, userId, clientId, baseId, o, {
+        clientOpId: o.clientOpId, status: "conflict", reasonCode: RC.SCHEMA_REPLAY_VALUE,
+        reasonDetail: why, serverVersion: await readSchemaVersionTx(tx, tableId),
+      });
+    }
   }
 
   let ctx: TableContext;
@@ -1117,6 +1313,13 @@ async function replayDeleteTx(
   const versionRow = await tx.syncEntityVersion.findUnique({
     where: { id: o.entityId }, select: { version: true, isDeleted: true, lastSeq: true },
   });
+
+  // #788-A（§19.3-4）：整表被对方软删时记录已级联成墓碑——必须在「墓碑幂等成功」之前判，
+  // 否则离线 delete 会被误当成功而悄悄丢弃（用户期望 restore_table 后整体重放）。
+  if (rec && rec.table.baseId === baseId) {
+    const depConflict = await structureDependencyGateTx(tx, userId, clientId, baseId, o, rec.tableId);
+    if (depConflict) return depConflict;
+  }
 
   // 实体已是墓碑 → delete 幂等成功（不重复推进版本），回执回当前版本/最后 seq（§7.1）。
   // 注意 deletedAt 未删时为 null，必须用 `!== null` 显式判定——不能写 `deletedAt ?? true`
@@ -1215,6 +1418,10 @@ async function replayRestoreTx(
       reasonDetail: "记录不属于该 Base",
     });
   }
+  // #788-A 结构依赖门（§19.2/§19.3-4）：父表已软删时恢复记录无意义（表级联墓碑），先挂起；
+  // 结构版本落后同样挂起，等表恢复且结构分叉解决后整体重放。
+  const depConflict = await structureDependencyGateTx(tx, userId, clientId, baseId, o, rec.tableId);
+  if (depConflict) return depConflict;
   // 必须当前是墓碑（deletedAt 非空或版本行 isDeleted）；存活记录的 restore 按幂等 accepted 处理
   // （与 delete 对已删实体幂等同口径），不重复推进版本。
   const recIsTombstone = rec.deletedAt !== null || versionRow?.isDeleted === true;
@@ -1456,10 +1663,16 @@ export async function retryIncoming(
 
 /** POST /resolve 的三种人工裁决。 */
 export type ResolveDecision = "mine" | "theirs" | "custom";
+/** 结构/数据依赖冲突在 record 三选一之外扩展的决定（§19.3，#788-D）。 */
+export type StructureResolveDecision = ResolveDecision | "compound" | "replayData";
 export interface ResolveConflictInput {
   /** 被解决的原始冲突操作的 clientOpId（sync_incoming 中 status=conflict 行）。 */
   resolveOf: string;
-  decision: ResolveDecision;
+  /**
+   * 裁决：record 冲突用 mine/theirs/custom；#788-D 结构冲突另支持 compound（原子多步）、
+   * 数据依赖冲突用 replayData（按新结构核对重放）。
+   */
+  decision: StructureResolveDecision;
   /**
    * mine/custom 时新 resolve 操作的幂等键（客户端造，全局唯一）。缺省由服务端以 res- 前缀生成。
    * theirs 不产生新写操作，忽略此项。
@@ -1467,11 +1680,27 @@ export interface ResolveConflictInput {
   clientOpId?: string;
   /** decision=custom：字段级挑选后拼出的 patch（形状同 push patch 的 payload，须含非空 changed）。 */
   patch?: Record<string, unknown>;
+  /**
+   * #788-D decision="compound"（结构冲突专用，§19.3-2 场景如「恢复字段并应用我的改名」）：
+   * 一个原子事务内顺序应用多条结构 op（restore_field + alter_field 等）。每步都是已登记的
+   * entityType/op + payload；全部成功才提交并把原冲突行置 resolved，任一步失败整体回滚、原行保留。
+   * oplog 为每步各落一条 result=resolved/conflictOf=原 op 的结构事实。
+   */
+  compound?: {
+    steps: Array<{ entityType: string; entityId: string; op: string; payload: Record<string, unknown> }>;
+  };
+  /**
+   * #788-D decision="replayData"（结构分叉解决后）：把曾因结构依赖挂起（STRUCTURE_DEPENDENCY/
+   * TABLE_DELETED）的【数据 op】按当前新结构核对重放（§19.3-3）。服务端按原 incoming 行的 op/payload
+   * 重放（忽略客户端再造），仅内部置 _reconcileSchema：baseSchemaVersion 不再拦，逐字段值按当前类型
+   * 核对（可转显式转型、不可转/字段已删 → 数据冲突，绝不静默丢）。
+   */
+  replayData?: boolean;
 }
 
 export interface ResolveConflictResult {
   resolveOf: string;
-  decision: ResolveDecision;
+  decision: StructureResolveDecision;
   /** theirs=dropped；mine/custom 成功=accepted。 */
   status: PushResult["status"];
   baseId: string;
@@ -1519,7 +1748,7 @@ export interface ResolveConflictResult {
  */
 async function readResolvedReceipt(
   row: { id: string; clientOpId: string; baseId: string | null; entityId: string; status: string; op: string },
-  decision: ResolveDecision,
+  decision: StructureResolveDecision,
 ): Promise<ResolveConflictResult> {
   const baseId = row.baseId ?? "";
   if (row.status === "dropped") {
@@ -1541,13 +1770,231 @@ async function readResolvedReceipt(
   };
 }
 
+/** resolveConflict 内传入的原冲突行所需字段（findUnique 全字段的结构化子集）。 */
+interface ConflictRow {
+  id: string;
+  clientOpId: string;
+  clientId: string;
+  entityType: string;
+  entityId: string;
+  op: string;
+  payload: string;
+  baseVersion: bigint;
+  baseId: string | null;
+  reasonCode: string | null;
+  serverVersion: bigint;
+}
+
+/** accepted 后把原冲突行条件置 resolved（owner+conflict 双条件）；并发已解则幂等返回不报错。 */
+async function markOriginalResolved(row: ConflictRow, userId: string): Promise<void> {
+  const upd = await prisma.syncIncoming.updateMany({
+    where: { id: row.id, actorId: userId, status: "conflict" },
+    data: { status: "resolved", decidedBy: userId, decidedAt: new Date() },
+  });
+  if (upd.count === 0) {
+    // 并发下已被另一请求解决：本次重放确已 accepted，幂等返回即可（重复 resolveOf 走 readResolvedReceipt）。
+    const fresh = await prisma.syncIncoming.findUnique({ where: { id: row.id } });
+    if (fresh && (fresh.status === "resolved" || fresh.status === "dropped")) return;
+    throw new HttpError(409, "冲突项状态已变化，请刷新后重试", RC.RESOLVE_NOT_CONFLICT);
+  }
+}
+
+/**
+ * #788-D 结构冲突 mine：以原结构 op 内容、基于【服务端当前 schemaVersion】重造一条 resolve op
+ * （新 clientOpId、o.baseVersion=当前结构版本、_resolveOf=原 op），重走结构回放——注册表 resolve 按
+ * 当前 manage_schema 裁决、apply 复用领域 *Tx、writeStructureOpTx 以当前版本为乐观基线，oplog 记
+ * result=resolved/conflictOf。重放非 accepted（当前无权/校验不过/又分叉）则原冲突行保留。
+ */
+async function resolveStructureMine(
+  userId: string,
+  input: ResolveConflictInput,
+  row: ConflictRow,
+  baseId: string,
+): Promise<ResolveConflictResult> {
+  let origPayload: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(row.payload);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      origPayload = parsed as Record<string, unknown>;
+    }
+  } catch {
+    throw new HttpError(409, "冲突项原始操作已损坏，无法按我的结构解决（可选择采用服务端）", RC.RESOLVE_NOT_CONFLICT);
+  }
+
+  const tableId = await resolveStructureTableId({
+    clientOpId: row.clientOpId, entityType: row.entityType, entityId: row.entityId,
+    op: row.op, baseVersion: row.baseVersion, payload: origPayload,
+  });
+  if (!tableId) {
+    throw new HttpError(409, "无法定位该结构操作所属的数据表，不能重放", RC.RESOLVE_NOT_CONFLICT);
+  }
+  const currentSchemaVersion = await readSchemaVersion(tableId);
+
+  const newClientOpId = input.clientOpId?.trim() || `res-${randomUUID()}`;
+  if (newClientOpId === input.resolveOf) {
+    throw new HttpError(400, "resolve 的 clientOpId 不能与原冲突操作相同", RC.RESOLVE_MALFORMED);
+  }
+  const resolveOp: IncomingOp = {
+    clientOpId: newClientOpId,
+    entityType: row.entityType,
+    entityId: row.entityId,
+    op: row.op,
+    baseVersion: currentSchemaVersion,
+    payload: origPayload,
+    _resolveOf: input.resolveOf,
+  };
+
+  const gate = await probeBaseEnter(userId, row.clientId, baseId);
+  const replay = gate.allowed
+    ? await replayOne(userId, row.clientId, baseId, gate.access, resolveOp, new Map())
+    : await replayGatedOut(userId, row.clientId, baseId, resolveOp, gate.everSubscribed);
+
+  if (replay.status !== "accepted") {
+    return {
+      resolveOf: input.resolveOf, decision: "mine", status: replay.status, baseId,
+      entityId: row.entityId, newClientOpId, replay,
+    };
+  }
+  await markOriginalResolved(row, userId);
+  return {
+    resolveOf: input.resolveOf, decision: "mine", status: "accepted", baseId,
+    entityId: row.entityId, newClientOpId,
+    seq: replay.seq, newVersion: replay.newVersion, replay,
+  };
+}
+
+/** 校验复合 resolve 的一步并返回规范化结构（非法即 400）。 */
+function parseCompoundStep(raw: unknown, index: number): {
+  entityType: string; entityId: string; op: string; payload: Record<string, unknown>;
+} {
+  const s = raw && typeof raw === "object" ? raw as Record<string, unknown> : null;
+  const entityType = typeof s?.entityType === "string" ? s.entityType.trim() : "";
+  const entityId = typeof s?.entityId === "string" ? s.entityId.trim() : "";
+  const op = typeof s?.op === "string" ? s.op.trim() : "";
+  const payload = s?.payload && typeof s.payload === "object" && !Array.isArray(s.payload)
+    ? s.payload as Record<string, unknown>
+    : null;
+  if (!entityType || !entityId || !op || !payload) {
+    throw new HttpError(400, `复合解决第 ${index + 1} 步缺少 entityType/entityId/op/payload`, RC.RESOLVE_STEPS_MALFORMED);
+  }
+  if (!isStructureEntityType(entityType) || !getStructureOpHandler(entityType, op)) {
+    throw new HttpError(400, `复合解决第 ${index + 1} 步是未登记的结构操作 ${entityType}.${op}`, RC.RESOLVE_STEPS_MALFORMED);
+  }
+  return { entityType, entityId, op, payload };
+}
+
+/**
+ * #788-D 结构冲突 compound（§19.3-2）：在【一个】串行写事务内顺序应用多条结构 op（如先 restore_field
+ * 再 alter_field）。每步都过注册表 resolve + 当前 manage_schema 裁决 + 领域 apply；每步在应用前于事务内
+ * 读该表当前 schemaVersion 作为乐观基线（同一表多步连续 +1），各落一条 result=resolved/conflictOf=原 op
+ * 的 oplog。任一步失败整体回滚（绝不留「字段恢复了但改名没落」的半成品），原冲突行保留。
+ */
+async function resolveStructureCompound(
+  userId: string,
+  input: ResolveConflictInput,
+  row: ConflictRow,
+  baseId: string,
+): Promise<ResolveConflictResult> {
+  const rawSteps = input.compound?.steps;
+  if (!Array.isArray(rawSteps) || rawSteps.length === 0 || rawSteps.length > 10) {
+    throw new HttpError(400, "compound 解决需提供 1–10 个结构步骤 steps", RC.RESOLVE_STEPS_MALFORMED);
+  }
+  const steps = rawSteps.map((s, i) => parseCompoundStep(s, i));
+  const runId = input.clientOpId?.trim() || `res-${randomUUID()}`;
+  if (runId === input.resolveOf) {
+    throw new HttpError(400, "resolve 的 clientOpId 不能与原冲突操作相同", RC.RESOLVE_MALFORMED);
+  }
+
+  // 库门探测（与 mine 同款；未进库 → 不应用，走隔离/拒绝分流，原冲突行保留）。
+  const gate = await probeBaseEnter(userId, row.clientId, baseId);
+  if (!gate.allowed) {
+    const first = steps[0]!;
+    const probeOp: IncomingOp = {
+      clientOpId: `${runId}-0`, entityType: first.entityType, entityId: first.entityId,
+      op: first.op, baseVersion: 0n, payload: first.payload, _resolveOf: input.resolveOf,
+    };
+    const replay = await replayGatedOut(userId, row.clientId, baseId, probeOp, gate.everSubscribed);
+    return {
+      resolveOf: input.resolveOf, decision: "compound", status: replay.status, baseId,
+      entityId: row.entityId, newClientOpId: runId, replay,
+    };
+  }
+
+  let lastSeq: bigint | null = null;
+  let lastVersion: bigint | null = null;
+  const stepClientOpIds: string[] = [];
+  try {
+    await withWriteTx("sync.resolve.compound", async (tx) => {
+      for (let i = 0; i < steps.length; i += 1) {
+        const step = steps[i]!;
+        const clientOpId = `${runId}-${i}`;
+        stepClientOpIds.push(clientOpId);
+        const o: IncomingOp = {
+          clientOpId, entityType: step.entityType, entityId: step.entityId,
+          op: step.op, baseVersion: 0n, payload: step.payload, _resolveOf: input.resolveOf,
+        };
+        const handler = getStructureOpHandler(step.entityType, step.op)!;
+        // 当前权限裁决（只读；403/503 抛 → 整体回滚，外层归一终态）。
+        const resolution = await handler.resolve(tx, baseId, o);
+        const decided = await enforceOrLegacy({
+          guard: `sync.resolve.${step.entityType}.${step.op}`,
+          userId, action: resolution.action, legacyAllowed: false,
+          ref: { resourceType: resolution.ref.resourceType, resourceId: resolution.ref.resourceId },
+        });
+        if (!decided.allowed) {
+          throw new HttpError(403, "当前角色已无权修改该表结构（权限可能在离线期间被收回）", RC.PERMISSION_REVOKED);
+        }
+        const applied = await handler.apply(tx, userId, baseId, o);
+        // 应用前事务内读当前结构版本作为乐观基线（同表多步连续 +1，故每步重读）。
+        const expected = await readSchemaVersionTx(tx, applied.tableId);
+        const ledger = await writeStructureOpTx(
+          tx,
+          {
+            entityType: applied.entityType, entityId: applied.entityId, tableId: applied.tableId,
+            baseId, op: applied.op, actorId: userId, payload: applied.payload,
+          },
+          {
+            clientId: row.clientId, clientOpId, clientBaseVersion: expected,
+            expectedBaseVersion: expected, result: "resolved", conflictOf: input.resolveOf,
+          },
+        );
+        await recordIncomingTx(tx, o, row.clientId, baseId, userId, {
+          clientOpId, status: "accepted", seq: ledger.seq,
+          newVersion: ledger.newVersion, entityId: applied.entityId, serverVersion: undefined,
+        });
+        lastSeq = ledger.seq;
+        lastVersion = ledger.newVersion;
+      }
+    });
+  } catch (e) {
+    if (e instanceof HttpError && e.status >= 500) throw e;
+    // 4xx（含当前无权/结构校验不过）：整个复合未生效，原冲突行保留，回 rejected 供用户改选。
+    const code = e instanceof HttpError ? (e.code || RC.VALIDATION) : RC.VALIDATION;
+    const detail = e instanceof HttpError ? e.message : "复合结构解决应用失败";
+    return {
+      resolveOf: input.resolveOf, decision: "compound", status: "rejected", baseId,
+      entityId: row.entityId, newClientOpId: runId,
+      replay: { clientOpId: runId, status: "rejected", reasonCode: code, reasonDetail: detail },
+    };
+  }
+
+  await markOriginalResolved(row, userId);
+  return {
+    resolveOf: input.resolveOf, decision: "compound", status: "accepted", baseId,
+    entityId: row.entityId, newClientOpId: runId,
+    ...(lastSeq !== null ? { seq: lastSeq } : {}),
+    ...(lastVersion !== null ? { newVersion: lastVersion } : {}),
+  };
+}
+
 export async function resolveConflict(
   userId: string,
   input: ResolveConflictInput,
 ): Promise<ResolveConflictResult> {
   const decision = input.decision;
-  if (decision !== "mine" && decision !== "theirs" && decision !== "custom") {
-    throw new HttpError(400, "decision 必须是 mine/theirs/custom", RC.RESOLVE_BAD_DECISION);
+  const allowedDecisions = new Set<string>(["mine", "theirs", "custom", "compound", "replayData"]);
+  if (!allowedDecisions.has(decision)) {
+    throw new HttpError(400, "decision 必须是 mine/theirs/custom/compound/replayData", RC.RESOLVE_BAD_DECISION);
   }
 
   // ① 读原冲突行并做身份/状态校验（非事务纯读）。
@@ -1582,6 +2029,32 @@ export async function resolveConflict(
     };
   }
 
+  const isStructureConflict = isStructureEntityType(row.entityType);
+  const isDataDependencyConflict = row.entityType === "record"
+    && (row.reasonCode === RC.STRUCTURE_DEPENDENCY || row.reasonCode === RC.TABLE_DELETED);
+
+  // ②' #788-D 结构冲突（table/field/view）：mine=基于当前 schemaVersion 重放原结构 op；
+  //    compound=原子多步（如 restore_field+alter_field）。custom 是 record 专用，结构冲突不给用。
+  if (isStructureConflict) {
+    if (decision !== "mine" && decision !== "compound") {
+      throw new HttpError(
+        400,
+        `结构冲突只支持 mine（采用我的结构）/theirs（采用服务端）/compound（组合操作），不支持 ${decision}`,
+        RC.RESOLVE_BAD_DECISION,
+      );
+    }
+    if (decision === "compound") {
+      return await resolveStructureCompound(userId, input, row, baseId);
+    }
+    return await resolveStructureMine(userId, input, row, baseId);
+  }
+
+  // 数据依赖冲突（record 因结构版本落后/表软删挂起）：mine 等价于「结构已解决，按新结构核对重放」。
+  const reconcileData = decision === "replayData" || (decision === "mine" && isDataDependencyConflict);
+  if (decision === "replayData" && !isDataDependencyConflict) {
+    throw new HttpError(400, "replayData 仅用于因表结构变化挂起的数据改动", RC.RESOLVE_BAD_DECISION);
+  }
+
   // ③ mine/custom：解析要重放的内容。
   let origPayload: Record<string, unknown> = {};
   try {
@@ -1609,7 +2082,8 @@ export async function resolveConflict(
     };
   } else {
     // mine：沿用原操作类型与内容（patch 重放我的字段改动；delete 重放删除）。
-    if (row.op !== "patch" && row.op !== "delete") {
+    // #788-D 数据依赖重放：原 op 可能是 create/patch/delete/restore，全部允许（按新结构核对）。
+    if (!reconcileData && row.op !== "patch" && row.op !== "delete") {
       throw new HttpError(
         409,
         `原冲突操作是 ${row.op}，不能「采用我的」重放（请逐字段挑选或采用服务端）`,
@@ -1621,11 +2095,18 @@ export async function resolveConflict(
   }
 
   // 服务端当前版本＝新 resolve op 的 baseVersion（乐观锁从此对齐；原行 serverVersion 是冲突时快照）。
-  const versionRow = await prisma.syncEntityVersion.findUnique({
-    where: { id: row.entityId },
-    select: { version: true },
-  });
-  const currentVersion = versionRow?.version ?? row.serverVersion ?? 0n;
+  // #788-D 数据依赖重放：结构变化不推进【记录】版本，忠实沿用原 op 的记录级 baseVersion——若离线期间
+  // 该记录也被他人改过，重放会正常落记录版本冲突（交 YN6 弹窗），不覆盖。
+  let currentVersion: bigint;
+  if (reconcileData) {
+    currentVersion = row.baseVersion;
+  } else {
+    const versionRow = await prisma.syncEntityVersion.findUnique({
+      where: { id: row.entityId },
+      select: { version: true },
+    });
+    currentVersion = versionRow?.version ?? row.serverVersion ?? 0n;
+  }
 
   const newClientOpId = input.clientOpId?.trim() || `res-${randomUUID()}`;
   if (newClientOpId === input.resolveOf) {
@@ -1640,6 +2121,8 @@ export async function resolveConflict(
     baseVersion: currentVersion,
     payload: replayPayload,
     _resolveOf: input.resolveOf,
+    // #788-D 数据依赖重放：绕过结构版本门、改由逐字段按当前类型核对（§19.3-3）。
+    ...(reconcileData ? { _reconcileSchema: true as const } : {}),
   };
 
   // ④ 当前库门探测（可能抛引擎 503 fail-closed；此时未删原冲突行，原样保留）。

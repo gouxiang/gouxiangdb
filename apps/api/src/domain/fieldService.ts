@@ -18,6 +18,8 @@ import {
   createLinkFieldPairTx,
   updateFieldTx,
   deleteFieldTx,
+  restoreFieldTx,
+  reorderFieldsTx,
 } from "./fieldServiceTx.js";
 import { resyncTableMaskTx } from "./authz/scopeProjectionTx.js";
 import { recordStructureOpTx } from "./sync/structureOplog.js";
@@ -323,6 +325,55 @@ export async function deleteField(
   // 缓存失效在提交成功后（纯同步内存操作）。
   invalidateOrdinalCache(field.tableId);
   return { deleted };
+}
+
+/**
+ * 恢复软删字段（回收站/YN7 restore_field 共用编排）：单事务跑 restoreFieldTx（含 partner 对称
+ * 复活、linkRow 回填），重算受影响表 mask，并登记 restore_field 结构 oplog（§19.1/§8.6；off 零 IO）。
+ */
+export async function restoreField(
+  fieldId: string,
+  operatorUserId: string,
+): Promise<{ name: string; renamed: boolean }> {
+  const r = await withWriteTx("field.restore", async (tx) => {
+    const result = await restoreFieldTx(tx, fieldId);
+    for (const tid of result.maskTableIds) await resyncTableMaskTx(tx, tid, operatorUserId);
+    const baseId = await baseIdOfTableTx(tx, result.tableId);
+    if (baseId) {
+      await recordStructureOpTx(tx, {
+        entityType: "field", entityId: fieldId, tableId: result.tableId, baseId,
+        op: "restore_field", actorId: operatorUserId,
+        payload: { tableId: result.tableId, name: result.name, renamed: result.renamed },
+      });
+    }
+    return result;
+  });
+  invalidateOrdinalCache(r.tableId);
+  return { name: r.name, renamed: r.renamed };
+}
+
+/**
+ * 字段整表重排（在线 move / YN7 reorder_fields 共用编排）：单事务把 orderedIds 落为该表活字段
+ * 的规范顺序，并登记 reorder_fields 结构 oplog（§19.1 payload＝有序 fieldId 列表；off 零 IO）。
+ * 集合一致性校验在 reorderFieldsTx 内（不一致 400，绝不静默吞字段位置）。
+ */
+export async function reorderFields(
+  tableId: string,
+  orderedIds: string[],
+  operatorUserId: string,
+): Promise<void> {
+  await withWriteTx("field.reorder", async (tx) => {
+    await reorderFieldsTx(tx, tableId, orderedIds);
+    const baseId = await baseIdOfTableTx(tx, tableId);
+    if (baseId) {
+      await recordStructureOpTx(tx, {
+        entityType: "field", entityId: tableId, tableId, baseId,
+        op: "reorder_fields", actorId: operatorUserId,
+        payload: { fieldIds: orderedIds },
+      });
+    }
+  });
+  invalidateOrdinalCache(tableId);
 }
 
 /**

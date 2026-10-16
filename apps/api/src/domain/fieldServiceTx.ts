@@ -13,6 +13,7 @@ import type { DbTx } from "../db.js";
 import { HttpError } from "../guards.js";
 import { toFieldMeta } from "./prismaDeps.js";
 import type { CreateFieldInput, UpdateFieldInput } from "./fieldService.js";
+import { resolveFieldRestoreName } from "./restoreName.js";
 
 export type RelationKind = "mm" | "hm" | "bt";
 
@@ -317,4 +318,108 @@ export async function deleteFieldTx(tx: DbTx, field: ExistingFieldRow): Promise<
   }
 
   return deleted;
+}
+
+export interface RestoreFieldTxResult {
+  tableId: string;
+  /** 恢复后最终字段名（同名冲突时已自动改名去歧义）。 */
+  name: string;
+  /** 是否因同名冲突被自动改名。 */
+  renamed: boolean;
+  /** 受影响、需重算 mask 的表（正向表 + partner 字段所在表，去重）。 */
+  maskTableIds: string[];
+}
+
+/**
+ * 恢复软删字段（单事务）：字段复活（同名活字段冲突时自动改名）→ links/subtable 的 partner
+ * 字段对称复活（同样去歧义改名）→ 关联 link_row 撤软删。
+ *
+ * 从 routes/records.ts 回收站恢复的 field 分支下沉（原为历史非事务多写），供【在线恢复】与
+ * 【YN7 结构回放 restore_field 处理器】共用（§20.1 单一事实源）。mask 重算与 oplog 切面由编排/
+ * 注册表层在同事务调用（与 deleteFieldTx 同分工）。字段已是活字段时按幂等成功处理（不改名）。
+ * 铁律：只用传入 tx，回调内禁止再入写队列。
+ */
+export async function restoreFieldTx(
+  tx: DbTx,
+  fieldId: string,
+): Promise<RestoreFieldTxResult> {
+  const f = await tx.field.findUnique({
+    where: { id: fieldId },
+    select: {
+      name: true, tableId: true, type: true, isReverse: true,
+      reverseFieldId: true, linkFieldId: true, deletedAt: true,
+    },
+  });
+  if (!f) throw new HttpError(404, "字段不存在");
+
+  const tableIds = new Set<string>([f.tableId]);
+  let finalName = f.name;
+
+  if (f.deletedAt) {
+    // 恢复前查重名：删除后重建同名字段、再恢复旧的，会落下两个同名活字段（公式/CSV 歧义）。
+    finalName = await resolveFieldRestoreName(tx, fieldId, f.tableId, f.name);
+    await tx.field.update({ where: { id: fieldId }, data: { deletedAt: null, name: finalName } });
+  }
+
+  // links/subtable 配对反向字段一并恢复（删除时对称软删，只恢复一个会成孤儿）。
+  if (f.type === "links" || f.type === "subtable") {
+    const partnerId = f.isReverse ? f.reverseFieldId : f.linkFieldId;
+    if (partnerId) {
+      const partner = await tx.field.findUnique({
+        where: { id: partnerId },
+        select: { name: true, tableId: true, deletedAt: true },
+      });
+      if (partner) tableIds.add(partner.tableId);
+      // 配对字段同样查重名；若它已是活字段则什么都不做（保持只复活软删行的语义）。
+      if (partner?.deletedAt) {
+        const partnerName = await resolveFieldRestoreName(tx, partnerId, partner.tableId, partner.name);
+        await tx.field.updateMany({
+          where: { id: partnerId, deletedAt: { not: null } },
+          data: { deletedAt: null, name: partnerName },
+        });
+      }
+      // 删字段时 linkRow 只打了软删标记，恢复字段时一并恢复，否则关联数据静默丢失。
+      await tx.linkRow.updateMany({
+        where: { linkFieldId: { in: [fieldId, partnerId] }, deletedAt: { not: null } },
+        data: { deletedAt: null },
+      });
+    }
+  }
+
+  return {
+    tableId: f.tableId,
+    name: finalName,
+    renamed: f.deletedAt !== null && finalName !== f.name,
+    maskTableIds: [...tableIds],
+  };
+}
+
+/**
+ * 字段整表重排（单事务）：payload 为该表【全部活字段】的有序 id 列表，校验与当前活字段集合
+ * 严格一致（同集合、无重复、无遗漏、不含已删/它表字段）后，按列表下标重写 order。
+ *
+ * 从 routes/fields.ts 的 move 编排下沉为「整表规范顺序」事务体（§19.1 reorder_fields payload＝
+ * 有序 fieldId 列表），供在线 move（换算成完整顺序后）与 YN7 结构回放共用。集合不一致即 400，
+ * 绝不按部分列表静默重排（会吞掉离线期间他人新增的字段位置）。铁律：只用传入 tx。
+ */
+export async function reorderFieldsTx(
+  tx: DbTx,
+  tableId: string,
+  orderedIds: string[],
+): Promise<void> {
+  const live = await tx.field.findMany({
+    where: { tableId, deletedAt: null },
+    orderBy: { order: "asc" },
+    select: { id: true },
+  });
+  const liveIds = live.map((x) => x.id);
+  const sameSet = liveIds.length === orderedIds.length
+    && new Set(orderedIds).size === orderedIds.length
+    && orderedIds.every((id) => liveIds.includes(id));
+  if (!sameSet) {
+    throw new HttpError(400, "字段排序列表与当前字段集合不一致（可能离线期间有字段增删），请刷新后重试", "SYNC_MALFORMED_PAYLOAD");
+  }
+  for (let i = 0; i < orderedIds.length; i += 1) {
+    await tx.field.update({ where: { id: orderedIds[i] }, data: { order: i } });
+  }
 }

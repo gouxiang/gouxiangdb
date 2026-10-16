@@ -7,7 +7,7 @@
 
 import { withWriteTx } from "../db.js";
 import { invalidateOrdinalCache } from "./prismaDeps.js";
-import { createTableTx, softDeleteTableTx, updateTableTx } from "./tableServiceTx.js";
+import { createTableTx, softDeleteTableTx, updateTableTx, restoreTableTx } from "./tableServiceTx.js";
 import { recordStructureOpTx } from "./sync/structureOplog.js";
 
 export {
@@ -130,4 +130,26 @@ export async function softDeleteTable(
     }
   });
   invalidateOrdinalCache(tableId);
+}
+
+/**
+ * 恢复软删表（回收站/YN7 restore_table 共用编排）：单事务跑 restoreTableTx，并在同事务登记
+ * restore_table 结构 oplog、推进 table_schema 钟（§19.1/§8.6；GX_SYNC_SERVER off 时切面第一行
+ * return null，零 IO、零行为变化）。
+ */
+export async function restoreTable(
+  tableId: string,
+  operatorUserId: string,
+): Promise<{ name: string; renamed: boolean }> {
+  const r = await withWriteTx("table.restore", async (tx) => {
+    const result = await restoreTableTx(tx, tableId, operatorUserId);
+    await recordStructureOpTx(tx, {
+      entityType: "table", entityId: tableId, tableId, baseId: result.baseId,
+      op: "restore_table", actorId: operatorUserId,
+      payload: { name: result.name, restoredRecords: result.restoredRecordIds.length },
+    });
+    return result;
+  });
+  invalidateOrdinalCache(tableId);
+  return { name: r.name, renamed: r.renamed };
 }

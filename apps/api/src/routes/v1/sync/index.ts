@@ -189,7 +189,20 @@ syncRoutes.post("/push", async (c) => {
     const payload = o.payload && typeof o.payload === "object" && !Array.isArray(o.payload)
       ? (o.payload as Record<string, unknown>)
       : {};
-    ops.push({ clientOpId, entityType, entityId, op, baseVersion: BigInt(baseVersionRaw), payload });
+    // §19.2 additive：仅 record op 可带 baseSchemaVersion（结构版本依赖门）。缺省=null → 旧客户端
+    // 不启用门（默认零行为变化）；非数字串整单 400（客户端 bug，不进幂等表）。
+    let baseSchemaVersion: bigint | null = null;
+    if (o.baseSchemaVersion !== undefined && o.baseSchemaVersion !== null) {
+      const raw = typeof o.baseSchemaVersion === "string" ? o.baseSchemaVersion.trim() : "";
+      if (!/^\d+$/.test(raw)) {
+        throw new HttpError(400, `op ${clientOpId} 的 baseSchemaVersion 必须是非负整数串`, "SYNC_BAD_CURSOR");
+      }
+      baseSchemaVersion = BigInt(raw);
+    }
+    ops.push({
+      clientOpId, entityType, entityId, op, baseVersion: BigInt(baseVersionRaw),
+      ...(baseSchemaVersion !== null ? { baseSchemaVersion } : {}), payload,
+    });
   }
 
   const outcome = await pushBaseOps(auth.userId, clientId, baseId, ops);
@@ -276,12 +289,17 @@ syncRoutes.post("/resolve", async (c) => {
   const auth = c.get("auth");
   const body = (await c.req.json().catch(() => null)) as {
     resolveOf?: unknown; decision?: unknown; clientOpId?: unknown; patch?: unknown;
+    // #788-D 结构冲突 compound（steps 数组）；数据依赖冲突 replayData（布尔）。
+    compound?: unknown; replayData?: unknown;
   } | null;
   const resolveOf = typeof body?.resolveOf === "string" ? body.resolveOf.trim() : "";
   if (!resolveOf) throw new HttpError(400, "缺少 resolveOf（要解决的冲突 clientOpId）", "SYNC_BAD_REQUEST");
   const decision = body?.decision;
-  if (decision !== "mine" && decision !== "theirs" && decision !== "custom") {
-    throw new HttpError(400, "decision 必须是 mine/theirs/custom", "SYNC_RESOLVE_BAD_DECISION");
+  if (
+    decision !== "mine" && decision !== "theirs" && decision !== "custom"
+    && decision !== "compound" && decision !== "replayData"
+  ) {
+    throw new HttpError(400, "decision 必须是 mine/theirs/custom/compound/replayData", "SYNC_RESOLVE_BAD_DECISION");
   }
   const clientOpId = typeof body?.clientOpId === "string" ? body.clientOpId.trim() : undefined;
   // custom 必须带非空 patch 对象；mine/theirs 忽略 patch（theirs 本就不重放）。
@@ -293,8 +311,22 @@ syncRoutes.post("/resolve", async (c) => {
     }
     patch = rawPatch as Record<string, unknown>;
   }
+  // #788-D compound：透传 {steps:[…]}，逐步形状由领域 parseCompoundStep 严格校验（路由不深校验）。
+  let compound: { steps: Array<{ entityType: string; entityId: string; op: string; payload: Record<string, unknown> }> } | undefined;
+  if (decision === "compound") {
+    const cObj = body?.compound;
+    if (!cObj || typeof cObj !== "object" || Array.isArray(cObj)) {
+      throw new HttpError(400, "compound 解决需提供 {steps:[…]}", "SYNC_RESOLVE_STEPS_MALFORMED");
+    }
+    const steps = (cObj as { steps?: unknown }).steps;
+    if (!Array.isArray(steps) || steps.length === 0) {
+      throw new HttpError(400, "compound 解决的 steps 必须是非空数组", "SYNC_RESOLVE_STEPS_MALFORMED");
+    }
+    compound = cObj as { steps: Array<{ entityType: string; entityId: string; op: string; payload: Record<string, unknown> }> };
+  }
+  const replayData = decision === "replayData" ? body?.replayData !== false : undefined;
 
-  const r = await resolveConflict(auth.userId, { resolveOf, decision, clientOpId, patch });
+  const r = await resolveConflict(auth.userId, { resolveOf, decision, clientOpId, patch, compound, replayData });
 
   // 仅在冲突【本次被真正解决】（theirs→dropped，或 mine/custom 重放 accepted）时打点；
   // 幂等回读（_idempotent，重发同一 resolveOf）或重放再被拒/再冲突都不发 resolved 审计。

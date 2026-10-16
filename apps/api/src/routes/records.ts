@@ -17,12 +17,6 @@ import {
 } from "../guards.js";
 import { requireTableManage, requireRestoreTable } from "../domain/authz/tableManageGuards.js";
 import {
-  resyncTableMaskTx,
-  syncTableForAllScopesTx,
-  resyncLibraryAggregateForAllScopesTx,
-} from "../domain/authz/scopeProjectionTx.js";
-import { projectAdminForNewTableTx } from "../domain/authz/scopeDoubleWrite.js";
-import {
   loadTableFields,
   queryRecords,
   parseViewConfig,
@@ -31,18 +25,15 @@ import {
 } from "../domain/recordService.js";
 import { isComputedFieldType, isSystemFieldType } from "../domain/types.js";
 import { parseCSV, inferFieldType, coerceCellValueWithIssue } from "../domain/csv.js";
-import { resolveFieldRestoreName, resolveTableRestoreName } from "../domain/restoreName.js";
-import { createField } from "../domain/fieldService.js";
+import { createField, restoreField } from "../domain/fieldService.js";
+import { restoreTable } from "../domain/tableService.js";
 import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
 import { applyCreateDefaults, applyEditDefaults, applyReverseDefaultsForChild, applyLinkChangeDefaults } from "../domain/defaults.js";
-import { syncRecordsTx, deleteRecordsTx, restoreRecordsTx } from "../domain/fieldIndex/sync.js";
+import { syncRecordsTx, deleteRecordsTx } from "../domain/fieldIndex/sync.js";
 import { enqueueChangeEventTx, enqueueChangeEventsTx } from "../domain/search/outbox.js";
 import { keysetPagingActive } from "../domain/queryPlan/flags.js";
 import { InvalidCursorError, OffsetWindowError } from "../domain/queryPlan/cursor.js";
-import {
-  syncNavFromEntitiesTx,
-  purgeTableNodeTx,
-} from "../domain/nav/sync.js";
+import { purgeTableNodeTx } from "../domain/nav/sync.js";
 import { resolveTableMask } from "../domain/authz/maskGate.js";
 import { parseViewAdminConfig } from "../domain/viewAdminConfig.js";
 import { loadUserPrefs } from "../domain/viewUserPrefsStore.js";
@@ -61,7 +52,7 @@ import { hydrateCommentThreads, hydrateSingleComment } from "../domain/commentTh
 export const records = new Hono();
 
 // M6/S4：写原语已移入 domain/recordWrite.ts（纯移动）+ re-export 保持既有导入点不变。
-import { applyFieldWrites, assertUnique, createRecordTx, parseStoredFields, restoreLinkRows, restoreRecordTx, runMaskWriteGate, softDeleteRecordTx, updateRecordTx } from "../domain/recordWrite.js";
+import { applyFieldWrites, assertUnique, createRecordTx, parseStoredFields, restoreRecordTx, runMaskWriteGate, softDeleteRecordTx, updateRecordTx } from "../domain/recordWrite.js";
 import { recordSyncOpTx, recordSyncOpsTx } from "../domain/sync/oplog.js";
 import { fieldWriteGate } from "../domain/authz/libraryPolicy.js";
 export { assertRequiredOnCreate, assertUnique } from "../domain/recordWrite.js";
@@ -1040,116 +1031,28 @@ records.post("/trash/:id/restore", async (c) => {
     const f = await prisma.field.findUnique({
       where: { id },
       select: {
-        name: true,
         tableId: true,
-        type: true,
-        isReverse: true,
-        reverseFieldId: true,
-        linkFieldId: true,
-        table: { select: { baseId: true } },
       },
     });
     if (!f) throw new HttpError(404, "字段不存在");
     // 恢复字段同回收站口径（manage_table）：与彻底删除同一档，不再按 canManageSchema 放行 creator。
     const { userId } = await requireTableManage(c, f.tableId);
-    // T-1：恢复前查重名。删除后重建同名字段、再恢复旧的，会在同表落下两个同名活字段
-    // （公式 {字段名} 引用歧义 / CSV 按列名匹配歧义）。恢复不能被 409 拒绝，故自动改名。
-    const finalName = await resolveFieldRestoreName(prisma, id, f.tableId, f.name);
-    await prisma.field.update({ where: { id }, data: { deletedAt: null, name: finalName } });
-    restoreName = finalName;
-    restoreRenamed = finalName !== f.name;
-    // links/subtable 连带恢复的 partner 字段可能位于另一张表，记录其 tableId 供 mask 重算。
-    let partnerTableId: string | null = null;
-    // links/subtable 配对反向字段一并恢复（删除时是对称软删的，单独恢复一个会成孤儿）
-    if (f.type === "links" || f.type === "subtable") {
-      const partnerId = f.isReverse ? f.reverseFieldId : f.linkFieldId;
-      if (partnerId) {
-        const partner = await prisma.field.findUnique({
-          where: { id: partnerId },
-          select: { name: true, tableId: true, deletedAt: true },
-        });
-        if (partner) partnerTableId = partner.tableId;
-        // 配对字段同样查重名（同一个表内不允许两个同名活字段）；
-        // 若它已经是活字段则什么都不做（保持原 updateMany 只复活软删行的语义）。
-        if (partner?.deletedAt) {
-          const partnerName = await resolveFieldRestoreName(
-            prisma, partnerId, partner.tableId, partner.name,
-          );
-          await prisma.field.updateMany({
-            where: { id: partnerId, deletedAt: { not: null } },
-            data: { deletedAt: null, name: partnerName },
-          });
-        }
-      }
-      // 删字段时 linkRow 只打了软删标记，恢复字段时一并恢复，否则关联数据静默丢失
-      const fieldIds = [id, ...(partnerId ? [partnerId] : [])];
-      await prisma.linkRow.updateMany({
-        where: { linkFieldId: { in: fieldIds }, deletedAt: { not: null } },
-        data: { deletedAt: null },
-      });
-    }
-    // P1/S7 #11：字段复活（历史非事务现状，不在此重构）后新开一个仅做 mask 重算的事务：
-    // 正向表必算；partner 字段若在另一张表，partner 表也重算（同回调内顺序 await）。
-    await withWriteTx("field.restore.resync", async (tx2) => {
-      await resyncTableMaskTx(tx2, f.tableId, userId);
-      if (partnerTableId && partnerTableId !== f.tableId) {
-        await resyncTableMaskTx(tx2, partnerTableId, userId);
-      }
-    });
+    // 字段复活（含 partner 对称复活/linkRow 回填/同名自动改名/mask 重算）与 YN7 restore_field
+    // 结构 oplog 切面统一走领域编排 restoreField（单一事实源，防在线/回放语义漂移）。
+    const r = await restoreField(id, userId);
+    restoreName = r.name;
+    restoreRenamed = r.renamed;
   } else {
     const t = await prisma.table.findUnique({ where: { id }, select: { baseId: true, name: true } });
     if (!t) throw new HttpError(404, "数据表不存在");
     // 恢复表同回收站口径（manage_table）：与彻底删除同一档，不再按 canManageSchema 放行 creator。
     // 走 requireRestoreTable：在 base 节点执法（软删 table 节点无法解析，否则永远恢复不了）。
     const { userId } = await requireRestoreTable(c, id);
-    // M3/S3 #14：原裸多写收紧进单事务。恢复表连带恢复字段/记录（级联软删，单恢复会成空壳），
-    // 视图 order=-1 重排为可见；nav 子树节点（table/view）原地复活、重算 ord/path
-    // （仅当其 base 活；base 仍软删时期望集不含该表，节点保持软删与实体悬挂态一致）。
-    let finalName = t.name;
-    await withWriteTx("table.restore", async (tx) => {
-      // T-1：同字段分支，恢复前查同 base 下同名活表，冲突则自动改名。
-      // 硬契约：此处只能用传入的 tx（写队列并发度 1，回调内再入队 runWrite/withWriteTx 会自死锁）。
-      finalName = await resolveTableRestoreName(tx, id, t.baseId, t.name);
-      await tx.table.update({ where: { id }, data: { deletedAt: null, name: finalName } });
-      await tx.field.updateMany({ where: { tableId: id, deletedAt: { not: null } }, data: { deletedAt: null } });
-      // 先取回待恢复记录 id，恢复后按「两端都存活」回填关联
-      const restoredRows = await tx.record.findMany({
-        where: { tableId: id, deletedAt: { not: null } },
-        select: { id: true },
-      });
-      await tx.record.updateMany({ where: { tableId: id, deletedAt: { not: null } }, data: { deletedAt: null } });
-      await restoreLinkRows(tx, restoredRows.map((r) => r.id));
-      const restoredIds = restoredRows.map((r) => r.id);
-      // M1/S4：整表恢复后批量重建全部恢复记录的 sidecar（prisma 自成语句，内部按批删插）。
-      if (restoredRows.length > 0) {
-        await restoreRecordsTx(tx, id, restoredIds);
-        // M5/S1：整表恢复的记录逐条登记 upsert。
-        const restoreVersion = BigInt(Date.now());
-        await enqueueChangeEventsTx(tx, restoredIds.map((rid) => ({
-          entityType: "record" as const, entityId: rid, op: "upsert" as const, version: restoreVersion,
-        })));
-        // YN1：整表恢复的记录逐条推进同步版本、撤墓碑（op=restore，显式传 baseId；开关 off 零写）。
-        await recordSyncOpsTx(tx, restoredIds.map((rid) => ({
-          entityType: "record" as const, entityId: rid, tableId: id, baseId: t.baseId,
-          op: "restore" as const, actorId: userId, changes: [],
-        })));
-      }
-      // 删表时视图被置 order=-1 隐藏，恢复时按原序无关地重置为可见顺序
-      const hiddenViews = await tx.view.findMany({ where: { tableId: id, order: -1 }, select: { id: true } });
-      for (let i = 0; i < hiddenViews.length; i++) {
-        await tx.view.update({ where: { id: hiddenViews[i]!.id }, data: { order: i } });
-      }
-      await syncNavFromEntitiesTx(tx);
-      // P1/S7 #5：表恢复同建表——为该库每条命中 scope 角色补齐恢复表节点 scope:role 策略，
-      // 并补 role_admin 隐含策略（恢复表此前投影随删表被删，须重建；漏补会 OVERDENY）。
-      await syncTableForAllScopesTx(tx, "base", t.baseId, id, "add", userId);
-      await projectAdminForNewTableTx(tx, t.baseId, id, userId);
-      // 与删表对称：恢复表后按现活表形态重算库节点聚合位，否则恢复的可写表
-      // 拿不回 edit_data（删表时已被移除）-> on 态 OVERDENY。
-      await resyncLibraryAggregateForAllScopesTx(tx, "base", t.baseId, userId);
-    });
-    restoreName = finalName;
-    restoreRenamed = finalName !== t.name;
+    // 整表恢复（字段/记录/视图/nav/scope 投影/同名改名）与 YN7 restore_table 结构 oplog 切面
+    // 统一走领域编排 restoreTable（单一事实源）。
+    const r = await restoreTable(id, userId);
+    restoreName = r.name;
+    restoreRenamed = r.renamed;
   }
   // 恢复记录没有「名字」概念，保持原响应形态；字段/表一律带 renamed+name，前端无需分支判空。
   return c.json(

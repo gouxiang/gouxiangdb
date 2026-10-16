@@ -3,10 +3,10 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { prisma, withWriteBatch } from "../db.js";
+import { prisma } from "../db.js";
 import { requireCanView, HttpError } from "../guards.js";
 import { requireSchemaDesign } from "../domain/authz/tableManageGuards.js";
-import { createField, updateField, deleteField, lookupTargetFields, relationDisplayName, relationIsMultiple } from "../domain/fieldService.js";
+import { createField, updateField, deleteField, reorderFields, lookupTargetFields, relationDisplayName, relationIsMultiple } from "../domain/fieldService.js";
 import { loadTableFields } from "../domain/recordService.js";
 import { invalidateOrdinalCache } from "../domain/prismaDeps.js";
 import { validateFieldConfig, type FieldConfigView } from "../domain/fieldValidation.js";
@@ -251,7 +251,7 @@ fields.post("/:fieldId/move", async (c) => {
     select: { tableId: true, table: { select: { baseId: true } } },
   });
   if (!f0) throw new HttpError(404, "字段不存在");
-  await requireSchemaDesign(c, f0.tableId);
+  const { userId } = await requireSchemaDesign(c, f0.tableId);
 
   const parsed = moveSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "参数不合法" }, 400);
@@ -271,10 +271,9 @@ fields.post("/:fieldId/move", async (c) => {
   const [moved] = reordered.splice(from, 1);
   reordered.splice(to, 0, moved!);
 
-  await withWriteBatch(
-    "field.reorder",
-    reordered.map((x, i) => prisma.field.update({ where: { id: x.id }, data: { order: i } })),
-  );
+  // 单字段移动换算成该表全部活字段的规范顺序，交领域编排落库（含 YN7 reorder_fields 结构
+  // oplog 切面；事务内再校验一次集合一致性，离线期间有增删则 400，不静默吞位置）。
+  await reorderFields(f.tableId, reordered.map((x) => x.id), userId);
   return c.json({ fields: await loadTableFields(f.tableId) });
 });
 
