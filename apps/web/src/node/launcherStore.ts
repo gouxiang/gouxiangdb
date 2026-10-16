@@ -11,6 +11,7 @@ import {
   LAUNCHER_REGISTRY_STORAGE_KEY,
   type NodeRegistryState,
   parseRegistry,
+  remoteEntries,
   serializeRegistry,
 } from "./registry";
 import {
@@ -26,7 +27,8 @@ import {
   type DataSourceResolverController,
   type ResolverDeps,
 } from "./datasource";
-import type { KvStorage } from "./remoteSessions";
+import type { KvStorage, RemoteSessionView } from "./remoteSessions";
+import { readAllRemoteSessions } from "./remoteSessions";
 import { resolveApiBase } from "../lib/base";
 import { useAuthStore } from "../store/auth";
 import { loginRemoteNode } from "./handshake";
@@ -45,6 +47,11 @@ export interface LauncherStore {
   subscribe(fn: () => void): () => void;
   /** 当前活动数据源（无活动为 null）。 */
   getActive(): ActiveDataSource | null;
+  /**
+   * 当前注册表里所有远端节点的已存会话（按 nodeId 分键读取，供启动器列表显示账号/免密态）。
+   * 只含当前注册表中存在的远端节点，不扫描整个 localStorage；本地 gx-auth 不在内。
+   */
+  getRemoteSessions(): RemoteSessionView[];
   controller: LauncherController;
   // 动作（与控制器同名但在变更后自动持久化 + 通知）
   connectLocal(): SwitchOutcome;
@@ -104,6 +111,11 @@ export function createLauncherStore(deps: LauncherStoreDeps): LauncherStore {
         ? controller.resolver().current()
         : null;
     },
+    getRemoteSessions: () =>
+      readAllRemoteSessions(
+        deps.storage,
+        remoteEntries(controller.getState()).map((e) => e.nodeId),
+      ),
     connectLocal() {
       return afterAction(controller.connectLocal());
     },
