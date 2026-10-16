@@ -9,7 +9,8 @@
 //   B nav_create_group 回放：保留离线 cuid、treeVersion 0→1、oplog entityType=navnode/baseId=null。
 //   C nav_rename / nav_reorder / nav_move / nav_delete 逐条回放，treeVersion 随每条 +1。
 //   D move 后服务端重算子树 path/depth（不信客户端）；防环非法目标 → rejected，树不动。
-//   E treeVersion 乐观锁：基于旧版本推 → conflict=SYNC_STRUCTURE_VERSION_CONFLICT，导航不动。
+//   E treeVersion 乐观锁（B 片分叉分析）：两台设备基于同一旧版本给同一分组改名 → 后推方
+//     conflict=SYNC_TREE_VERSION_CONFLICT，名称不被覆盖、带 serverVersion、进同步中心。
 //   F 幂等：同 clientOpId 重放回同一回执，树只改一次、钟不二次推进。
 //   G 当前权限：无 manage_menu 的成员推树 op → rejected=PERMISSION_REVOKED。
 //   H 未登记 op/非 navnode 实体 → rejected=OP_UNSUPPORTED；payload 非法 → 4xx rejected。
@@ -22,6 +23,7 @@ let h: OrgHarness;
 const OWNER = "yn8_owner";
 const VIEWER = "yn8_viewer";
 const CLIENT = "yn8-client-owner";
+const CLIENT2 = "yn8-client-owner-2";
 
 interface TreeOpResult {
   clientOpId: string;
@@ -186,19 +188,32 @@ describe("B-D. nav 5 op 回放 + treeVersion", () => {
 });
 
 describe("E. treeVersion 乐观锁", () => {
-  it("基于旧版本推 → conflict，带 serverVersion，导航不动", async () => {
+  it("两台设备基于同一旧版本给同一分组改名 → 后者 conflict，带 serverVersion，名称不被覆盖", async () => {
+    // 先建一个存活分组，拿到双方共识的基线 base。
     const cur = await treeVersion();
-    const r = await pushTree(OWNER, CLIENT, [
-      top(cid("g"), "nav_create_group", "yn8grp_stale_000", "0", { name: "陈旧基线组" }),
-      // 显式标记当前基线版本用于断言
-      top(cid("g"), "nav_create_group", "yn8grp_cur_00000", cur.toString(), { name: "当前基线组" }),
+    const grp = "yn8grp_lock_00001";
+    const created = await pushTree(OWNER, CLIENT, [
+      top(cid("g"), "nav_create_group", grp, cur.toString(), { name: "乐观锁组" }),
+    ]);
+    expect(created.results?.[0]?.status).toBe("accepted");
+    const base = await treeVersion(); // 两台设备此刻都停在 base
+
+    // 设备1基于 base 改名 → accepted，钟前进到 base+1。
+    const first = await pushTree(OWNER, CLIENT, [
+      top(cid("g"), "nav_rename", grp, base.toString(), { name: "设备1改的名" }),
+    ]);
+    expect(first.results?.[0]?.status).toBe("accepted");
+
+    // 设备2仍基于旧 base 给【同一分组】改不同名 → nodes 相交（node_rename）树冲突，改名不生效。
+    const r = await pushTree(OWNER, CLIENT2, [
+      top(cid("g"), "nav_rename", grp, base.toString(), { name: "设备2改的名" }),
     ]);
     expect(r.results?.[0]?.status).toBe("conflict");
-    expect(r.results?.[0]?.reasonCode).toBe("SYNC_STRUCTURE_VERSION_CONFLICT");
-    expect(r.results?.[0]?.serverVersion).toBe(cur.toString());
-    expect(r.results?.[1]?.status).toBe("accepted");
-    const stale = await h.prisma.navNode.findUnique({ where: { id: "yn8grp_stale_000" } });
-    expect(stale).toBeNull();
+    expect(r.results?.[0]?.reasonCode).toBe("SYNC_TREE_VERSION_CONFLICT");
+    expect(r.results?.[0]?.serverVersion).toBe((base + 1n).toString());
+    // 设备2的改名未覆盖设备1。
+    const row = await h.prisma.navNode.findUnique({ where: { id: grp } });
+    expect(row?.name).toBe("设备1改的名");
     // 冲突进同步中心。
     const incoming = await h.prisma.syncIncoming.findFirst({
       where: { clientOpId: r.results![0]!.clientOpId, status: "conflict" },

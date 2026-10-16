@@ -58,8 +58,14 @@ import {
 } from "./structureRegistry.js";
 import { buildStructureSnapshot, resolveStructureTableId } from "./structureSnapshot.js";
 import { canConvertStoredValue, isEmptyStoredValue } from "./structureValidation.js";
-import { writeTreeOpTx, readTreeVersion, TREE_WORKSPACE_ID } from "./treeOplog.js";
+import { writeTreeOpTx, readTreeVersion, readTreeVersionTx, TREE_WORKSPACE_ID } from "./treeOplog.js";
 import { getTreeOpHandler, isTreeEntityType, type TreeOpHandler } from "./navRegistry.js";
+import {
+  analyzeTreeFork,
+  readForkTreeOpsTx,
+  buildTreeConflictPayload,
+  RC_TREE_CONFLICT,
+} from "./treeConflict.js";
 import { hasOrgAction } from "../org/authorization.js";
 
 // ───────────────────────────────── 信封类型 ─────────────────────────────────
@@ -93,6 +99,12 @@ export interface IncomingOp {
    *      不可转（如「张三」→数字）或字段已被对方删除 → 落数据冲突，绝不静默丢/静默写脏值（§19.3-3）。
    */
   _reconcileSchema?: boolean;
+  /**
+   * 【内部，路由永不设置】YN8：树冲突 resolve mine（用户在弹窗显式「采用我的位置/排列」）产生的
+   * resolve op。作用：treeVersion 乐观断言以【服务端当前树版本】为准（跳过分叉自动/冲突再判定），
+   * oplog 记 result=resolved/conflictOf。普通 /push/tree 的 op 恒无此位。
+   */
+  _forceTreeApply?: boolean;
 }
 
 /** 单条裁决回执（§13 push.results[i]）。BigInt 序列化为字符串由路由层负责。 */
@@ -178,6 +190,8 @@ const RC = {
   SCHEMA_REPLAY_VALUE: "SYNC_SCHEMA_REPLAY_VALUE_CONFLICT",
   // #788-D：结构冲突的复合 resolve 载荷非法（steps 缺失/形状错）。
   RESOLVE_STEPS_MALFORMED: "SYNC_RESOLVE_STEPS_MALFORMED",
+  // YN8（§19.6）：同节点被双方移动到不同父、或同一组兄弟被双方排序/成员改动且 treeVersion 分叉。
+  TREE_CONFLICT: RC_TREE_CONFLICT,
 } as const;
 
 /** 本期回放支持的 record 操作（YN5 起接入 restore，见 replayRestoreTx）。 */
@@ -792,6 +806,38 @@ async function replayTreeOneTx(
     return await rejectFromPreflightTx(tx, userId, clientId, null, o, e);
   }
 
+  // §19.6 分叉分析（resolve mine 跳过——用户已在弹窗基于当前树显式选择，以当前版本强制落）：
+  //   读当前树版本与分叉期间已接受的 nav op，判定本 op 是「互不相交→自动合并」还是「抢同节点/同组
+  //   兄弟→树冲突」。自动合并把乐观基线抬到当前版本（应用在最新树之上）；冲突不写主数据，落带「两个
+  //   目标位置」快照的 conflict。ENTITY_DELETED（引用节点/目标父已消失）优先落失效资源冲突。
+  let expectedVersion = o.baseVersion;
+  if (!o._forceTreeApply) {
+    const currentVersion = await readTreeVersionTx(tx);
+    if (currentVersion !== o.baseVersion) {
+      const fork = await readForkTreeOpsTx(tx, o.baseVersion, clientId);
+      const liveRows = await tx.navNode.findMany({
+        where: { deletedAt: null },
+        select: { id: true },
+      });
+      const liveIds = new Set(liveRows.map((r) => r.id));
+      const verdict = analyzeTreeFork(o, fork, liveIds);
+      if (!verdict.auto) {
+        return await terminalInTx(tx, userId, clientId, null, o, {
+          clientOpId: o.clientOpId,
+          status: "conflict",
+          reasonCode: verdict.conflict.reasonCode === RC_TREE_CONFLICT ? RC.TREE_CONFLICT : RC.ENTITY_DELETED,
+          reasonDetail: verdict.conflict.detail,
+          serverVersion: currentVersion,
+          _conflictServerPayload: buildTreeConflictPayload(o, verdict.conflict, currentVersion),
+        });
+      }
+      // 不相交 → 以当前版本为基线自动合并（主写作用在最新树上，钟再 +1）。
+      expectedVersion = currentVersion;
+    }
+  } else {
+    expectedVersion = await readTreeVersionTx(tx);
+  }
+
   // 树主写（复用 domain/nav 的 *Tx：防环/深度/删除策略同事务生效；失败可能毒化事务 → 穿界）。
   let applied;
   try {
@@ -800,7 +846,7 @@ async function replayTreeOneTx(
     abortFromWrite(e, o.clientOpId);
   }
 
-  // 工作区 treeVersion +1 + oplog（乐观断言=o.baseVersion；分叉 → 树冲突人工裁决，§19.6）。
+  // 工作区 treeVersion +1 + oplog（乐观断言=分叉分析后的 expectedVersion；resolve 记 resolved）。
   let ledger: Awaited<ReturnType<typeof writeTreeOpTx>>;
   try {
     ledger = await writeTreeOpTx(
@@ -808,7 +854,7 @@ async function replayTreeOneTx(
       { entityType: "navnode", entityId: applied.entityId, op: applied.op, actorId: userId, payload: applied.payload },
       {
         clientId, clientOpId: o.clientOpId, clientBaseVersion: o.baseVersion,
-        expectedBaseVersion: o.baseVersion,
+        expectedBaseVersion: expectedVersion,
         ...(o._resolveOf ? { result: "resolved" as const, conflictOf: o._resolveOf } : {}),
       },
     );
@@ -817,7 +863,7 @@ async function replayTreeOneTx(
       throw new AbortReplayError({
         clientOpId: o.clientOpId,
         status: "conflict",
-        reasonCode: RC.STRUCTURE_CONFLICT,
+        reasonCode: RC.TREE_CONFLICT,
         reasonDetail: `导航树已变化（本地基于树版本 ${o.baseVersion.toString()}，服务端 ${e.currentVersion.toString()}）；请刷新导航树后人工解决`,
         serverVersion: e.currentVersion,
       });
@@ -2141,6 +2187,95 @@ async function resolveStructureCompound(
   };
 }
 
+/**
+ * YN8 树冲突人工裁决（§19.6）。树 op 的 sync_incoming/baseId 恒 null，故在 resolveConflict 的 base
+ * 必填校验之前独立分流：
+ *   - theirs：放弃本地这次导航改动，原冲突行 dropped 留痕（服务端当前树不动）；
+ *   - mine：弹窗选「采用我的位置/排列」→ 以原 op 内容、基于【服务端当前 treeVersion】强制重放
+ *     （_forceTreeApply 跳过分叉再判定，oplog result=resolved/conflictOf）；
+ *   - custom：「拖到第三个位置」→ 用白名单键覆盖原 payload 的目标位置后同 mine 重放；
+ *   - ENTITY_DELETED（引用节点/目标父已删）：本期只接受 theirs；mine 需先恢复资源/改选目标（custom
+ *     可改 to.parentId 绕开已删目标父）。绝不静默丢数据，全部由用户显式选择。
+ */
+async function resolveTreeConflict(
+  userId: string,
+  input: ResolveConflictInput,
+  row: ConflictRow,
+): Promise<ResolveConflictResult> {
+  // theirs：原冲突行置 dropped（与记录/结构 theirs 同口径，留痕不删行）。
+  if (input.decision === "theirs") {
+    const upd = await prisma.syncIncoming.updateMany({
+      where: { id: row.id, actorId: userId, status: "conflict" },
+      data: { status: "dropped", decidedBy: userId, decidedAt: new Date() },
+    });
+    if (upd.count === 0) throw new HttpError(409, "冲突项状态已变化，请刷新后重试", RC.RESOLVE_NOT_CONFLICT);
+    return {
+      resolveOf: input.resolveOf, decision: "theirs", status: "dropped",
+      baseId: "", entityId: row.entityId,
+    };
+  }
+
+  // 树冲突只支持 mine/custom（compound/replayData 是表结构/数据专用）。
+  if (input.decision !== "mine" && input.decision !== "custom") {
+    throw new HttpError(400, "导航树冲突只支持 mine（采用我的）/theirs（采用服务端）/custom（拖到第三位置）", RC.RESOLVE_BAD_DECISION);
+  }
+
+  let origPayload: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(row.payload);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      origPayload = parsed as Record<string, unknown>;
+    }
+  } catch {
+    throw new HttpError(409, "冲突项原始操作已损坏，无法按我的导航解决（可选择采用服务端）", RC.RESOLVE_NOT_CONFLICT);
+  }
+
+  let payload = origPayload;
+  if (input.decision === "custom") {
+    const patch = asRecord(input.patch);
+    if (!patch) throw new HttpError(400, "custom 解决需提供 patch（第三位置的 to/parentId/orderedIds/name）", RC.RESOLVE_MALFORMED);
+    // 白名单浅合并：只允许改导航目标位置/顺序/名称，不得透传任意键。
+    const allowed = ["to", "parentId", "orderedIds", "name", "strategy", "targetParentId"];
+    const merged: Record<string, unknown> = { ...origPayload };
+    let touched = false;
+    for (const k of allowed) {
+      if (patch[k] !== undefined) { merged[k] = patch[k]; touched = true; }
+    }
+    if (!touched) throw new HttpError(400, "custom 解决至少要给出一个新的位置/顺序/名称字段", RC.RESOLVE_MALFORMED);
+    payload = merged;
+  }
+
+  const currentTreeVersion = await readTreeVersion();
+  const newClientOpId = input.clientOpId?.trim() || `res-${randomUUID()}`;
+  if (newClientOpId === input.resolveOf) {
+    throw new HttpError(400, "resolve 的 clientOpId 不能与原冲突操作相同", RC.RESOLVE_MALFORMED);
+  }
+  const resolveOp: IncomingOp = {
+    clientOpId: newClientOpId,
+    entityType: row.entityType,
+    entityId: row.entityId,
+    op: row.op,
+    baseVersion: currentTreeVersion,
+    payload,
+    _resolveOf: input.resolveOf,
+    _forceTreeApply: true, // 用户已基于当前树显式选择：跳过自动分叉再判定，以当前版本强制落。
+  };
+
+  const replay = await replayTreeOne(userId, row.clientId, resolveOp);
+  if (replay.status !== "accepted") {
+    return {
+      resolveOf: input.resolveOf, decision: input.decision, status: replay.status,
+      baseId: "", entityId: row.entityId, newClientOpId, replay,
+    };
+  }
+  await markOriginalResolved(row, userId);
+  return {
+    resolveOf: input.resolveOf, decision: input.decision, status: "accepted",
+    baseId: "", entityId: row.entityId, newClientOpId,
+    seq: replay.seq, newVersion: replay.newVersion, replay,
+  };
+}
+
 export async function resolveConflict(
   userId: string,
   input: ResolveConflictInput,
@@ -2165,6 +2300,12 @@ export async function resolveConflict(
   if (row.status !== "conflict") {
     throw new HttpError(409, `当前状态为 ${row.status}，不能解决（仅冲突项可解决）`, RC.RESOLVE_NOT_CONFLICT);
   }
+
+  // YN8 工作区树冲突（navnode，baseId 恒 null）在 base 必填校验之前独立分流（§19.6 mine/theirs/custom）。
+  if (isTreeEntityType(row.entityType)) {
+    return await resolveTreeConflict(userId, input, row);
+  }
+
   const baseId = row.baseId;
   if (!baseId) throw new HttpError(409, "冲突项缺少 base 归属，无法解决", RC.RESOLVE_NOT_CONFLICT);
 

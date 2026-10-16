@@ -27,6 +27,13 @@ import type { TreeEntityType } from "./treeOplog.js";
 
 const MALFORMED = "SYNC_MALFORMED_PAYLOAD";
 
+/**
+ * 离线分组 id 护栏（与 createGroupTx 的显式-id 白名单同口径）：会拼进物化路径，
+ * 只允许 cuid 风格安全字符、8–64 位。回放时客户端给了 id 却不合规必须【明确拒绝】，
+ * 绝不能让底层静默换成随机 navgrp_ id——否则后续引用该 id 的 op 会集体失联且客户端永无对账依据。
+ */
+const OFFLINE_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
+
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 }
@@ -65,6 +72,9 @@ const createGroupHandler: TreeOpHandler = {
   entityType: "navnode",
   async assertTx(tx, o) {
     const p = asRecord(o.payload) ?? {};
+    if (!OFFLINE_ID_RE.test(o.entityId)) {
+      throw new HttpError(400, "nav_create_group 实体 id 非法（需 8–64 位字母/数字/_/-）", MALFORMED);
+    }
     if (!str(p.name)) throw new HttpError(400, "nav_create_group 缺少 name", MALFORMED);
     const parent = normalizeParent(p.parentId);
     if (parent === "__invalid__") throw new HttpError(400, "nav_create_group parentId 非法", MALFORMED);
