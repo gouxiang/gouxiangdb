@@ -13,6 +13,7 @@ import {
   bindQueryClientClearing,
   registerQueryClient,
 } from "./node/queryClientBridge";
+import { installLauncher } from "./node/installLauncher";
 import "./index.css";
 
 // 部署子路径（飞牛网关 /app/gouxiangdb/）下作为 BrowserRouter basename；
@@ -35,6 +36,12 @@ const queryClient = new QueryClient({
 // 从不 emit，本订阅零副作用；仅桌面启动器切节点时才清空缓存（node 域 queryClientBridge）。
 registerQueryClient(queryClient);
 bindQueryClientClearing();
+
+// 桌面节点启动器装配（S4）：门控关闭（浏览器/fnOS/服务器构建）时 installLauncher 为 no-op，
+// 不构造仓库、不注册任何东西、现网零副作用；门控开启（桌面壳）时这一步会构造/跨重启恢复
+// 启动器仓库（构造即把上次活动节点的数据源 restore 进 resolver）并注册远端 401 回流，
+// 保证用户从 / 直达业务壳（不经 /launcher）时远端会话与 401 处理同样就位。
+installLauncher();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
