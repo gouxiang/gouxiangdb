@@ -18,6 +18,13 @@
 import type { NodeKind } from "./datasource";
 import { LOCAL_NODE_ID } from "./resolve";
 
+/**
+ * 启动器注册表持久化键（单份 JSON 信封：条目 + activeNodeId + localDesired）。
+ * 与既有键全部不同：gx-auth(本地会话) / gx-node-session:*(远端会话) / gx-node-profiles(旧预留)。
+ * 本形状只描述"有哪些节点/各自意图/当前看哪个"，不含任何凭据。
+ */
+export const LAUNCHER_REGISTRY_STORAGE_KEY = "gx-node-launcher";
+
 /** 本地节点进程的「期望运行态」：跨重启记忆，决定壳下次是否自动拉起本地内核。 */
 export type LocalDesiredState = "running" | "stopped";
 
