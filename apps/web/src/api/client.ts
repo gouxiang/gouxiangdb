@@ -89,6 +89,11 @@ import type { BrandingConfigDTO, BrandingUpdateInput } from "@gx/shared-types";
 import { resolveApiBase, withBase as joinBase } from "../lib/base";
 import { saveSessionFrom } from "../lib/session-from";
 import { authHeaders } from "./authHeader";
+// 节点模式 S2（DESIGN §6.1/§8.5 启动器）：API 主请求路径改读数据源解析器单例。
+// 现状该单例恒为 local（buildActive=buildLocal），其 baseURL/headers 与下方既有 BASE_URL/
+// authHeaders(<auth store token>) 逐字节同口径（见 node/datasource.test.ts golden），故本次接线
+// 对浏览器/fnOS 现网零行为变化；S2+ 启动器经 setActive 放入远端后，主路径自动跟随，无需再改调用点。
+import { dataSourceResolver } from "../node/datasource";
 
 // API 同源前缀解析：
 //  - 显式 VITE_API_URL（非空）→ 绝对来源，去尾斜杠（保留跨域/独立域名能力）
@@ -286,7 +291,10 @@ export interface ApiFetchInit extends RequestInit {
 }
 
 export async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
-  const token = useAuthStore.getState().token;
+  // S2：URL 与鉴权头都从「当前活动数据源」解析。恒 local 时 == 旧 `${BASE_URL}${path}` 与
+  // authHeaders(<auth store token>)（path 恒以 "/" 开头，withBase 走 `${base}${path}` 分支，逐字节等价）。
+  // baseFor/headers 在此同步段内各自读一次解析器、中间无 await，快照必然同源，不存在串源。
+  const url = dataSourceResolver.baseFor(path);
   const timeoutMs = init?.timeoutMs;
   // 调用方显式给了 signal（可取消请求）时不抢它的控制器，直接透传
   const controller = timeoutMs != null && timeoutMs > 0 && !init?.signal ? new AbortController() : null;
@@ -296,12 +304,12 @@ export async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T>
       : null;
   let res: Response;
   try {
-    res = await fetch(`${BASE_URL}${path}`, {
+    res = await fetch(url, {
       ...init,
       signal: controller?.signal ?? init?.signal,
       headers: {
         "Content-Type": "application/json",
-        ...authHeaders(token),
+        ...dataSourceResolver.headers(),
         ...init?.headers,
       },
     });
