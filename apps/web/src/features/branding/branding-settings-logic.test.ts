@@ -61,6 +61,51 @@ describe("buildBrandingPatch（保存载荷）", () => {
   });
 });
 
+describe("对外访问网址（0.2.5，第三参 serverBaseUrl）", () => {
+  it("validate：空串/留空通过（=清空恢复自动）；非空合法通过", () => {
+    expect(validateBrandingInput("名", "", "")).toBeNull();
+    expect(validateBrandingInput("名", "", "   ")).toBeNull();
+    expect(validateBrandingInput("名", "", "https://gx.example.com")).toBeNull();
+    expect(validateBrandingInput("名", "", "192.168.31.183:5666")).toBeNull();
+  });
+
+  it("validate：非空非法（非 http(s)/含空白/userinfo）拦截", () => {
+    expect(validateBrandingInput("名", "", "javascript:alert(1)")).toContain("访问网址格式不正确");
+    expect(validateBrandingInput("名", "", "https://a b.com")).toContain("访问网址格式不正确");
+    expect(validateBrandingInput("名", "", "https://u:p@gx.com")).toContain("访问网址格式不正确");
+  });
+
+  it("validate：超长按 BRANDING_LIMITS 拦截", () => {
+    const longUrl = `https://${"a".repeat(BRANDING_LIMITS.serverBaseUrlMax)}.com`;
+    expect(validateBrandingInput("名", "", longUrl)).toContain("访问网址不能超过");
+  });
+
+  it("build：第三参规范化（去尾斜杠/补 http/小写 host），空串保持空串", () => {
+    expect(buildBrandingPatch("名", "", "  https://GX.COM/ ")).toEqual({
+      productName: "名",
+      copyright: "",
+      serverBaseUrl: "https://gx.com",
+    });
+    expect(buildBrandingPatch("名", "", "host:5666/x/")).toEqual({
+      productName: "名",
+      copyright: "",
+      serverBaseUrl: "http://host:5666/x",
+    });
+    expect(buildBrandingPatch("名", "", "")).toEqual({
+      productName: "名",
+      copyright: "",
+      serverBaseUrl: "",
+    });
+  });
+
+  it("build：不传第三参时载荷不含 serverBaseUrl 键（两参旧调用形状不变）", () => {
+    expect(buildBrandingPatch("名", "© x")).toEqual({
+      productName: "名",
+      copyright: "© x",
+    });
+  });
+});
+
 describe("validateHeroFile（广告图上传前拦截）", () => {
   it("jpg/png/webp 且不超过 5MB → 通过", () => {
     expect(validateHeroFile({ type: "image/png", size: 1 })).toBeNull();

@@ -12,7 +12,7 @@ import { Hono, type Context } from "hono";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { BRANDING_LIMITS, type BrandingConfigDTO } from "@gx/shared-types";
+import { BRANDING_LIMITS, normalizeServerBaseUrl, type BrandingConfigDTO } from "@gx/shared-types";
 import { withWriteTx, type DbTx } from "../db.js";
 import { config } from "../config.js";
 import { HttpError } from "../guards.js";
@@ -76,6 +76,16 @@ const patchSchema = z
     // 访客自主注册开关：KV 仅认 "on"/"off"（store 侧只把 "on" 当开放），布尔由 zod 保证；
     // 非布尔（字符串/数字/null）一律 400，绝不做 truthy 隐式转换。
     signupOpen: z.boolean().optional(),
+    // 服务器对外访问网址（0.2.5）：字符串，长度先在 zod 粗拦；是否为合法 http(s) 网址由
+    // normalizeServerBaseUrl 在路由内精确判定（空串=清空/恢复自动，合法；非空非法=400）。
+    serverBaseUrl: z
+      .string()
+      .trim()
+      .max(
+        BRANDING_LIMITS.serverBaseUrlMax,
+        `访问网址不能超过 ${BRANDING_LIMITS.serverBaseUrlMax} 字符`,
+      )
+      .optional(),
   })
   .strict();
 
@@ -128,6 +138,16 @@ adminBranding.patch("/", async (c) => {
   if (!parsed.success) {
     throw new HttpError(400, parsed.error.issues[0]?.message ?? "请求参数有误", "BAD_REQUEST");
   }
+  // 对外访问网址：长度已过 zod；这里把非空值规范化，非法（含空白/非 http(s)/畸形 host）
+  // 一律 400，绝不静默丢弃或强行猜测。空串=显式清空（恢复「未设置/自动」）。
+  let normalizedServerBaseUrl: string | null = null;
+  if (parsed.data.serverBaseUrl !== undefined) {
+    normalizedServerBaseUrl = normalizeServerBaseUrl(parsed.data.serverBaseUrl);
+    if (normalizedServerBaseUrl === null) {
+      throw new HttpError(400, "访问网址格式不正确，请填写 http(s):// 开头的有效网址", "BAD_REQUEST");
+    }
+  }
+
   const fields = Object.keys(parsed.data);
   if (fields.length === 0) {
     throw new HttpError(400, "没有需要更新的字段", "BAD_REQUEST");
@@ -145,6 +165,10 @@ adminBranding.patch("/", async (c) => {
       // 关闭也显式写 "off"（而非删行/留空）：保证关掉后绝不残留历史 "on"，
       // 且 KV 行的存在本身可被运维审计（store 侧仅 "on" 判开放，"off" 等同关闭）。
       await upsertBrandingKeyTx(tx, BRANDING_KEYS.publicSignup, parsed.data.signupOpen ? "on" : "off");
+    }
+    if (normalizedServerBaseUrl !== null) {
+      // 空串也照写=显式清空（与版权同口径）；非空为已规范化（去尾斜杠/小写 host/补协议）。
+      await upsertBrandingKeyTx(tx, BRANDING_KEYS.serverBaseUrl, normalizedServerBaseUrl);
     }
   });
   invalidateBrandingCache();

@@ -61,12 +61,15 @@ describe("owner + 自定义品牌 dto", () => {
     copyright: "© {year} 星表科技",
     heroUrl: "/uploads/branding/hero.png?v=1",
     signupOpen: true,
+    serverBaseUrl: "https://gx.example.com",
   });
 
   it("三行标签与头行操作齐全，产品名直接回填（哪怕等于默认名也回填）", () => {
     expect(html).toContain("产品显示名称");
     expect(html).toContain("版权信息");
     expect(html).toContain("登录页广告图");
+    expect(html).toContain("服务器访问网址");
+    expect(html).toContain('value="https://gx.example.com"');
     expect(html).toContain("恢复默认文案");
     expect(html).toContain(">保存<");
     expect(html).toContain('id="branding-product-name"');
@@ -131,6 +134,7 @@ describe("访客自主注册开关 checked 反映 config.signupOpen", () => {
       copyright: "",
       heroUrl: null,
       signupOpen: false,
+      serverBaseUrl: "",
     });
     expect(html).toContain("允许访客自主注册");
     expect(html).toContain("bg-gx-border-strong");
@@ -146,6 +150,7 @@ describe("双保险：非 owner / 探针未回 → return null", () => {
       copyright: "© x",
       heroUrl: "/u/h.png",
       signupOpen: true,
+      serverBaseUrl: "https://gx.example.com",
     });
     expect(html).toBe("");
     expect(html).not.toContain("产品显示名称");

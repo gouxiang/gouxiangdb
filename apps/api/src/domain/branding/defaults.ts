@@ -5,6 +5,10 @@
 //      db.js 的 store.ts；默认产品名由此零依赖模块统一供给，避免字面量漂移；
 //   2. renderCopyright 与归一化逻辑给前端作同源移植参考；
 //   3. BRANDING_KEYS 是 app_settings 存储契约，域层/测试共用同一字面量。
+//
+// 0.2.5 增第五键 serverBaseUrl（branding.server_base_url）：管理员手填的对外可访问网址，
+// 仅用于多地址环境（内网 IP + 反代域名并存）下对外展示/复制正确外网网址；空串=未设置。
+// 它是声明性字段：不改服务监听、不做重定向；URL 规范化纯函数在 @gx/shared-types（前后端同源）。
 
 /** 默认产品名：未配置任何品牌 KV、或读取失败时的全站回退值。 */
 export const DEFAULT_PRODUCT_NAME = "构想工作台";
@@ -19,6 +23,8 @@ export const BRANDING_KEYS = {
   copyright: "branding.copyright",
   loginHero: "branding.login_hero",
   publicSignup: "auth.public_signup",
+  // 0.2.5：管理员手填的对外可访问网址（空串=未设置/恢复自动）。声明性，不触监听/重定向。
+  serverBaseUrl: "branding.server_base_url",
 } as const;
 
 /**

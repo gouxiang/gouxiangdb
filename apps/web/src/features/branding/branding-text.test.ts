@@ -46,6 +46,7 @@ describe("DEFAULT_BRANDING", () => {
       copyright: "",
       heroUrl: null,
       signupOpen: false,
+      serverBaseUrl: "",
     });
   });
 

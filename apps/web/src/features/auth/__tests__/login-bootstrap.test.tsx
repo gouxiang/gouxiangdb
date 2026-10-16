@@ -32,6 +32,8 @@ vi.mock("../../../api/client", () => ({
         productName: "构想工作台",
         copyright: "",
         heroUrl: null,
+        signupOpen: false,
+        serverBaseUrl: "",
       }),
   },
   withBase: (p: string) => p,
@@ -310,6 +312,7 @@ describe("LoginPage 双栏改版（#753）", () => {
       copyright: "",
       heroUrl: null,
       signupOpen: false,
+      serverBaseUrl: "",
     });
     expect(html).toContain("星表私有云");
     // 旧副标题开发味文案彻底消失
@@ -322,6 +325,7 @@ describe("LoginPage 双栏改版（#753）", () => {
       copyright: "© {year} 构想科技",
       heroUrl: null,
       signupOpen: false,
+      serverBaseUrl: "",
     });
     expect(html).toContain(`© ${new Date().getFullYear()} 构想科技`);
   });
@@ -332,6 +336,7 @@ describe("LoginPage 双栏改版（#753）", () => {
       copyright: "",
       heroUrl: "/uploads/branding/hero-abc.png",
       signupOpen: false,
+      serverBaseUrl: "",
     });
     expect(html).toContain('src="/uploads/branding/hero-abc.png"');
   });

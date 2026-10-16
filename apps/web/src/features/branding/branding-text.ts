@@ -17,6 +17,8 @@ export const DEFAULT_BRANDING: BrandingConfigDTO = {
   heroUrl: null,
   // 加载/失败占位默认关闭访客自主注册（fail-closed）；有效态由后端计算，前端只透传。
   signupOpen: false,
+  // 未设置对外访问网址（空串=不启用，消费方回退当前页面来源/自动探测）。
+  serverBaseUrl: "",
 };
 
 /**

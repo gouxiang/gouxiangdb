@@ -18,7 +18,7 @@
 // 默认值/键名/纯函数在零依赖的 defaults.ts（update 纯单测与前端同源逻辑复用），此处转出
 // 保持品牌模块对外只有一个导入入口。
 
-import type { BrandingConfigDTO } from "@gx/shared-types";
+import { normalizeServerBaseUrl, type BrandingConfigDTO } from "@gx/shared-types";
 import { publicSignupAllowedByKv, publicSignupOpen } from "../../configSignup.js";
 import { prisma, type DbTx } from "../../db.js";
 import { BRANDING_KEYS, DEFAULT_PRODUCT_NAME, normalizeProductName } from "./defaults.js";
@@ -58,7 +58,11 @@ function assemble(
   const heroUrl = heroRow && heroFile
     ? `/uploads/branding/${heroFile}?v=${heroRow.updatedAt.getTime()}`
     : null;
-  return { productName, copyright, heroUrl, signupOpen };
+  // 对外网址：写入时已规范化（路由层），这里只 trim 回显；脏值（历史/手工改库）防御性归一，
+  // 非空但非法则回退空串（未设置），绝不把畸形 URL 下发到公开 DTO。
+  const rawServerBaseUrl = (byKey.get(BRANDING_KEYS.serverBaseUrl)?.v ?? "").trim();
+  const serverBaseUrl = rawServerBaseUrl === "" ? "" : (normalizeServerBaseUrl(rawServerBaseUrl) ?? "");
+  return { productName, copyright, heroUrl, signupOpen, serverBaseUrl };
 }
 
 /**
@@ -67,7 +71,13 @@ function assemble(
  * 默认 env 未设 -> signupOpen=false，与历史行为一致。
  */
 export function defaultBranding(): BrandingConfigDTO {
-  return { productName: DEFAULT_PRODUCT_NAME, copyright: "", heroUrl: null, signupOpen: publicSignupOpen() };
+  return {
+    productName: DEFAULT_PRODUCT_NAME,
+    copyright: "",
+    heroUrl: null,
+    signupOpen: publicSignupOpen(),
+    serverBaseUrl: "",
+  };
 }
 
 /**
@@ -86,6 +96,7 @@ export async function getBranding(client?: BrandingClient): Promise<BrandingConf
           BRANDING_KEYS.copyright,
           BRANDING_KEYS.loginHero,
           BRANDING_KEYS.publicSignup,
+          BRANDING_KEYS.serverBaseUrl,
         ],
       },
     },

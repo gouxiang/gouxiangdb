@@ -62,6 +62,7 @@ const CUSTOM: BrandingConfigDTO = {
   copyright: "© {year} 定制公司",
   heroUrl: "/uploads/branding/hero.png?v=1728000000",
   signupOpen: true,
+  serverBaseUrl: "https://gx.example.com",
 };
 
 /** SSR 下把 hook 结果拍成一行文本断言。 */

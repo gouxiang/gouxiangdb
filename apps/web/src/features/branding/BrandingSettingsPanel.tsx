@@ -10,10 +10,11 @@
 // 不先空一帧），开始编辑才落本地 draft；保存成功清 draft 回落 invalidate 后的最新服务端值。
 
 import { useEffect, useRef, useState } from "react";
-import { BRANDING_LIMITS } from "@gx/shared-types";
+import { BRANDING_LIMITS, normalizeServerBaseUrl } from "@gx/shared-types";
 import { ApiError, withBase } from "../../api/client";
 import { Button, Input, Switch, Textarea, toast } from "../../components/ui";
 import { Icon } from "../../components/icons";
+import { copyText } from "../../lib/clipboard";
 import { useIsWorkspaceOwner } from "../contacts/contacts-hooks";
 import { useBrandingAdmin, DEFAULT_HERO_URL } from "./useBranding";
 import { DEFAULT_BRANDING, renderCopyright } from "./branding-text";
@@ -39,6 +40,7 @@ function errorText(err: unknown, fallback: string): string {
 interface TextDraft {
   productName: string;
   copyright: string;
+  serverBaseUrl: string;
 }
 
 export function BrandingSettingsPanel() {
@@ -52,6 +54,8 @@ export function BrandingSettingsPanel() {
   // 产品名无论是否等于默认名都直接回填显示（不再把默认名呈现为「留空=默认」）。
   const productName = draft?.productName ?? config?.productName ?? "";
   const copyright = draft?.copyright ?? config?.copyright ?? "";
+  // 对外访问网址：未编辑时回显已保存值（空=未设置）。
+  const serverBaseUrl = draft?.serverBaseUrl ?? config?.serverBaseUrl ?? "";
 
   const fileRef = useRef<HTMLInputElement>(null);
   // 两步恢复确认：confirming 为确认态；timerRef 存自动还原句柄。
@@ -78,17 +82,20 @@ export function BrandingSettingsPanel() {
 
   const nameDirty = productName.trim() !== (config?.productName ?? "").trim();
   const copyrightDirty = copyright !== (config?.copyright ?? "");
-  const textDirty = nameDirty || copyrightDirty;
+  // 网址按「规范化后」比较，避免仅尾斜杠/补协议差异导致保存按钮常亮。
+  const urlDirty =
+    normalizeServerBaseUrl(serverBaseUrl) !== normalizeServerBaseUrl(config?.serverBaseUrl ?? "");
+  const textDirty = nameDirty || copyrightDirty || urlDirty;
 
   async function saveText() {
-    const invalid = validateBrandingInput(productName, copyright);
+    const invalid = validateBrandingInput(productName, copyright, serverBaseUrl);
     if (invalid) {
       toast(invalid, "error");
       return;
     }
     try {
       await updateBranding.mutateAsync(
-        buildBrandingPatch(productName, copyright),
+        buildBrandingPatch(productName, copyright, serverBaseUrl),
       );
       setDraft(null); // 回落 invalidate refetch 后的最新服务端值
       toast("品牌设置已保存", "success");
@@ -97,9 +104,17 @@ export function BrandingSettingsPanel() {
     }
   }
 
-  // 「恢复默认文案」：只回填草稿（默认名 + 空版权），不发请求；仍由用户点保存提交。
+  // 「恢复默认文案」：只回填草稿（默认名 + 空版权 + 空网址），不发请求；仍由用户点保存提交。
   function restoreDefaultText() {
-    setDraft({ productName: DEFAULT_BRANDING.productName, copyright: "" });
+    setDraft({ productName: DEFAULT_BRANDING.productName, copyright: "", serverBaseUrl: "" });
+  }
+
+  // 一键复制「对外访问网址」：仅在已保存了有效网址时可点（多地址环境下内网 IP 登录时
+  // 需要把外网可用网址发给外部协作者）。剪贴板失败给手动复制提示。
+  const savedServerBaseUrl = config?.serverBaseUrl ?? "";
+  async function copyServerBaseUrl() {
+    const ok = await copyText(savedServerBaseUrl);
+    toast(ok ? `已复制：${savedServerBaseUrl}` : "复制失败，请手动选中复制", ok ? "success" : "error");
   }
 
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -197,7 +212,7 @@ export function BrandingSettingsPanel() {
             maxLength={BRANDING_LIMITS.productNameMax}
             placeholder="请输入产品显示名称"
             onChange={(e) =>
-              setDraft({ productName: e.target.value, copyright })
+              setDraft({ productName: e.target.value, copyright, serverBaseUrl })
             }
           />
           <div className="flex items-center justify-between text-gx-11 text-gx-text-hint">
@@ -225,7 +240,7 @@ export function BrandingSettingsPanel() {
             maxLength={BRANDING_LIMITS.copyrightMax}
             placeholder="留空则不展示，例如：© {year} 构想科技"
             onChange={(e) =>
-              setDraft({ productName, copyright: e.target.value })
+              setDraft({ productName, copyright: e.target.value, serverBaseUrl })
             }
           />
           <div className="flex items-center justify-between text-gx-11 text-gx-text-hint">
@@ -242,6 +257,46 @@ export function BrandingSettingsPanel() {
               预览：{renderCopyright(copyright)}
             </div>
           )}
+        </div>
+
+        {/* c2. 服务器对外访问网址（多地址环境：内网 IP 与反代域名并存时手填外网可用地址） */}
+        <div className="flex flex-col gap-1.5 px-4 py-3">
+          <div className="flex items-center gap-1.5">
+            <label
+              htmlFor="branding-server-base-url"
+              className="text-gx-13 text-gx-text-primary"
+            >
+              服务器访问网址
+            </label>
+            <span className="inline-flex items-center text-gx-text-hint">
+              <Icon name="globe" size={13} />
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              id="branding-server-base-url"
+              value={serverBaseUrl}
+              maxLength={BRANDING_LIMITS.serverBaseUrlMax}
+              placeholder="留空=自动；例如 https://gouxiang.example.com"
+              onChange={(e) =>
+                setDraft({ productName, copyright, serverBaseUrl: e.target.value })
+              }
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="copy"
+              className="shrink-0 px-2"
+              disabled={!savedServerBaseUrl}
+              title={savedServerBaseUrl ? "复制对外可用网址" : "尚未保存网址"}
+              onClick={() => void copyServerBaseUrl()}
+            >
+              复制
+            </Button>
+          </div>
+          <span className="text-gx-11 text-gx-text-hint">
+            当服务器同时有内网 IP 和反代域名、在内网用 IP 登录却需要把外网网址发给他人时，在此填写对外可访问的网址（可含端口/子路径）。仅用于展示与复制正确网址，不改监听、不做跳转；留空则按当前访问地址自动识别。
+          </span>
         </div>
 
         {/* c. 登录页广告图 */}

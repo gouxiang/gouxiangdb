@@ -66,6 +66,7 @@ describe("品牌外观：匿名公开读", () => {
       copyright: "",
       heroUrl: null,
       signupOpen: false,
+      serverBaseUrl: "",
     });
   });
 
@@ -140,6 +141,61 @@ describe("品牌外观：PATCH 校验 + 写后缓存立即失效", () => {
     expect(res.status).toBe(200);
     expect((await json<{ copyright: string }>(res)).copyright).toBe("© {year} 蓝奏云");
     expect((await patch("admin", { copyright: "" })).status).toBe(200);
+  });
+});
+
+describe("品牌外观：服务器对外访问网址 serverBaseUrl（0.2.5）", () => {
+  it("合法 https 域名：保存后 PATCH 响应与匿名 GET 均为去尾斜杠的规范化值", async () => {
+    const res = await patch("owner", { serverBaseUrl: "https://gx.example.com/" });
+    expect(res.status).toBe(200);
+    expect((await json<{ serverBaseUrl: string }>(res)).serverBaseUrl).toBe(
+      "https://gx.example.com",
+    );
+    const pub = await json<{ serverBaseUrl: string }>(
+      await h.app.request("/api/auth/branding"),
+    );
+    expect(pub.serverBaseUrl).toBe("https://gx.example.com");
+  });
+
+  it("裸 host:port/子路径自动补 http://、host 小写、保留端口与路径、去尾斜杠", async () => {
+    const res = await patch("admin", { serverBaseUrl: "NAS.Example.COM:5666/app/gx//" });
+    expect(res.status).toBe(200);
+    expect((await json<{ serverBaseUrl: string }>(res)).serverBaseUrl).toBe(
+      "http://nas.example.com:5666/app/gx",
+    );
+  });
+
+  it("空串=清空（恢复自动）：保存后匿名 GET 回空串", async () => {
+    expect((await patch("admin", { serverBaseUrl: "https://x.com" })).status).toBe(200);
+    const cleared = await patch("admin", { serverBaseUrl: "   " });
+    expect(cleared.status).toBe(200);
+    expect((await json<{ serverBaseUrl: string }>(cleared)).serverBaseUrl).toBe("");
+  });
+
+  it("非 http(s) 协议 / 含空白 / 路径双斜杠 / 带 userinfo -> 400 且不落 KV", async () => {
+    expect((await patch("admin", { serverBaseUrl: "javascript:alert(1)" })).status).toBe(400);
+    expect((await patch("admin", { serverBaseUrl: "https://a b.com" })).status).toBe(400);
+    expect((await patch("admin", { serverBaseUrl: "http://gx.com/a//b" })).status).toBe(400);
+    expect((await patch("admin", { serverBaseUrl: "https://u:p@gx.com" })).status).toBe(400);
+    const row = await h.prisma.appSetting.findUnique({ where: { k: "branding.server_base_url" } });
+    expect(row).toBeNull();
+  });
+
+  it("viewer PATCH serverBaseUrl -> 403", async () => {
+    expect((await patch("viewer", { serverBaseUrl: "https://ok.com" })).status).toBe(403);
+  });
+
+  it("审计 branding_update 的 detail.fields 含 serverBaseUrl", async () => {
+    await patch("owner", { serverBaseUrl: "https://audit.com" });
+    const lines = fs
+      .readFileSync(h.auditFile, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+    const evt = lines
+      .filter((r: { event: string }) => r.event === "branding_update")
+      .find((r: { detail: { fields: string[] } }) => r.detail.fields.includes("serverBaseUrl"));
+    expect(evt).toBeTruthy();
   });
 });
 
