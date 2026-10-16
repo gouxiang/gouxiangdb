@@ -54,8 +54,9 @@ fn main() {
   dbg_log(&format!("app run begin pid={}", std::process::id()));
   let poc3 = std::env::var("GX_POC3").map(|v| v == "1").unwrap_or(false);
   if poc3 {
-    // 默认 append：更新会 restart 成新 .app，新旧两段证据要留在同一日志。
-    // 需要一次干净复测时由驱动脚本设 GX_POC3_RESET_LOG=1 清空。
+    // 始终 append：更新 restart 会继承环境并以新 .app 再进 main，新旧两段证据必须留在同一日志。
+    // 注意：绝不能靠会被重启继承的 env 在运行时自删（曾用 GX_POC3_RESET_LOG 导致新版抹掉旧版证据）；
+    // 清空日志由驱动脚本在【开跑前】外部截断一次。GX_POC3_RESET_LOG 仅保留给"单次启动不更新"的隔离调试。
     if std::env::var("GX_POC3_RESET_LOG").map(|v| v == "1").unwrap_or(false) {
       let _ = fs::remove_file(POC3_LOG);
     }
@@ -206,13 +207,15 @@ fn graceful_stop(pid: i32, timeout: Duration) {
 
 /// PoC-3 无交互自动更新编排（仅 GX_POC3=1 时在专用系统线程里跑）。
 ///
-/// 流程与无交互判定：
+/// 流程与无交互判定（★严格遵守 updater 2.13.3 的真实时序）：
 /// 1. 等 sidecar 就绪（轮询共享 PID 置位），再等几秒让内核把库真正打开，避免抢跑；
 /// 2. updater().check() 拉构建期注入的静态源 latest.json（semver 判定，无新版=正常返回）；
-/// 3. download_and_install：下载在内部先做 minisign 公钥校验——篡改/坏签名在此返回 Err，
-///    此时 on_download_finish【尚未执行】，sidecar 没被停、旧版原样运行（满足"校验失败不安装"）；
-/// 4. 校验通过后、真正替换前，闭包 on_download_finish 优雅停 sidecar（保 WAL 落盘）；
-/// 5. macOS 装完不自动重启，显式 app_handle.restart() 触发 ExitRequested(RESTART_EXIT_CODE)，
+/// 3. update.download()：收齐字节后先跑 minisign verify（updater.rs:837）。
+///    其 on_download_finish 在 verify【之前】（:835），故该回调绝不能停 sidecar——
+///    否则坏签名被拒时内核已被误停。篡改/坏签名在此 Err 返回，内核全程不动、旧版照跑；
+/// 4. download 成功（已校验）后，才优雅停 sidecar（保 WAL 落盘）；
+/// 5. update.install(bytes)（内部对字节再 verify 一次 + 解压替换 .app）；
+/// 6. macOS 装完不自动重启，显式 app_handle.restart() 触发 ExitRequested(RESTART_EXIT_CODE)，
 ///    由主 run 循环放行并再做一次 sidecar 收尸，然后 Tauri 用新 .app 重启。
 ///
 /// 本线程不在 tokio 运行时内，故两处 updater 异步调用用 block_on 驱动；等待一律用 std sleep。
@@ -266,10 +269,14 @@ fn run_poc3_update(handle: tauri::AppHandle) {
     update.current_version, update.version, update.target, update.download_url
   ));
 
-  // 下载进度回调（限频落日志）；安装前回调停 sidecar。
+  // 下载进度回调（限频落日志）。
   let mut last_log: u64 = 0;
-  let handle_for_stop = handle.clone();
-  let result = tauri::async_runtime::block_on(update.download_and_install(
+  // 关键：不能用 download_and_install 的 on_download_finish 停 sidecar。
+  // 实测 tauri-plugin-updater 2.13.3（updater.rs:835-843）该回调在【下载完成时】先于
+  // verify_signature 触发——若在其中停内核，坏签名虽被拒（843 行 Err），内核却已被我们误停。
+  // 正确顺序：download（完成回调只记日志，不停任何东西；坏签名在此 Err 直接返回，内核不动）
+  //          → 成功拿到字节后【这里才】优雅停 sidecar → install（内部再 verify 一次 + 替换）→ restart。
+  let bytes = match tauri::async_runtime::block_on(update.download(
     move |chunk, total| {
       last_log = last_log.saturating_add(chunk as u64);
       // 每 ~4MiB 或已知总量末包打一条，避免日志爆量。
@@ -279,23 +286,34 @@ fn run_poc3_update(handle: tauri::AppHandle) {
         poc3_log(&format!("download bytes={last_log} total={total:?}"));
       }
     },
-    move || {
-      // 下载完成且【签名校验通过】后、替换 .app 前调用：优雅停内核，确保最后落盘。
-      poc3_log("download+verify OK; on_download_finish: graceful stop sidecar before install");
-      let pid = handle_for_stop
-        .try_state::<SidecarPid>()
-        .map(|s| s.0.swap(0, Ordering::SeqCst))
-        .unwrap_or(0);
-      if pid > 0 {
-        graceful_stop(pid, Duration::from_secs(8));
-      }
+    || {
+      // 仅表示下载字节收齐；签名校验此刻【尚未】进行，绝不能在这里停 sidecar。
+      poc3_log("download finished (signature not yet verified); keep sidecar running");
     },
-  ));
+  )) {
+    Ok(b) => b,
+    Err(e) => {
+      // 篡改 / 坏签名落这里：on_download_finish 未停内核，sidecar 与旧版原样运行、业务不中断。
+      poc3_log(&format!("RESULT FAIL reason=download_or_verify error={e}"));
+      poc3_log("NOTE 校验失败：未安装，且 sidecar 全程未被停止（旧版继续运行）");
+      return;
+    }
+  };
 
-  if let Err(e) = result {
-    // 篡改 / 坏签名 / 网络错误都落这里；此时 on_download_finish 未执行，旧版与 sidecar 完好。
-    poc3_log(&format!("RESULT FAIL reason=download_or_verify error={e}"));
-    poc3_log("NOTE 校验失败：未安装、sidecar 未被停止（旧版继续运行）");
+  // 下载【且 minisign 公钥校验】已通过——此刻、且仅此刻，才在替换前优雅停内核保最后落盘。
+  poc3_log(&format!("signature OK ({} bytes verified); graceful stop sidecar before install", bytes.len()));
+  let pid = handle
+    .try_state::<SidecarPid>()
+    .map(|s| s.0.swap(0, Ordering::SeqCst))
+    .unwrap_or(0);
+  if pid > 0 {
+    graceful_stop(pid, Duration::from_secs(8));
+  }
+
+  // install 内部对 bytes 再 verify 一次，然后解压替换 .app；不会自动重启。
+  if let Err(e) = update.install(bytes) {
+    poc3_log(&format!("RESULT FAIL reason=install error={e}"));
+    poc3_log("NOTE 安装失败：新包未落位（sidecar 已停，需重启 App；坏包不会替换成功）");
     return;
   }
 

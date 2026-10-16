@@ -83,10 +83,20 @@ build_one() {
 
 stage_artifacts() {
   local ver="$1"
+  # 必须先删目标：macOS `cp -R src.app 已存在的dst.app` 会合并/嵌套而非干净覆盖内部二进制，
+  # 曾导致 art 里 tar.gz 是新的、.app 壳二进制却是旧逻辑（假绿）。
+  rm -rf "$ART/$APPNAME-$ver.app"
   cp -R "$BUNDLE_DIR/$APPNAME.app" "$ART/$APPNAME-$ver.app"
-  cp "$BUNDLE_DIR/$APPNAME.app.tar.gz" "$ART/GouXiangDB-$ver.app.tar.gz"
-  cp "$BUNDLE_DIR/$APPNAME.app.tar.gz.sig" "$ART/GouXiangDB-$ver.app.tar.gz.sig"
-  echo "[poc3] staged $ver .app / tar.gz / sig -> $ART"
+  cp -f "$BUNDLE_DIR/$APPNAME.app.tar.gz" "$ART/GouXiangDB-$ver.app.tar.gz"
+  cp -f "$BUNDLE_DIR/$APPNAME.app.tar.gz.sig" "$ART/GouXiangDB-$ver.app.tar.gz.sig"
+  # 指纹硬校验：staged 壳二进制必须与刚构建 bundle 的逐字节一致，否则中止（杜绝壳旧包新）。
+  local h1 h2
+  h1=$(shasum -a 256 "$BUNDLE_DIR/$APPNAME.app/Contents/MacOS/gouxiangdb-desktop" | awk '{print $1}')
+  h2=$(shasum -a 256 "$ART/$APPNAME-$ver.app/Contents/MacOS/gouxiangdb-desktop" | awk '{print $1}')
+  if [ "$h1" != "$h2" ]; then
+    echo "[poc3] FAIL staged $ver 壳二进制与 bundle 不一致 ($h1 != $h2)"; exit 1
+  fi
+  echo "[poc3] staged ${ver} .app / tar.gz / sig -> ${ART}（壳指纹一致 ${h1}）"
 }
 
 cmd_buildall() {
@@ -119,7 +129,7 @@ manifest() { # manifest <version> [--tamper]
     --remote "GouXiangDB-$ver.app.tar.gz" "$@"
 }
 
-cmd_manifest_ok() { manifest "$NEW_VER" --notes "PoC-3 正常更新包 $NEW_VER（应被安装）"; }
+cmd_manifest_ok() { manifest "$NEW_VER" --notes "PoC-3 正常更新包 ${NEW_VER}（应被安装）"; }
 
 wait_log() { # wait_log <grep-ere> <timeout-sec>
   local pat="$1" timeout="${2:-120}" start=$SECONDS
@@ -130,11 +140,11 @@ wait_log() { # wait_log <grep-ere> <timeout-sec>
   return 1
 }
 
-launch_installed() { # launch_installed <reset-log 0|1>
-  local reset="$1"
-  local envargs=(--env GX_POC3=1 --env "GX_POC3_DATA_DIR=$DATA")
-  if [ "$reset" = "1" ]; then envargs+=(--env GX_POC3_RESET_LOG=1); fi
-  open -n "$INSTALL/$APPNAME.app" "${envargs[@]}"
+launch_installed() {
+  # 不传 GX_POC3_RESET_LOG：更新 restart 会继承 env，若带自删标志，新版启动会抹掉旧版那段证据。
+  # 日志清理由调用方在启动前外部截断（run_old），篡改用例只看本次启动后的新增行（tamper）。
+  open -n "$INSTALL/$APPNAME.app" \
+    --env GX_POC3=1 --env "GX_POC3_DATA_DIR=$DATA"
 }
 
 cmd_run_old() {
@@ -144,14 +154,15 @@ cmd_run_old() {
   cp -R "$ART/$APPNAME-$OLD_VER.app" "$INSTALL/$APPNAME.app"
   local instver
   instver=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INSTALL/$APPNAME.app/Contents/Info.plist")
-  echo "[poc3] 安装的旧版版本=$instver（期望 $OLD_VER）"
+  echo "[poc3] 安装的旧版版本=${instver}（期望 ${OLD_VER}）"
   [ "$instver" = "$OLD_VER" ] || { echo "[poc3] 旧版版本不符，中止"; exit 1; }
-  launch_installed 1
-  echo "[poc3] 等待自动更新到 $NEW_VER（看 $UPD_LOG，最多 150s）…"
+  : > "$UPD_LOG"   # 开跑前外部清空一次；重启继承的 env 不再自删
+  launch_installed
+  echo "[poc3] 等待自动更新到 ${NEW_VER}（看 ${UPD_LOG}，最多 150s）…"
   if wait_log "bundle_version=$NEW_VER" 150; then
     echo "[poc3] ✅ 已重启为 $NEW_VER"
   else
-    echo "[poc3] ❌ 超时未见到 $NEW_VER，日志末尾："; tail -30 "$UPD_LOG"; exit 1
+    echo "[poc3] ❌ 超时未见到 ${NEW_VER}，日志末尾："; tail -30 "$UPD_LOG"; exit 1
   fi
   sleep 6  # 让新版自检一次（应 NONE already-latest，不产生再更新循环）
   local nowver
@@ -177,20 +188,29 @@ cmd_tamper() {
     --notes "PoC-3 篡改包（必须拒绝）"
   local before
   before=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INSTALL/$APPNAME.app/Contents/Info.plist")
-  echo "[poc3] 篡改用例前安装版本=$before（期望 $NEW_VER）"
-  launch_installed 0
-  echo "[poc3] 等待校验失败结果（最多 120s）…"
-  if wait_log "RESULT FAIL reason=download_or_verify" 120; then
+  echo "[poc3] 篡改用例前安装版本=${before}（期望 ${NEW_VER}）"
+  # 只看本次启动之后新增的日志，避免被上一轮成功记录干扰。
+  local mark
+  mark=$(wc -l < "$UPD_LOG" 2>/dev/null | tr -d ' '); mark=${mark:-0}
+  launch_installed
+  echo "[poc3] 等待校验失败结果（最多 120s，仅看第 $((mark+1)) 行之后）…"
+  local start=$SECONDS pat="RESULT FAIL reason=download_or_verify"
+  local got=0
+  while (( SECONDS - start < 120 )); do
+    if tail -n +$((mark+1)) "$UPD_LOG" 2>/dev/null | grep -Eq "$pat"; then got=1; break; fi
+    sleep 1
+  done
+  if [ "$got" = "1" ]; then
     echo "[poc3] ✅ updater 拒绝了篡改包"
   else
-    echo "[poc3] ❌ 未等到拒绝，可能被错误安装！日志："; tail -30 "$UPD_LOG"; exit 1
+    echo "[poc3] ❌ 未等到拒绝，可能被错误安装！新增日志："; tail -n +$((mark+1)) "$UPD_LOG"; exit 1
   fi
   sleep 3
   local after
   after=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INSTALL/$APPNAME.app/Contents/Info.plist")
-  echo "[poc3] 篡改用例后安装版本=$after（必须仍是 $NEW_VER）"
+  echo "[poc3] 篡改用例后安装版本=${after}（必须仍是 ${NEW_VER}）"
   [ "$after" = "$NEW_VER" ] || { echo "[poc3] ❌ 版本被改变，篡改防护失败"; exit 1; }
-  pgrep -fl "$INSTALL/$APPNAME.app" >/dev/null && echo "[poc3] ✅ 旧版进程仍存活（未被中断/替换）" \
+  pgrep -fl "$INSTALL/$APPNAME.app/Contents/MacOS" >/dev/null && echo "[poc3] ✅ 旧版进程仍存活（未被中断/替换）" \
     || echo "[poc3] 注意：未检出存活进程，需人工确认"
   echo "[poc3] ✅ PoC-3 篡改拒绝通过"
 }
