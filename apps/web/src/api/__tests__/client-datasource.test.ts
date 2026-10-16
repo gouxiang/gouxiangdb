@@ -20,6 +20,10 @@ import {
 import { useAuthStore } from "../../store/auth";
 import { dataSourceResolver } from "../../node/datasource";
 import type { ActiveDataSource } from "../../node/datasource";
+import {
+  registerRemoteUnauthorizedHandler,
+  __resetUnauthorizedBridgeForTest,
+} from "../../node/unauthorizedBridge";
 
 const REMOTE: ActiveDataSource = {
   nodeId: "abcdef012345",
@@ -45,6 +49,7 @@ beforeEach(() => {
 
 afterEach(() => {
   dataSourceResolver.setActive(null);
+  __resetUnauthorizedBridgeForTest();
   vi.unstubAllGlobals();
 });
 
@@ -215,5 +220,47 @@ describe("S2-6：nav flag 探活缓存随节点切换失效", () => {
     ).length;
     expect(remoteMenuCalls).toBe(1);
     expect(fetchMock.mock.calls.length).toBe(2); // local 首探 1（次探命中缓存）+ remote 重探 1
+  });
+});
+
+describe("S2-7：401 按数据源 kind 分流", () => {
+  // handleUnauthorized 有 3s 模块级去重；用 fake timers 在每条用例后推进，复位去重标志，
+  // 避免相邻 401 用例互相吞掉。
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.advanceTimersByTime(3_100);
+    vi.useRealTimers();
+  });
+
+  it("remote 401：只通知启动器处理器（带 nodeId），不清本地登录态、不跳本地登录页", async () => {
+    dataSourceResolver.__setActiveForTest(REMOTE);
+    const handler = vi.fn();
+    registerRemoteUnauthorizedHandler(handler);
+    fetchMock.mockResolvedValue(
+      jsonResponse({ error: "token expired", code: "UNAUTHORIZED" }, { status: 401 }),
+    );
+
+    await expect(apiFetch("/api/bases")).rejects.toMatchObject({ status: 401 });
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith(REMOTE.nodeId);
+    // 本地登录态原样保留
+    expect(useAuthStore.getState().token).toBe("local-tok");
+  });
+
+  it("remote 401 未注册处理器（裸 web 面）：no-op，不清本地登录态", async () => {
+    dataSourceResolver.__setActiveForTest(REMOTE);
+    fetchMock.mockResolvedValue(jsonResponse({ error: "x" }, { status: 401 }));
+    await expect(apiFetch("/api/bases")).rejects.toMatchObject({ status: 401 });
+    expect(useAuthStore.getState().token).toBe("local-tok");
+  });
+
+  it("local 401：仍走旧路径清本地登录态（golden）", async () => {
+    // node 测试环境无 window：assign 有 typeof 守卫；logout() 会把 token 置空，这是可断言的旧行为。
+    fetchMock.mockResolvedValue(jsonResponse({ error: "x" }, { status: 401 }));
+    await expect(apiFetch("/api/bases")).rejects.toMatchObject({ status: 401 });
+    expect(useAuthStore.getState().token).toBeNull();
   });
 });

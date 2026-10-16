@@ -93,6 +93,7 @@ import { saveSessionFrom } from "../lib/session-from";
 // authHeaders(<auth store token>) 逐字节同口径（见 node/datasource.test.ts golden），故本次接线
 // 对浏览器/fnOS 现网零行为变化；S2+ 启动器经 setActive 放入远端后，主路径自动跟随，无需再改调用点。
 import { dataSourceResolver } from "../node/datasource";
+import { notifyRemoteUnauthorized } from "../node/unauthorizedBridge";
 
 // API 同源前缀解析：
 //  - 显式 VITE_API_URL（非空）→ 绝对来源，去尾斜杠（保留跨域/独立域名能力）
@@ -238,12 +239,23 @@ export function isSelfCredential401Path(path: string): boolean {
   return AUTH_SELF_401_PATHS.test(path);
 }
 
-/** 并发请求可能同时 401，只处理一次，避免重复跳转 */
+/** 并发请求可能同时 401，只处理一次，避免重复跳转/重复通知 */
 let unauthorizedHandled = false;
 
 function handleUnauthorized(): void {
   if (unauthorizedHandled) return;
   unauthorizedHandled = true;
+  // 节点模式 S2：按当前数据源分流。远端节点 401 只代表该远端会话失效——
+  // 通知启动器清该节点会话/回连接界面，绝不清本地 gx-auth、不跳本地登录页。
+  // （401 判定发生在 await fetch 之后，此处同步读当前活动数据源；local 分支逐字节保留旧行为。）
+  const ds = dataSourceResolver.current();
+  if (ds.kind === "remote") {
+    notifyRemoteUnauthorized(ds.nodeId);
+    setTimeout(() => {
+      unauthorizedHandled = false;
+    }, 3000);
+    return;
+  }
   // 记下当前页（含查询串），重新登录后回到原页（R-D-17）。失败不影响既有跳转。
   if (typeof window !== "undefined") {
     saveSessionFrom(window.location.pathname + window.location.search);
