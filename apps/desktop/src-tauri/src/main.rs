@@ -16,6 +16,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use tauri::{Manager, WebviewWindow};
+// PoC-3：仅用其 UpdaterExt（app.updater()）。插件在 Builder 注册但默认永不 check——
+// 只有 GX_POC3=1 时才主动发起，且 endpoints/pubkey 由构建期 --config 注入，正式 tauri.conf 不含 updater 段。
+use tauri_plugin_updater::UpdaterExt;
 
 const BUNDLE_ID: &str = "cc.gouxiang.desktop";
 const NODE_BIN: &str = "gxnode-aarch64-apple-darwin";
@@ -24,10 +27,21 @@ const EXIT_LOG: &str = "/tmp/gx-desktop-exit.log";
 /// PoC-2 门控（仅自测）：GX_POC2=1 时把 sidecar 输出落盘并导航到同源探针页 /poc2.html。
 /// 默认（无此 env）行为与 PoC-1 完全一致：日志丢弃、导航到 /。
 const POC2_SIDECAR_LOG: &str = "/tmp/gx-poc2-sidecar.log";
+/// PoC-3 门控（仅自测）：GX_POC3=1 时延迟若干秒后向构建期注入的静态源 check 更新，
+/// 下载→minisign 公钥校验→安装前优雅停 sidecar→替换→restart，全过程落盘供无交互判定。
+const POC3_LOG: &str = "/tmp/gx-poc3-updater.log";
 
 fn dbg_log(msg: &str) {
   use std::io::Write;
   if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(EXIT_LOG) {
+    let _ = writeln!(f, "{msg}");
+  }
+}
+
+/// PoC-3 专用无交互日志（与主退出日志分开，便于脚本直接判定更新闭环结果）。
+fn poc3_log(msg: &str) {
+  use std::io::Write;
+  if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(POC3_LOG) {
     let _ = writeln!(f, "{msg}");
   }
 }
@@ -38,21 +52,56 @@ struct SidecarPid(AtomicI32);
 fn main() {
   let _ = fs::remove_file(EXIT_LOG);
   dbg_log(&format!("app run begin pid={}", std::process::id()));
+  let poc3 = std::env::var("GX_POC3").map(|v| v == "1").unwrap_or(false);
+  if poc3 {
+    // 默认 append：更新会 restart 成新 .app，新旧两段证据要留在同一日志。
+    // 需要一次干净复测时由驱动脚本设 GX_POC3_RESET_LOG=1 清空。
+    if std::env::var("GX_POC3_RESET_LOG").map(|v| v == "1").unwrap_or(false) {
+      let _ = fs::remove_file(POC3_LOG);
+    }
+    poc3_log(&format!(
+      "---- session begin pid={} crate_ver={} ----",
+      std::process::id(),
+      env!("CARGO_PKG_VERSION")
+    ));
+  }
   let app = tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
+    // PoC-3：注册 updater 插件。其 endpoints/pubkey 只在 PoC 构建的 --config 覆盖里提供；
+    // 默认 tauri.conf.json 无 updater 段，且非 GX_POC3 时永远不调用 check，故零自动行为。
+    .plugin(tauri_plugin_updater::Builder::new().build())
     .manage(SidecarPid(AtomicI32::new(0)))
-    .setup(|app| {
+    .setup(move |app| {
       let window: WebviewWindow = app.get_webview_window("main").expect("main window");
       let resource_dir = app.path().resource_dir().expect("resource_dir");
+      // 记录构建期 --config 注入的真实 bundle 版本（两版 crate 版本相同，须靠它区分 0.1.0/0.2.0）。
+      if std::env::var("GX_POC3").map(|v| v == "1").unwrap_or(false) {
+        poc3_log(&format!(
+          "bundle_version={} name={}",
+          app.package_info().version,
+          app.package_info().name
+        ));
+      }
       let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-      // PoC-2：数据目录可由 GX_POC2_DATA_DIR 覆盖（隔离自测，绝不碰真实 Application Support）。
+      // PoC-2/PoC-3：数据目录可由 GX_POC2_DATA_DIR / GX_POC3_DATA_DIR 覆盖（隔离自测，绝不碰真实 Application Support）。
       // 不能靠覆盖 HOME 隔离——会让 Tauri resource_dir() 解析失败（UnknownPath）。
-      let data_dir = match std::env::var("GX_POC2_DATA_DIR") {
-        Ok(p) if !p.trim().is_empty() => PathBuf::from(p),
-        _ => PathBuf::from(home)
-          .join("Library/Application Support")
-          .join(BUNDLE_ID),
+      let data_dir = match std::env::var("GX_POC3_DATA_DIR").ok().filter(|p| !p.trim().is_empty()) {
+        Some(p) => PathBuf::from(p),
+        None => match std::env::var("GX_POC2_DATA_DIR").ok().filter(|p| !p.trim().is_empty()) {
+          Some(p) => PathBuf::from(p),
+          None => PathBuf::from(home)
+            .join("Library/Application Support")
+            .join(BUNDLE_ID),
+        },
       };
+
+      // PoC-3：起一条专用系统线程，等 sidecar 就绪（轮询共享 PID）后再查更新，
+      // 避免与内核启动抢占；安装前在 on_download_finish 里优雅停 sidecar。
+      // 用普通线程 + std 等待，仅在两处 updater 异步调用上 block_on（该线程不在 tokio 运行时内，安全）。
+      if poc3 {
+        let handle3 = app.handle().clone();
+        thread::spawn(move || run_poc3_update(handle3));
+      }
 
       thread::spawn(move || {
         let poc2 = std::env::var("GX_POC2").map(|v| v == "1").unwrap_or(false);
@@ -72,22 +121,38 @@ fn main() {
   // 双保险收尸：
   //  - ExitRequested：可阻止。prevent_exit 后另起线程优雅停 sidecar（SIGTERM 等 ≤5s），再 app.exit。
   //  - Exit：不可阻止但仍能同步收尾，做有界 SIGTERM→SIGKILL 兜底（防某些终止路径不发 Requested）。
+  //  - updater 重启（code==RESTART_EXIT_CODE=80）：绝不 prevent_exit，只在退出前同步优雅停 sidecar，
+  //    让 Tauri 完成"替换 .app 后重启"；否则会把更新重启误判成普通退出而卡死。
   app.run(move |app_handle, event| match event {
-    tauri::RunEvent::ExitRequested { api, .. } => {
-      dbg_log("ExitRequested received -> prevent_exit + graceful");
-      api.prevent_exit();
-      let pid = app_handle
-        .try_state::<SidecarPid>()
-        .map(|s| s.0.swap(0, Ordering::SeqCst))
-        .unwrap_or(0);
-      dbg_log(&format!("sidecar pid from state = {pid}"));
-      let handle = app_handle.clone();
-      thread::spawn(move || {
+    tauri::RunEvent::ExitRequested { code, api, .. } => {
+      if code == Some(tauri::RESTART_EXIT_CODE) {
+        dbg_log("ExitRequested RESTART(80) -> updater relaunch: graceful stop, do NOT prevent_exit");
+        poc3_log("RESTART_EXIT_CODE received: stopping sidecar before relaunch");
+        let pid = app_handle
+          .try_state::<SidecarPid>()
+          .map(|s| s.0.swap(0, Ordering::SeqCst))
+          .unwrap_or(0);
         if pid > 0 {
           graceful_stop(pid, Duration::from_secs(5));
         }
-        handle.exit(0);
-      });
+        // 不调用 api.prevent_exit()：放行 Tauri 重启流程。
+        let _ = api;
+      } else {
+        dbg_log("ExitRequested received -> prevent_exit + graceful");
+        api.prevent_exit();
+        let pid = app_handle
+          .try_state::<SidecarPid>()
+          .map(|s| s.0.swap(0, Ordering::SeqCst))
+          .unwrap_or(0);
+        dbg_log(&format!("sidecar pid from state = {pid}"));
+        let handle = app_handle.clone();
+        thread::spawn(move || {
+          if pid > 0 {
+            graceful_stop(pid, Duration::from_secs(5));
+          }
+          handle.exit(0);
+        });
+      }
     }
     tauri::RunEvent::Exit => {
       dbg_log("RunEvent::Exit -> backstop reaper");
@@ -137,6 +202,106 @@ fn graceful_stop(pid: i32, timeout: Duration) {
     dbg_log(&format!("超时，SIGKILL 进程组 {pid} -> {r}"));
   }
   thread::sleep(Duration::from_millis(300));
+}
+
+/// PoC-3 无交互自动更新编排（仅 GX_POC3=1 时在专用系统线程里跑）。
+///
+/// 流程与无交互判定：
+/// 1. 等 sidecar 就绪（轮询共享 PID 置位），再等几秒让内核把库真正打开，避免抢跑；
+/// 2. updater().check() 拉构建期注入的静态源 latest.json（semver 判定，无新版=正常返回）；
+/// 3. download_and_install：下载在内部先做 minisign 公钥校验——篡改/坏签名在此返回 Err，
+///    此时 on_download_finish【尚未执行】，sidecar 没被停、旧版原样运行（满足"校验失败不安装"）；
+/// 4. 校验通过后、真正替换前，闭包 on_download_finish 优雅停 sidecar（保 WAL 落盘）；
+/// 5. macOS 装完不自动重启，显式 app_handle.restart() 触发 ExitRequested(RESTART_EXIT_CODE)，
+///    由主 run 循环放行并再做一次 sidecar 收尸，然后 Tauri 用新 .app 重启。
+///
+/// 本线程不在 tokio 运行时内，故两处 updater 异步调用用 block_on 驱动；等待一律用 std sleep。
+/// 全过程写 POC3_LOG，外部脚本只需 grep RESULT 行即可判定，无需人点界面。
+fn run_poc3_update(handle: tauri::AppHandle) {
+  /// 等 sidecar PID 登记（内核已 listen）。
+  fn wait_sidecar_ready(handle: &tauri::AppHandle) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while Instant::now() < deadline {
+      let pid = handle
+        .try_state::<SidecarPid>()
+        .map(|s| s.0.load(Ordering::SeqCst))
+        .unwrap_or(0);
+      if pid > 0 {
+        return true;
+      }
+      thread::sleep(Duration::from_millis(500));
+    }
+    false
+  }
+
+  if !wait_sidecar_ready(&handle) {
+    poc3_log("RESULT FAIL reason=sidecar-never-ready");
+    return;
+  }
+  poc3_log("sidecar ready; settle 4s before check");
+  thread::sleep(Duration::from_secs(4));
+
+  let updater = match handle.updater() {
+    Ok(u) => u,
+    Err(e) => {
+      poc3_log(&format!("RESULT FAIL reason=updater-build error={e}"));
+      return;
+    }
+  };
+
+  let update = match tauri::async_runtime::block_on(updater.check()) {
+    Ok(Some(u)) => u,
+    Ok(None) => {
+      poc3_log("RESULT NONE reason=already-latest（静态源版本不高于当前，属正常分支）");
+      return;
+    }
+    Err(e) => {
+      poc3_log(&format!("RESULT FAIL reason=check error={e}"));
+      return;
+    }
+  };
+
+  poc3_log(&format!(
+    "update available: current={} remote={} target={} url={}",
+    update.current_version, update.version, update.target, update.download_url
+  ));
+
+  // 下载进度回调（限频落日志）；安装前回调停 sidecar。
+  let mut last_log: u64 = 0;
+  let handle_for_stop = handle.clone();
+  let result = tauri::async_runtime::block_on(update.download_and_install(
+    move |chunk, total| {
+      last_log = last_log.saturating_add(chunk as u64);
+      // 每 ~4MiB 或已知总量末包打一条，避免日志爆量。
+      if last_log % (4 * 1024 * 1024) < chunk as u64
+        || matches!(total, Some(t) if last_log >= t)
+      {
+        poc3_log(&format!("download bytes={last_log} total={total:?}"));
+      }
+    },
+    move || {
+      // 下载完成且【签名校验通过】后、替换 .app 前调用：优雅停内核，确保最后落盘。
+      poc3_log("download+verify OK; on_download_finish: graceful stop sidecar before install");
+      let pid = handle_for_stop
+        .try_state::<SidecarPid>()
+        .map(|s| s.0.swap(0, Ordering::SeqCst))
+        .unwrap_or(0);
+      if pid > 0 {
+        graceful_stop(pid, Duration::from_secs(8));
+      }
+    },
+  ));
+
+  if let Err(e) = result {
+    // 篡改 / 坏签名 / 网络错误都落这里；此时 on_download_finish 未执行，旧版与 sidecar 完好。
+    poc3_log(&format!("RESULT FAIL reason=download_or_verify error={e}"));
+    poc3_log("NOTE 校验失败：未安装、sidecar 未被停止（旧版继续运行）");
+    return;
+  }
+
+  poc3_log("RESULT INSTALLED（新 .app 已落位），请求 restart");
+  // 触发 RESTART_EXIT_CODE；主 run 循环会再停一次 sidecar（幂等）并放行重启。
+  handle.restart();
 }
 
 fn boot_local_kernel(window: &WebviewWindow, resource_dir: &Path, data_dir: &Path, poc2: bool) -> Result<String, String> {

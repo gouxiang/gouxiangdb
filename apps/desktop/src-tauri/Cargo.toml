@@ -14,6 +14,12 @@ tauri = { version = "2", features = [] }
 # sidecar：用 Tauri shell 插件的 externalBin 拉起随包 Node 运行 apps/api。
 # 钉死 2.2.1：泛版本 "2" 范围内含已知安全漏洞版本（依赖安全闸门拦截）。
 tauri-plugin-shell = "=2.2.1"
+# PoC-3：Tauri 自带 updater（minisign 完整性校验，无需 Apple 账号）。
+# 选 2.13.3：其依赖约束 tauri "^2.12"、reqwest "^0.13"，与现锁 tauri 2.12.4 / reqwest 0.13.5 共存，不拖核心升级。
+# default-features=false：去掉仅 Windows v1 包用的 zip 依赖（zip 4.x 全 yanked，会导致 resolve 失败）；
+# macOS 用 tar.gz（flate2/tar，插件内 macOS 目标自带）。保留 rustls-tls：最终生产更新源是 https Gitea。
+# 仅在构建期 --config 注入 updater 段、且运行期 GX_POC3=1 时才发起检查；默认不注册任何自动行为。
+tauri-plugin-updater = { version = "=2.13.3", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
