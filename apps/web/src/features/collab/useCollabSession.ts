@@ -8,9 +8,10 @@
 //   2. WS 尚未连通时，先用 getCollabPresence 拉一次服务端名单兜底（DESIGN.md §4.3）。
 //   3. awareness 载荷按白名单裁剪后才进 state（toPresenceEntries）。
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Doc } from "yjs";
 import { getCollabPresence } from "../../api/client";
+import { dataSourceResolver } from "../../node/datasource";
 import { createCollabConnection, type CollabConnection, type CollabStatus } from "./collab-provider";
 import { toPresenceEntries } from "./collab-presence";
 import type { CollabDenyReason, CollabPresenceEntry } from "@gx/shared-types";
@@ -54,6 +55,15 @@ export function useCollabSession(roomId: string | null): UseCollabSessionResult 
   const [doc, setDoc] = useState<Doc | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // 节点模式 S2：订阅数据源，nodeId 进 effect 依赖——切节点（local↔远端）时本 effect 重跑，
+  // 清理函数 disconnect 旧长连、按新节点重新取票（取票走 apiFetch 自动跟源）并建新 WS。
+  // 只订阅 nodeId 这个稳定标量：同节点 token 刷新不会误触发长连重建。
+  const nodeId = useSyncExternalStore(
+    dataSourceResolver.subscribe,
+    () => dataSourceResolver.current().nodeId,
+    () => "local",
+  );
+
   /** 当前连接（发布口的实际落点）；用 ref 而非 state，避免 publish 因重渲染而换引用。 */
   const connRef = useRef<CollabConnection | null>(null);
   const publish = useCallback((fields: Record<string, unknown>) => {
@@ -86,6 +96,9 @@ export function useCollabSession(roomId: string | null): UseCollabSessionResult 
       });
 
     const conn = createCollabConnection(roomId, {
+      // S2：WS origin 取当前数据源的纯 host（不含 basePath，wsPath 已自带网关前缀，防双前缀）。
+      // effect 内同步读取：重跑时必为当前节点 origin；恒 local 时与旧默认 defaultOrigin 逐字节一致。
+      origin: dataSourceResolver.wsHostOrigin(),
       onStatus: (next, reason) => {
         if (!alive) return;
         if (next === "connected") connectedOnce = true;
@@ -108,7 +121,8 @@ export function useCollabSession(roomId: string | null): UseCollabSessionResult 
       unsubscribe();
       conn.disconnect();
     };
-  }, [roomId]);
+    // nodeId 入依赖：切节点销毁重建；origin 在 effect 体内同步读 resolver，不进依赖（避免字符串抖动）。
+  }, [roomId, nodeId]);
 
   return { status, entries, selfId, doc, error, publish };
 }

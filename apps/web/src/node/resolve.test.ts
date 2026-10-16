@@ -12,6 +12,7 @@ import {
   matchSameNode,
   toWsOrigin,
   localWsOrigin,
+  wsHostOriginFor,
   type StringHasher,
 } from "./resolve";
 
@@ -201,5 +202,35 @@ describe("nodeId 哈希（可注入，确定性 + 前 12 位）", () => {
     expect(h1).toBe(
       "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
     );
+  });
+});
+
+describe("wsHostOriginFor：协同 WS 纯 host origin（双前缀防护）", () => {
+  const PAGE_HTTP = "http://localhost:5173";
+  const PAGE_HTTPS = "https://nas.local";
+
+  it("相对本地槽（根部署 base=''）→ 页面 origin 换 ws（golden：== toWsOrigin(pageOrigin)）", () => {
+    expect(wsHostOriginFor("", PAGE_HTTP)).toBe("ws://localhost:5173");
+  });
+
+  it("相对本地槽（飞牛子路径 base='/app/gouxiangdb'）→ 仍只取页面 host，绝不拼 basePath", () => {
+    // 双前缀陷阱：wsPath 已自带 /app/gouxiangdb，origin 端再拼就变成 .../app/gx/app/gx/ws
+    expect(wsHostOriginFor("/app/gouxiangdb", PAGE_HTTPS)).toBe("wss://nas.local");
+  });
+
+  it("绝对远端 http baseURL（根部署）→ 反解其 host 换 ws，丢弃 pathname", () => {
+    expect(wsHostOriginFor("http://192.168.1.5:3001", PAGE_HTTP)).toBe(
+      "ws://192.168.1.5:3001",
+    );
+  });
+
+  it("绝对远端 https + 子路径 baseURL → 只取 host（basePath 由票据 wsPath 承担）", () => {
+    expect(wsHostOriginFor("https://nas.local/app/gouxiangdb", PAGE_HTTPS)).toBe(
+      "wss://nas.local",
+    );
+  });
+
+  it("畸形绝对 URL → fail-safe 回落页面 origin", () => {
+    expect(wsHostOriginFor("http://", PAGE_HTTPS)).toBe("wss://nas.local");
   });
 });

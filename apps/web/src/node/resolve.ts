@@ -153,3 +153,31 @@ export function toWsOrigin(baseURL: string): string {
 export function localWsOrigin(localBase: string, origin: string): string {
   return `${toWsOrigin(origin)}${localBase}`;
 }
+
+/**
+ * 计算协同 WebSocket 的**纯 host origin**（ws(s)://host[:port]，不含任何 basePath）。
+ *
+ * 关键（双前缀陷阱，DESIGN §9.2）：协同地址 = 本 origin + 服务端票据给的 `wsPath`，而 wsPath
+ * 在子路径部署下**已自带网关前缀**（collab-provider.test.ts「wsPath 自带 basePath 时原样保留」：
+ * `wss://nas/app/gouxiangdb/ws/...`）。因此客户端 origin 端**绝不能**再拼 basePath，否则会得到
+ * `/app/gx/app/gx/ws/...` 双前缀、握手 404。
+ *
+ * 规则：
+ *   - baseURL 为绝对 http(s)（远端节点；或未来桌面壳里本地内核的独立回环口）→ 用 `new URL`
+ *     反解出 origin，**丢弃 pathname/basePath**；
+ *   - baseURL 为相对前缀（现网浏览器/fnOS 的本地同源槽，"" 或 "/app/.."）→ 用页面同源 origin，
+ *     与 collab 历史 `toWsOrigin(window.location.origin)` 逐字节一致（golden）。
+ *
+ * @param baseURL    当前数据源 baseURL（local 相对 / remote 绝对）
+ * @param pageOrigin 页面同源 origin（仅相对本地槽使用；生产传 window.location.origin）
+ */
+export function wsHostOriginFor(baseURL: string, pageOrigin: string): string {
+  if (ABSOLUTE_HTTP.test(baseURL)) {
+    try {
+      return toWsOrigin(new URL(baseURL).origin);
+    } catch {
+      // 畸形绝对 URL：落到页面 origin（fail-safe，调用方后续取票/握手会给出更明确错误）。
+    }
+  }
+  return toWsOrigin(pageOrigin);
+}

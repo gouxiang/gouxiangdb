@@ -148,6 +148,61 @@ describe("默认单例 dataSourceResolver（零接线模块仍可直接用）", 
   });
 });
 
+describe("wsHostOrigin：协同 WS 纯 host origin（双前缀防护 golden）", () => {
+  const remoteHost: ActiveDataSource = {
+    nodeId: "abcdef012345",
+    kind: "remote",
+    baseURL: "http://remote:3001",
+    token: "remote-jwt",
+    wsOrigin: "ws://remote:3001",
+  };
+
+  it("local 根部署：ws://页面 host（不含任何路径）", () => {
+    const resolver = createDataSourceResolver({
+      getLocalBase: () => "",
+      getOrigin: () => "http://localhost:5173",
+      getLocalToken: () => null,
+    });
+    expect(resolver.wsHostOrigin()).toBe("ws://localhost:5173");
+  });
+
+  it("local 子路径部署：仍只取页面 host，绝不拼 /app/gouxiangdb（防双前缀）", () => {
+    const resolver = createDataSourceResolver({
+      getLocalBase: () => "/app/gouxiangdb",
+      getOrigin: () => "https://nas.local",
+      getLocalToken: () => null,
+    });
+    expect(resolver.wsHostOrigin()).toBe("wss://nas.local");
+  });
+
+  it("remote 根部署：反解远端 host", () => {
+    const resolver = createDataSourceResolver({ getOrigin: () => ORIGIN });
+    resolver.__setActiveForTest(remoteHost);
+    expect(resolver.wsHostOrigin()).toBe("ws://remote:3001");
+  });
+
+  it("remote 子路径 baseURL：只取 host，丢弃 pathname", () => {
+    const resolver = createDataSourceResolver({ getOrigin: () => ORIGIN });
+    resolver.__setActiveForTest({
+      ...remoteHost,
+      baseURL: "https://nas.remote/app/gouxiangdb",
+    });
+    expect(resolver.wsHostOrigin()).toBe("wss://nas.remote");
+  });
+
+  it("setActive(null) 回落 local：host origin 也回到页面 host", () => {
+    const resolver = createDataSourceResolver({
+      getLocalBase: () => "",
+      getOrigin: () => ORIGIN,
+      getLocalToken: () => null,
+    });
+    resolver.__setActiveForTest(remoteHost);
+    expect(resolver.wsHostOrigin()).toBe("ws://remote:3001");
+    resolver.setActive(null);
+    expect(resolver.wsHostOrigin()).toBe(toWsOrigin(ORIGIN));
+  });
+});
+
 describe("subscribe：为后续 remote 预留的切换通知（仅测试触达）", () => {
   const remote: ActiveDataSource = {
     nodeId: "abcdef012345",

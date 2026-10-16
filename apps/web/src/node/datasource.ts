@@ -9,7 +9,7 @@
 import { resolveApiBase, withBase } from "../lib/base";
 import { authHeaders } from "../api/authHeader";
 import { useAuthStore } from "../store/auth";
-import { LOCAL_NODE_ID, localWsOrigin } from "./resolve";
+import { LOCAL_NODE_ID, localWsOrigin, wsHostOriginFor } from "./resolve";
 
 /** 数据源所属节点类型（DESIGN §6.1）：本机节点 / 远端节点。 */
 export type NodeKind = "local" | "remote";
@@ -34,6 +34,12 @@ export interface DataSourceResolver {
   baseFor(path: string): string;
   /** = authHeaders(current().token)，与今天 client.ts 发出的头完全一致。 */
   headers(): Record<string, string>;
+  /**
+   * 协同 WS 的**纯 host origin**（ws(s)://host[:port]，不含 basePath）。
+   * 与 wsOrigin 不同：协同路径前缀由服务端票据 wsPath 承担（已含网关前缀），故这里
+   * 绝不拼 basePath，否则双前缀。local 下 == toWsOrigin(window.location.origin)（golden）。
+   */
+  wsHostOrigin(): string;
   /** 订阅数据源切换；返回取消订阅函数。 */
   subscribe(fn: () => void): () => void;
 }
@@ -116,6 +122,10 @@ export function createDataSourceResolver(initial?: ResolverDeps): DataSourceReso
     },
     headers() {
       return authHeaders(buildActive().token);
+    },
+    wsHostOrigin() {
+      // 统一推导：相对本地槽用页面 origin（golden）；绝对远端槽反解其 host，均不含 basePath。
+      return wsHostOriginFor(buildActive().baseURL, getOrigin());
     },
     subscribe(fn: () => void) {
       listeners.add(fn);
