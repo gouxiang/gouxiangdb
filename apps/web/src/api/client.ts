@@ -1571,6 +1571,19 @@ export const NavApi = {
  */
 let navFlagCache: boolean | null = null;
 
+// 节点模式 S2：nav flag 是「每个部署一份」的能力位，切到另一节点后旧值不可复用。
+// 订阅数据源，nodeId 变化即重置缓存。浏览器/fnOS 下 nodeId 恒 "local" 从不触发，零行为变化。
+{
+  let lastNavFlagNodeId = dataSourceResolver.current().nodeId;
+  dataSourceResolver.subscribe(() => {
+    const next = dataSourceResolver.current().nodeId;
+    if (next !== lastNavFlagNodeId) {
+      lastNavFlagNodeId = next;
+      navFlagCache = null;
+    }
+  });
+}
+
 export async function probeNavV2(): Promise<boolean> {
   if (navFlagCache !== null) return navFlagCache;
   try {

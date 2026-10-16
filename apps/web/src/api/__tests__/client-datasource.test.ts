@@ -15,6 +15,7 @@ import {
   Tables,
   EmbeddingAdminApi,
   PatsApi,
+  probeNavV2,
 } from "../client";
 import { useAuthStore } from "../../store/auth";
 import { dataSourceResolver } from "../../node/datasource";
@@ -190,5 +191,29 @@ describe("S2-2：client.ts 内手写鉴权 fetch 跟数据源", () => {
       "http://remote.example:3001/api/v1/pats/p1",
     );
     expect(fetchMock.mock.calls[0]![1].headers["X-GX-Token"]).toBe("remote-jwt");
+  });
+});
+
+describe("S2-6：nav flag 探活缓存随节点切换失效", () => {
+  it("同一节点第二次命中缓存不重探；切到另一节点后必须重新发请求", async () => {
+    // local：第一次探活打一次 /menu（每次返回新 Response，body 才能被多次 json() 读取）
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(jsonResponse({ tree: [] })),
+    );
+    await probeNavV2();
+    await probeNavV2();
+    const localMenuCalls = fetchMock.mock.calls.filter(
+      (c) => typeof c[0] === "string" && c[0].endsWith("/menu"),
+    ).length;
+    expect(localMenuCalls).toBe(1);
+
+    // 切到远端节点：缓存失效，再探一次且打到远端
+    dataSourceResolver.__setActiveForTest(REMOTE);
+    await probeNavV2();
+    const remoteMenuCalls = fetchMock.mock.calls.filter(
+      (c) => c[0] === "http://remote.example:3001/api/v1/workspaces/current/menu",
+    ).length;
+    expect(remoteMenuCalls).toBe(1);
+    expect(fetchMock.mock.calls.length).toBe(2); // local 首探 1（次探命中缓存）+ remote 重探 1
   });
 });
