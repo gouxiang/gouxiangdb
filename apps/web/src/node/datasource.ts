@@ -65,13 +65,22 @@ function defaultGetLocalBase(): string {
  * 创建数据源解析器。S1：内部 active 恒为 local，且 current() 每次实时读 base/token，
  * 因此即便后续在 S2+ 接线前，local 的 baseURL/token 也永远反映最新部署前缀与登录态。
  */
-export function createDataSourceResolver(initial?: ResolverDeps): DataSourceResolver & {
+export interface DataSourceResolverController extends DataSourceResolver {
   /**
-   * 仅测试用：切换当前 active 数据源并通知订阅者。
-   * 生产代码不得调用（S1 无任何业务入口触达），命名显式带 __test 以隔离误用。
+   * 设置当前活动数据源（启动器 S2+ 的正式出口，由 node 编排层在连接/切换成功后调用）：
+   *   - 传具体数据源：后续 current()/baseFor()/headers() 全部读它；
+   *   - 传 null：回落到 local 构建器（启动器空态/全部断开时的惰性兜底，取值≈未登录现状，
+   *     保证 S1「local 逐字节等价」与上千个既有调用点在空态也不会拿到抛错的解析器）。
+   * 每次设置都通知订阅者（接线层据此 queryClient.clear() 后重取）。
+   */
+  setActive(next: ActiveDataSource | null): void;
+  /**
+   * 仅测试用：切换当前 active 数据源并通知订阅者（等价 setActive(next)，保留旧名以兼容 S1 测试）。
    */
   __setActiveForTest(next: ActiveDataSource): void;
-} {
+}
+
+export function createDataSourceResolver(initial?: ResolverDeps): DataSourceResolverController {
   const getLocalBase = initial?.getLocalBase ?? defaultGetLocalBase;
   const getOrigin = initial?.getOrigin ?? defaultOrigin;
   const getLocalToken =
@@ -90,9 +99,13 @@ export function createDataSourceResolver(initial?: ResolverDeps): DataSourceReso
     };
   }
 
-  // S1：当前 active 构建器恒为 local。S2+ 会在此引入 remote 槽；切换走 __setActiveForTest
-  // 之外的正式出口（connect.ts），本阶段刻意不导出任何设置 remote 的生产 API。
+  // 默认（S1 行为）：active 恒为 local。S2+ 由 node 编排层经 setActive 放入远端数据源；
+  // 传 null 时回到 buildLocal。任何时刻 current() 都同步可读、绝不抛错。
   let buildActive: () => ActiveDataSource = buildLocal;
+
+  function emit() {
+    listeners.forEach((fn) => fn());
+  }
 
   return {
     current() {
@@ -110,9 +123,13 @@ export function createDataSourceResolver(initial?: ResolverDeps): DataSourceReso
         listeners.delete(fn);
       };
     },
+    setActive(next) {
+      buildActive = next ? () => next : buildLocal;
+      emit();
+    },
     __setActiveForTest(next: ActiveDataSource) {
       buildActive = () => next;
-      listeners.forEach((fn) => fn());
+      emit();
     },
   };
 }
