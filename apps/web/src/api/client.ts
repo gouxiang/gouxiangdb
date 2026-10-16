@@ -88,7 +88,6 @@ import type { UpdatePrefetchDTO, UpdateStatusDTO } from "@gx/shared-types";
 import type { BrandingConfigDTO, BrandingUpdateInput } from "@gx/shared-types";
 import { resolveApiBase, withBase as joinBase } from "../lib/base";
 import { saveSessionFrom } from "../lib/session-from";
-import { authHeaders } from "./authHeader";
 // 节点模式 S2（DESIGN §6.1/§8.5 启动器）：API 主请求路径改读数据源解析器单例。
 // 现状该单例恒为 local（buildActive=buildLocal），其 baseURL/headers 与下方既有 BASE_URL/
 // authHeaders(<auth store token>) 逐字节同口径（见 node/datasource.test.ts golden），故本次接线
@@ -385,10 +384,12 @@ export const Auth = {
       body: JSON.stringify(data),
     }),
   uploadAvatar: async (file: File) => {
-    const token = useAuthStore.getState().token;
+    // S2：跟当前数据源（local 逐字节等价）。保留 Bearer 头风格——此端点历史上走 Authorization，
+    // 改 token 来源即可，不借 resolver.headers()（那恒为 X-GX-Token，会改变本端点 golden）。
+    const token = dataSourceResolver.current().token;
     const fd = new FormData();
     fd.append("file", file);
-    const res = await fetch(`${BASE_URL}/api/auth/me/avatar`, {
+    const res = await fetch(dataSourceResolver.baseFor("/api/auth/me/avatar"), {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: fd,
@@ -520,13 +521,16 @@ export const Tables = {
    */
   exportCsvText: async (tableId: string, viewId?: string): Promise<string> => {
     const path = `/api/tables/${tableId}/export.csv${qs({ viewId })}`;
-    const token = useAuthStore.getState().token;
+    // S2：跟当前数据源（local 逐字节等价，X-GX-Token 头不变）。
     // R-I-27 长任务兜底超时：导出整表可能很慢（keyset 分批），故用 LONG_TASK 档而非写档。
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), LONG_TASK_TIMEOUT_MS);
     let res: Response;
     try {
-      res = await fetch(`${BASE_URL}${path}`, { headers: { ...authHeaders(token) }, signal: controller.signal });
+      res = await fetch(dataSourceResolver.baseFor(path), {
+        headers: { ...dataSourceResolver.headers() },
+        signal: controller.signal,
+      });
     } catch (e) {
       if (controller.signal.aborted) throw new ApiTimeoutError(path, LONG_TASK_TIMEOUT_MS);
       throw e;
@@ -1706,8 +1710,9 @@ export const EmbeddingAdminApi = {
     }),
   /** 清除 db 嵌入 key（随后回落 env 种子或 none），204 无体，需容忍空响应。 */
   clearApiKey: async () => {
-    const token = useAuthStore.getState().token;
-    const res = await fetch(`${BASE_URL}/api/v1/admin/embedding/api-key`, {
+    // S2：跟数据源；Bearer 风格为历史既有，仅把 token/URL 改读 resolver，保留头风格（golden）。
+    const token = dataSourceResolver.current().token;
+    const res = await fetch(dataSourceResolver.baseFor("/api/v1/admin/embedding/api-key"), {
       method: "DELETE",
       headers: {
         "Content-Type": "application/json",
@@ -1799,14 +1804,17 @@ export const PatsApi = {
     apiFetch<CreatedPat>("/api/v1/pats", { method: "POST", body: JSON.stringify(input) }),
   /** 吊销（204 无体，容忍空响应；本人限定；429 请尊重 Retry-After，勿自动重试）。 */
   revoke: async (id: string): Promise<void> => {
-    const token = useAuthStore.getState().token;
-    const res = await fetch(`${BASE_URL}/api/v1/pats/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders(token),
+    // S2：跟当前数据源（X-GX-Token 头不变，local 逐字节等价）。
+    const res = await fetch(
+      dataSourceResolver.baseFor(`/api/v1/pats/${encodeURIComponent(id)}`),
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          ...dataSourceResolver.headers(),
+        },
       },
-    });
+    );
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       if (res.status === 401) handleUnauthorized();
@@ -1878,9 +1886,9 @@ export const AdminUpdateApi = {
 // DELETE /api/admin/branding/hero 恢复内置默认图
 //
 // 上传不能走 apiFetch：它强制注入 Content-Type: application/json（见上方 apiFetch），
-// multipart 请求必须让浏览器自行带 boundary，故手写 fetch；鉴权统一用 X-GX-Token
-// （authHeaders），不要照抄 Auth.uploadAvatar 的 Authorization 写法——那是飞牛网关
-// 踩坑前的旧代码（见 api/authHeader.ts 头注释）。
+// multipart 请求必须让浏览器自行带 boundary，故手写 fetch；鉴权头由 dataSourceResolver.headers()
+// 统一给 X-GX-Token（local 下等价旧 authHeaders），不要照抄 Auth.uploadAvatar 的 Authorization
+// 写法——那是飞牛网关踩坑前的旧代码（见 api/authHeader.ts 头注释）。
 export const Branding = {
   /** 匿名读公开品牌配置（产品名/版权/广告图）。 */
   publicConfig: () => apiFetch<BrandingConfigDTO>("/api/auth/branding"),
@@ -1894,13 +1902,13 @@ export const Branding = {
     }),
   /** 上传登录广告图（multipart，字段名 file）；返回保存后的最新 DTO。 */
   uploadHero: async (file: File): Promise<BrandingConfigDTO> => {
-    const token = useAuthStore.getState().token;
     const fd = new FormData();
     fd.append("file", file);
-    const res = await fetch(`${BASE_URL}/api/admin/branding/hero`, {
+    // S2：跟当前数据源（local 逐字节等价）；不设 Content-Type，由浏览器带 multipart boundary。
+    const res = await fetch(dataSourceResolver.baseFor("/api/admin/branding/hero"), {
       method: "POST",
       // 注意：不设 Content-Type，由浏览器带 multipart/form-data; boundary=...
-      headers: authHeaders(token),
+      headers: dataSourceResolver.headers(),
       body: fd,
     });
     if (!res.ok) {

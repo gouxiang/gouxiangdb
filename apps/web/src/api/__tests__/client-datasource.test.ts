@@ -9,7 +9,13 @@
 // 401 按 kind 分流、裸 fetch 点（头像/csv/multipart）切源在后续切片覆盖，本文件不预设其行为。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { apiFetch } from "../client";
+import {
+  apiFetch,
+  Auth,
+  Tables,
+  EmbeddingAdminApi,
+  PatsApi,
+} from "../client";
 import { useAuthStore } from "../../store/auth";
 import { dataSourceResolver } from "../../node/datasource";
 import type { ActiveDataSource } from "../../node/datasource";
@@ -111,5 +117,78 @@ describe("S2：活动数据源切到 remote 后 apiFetch 改打远端", () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe("/api/auth/me");
     expect(init.headers["X-GX-Token"]).toBe("local-tok");
+  });
+});
+
+// 手写 fetch 的鉴权端点（不经 apiFetch）：S2-2 起同样跟数据源。
+// golden 重点：local 下各端点的「头风格」必须与改造前逐字节一致——
+//   uploadAvatar / clearApiKey 历史走 Authorization: Bearer（保留）；
+//   exportCsvText / pats.revoke / branding.uploadHero 走 X-GX-Token。
+describe("S2-2：client.ts 内手写鉴权 fetch 跟数据源", () => {
+  it("uploadAvatar（local）：URL 本地 + 仍是 Authorization Bearer（不改成 X-GX-Token）", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ user: {} }));
+    await Auth.uploadAvatar(new File(["x"], "a.png", { type: "image/png" }));
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/auth/me/avatar");
+    expect(init.headers["Authorization"]).toBe("Bearer local-tok");
+    expect(init.headers["X-GX-Token"]).toBeUndefined();
+    expect(init.headers["Content-Type"]).toBeUndefined(); // multipart 不注入
+  });
+
+  it("uploadAvatar（remote）：打远端、带远端 Bearer", async () => {
+    dataSourceResolver.__setActiveForTest(REMOTE);
+    fetchMock.mockResolvedValue(jsonResponse({ user: {} }));
+    await Auth.uploadAvatar(new File(["x"], "a.png", { type: "image/png" }));
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://remote.example:3001/api/auth/me/avatar");
+    expect(init.headers["Authorization"]).toBe("Bearer remote-jwt");
+  });
+
+  it("exportCsvText（local）：X-GX-Token，无 Authorization", async () => {
+    fetchMock.mockResolvedValue(new Response("a,b\n1,2", { status: 200 }));
+    await Tables.exportCsvText("t1", "v1");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/tables/t1/export.csv?viewId=v1");
+    expect(init.headers["X-GX-Token"]).toBe("local-tok");
+    expect(init.headers["Authorization"]).toBeUndefined();
+  });
+
+  it("exportCsvText（remote）：打远端绝对地址 + 远端 token", async () => {
+    dataSourceResolver.__setActiveForTest(REMOTE);
+    fetchMock.mockResolvedValue(new Response("", { status: 200 }));
+    await Tables.exportCsvText("t1");
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      "http://remote.example:3001/api/tables/t1/export.csv",
+    );
+    expect(fetchMock.mock.calls[0]![1].headers["X-GX-Token"]).toBe("remote-jwt");
+  });
+
+  it("clearApiKey（local）：DELETE 本地 + 仍是 Bearer", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    await EmbeddingAdminApi.clearApiKey();
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/v1/admin/embedding/api-key");
+    expect(init.method).toBe("DELETE");
+    expect(init.headers["Authorization"]).toBe("Bearer local-tok");
+  });
+
+  it("pats.revoke（local）：DELETE 本地 + X-GX-Token", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    await PatsApi.revoke("pat 1");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/v1/pats/pat%201");
+    expect(init.method).toBe("DELETE");
+    expect(init.headers["X-GX-Token"]).toBe("local-tok");
+    expect(init.headers["Authorization"]).toBeUndefined();
+  });
+
+  it("pats.revoke（remote）：打远端 + 远端 token", async () => {
+    dataSourceResolver.__setActiveForTest(REMOTE);
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    await PatsApi.revoke("p1");
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      "http://remote.example:3001/api/v1/pats/p1",
+    );
+    expect(fetchMock.mock.calls[0]![1].headers["X-GX-Token"]).toBe("remote-jwt");
   });
 });
