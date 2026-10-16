@@ -9,6 +9,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { ToastHost } from "./components/ui";
 import { ConfirmHost } from "./components/feedback";
+import {
+  bindQueryClientClearing,
+  registerQueryClient,
+} from "./node/queryClientBridge";
 import "./index.css";
 
 // 部署子路径（飞牛网关 /app/gouxiangdb/）下作为 BrowserRouter basename；
@@ -26,6 +30,11 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// 节点模式 S2：注册主 QueryClient 并订阅数据源切换。浏览器/fnOS 下 resolver 恒 local、
+// 从不 emit，本订阅零副作用；仅桌面启动器切节点时才清空缓存（node 域 queryClientBridge）。
+registerQueryClient(queryClient);
+bindQueryClientClearing();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

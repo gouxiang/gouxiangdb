@@ -19,6 +19,7 @@ import { CanvasEmbed } from "./CanvasEmbed";
 import { TableEmbed } from "./TableEmbed";
 import { EmbedDepthFallback } from "./EmbedDepthFallback";
 import { EmbedChainContext, planEmbed, ROOT_EMBED_CHAIN, type EmbedChain } from "./embed-depth";
+import { registerQueryClient } from "../../node/queryClientBridge";
 
 const roots = new WeakMap<HTMLElement, ReturnType<typeof createRoot>>();
 
@@ -54,6 +55,8 @@ const embedQueryClient = new QueryClient({
     },
   },
 });
+// 节点模式 S2：独立 root 不在主 Provider 树内，需单独注册，切节点时一并清空（防串节点数据）。
+registerQueryClient(embedQueryClient);
 
 export interface EnhanceEmbedOpts {
   kbId?: string;
