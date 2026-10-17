@@ -339,11 +339,20 @@ sequenceDiagram
 ### 7.4 远程模式（连网络节点）的连接面
 
 - 界面在 `http://127.0.0.1:<port>`（http 源），远程节点为 `http(s)://<node>`，由 dataSourceResolver remote 槽直连：
-  - **混合内容**：页面是 `http://127.0.0.1`，连 `https://` 节点是**升级**，允许；连 `http://` 局域网节点也是 http→http，允许（这是选 loopback http 源而非 tauri 类安全源的附带好处——避免 https 类源页面对 http 节点的混合内容硬阻断）。若未来强制 WebView https 源，则只能连 https 节点，需在节点模式主设计 §7.4 基础上再加桌面约束。
+  - **混合内容 vs ATS（两层不同的关，PoC-4 已澄清）**：选 http 回环源确实避免了 https 类源页面对 http 节点的**混合内容**硬阻断；但 WKWebView 仍另有 **ATS**：`127.0.0.1`/`localhost` 回环豁免，而**非回环**明文 http（含局域网 IP 与公网）默认在连接层被拦，**与页面是不是 http 源无关**。所以连 `http://192.168.x` 局域网节点不是"天然允许"，必须靠 §7.4 的 `NSAppTransportSecurity → NSAllowsArbitraryLoadsInWebContent` 放行（已实测通过）；连 `https://` 节点始终允许。若未来强制 WebView https 源，则只能连 https 节点（混合内容），需在节点模式主设计 §7.4 基础上再加桌面约束。
   - **CORS（远端）**：浏览器请求带 `Origin: http://127.0.0.1:<随机端口>`。用默认 CORS 的节点（未硬配 CORS_ORIGIN）白名单本就含 `127.0.0.1` 任意端口（`config.ts:192`）可放行；**硬配了 CORS_ORIGIN 的节点会去掉默认白名单**，需管理员把 `http://127.0.0.1:*`（或 `http://localhost:*`）正则加进 `CORS_ORIGIN`。随机端口的问题用通配正则解决（只放行 loopback，不放任公网）。
   - **备选（远端零配置）**：由 Rust 提供一个"出口转发"command，远程请求经 Rust HTTP 客户端发出（**不带 Origin**），内核/远端对无 Origin 一律放行 `*`（`app.ts:126`）。但通用转发要处理 multipart/WS，成本高，本期不默认实现；先按"远端加 loopback 白名单"走，列入 PoC-2 与待拍板 U6。
   - **远程 WS 协同**：浏览器直连远端 `wss://`/`ws://` + 远端短票（同主设计 §9.2）；远端节点需暴露 `/ws/*`（主设计 U6 已提 Caddy matcher 缺口）。
-- Tauri 侧连接白名单：若用 Tauri 的 http 插件做任何 Rust 出口请求，需在 capabilities 配 scope；但业务 fetch 在 WKWebView 内不受 http 插件 scope 限制（受同源/CORS 约束）。**[待 PoC 验证]** WKWebView 对任意 http(s) 节点的 ATS（App Transport Security）策略——macOS 对未公证 App 的 http 明文连接默认较宽，但需在 `Info.plist` 按需允许任意本地/局域网 http（自用可接受），记录于 PoC-2。
+- Tauri 侧连接白名单：若用 Tauri 的 http 插件做任何 Rust 出口请求，需在 capabilities 配 scope；但业务 fetch 在 WKWebView 内不受 http 插件 scope 限制（受同源/CORS 约束）。
+- **ATS（App Transport Security）— ✅ 已 PoC-4 实测裁决（2026-10-17，#91/#92）**。此前"未公证 App 对明文 http 默认较宽"的猜测**错误**：WKWebView 对所有**非回环**明文 http（含局域网 RFC1918 与公网）默认拦截。实测要点：
+  - **回环豁免**：`127.0.0.1`/`localhost` 的 http 不在 ATS 管辖内，故本地内核明文口永不被拦（本地承载无需任何 ATS 配置）。
+  - **最小充分配置**＝`Info.plist` 内仅放 `NSAppTransportSecurity` → `NSAllowsArbitraryLoadsInWebContent = true`。该键**只放宽 WKWebView 网页内容**，壳自身原生网络（URLSession，如 updater 走 https Gitea）仍受完整 ATS 保护；实测明文 http 局域网节点（`http://192.168.31.15:3001/...`，64ms）与 https 远端（`https://gitea0...`，201ms）在 WKWebView 内均连通。
+  - **键名铁律**：父键必须是 `NSAppTransportSecurity`（**无尾缀 s**）。误写成 `NSAppTransportSettings` 会被系统**静默忽略整个字典**（本段排查曾在此卡很久，三键全开仍被秒拒，最终靠 `lsregister -dump` 对比微信/Chrome 真实键名定位）。
+  - **不要用 `NSAllowsLocalNetworking` 指望放行局域网 IP**：它只豁免 `.local` 主机名与 link-local（`169.254/16`、`fe80::`），**不覆盖 `192.168.*` 等 RFC1918 私网地址**。
+  - 亦不必开全局 `NSAllowsArbitraryLoads`（那会同时放宽壳原生网络）；`InWebContent` 单键即可，最小授权。
+  - **Tauri 接入**：本机 CLI 2.12.3 / 核心 2.12.4，`bundle.macOS` 的自定义 plist 键是 **`infoPlist`**（不是新版官网文档写的 `infoPlistPath`——后者在 2.12.3 schema 校验直接报错）。已新增 `apps/desktop/src-tauri/Info.plist` 并在 `tauri.conf.json` 配 `"infoPlist": "Info.plist"`；bundler 按 key merge（`plist.insert`），自动生成的 `CFBundle*` 等默认键全部保留，自定义文件只写增补键即可。
+  - **不上 App Store**（独立分发 + updater minisign），故放宽 Web 内容 http 可接受；若未来上架须改用 NSExceptionDomains 精确白名单。
+  - **方法学陷阱（供复测避坑）**：判 ATS 要用**不发 `Cross-Origin-Resource-Policy` 的目标**。对 `/api/*` 发 `no-cors` fetch 会因对端回 `CORP: same-origin` 在**收到响应后**被 WebKit `NetworkLoadChecker::validateResponse` 拒（TCP/HTTP 早已连通）——那是 CORP 裁决、不是 ATS 连接层拦截。本 PoC 用公开头像通道（在 CORS/secureHeaders 之前注册、不发 CORP，404 亦无 CORP）得到干净 no-cors opaque；业务数据走 `cors` fetch，ATS 通后能否读响应另由对端 CORS 决定。
 
 ---
 
@@ -417,9 +426,9 @@ sequenceDiagram
 **界面承载方式的必要修订（由"新装不启本地"推出，开工前已定，避免返工）：**
 
 - 现状 PoC 壳让**业务内核兼任前端托管**（WebView 跳 `http://127.0.0.1:<内核口>/`，§6/PoC-2 同源）。启动器模型下界面必须在"任何节点连接前"就存在，故改为：**壳自己在回环口开一个极简静态服务，只托管 `web/dist`，不碰任何数据/API**（Rust 侧轻量 HTTP，如 tiny_http/axum，随机口；前端启动时经 command 获知"壳口"与"本地节点口"）。
-- 数据源全部走 resolver 跨源：本地节点 `http://127.0.0.1:<内核口>`、远端 `https?://<基址>`。源仍是 **http 回环源**（不是 `tauri://` 安全源），因此保留 PoC-2 的关键收益——连 `http://` 局域网节点是 http→http 不触发混合内容拦截，连 `https://` 是升级允许。**否掉"直接用 tauri:// 内置 frontendDist"**：安全源向 http 局域网节点发 fetch/WS 会被混合内容硬阻断（§7.4 已记录该取舍）。
+- 数据源全部走 resolver 跨源：本地节点 `http://127.0.0.1:<内核口>`、远端 `https?://<基址>`。源仍是 **http 回环源**（不是 `tauri://` 安全源），因此避免了 https 类源页面对 http 节点的**混合内容**硬阻断（连 `https://` 是升级允许）。但注意：**非回环的明文 http 局域网节点仍受 ATS 拦截**，需 §7.4 的 `NSAllowsArbitraryLoadsInWebContent` 放行（PoC-4 已实测）；回环本地内核口豁免 ATS。**否掉"直接用 tauri:// 内置 frontendDist"**：安全源向 http 局域网节点发 fetch/WS 会被混合内容硬阻断（§7.4 已记录该取舍）。
 - 跨端口/跨源＝需要后端 **CORS/WS Origin 白名单**（本就是 S2 要做的 additive env）：本地内核桌面启动时默认允许壳回环源（现有 fnOS/服务器部署面默认值不变）；远端节点由其管理员把桌面源加入白名单（沿用 U6，本期不做壳内 API 转发）。
-- **承载 PoC（开工第一项，纯技术验证、不需戴总授权）**：✅ **已通过（2026-10-17，PoC-4，12/12，见 §15 / `apps/desktop/poc/POC4-REPORT.md`）**——壳 std 级回环静态口 + 跨源连内核的 CORS/预检/multipart/WS/公开图全部实测通过，后端零改动、无需放宽 CORP；退路（合口）不需要。远端 http/https ATS 观察留待有远端节点时补。
+- **承载 PoC（开工第一项，纯技术验证、不需戴总授权）**：✅ **已通过（2026-10-17，PoC-4，核心 12/12 + 观察 #80/#91/#92 全 PASS，见 §15 / `apps/desktop/poc/POC4-REPORT.md`）**——壳 std 级回环静态口 + 跨源连内核的 CORS/预检/multipart/WS/公开图全部实测通过，后端零改动、无需放宽 CORP；退路（合口）不需要。**远端 ATS 亦已在正式构建产物上裁决**：明文 http 局域网节点（#91，64ms）与 https 远端（#92，201ms）经 `Info.plist` 的 `NSAllowsArbitraryLoadsInWebContent` 放行后连通（详见 §7.4，含键名 typo 与 no-cors/CORP 陷阱）。**遗留产品化项**：硬配了 `CORS_ORIGIN` 的远端节点不回显随机壳口 Origin，ATS 通后业务 cors fetch 仍需 resolver/节点配置侧把 loopback 白名单加回去（见 §7.4 CORS 条）。
 
 **与已有阶段的接线（不新增并行大线）：**
 - 节点注册表/单活会话/气泡/启动器界面属 **web 节点域 + S2**（纯前端新增为主，默认门控，浏览器/fnOS 部署面零行为变化）；本地节点的"可启停 + 状态 + 首次初始化"Rust command 属 **D2**（把 PoC 壳 `main.rs:107-116` 的无条件 spawn 重构为可 start/stop 的托管服务，是本模型相对旧方案唯一较重的 Rust 改动，同时服务"纯远端不起内核"与"手动关闭本地节点"两个需求）；壳口静态服务属 **D1/D3**。
@@ -688,7 +697,8 @@ sequenceDiagram
 - 结论：§8.5「壳在独立回环口只托管 web/dist、业务跨源连内核口」**成立，后端零改动、无需 §7.3 的桌面 CORP 放宽**。
 - 真实 WKWebView 实测跨端口（壳口 vs 内核口）：CORS 简单请求、application/json 与 X-GX-Token 的预检、CRUD、multipart、带票私有附件 fetch+blob、无票 401、跨源 WS 升级收首帧、坏票 4401 全通过。
 - 关键：公开头像/品牌图通道在 `app.ts` 注册早于 CORS/secureHeaders，**本就不发 CORP**，no-cors `<img>` 跨端口天然显示；业务 `/api/*` 的 CORP same-origin 不影响 cors fetch。CORS 靠启动注入的 `http://127.0.0.1:*` 通配白名单命中壳口随机端口；WS（`collab/attach.ts`）不校验 Origin。
-- 沉淀：`boot(navigate=false)->port` 已为 D2 可启停 sidecar 备好形状；记录了 updater 插件必带配置段、崩溃恢复弹窗、必须经 `open` 启动等踩坑。远端 http/https 的 ATS 混合内容观察（#91/#92）待有可达远端节点时配 `poc4-node.json` 补测。
+- 沉淀：`boot(navigate=false)->port` 已为 D2 可启停 sidecar 备好形状；记录了 updater 插件必带配置段、崩溃恢复弹窗、必须经 `open` 启动等踩坑。
+- **远端 ATS 观察（#91/#92）✅ 已补测（2026-10-17，正式构建产物上全 PASS）**：明文 http 局域网节点（`http://192.168.31.15:3001/...`，64ms）与 https 远端（`https://gitea0.hn.takin.cc/`，201ms）在 WKWebView 内均连通，条件是 `Info.plist` 放 `NSAppTransportSecurity → NSAllowsArbitraryLoadsInWebContent`（已接入 `tauri.conf.json` 的 `bundle.macOS.infoPlist`）。回环本地内核口豁免 ATS。详见 §7.4 与报告 §3/§5/§7：含**键名必须无尾缀 s**、Tauri **`infoPlist`（非 `infoPlistPath`）** 两个键名坑，以及 no-cors 探针会被 `/api/*` 的 CORP 污染、须用不发 CORP 的目标这一方法学陷阱。遗留：硬配 CORS_ORIGIN 的远端节点不回显随机壳口 Origin，属产品化 resolver/节点配置事项，与 ATS 无关。
 
 ---
 

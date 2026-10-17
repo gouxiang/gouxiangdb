@@ -301,12 +301,18 @@ function remoteProbes() {
         var label = pair[0], u = pair[1];
         if (!u) return;
         var code = 91 + i, t0 = performance.now();
-        fetch(u + (u.indexOf("?") < 0 ? "?" : "&") + "_=" + Date.now(), { mode: "cors" })
+        // 测 ATS / 混合内容的正确姿势：no-cors 简单 GET（不带自定义头）。
+        // 不依赖对端 CORS：明文 http 若被 ATS 拦会在连接层 reject；放行则拿到 opaque 响应。
+        // （跨域能否用 JS 读响应是另一回事——由对端把 loopback 加白名单决定，见主设计 U6。）
+        fetch(u + (u.indexOf("?") < 0 ? "?" : "&") + "_=" + Date.now(), { mode: "no-cors" })
           .then(function (resp) {
-            emitObs(code, true, label + " " + u + " → HTTP " + resp.status + "（" + Math.round(performance.now() - t0) + "ms）未被 ATS/混合内容拦；跨域读取视对端 CORS 而定");
+            emitObs(code, true, label + " " + u + " → 连接成功（no-cors " + resp.type + "/" + resp.status + "，" +
+              Math.round(performance.now() - t0) + "ms）：WKWebView 未被 ATS/混合内容拦（http 壳源连 " +
+              (u.indexOf("https") === 0 ? "https 升级" : "明文 http 局域网") + " 放行）；能否读响应另取决于对端 CORS");
           })
           .catch(function (e) {
-            emitObs(code, false, label + " " + u + " → fetch 失败：" + e.message + "（" + Math.round(performance.now() - t0) + "ms；据错误名区分 ATS 明文/混合内容/CORS/不可达）");
+            emitObs(code, false, label + " " + u + " → no-cors fetch 失败：" + e.message + "（" +
+              Math.round(performance.now() - t0) + "ms；连接层失败＝可能被 ATS 明文策略/混合内容拦或不可达，需结合对端确实在线判断）");
           });
       });
     }).catch(function () { emitObs(90, false, "读 poc4-node.json 失败"); });

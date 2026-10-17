@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  桌面壳（构想工作台.app）专用的 Info.plist 增补段。
+
+  通过 tauri.conf.json 的 bundle.macOS.infoPlistPath 引入；tauri-bundler 会把这里的键
+  逐条 merge 进它自动生成的 Info.plist（同名覆盖，CFBundle* 等默认键仍保留），所以本文件
+  只需写要增补的键，不要重复 CFBundle* 段。
+
+  目的（PoC-4 实测，2026-10-17，见 apps/desktop/poc/POC4-REPORT.md #91）：
+    WKWebView 要能连接用户自建的明文 http 局域网节点（如 http://192.168.31.15:3001，
+    飞牛 fnOS / 自建 NAS 常见）。macOS App Transport Security 默认拦明文 http（回环
+    127.0.0.1/localhost 豁免，故本地内核不受影响）。
+
+  仅放宽 WKWebView 内的 ATS，壳自身原生网络（URLSession/updater 等）仍受完整 ATS 保护——
+  最终生产更新源走 https Gitea。自用内网工具，按 Apple 要求此键属"需说明理由"类例外，
+  不上 App Store 分发（独立分发 + minisign 自更新），可接受。
+
+  ★ 键名必须是 NSAppTransportSecurity（无尾缀 s）。PoC 中一度误写成 NSAppTransportSettings，
+    系统静默忽略整个字典导致例外不生效，排查良久；以系统 LaunchServices dump 中
+    WeChat/Chrome 的实际键名为准。
+-->
+<plist version="1.0">
+<dict>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- 只对 WKWebView 网页内容放开明文 http；不用 NSAllowsArbitraryLoads（那会同时
+		     放宽壳原生网络）。PoC-4 实测此单键即可让 WKWebView 连明文 http 局域网节点。 -->
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
