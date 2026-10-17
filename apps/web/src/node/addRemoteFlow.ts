@@ -32,6 +32,13 @@ export interface AddRemoteStorePort {
   addRemote(input: { nodeId: string; baseURL: string; label?: string | null }): void;
   connectRemote(nodeId: string, creds?: RemoteCredentials): Promise<SwitchOutcome>;
   removeRemote(nodeId: string): void;
+  /**
+   * 成品壳专用：probe 同源转发握手工厂（begin_probe→/__gx/probe/<id>→end_probe）。
+   * 浏览器/fnOS 的 store 无此方法（undefined）→ 编排器回落对显式 baseURL 直连握手（现状零变化）。
+   */
+  addHandshake?: (
+    minNodeVersion?: string,
+  ) => (baseURL: string) => Promise<NodeHandshake>;
 }
 
 export interface AddRemoteInput {
@@ -147,6 +154,21 @@ export type { StringHasher };
 export interface ConnectExistingPort {
   getNode(nodeId: string): { kind: "local" | "remote" } | null;
   connectRemote(nodeId: string, creds?: RemoteCredentials): Promise<SwitchOutcome>;
+}
+
+/**
+ * 成品壳模式的凭据重连端口：与「直连控制器」唯一的差别是 connectRemote 改走 **store**，
+ * 使切换成功后触发壳代理 set_active_upstream（直连控制器不经过 store 的壳副作用包装）。
+ * getNode 仍读控制器（纯注册表查询）。非壳不使用本适配器，UI 继续直传 controller，时序零变化。
+ */
+export function shellConnectPort(store: {
+  controller: ConnectExistingPort;
+  connectRemote(nodeId: string, creds?: RemoteCredentials): Promise<SwitchOutcome>;
+}): ConnectExistingPort {
+  return {
+    getNode: (nodeId) => store.controller.getNode(nodeId),
+    connectRemote: (nodeId, creds) => store.connectRemote(nodeId, creds),
+  };
 }
 
 export interface ConnectExistingInput {

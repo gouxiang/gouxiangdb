@@ -15,6 +15,7 @@ import {
   addAndConnectRemote,
   connectExistingRemote,
   normalizeNodeLabel,
+  shellConnectPort,
   type AddRemoteStorePort,
 } from "./addRemoteFlow";
 import {
@@ -447,5 +448,45 @@ describe("normalizeNodeLabel", () => {
     expect(normalizeNodeLabel("  家里的库 ")).toBe("家里的库");
     // 内部空格保留。
     expect(normalizeNodeLabel("a  b")).toBe("a  b");
+  });
+});
+
+describe("shellConnectPort（壳模式凭据重连改道 store，触发 set_upstream）", () => {
+  it("getNode 读控制器；connectRemote 走 store 而非控制器（这样才包壳上游切换）", async () => {
+    const remote: StoredNodeEntry = {
+      kind: "remote",
+      nodeId: "abcdef012345",
+      baseURL: "http://nas:3001",
+      label: null,
+      lastConnectedAt: null,
+    };
+    const controllerConnect = vi.fn(async () => ({
+      state: { version: 1 as const, entries: [remote], activeNodeId: null, localDesired: null },
+      active: null,
+    }));
+    const storeConnect = vi.fn(async () => ({
+      state: { version: 1 as const, entries: [remote], activeNodeId: "abcdef012345", localDesired: null },
+      active: { nodeId: "abcdef012345", kind: "remote" as const, baseURL: "", token: "j", wsOrigin: "ws://x" },
+    }));
+    const port = shellConnectPort({
+      controller: { getNode: () => remote, connectRemote: controllerConnect },
+      connectRemote: storeConnect,
+    });
+
+    // getNode 透传控制器（纯注册表查询）。
+    expect(port.getNode("abcdef012345")).toBe(remote);
+
+    // 凭据重连：走 store（包 set_upstream），绝不直连控制器。
+    const r = await connectExistingRemote(
+      { nodeId: "abcdef012345", email: "a@b.com", password: "pw" },
+      port,
+    );
+    expect(storeConnect).toHaveBeenCalledTimes(1);
+    expect(storeConnect).toHaveBeenCalledWith("abcdef012345", {
+      email: "a@b.com",
+      password: "pw",
+    });
+    expect(controllerConnect).not.toHaveBeenCalled();
+    expect(r.kind).toBe("connected");
   });
 });

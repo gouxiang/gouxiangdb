@@ -72,6 +72,13 @@ export interface LauncherDeps extends ResolverDeps {
    * 驱动的正是 api/client.ts + collab 读取的那一个；纯逻辑测试不传→内部新建独立 resolver。
    */
   resolver?: DataSourceResolverController;
+  /**
+   * 活动数据源构建器覆盖（W1 成品 Mac 壳注入 shellRouting.deriveShellActiveDataSource 做同源化）。
+   * 与默认 deriveActiveDataSource 同形：入参为活动条目（无活动时 applyActive 不调用本函数）+
+   * 该节点 token（local=gx-auth，远端=已存会话 JWT），返回交给 resolver 的数据源或 null。
+   * **缺省＝deriveActiveDataSource**：浏览器 / fnOS / 服务器面逐字节走现状，不经过任何壳逻辑。
+   */
+  deriveDs?: (entry: StoredNodeEntry, token: string | null) => ActiveDataSource | null;
 }
 
 export interface SwitchOutcome {
@@ -158,6 +165,12 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
     (typeof window !== "undefined" ? window.location.origin : "http://localhost"));
   const getLocalToken = deps.getLocalToken ?? (() => null);
   const now = deps.now ?? (() => new Date().toISOString());
+  // 活动数据源构建唯一出口：缺省＝现状 deriveActiveDataSource（非壳零变化）；
+  // W1 成品壳注入 shellRouting.deriveShellActiveDataSource 把 local/remote 同源化为壳口相对地址。
+  const deriveDs =
+    deps.deriveDs ??
+    ((entry: StoredNodeEntry, token: string | null) =>
+      deriveActiveDataSource(entry, token, getLocalBase, getOrigin));
 
   let state: NodeRegistryState = deps.initialRegistry ?? emptyRegistry();
 
@@ -169,7 +182,7 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
     }
     if (entry.kind === "local") {
       // 本地允许 token=null（未登录/首启初始化页仍需数据源指向本地内核）。
-      const ds = deriveActiveDataSource(entry, getLocalToken(), getLocalBase, getOrigin);
+      const ds = deriveDs(entry, getLocalToken());
       resolver.setActive(ds);
       return { state: nextState, active: ds };
     }
@@ -180,7 +193,7 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
       resolver.setActive(null);
       return { state: nextState, active: null };
     }
-    const ds = deriveActiveDataSource(entry, token, getLocalBase, getOrigin);
+    const ds = deriveDs(entry, token);
     resolver.setActive(ds);
     return { state: nextState, active: ds };
   }

@@ -29,14 +29,14 @@ const baseDeps = () => ({
 });
 
 describe("自动持久化与订阅", () => {
-  it("connectLocal 后注册表写入 gx-node-launcher 且订阅者被通知", () => {
+  it("connectLocal 后注册表写入 gx-node-launcher 且订阅者被通知", async () => {
     const storage = new MemStorage();
     const store = createLauncherStore({ storage, ...baseDeps() });
     let n = 0;
     store.subscribe(() => {
       n += 1;
     });
-    store.connectLocal();
+    await store.connectLocal();
     const raw = storage.getItem(LAUNCHER_REGISTRY_STORAGE_KEY) ?? "";
     const saved = JSON.parse(raw);
     expect(saved.activeNodeId).toBe("local");
@@ -55,10 +55,10 @@ describe("自动持久化与订阅", () => {
 });
 
 describe("跨重启恢复", () => {
-  it("活动本地：用同一 storage 新建 store 即恢复 local 数据源", () => {
+  it("活动本地：用同一 storage 新建 store 即恢复 local 数据源", async () => {
     const storage = new MemStorage();
     const s1 = createLauncherStore({ storage, ...baseDeps() });
-    s1.connectLocal();
+    await s1.connectLocal();
 
     const s2 = createLauncherStore({ storage, ...baseDeps() });
     expect(s2.getState().activeNodeId).toBe("local");
@@ -93,11 +93,11 @@ describe("跨重启恢复", () => {
     expect(s2.getActive()).toBeNull();
   });
 
-  it("本地节点 stopped 持久化后，重启仍保持 stopped、无活动", () => {
+  it("本地节点 stopped 持久化后，重启仍保持 stopped、无活动", async () => {
     const storage = new MemStorage();
     const s1 = createLauncherStore({ storage, ...baseDeps() });
-    s1.connectLocal();
-    s1.disconnect("local");
+    await s1.connectLocal();
+    await s1.disconnect("local");
     expect(s1.getState().localDesired).toBe("stopped");
 
     const s2 = createLauncherStore({ storage, ...baseDeps() });

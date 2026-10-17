@@ -16,7 +16,7 @@ import type { LauncherStore } from "./launcherStore";
 import { NodeList, type NodeRenameState } from "./NodeList";
 import { AddRemoteNodeForm } from "./AddRemoteNodeForm";
 import { ConnectNodeForm } from "./ConnectNodeForm";
-import { normalizeNodeLabel } from "./addRemoteFlow";
+import { normalizeNodeLabel, shellConnectPort } from "./addRemoteFlow";
 import type { NodeRow } from "./launcherViewModel";
 
 type View =
@@ -64,7 +64,8 @@ export function LauncherPanel({ store, onEnterWorkspace }: LauncherPanelProps) {
   async function connectLocal() {
     setBusyNodeId("local");
     try {
-      const out = resolved.connectLocal();
+      // 壳模式：store 内部先 start_local 等 ready 再切源（失败 throw，active 不变）。
+      const out = await resolved.connectLocal();
       if (out.active) handleActive(out.active.nodeId);
     } finally {
       setBusyNodeId(null);
@@ -87,8 +88,15 @@ export function LauncherPanel({ store, onEnterWorkspace }: LauncherPanelProps) {
   }
 
   function disconnect(nodeId: string) {
-    const out = resolved.disconnect(nodeId);
-    if (!out.active) openView({ mode: "list" });
+    // 非壳：注册表/活动源在调用当拍同步回落；壳：随后异步 stop_local（仅本地）+ set_upstream(none)。
+    // 壳命令失败不回滚已提交的断开（视图仍回列表，具体错误提示在 W2 接），同时兜住 rejection。
+    void Promise.resolve(resolved.disconnect(nodeId))
+      .then((out) => {
+        if (!out.active) openView({ mode: "list" });
+      })
+      .catch(() => {
+        openView({ mode: "list" });
+      });
   }
 
   function removeRemote(nodeId: string) {
@@ -127,7 +135,10 @@ export function LauncherPanel({ store, onEnterWorkspace }: LauncherPanelProps) {
             nodeId={view.nodeId}
             title={view.title}
             baseURL={view.baseURL}
-            port={resolved.controller}
+            // 非壳：直连控制器（现状时序，不经 store emit）；壳：改道 store 以触发 set_upstream。
+            port={
+              resolved.shellBound ? shellConnectPort(resolved) : resolved.controller
+            }
             onConnected={(nodeId) => {
               setView({ mode: "list" });
               handleActive(nodeId);

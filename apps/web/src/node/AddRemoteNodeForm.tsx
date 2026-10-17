@@ -179,6 +179,9 @@ export function AddRemoteNodeForm({
     setError(null);
     setSucceeded(false);
     try {
+      // 成品壳内 store 提供 probe 同源转发握手（begin_probe/end_probe）；浏览器/fnOS 无此方法，
+      // 传 undefined → addAndConnectRemote 缺省对显式 baseURL 直连（现网零变化）。
+      const performHandshake = store.addHandshake?.(minNodeVersion);
       const result = await addAndConnectRemote(
         {
           url: values.url,
@@ -186,7 +189,7 @@ export function AddRemoteNodeForm({
           password: values.password,
           label: values.label,
         },
-        { store, minNodeVersion },
+        { store, minNodeVersion, ...(performHandshake ? { performHandshake } : {}) },
       );
       if (result.kind === "connected") {
         setSucceeded(true);

@@ -42,7 +42,9 @@ export function installLauncher(options?: {
   const handler: RemoteUnauthorizedHandler = (nodeId) => {
     // client.ts 仅在当前数据源是该远端节点时才通知，故这里断开的必是活动节点；
     // disconnect 对远端清会话、活动指针置 null（resolver 回 local 兜底）。
-    store.disconnect(nodeId);
+    // 不 await（保持原 fire-and-forget 分流语义）；壳模式其内部还会 set_upstream(none)，
+    // 失败不改变已提交的断开结果。Promise.resolve 包裹对历史返回 undefined 的测试替身也安全。
+    void Promise.resolve(store.disconnect(nodeId)).catch(() => undefined);
   };
   registerRemoteUnauthorizedHandler(handler);
 
