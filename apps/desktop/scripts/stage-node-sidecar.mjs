@@ -128,6 +128,13 @@ if (process.env.GX_POC2 === "1" && fs.existsSync(poc2Src)) {
   copyFile(poc2Src, path.join(serverDir, "public", "poc2.html"));
   log("GX_POC2=1：放入 PoC-2 同源探针页 public/poc2.html（自测专用，正式打包不带）");
 }
+// PoC-4 only（#816 承载验证）：跨源探针页，由【壳自己的回环静态口】托管在 /poc4.html，
+// 业务请求跨源发往内核口。仅 GX_POC4=1 自测时随包；正式 stage 产物不含。
+const poc4Src = path.join(desktopDir, "poc", "poc4.html");
+if (process.env.GX_POC4 === "1" && fs.existsSync(poc4Src)) {
+  copyFile(poc4Src, path.join(serverDir, "public", "poc4.html"));
+  log("GX_POC4=1：放入 PoC-4 跨源探针页 public/poc4.html（自测专用，正式打包不带）");
+}
 copyFile(path.join(srcApi, "prisma", "schema.prisma"), path.join(serverDir, "prisma", "schema.prisma"));
 copyDir(path.join(srcApi, "prisma", "migrations"), path.join(serverDir, "prisma", "migrations"));
 copyDir(path.join(srcApi, "scripts", "backup"), path.join(serverDir, "scripts", "backup"));

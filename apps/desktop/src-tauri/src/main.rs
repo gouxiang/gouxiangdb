@@ -7,6 +7,7 @@
 #![cfg_attr(not(debug_assertions), cfg_attr(windows, windows_subsystem = "windows"))]
 
 use std::fs;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -30,6 +31,10 @@ const POC2_SIDECAR_LOG: &str = "/tmp/gx-poc2-sidecar.log";
 /// PoC-3 门控（仅自测）：GX_POC3=1 时延迟若干秒后向构建期注入的静态源 check 更新，
 /// 下载→minisign 公钥校验→安装前优雅停 sidecar→替换→restart，全过程落盘供无交互判定。
 const POC3_LOG: &str = "/tmp/gx-poc3-updater.log";
+/// PoC-4 门控（仅自测，#816 承载验证）：GX_POC4=1 时壳在【独立回环静态口】托管 web/dist，
+/// WebView 加载壳口的 /poc4.html?kernel=<内核口>，跨源连本地内核口，实测 CORS/预检/CORP/WS/multipart。
+/// 默认（无此 env）行为与 PoC-1 完全一致：不起壳静态口、直接同源跳内核口。
+const POC4_LOG: &str = "/tmp/gx-poc4-shell.log";
 
 fn dbg_log(msg: &str) {
   use std::io::Write;
@@ -105,8 +110,14 @@ fn main() {
       }
 
       thread::spawn(move || {
+        let poc4 = std::env::var("GX_POC4").map(|v| v == "1").unwrap_or(false);
+        if poc4 {
+          // #816 承载验证：壳独立回环静态口 → 跨源连本地内核口（不再同源跳内核口）。
+          run_poc4(window, resource_dir, data_dir);
+          return;
+        }
         let poc2 = std::env::var("GX_POC2").map(|v| v == "1").unwrap_or(false);
-        if let Err(e) = boot_local_kernel(&window, &resource_dir, &data_dir, poc2) {
+        if let Err(e) = boot_local_kernel(&window, &resource_dir, &data_dir, poc2, true) {
           eprintln!("[desktop] 本地内核启动失败: {e}");
           let _ = window.eval(&format!(
             "document.body.innerHTML='<pre style=\"padding:24px;color:#b00\">本地内核启动失败：{}</pre>'",
@@ -322,7 +333,150 @@ fn run_poc3_update(handle: tauri::AppHandle) {
   handle.restart();
 }
 
-fn boot_local_kernel(window: &WebviewWindow, resource_dir: &Path, data_dir: &Path, poc2: bool) -> Result<String, String> {
+/// 启动本地内核。
+/// - `navigate = true`（PoC-1/2 默认）：内核就绪后 WebView 直接同源跳内核口（/ 或 /poc2.html）。
+/// - `navigate = false`（PoC-4）：只起内核、不导航，返回端口；由调用方起壳静态口后把
+///   WebView 导到壳口跨源探针页（?kernel=<内核口>）。
+/// PoC-4 专用无交互日志（壳口承载验证，与主退出日志分开，便于脚本直接 grep 判定）。
+fn poc4_log(msg: &str) {
+  use std::io::Write;
+  if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(POC4_LOG) {
+    let _ = writeln!(f, "{msg}");
+  }
+}
+
+/// PoC-4：壳自己的【极简回环静态服务】（#816 承载验证；D1/D3 产品化可换 tiny_http/axum）。
+/// 零新依赖：std::net + thread-per-connection。只绑 127.0.0.1、随机端口，只托管 root 下静态文件
+/// （不碰任何数据/API）。带目录穿越防护与基本 MIME。返回实际监听端口。
+fn serve_static_loopback(root: PathBuf) -> Result<u16, String> {
+  let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| format!("壳静态口绑定失败: {e}"))?;
+  let port = listener.local_addr().map_err(|e| format!("读壳静态口失败: {e}"))?.port();
+  thread::spawn(move || {
+    for stream in listener.incoming().flatten() {
+      let root = root.clone();
+      thread::spawn(move || {
+        let _ = serve_one(stream, &root);
+      });
+    }
+  });
+  Ok(port)
+}
+
+fn mime_for(path: &str) -> &'static str {
+  if path.ends_with(".html") || path.ends_with(".htm") {
+    "text/html; charset=utf-8"
+  } else if path.ends_with(".js") || path.ends_with(".mjs") {
+    "text/javascript; charset=utf-8"
+  } else if path.ends_with(".css") {
+    "text/css; charset=utf-8"
+  } else if path.ends_with(".json") {
+    "application/json; charset=utf-8"
+  } else if path.ends_with(".svg") {
+    "image/svg+xml"
+  } else if path.ends_with(".png") {
+    "image/png"
+  } else if path.ends_with(".jpg") || path.ends_with(".jpeg") {
+    "image/jpeg"
+  } else if path.ends_with(".ico") {
+    "image/x-icon"
+  } else if path.ends_with(".woff2") {
+    "font/woff2"
+  } else {
+    "application/octet-stream"
+  }
+}
+
+fn serve_one(mut stream: TcpStream, root: &Path) -> std::io::Result<()> {
+  stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+  let mut buf = [0u8; 4096];
+  let n = stream.read(&mut buf)?;
+  let req = String::from_utf8_lossy(&buf[..n]);
+  // 解析请求行：GET /path?query HTTP/1.1
+  let mut lines = req.split_whitespace();
+  let method = lines.next().unwrap_or("GET");
+  let target = lines.next().unwrap_or("/");
+  let path_only = target.split('?').next().unwrap_or("/");
+
+  // PoC-4 探针结果旁路：同源 GET /__poc4/... 编码结果，落 POC4_LOG 供无交互判定（返回 204 空）。
+  if path_only.starts_with("/__poc4/") {
+    poc4_log(&format!("PROBE {method} {path_only}"));
+    let _ = write!(stream, "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n");
+    return Ok(());
+  }
+
+  let rel = path_only.trim_start_matches('/');
+  let rel = if rel.is_empty() { "index.html" } else { rel };
+
+  let file = root.join(rel);
+  // 目录穿越防护：规范化后必须仍在 root 内。
+  let safe = file.canonicalize().map(|c| c.starts_with(root.canonicalize().unwrap_or(root.to_path_buf()))).unwrap_or(false);
+  if !safe || !file.is_file() {
+    let body = "not found";
+    let _ = write!(stream, "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+    poc4_log(&format!("SHELL 404 {path_only}"));
+    return Ok(());
+  }
+  let data = fs::read(&file)?;
+  let mime = mime_for(&file.to_string_lossy());
+  let head = format!(
+    "HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+    data.len()
+  );
+  stream.write_all(head.as_bytes())?;
+  stream.write_all(&data)?;
+  poc4_log(&format!("SHELL 200 {path_only} ({len} B)", len = data.len()));
+  Ok(())
+}
+
+/// PoC-4 编排（GX_POC4=1，#816）：
+/// 1) 起本地内核（navigate=false，仅绑回环，默认 CORS 白名单已含 127.0.0.1 任意端口）拿内核口；
+/// 2) 壳在独立回环口静态托管 server/public（含注入的 poc4.html）；
+/// 3) WebView 导到壳口跨源探针页，并把内核口通过 query 传进去。
+/// 验证：壳 http 源 → 内核口的 fetch/预检、带 X-GX-Token、multipart、公开/私有图 CORP、WS 跨源。
+fn run_poc4(window: WebviewWindow, resource_dir: PathBuf, data_dir: PathBuf) {
+  let _ = fs::remove_file(POC4_LOG);
+  poc4_log(&format!("==== PoC-4 begin pid={} ====", std::process::id()));
+  let web_root = resource_dir.join("server").join("public");
+  if !web_root.join("poc4.html").exists() {
+    poc4_log("FATAL 未找到随包 poc4.html（需 GX_POC4=1 重新 stage）");
+    let _ = window.eval("document.body.innerHTML='<pre style=\"padding:24px;color:#b00\">PoC-4 探针页未随包，请用 GX_POC4=1 重新 stage/build</pre>'");
+    return;
+  }
+  // 1) 起内核但不导航。
+  let kernel_port = match boot_local_kernel(&window, &resource_dir, &data_dir, false, false) {
+    Ok(p) => p,
+    Err(e) => {
+      poc4_log(&format!("FATAL 内核启动失败: {e}"));
+      let _ = window.eval(&format!("document.body.innerHTML='<pre style=\"padding:24px;color:#b00\">内核启动失败：{}</pre>'", js_escape(&e)));
+      return;
+    }
+  };
+  poc4_log(&format!("kernel ready on 127.0.0.1:{kernel_port}（未导航）"));
+
+  // 2) 壳独立静态口。
+  let shell_port = match serve_static_loopback(web_root) {
+    Ok(p) => p,
+    Err(e) => {
+      poc4_log(&format!("FATAL {e}"));
+      return;
+    }
+  };
+  poc4_log(&format!("shell static on 127.0.0.1:{shell_port}（跨端口 vs kernel {kernel_port}）"));
+
+  // 3) 导航 WebView 到壳口探针页（?kernel= 内核口）。
+  let url = format!("http://127.0.0.1:{shell_port}/poc4.html?kernel={kernel_port}");
+  if let Err(e) = window.eval(&format!("window.location.replace('{url}');")) {
+    poc4_log(&format!("FATAL 导航壳口失败: {e}"));
+  }
+}
+
+fn boot_local_kernel(
+    window: &WebviewWindow,
+    resource_dir: &Path,
+    data_dir: &Path,
+    poc2: bool,
+    navigate: bool,
+) -> Result<u16, String> {
   if poc2 {
     let _ = fs::remove_file(POC2_SIDECAR_LOG);
     dbg_log(&format!("PoC-2 mode ON: sidecar log -> {POC2_SIDECAR_LOG}, nav /poc2.html, data={}", data_dir.display()));
@@ -469,14 +623,20 @@ fn boot_local_kernel(window: &WebviewWindow, resource_dir: &Path, data_dir: &Pat
   std::mem::forget(child);
   dbg_log(&format!("sidecar ready pid={sidecar_pid} port={port}"));
 
-  // PoC-2：导航到同源探针页（由 stage 注入 public/poc2.html）；默认仍是首页 /。
+  // PoC-4（navigate=false）：不导航，端口交回调用方，由壳静态口就绪后再跨源引导 WebView。
+  if !navigate {
+    dbg_log(&format!("sidecar ready (no-nav) pid={sidecar_pid} port={port}"));
+    return Ok(port);
+  }
+
+  // PoC-2：导航到同源探针页（由 stage 注入 public/poc2.html）；默认是首页 /。
   let path = if poc2 { "/poc2.html" } else { "/" };
-  let url = format!("http://127.0.0.1:{port}{path}");
+  let nav_url = format!("http://127.0.0.1:{port}{path}");
   // 5) WebView 跳到内核同源页（界面/API/WS/附件全同源，绕开自定义协议 CORS）。
   window
-    .eval(&format!("window.location.replace('{url}');"))
+    .eval(&format!("window.location.replace('{nav_url}');"))
     .map_err(|e| format!("跳转本地内核失败: {e}"))?;
-  Ok(url)
+  Ok(port)
 }
 
 fn random_secret(n: usize) -> String {

@@ -419,7 +419,7 @@ sequenceDiagram
 - 现状 PoC 壳让**业务内核兼任前端托管**（WebView 跳 `http://127.0.0.1:<内核口>/`，§6/PoC-2 同源）。启动器模型下界面必须在"任何节点连接前"就存在，故改为：**壳自己在回环口开一个极简静态服务，只托管 `web/dist`，不碰任何数据/API**（Rust 侧轻量 HTTP，如 tiny_http/axum，随机口；前端启动时经 command 获知"壳口"与"本地节点口"）。
 - 数据源全部走 resolver 跨源：本地节点 `http://127.0.0.1:<内核口>`、远端 `https?://<基址>`。源仍是 **http 回环源**（不是 `tauri://` 安全源），因此保留 PoC-2 的关键收益——连 `http://` 局域网节点是 http→http 不触发混合内容拦截，连 `https://` 是升级允许。**否掉"直接用 tauri:// 内置 frontendDist"**：安全源向 http 局域网节点发 fetch/WS 会被混合内容硬阻断（§7.4 已记录该取舍）。
 - 跨端口/跨源＝需要后端 **CORS/WS Origin 白名单**（本就是 S2 要做的 additive env）：本地内核桌面启动时默认允许壳回环源（现有 fnOS/服务器部署面默认值不变）；远端节点由其管理员把桌面源加入白名单（沿用 U6，本期不做壳内 API 转发）。
-- **承载 PoC（开工第一项，纯技术验证、不需戴总授权）**：验证"壳口 http 源 → 本地内核口 fetch/WS/附件 multipart"与"→ http 局域网远端 / https 远端"的 CORS、混合内容、cookie/token 头表现。若回环跨端口 WS 有意外，退路＝壳口与内核口合并为同一个回环 HTTP（壳反代静态到内核或内核在本地节点运行时直接兼任静态，纯远端仍由壳口独立承载）。
+- **承载 PoC（开工第一项，纯技术验证、不需戴总授权）**：✅ **已通过（2026-10-17，PoC-4，12/12，见 §15 / `apps/desktop/poc/POC4-REPORT.md`）**——壳 std 级回环静态口 + 跨源连内核的 CORS/预检/multipart/WS/公开图全部实测通过，后端零改动、无需放宽 CORP；退路（合口）不需要。远端 http/https ATS 观察留待有远端节点时补。
 
 **与已有阶段的接线（不新增并行大线）：**
 - 节点注册表/单活会话/气泡/启动器界面属 **web 节点域 + S2**（纯前端新增为主，默认门控，浏览器/fnOS 部署面零行为变化）；本地节点的"可启停 + 状态 + 首次初始化"Rust command 属 **D2**（把 PoC 壳 `main.rs:107-116` 的无条件 spawn 重构为可 start/stop 的托管服务，是本模型相对旧方案唯一较重的 Rust 改动，同时服务"纯远端不起内核"与"手动关闭本地节点"两个需求）；壳口静态服务属 **D1/D3**。
@@ -680,6 +680,15 @@ sequenceDiagram
   2. 篡改 tar.gz 后校验失败且不安装；
   3. **重点记录 quarantine**：更新后新 .app 的 `xattr/codesign/spctl` 状态、是否弹 Gatekeeper/被 kill；右键打开或 `xattr -dr` 后是否恢复；给出自用可接受的标准姿势（A/B/C 选一）写进 runbook；
   4. 安装时确认 sidecar 已被优雅停止、旧库无 WAL 损坏（重启后 readyz 绿）。
+
+### PoC-4：壳独立回环静态口跨源连本地内核口（#816，✅ 2026-10-17 已实测 12/12）
+
+> 报告：`apps/desktop/poc/POC4-REPORT.md`（驱动 `poc/run-poc4.sh`、探针 `poc/poc4.html`，`GX_POC4=1` 门控；复跑的无交互原始日志落 `/tmp/gx-poc4-shell.log`，不入库）。
+
+- 结论：§8.5「壳在独立回环口只托管 web/dist、业务跨源连内核口」**成立，后端零改动、无需 §7.3 的桌面 CORP 放宽**。
+- 真实 WKWebView 实测跨端口（壳口 vs 内核口）：CORS 简单请求、application/json 与 X-GX-Token 的预检、CRUD、multipart、带票私有附件 fetch+blob、无票 401、跨源 WS 升级收首帧、坏票 4401 全通过。
+- 关键：公开头像/品牌图通道在 `app.ts` 注册早于 CORS/secureHeaders，**本就不发 CORP**，no-cors `<img>` 跨端口天然显示；业务 `/api/*` 的 CORP same-origin 不影响 cors fetch。CORS 靠启动注入的 `http://127.0.0.1:*` 通配白名单命中壳口随机端口；WS（`collab/attach.ts`）不校验 Origin。
+- 沉淀：`boot(navigate=false)->port` 已为 D2 可启停 sidecar 备好形状；记录了 updater 插件必带配置段、崩溃恢复弹窗、必须经 `open` 启动等踩坑。远端 http/https 的 ATS 混合内容观察（#91/#92）待有可达远端节点时配 `poc4-node.json` 补测。
 
 ---
 

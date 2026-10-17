@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PoC-4 壳口跨源承载探针</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 13px/1.55 -apple-system, "PingFang SC", system-ui, sans-serif; margin: 0; padding: 20px 24px; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  #env { color: #555; font-size: 12px; margin-bottom: 12px; word-break: break-all; }
+  .row { display: flex; gap: 8px; align-items: flex-start; padding: 5px 8px; border-radius: 6px; }
+  .pass { background: rgba(52,199,89,.14); }
+  .fail { background: rgba(255,69,58,.16); }
+  .obs { background: rgba(0,122,255,.12); }
+  .tag { font-weight: 700; min-width: 52px; }
+  .pass .tag { color: #1c7a34; }
+  .fail .tag { color: #b4231c; }
+  .obs .tag { color: #0a58c4; }
+  .msg { flex: 1; word-break: break-word; }
+  #summary { margin-top: 14px; font-weight: 700; font-size: 14px; }
+  code { background: rgba(127,127,127,.16); padding: 0 4px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>PoC-4 · 壳独立静态口 → 跨源连本地内核口</h1>
+<div id="env"></div>
+<div id="rows"></div>
+<div id="summary"></div>
+<!--
+  本页由【壳自己的回环静态服务】托管（http://127.0.0.1:<壳口>/poc4.html），
+  所有业务请求发往【本地内核口】http://127.0.0.1:<kernel>（query ?kernel= 传入），
+  二者端口不同 = 跨源。目标（DESIGN-MACOS-APP §8.5 / #816）：在真实 WKWebView 裁决
+  CORS 简单请求/预检、X-GX-Token、multipart、公开图 no-cors 的 CORP、带票 fetch、WS 跨源升级。
+  结果经壳口同源 /__poc4/ 旁路落进 /tmp/gx-poc4-shell.log（纯旁路，无需后端改动）。
+-->
+<script>
+"use strict";
+var RESULTS = [];
+function b64url(s) {
+  var b64 = encodeURIComponent(s).replace(/%([0-9A-F]{2})/g, function (_, h) {
+    return String.fromCharCode(parseInt(h, 16));
+  });
+  try { b64 = btoa(b64); } catch (e) { b64 = "ENC_ERR"; }
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function emit(idx, ok, msg) {
+  RESULTS.push({ i: idx, ok: !!ok, msg: String(msg) });
+  draw(idx, ok, msg);
+  var seg = (ok ? "1" : "0") + "/" + idx + "/" + b64url(String(msg).slice(0, 700));
+  try { (new Image()).src = "/__poc4/s/" + seg + "&_=" + Date.now(); } catch (e) {}
+}
+function emitObs(idx, ok, msg) {
+  draw(idx, ok, "[观察] " + msg, true);
+  var seg = (ok ? "1" : "0") + "/" + idx + "/" + b64url("[观察] " + String(msg).slice(0, 660));
+  try { (new Image()).src = "/__poc4/obs/" + seg + "&_=" + Date.now(); } catch (e) {}
+}
+function draw(idx, ok, msg, obs) {
+  var d = document.createElement("div");
+  d.className = "row " + (ok ? "pass" : "fail") + (obs ? " obs" : "");
+  d.innerHTML = '<span class="tag">' + (ok ? "PASS" : "FAIL") + " #" + idx + '</span><span class="msg"></span>';
+  d.querySelector(".msg").textContent = msg;
+  document.getElementById("rows").appendChild(d);
+}
+function finish(total, verdict) {
+  // RESULTS 只在核心 emit 里 push（观察项 emitObs 不入），故以其实际长度+通过数判定，
+  // 不按编号过滤（核心编号跳过 8：#80 是观察项，最大核心编号为 12，共 12 步）。
+  var passed = RESULTS.filter(function (r) { return r.ok; }).length;
+  var got = RESULTS.length;
+  var allOk = passed === total && got === total;
+  var el = document.getElementById("summary");
+  el.textContent = (allOk ? "核心全部通过 " : "存在失败 ") + passed + "/" + total +
+    (verdict ? "｜结论：" + verdict : "");
+  el.style.color = allOk ? "#1c7a34" : "#b4231c";
+  try {
+    (new Image()).src = "/__poc4/DONE/" + total + "/" + (allOk ? "true" : "false") +
+      "/pass" + passed + "?v=" + encodeURIComponent(verdict || "") + "&_=" + Date.now();
+  } catch (e) {}
+}
+
+var q = new URLSearchParams(location.search);
+var KERNEL_PORT = q.get("kernel");
+var KERNEL = "http://127.0.0.1:" + KERNEL_PORT;
+
+function api(path, opts) {
+  opts = opts || {};
+  var headers = opts.headers || {};
+  if (window.__TOKEN) headers["X-GX-Token"] = window.__TOKEN;
+  return fetch(KERNEL + "/api" + path, Object.assign({}, opts, { mode: "cors", headers: headers }));
+}
+function jpegPng() {
+  var b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+  var bin = atob(b64), u8 = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return new File([u8], "poc4.png", { type: "image/png" });
+}
+function decodeObjectUrl(obj) {
+  return new Promise(function (res, rej) {
+    var img = new Image();
+    img.onload = function () { res({ w: img.naturalWidth, h: img.naturalHeight }); };
+    img.onerror = function () { rej(new Error("image decode/blocked")); };
+    img.src = obj;
+  });
+}
+function wsOnce(url, wantClose) {
+  return new Promise(function (resolve) {
+    var ws, opened = false, done = false;
+    function fin(v) { if (done) return; done = true; clearTimeout(timer); resolve(v); }
+    try { ws = new WebSocket(url); } catch (e) { return fin({ err: "ctor:" + e.message }); }
+    var timer = setTimeout(function () {
+      try { ws.close(); } catch (e) {}
+      fin({ err: opened ? "timeout_after_open" : "timeout_before_open" });
+    }, 6000);
+    ws.binaryType = "arraybuffer";
+    ws.onopen = function () { opened = true; };
+    ws.onmessage = function (ev) {
+      var bytes = ev.data instanceof ArrayBuffer ? ev.data.byteLength : -1;
+      try { ws.close(1000, "poc-done"); } catch (e) {}
+      fin({ open: true, binary: ev.data instanceof ArrayBuffer, bytes: bytes, proto: ws.protocol || "(none)" });
+    };
+    ws.onclose = function (ev) {
+      if (wantClose) fin({ closed: true, opened: opened, code: ev.code, reason: ev.reason });
+      else fin({ err: "closed code=" + ev.code + " " + ev.reason + (opened ? "(握手后关闭)" : "(未握手)") });
+    };
+    ws.onerror = function () {};
+  });
+}
+
+var EMAIL = "poc4@example.local", PASS = "poc4-pass-123", NAME = "PoC4";
+var TOTAL = 12;
+
+function main() {
+  var cross = location.port !== String(KERNEL_PORT) && location.hostname === "127.0.0.1";
+  document.getElementById("env").textContent =
+    "shell(页面)源=" + location.origin + "  →  kernel(内核)源=" + KERNEL +
+    " ｜跨源=" + cross + " ｜UA=" + navigator.userAgent;
+  emit(0, cross, "壳口(" + location.port + ")与内核口(" + KERNEL_PORT + ")确为跨源（不同端口）");
+
+  // 1) 跨源简单 GET（无自定义头），验证 ACAO 放行 + JSON 可读。
+  api("/auth/bootstrap-status").then(function (r) {
+    return r.json().then(function (j) {
+      if (r.ok && typeof j.initialized === "boolean") {
+        emit(1, true, "跨源 GET /auth/bootstrap-status 200（CORS 简单请求放行，可读 JSON）initialized=" + j.initialized);
+        return j.initialized ? "login" : "signup";
+      }
+      throw new Error("HTTP " + r.status);
+    });
+  }).then(function (mode) {
+    // 2) 注册/登录：application/json 的 POST 非简单请求，浏览器必发预检；拿到 token 即预检+ACAH 已通。
+    var body = mode === "signup"
+      ? { email: EMAIL, password: PASS, displayName: NAME }
+      : { email: EMAIL, password: PASS };
+    return api("/auth/" + mode, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok || !j.token) throw new Error("HTTP " + r.status + " " + JSON.stringify(j).slice(0, 200));
+        window.__TOKEN = j.token;
+        emit(2, true, "跨源 POST /auth/" + mode + " 200（application/json 自动预检通过）拿到 token");
+      });
+    });
+  }).then(function () {
+    // 3) 自定义头 X-GX-Token 的预检裁决：简单 GET 本不触发预检，但带上 X-GX-Token
+    //    （非 CORS 安全头）后浏览器必先发 OPTIONS 预检，要求 ACAH 允许该头，否则直接 Load failed。
+    //    用真实白名单头（后端 allowHeaders 含 X-GX-Token）；能读到响应即预检对自定义头放行。
+    //    （旁证：上一版曾用不在白名单的 X-GX-POC4-Probe，预检被拒 Load failed——证明裁决真实生效。）
+    return fetch(KERNEL + "/api/health", {
+      method: "GET", mode: "cors",
+      headers: { "X-GX-Token": window.__TOKEN }
+    }).then(function (r) {
+      if (r.ok) emit(3, true, "带 X-GX-Token 的跨源 GET /api/health 200（浏览器自动预检通过，ACAH 允许 X-GX-Token）");
+      else throw new Error("HTTP " + r.status);
+    });
+  }).then(function () {
+    // 4) 业务自定义头 X-GX-Token 跨源 GET。
+    return api("/auth/me").then(function (r) {
+      return r.json().then(function (j) {
+        if (r.ok && j.user && j.user.email === EMAIL) emit(4, true, "跨源 GET /auth/me 200（X-GX-Token 跨源头通过）email=" + j.user.email);
+        else throw new Error("HTTP " + r.status);
+      });
+    });
+  }).then(function () {
+    // 5) 写：跨源 JSON POST 建 Base。
+    return api("/bases", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "PoC4 库", icon: "database" }),
+    }).then(function (r) {
+      return r.json().then(function (j) {
+        if (r.status === 201 && j.base && j.base.id) { window.__BASE = j.base; emit(5, true, "跨源 POST /bases 201 id=" + j.base.id + "（写操作跨源成功）"); }
+        else throw new Error("HTTP " + r.status + " " + JSON.stringify(j).slice(0, 200));
+      });
+    });
+  }).then(function () {
+    // 6) 读回 CRUD 闭环。
+    return api("/bases").then(function (r) {
+      return r.json().then(function (j) {
+        var hit = (j.bases || []).some(function (b) { return b.id === window.__BASE.id; });
+        if (r.ok && hit) emit(6, true, "跨源 GET /bases 读回刚建库，CRUD 闭环 OK（n=" + (j.bases || []).length + "）");
+        else throw new Error("未读回 base HTTP " + r.status);
+      });
+    });
+  }).then(function () {
+    // 7) multipart 头像上传（FormData + X-GX-Token 触发预检；boundary 浏览器生成）。
+    var fd = new FormData();
+    fd.append("file", jpegPng());
+    return api("/auth/me/avatar", { method: "POST", body: fd }).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok || !(j.user && j.user.avatarUrl)) throw new Error("HTTP " + r.status + " " + JSON.stringify(j).slice(0, 200));
+        window.__AVATAR = j.user.avatarUrl;
+        emit(7, true, "跨源 multipart POST /auth/me/avatar 200 url=" + j.user.avatarUrl);
+      });
+    });
+  }).then(function () {
+    // 8) ★关键裁决（观察项）：公开头像用 no-cors 的 <img src=内核口> 直接加载。
+    //    响应带 Cross-Origin-Resource-Policy: same-origin，壳口跨端口加载【预期被 CORP 拦】。
+    var url = KERNEL + window.__AVATAR;
+    var t0 = Date.now();
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () {
+        emitObs(80, true, "公开头像 no-cors <img> 跨源加载成功 " + img.naturalWidth + "px（" + (Date.now() - t0) + "ms）。已 curl 坐实根因：头像/品牌图公开通道在 CORS/secureHeaders 中间件之前注册，响应不发 CORP（也不过 CORS），故裸 <img> 跨端口天然可显示 → D1 无需放宽内核 CORP");
+        resolve();
+      };
+      img.onerror = function () {
+        emitObs(80, false, "公开头像 no-cors <img> 跨源被拦（onerror，" + (Date.now() - t0) + "ms）：该通道发了 CORP same-origin，D1 需 additive 放宽内核 CORP（仅桌面 env）");
+        resolve();
+      };
+      img.src = url;
+    });
+  }).then(function () {
+    // 9) 私有图真实姿势：带 X-GX-Token 的 cors fetch → blob → objectURL → <img>。
+    var fd = new FormData();
+    fd.append("baseId", window.__BASE.id);
+    fd.append("purpose", "record");
+    fd.append("file", jpegPng());
+    return api("/attachments", { method: "POST", body: fd }).then(function (r) {
+      return r.json().then(function (j) {
+        if (r.status === 201 && j.files && j.files[0]) { window.__ATT = j.files[0]; return; }
+        throw new Error("附件上传 HTTP " + r.status);
+      });
+    }).then(function () {
+      return fetch(KERNEL + window.__ATT.url, { mode: "cors", headers: { "X-GX-Token": window.__TOKEN }, cache: "no-store" });
+    }).then(function (r) {
+      var corp = r.headers.get("cross-origin-resource-policy");
+      if (!r.ok) throw new Error("带票附件 HTTP " + r.status);
+      return r.blob().then(function (b) {
+        return decodeObjectUrl(URL.createObjectURL(b)).then(function (d) {
+          emit(9, true, "私有附件带票 cors fetch+blob+<img> 解码 " + d.w + "x" + d.h + " CORP=" + (corp || "(无)") + "（cors 响应可读，CORP 不拦 cors 模式）");
+        });
+      });
+    });
+  }).then(function () {
+    // 10) 无票访问私有附件应 401（跨源；错误响应也须带 ACAO 才能读到状态）。
+    return fetch(KERNEL + window.__ATT.url, { mode: "cors", cache: "no-store" }).then(function (r) {
+      if (r.status === 401) emit(10, true, "跨源无票私有附件 → 401（错误响应仍带 CORS 头、状态可读；鉴权生效）");
+      else throw new Error("期望 401 实得 " + r.status);
+    });
+  }).then(function () {
+    // 11) 跨源 WebSocket：REST 拿短票后 ws://内核口 升级收首帧。WS 不受 CORS 限制，
+    //     浏览器带 Origin: 壳口；内核 attach 不校验 Origin（代码已核），预期握手成功。
+    return api("/kb", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "PoC4 KB" }) })
+      .then(function (r) { return r.json(); }).then(function (j) {
+        window.__KB = j.knowledgeBase.id;
+        return api("/kb/" + window.__KB + "/docs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "doc", title: "PoC4 文档" }) });
+      }).then(function (r) { return r.json(); }).then(function (j) {
+        window.__DOC = (j.doc && j.doc.id) || j.id;
+        return api("/collab/ticket?roomId=" + encodeURIComponent("doc:" + window.__DOC));
+      }).then(function (r) { return r.json(); }).then(function (j) {
+        if (!j.ticket) throw new Error("短票失败 " + JSON.stringify(j).slice(0, 160));
+        window.__WS_PATH = j.wsPath;
+        var url = "ws://127.0.0.1:" + KERNEL_PORT + j.wsPath + "?t=" + encodeURIComponent(j.ticket);
+        return wsOnce(url, false);
+      }).then(function (res) {
+        if (res.open && res.binary) emit(11, true, "跨源 WebSocket 升级成功并收服务端首帧 " + res.bytes + "B（Origin=壳口，内核不校验，跨端口 WS 通）");
+        else throw new Error("WS 未达首帧：" + JSON.stringify(res));
+      });
+  }).then(function () {
+    // 12) 坏票跨源 WS → 4401 安全对照。
+    var url = "ws://127.0.0.1:" + KERNEL_PORT + window.__WS_PATH + "?t=invalid-xyz";
+    return wsOnce(url, true).then(function (res) {
+      if (res.closed && res.code === 4401) emit(12, true, "跨源坏票 WS → close(4401 ticket_invalid)，拒绝纪律正确");
+      else throw new Error("期望 4401 实得 " + JSON.stringify(res));
+    });
+  }).then(function () {
+    finish(TOTAL, "fetch/cors/预检/multipart/WS 跨源全通；no-cors 公开图见 #80 观察（CORP 是否需放宽以该实测为准）");
+  }).catch(function (e) {
+    var idx = RESULTS.length;
+    emit(idx < TOTAL ? idx : RESULTS.length, false, "异常中断：" + (e && e.message ? e.message : String(e)));
+    finish(TOTAL, "有失败，见上");
+  });
+}
+
+function remoteProbes() {
+  fetch("/poc4-node.json", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (cfg) {
+      if (!cfg) { emitObs(90, true, "未配置 poc4-node.json，跳过 http 局域网 / https 远端远程观察（本地跨端口已足以裁决本地承载）"); return; }
+      [["明文 http 局域网节点", cfg.httpNode], ["https 远端节点", cfg.httpsNode]].forEach(function (pair, i) {
+        var label = pair[0], u = pair[1];
+        if (!u) return;
+        var code = 91 + i, t0 = performance.now();
+        fetch(u + (u.indexOf("?") < 0 ? "?" : "&") + "_=" + Date.now(), { mode: "cors" })
+          .then(function (resp) {
+            emitObs(code, true, label + " " + u + " → HTTP " + resp.status + "（" + Math.round(performance.now() - t0) + "ms）未被 ATS/混合内容拦；跨域读取视对端 CORS 而定");
+          })
+          .catch(function (e) {
+            emitObs(code, false, label + " " + u + " → fetch 失败：" + e.message + "（" + Math.round(performance.now() - t0) + "ms；据错误名区分 ATS 明文/混合内容/CORS/不可达）");
+          });
+      });
+    }).catch(function () { emitObs(90, false, "读 poc4-node.json 失败"); });
+}
+
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { main(); remoteProbes(); });
+else { main(); remoteProbes(); }
+</script>
+</body>
+</html>
