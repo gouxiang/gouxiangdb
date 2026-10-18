@@ -22,6 +22,43 @@ tauri-plugin-shell = "=2.2.1"
 tauri-plugin-updater = { version = "=2.13.3", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# ── R1 壳口（IMPL §4 阶段 R1）─────────────────────────────────────────────
+# 红线：只用锁树内已有的 1.x hyper/tower/rustls 生态，绝不得引入 aws-lc-rs（全树计数须为 0）。
+# TLS 两通道（HTTP reqwest / WSS 手写隧道）统一走 macOS 系统钥匙串校验
+# （rustls-platform-verifier）+ 进程级幂等安装的 ring crypto provider：内网自签/私有 CA
+# 装进登录钥匙串即被信任，不硬编码 webpki 根。
+#
+# axum 0.8：default-features 精剪，只用 http1 + tokio（JSON 响应手写，不引 json/form/query）。
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+# tokio：壳口 listener / WS copy_bidirectional / 上游状态互斥 / headless 单测运行时。
+# 钉 ≥1.44.2（安全闸门已知漏洞下限，锁内实为 1.53.3）。
+tokio = { version = "1.44.2", features = [
+  "rt",
+  "rt-multi-thread",
+  "net",
+  "sync",
+  "io-util",
+  "time",
+  "macros",
+] }
+# HTTP 反代客户端。rustls-no-provider = platform-verifier + __rustls，不拖 aws-lc-rs
+# （普通 "rustls" feature 会带 __rustls-aws-lc-rs）；crypto provider 由我们手动装 ring。
+# stream = Body::wrap_stream 请求体流式转发（multipart 不全量缓冲）。
+reqwest = { version = "0.13", default-features = false, features = [
+  "rustls-no-provider",
+  "stream",
+] }
+# 入站升级 OnUpgrade 类型（hyper server/http1；出站是手写 HTTP/1.1，不用 hyper client）。
+hyper = { version = "1", features = ["http1", "server"] }
+# TokioIo：把 hyper 升级后的裸流桥到 tokio IO 做 copy_bidirectional（只需 tokio feature）。
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+# 上游 base / WS 目标 URL 解析。
+url = "2"
+# WSS 隧道 TLS：钉 ≥0.23.18（避开安全闸门已知漏洞版，锁内实为 0.23.46）。
+rustls = { version = "0.23.18", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["tls12"] }
+# 直接边：proxy_ws.rs 直接调 ClientConfig::with_platform_verifier()（Rust 2018 传递依赖不在 extern prelude）。
+rustls-platform-verifier = "0.7"
 
 [profile.release]
 # PoC 阶段用 thin LTO + 多 codegen units：避免 fat LTO 最终链接在 16GB 机上产生内存尖峰；
