@@ -10,7 +10,7 @@ rust-version = "1.77"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 # sidecar：用 Tauri shell 插件的 externalBin 拉起随包 Node 运行 apps/api。
 # 钉死 2.2.1：泛版本 "2" 范围内含已知安全漏洞版本（依赖安全闸门拦截）。
 tauri-plugin-shell = "=2.2.1"

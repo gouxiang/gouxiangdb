@@ -13,7 +13,10 @@
 mod commands;
 mod proxy;
 mod proxy_ws;
+mod secret;
 mod shell_server;
+mod sidecar;
+mod tray;
 mod upstream;
 
 // R1 headless 集成测试（IMPL §4-R1 六类）：真实回环 HTTP/裸 TCP，不依赖 Tauri Builder/winit。
@@ -111,14 +114,33 @@ fn main() {
     // 默认 tauri.conf.json 无 updater 段，且非 GX_POC3 时永远不调用 check，故零自动行为。
     .plugin(tauri_plugin_updater::Builder::new().build())
     .manage(SidecarPid(AtomicI32::new(0)))
+    // R2：用户显式「彻底退出」请求标志（区别于关窗驻留与 updater 重启）。
+    .manage(tray::QuitFlag::default())
     .manage(shell_state.clone())
-    // R1 §3：注册 4 条 gx:* 命令（invoke 名经函数上的 rename = "gx:..." 精确含冒号）。
+    // §3：注册 gx:* 命令（invoke 名经函数上 rename = "gx:..." 精确含冒号）。
     .invoke_handler(tauri::generate_handler![
       commands::gx_get_shell_info,
       commands::gx_set_active_upstream,
       commands::gx_begin_probe,
-      commands::gx_end_probe
+      commands::gx_end_probe,
+      commands::gx_start_local,
+      commands::gx_stop_local,
+      commands::gx_local_status
     ])
+    // R2：关红钮默认隐藏驻留菜单栏，不退出（内核/反代不断）。
+    .on_window_event(|window, event| {
+      if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        let quitting = window
+          .app_handle()
+          .try_state::<tray::QuitFlag>()
+          .map(|f| f.should_quit())
+          .unwrap_or(false);
+        if !quitting {
+          api.prevent_close();
+          tray::hide_instead_of_close(window);
+        }
+      }
+    })
     .setup(move |app| {
       let window: WebviewWindow = app.get_webview_window("main").expect("main window");
       let resource_dir = app.path().resource_dir().expect("resource_dir");
@@ -142,6 +164,14 @@ fn main() {
             .join(BUNDLE_ID),
         },
       };
+
+      // R2：把随包资源根与本地数据目录登记进壳状态（sidecar 首 boot 据此定位随包 Node/库）。
+      // 必须在下面 shell_state 被 move 进启动线程之前完成。
+      shell_state.set_dirs(resource_dir.clone(), data_dir.clone());
+      // R2：安装菜单栏驻留托盘（显示主窗口/检查更新/彻底退出；关窗默认隐藏驻留）。
+      if let Err(e) = tray::build_tray(app.handle()) {
+        dbg_log(&format!("托盘安装失败（不影响主流程）: {e}"));
+      }
 
       // PoC-3：起一条专用系统线程，等 sidecar 就绪（轮询共享 PID）后再查更新，
       // 避免与内核启动抢占；安装前在 on_download_finish 里优雅停 sidecar。
@@ -184,53 +214,48 @@ fn main() {
     .build(tauri::generate_context!())
     .expect("error while building GouXiangDB desktop");
 
-    // 双保险收尸：
-    //  - ExitRequested：可阻止。prevent_exit 后另起线程优雅停 sidecar（SIGTERM 等 ≤5s），再 app.exit。
-    //  - Exit：不可阻止但仍能同步收尾，做有界 SIGTERM→SIGKILL 兜底（防某些终止路径不发 Requested）。
-    //  - updater 重启（code==RESTART_EXIT_CODE=80）：绝不 prevent_exit，只在退出前同步优雅停 sidecar，
-    //    让 Tauri 完成"替换 .app 后重启"；否则会把更新重启误判成普通退出而卡死。
+    // 退出收尸（R2：关红钮已被 on_window_event 拦成隐藏驻留，能走到这里的非 RESTART 退出
+    // 只有真正的退出意图——CMD+Q 或托盘「彻底退出」app.exit；故一律【放行】，不再 prevent_exit）：
+    //  - ExitRequested：仅 updater RESTART(80) 需在此特别记录；其余放行，实际收尸统一放 Exit。
+    //  - Exit：不可阻止但仍能同步收尾。停 R2 托管内核（SidecarManager）+ PoC 旧 SidecarPid，
+    //    有界 SIGTERM→SIGKILL 兜底，防孤儿 node。
     app.run(move |app_handle, event| match event {
     tauri::RunEvent::ExitRequested { code, api, .. } => {
       if code == Some(tauri::RESTART_EXIT_CODE) {
         dbg_log("ExitRequested RESTART(80) -> updater relaunch: graceful stop, do NOT prevent_exit");
         poc3_log("RESTART_EXIT_CODE received: stopping sidecar before relaunch");
-        let pid = app_handle
-          .try_state::<SidecarPid>()
-          .map(|s| s.0.swap(0, Ordering::SeqCst))
-          .unwrap_or(0);
-        if pid > 0 {
-          graceful_stop(pid, Duration::from_secs(5));
+        // R2 托管内核也在替换前优雅停（保 WAL 落盘）。
+        if let Some(state) = app_handle.try_state::<std::sync::Arc<commands::ShellState>>() {
+          state.sidecar().shutdown_if_running(Duration::from_secs(8));
         }
+        reap_poc_pid(app_handle, Duration::from_secs(5));
         // 不调用 api.prevent_exit()：放行 Tauri 重启流程。
         let _ = api;
       } else {
-        dbg_log("ExitRequested received -> prevent_exit + graceful");
-        api.prevent_exit();
-        let pid = app_handle
-          .try_state::<SidecarPid>()
-          .map(|s| s.0.swap(0, Ordering::SeqCst))
-          .unwrap_or(0);
-        dbg_log(&format!("sidecar pid from state = {pid}"));
-        let handle = app_handle.clone();
-        thread::spawn(move || {
-          if pid > 0 {
-            graceful_stop(pid, Duration::from_secs(5));
-          }
-          handle.exit(0);
-        });
+        // 真正退出（CMD+Q / 托盘彻底退出）：放行，收尸在 Exit 统一做。
+        dbg_log("ExitRequested (real quit) -> allow; reaping in Exit");
       }
     }
     tauri::RunEvent::Exit => {
-      dbg_log("RunEvent::Exit -> backstop reaper");
-      if let Some(state) = app_handle.try_state::<SidecarPid>() {
-        let pid = state.0.swap(0, Ordering::SeqCst);
-        if pid > 0 {
-          graceful_stop(pid, Duration::from_secs(3));
-        }
+      dbg_log("RunEvent::Exit -> stop managed sidecar + PoC backstop reaper");
+      if let Some(state) = app_handle.try_state::<std::sync::Arc<commands::ShellState>>() {
+        state.sidecar().shutdown_if_running(Duration::from_secs(8));
       }
+      reap_poc_pid(app_handle, Duration::from_secs(3));
     }
     _ => {}
   });
+}
+
+/// 停 PoC 路径（GX_POC2/3/4 经 boot_local_kernel）登记的旧 SidecarPid。
+/// R2 默认路径内核由 SidecarManager 收，二者互不重叠（PoC 门控默认关闭）。
+fn reap_poc_pid(app_handle: &tauri::AppHandle, timeout: Duration) {
+    if let Some(state) = app_handle.try_state::<SidecarPid>() {
+        let pid = state.0.swap(0, Ordering::SeqCst);
+        if pid > 0 {
+            graceful_stop(pid, timeout);
+        }
+    }
 }
 
 /// 进程是否仍在（signal 0）。
