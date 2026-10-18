@@ -9,6 +9,25 @@ import type { NodeRegistryState, StoredNodeEntry } from "./registry";
 import { LOCAL_NODE_ID } from "./resolve";
 import type { RemoteSessionView } from "./remoteSessions";
 
+/**
+ * 本地内核的实时运行相位（W2 四态）。仅壳内由 localStatus 轮询结果映射；
+ * 非壳（浏览器/fnOS/服务器）行上该字段恒 undefined，状态文案走 localDesired 旧推导，行为零变化。
+ */
+export type LocalRuntimePhase = "unknown" | "absent" | "stopped" | "starting" | "ready";
+
+/**
+ * localStatus 的最小结构（不 import shellBridge，保持纯层无 DOM/壳依赖）。
+ * 与 shellBridge.LocalStatus 字段同名同义：added=曾添加，initialized=数据已初始化，
+ * running=进程在，ready=/readyz 绿，kernelPort=就绪端口（未就绪为 null）。
+ */
+export interface LocalRuntimeLike {
+  added: boolean;
+  initialized: boolean;
+  running: boolean;
+  ready: boolean;
+  kernelPort: number | null;
+}
+
 /** 单个节点在列表里的展示模型。 */
 export interface NodeRow {
   kind: "local" | "remote";
@@ -31,6 +50,14 @@ export interface NodeRow {
   /** 本地条目永久不可删（戴总硬规则 #2）；远端可删。 */
   removable: boolean;
   lastConnectedAt: string | null;
+  /**
+   * 仅本地行：壳内实时运行相位（由 applyLocalRuntime 从 localStatus 映射）。
+   * 可选——非壳/未注入实时态时为 undefined，列表保持 localDesired 旧文案（零变化的关键）。
+   * 远端行恒 undefined。
+   */
+  runtime?: LocalRuntimePhase;
+  /** 仅本地行：实时内核端口（未就绪/未知为 null）；远端行恒缺省。 */
+  kernelPort?: number | null;
 }
 
 /** 由绝对/相对基址取一个可读 host（远端缺省标题用）；失败回退原串。 */
@@ -138,4 +165,44 @@ export function buildLauncherViewModel(
     isEmpty: state.entries.length === 0,
     activeRow: activeNodeId ? (rows.find((r) => r.nodeId === activeNodeId) ?? null) : null,
   };
+}
+
+/**
+ * 单个本地状态 → 运行相位（applyLocalRuntime 的纯映射内核，便于表驱动单测）。
+ * busyLocal 为点击瞬间的乐观态：除 ready 外一律展示 "starting"。
+ */
+export function localPhase(
+  status: LocalRuntimeLike | null,
+  busyLocal: boolean,
+): LocalRuntimePhase {
+  if (status === null) return "unknown";
+  if (!status.added) return busyLocal ? "starting" : "absent";
+  if (status.running && status.ready) return "ready";
+  if (status.running && !status.ready) return "starting";
+  // added && !running
+  return busyLocal ? "starting" : "stopped";
+}
+
+/**
+ * 把壳内 localStatus 实时探测结果映射到本地行的 runtime 相位（W2 四态）。
+ *
+ * 纯函数：返回**新数组**、不改入参；只作用于 kind==="local" 行，远端行原样返回（引用可比）。
+ * status===null（壳内探测未回首拍 / 非壳未接线）→ 本地行 "unknown"，UI 回落 localDesired
+ * 旧推导，保证 SSR 首拍与非壳形态零变化。
+ */
+export function applyLocalRuntime(
+  rows: NodeRow[],
+  status: LocalRuntimeLike | null,
+  busyLocal: boolean,
+): NodeRow[] {
+  const phase = localPhase(status, busyLocal);
+  const kernelPort = status?.kernelPort ?? null;
+  let changed = false;
+  const next = rows.map((row) => {
+    if (row.kind !== "local") return row;
+    if (row.runtime === phase && row.kernelPort === kernelPort) return row;
+    changed = true;
+    return { ...row, runtime: phase, kernelPort };
+  });
+  return changed ? next : rows;
 }

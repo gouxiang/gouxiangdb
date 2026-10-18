@@ -1,10 +1,12 @@
 // launcherViewModel.ts 纯派生层单测（node 环境，无 DOM/React）。
 import { describe, it, expect } from "vitest";
 import {
+  applyLocalRuntime,
   buildNodeRows,
   buildLauncherViewModel,
   hostLabel,
 } from "./launcherViewModel";
+import type { LocalRuntimeLike, NodeRow } from "./launcherViewModel";
 import { emptyRegistry, type NodeRegistryState, type StoredNodeEntry } from "./registry";
 import type { RemoteSessionView } from "./remoteSessions";
 
@@ -119,8 +121,7 @@ describe("buildNodeRows", () => {
   });
 });
 
-describe("buildLauncherViewModel", () => {
-  it("汇总标记：空/有本地/有活动", () => {
+describe("buildLauncherViewModel", () => {  it("汇总标记：空/有本地/有活动", () => {
     expect(buildLauncherViewModel(emptyRegistry(), new Map()).isEmpty).toBe(true);
     const withLocal: NodeRegistryState = {
       ...emptyRegistry(),
@@ -135,5 +136,97 @@ describe("buildLauncherViewModel", () => {
     const vm2 = buildLauncherViewModel(active, new Map());
     expect(vm2.hasActive).toBe(true);
     expect(vm2.activeNodeId).toBe("local");
+  });
+});
+
+describe("applyLocalRuntime", () => {
+  const vmLike = (over: Partial<NodeRow> = {}): NodeRow =>
+    ({
+      kind: "local",
+      nodeId: "local",
+      title: "本机",
+      label: null,
+      subtitle: "本机数据",
+      baseURL: "",
+      active: false,
+      connected: false,
+      account: null,
+      localDesired: "running",
+      removable: false,
+      lastConnectedAt: null,
+      ...over,
+    }) as NodeRow;
+  const remoteRow = (): NodeRow =>
+    ({
+      kind: "remote",
+      nodeId: "abc",
+      title: "nas:3001",
+      label: null,
+      subtitle: "http://nas:3001",
+      baseURL: "http://nas:3001",
+      active: false,
+      connected: false,
+      account: null,
+      localDesired: null,
+      removable: true,
+      lastConnectedAt: null,
+    }) as NodeRow;
+  const st = (over: Partial<LocalRuntimeLike> = {}): LocalRuntimeLike => ({
+    added: true,
+    initialized: true,
+    running: true,
+    ready: true,
+    kernelPort: 3001,
+    ...over,
+  });
+
+  it("status=null → 本地 unknown、带 kernelPort=null；远端行引用不变", () => {
+    const remote = remoteRow();
+    const local = vmLike();
+    const rows = [local, remote];
+    const out = applyLocalRuntime(rows, null, false);
+    expect(out[0]!.runtime).toBe("unknown");
+    expect(out[0]!.kernelPort).toBeNull();
+    expect(out[1]).toBe(remote);
+    expect(rows[0]).toEqual(local); // 入参不被改
+  });
+
+  it("!added → absent（busy 时为 starting）", () => {
+    const out = applyLocalRuntime([vmLike()], st({ added: false }), false);
+    expect(out[0]!.runtime).toBe("absent");
+    const busy = applyLocalRuntime([vmLike()], st({ added: false }), true);
+    expect(busy[0]!.runtime).toBe("starting");
+  });
+
+  it("added 但未运行 → stopped", () => {
+    const out = applyLocalRuntime([vmLike()], st({ running: false, ready: false }), false);
+    expect(out[0]!.runtime).toBe("stopped");
+  });
+
+  it("运行中但未就绪 → starting", () => {
+    const out = applyLocalRuntime([vmLike()], st({ running: true, ready: false }), false);
+    expect(out[0]!.runtime).toBe("starting");
+  });
+
+  it("运行且就绪 → ready 并带 kernelPort", () => {
+    const out = applyLocalRuntime([vmLike()], st({ kernelPort: 4100 }), false);
+    expect(out[0]!.runtime).toBe("ready");
+    expect(out[0]!.kernelPort).toBe(4100);
+  });
+
+  it("busyLocal 把 stopped 拉成 starting，但 ready 不降级", () => {
+    const stopped = applyLocalRuntime(
+      [vmLike()],
+      st({ running: false, ready: false }),
+      true,
+    );
+    expect(stopped[0]!.runtime).toBe("starting");
+    const ready = applyLocalRuntime([vmLike()], st(), true);
+    expect(ready[0]!.runtime).toBe("ready");
+  });
+
+  it("结果未变化时返回同一数组引用（幂等）", () => {
+    const rows = applyLocalRuntime([vmLike()], st(), false);
+    expect(applyLocalRuntime(rows, st(), false)).toBe(rows);
   });
 });

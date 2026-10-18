@@ -1,5 +1,6 @@
 // LauncherPanel SSR 组合测试（node + react-dom/server，无 jsdom/新依赖）。
-// 锁：空注册表（新装）直落「添加网络节点」首屏且无取消；有节点时渲染列表 + 添加按钮。
+// 锁：空注册表（新装）显横屏欢迎卡（本机主 CTA + 网络节点次入口），不再自动落添加表单；
+// 有节点时渲染列表 + 添加按钮；add 视图才出现 AddRemoteNodeForm（带取消，可回欢迎/列表）。
 import { describe, it, expect } from "vitest";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -30,17 +31,18 @@ function makeStore(): LauncherStore {
 }
 
 describe("LauncherPanel", () => {
-  it("全新安装空注册表：标题 + 直接显示添加网络节点表单，且无返回/取消", () => {
+  it("全新安装空注册表：标题 + 欢迎卡双入口，不自动展开添加表单", () => {
     const store = makeStore();
     const html = renderToStaticMarkup(
       React.createElement(LauncherPanel, { store }),
     );
     expect(html).toContain("构想工作台");
-    expect(html).toContain("添加网络节点");
-    expect(html).toContain("节点网址");
-    // 空态不应出现列表空态文案或「取消」（已是首屏，无处可退）
+    expect(html).toContain("在这台电脑上开始");
+    expect(html).toContain("数据保存在本机，离线也能用");
+    expect(html).toContain("连接到网络上的另一台电脑");
+    // 不再强制落添加表单（其特征文案「节点网址」不应出现）
+    expect(html).not.toContain("节点网址");
     expect(html).not.toContain("还没有节点");
-    expect(html).not.toContain(">取消<");
   });
 
   it("有本地与远端节点：渲染节点列表与添加按钮，本地在前", () => {
@@ -54,7 +56,9 @@ describe("LauncherPanel", () => {
     expect(html).toContain("公司库");
     expect(html).toContain("http://nas:3001");
     expect(html).toContain("添加网络节点");
-    // 列表视图下不再内联添加表单
+    // 活动本地行仍只显「断开」（活动行动区逻辑不动）
+    expect(html).toContain(">断开<");
+    // 列表视图下不内联添加表单
     expect(html).not.toContain("节点网址");
   });
 

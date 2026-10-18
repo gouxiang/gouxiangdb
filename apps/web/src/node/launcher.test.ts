@@ -244,6 +244,45 @@ describe("断开 / 删除", () => {
   });
 });
 
+describe("独立启停的注册表动作（W2）", () => {
+  it("ensureLocalRegistered：空册出现 local 条目、desired=running，但 activeNodeId 仍 null", () => {
+    const { controller } = makeController();
+    const next = controller.ensureLocalRegistered();
+    expect(next.entries.filter((e) => e.kind === "local")).toHaveLength(1);
+    expect(next.localDesired).toBe("running");
+    expect(next.activeNodeId).toBeNull();
+    expect(controller.getActiveNode()).toBeNull();
+    // 不驱动 resolver（仍回落 local 兜底，但没有活动条目）
+    expect(controller.getState().activeNodeId).toBeNull();
+  });
+
+  it("ensureLocalRegistered：已有 local 时幂等，返回同一 state 引用", () => {
+    const { controller } = makeController(seededWithRemote());
+    const before = controller.getState();
+    const next = controller.ensureLocalRegistered();
+    expect(next).toBe(before);
+    expect(next.entries.filter((e) => e.kind === "local")).toHaveLength(1);
+  });
+
+  it("setLocalDesiredOnly：只改 desired，activeNodeId/resolver 不动", () => {
+    let s = addLocalNode(emptyRegistry()).state;
+    s = connectNode(s, LOCAL_NODE_ID, "t").state; // active=local、desired=running
+    const { controller } = makeController(s);
+    const next = controller.setLocalDesiredOnly("stopped");
+    expect(next.localDesired).toBe("stopped");
+    // active 指针与 resolver 都仍指向 local（停止进程不等于断开活动数据源）
+    expect(next.activeNodeId).toBe(LOCAL_NODE_ID);
+    expect(controller.resolver().current().nodeId).toBe(LOCAL_NODE_ID);
+  });
+
+  it("setLocalDesiredOnly：无 local 条目时安全 no-op", () => {
+    const { controller } = makeController();
+    const before = controller.getState();
+    expect(controller.setLocalDesiredOnly("stopped")).toBe(before);
+    expect(before.localDesired).toBeNull();
+  });
+});
+
 describe("跨重启 restore", () => {
   it("活动远端且会话已存 → restore 重建远端数据源（免登）", () => {
     let s = seededWithRemote();

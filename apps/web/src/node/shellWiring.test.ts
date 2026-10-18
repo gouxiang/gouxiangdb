@@ -61,6 +61,8 @@ function makeWiring(): Wiring {
   const shell: ShellStoreHooks = {
     ensureLocalReady,
     stopLocal,
+    startLocalOnly: vi.fn(async () => ({ firstBoot: false })),
+    stopLocalOnly: vi.fn(async () => undefined),
     syncUpstream: vi.fn(async (active, entry: StoredNodeEntry | null) => {
       // emit 必须发生在壳上游切换期间之外：进入 sync 时记录通知数，体内不应新增。
       const atEntry = emitCount;

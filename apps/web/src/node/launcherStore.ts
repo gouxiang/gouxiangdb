@@ -37,6 +37,7 @@ import type { NodeHandshake } from "./handshake";
 import { launcherEnabled } from "./desktopGate";
 import {
   hasShell,
+  localStatus,
   setActiveUpstream,
   startLocal,
   stopLocal as stopLocalCmd,
@@ -69,6 +70,14 @@ export interface ShellStoreHooks {
    * 仅当 disconnect 目标是本地条目时由 store 调用；远端断开不停本地进程。
    */
   stopLocal(): Promise<void>;
+  /**
+   * 独立「启动」：注册表已先登记 local 条目（localDesired=running）后调 gx:start_local。
+   * **不**切换活动数据源、**不** set_upstream（那是「进入本机」connectLocal 的职责）。
+   * 返回 firstBoot=本次是否首次初始化（added 或 initialized 此前为假），供 UI 显示首启慢提示。
+   */
+  startLocalOnly(): Promise<{ firstBoot: boolean }>;
+  /** 独立「停止」：gx:stop_local 优雅停进程。不动活动指针/壳上游（注册表侧已先落 stopped）。 */
+  stopLocalOnly(): Promise<void>;
 }
 
 export interface LauncherStoreDeps extends ResolverDeps {
@@ -122,6 +131,17 @@ export interface LauncherStore {
   connectRemote(nodeId: string, creds?: RemoteCredentials): Promise<SwitchOutcome>;
   /** 同 connectLocal：非壳零 await 同步提交；壳模式切换后把壳上游对齐（远端/none）。 */
   disconnect(nodeId: string): Promise<SwitchOutcome>;
+  /**
+   * 独立启动本机内核（与「进入本机」connectLocal 拆开）：只登记 local 条目 +
+   * localDesired=running 并在壳内 await gx:start_local；**不**切换活动数据源、**不** set_upstream。
+   * 非壳：注册+持久化+通知后回 {firstBoot:false}，不触达任何壳命令（测试可驱动）。
+   */
+  startLocalOnly(): Promise<{ firstBoot: boolean }>;
+  /**
+   * 独立停止本机内核：注册表先落 localDesired=stopped（条目保留、activeNodeId 不变），
+   * 壳内 await gx:stop_local；不 disconnect、不 set_upstream(none)。非壳只做注册表部分。
+   */
+  stopLocalOnly(): Promise<void>;
   removeRemote(nodeId: string): void;
   rename(nodeId: string, label: string | null): void;
   /**
@@ -234,6 +254,26 @@ export function createLauncherStore(deps: LauncherStoreDeps): LauncherStore {
       emit();
       return outcome;
     },
+    async startLocalOnly() {
+      // 注册表先登记 local 条目（addLocalNode 设 localDesired=running），不动活动指针/resolver。
+      controller.ensureLocalRegistered();
+      persist();
+      let firstBoot = false;
+      if (deps.shell) {
+        firstBoot = (await deps.shell.startLocalOnly()).firstBoot;
+      }
+      emit();
+      return { firstBoot };
+    },
+    async stopLocalOnly() {
+      // 仅落期望停止：不 disconnect、不删条目、不改 activeNodeId、不 set_upstream。
+      controller.setLocalDesiredOnly("stopped");
+      persist();
+      if (deps.shell) {
+        await deps.shell.stopLocalOnly();
+      }
+      emit();
+    },
     removeRemote(nodeId) {
       controller.removeRemote(nodeId);
       afterAction(undefined);
@@ -325,6 +365,18 @@ function shellDefaultDeps(): Omit<LauncherStoreDeps, "storage"> {
         });
       },
       async stopLocal() {
+        await stopLocalCmd();
+      },
+      async startLocalOnly() {
+        // 先探一次状态用于首 boot 判定（探测失败不阻塞启动，按结果回退判定）。
+        const before = await localStatus().catch(() => null);
+        const r = await startLocal();
+        if (!r.ok) throw new Error(r.error);
+        // 曾未添加 / 曾未初始化 = 首次初始化；before 不可得时以本次结果 initialized 反推。
+        const firstBoot = before ? !before.added || !before.initialized : !r.initialized;
+        return { firstBoot };
+      },
+      async stopLocalOnly() {
         await stopLocalCmd();
       },
     },

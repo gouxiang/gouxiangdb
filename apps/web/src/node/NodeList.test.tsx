@@ -48,6 +48,61 @@ describe("NodeList", () => {
     expect(html).toContain("已停止");
   });
 
+  it("W2 ready 本地行：运行中 + 进入本机 + 停止", () => {
+    const html = render([
+      row({ kind: "local", nodeId: "local", title: "本机", runtime: "ready" }),
+    ]);
+    expect(html).toContain("运行中");
+    expect(html).toContain("进入本机");
+    expect(html).toContain(">停止<");
+    expect(html).not.toContain("使用本机");
+  });
+
+  it("W2 stopped 本地行：已停止 + 进入本机 + 启动", () => {
+    const html = render([
+      row({ kind: "local", nodeId: "local", title: "本机", runtime: "stopped" }),
+    ]);
+    expect(html).toContain("已停止");
+    expect(html).toContain("进入本机");
+    expect(html).toContain(">启动<");
+  });
+
+  it("W2 absent 本地行：未启用 + 启动按钮", () => {
+    const html = render([
+      row({ kind: "local", nodeId: "local", title: "本机", runtime: "absent" }),
+    ]);
+    expect(html).toContain("未启用");
+    expect(html).toContain(">启动<");
+  });
+
+  it("W2 starting 本地行：启动中…且两按钮 disabled、带 title 原因", () => {
+    const html = render([
+      row({ kind: "local", nodeId: "local", title: "本机", runtime: "starting" }),
+    ]);
+    expect(html).toContain("启动中…");
+    expect(html).toContain("本机内核正在启动");
+    expect(html).toContain("disabled");
+  });
+
+  it("W2 busyNodeId=local-start 时本地行按启动中置灰（即便 runtime=stopped）", () => {
+    const html = render(
+      [row({ kind: "local", nodeId: "local", title: "本机", runtime: "stopped" })],
+      { busyNodeId: "local-start" },
+    );
+    expect(html).toContain("启动中…");
+    expect(html).toContain("disabled");
+  });
+
+  it("W2 非壳锁：不传 runtime（unknown）仍是单个「使用本机」，无启动/停止", () => {
+    const html = render([
+      row({ kind: "local", nodeId: "local", title: "本机", localDesired: "running" }),
+    ]);
+    expect(html).toContain("使用本机");
+    expect(html).not.toContain("进入本机");
+    expect(html).not.toContain(">启动<");
+    expect(html).not.toContain(">停止<");
+  });
+
   it("未连接远端行：连接按钮 + 可删除，副标题含基址与未连接", () => {
     const html = render([
       row({

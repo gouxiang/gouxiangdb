@@ -55,11 +55,12 @@ describe("NodeLauncherGate", () => {
     expect(html).not.toContain("添加网络节点");
   });
 
-  it("门控开启：渲染启动器面板（新装空态直落添加表单）", () => {
+  it("门控开启：渲染启动器面板（新装空态为欢迎卡双入口，不自动展开添加表单）", () => {
     const html = renderGate(true, makeStore());
     expect(html).toContain("构想工作台");
-    expect(html).toContain("添加网络节点");
-    expect(html).toContain("节点网址");
+    expect(html).toContain("在这台电脑上开始");
+    expect(html).toContain("连接到网络上的另一台电脑");
+    expect(html).not.toContain("节点网址");
   });
 
   it("门控开启且已有节点：渲染列表", () => {

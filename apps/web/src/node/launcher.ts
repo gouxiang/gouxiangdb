@@ -126,6 +126,18 @@ export interface LauncherController {
   resolver(): DataSourceResolverController;
   /** 添加并连接本地节点（首次＝壳随后做 boot+初始化；已添加则仅连接）。 */
   connectLocal(): SwitchOutcome;
+  /**
+   * 仅确保注册表存在 local 条目（addLocalNode 幂等，localDesired="running"），
+   * **不** regConnect、**不** applyActive、activeNodeId 不变——独立「启动」按钮用：
+   * 先登记期望运行，再由壳 gx:start_local 拉起内核，活动指针仍由随后的「进入本机」切换。
+   */
+  ensureLocalRegistered(): NodeRegistryState;
+  /**
+   * 仅改本地条目的期望运行态（不动 activeNodeId、不调 resolver、不停远端会话）。
+   * 独立「停止」按钮用：注册表先落 stopped，再由壳 gx:stop_local 优雅停进程。
+   * 无 local 条目时安全 no-op（原样返回当前 state）。
+   */
+  setLocalDesiredOnly(desired: "running" | "stopped"): NodeRegistryState;
   /** 添加远端档案（不连接）。nodeId/baseURL 由 resolve 层规范化后传入。 */
   addRemote(input: { nodeId: string; baseURL: string; label?: string | null }): NodeRegistryState;
   /**
@@ -215,6 +227,22 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
       next = regConnect(next, LOCAL_NODE_ID, now()).state;
       state = next;
       return applyActive(next);
+    },
+
+    ensureLocalRegistered() {
+      if (state.entries.some((e) => e.kind === "local")) return state;
+      const r = addLocalNode(state);
+      // addLocalNode 仅在已存在 local 时失败；上一行已排除，error 必为 null。
+      if (!r.error) state = r.state;
+      return state;
+    },
+
+    setLocalDesiredOnly(desired) {
+      // 无本地条目：localDesired 无意义，安全 no-op（不改 active、不调 resolver）。
+      if (!state.entries.some((e) => e.kind === "local")) return state;
+      if (state.localDesired === desired) return state;
+      state = { ...state, localDesired: desired };
+      return state;
     },
 
     addRemote(input) {
