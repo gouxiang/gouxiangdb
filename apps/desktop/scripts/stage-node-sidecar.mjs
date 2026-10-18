@@ -20,6 +20,9 @@
 //
 // 用法：
 //   node apps/desktop/scripts/stage-node-sidecar.mjs [--out <dir>] [--node-tar <dir-or-file>]
+//                                            [--web-dist <dir>]
+//   --web-dist 缺省为 apps/web/dist（普通构建，与历史行为逐字节一致）；
+//   桌面壳门控构建传 apps/web/dist-shell（由 build-web-shell.mjs 产出）。
 //
 // 退出码：任何原生件架构不符 / 冒烟失败 => 非 0（PoC-1 硬门槛）。
 
@@ -39,10 +42,18 @@ const srcApi = path.join(repoRoot, "apps", "api");
 const args = process.argv.slice(2);
 let outDir = path.join(desktopDir, ".stage");
 let nodeTarHint = "";
+let webDistOpt = "";
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--out") outDir = args[++i];
   else if (args[i] === "--node-tar") nodeTarHint = args[++i];
+  else if (args[i] === "--web-dist") webDistOpt = args[++i];
 }
+// 默认仍是 apps/web/dist（不传参时与历史行为完全一致）；相对路径相对 repoRoot 解析。
+const webDist = webDistOpt
+  ? path.isAbsolute(webDistOpt)
+    ? webDistOpt
+    : path.join(repoRoot, webDistOpt)
+  : path.join(repoRoot, "apps", "web", "dist");
 const serverDir = path.join(outDir, "server");
 const sidecarName = "gxnode-aarch64-apple-darwin";
 
@@ -106,8 +117,9 @@ const distSrc = path.join(srcApi, "dist");
 for (const entry of ["index.js", "mcp-stdio.js", "nav-reconcile.js", "init-admin.js"]) {
   if (!fs.existsSync(path.join(distSrc, entry))) fail(`缺少 apps/api/dist/${entry}（先 pnpm --filter @gx/api build）`);
 }
-const webDist = path.join(repoRoot, "apps", "web", "dist");
-if (!fs.existsSync(path.join(webDist, "index.html"))) fail("缺少 apps/web/dist/index.html（先 pnpm --filter @gx/web build，base='/'）");
+log(`前端产物目录：${webDist}`);
+if (webDistOpt) log("使用自定义前端产物（桌面壳门控构建）");
+if (!fs.existsSync(path.join(webDist, "index.html"))) fail(`缺少 ${path.relative(repoRoot, path.join(webDist, "index.html"))}（先构建前端；默认跑 pnpm --filter @gx/web build，桌面壳跑 build:web:shell 后用 --web-dist 指向其产物，base='/'）`);
 
 // --- 4) 干净组装 -------------------------------------------------------------------
 rimraf(outDir);

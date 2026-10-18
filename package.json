@@ -15,6 +15,7 @@
     "build": "pnpm -r run build",
     "build:api": "pnpm --filter @gx/api run build",
     "build:web": "pnpm --filter @gx/web run build",
+    "build:web:shell": "node apps/desktop/scripts/build-web-shell.mjs",
     "test": "pnpm -r run test",
     "test:unit": "pnpm -r run test:unit",
     "test:e2e": "pnpm -r run test:e2e",
