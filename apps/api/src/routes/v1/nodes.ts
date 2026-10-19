@@ -13,6 +13,8 @@ import { audit } from "../../audit/emit.js";
 import { createGroupTx, updateGroupTx, deleteGroupTx } from "../../domain/nav/groups.js";
 import { moveImpactTx, moveNodeTx } from "../../domain/nav/move.js";
 import { recordTreeOpTx } from "../../domain/sync/treeOplog.js";
+import { recordLocalTreeReplicaTx } from "../../domain/sync/localOutbox.js";
+import { offlineNodeId, offlineClientId } from "../../configOfflineReplica.js";
 
 export const navRoutes = new Hono();
 export const nodeRoutes = new Hono();
@@ -39,13 +41,16 @@ navRoutes.post("/groups", manageMenu, async (c) => {
       iconName: body.iconName as string | null | undefined,
     });
     // YN8 在线切面（§8.6/§19.6）：手动建组记树 op + 推进 treeVersion；off 时 recordTreeOpTx 首行 return null。
-    await recordTreeOpTx(tx, {
-      entityType: "navnode", entityId: gid, op: "nav_create_group", actorId,
+    const treeInput = {
+      entityType: "navnode" as const, entityId: gid, op: "nav_create_group", actorId,
       payload: {
         name: body.name, parentId,
         ...(typeof body.ord === "number" ? { ord: body.ord } : {}),
       },
-    });
+    };
+    await recordTreeOpTx(tx, treeInput);
+    // S2c：离线副本同事务落 local_outbox（默认关零行为；树回放走 navRegistry 不经本路由）。
+    await recordLocalTreeReplicaTx(tx, treeInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     return gid;
   });
   audit(c, {
@@ -64,10 +69,13 @@ navRoutes.patch("/groups/:id", manageMenu, async (c) => {
     // YN8 在线切面：改名记 nav_rename；改 ord 记该父位【当前全兄弟】有序列表的 nav_reorder
     //（树 op 以集合为权威，离线端据此整组对账；不把单节点裸 ord 当 op）。
     if (body.name !== undefined) {
-      await recordTreeOpTx(tx, {
-        entityType: "navnode", entityId: id, op: "nav_rename", actorId,
+      const treeInput = {
+        entityType: "navnode" as const, entityId: id, op: "nav_rename", actorId,
         payload: { name: body.name },
-      });
+      };
+      await recordTreeOpTx(tx, treeInput);
+      // S2c：离线副本同事务落 local_outbox（默认关零行为；树回放不经本路由）。
+      await recordLocalTreeReplicaTx(tx, treeInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
     if (body.ord !== undefined) {
       const node = await tx.navNode.findUnique({ where: { id }, select: { parentId: true } });
@@ -76,10 +84,13 @@ navRoutes.patch("/groups/:id", manageMenu, async (c) => {
         orderBy: [{ depth: "asc" }, { ord: "asc" }, { id: "asc" }],
         select: { id: true },
       });
-      await recordTreeOpTx(tx, {
-        entityType: "navnode", entityId: node?.parentId ?? "root", op: "nav_reorder", actorId,
+      const treeInput = {
+        entityType: "navnode" as const, entityId: node?.parentId ?? "root", op: "nav_reorder", actorId,
         payload: { parentId: node?.parentId ?? null, orderedIds: sibs.map((s) => s.id) },
-      });
+      };
+      await recordTreeOpTx(tx, treeInput);
+      // S2c：离线副本同事务落 local_outbox（默认关零行为；树回放不经本路由）。
+      await recordLocalTreeReplicaTx(tx, treeInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
   });
   return c.json({ id });
@@ -97,14 +108,17 @@ navRoutes.delete("/groups/:id", manageMenu, async (c) => {
   const result = await withWriteTx("nav.group.delete", async (tx) => {
     const r = await deleteGroupTx(tx, id, strategy, targetParentId);
     // YN8 在线切面：手动删组记树 op（含子节点处置策略，离线端按同策略对账）。
-    await recordTreeOpTx(tx, {
-      entityType: "navnode", entityId: id, op: "nav_delete", actorId,
+    const treeInput = {
+      entityType: "navnode" as const, entityId: id, op: "nav_delete", actorId,
       payload: {
         ...(strategy ? { strategy } : {}),
         ...(targetParentId ? { targetParentId } : {}),
         moved: r.moved,
       },
-    });
+    };
+    await recordTreeOpTx(tx, treeInput);
+    // S2c：离线副本同事务落 local_outbox（默认关零行为；树回放不经本路由）。
+    await recordLocalTreeReplicaTx(tx, treeInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     return r;
   });
   audit(c, {
@@ -143,10 +157,13 @@ nodeRoutes.post("/:id/move", manageMenu, async (c) => {
   await withWriteTx("nav.node.move", async (tx) => {
     await moveNodeTx(tx, id, newParentId);
     // YN8 在线切面（§19.6）：手动移动记树 op（path/depth 已由 moveNodeTx 服务端重算，oplog 只存目标父）。
-    await recordTreeOpTx(tx, {
-      entityType: "navnode", entityId: id, op: "nav_move", actorId,
+    const treeInput = {
+      entityType: "navnode" as const, entityId: id, op: "nav_move", actorId,
       payload: { to: { parentId: newParentId } },
-    });
+    };
+    await recordTreeOpTx(tx, treeInput);
+    // S2c：离线副本同事务落 local_outbox（默认关零行为；树回放走 navRegistry 不经本路由）。
+    await recordLocalTreeReplicaTx(tx, treeInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
   });
   audit(c, {
     event: "nav_node_moved", status: 200, actorId,

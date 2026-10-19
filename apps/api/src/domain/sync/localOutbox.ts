@@ -23,6 +23,7 @@ import type { DbTx } from "../../db.js";
 import { offlineReplicaEnabled } from "../../configOfflineReplica.js";
 import { writeSyncOpTx, type RecordSyncOpInput } from "./oplog.js";
 import { writeStructureOpTx, schemaVersionRowId, type StructureOpInput } from "./structureOplog.js";
+import { writeTreeOpTx, treeVersionRowId, TREE_WORKSPACE_ID, type TreeOpInput } from "./treeOplog.js";
 
 /** recordLocalReplicaTx 的本地副本身份（由调用方从 env 解析后传入，便于测试注入）。 */
 export interface LocalReplicaCtx {
@@ -156,6 +157,67 @@ export async function recordLocalStructureReplicaTx(
         op: input.op,
         entityType: input.entityType,
         tableId: input.tableId,
+        ...input.payload,
+      }),
+      baseVersion: preVersion,
+    },
+  });
+
+  return { clientOpId, baseVersion: preVersion };
+}
+
+/**
+ * S2c：导航树（navnode）轨在线直写的离线发件箱切面。
+ *
+ * 挂接位置是在线导航写编排（routes/v1/nodes.ts 的 withWriteTx 回调），与在线切面
+ * recordTreeOpTx 并排；push 树回放走 domain/sync/push.ts 的 replayTreeOne → navRegistry.applyTx
+ * → nav/* *Tx 原语层（物理上不经过 nodes.ts 路由），故天然不会回到这里——绝不可下沉到
+ * nav/* 原语层（在线/回放共用，挂上即回放循环）。
+ *
+ * 树是跨库的工作区级资源，版本钟为 workspace_tree:ws_default，local_outbox.baseId 恒 null
+ * （订阅分片走独立 scopeType="workspace_tree"）。其余纪律同 record/结构切面：默认关首行返回
+ * null；同事务推进 treeVersion + 追加本地 oplog（在线直写不传 expectedBaseVersion）+ 落一条
+ * pending outbox；异常原样抛出随主事务回滚，只用 tx、不再入写队列。
+ */
+export async function recordLocalTreeReplicaTx(
+  tx: DbTx,
+  input: TreeOpInput,
+  ctx: LocalReplicaCtx,
+  workspaceId: string = TREE_WORKSPACE_ID,
+): Promise<LocalReplicaRecord | null> {
+  // 副本门：默认 off 零行为、零 IO。
+  if (!offlineReplicaEnabled()) return null;
+
+  // 写前工作区树版本：既是本地 oplog 的 clientBaseVersion，也是 outbox.baseVersion。
+  const pre = await tx.syncEntityVersion.findUnique({
+    where: { id: treeVersionRowId(workspaceId) },
+    select: { version: true },
+  });
+  const preVersion = pre?.version ?? 0n;
+
+  const clientOpId = `local-${randomUUID()}`;
+
+  // 以本地副本身份推进 workspace treeVersion + 追加本地树 oplog（不做乐观锁断言）。
+  await writeTreeOpTx(
+    tx,
+    input,
+    { clientId: ctx.clientId, clientOpId, clientBaseVersion: preVersion },
+    workspaceId,
+  );
+
+  // 待发行：树 op 无 base 归属（baseId=null）；payload 与 treeOplog 落库形状同构。
+  await tx.localOutbox.create({
+    data: {
+      clientOpId,
+      nodeId: ctx.nodeId,
+      baseId: null,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      op: input.op,
+      payload: JSON.stringify({
+        op: input.op,
+        entityType: input.entityType,
+        workspaceId,
         ...input.payload,
       }),
       baseVersion: preVersion,
