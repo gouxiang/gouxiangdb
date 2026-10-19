@@ -41,9 +41,17 @@ vi.mock("../../api/hooks", () => ({
   }),
 }));
 
-vi.mock("../../store/auth", () => ({
-  useAuthStore: (sel: (s: unknown) => unknown) => sel({ user: { id: "me" } }),
-}));
+vi.mock("../../store/auth", () => {
+  // 须还原 zustand store 的真实形态：既可作选择器 hook 调用，又带 .getState()——
+  // node 数据源单例（node/datasource.ts）在模块加载时经 client.ts 急切读 useAuthStore.getState().token。
+  const state = { user: { id: "me" }, token: null as string | null };
+  return {
+    useAuthStore: Object.assign(
+      (sel: (s: unknown) => unknown) => sel(state),
+      { getState: () => state },
+    ),
+  };
+});
 
 const roster: RosterMember[] = [
   { id: "me", displayName: "我自己", email: "me@x.com", avatarUrl: null },
