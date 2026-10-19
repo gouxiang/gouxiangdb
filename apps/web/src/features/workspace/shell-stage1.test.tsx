@@ -86,8 +86,8 @@ function renderNavAt(location: string, props: Record<string, unknown> = {}) {
 
 
 describe("阶段 1 骨架常量（UI-SPEC A.3）", () => {
-  it("L1 展开 224 / 折叠 56；L2 常驻 240；顶栏 56；折叠键走 gx 前缀约定", () => {
-    expect(L1_WIDTH_EXPANDED).toBe(224);
+  it("L1 展开 196 / 折叠 56；L2 常驻 240；顶栏 56；折叠键走 gx 前缀约定", () => {
+    expect(L1_WIDTH_EXPANDED).toBe(196);
     expect(L1_WIDTH_COLLAPSED).toBe(56);
     expect(L2_WIDTH).toBe(240);
     expect(TOPBAR_H).toBe(56);

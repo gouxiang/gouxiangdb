@@ -1357,9 +1357,16 @@ export function FormDesigner({
   );
   // 全屏抽屉式设计器（⑤）：近全屏、弹窗本身不滚动，三栏各自独立滚动。
   // Portal 到 body：抽屉（RecordDrawer）带 transform 会破坏内部 fixed 定位与层叠上下文。
+  //
+  // 层级必须走应用弹层带 gx-z-modal(800)，不能用裸 z-50：背景工作区 chrome 普遍更高
+  // （浮出 L2 面板 gx-z-drawer=400、二级收纳/唤回圆钮 gx-z-popover=900）。裸 z-50 时
+  // 这些元素会穿出盖在设计器上——圆钮浮在最上层（视觉穿帮），中宽窗口下浮出 L2(400)
+  // 还整片压住设计器最左侧「字段库」拖拽起点，导致 HTML5 拖拽从字段库发起即被截走、
+  // 无法落到画布（2026-10-19 真机）。抬到 800 即盖住全部工作区 chrome；内部版本历史
+  // 抽屉另用 gx-z-canvas-modal(820) 盖在本层之上，回滚确认弹窗 860 再上一层。
   if (!open) return null;
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-stretch justify-center p-3 sm:p-6">
+    <div className="gx-z-modal fixed inset-0 flex items-stretch justify-center p-3 sm:p-6">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
       <div className="relative flex w-full max-w-[1500px] flex-col overflow-hidden rounded-gx-xl bg-gx-surface shadow-2xl">
         {body}

@@ -6,8 +6,8 @@
 /** localStorage 键：L1 折叠态（"1" 折叠 / 其余或缺失 = 展开）。 */
 export const L1_COLLAPSED_KEY = "gx.l1.collapsed";
 
-/** L1 两档宽度（UI-SPEC A.3 / R-N-07）：展开 224、折叠 56。 */
-export const L1_WIDTH_EXPANDED = 224;
+/** L1 两档宽度（2026-10-19 真机目验：展开档由 224 收窄到 196；折叠档仍 56）。 */
+export const L1_WIDTH_EXPANDED = 196;
 export const L1_WIDTH_COLLAPSED = 56;
 
 /** L2 常驻宽度（骨架 S-1）。无二级内容时为 0（不占位）。 */

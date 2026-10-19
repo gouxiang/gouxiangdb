@@ -1,52 +1,40 @@
-// L2 收起态窄条（56，与 L1 折叠档同规格）。
+// L2 收起态唤回入口（常驻档 ≥1280 使用）。
 //
-// 存在理由：常驻档（≥1280）L2 收起后原来宽度归零、且壳层没有任何还原入口 —— 收起等于
-// 把二级导航永久删掉。故收起后必须留一条竖栏：既是「这里折叠了一列」的位置提示，也是唤回入口。
+// 2026-10-19 交互调整（戴总真机目验）：收起后**不再保留任何竖栏**——旧版那条 56px、
+// 竖排显示容器名的窄条仍占据内容宽度且显得「没收干净」。改为彻底收起（零尺寸、不占位），
+// 只在一级导航（L1）右缘的垂直中点保留一个圆形悬浮小箭头作为唯一唤回入口。
 //
-// 浮出档（R-D-31/32，768–1279）不渲染本条：那档 L2 是覆盖内容区的浮层，再插一条 56 的
-// 常驻竖栏等于反向挤压内容宽度。那档的唤回入口在 L1 底部固定区（WorkspaceShell.secondaryToggle）。
+// 定位：absolute 骑在 L1 右缘（left = L1 宽 − 半个钮，由壳层按当前 L1 实际宽度传入），
+// 父级是 WorkspaceShell 内 `relative flex ...` 的行容器，故相对该行定位、垂直居中。
+// 浮出档（R-D-31/32，768–1279）不渲染本件：那档唤回入口在 L1 底部固定区（secondaryToggle）。
 import { Icon } from "../../components/icons";
-import { L2_WIDTH_COLLAPSED } from "./lib/l2-collapse";
 
 export function SecondaryNavRail({
   containerName,
   onExpand,
-  width = L2_WIDTH_COLLAPSED,
+  /** L1 当前宽度（展开 196 / 折叠 56），用于把箭头骑在其右缘。 */
+  l1Width,
 }: {
-  /** 折叠的容器名：竖排显示 + tooltip，让用户知道收起的是哪一列。 */
+  /** 收起的容器名：仅用于 tooltip / aria-label，不再竖排展示。 */
   containerName: string;
   onExpand: () => void;
-  width?: number;
+  l1Width: number;
 }) {
   const label = `展开「${containerName}」二级面板`;
   return (
-    <aside
-      className="flex h-full shrink-0 flex-col border-r border-gx-hairline bg-gx-nav2"
-      style={{ width }}
-      data-l2="collapsed"
+    <button
+      type="button"
+      onClick={onExpand}
+      title={label}
+      aria-label={label}
+      aria-expanded={false}
+      className="gx-l2-expand-tab gx-z-drawer absolute top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-gx-border bg-gx-surface text-gx-text-secondary shadow-gx-md transition-colors hover:bg-gx-row-hover hover:text-gx-text-primary"
+      // 骑在 L1 右缘：钮中心落在 L1 右边线上（再向外露一半）。
+      style={{ left: l1Width - 14 }}
+      data-l2="collapsed-tab"
     >
-      {/* 整条就是一个唤回按钮：56px 宽的全高点击区，收起后误触成本最低的还原方式 */}
-      <button
-        type="button"
-        onClick={onExpand}
-        title={label}
-        aria-label={label}
-        aria-expanded={false}
-        className="flex h-full w-full flex-col items-center text-gx-text-tertiary transition-colors hover:bg-gx-row-hover hover:text-gx-text-primary"
-      >
-        <span className="flex h-[52px] w-full shrink-0 items-center justify-center border-b border-gx-hairline">
-          <Icon name="chevronRight" size={14} />
-        </span>
-        <span className="flex min-h-0 flex-1 items-start justify-center overflow-hidden py-2">
-          <span
-            className="max-h-full overflow-hidden text-gx-12"
-            style={{ writingMode: "vertical-rl" }}
-            title={containerName}
-          >
-            {containerName}
-          </span>
-        </span>
-      </button>
-    </aside>
+      {/* 收起态箭头朝右＝向右拉回二级面板；与展开态的朝左收起箭头互为反向。 */}
+      <Icon name="chevronRight" size={15} />
+    </button>
   );
 }

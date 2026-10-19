@@ -462,13 +462,15 @@ export function WorkspaceShell() {
               secondary
             )
           ) : (
-            // 收起态：常驻档留 56 窄条唤回（否则收起＝二级导航永久消失）；
-            // 浮出档不给窄条（会占掉内容宽度，违反 R-D-31/32），唤回入口在 L1 底部固定区。
+            // 收起态（常驻档）：彻底收起、零内容占位，只在 L1 右缘垂直中点留一个圆形悬浮
+            // 箭头唤回（SecondaryNavRail 已改为不占宽的 absolute 钮，骑在当前 L1 右缘）。
+            // 浮出档不渲染本件（会占内容宽度，违反 R-D-31/32），唤回入口在 L1 底部固定区。
             !floatingL2 && (
               <SecondaryNavRail
                 key={`rail-${activeContainer.id}`}
                 containerName={activeContainer.name}
                 onExpand={expandL2}
+                l1Width={l1Width}
               />
             )
           )

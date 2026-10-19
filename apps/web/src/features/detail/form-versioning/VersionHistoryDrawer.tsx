@@ -136,8 +136,10 @@ export function VersionHistoryDrawer({
     }
   }
 
+  // 层级借应用弹层阶梯的 gx-z-canvas-modal(820)：表单设计器全屏底座是 gx-z-modal(800)，
+  // 本抽屉从设计器内打开，必须压在它之上；回滚二次确认弹窗 gx-z-modal-nested(860) 再上一层。
   const drawer = (
-    <div className="fixed inset-0 gx-z-drawer flex justify-end">
+    <div className="fixed inset-0 gx-z-canvas-modal flex justify-end">
       <div className="absolute inset-0 bg-black/25" onClick={onClose} />
       <div className="relative flex h-full w-full max-w-3xl flex-col bg-gx-surface shadow-gx-lg">
         <div className="flex items-center justify-between border-b border-gx-separator px-4 py-3">

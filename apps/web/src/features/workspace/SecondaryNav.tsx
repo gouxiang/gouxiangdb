@@ -208,6 +208,27 @@ export function SecondaryNav({
   const empty = flatRows.length === 0;
 
   return (
+    <div className="relative h-full shrink-0" data-l2-expanded={container.kind}>
+      {/*
+        收起入口：面板右缘的圆形悬浮箭头（替代旧的头部「X」）。
+        展开态箭头朝左——语义＝点击向左收起这一列（收起态边中间的唤回箭头朝右＝拉回）。
+        绝对定位骑在右缘（right: -14px），不占面板内布局、不挤头部标题，浮出/常驻两态同一位置。
+        层级 gx-z-drawer(400)＝工作区悬浮 chrome：高过业务内容（≤75，浮出面板下也可点），
+        但低于一切应用弹层——全屏表单设计器/字段弹窗是 gx-z-modal(800)、记录抽屉 400(同层
+        但在更后 DOM)，打开即把这个骑缝钮盖在下面，避免圆钮穿出浮在设计器上（2026-10-19 真机）。
+        旧值 gx-z-popover(900) 是全局最高应用层，会穿出所有弹窗，禁用。
+      */}
+      <button
+        type="button"
+        aria-label="收起二级面板"
+        title="收起二级面板"
+        aria-expanded
+        onClick={onClose}
+        className="gx-l2-collapse-tab gx-z-drawer absolute top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-gx-border bg-gx-surface text-gx-text-secondary shadow-gx-md transition-colors hover:text-gx-text-primary hover:bg-gx-row-hover"
+        style={{ right: -14 }}
+      >
+        <Icon name="chevronLeft" size={15} />
+      </button>
     <aside
       className={clsx(
         "flex h-full shrink-0 flex-col border-r border-gx-hairline bg-gx-nav2",
@@ -226,16 +247,6 @@ export function SecondaryNav({
         <span className="flex-1 truncate text-gx-14 font-semibold text-gx-text-primary" title={container.name}>
           {container.name}
         </span>
-        <button
-          type="button"
-          aria-label="收起二级面板"
-          title="收起二级面板"
-          aria-expanded
-          onClick={onClose}
-          className="rounded-gx-sm p-1 text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary"
-        >
-          <Icon name="close" size={14} />
-        </button>
       </div>
 
       <div className="border-b border-gx-separator px-2 py-2">
@@ -369,6 +380,7 @@ export function SecondaryNav({
         </div>
       </div>
     </aside>
+    </div>
   );
 }
 

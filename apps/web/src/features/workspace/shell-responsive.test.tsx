@@ -55,14 +55,19 @@ describe("R-D-30/31/32/33 壳层断点接线", () => {
     expect(shell).toContain("展开面板");
   });
 
-  it("L2 收起态持久化：意图写 localStorage，收起后常驻档留 56 窄条唤回", () => {
+  it("L2 收起态持久化：意图写 localStorage，收起后常驻档以零宽悬浮圆钮唤回（不占位）", () => {
     expect(shell).toContain("readL2Collapsed()");
     expect(shell).toContain("writeL2Collapsed(");
     expect(L2_WIDTH_COLLAPSED).toBe(56);
-    // 窄条只在非浮出档渲染：浮出档插常驻竖栏会反向挤压内容宽度（R-D-31/32）
+    // 唤回钮只在非浮出档渲染：浮出档插常驻竖栏会反向挤压内容宽度（R-D-31/32）
     expect(shell).toContain("<SecondaryNavRail");
     expect(shell).toContain("!floatingL2 && (");
-    expect(read("./SecondaryNavRail.tsx")).toContain('data-l2="collapsed"');
+    // Rail 已改为零宽 absolute 悬浮钮（不再竖排占栏），位置骑在 L1 右缘
+    const rail = read("./SecondaryNavRail.tsx");
+    expect(rail).toContain('data-l2="collapsed-tab"');
+    expect(rail).toContain("absolute");
+    expect(rail).toContain("l1Width");
+    expect(rail).not.toContain("writingMode");
   });
 
   it("SecondaryNav 支持浮出变体：浮层带阴影，宽度由壳层按档传入", () => {
