@@ -1,7 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "PoC-1 预热阶段的最小权限集：仅核心默认。sidecar/updater 权限在后续接线时按最小化追加。",
+  "description": "R1/R2 最小权限集：core:default + 授权壳回环静态口（http 远程上下文）调用 gx:* 命令。界面由壳在随机端口的 127.0.0.1 上同源托管（非 tauri:// 自定义协议），Tauri v2 对远程 origin 的命令调用强制过 ACL，故必须同时：① permissions 引用应用自定义命令权限 allow-gx-shell；② remote.urls 用 URLPattern 显式放行回环域（经 tauri RemoteUrlPattern 单测实证：带随机端口必须写 :*，省略端口不匹配；127.0.0.1 是 boot_shell 实际绑定 host）。仅限本机回环，不放行任何外网域。",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "allow-gx-shell"],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*/*",
+      "http://localhost:*/*"
+    ]
+  }
 }

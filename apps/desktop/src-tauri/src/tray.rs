@@ -92,10 +92,20 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
 }
 
 /// 显示并聚焦主窗口（从最小化/隐藏恢复）。
-fn show_main_window(app: &AppHandle) {
+/// 供托盘菜单、点托盘图标、以及 macOS Dock/启动台「重新打开」(RunEvent::Reopen) 共用，
+/// 保证窗口被关红钮隐藏后，无论从哪个入口都能被重新唤出并置前（激活 App、取消最小化、显示）。
+pub fn show_main_window(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.show();
+        // 顺序：先把 App 自身激活到最前（否则 show 后窗口可能在其他 App 后面不获焦），
+        // 再取消最小化、显示、置焦。每一步均忽略错误（窗口已在该状态时返回 Err 无害）。
+        // 顺序：先把 App 自身激活（不自动抢焦），再取消最小化、显示窗口、置前获焦。
+        // 默认激活策略即 Regular（Dock/启动台图标常驻），无需切换 ActivationPolicy。
+        #[cfg(target_os = "macos")]
+        {
+            let _ = app.show();
+        }
         let _ = win.unminimize();
+        let _ = win.show();
         let _ = win.set_focus();
     }
 }

@@ -117,6 +117,7 @@ pub struct ShellInfoDto {
 /// 壳版本/平台信息（§3 冻结值）。本期仅 Apple Silicon、darwin/arm64。
 #[tauri::command(rename = "gx:get_shell_info")]
 pub async fn gx_get_shell_info(state: State<'_, Arc<ShellState>>) -> Result<ShellInfoDto, String> {
+    crate::dbg_log("ENTER gx:get_shell_info");
     Ok(ShellInfoDto {
         shell_version: env!("CARGO_PKG_VERSION").to_string(),
         platform: "darwin".to_string(),
@@ -176,6 +177,7 @@ pub async fn gx_set_active_upstream(
 pub async fn gx_start_local(
     state: State<'_, Arc<ShellState>>,
 ) -> Result<serde_json::Value, String> {
+    crate::dbg_log("ENTER gx:start_local");
     let planner = match state.kernel_planner() {
         Ok(p) => p,
         Err(e) => return Ok(serde_json::json!({ "ok": false, "error": e })),
@@ -188,10 +190,16 @@ pub async fn gx_start_local(
         .map_err(|e| format!("启动任务执行失败：{e}"))?;
     match start_res {
         Ok(port) => {
+            crate::dbg_log(&format!(
+                "gx:start_local OK port={port} initialized={initialized}"
+            ));
             state.shared.set_upstream(Upstream::Local { port }).await;
             Ok(serde_json::json!({ "ok": true, "kernelPort": port, "initialized": initialized }))
         }
-        Err(e) => Ok(serde_json::json!({ "ok": false, "error": e })),
+        Err(e) => {
+            crate::dbg_log(&format!("gx:start_local FAIL: {e}"));
+            Ok(serde_json::json!({ "ok": false, "error": e }))
+        }
     }
 }
 

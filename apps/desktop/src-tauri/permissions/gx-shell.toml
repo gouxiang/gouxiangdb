@@ -1,0 +1,24 @@
+# 构想工作台桌面壳——壳口（http 回环远程上下文）所需的应用自定义命令授权。
+#
+# 背景：R1 默认把界面托管在壳随机回环口 http://127.0.0.1:<port>/（非 tauri:// 自定义协议）。
+# Tauri v2（tauri-2.12.4/src/webview/mod.rs:2076-2084）规定：远程 origin 调用任何命令
+# （含 #[tauri::command] 应用自定义命令）都必须过 ACL，否则在 webview 边界直接 reject，
+# 命令体不执行（表现为前端拿不到错误细节、Rust 无任何日志）。
+# 应用自定义命令归在 __app-acl__ 下，需在 capabilities 里显式引用本权限，并配合
+# capabilities/default.json 的 remote.urls 放行回环域，二者缺一不可。
+#
+# 命令名带冒号是 invoke 通道冻结契约（shellBridge.ts CMD 表），作为 commands.allow 的
+# 字符串值原样使用；权限 identifier 自身不含冒号，避免与 ACL 的 plugin 前缀分隔符冲突。
+
+[[permission]]
+identifier = "allow-gx-shell"
+description = "放行壳口回环页调用的全部 7 条 gx:* 壳命令（壳状态/上游切换/探针/本地内核起停与状态）。仅配合 remote.urls 的 127.0.0.1/localhost 回环域生效。"
+commands.allow = [
+  "gx:get_shell_info",
+  "gx:set_active_upstream",
+  "gx:begin_probe",
+  "gx:end_probe",
+  "gx:start_local",
+  "gx:stop_local",
+  "gx:local_status",
+]

@@ -81,6 +81,10 @@ fn poc3_log(msg: &str) {
 struct SidecarPid(AtomicI32);
 
 fn main() {
+    // #857：极早在主线程屏蔽 SIGTERM/SIGINT，使全进程线程继承屏蔽，交由下方专用 reaper 线程
+    // sigwait 收尸 sidecar 后再退出（必须先于 build，否则 Tauri/其它线程未必继承屏蔽）。
+    block_exit_signals();
+
     // R1 硬要求：进程级幂等安装 rustls ring crypto provider，必须早于任何 https/wss 连接。
     // reqwest 用 rustls-no-provider、rustls 仅选 ring（全树无 aws-lc-rs），否则首次 TLS 握手运行时报错。
     // 写法逐字对齐 tauri-plugin-updater updater.rs:585-587（get_default().is_none() 才装）。
@@ -108,11 +112,17 @@ fn main() {
     // R1：壳统一状态（上游 + probe 表 + SHELL_PORT + 静态根）。Tauri 命令与 axum 共用同一 Arc。
     let shell_state: Arc<commands::ShellState> =
         Arc::new(commands::ShellState::new(Arc::new(upstream::Shared::new())));
-    let app = tauri::Builder::default()
+    // PoC-3：updater 插件【仅在 GX_POC3=1 时注册】。tauri-plugin-updater 2.13.3 初始化时会
+    // 强解 tauri.conf.json 的 plugins.updater 段，默认配置无此段（null）即
+    // PluginInitialization panic（"invalid type: null, expected struct Config"）。
+    // 其 endpoints/pubkey 只在 PoC 构建的 --config 覆盖里提供；正式/R1 默认路径既无配置也不 check，
+    // 故默认不注册该插件，与「默认关闭、增量旁路」一致；#829 正式 updater 落地时再以完整配置常驻。
+    let mut builder = tauri::Builder::default();
+    if poc3 {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+    let app = builder
     .plugin(tauri_plugin_shell::init())
-    // PoC-3：注册 updater 插件。其 endpoints/pubkey 只在 PoC 构建的 --config 覆盖里提供；
-    // 默认 tauri.conf.json 无 updater 段，且非 GX_POC3 时永远不调用 check，故零自动行为。
-    .plugin(tauri_plugin_updater::Builder::new().build())
     .manage(SidecarPid(AtomicI32::new(0)))
     // R2：用户显式「彻底退出」请求标志（区别于关窗驻留与 updater 重启）。
     .manage(tray::QuitFlag::default())
@@ -214,6 +224,9 @@ fn main() {
     .build(tauri::generate_context!())
     .expect("error while building GouXiangDB desktop");
 
+    // #857：build 完成后起信号收尸线程（此时 ShellState 已 manage，try_state 可取到）。
+    spawn_signal_reaper(app.handle().clone());
+
     // 退出收尸（R2：关红钮已被 on_window_event 拦成隐藏驻留，能走到这里的非 RESTART 退出
     // 只有真正的退出意图——CMD+Q 或托盘「彻底退出」app.exit；故一律【放行】，不再 prevent_exit）：
     //  - ExitRequested：仅 updater RESTART(80) 需在此特别记录；其余放行，实际收尸统一放 Exit。
@@ -243,6 +256,20 @@ fn main() {
       }
       reap_poc_pid(app_handle, Duration::from_secs(3));
     }
+    // macOS：App 已在运行、窗口被关红钮隐藏后，用户再点 Dock / 启动台图标会触发
+    // applicationShouldHandleReopen（has_visible_windows=false）。原来被 `_ => {}` 忽略，
+    // 表现为「图标还在、但点不开」。这里与托盘「显示主窗口」走同一出口，把窗口唤出并置前；
+    // 若仍有可见窗口（has_visible_windows=true）则交给系统默认，不重复抢焦。
+    #[cfg(target_os = "macos")]
+    tauri::RunEvent::Reopen {
+      has_visible_windows,
+      ..
+    } => {
+      dbg_log(&format!("RunEvent::Reopen has_visible_windows={has_visible_windows}"));
+      if !has_visible_windows {
+        tray::show_main_window(app_handle);
+      }
+    }
     _ => {}
   });
 }
@@ -257,6 +284,89 @@ fn reap_poc_pid(app_handle: &tauri::AppHandle, timeout: Duration) {
         }
     }
 }
+
+// ───────────── 外部信号（kill / launchd / Ctrl-C）收尸（#857）─────────────
+//
+// 问题：默认 R2 路径的内核由 ShellState 的 SidecarManager 管，只在 RunEvent::Exit 收尸；
+// 但外部 SIGTERM/SIGINT 默认直接终止壳进程、不走 Tauri 事件循环，于是独立成组的内核不被收，
+// PPID 变 1（launchd 收养）继续 LISTEN，成了孤儿。
+//
+// 修法（标准 POSIX「全进程屏蔽 + 专用线程 sigwait」）：
+//   1) 极早在【主线程】屏蔽 SIGTERM/SIGINT——此后创建的所有线程都继承屏蔽，信号不再默认致命、
+//      只会挂起 pending；
+//   2) build 后起一条专用线程 sigwait 同步等待；收到即在【普通线程上下文】安全复用现成的
+//      shutdown_if_running（mutex take，幂等，与托盘彻底退出 / RESTART 路径互不重复杀）与
+//      reap_poc_pid 收尸，再按 Unix 惯例 128+sig 退出进程。
+//   在 reaper 线程启动前的窗口里若信号到达，因已被屏蔽只会挂起，sigwait 一启动即取到，无竞态。
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    // macOS 上 sigset_t 就是一个 __uint32_t（见 sys/_types/_sigset_t.h），用 u32 表示。
+    fn sigemptyset(set: *mut u32) -> i32;
+    fn sigaddset(set: *mut u32, signum: i32) -> i32;
+    fn pthread_sigmask(how: i32, set: *const u32, oldset: *mut u32) -> i32;
+    fn sigwait(set: *const u32, sig: *mut i32) -> i32;
+}
+
+#[cfg(target_os = "macos")]
+const SIG_BLOCK: i32 = 1;
+#[cfg(target_os = "macos")]
+const SIGINT: i32 = 2;
+#[cfg(target_os = "macos")]
+const SIGTERM: i32 = 15;
+
+/// 极早在主线程屏蔽 SIGTERM/SIGINT（必须先于任何线程创建，使全进程继承屏蔽）。
+#[cfg(target_os = "macos")]
+fn block_exit_signals() {
+    unsafe {
+        let mut set: u32 = 0;
+        let _ = sigemptyset(&mut set);
+        let _ = sigaddset(&mut set, SIGTERM);
+        let _ = sigaddset(&mut set, SIGINT);
+        let rc = pthread_sigmask(SIG_BLOCK, &set, std::ptr::null_mut());
+        if rc != 0 {
+            dbg_log(&format!(
+                "pthread_sigmask(SIG_BLOCK) 失败 rc={rc}（外部信号可能不收尸）"
+            ));
+        }
+    }
+}
+
+/// 起专用线程同步等待 SIGTERM/SIGINT，收到后收尸整个 sidecar 进程组并退出。
+#[cfg(target_os = "macos")]
+fn spawn_signal_reaper(app: tauri::AppHandle) {
+    thread::spawn(move || {
+        let set: u32 = unsafe {
+            let mut s: u32 = 0;
+            let _ = sigemptyset(&mut s);
+            let _ = sigaddset(&mut s, SIGTERM);
+            let _ = sigaddset(&mut s, SIGINT);
+            s
+        };
+        let mut sig: i32 = 0;
+        // 阻塞直到有一个被屏蔽的信号到达。
+        let rc = unsafe { sigwait(&set, &mut sig) };
+        if rc != 0 {
+            dbg_log(&format!("sigwait 失败 rc={rc}，按 SIGTERM 兜底收尸退出"));
+            sig = SIGTERM;
+        }
+        dbg_log(&format!(
+            "收到外部信号 {sig}（rc={rc}）：优雅收尸 R2 内核 + PoC 兜底"
+        ));
+        if let Some(state) = app.try_state::<std::sync::Arc<commands::ShellState>>() {
+            // 幂等：与托盘彻底退出 / RESTART 的 RunEvent::Exit 收尸共用同一把锁，先到先收。
+            state.sidecar().shutdown_if_running(Duration::from_secs(8));
+        }
+        reap_poc_pid(&app, Duration::from_secs(3));
+        dbg_log("外部信号收尸完成，退出进程");
+        std::process::exit(128 + sig.clamp(0, 63));
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn block_exit_signals() {}
+
+#[cfg(not(target_os = "macos"))]
+fn spawn_signal_reaper(_app: tauri::AppHandle) {}
 
 /// 进程是否仍在（signal 0）。
 fn process_alive(pid: i32) -> bool {

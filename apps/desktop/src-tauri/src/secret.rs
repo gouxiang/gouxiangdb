@@ -39,9 +39,12 @@ pub const JWT_LEN: usize = 48;
 /// 一处机密的存取抽象。生产是 macOS 钥匙串；测试是内存 map。
 pub trait SecretStore: Send + Sync {
     /// 读取已存机密；不存在返回 `Ok(None)`；钥匙串/IO 错误返回 `Err`（中文，可展示）。
+    /// 实现只负责"取到原始字符串"，不做长度/合法性判定（交给编排层自愈损坏项）。
     fn get(&self) -> Result<Option<String>, String>;
     /// 写入机密（已存在则覆盖）。机密只经 stdin / 内存，绝不进命令行参数。
     fn put(&self, secret: &str) -> Result<(), String>;
+    /// 删除已存机密；不存在视为成功（幂等）。供编排层清掉损坏项后重建。
+    fn delete(&self) -> Result<(), String>;
 }
 
 /// 机密来源（供日志/首 boot 判定，不返回给前端敏感内容）。
@@ -88,26 +91,41 @@ impl KeychainStore {
         }
     }
 
-    /// 组装 `security find/add/set-generic-password` 的 argv（**不含任何密钥**）。
-    /// 密钥对 add/set 通过 `-w` 独立参数触发、随后经 stdin 提供。
+    /// 组装 `security` 子命令的 argv（**不含任何密钥**）。
+    /// 密钥对写入通过 `-w` 独立参数触发、随后经 stdin 提供。
     /// 纯函数：供单测断言 argv 里永远不出现口令。
     fn argv_for(&self, op: KeychainOp) -> Vec<String> {
-        let sub = match op {
-            KeychainOp::Find => "find-generic-password",
-            KeychainOp::Add => "add-generic-password",
-            KeychainOp::Set => "set-generic-password",
-        };
-        vec![
-            sub.to_string(),
-            "-s".to_string(),
-            self.service.clone(),
-            "-a".to_string(),
-            self.account.clone(),
-            // 三个子命令都带 -w：
-            //  find：-w 表示「只把密码写到 stdout」（不打印属性/弹窗元信息）；
-            //  add/set：-w 后【不接值】，强制 security 从 stdin 读口令，避免进 ps。
-            "-w".to_string(),
-        ]
+        match op {
+            KeychainOp::Find => vec![
+                "find-generic-password".to_string(),
+                "-s".to_string(),
+                self.service.clone(),
+                "-a".to_string(),
+                self.account.clone(),
+                // find 的 -w：只把密码写到 stdout（不打印属性/弹窗元信息）。
+                "-w".to_string(),
+            ],
+            KeychainOp::Add => vec![
+                // add -U：项不存在则新建，已存在则原地更新（实测 macOS 上
+                // `set-generic-password -w` 不可用——被解析成 partition-list 子命令，exit 2；
+                // `add-generic-password -U` 才是更新已有项的正确姿势）。
+                "add-generic-password".to_string(),
+                "-U".to_string(),
+                "-s".to_string(),
+                self.service.clone(),
+                "-a".to_string(),
+                self.account.clone(),
+                // add 的 -w 后【不接值】，强制 security 从 stdin 读口令，避免进 ps。
+                "-w".to_string(),
+            ],
+            KeychainOp::Delete => vec![
+                "delete-generic-password".to_string(),
+                "-s".to_string(),
+                self.service.clone(),
+                "-a".to_string(),
+                self.account.clone(),
+            ],
+        }
     }
 }
 
@@ -115,7 +133,7 @@ impl KeychainStore {
 enum KeychainOp {
     Find,
     Add,
-    Set,
+    Delete,
 }
 
 /// `security` 退出码：44 = errSecItemNotFound（找不到该项）。
@@ -132,12 +150,8 @@ impl SecretStore for KeychainStore {
             // stdout 末尾通常带换行；密钥字符集不含空白，trim_end 安全。
             let secret = String::from_utf8_lossy(&output.stdout);
             let secret = secret.trim_end_matches(['\n', '\r']).to_string();
-            if secret.len() < JWT_LEN {
-                return Err(
-                    "钥匙串中的 JWT 密钥长度异常（可能已损坏），请在钥匙串访问中删除该项后重试"
-                        .to_string(),
-                );
-            }
+            // 这里不做长度判定：过短值视为"损坏的已存项"，交给 ensure_jwt_secret 自愈
+            // （delete 后重建），而不是把用户卡死在必须手动开钥匙串访问删项的境地。
             Ok(Some(secret))
         } else if output.status.code() == Some(SEC_ERR_ITEM_NOT_FOUND) {
             Ok(None)
@@ -151,57 +165,61 @@ impl SecretStore for KeychainStore {
     }
 
     fn put(&self, secret: &str) -> Result<(), String> {
-        // 先 add；遇到「已存在」(duplicate) 再 set 覆盖。两次都把口令经 stdin 喂入。
-        match self.run_write(KeychainOp::Add, secret) {
-            Ok(()) => Ok(()),
-            Err(WriteErr::Duplicate) => {
-                self.run_write(KeychainOp::Set, secret)
-                    .map_err(|e| match e {
-                        WriteErr::Duplicate => "钥匙串写入失败：项已存在且无法更新".to_string(),
-                        WriteErr::Other(m) => m,
-                    })
-            }
-            Err(WriteErr::Other(m)) => Err(m),
+        // 统一走 add-generic-password -U（不存在则建，已存在则更新）；实测此版 macOS 上
+        // set-generic-password -w 不可用，-U 是官方支持的 upsert 姿势。
+        self.run_write(KeychainOp::Add, secret)
+    }
+
+    fn delete(&self) -> Result<(), String> {
+        let output = Command::new(&self.security_bin)
+            .args(self.argv_for(KeychainOp::Delete))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|e| format!("无法调用系统钥匙串工具 security：{e}"))?;
+        // 幂等：项不存在（退出码 44）也视为成功。
+        if output.status.success() || output.status.code() == Some(SEC_ERR_ITEM_NOT_FOUND) {
+            Ok(())
+        } else {
+            let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(format!(
+                "删除钥匙串密钥失败（code={:?}）：{err}",
+                output.status.code()
+            ))
         }
     }
 }
 
-enum WriteErr {
-    Duplicate,
-    Other(String),
-}
-
 impl KeychainStore {
-    fn run_write(&self, op: KeychainOp, secret: &str) -> Result<(), WriteErr> {
+    fn run_write(&self, op: KeychainOp, secret: &str) -> Result<(), String> {
         let mut child = Command::new(&self.security_bin)
             .args(self.argv_for(op))
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| WriteErr::Other(format!("无法调用系统钥匙串工具 security：{e}")))?;
-        // 口令写进 stdin（末尾换行结束输入）；它绝不出现在 argv / ps。
+            .map_err(|e| format!("无法调用系统钥匙串工具 security：{e}"))?;
+        // 关键：`security add-generic-password -w`（-w 不接值）进入交互式【二次确认】——
+        // 先读 "password data for new item"，再读 "retype password"，两行不一致就判
+        // "passwords don't match"（但仍 exit 0，会留下一个空/截断密码项！）。故必须把同一
+        // 口令经 stdin 喂【两次】，每次以换行结束。口令绝不出现在 argv / ps。
         if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(secret.as_bytes());
+            let _ = stdin.write_all(b"\n");
             let _ = stdin.write_all(secret.as_bytes());
             let _ = stdin.write_all(b"\n");
         }
         let output = child
             .wait_with_output()
-            .map_err(|e| WriteErr::Other(format!("等待钥匙串写入失败：{e}")))?;
+            .map_err(|e| format!("等待钥匙串写入失败：{e}"))?;
         if output.status.success() {
             return Ok(());
         }
-        let err = String::from_utf8_lossy(&output.stderr);
-        // 重复项：security 文本含 "already exists"；不同本地化/版本措辞不一，
-        // 同时认 errSecDuplicateItem 退出码 45。
-        let code = output.status.code();
-        if code == Some(45) || err.to_ascii_lowercase().contains("already exists") {
-            return Err(WriteErr::Duplicate);
-        }
-        Err(WriteErr::Other(format!(
-            "写入钥匙串密钥失败（code={code:?}）：{}",
-            err.trim()
-        )))
+        Err(format!(
+            "写入钥匙串密钥失败（code={:?}）",
+            output.status.code()
+        ))
     }
 }
 
@@ -219,11 +237,16 @@ pub fn ensure_jwt_secret<S: SecretStore + ?Sized>(
     legacy_file: &Path,
 ) -> Result<SecretOutcome, String> {
     if let Some(existing) = store.get()? {
-        return Ok(SecretOutcome {
-            secret: existing,
-            source: SecretSource::Existing,
-            legacy_deleted: false,
-        });
+        if existing.len() >= JWT_LEN {
+            return Ok(SecretOutcome {
+                secret: existing,
+                source: SecretSource::Existing,
+                legacy_deleted: false,
+            });
+        }
+        // 已存项过短＝损坏（如旧版 put 只喂一次确认值，被 security 双确认写成空项）。
+        // 自愈：删掉损坏项后落到下方迁移/新建分支重建，避免把用户卡在"手动开钥匙串删项"。
+        store.delete()?;
     }
 
     // 旧 PoC 文件方案迁移。
@@ -345,6 +368,10 @@ impl SecretStore for MemSecretStore {
         *self.inner.lock().expect("mem secret lock") = Some(secret.to_string());
         Ok(())
     }
+    fn delete(&self) -> Result<(), String> {
+        *self.inner.lock().expect("mem secret lock") = None;
+        Ok(())
+    }
 }
 
 /// 测试辅助：临时 legacy 文件路径（每用例唯一，避免互踩）。
@@ -428,22 +455,74 @@ mod tests {
         }
     }
 
+    /// 可控的内存 store：可预置"损坏的过短已存项"，并记录 delete 调用次数。
+    struct CorruptibleStore {
+        inner: std::sync::Mutex<Option<String>>,
+        deletes: std::sync::atomic::AtomicU32,
+    }
+    impl CorruptibleStore {
+        fn preloaded(v: &str) -> Self {
+            Self {
+                inner: std::sync::Mutex::new(Some(v.to_string())),
+                deletes: 0.into(),
+            }
+        }
+    }
+    impl SecretStore for CorruptibleStore {
+        fn get(&self) -> Result<Option<String>, String> {
+            Ok(self.inner.lock().unwrap().clone())
+        }
+        fn put(&self, secret: &str) -> Result<(), String> {
+            *self.inner.lock().unwrap() = Some(secret.to_string());
+            Ok(())
+        }
+        fn delete(&self) -> Result<(), String> {
+            self.deletes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            *self.inner.lock().unwrap() = None;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn corrupted_short_secret_is_deleted_and_recreated() {
+        // 已存项过短（损坏）：必须 delete 后重新创建 48 字符新密钥，而不是沿用或报错卡死。
+        let store = CorruptibleStore::preloaded("");
+        let legacy = temp_legacy_path("corrupt");
+        let _ = std::fs::remove_file(&legacy);
+        let out = ensure_jwt_secret(&store, &legacy).expect("损坏项应自愈成功");
+        assert_eq!(out.source, SecretSource::Created);
+        assert_eq!(out.secret.len(), JWT_LEN);
+        assert_eq!(
+            store.deletes.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "应删除一次损坏项"
+        );
+        let _ = std::fs::remove_file(&legacy);
+    }
+
     #[test]
     fn keychain_argv_never_carries_secret_and_w_is_standalone() {
         let store = KeychainStore::jwt();
-        for op in [KeychainOp::Find, KeychainOp::Add, KeychainOp::Set] {
-            let argv = store.argv_for(op);
-            // 固定 service/account。
-            assert!(argv.iter().any(|a| a == SERVICE_MAIN));
-            assert!(argv.iter().any(|a| a == ACCOUNT_JWT));
-            // -w 必须是独立参数（口令从 stdin 来），不得出现 "-wSOMESECRET" 形态。
-            assert!(argv.iter().any(|a| a == "-w"));
+        // Find：带独立 -w；Add：add -U 且带独立 -w（upsert，口令走 stdin 双确认）；
+        // Delete：无 -w（删除不需要口令）。
+        let find = store.argv_for(KeychainOp::Find);
+        assert!(find.contains(&"-w".to_string()));
+        assert!(find.iter().all(|a| !(a.starts_with("-w") && a.len() > 2)));
+
+        let add = store.argv_for(KeychainOp::Add);
+        assert!(add.contains(&"-U".to_string()), "写入须用 add -U upsert");
+        assert!(add.contains(&"-w".to_string()));
+        assert!(add.iter().all(|a| !(a.starts_with("-w") && a.len() > 2)));
+        assert!(add.iter().any(|a| a == SERVICE_MAIN));
+        assert!(add.iter().any(|a| a == ACCOUNT_JWT));
+
+        let delete = store.argv_for(KeychainOp::Delete);
+        assert!(!delete.contains(&"-w".to_string()), "删除不带 -w");
+        assert!(delete[0].contains("delete-generic-password"));
+
+        for argv in [find, add, delete] {
             for a in &argv {
-                // 只允许精确的 "-w"；任何以 -w 开头的更长参数都意味着口令被拼进命令行。
-                assert!(
-                    !(a.starts_with("-w") && a.len() > 2),
-                    "参数 {a:?} 不得把口令拼进 -w"
-                );
                 assert_ne!(a, "SUPER-SECRET-PASSWORD");
             }
         }
