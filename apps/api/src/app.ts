@@ -37,6 +37,7 @@ import { syncRoutes } from "./routes/v1/sync/index.js";
 import { adminUpdateDownloadRoutes } from "./routes/v1/adminUpdateDownload.js";
 import { inviteRoutes } from "./routes/v1/authInvite.js";
 import { publicBranding, adminBranding } from "./routes/branding.js";
+import { helpProxy } from "./routes/helpProxy.js";
 import { mcpApp } from "./mcp/transport/mcpApp.js";
 import { health } from "./routes/health.js";
 import { healthz } from "./routes/healthz.js";
@@ -214,6 +215,10 @@ function createMount(webRoot: string | null): Hono {
   // 企业门——双 flag 全 off 时品牌端点仍须可达）。叠加挂载模式同 meAvatar。
   api.route("/auth/branding", publicBranding);
   api.route("/admin/branding", adminBranding);
+  // 帮助百科公开只读代理：服务端拉内网 Gitea wiki markdown/图片，经同源 /api 出口给前端
+  //（桌面壳/浏览器无法跨域直连 Gitea，wiki 渲染页也带 x-frame-options SAMEORIGIN 不能 iframe）。
+  // 必须挂在无全局鉴权的 api 实例上（非 /api/v1），保持公开匿名可读。
+  api.route("/help", helpProxy);
   mount.route("/api", api);
 
   // 离线同步面（YN0 起）：与企业双 flag 正交，恒挂载到 mount；是否可达由组首中间件

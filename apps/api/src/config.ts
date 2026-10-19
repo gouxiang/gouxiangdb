@@ -35,6 +35,8 @@ const BLOCKED_JWT_SECRETS = new Set([
 ]);
 
 const DEV_JWT_SECRET = "dev-secret-change-me-in-production";
+// 帮助百科代理（/api/help/*）默认指向 GouXiangDB 官方 Gitea 仓库 wiki；全部可选、默认合法。
+const DEFAULT_HELP_WIKI_BASE = "https://gitea0.hn.takin.cc/GouXiang/gouxiangdb";
 const DEFAULT_PORT = 3001;
 const DEFAULT_MIN_DISK_MB = 1024;
 const DEFAULT_BODY_LIMIT_JSON_MB = 1;
@@ -197,6 +199,49 @@ function buildCorsPatterns(raw: string | undefined): RegExp[] {
     .map((s) => new RegExp(`^${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\*/g, ".*")}$`));
 }
 
+/**
+ * 帮助百科代理（/api/help/*）配置解析，三项全部可选且默认合法：
+ *   - GX_HELP_WIKI_BASE：wiki 仓库基址（去尾斜杠），默认官方 Gitea 仓库；
+ *   - GX_GITEA_API_BASE：Gitea API 基址，缺省从 wiki base 的 host 同源推导 https://<host>/api/v1；
+ *   - GX_GITEA_TOKEN：可选只读 PAT；有则 wiki 目录走 /repos/<owner>/<repo>/wiki/pages，无则匿名解析 HTML。
+ * 非法 URL 一律回退默认（不启动期硬失败）；owner/repo 在 helpProxy 运行时从路径前两段解析。
+ */
+function normalizeTrailingSlash(raw: string): string {
+  return raw.replace(/\/+$/, "");
+}
+
+function resolveHelpWikiBase(env: NodeJS.ProcessEnv): string {
+  const raw = env.GX_HELP_WIKI_BASE?.trim();
+  if (!raw) return DEFAULT_HELP_WIKI_BASE;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return DEFAULT_HELP_WIKI_BASE;
+    return normalizeTrailingSlash(u.origin + u.pathname);
+  } catch {
+    return DEFAULT_HELP_WIKI_BASE;
+  }
+}
+
+function resolveGiteaApiBase(env: NodeJS.ProcessEnv, wikiBase: string): string {
+  const raw = env.GX_GITEA_API_BASE?.trim();
+  if (raw) {
+    try {
+      const u = new URL(raw);
+      if (u.protocol === "https:" || u.protocol === "http:") {
+        return normalizeTrailingSlash(u.origin + u.pathname);
+      }
+    } catch {
+      // 落到同源推导
+    }
+  }
+  try {
+    const u = new URL(wikiBase);
+    return normalizeTrailingSlash(`${u.origin}/api/v1`);
+  } catch {
+    return "https://gitea0.hn.takin.cc/api/v1";
+  }
+}
+
 interface AppConfig {
   nodeEnv: NodeEnv;
   isProduction: boolean;
@@ -302,6 +347,15 @@ interface AppConfig {
    * 不配任何 GX_UPDATE_* 时不影响既有功能，off 时更新子路由不注册（404）。
    */
   update: UpdateConfig;
+  /**
+   * 帮助百科代理（/api/help/wiki|asset）三项配置，全部可选、默认合法：
+   * - helpWikiBase：Gitea wiki 仓库基址（GX_HELP_WIKI_BASE，默认官方仓库，去尾斜杠）；
+   * - giteaApiBase：Gitea API 基址（GX_GITEA_API_BASE，默认从 wiki base host 同源推导 /api/v1）；
+   * - giteaToken：可选只读 PAT（GX_GITEA_TOKEN）；为空时 wiki 目录退化为匿名解析首页 HTML 侧边栏。
+   */
+  helpWikiBase: string;
+  giteaApiBase: string;
+  giteaToken: string;
 }
 
 function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
@@ -317,6 +371,7 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
   if (!updateConfig.prefetchDir) {
     updateConfig.prefetchDir = path.join(dataDir, "update-cache");
   }
+  const helpWikiBase = resolveHelpWikiBase(env);
   return {
     nodeEnv: (env.NODE_ENV === "production" || env.NODE_ENV === "test"
       ? env.NODE_ENV
@@ -380,6 +435,9 @@ function buildConfig(env: NodeJS.ProcessEnv): AppConfig {
     // 监听地址：默认 0.0.0.0＝历史 server.listen(port) 行为；桌面传 127.0.0.1 仅绑回环。
     bindHost: env.GX_BIND_HOST?.trim() || "0.0.0.0",
     update: updateConfig,
+    helpWikiBase,
+    giteaApiBase: resolveGiteaApiBase(env, helpWikiBase),
+    giteaToken: env.GX_GITEA_TOKEN?.trim() ?? "",
   };
 }
 
