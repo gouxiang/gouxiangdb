@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import type { DbTx } from "../../db.js";
 import { offlineReplicaEnabled } from "../../configOfflineReplica.js";
 import { writeSyncOpTx, type RecordSyncOpInput } from "./oplog.js";
+import { writeStructureOpTx, schemaVersionRowId, type StructureOpInput } from "./structureOplog.js";
 
 /** recordLocalReplicaTx 的本地副本身份（由调用方从 env 解析后传入，便于测试注入）。 */
 export interface LocalReplicaCtx {
@@ -99,6 +100,63 @@ export async function recordLocalReplicaTx(
         entityType: input.entityType,
         tableId: input.tableId,
         changes: input.changes ?? [],
+      }),
+      baseVersion: preVersion,
+    },
+  });
+
+  return { clientOpId, baseVersion: preVersion };
+}
+
+/**
+ * S2c：结构轨（table / field / view）在线直写的离线发件箱切面。
+ *
+ * 挂接位置是各元数据【编排 wrapper】（tableService/fieldService/viewService），与在线切面
+ * recordStructureOpTx 并排；push 结构回放走 structureRegistry → *Tx 原语层（物理上不经过
+ * wrapper），故天然不会回到这里——绝不可挂到 *Tx 原语层（在线/回放共用，挂上即回放循环）。
+ *
+ * 与 record 切面同纪律：默认关首行返回 null；同事务推进该表 table_schema 钟 + 追加本地 oplog
+ * （复用 writeStructureOpTx，在线直写不传 expectedBaseVersion），并落一条 pending local_outbox；
+ * 任何异常原样抛出随主事务回滚，只用 tx、不再入写队列。
+ */
+export async function recordLocalStructureReplicaTx(
+  tx: DbTx,
+  input: StructureOpInput,
+  ctx: LocalReplicaCtx,
+): Promise<LocalReplicaRecord | null> {
+  // 副本门：默认 off 零行为、零 IO。
+  if (!offlineReplicaEnabled()) return null;
+
+  // 写前该表结构版本：既是本地 oplog 的 clientBaseVersion，也是 outbox.baseVersion。
+  const pre = await tx.syncEntityVersion.findUnique({
+    where: { id: schemaVersionRowId(input.tableId) },
+    select: { version: true },
+  });
+  const preVersion = pre?.version ?? 0n;
+
+  const clientOpId = `local-${randomUUID()}`;
+
+  // 以本地副本身份推进 table_schema 钟 + 追加本地结构 oplog（不做乐观锁断言）。
+  await writeStructureOpTx(
+    tx,
+    input,
+    { clientId: ctx.clientId, clientOpId, clientBaseVersion: preVersion },
+  );
+
+  // 待发行：payload 与 structureOplog 落库形状同构（{op,entityType,tableId,...payload}）。
+  await tx.localOutbox.create({
+    data: {
+      clientOpId,
+      nodeId: ctx.nodeId,
+      baseId: input.baseId,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      op: input.op,
+      payload: JSON.stringify({
+        op: input.op,
+        entityType: input.entityType,
+        tableId: input.tableId,
+        ...input.payload,
       }),
       baseVersion: preVersion,
     },

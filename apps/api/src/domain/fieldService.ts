@@ -23,6 +23,8 @@ import {
 } from "./fieldServiceTx.js";
 import { resyncTableMaskTx } from "./authz/scopeProjectionTx.js";
 import { recordStructureOpTx } from "./sync/structureOplog.js";
+import { recordLocalStructureReplicaTx } from "./sync/localOutbox.js";
+import { offlineNodeId, offlineClientId } from "../configOfflineReplica.js";
 
 /** 事务内取表所属 base（结构 oplog 的订阅分片键）；取不到返回 null。 */
 async function baseIdOfTableTx(tx: Parameters<typeof resyncTableMaskTx>[0], tableId: string): Promise<string | null> {
@@ -146,14 +148,17 @@ export async function createField(
     // 成对用 create_link_field 一个 op 表达（含 reverseFieldId），保持正/反两字段原子（§19.1）。
     const baseId = await baseIdOfTableTx(tx, input.tableId);
     if (baseId) {
-      await recordStructureOpTx(tx, {
-        entityType: "field", entityId: forwardMeta.id, tableId: input.tableId, baseId,
+      const structInput = {
+        entityType: "field" as const, entityId: forwardMeta.id, tableId: input.tableId, baseId,
         op: isLinkPair ? "create_link_field" : "add_field", actorId: operatorUserId,
         payload: {
           tableId: input.tableId, name: input.name, type: input.type,
           ...(reverseMeta ? { reverseFieldId: reverseMeta.id } : {}),
         },
-      });
+      };
+      await recordStructureOpTx(tx, structInput);
+      // S2c：离线副本同事务落 local_outbox（默认关零行为；回放走 *Tx 原语不经 wrapper）。
+      await recordLocalStructureReplicaTx(tx, structInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
     return reverseMeta ? { field: forwardMeta, reverseField: reverseMeta } : { field: forwardMeta };
   });
@@ -271,11 +276,14 @@ export async function updateField(
     // YN7 §8.6：alter_field 结构 oplog（只记被改子集 changed；off 时零 IO）。
     const baseId = await baseIdOfTableTx(tx, existing.tableId);
     if (baseId) {
-      await recordStructureOpTx(tx, {
-        entityType: "field", entityId: fieldId, tableId: existing.tableId, baseId,
+      const structInput = {
+        entityType: "field" as const, entityId: fieldId, tableId: existing.tableId, baseId,
         op: "alter_field", actorId: operatorUserId,
         payload: { tableId: existing.tableId, changed: patch },
-      });
+      };
+      await recordStructureOpTx(tx, structInput);
+      // S2c：离线副本同事务落 local_outbox（默认关零行为；回放不经此 wrapper）。
+      await recordLocalStructureReplicaTx(tx, structInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
     return r;
   });
@@ -313,11 +321,14 @@ export async function deleteField(
     // YN7 §8.6：delete_field 结构 oplog（含级联删除 id；off 时零 IO）。
     const baseId = await baseIdOfTableTx(tx, field.tableId);
     if (baseId) {
-      await recordStructureOpTx(tx, {
-        entityType: "field", entityId: fieldId, tableId: field.tableId, baseId,
+      const structInput = {
+        entityType: "field" as const, entityId: fieldId, tableId: field.tableId, baseId,
         op: "delete_field", actorId: operatorUserId,
         payload: { tableId: field.tableId, deleted: deletedIds },
-      });
+      };
+      await recordStructureOpTx(tx, structInput);
+      // S2c：离线副本同事务落 local_outbox（默认关零行为；回放不经此 wrapper）。
+      await recordLocalStructureReplicaTx(tx, structInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
     return deletedIds;
   });
@@ -340,11 +351,14 @@ export async function restoreField(
     for (const tid of result.maskTableIds) await resyncTableMaskTx(tx, tid, operatorUserId);
     const baseId = await baseIdOfTableTx(tx, result.tableId);
     if (baseId) {
-      await recordStructureOpTx(tx, {
-        entityType: "field", entityId: fieldId, tableId: result.tableId, baseId,
+      const structInput = {
+        entityType: "field" as const, entityId: fieldId, tableId: result.tableId, baseId,
         op: "restore_field", actorId: operatorUserId,
         payload: { tableId: result.tableId, name: result.name, renamed: result.renamed },
-      });
+      };
+      await recordStructureOpTx(tx, structInput);
+      // S2c：离线副本同事务落 local_outbox（默认关零行为；回放不经此 wrapper）。
+      await recordLocalStructureReplicaTx(tx, structInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
     return result;
   });
@@ -366,11 +380,14 @@ export async function reorderFields(
     await reorderFieldsTx(tx, tableId, orderedIds);
     const baseId = await baseIdOfTableTx(tx, tableId);
     if (baseId) {
-      await recordStructureOpTx(tx, {
-        entityType: "field", entityId: tableId, tableId, baseId,
+      const structInput = {
+        entityType: "field" as const, entityId: tableId, tableId, baseId,
         op: "reorder_fields", actorId: operatorUserId,
         payload: { fieldIds: orderedIds },
-      });
+      };
+      await recordStructureOpTx(tx, structInput);
+      // S2c：离线副本同事务落 local_outbox（默认关零行为；回放不经此 wrapper）。
+      await recordLocalStructureReplicaTx(tx, structInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
   });
   invalidateOrdinalCache(tableId);

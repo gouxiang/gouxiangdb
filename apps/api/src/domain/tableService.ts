@@ -9,6 +9,8 @@ import { withWriteTx } from "../db.js";
 import { invalidateOrdinalCache } from "./prismaDeps.js";
 import { createTableTx, softDeleteTableTx, updateTableTx, restoreTableTx } from "./tableServiceTx.js";
 import { recordStructureOpTx } from "./sync/structureOplog.js";
+import { recordLocalStructureReplicaTx } from "./sync/localOutbox.js";
+import { offlineNodeId, offlineClientId } from "../configOfflineReplica.js";
 
 export {
   assertTableNameFree,
@@ -42,11 +44,14 @@ export async function createTable(input: CreateTableInput, operatorUserId: strin
       userId: operatorUserId,
     });
     // YN7 §8.6：在线结构写也推进 table_schema 钟 + oplog（off 时第一行 return null，零 IO）。
-    await recordStructureOpTx(tx, {
-      entityType: "table", entityId: r.table.id, tableId: r.table.id, baseId: input.baseId,
+    const structInput = {
+      entityType: "table" as const, entityId: r.table.id, tableId: r.table.id, baseId: input.baseId,
       op: "create_table", actorId: operatorUserId,
       payload: { name, withDefaults: input.withDefaults ?? false, primaryFieldId: r.primaryFieldId },
-    });
+    };
+    await recordStructureOpTx(tx, structInput);
+    // S2c：离线副本同事务落 local_outbox（默认关首行 return null；回放走 *Tx 原语不经 wrapper）。
+    await recordLocalStructureReplicaTx(tx, structInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     return r;
   });
   return { tableId: result.table.id, primaryFieldId: result.primaryFieldId, createdAt: result.table.createdAt };
@@ -98,6 +103,11 @@ export async function updateTable(
       entityType: "table", entityId: tableId, tableId, baseId,
       op, actorId: operatorUserId ?? null, payload,
     });
+    // S2c：离线副本同事务落 local_outbox（复用同一 input；默认关零行为）。
+    await recordLocalStructureReplicaTx(tx, {
+      entityType: "table", entityId: tableId, tableId, baseId,
+      op, actorId: operatorUserId ?? null, payload,
+    }, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     return updated;
   });
   if (renaming) invalidateOrdinalCache(tableId);
@@ -123,10 +133,13 @@ export async function softDeleteTable(
       ?? (await tx.table.findUnique({ where: { id: tableId }, select: { baseId: true } }))?.baseId
       ?? null;
     if (resolvedBase) {
-      await recordStructureOpTx(tx, {
-        entityType: "table", entityId: tableId, tableId, baseId: resolvedBase,
+      const structInput = {
+        entityType: "table" as const, entityId: tableId, tableId, baseId: resolvedBase,
         op: "delete_table", actorId: operatorUserId, payload: {},
-      });
+      };
+      await recordStructureOpTx(tx, structInput);
+      // S2c：离线副本同事务落 local_outbox（默认关零行为；回放不经此 wrapper）。
+      await recordLocalStructureReplicaTx(tx, structInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
   });
   invalidateOrdinalCache(tableId);
@@ -143,11 +156,14 @@ export async function restoreTable(
 ): Promise<{ name: string; renamed: boolean }> {
   const r = await withWriteTx("table.restore", async (tx) => {
     const result = await restoreTableTx(tx, tableId, operatorUserId);
-    await recordStructureOpTx(tx, {
-      entityType: "table", entityId: tableId, tableId, baseId: result.baseId,
+    const structInput = {
+      entityType: "table" as const, entityId: tableId, tableId, baseId: result.baseId,
       op: "restore_table", actorId: operatorUserId,
       payload: { name: result.name, restoredRecords: result.restoredRecordIds.length },
-    });
+    };
+    await recordStructureOpTx(tx, structInput);
+    // S2c：离线副本同事务落 local_outbox（默认关零行为；回放不经此 wrapper）。
+    await recordLocalStructureReplicaTx(tx, structInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     return result;
   });
   invalidateOrdinalCache(tableId);

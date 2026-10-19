@@ -12,6 +12,8 @@ import {
   type UpdateViewSnapshot,
 } from "./viewServiceTx.js";
 import { recordStructureOpTx } from "./sync/structureOplog.js";
+import { recordLocalStructureReplicaTx } from "./sync/localOutbox.js";
+import { offlineNodeId, offlineClientId } from "../configOfflineReplica.js";
 
 /** 事务内由视图 id 取 (tableId, baseId)（结构 oplog 的版本钟/分片键）。 */
 async function viewLocatorTx(
@@ -45,11 +47,14 @@ export async function createView(
     const tbl = await tx.table.findUnique({ where: { id: input.tableId }, select: { baseId: true } });
     const baseId = tbl?.baseId ?? null;
     if (baseId) {
-      await recordStructureOpTx(tx, {
-        entityType: "view", entityId: created.id, tableId: input.tableId, baseId,
+      const structInput = {
+        entityType: "view" as const, entityId: created.id, tableId: input.tableId, baseId,
         op: "create_view", actorId: actorUserId ?? null,
         payload: { tableId: input.tableId, name, type: input.type, ...(input.config ? { config: input.config } : {}) },
-      });
+      };
+      await recordStructureOpTx(tx, structInput);
+      // S2c：离线副本同事务落 local_outbox（默认关零行为；回放走 *Tx 原语不经 wrapper）。
+      await recordLocalStructureReplicaTx(tx, structInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
     return created;
   });
@@ -74,10 +79,13 @@ export async function updateView(
     // YN7 §8.6：alter_view 结构 oplog（payload 即授权可写列；off 时零 IO）。
     const loc = await viewLocatorTx(tx, viewId);
     if (loc) {
-      await recordStructureOpTx(tx, {
-        entityType: "view", entityId: viewId, tableId: loc.tableId, baseId: loc.baseId,
+      const structInput = {
+        entityType: "view" as const, entityId: viewId, tableId: loc.tableId, baseId: loc.baseId,
         op: "alter_view", actorId: actorUserId ?? null, payload: { tableId: loc.tableId, ...patch.data },
-      });
+      };
+      await recordStructureOpTx(tx, structInput);
+      // S2c：离线副本同事务落 local_outbox（默认关零行为；回放不经此 wrapper）。
+      await recordLocalStructureReplicaTx(tx, structInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
     return u;
   });
@@ -90,10 +98,13 @@ export async function purgeView(viewId: string, actorUserId?: string | null): Pr
     await assertAndPurgeViewTx(tx, viewId);
     // YN7 §8.6：delete_view 结构 oplog（先定位再物理删；off 时零 IO）。
     if (loc) {
-      await recordStructureOpTx(tx, {
-        entityType: "view", entityId: viewId, tableId: loc.tableId, baseId: loc.baseId,
+      const structInput = {
+        entityType: "view" as const, entityId: viewId, tableId: loc.tableId, baseId: loc.baseId,
         op: "delete_view", actorId: actorUserId ?? null, payload: { tableId: loc.tableId },
-      });
+      };
+      await recordStructureOpTx(tx, structInput);
+      // S2c：离线副本同事务落 local_outbox（默认关零行为；回放不经此 wrapper）。
+      await recordLocalStructureReplicaTx(tx, structInput, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
   });
 }
