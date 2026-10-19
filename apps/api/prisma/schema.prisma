@@ -977,6 +977,82 @@ model SyncSubscription {
 }
 
 // ============================================================================
+// 离线客户端（Mac 侧车本地 SQLite）三表 —— beta.2 S2a，只增空表、零行为。
+// 设计权威：docs/design/2026-10-node-mode/DESIGN-OFFLINE-SYNC.md §4.2.1-4.2.3。
+// 侧车本地库复用服务端内核同构结构，额外需要 outbox / 副本游标 / id 映射三张表。
+// 列名一律 camelCase（@@map 只改表名不改列名）；不加物理外键，悬挂由应用层清理。
+// ============================================================================
+
+/// 本地待推送操作（纯本地 base 与远端副本共用）；状态机 pending→pushing→acked/conflict/…
+model LocalOutbox {
+  id               String   @id @default(cuid())
+  clientOpId       String   @unique
+  /// 目标节点：本地 "local" 或远端节点 id（与 dataSourceResolver nodeId 对齐）
+  nodeId           String
+  /// 该操作归属的 base（本地副本 id）
+  baseId           String?
+  entityType       String
+  entityId         String
+  op               String
+  payload          String
+  /// 发起时本地认定的基线版本
+  baseVersion      BigInt   @default(0)
+  /// pending | pushing | acked | conflict | rejected | quarantined | pending_approval
+  status           String   @default("pending")
+  /// 服务端去重后回认的 canonical id（一般同 clientOpId）
+  serverClientOpId String?
+  reasonCode       String?
+  /// 服务端返回的另一版本
+  conflictPayload  String?
+  attempts         Int      @default(0)
+  lastError        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([nodeId, status])
+  @@index([baseId, entityType, entityId])
+  @@map("local_outbox")
+}
+
+/// 每个远端 base 的副本与拉取游标（本地副本以独立 localBaseId 承载）
+model ReplicaState {
+  id            String    @id @default(cuid())
+  nodeId        String
+  /// 远端 baseId
+  remoteBaseId  String
+  /// 本地承载该副本的 base 行 id
+  localBaseId   String
+  pullCursorSeq BigInt    @default(0)
+  snapshotDone  Boolean   @default(false)
+  subscribed    Boolean   @default(false)
+  lastPulledAt  DateTime?
+  lastPushedAt  DateTime?
+  /// 离线权限快照：拉取时服务端返回的可见集/权限版本，重连后比对（§6.3、§9.2）
+  authzVersion  String?
+  /// 副本是否启用静态加密（§9.3）
+  encrypted     Boolean   @default(false)
+
+  @@unique([nodeId, remoteBaseId])
+  @@map("replica_state")
+}
+
+/// 远端主键 ↔ 本地主键映射（离线新建；多数情况下服务端保留客户端 id，此表为兜底）
+model SyncIdMap {
+  id             String  @id @default(cuid())
+  nodeId         String
+  entityType     String
+  localEntityId  String
+  /// 服务端接受后回填；未 ack 前为空
+  remoteEntityId String?
+  /// 由哪条创建操作产生
+  clientOpId     String  @unique
+
+  @@unique([nodeId, entityType, localEntityId])
+  @@index([remoteEntityId])
+  @@map("sync_id_map")
+}
+
+// ============================================================================
 // 手写维护表（不经 Prisma 管理，禁止在此添加 model）
 // ============================================================================
 // record_field_index —— M1/S3 起存在的 EAV 旁路索引（records.fields JSON 的
