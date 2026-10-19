@@ -33,13 +33,17 @@
       <stop offset="1" stop-color="#29B6F6"/>
     </linearGradient>
   </defs>
+  <g transform="translate(25 25) scale(0.8046875)">
 
       <rect width="256" height="256" rx="0" fill="url(#paperk)"/>
       <rect width="256" height="256" rx="0" fill="url(#pearlk)"/>
       <rect width="256" height="256" rx="0" fill="url(#glossk)"/>
       <rect width="256" height="256" rx="0" fill="url(#sheenk)"/>
 
+  <g transform="translate(128 128) scale(1.4) translate(-128 -128)">
   <path d="M 182 112 L 182 96 Q 182 74 160 74 L 96 74 Q 74 74 74 96 L 74 160 Q 74 182 96 182 L 160 182 Q 182 182 182 160 L 182 142 L 104 142"
     fill="none" stroke="url(#bandk)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
   <line x1="98" y1="112" x2="146" y2="112" stroke="url(#bandk)" stroke-width="11" stroke-linecap="round"/>
+  </g>
+  </g>
 </svg>

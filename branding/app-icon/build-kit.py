@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """从定稿 SVG 生成完整图标套件（PNG 多尺寸 / ICO / ICNS / iOS / Android / Web）。"""
 import os, subprocess, shutil
-from PIL import Image
+from PIL import Image, ImageDraw
+
+# Apple macOS 图标网格（Big Sur 起官方模板，1024 画布）：
+#   安全边 inset = 100 / 1024（≈9.77%），底板 side = 824 / 1024（≈80.47%），
+#   底板超椭圆圆角 radius = 185 / 824（≈22.45% 底板边长）。
+MAC_INSET_RATIO = 100 / 1024
+MAC_TILE_RATIO = 824 / 1024
+MAC_RADIUS_RATIO = 185 / 824
 
 ROOT = "/Users/daijing/Desktop/GouXiangDB/branding/app-icon"
 Q = "/usr/bin/qlmanage"
@@ -23,7 +30,7 @@ def render(svg, size, outdir, name):
     return dst
 
 rounded = os.path.join(ROOT, "svg", "icon.svg")
-fullbleed = os.path.join(ROOT, "svg", "icon-fullbleed.svg")
+macsvg = os.path.join(ROOT, "svg", "icon-mac.svg")
 
 # —— 1. 通用 PNG 多尺寸 ——
 sizes = [16, 32, 48, 64, 128, 256, 512, 1024]
@@ -50,12 +57,47 @@ build_ico(os.path.join(web, "favicon.ico"), [16, 32, 48])
 build_ico(os.path.join(ROOT, "ico", "icon.ico"), [16, 32, 48, 64, 128, 256])
 print("ico/ ok")
 
-# —— 4. macOS icns（用满出血版，交给系统裁圆角）——
+# —— 4. macOS icns（网格内缩直角板 + 放大 G，PIL 单一超椭圆遮罩按底板矩形裁透明安全边）——
+# Big Sur 起 App 图标圆角由图标自身承担，且图标必须内缩在 Apple 网格内（底板 ~80.47%、
+# 四周安全边 ~9.77%），否则在 Dock 里会比满网格的主流图标「肥大一圈」。qlmanage 会把 SVG
+# 透明区域压平成白底，故渲染后用 PIL 加一道 alpha 超椭圆遮罩：仅底板矩形（含 ~22.45% 圆角）
+# 不透明、安全边全透明。为避免在小尺寸上直接栅格化圆角产生锯齿，**只在 1024 母版上画一次
+# 遮罩（边缘最平滑），其余尺寸一律 LANCZOS 降采样**。只裁这一次，SVG 不带圆角，杜绝双重圆角。
+MAC_MASTER = 1024
+
+def downscale_premultiplied(src, size):
+    """预乘 alpha 后 LANCZOS 降采样再反预乘，避免透明安全边在缩小时混入颜色产生淡晕。"""
+    import numpy as np
+    arr = np.asarray(src).astype(np.float32)          # H,W,4 (RGBA)
+    rgb, alpha = arr[..., :3], arr[..., 3:4]
+    prem = np.concatenate([rgb * alpha / 255.0, alpha], axis=-1)
+    out = np.asarray(Image.fromarray(prem.astype(np.uint8), "RGBA")
+                     .resize((size, size), Image.LANCZOS)).astype(np.float32)
+    o_rgb, o_alpha = out[..., :3], out[..., 3:4]
+    safe = np.where(o_alpha > 0, o_alpha, 255.0)      # alpha=0 处不放大颜色
+    u_rgb = np.clip(o_rgb * 255.0 / safe, 0, 255)
+    res = np.concatenate([u_rgb, o_alpha], axis=-1).astype(np.uint8)
+    return Image.fromarray(res, "RGBA")
+
+def build_mac_iconset(iconset):
+    os.makedirs(iconset, exist_ok=True)
+    master_p = render(macsvg, MAC_MASTER, iconset, "_master.png")
+    with Image.open(master_p) as p:
+        master = p.convert("RGBA")
+    inset = int(round(MAC_MASTER * MAC_INSET_RATIO))
+    side = MAC_MASTER - 2 * inset
+    r = int(round(side * MAC_RADIUS_RATIO))
+    mask = Image.new("L", (MAC_MASTER, MAC_MASTER), 0)
+    x1 = inset + side - 1
+    ImageDraw.Draw(mask).rounded_rectangle([inset, inset, x1, x1], radius=r, fill=255)
+    master.putalpha(mask)
+    for s in [16, 32, 128, 256, 512]:
+        downscale_premultiplied(master, s).save(os.path.join(iconset, f"icon_{s}x{s}.png"))
+        downscale_premultiplied(master, s * 2).save(os.path.join(iconset, f"icon_{s}x{s}@2x.png"))
+    os.remove(master_p)
+
 iconset = os.path.join(ROOT, "mac", "icon.iconset")
-os.makedirs(iconset, exist_ok=True)
-for s in [16, 32, 128, 256, 512]:
-    render(fullbleed, s, iconset, f"icon_{s}x{s}.png")
-    render(fullbleed, s * 2, iconset, f"icon_{s}x{s}@2x.png")
+build_mac_iconset(iconset)
 icns = os.path.join(ROOT, "mac", "icon.icns")
 subprocess.run([ICONUTIL, "-c", "icns", iconset, "-o", icns], check=True)
 print("mac/icon.icns ok")

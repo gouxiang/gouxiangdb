@@ -58,6 +58,25 @@ const mark = `
     fill="none" stroke="url(#band${id})" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
   <line x1="98" y1="112" x2="146" y2="112" stroke="url(#band${id})" stroke-width="11" stroke-linecap="round"/>`;
 
+// macOS 主图形：G 标志居中放大（2026-10-18 戴总反馈「图案太小」）。
+// 原 mark 视觉边界约 61..195（占 256 画布 ~52%）；以中心(128,128)等比放大 1.4 倍后
+// 边界约 34..222（~73%，与微信等主流 App 主图形占比接近）。stroke-width 随 transform
+// 同比加粗（26→36.4、11→15.4），整体更敦实。通用圆角版仍用未缩放的 ${mark}。
+const MAC_MARK_SCALE = 1.4;
+const markMac = `
+  <g transform="translate(128 128) scale(${MAC_MARK_SCALE}) translate(-128 -128)">${mark}
+  </g>`;
+
+// macOS 图标网格（2026-10-18 戴总反馈「图标比别的 App 肥大一圈」返工）。
+// Apple Big Sur 起官方模板：1024 画布上底板为 824×824、居中、四周安全边各 100
+// （底板占 824/1024 ≈ 80.47%，安全边 100/1024 ≈ 9.77%）。映射到 256 逻辑坐标：
+// 底板边长 206、inset 25。做法＝把上一版「铺满 256 的白牌 + 放大 G」整组同比缩
+// 0.8046875 再平移 25，于是 G 相对白牌占比逐像素保持 ~73.4%（戴总已认可的敦实度），
+// 只是整组缩入网格、四周留白，Dock 中不再比微信等满网格图标「肥大一圈」。
+// 底板超椭圆圆角在 build-kit.py 用 PIL 单一 alpha 遮罩按底板矩形裁出（不由 SVG 自带）。
+const MAC_TILE_SCALE = 824 / 1024;   // 0.8046875
+const MAC_INSET = (256 * 100) / 1024; // 25
+
 // 圆角版：自带圆角 + 内外描边（web / Android / iOS / 通用 PNG）
 const rounded = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="1024" height="1024">
 ${defs(57)}
@@ -68,14 +87,19 @@ ${mark}
 </svg>
 `;
 
-// 满出血方角版：四角不留圆角，交给 macOS / Windows 系统裁切
-const fullbleed = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="1024" height="1024">
+// macOS 网格母版：白牌 + 放大 G（markMac）整组同比缩入 Apple 图标网格（见上 MAC_TILE_SCALE /
+// MAC_INSET），四周留安全边、不再满出血。Big Sur 起 App 图标的超椭圆圆角由图标自身承担，
+// 而 qlmanage 渲染 SVG 会把透明角压平成白底，故**圆角遮罩在 build-kit.py 里用 PIL 单一超椭圆
+// alpha 遮罩按底板矩形裁出**（半径 ≈22.45% 底板边长），避免「自带圆角再被裁」的双重圆角白晕。
+const mac = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="1024" height="1024">
 ${defs(0)}
+  <g transform="translate(${MAC_INSET} ${MAC_INSET}) scale(${MAC_TILE_SCALE})">
 ${paper(0, '')}
-${mark}
+${markMac}
+  </g>
 </svg>
 `;
 
 writeFileSync(join(OUT, 'icon.svg'), rounded, 'utf8');
-writeFileSync(join(OUT, 'icon-fullbleed.svg'), fullbleed, 'utf8');
+writeFileSync(join(OUT, 'icon-mac.svg'), mac, 'utf8');
 console.log('svg written ->', OUT);
