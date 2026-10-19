@@ -4,6 +4,7 @@ import {
   applyLocalRuntime,
   buildNodeRows,
   buildLauncherViewModel,
+  ensureLocalRow,
   hostLabel,
 } from "./launcherViewModel";
 import type { LocalRuntimeLike, NodeRow } from "./launcherViewModel";
@@ -136,6 +137,59 @@ describe("buildLauncherViewModel", () => {  it("汇总标记：空/有本地/有
     const vm2 = buildLauncherViewModel(active, new Map());
     expect(vm2.hasActive).toBe(true);
     expect(vm2.activeNodeId).toBe("local");
+  });
+});
+
+describe("ensureLocalRow", () => {
+  it("已有本机行：原样保留（不重复、不改顺序、真实行 canRename=true）", () => {
+    const state: NodeRegistryState = {
+      ...emptyRegistry(),
+      entries: [remote({ nodeId: "abc" }), local()],
+    };
+    const rows = ensureLocalRow(buildNodeRows(state, new Map()));
+    expect(rows.map((r) => r.kind)).toEqual(["local", "remote"]);
+    expect(rows[0]!.canRename).toBe(true);
+  });
+
+  it("只有远端、无本机：最前补占位本机行（nodeId=local、未活动、不可删、不可改名）", () => {
+    const state: NodeRegistryState = {
+      ...emptyRegistry(),
+      entries: [remote({ nodeId: "abc" })],
+      activeNodeId: "abc",
+    };
+    const rows = ensureLocalRow(buildNodeRows(state, new Map()));
+    expect(rows.map((r) => r.nodeId)).toEqual(["local", "abc"]);
+    const p = rows[0]!;
+    expect(p).toMatchObject({
+      kind: "local",
+      nodeId: "local",
+      title: "本机",
+      active: false,
+      removable: false,
+      canRename: false,
+      localDesired: "stopped",
+    });
+    // 占位行不顶替当前活动远端。
+    expect(rows[1]!.active).toBe(true);
+  });
+
+  it("空行：仍补一个占位本机行（全新装欢迎页本身不消费它，仅保证函数全情形有本机入口）", () => {
+    const rows = ensureLocalRow([]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.kind).toBe("local");
+    expect(rows[0]!.canRename).toBe(false);
+  });
+
+  it("占位本机行经 applyLocalRuntime（壳内 added=false）映射为 absent，驱动『未启用+进入本机+启动』", () => {
+    const status: LocalRuntimeLike = {
+      added: false,
+      initialized: false,
+      running: false,
+      ready: false,
+      kernelPort: null,
+    };
+    const [row] = applyLocalRuntime(ensureLocalRow([]), status, false);
+    expect(row!.runtime).toBe("absent");
   });
 });
 

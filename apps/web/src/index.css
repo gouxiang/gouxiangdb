@@ -13,6 +13,36 @@
   * {
     box-sizing: border-box;
   }
+
+  /* ============ 桌面壳原生手感：锁定视口、消除整页橡皮筋（仅壳内） ============
+     .gx-desktop-shell 由 shellViewport.installShellViewport() 在检测到物理 Tauri 壳
+     （window.__TAURI_INTERNALS__.invoke）时加给 <html>；浏览器 / fnOS / 服务器构建永不加，
+     故下列规则对现网滚动/回弹行为零影响。
+     目标：鼠标移动、触控板/触屏滑动在任何方向都不能把整页拖出空白（WKWebView bounce），
+     同时内部局部滚动区（侧栏、表格、弹层、文档正文）照常滚动。 */
+  html.gx-desktop-shell,
+  html.gx-desktop-shell body,
+  html.gx-desktop-shell #root {
+    height: 100%;
+  }
+  html.gx-desktop-shell,
+  html.gx-desktop-shell body {
+    /* 文档自身不产生滚动：整页没有可被拖出的位移面（横向、纵向都封死）。 */
+    overflow: hidden;
+    /* 到文档边界不做橡皮筋回弹、也不触发任何滚动链/导航。 */
+    overscroll-behavior: none;
+  }
+  /* 内部一切可滚动容器：到自身顶/底/左/右边界时把滚动"含"在本容器内，
+     不向文档冒泡，故在列表边缘继续滑动只会停在边界，绝不带动整页。
+     用 Tailwind 滚动类名子串匹配（这些是运行时真实 class，与 purge 无关）。 */
+  html.gx-desktop-shell [class*="overflow-auto"],
+  html.gx-desktop-shell [class*="overflow-y-auto"],
+  html.gx-desktop-shell [class*="overflow-x-auto"],
+  html.gx-desktop-shell [class*="overflow-scroll"],
+  html.gx-desktop-shell [class*="overflow-y-scroll"],
+  html.gx-desktop-shell [class*="overflow-x-scroll"] {
+    overscroll-behavior: contain;
+  }
 }
 
 /* ============ 个人中心弹窗动画（全局，任意视图可用） ============ */
@@ -165,5 +195,222 @@
 @media (prefers-reduced-motion: reduce) {
   .gx-field-ctl {
     transition: none;
+  }
+}
+
+/* ============ 桌面启动器动效（仅门控内） ============ */
+/* 仅由桌面壳构建（VITE_NODE_LAUNCHER=1）经 NodeLauncherGate 门控后渲染的启动器界面引用，
+   浏览器/fnOS/服务器永不加载本节类名。零依赖：纯 CSS keyframes + 既有 gx-* 令牌工具类。
+   品牌色来源：构想 G 标志色带（橙 #F5841F → 玫红 #E8447A → 紫 #7B4CD8 → 蓝 #2C7BE5）
+   与品牌主色 #F7A81B（戴总指定品牌值）。以下十六进制仅限启动器徽标/主 CTA 小范围使用，
+   不得扩散到业务壳；其余表面、文本、边框、圆角、阴影一律走 gx-* token。 */
+
+/* 统一缓动：与项目既有弹层手感一致（见 kb-pcdialog-in）。 */
+@keyframes gx-launcher-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes gx-launcher-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes gx-launcher-logo-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* ready 状态小圆点柔和呼吸：幅度刻意压小（1.8s，透明度 .55→1、缩放 .8→1）。 */
+@keyframes gx-launcher-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1); }
+}
+/* 主 CTA 首次入场的一次高光扫过（不循环，宽度 40% 斜光带，650ms 后静止）。 */
+@keyframes gx-launcher-sheen {
+  from { transform: translateX(-130%); }
+  to { transform: translateX(330%); }
+}
+
+.gx-launcher-rise {
+  animation: gx-launcher-rise 220ms cubic-bezier(.22, .61, .36, 1) both;
+}
+.gx-launcher-fade {
+  animation: gx-launcher-fade 170ms ease-out both;
+}
+
+/* 头部品牌徽标：珠光白圆角卡（与新 App 图标 paper 一致：白→暖白对角微渐变 + 暖灰描边 +
+   顶部内高光 + 柔和外投影），内放彩色品牌 G；入场一次上浮淡入。 */
+.gx-launcher-logo {
+  background: linear-gradient(135deg, #FFFFFF 0%, #FDFBF5 38%, #F7F4EC 72%, #FFFDF8 100%);
+  border: 1px solid rgba(230, 224, 213, 0.85);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 1px 2px rgba(22, 32, 58, 0.10), 0 3px 8px rgba(22, 32, 58, 0.08);
+  animation: gx-launcher-logo-in 320ms cubic-bezier(.22, .61, .36, 1) both;
+}
+
+/* 节点行：只过渡底色/边框/阴影，不做位移（列表内行位移动会显抖）。 */
+.gx-launcher-row {
+  transition: background-color 150ms ease-out, border-color 150ms ease-out,
+    box-shadow 150ms ease-out;
+}
+.gx-launcher-row:hover {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 2px 6px rgba(22, 32, 58, 0.08);
+}
+.gx-launcher-dot-live {
+  animation: gx-launcher-pulse 1.8s ease-in-out infinite;
+}
+
+/* 空态动作卡：hover 整卡轻微上浮 + 投影加深；箭头同步轻位移。 */
+.gx-launcher-cta {
+  transition: transform 190ms cubic-bezier(.22, .61, .36, 1),
+    box-shadow 190ms cubic-bezier(.22, .61, .36, 1),
+    border-color 150ms ease-out, background-color 150ms ease-out;
+}
+.gx-launcher-cta:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(22, 32, 58, 0.10);
+}
+.gx-launcher-cta:not(:disabled):active {
+  transform: translateY(0);
+}
+.gx-launcher-arrow {
+  transition: transform 190ms cubic-bezier(.22, .61, .36, 1);
+}
+.gx-launcher-cta:not(:disabled):hover .gx-launcher-arrow {
+  transform: translateX(3px);
+}
+
+/* 主 CTA：品牌暖→玫红柔和渐变底、白色文字、顶部内高光；扫光伪元素只播一次。 */
+.gx-launcher-cta-primary {
+  background: linear-gradient(135deg, #F7A81B 0%, #F5841F 40%, #E8447A 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 2px 6px rgba(245, 132, 31, 0.26);
+}
+.gx-launcher-cta-primary:not(:disabled):hover {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 6px 16px rgba(232, 68, 122, 0.28);
+}
+.gx-launcher-cta-primary::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.22) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: gx-launcher-sheen 650ms cubic-bezier(.22, .61, .36, 1) 1;
+  animation-delay: 280ms;
+}
+.gx-launcher-cta-primary:disabled::after {
+  animation: none;
+}
+
+/* 右下角常驻气泡：hover 微抬 + 阴影加深（过渡接管原 transition-colors）。 */
+.gx-launcher-bubble {
+  transition: transform 160ms cubic-bezier(.22, .61, .36, 1),
+    box-shadow 160ms cubic-bezier(.22, .61, .36, 1),
+    background-color 120ms ease-out, color 120ms ease-out;
+}
+.gx-launcher-bubble:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(22, 32, 58, 0.14);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gx-launcher-rise,
+  .gx-launcher-fade,
+  .gx-launcher-logo,
+  .gx-launcher-dot-live,
+  .gx-launcher-cta-primary::after {
+    animation: none;
+  }
+  .gx-launcher-row,
+  .gx-launcher-cta,
+  .gx-launcher-arrow,
+  .gx-launcher-bubble {
+    transition: none;
+  }
+  .gx-launcher-cta:not(:disabled):hover,
+  .gx-launcher-cta:not(:disabled):active {
+    transform: none;
+  }
+  .gx-launcher-bubble:hover {
+    transform: none;
+  }
+}
+
+/* ============ 壳底部状态条 + 节点切换侧滑抽屉（仅门控壳内） ============ */
+/* 与启动器同纪律：仅 ShellStatusDock（VITE_NODE_LAUNCHER=1 且物理在 Tauri 壳内）引用，
+   浏览器/fnOS/服务器永不渲染这些类名。动画用 transform/opacity（合成层、不触发布局）。 */
+
+/* 底部状态条＝壳附加的「独立整行」，不与内容抢位置、不遮挡任何内容：
+   - 仅壳内（html.gx-desktop-shell，且 #root 已 height:100%）把 App 根 .gx-shell-app 撑满；
+   - 主内容 .gx-shell-app-main flex:1、min-height:0 自适应；状态条 shrink-0 固定 38px 占末行；
+   - 业务壳（WorkspaceShell/AppShell/KbShell）根用的是 h-screen(=100vh)，在壳内主内容里
+     覆盖成 height:100%，于是内容整体上移让出底部一行，表格底部状态行不再被遮。
+   浏览器/fnOS 不命中 html.gx-desktop-shell：.gx-shell-app 退化为普通内容高，
+   内部 h-screen 原样 100vh，ShellStatusDock 又恒为 null —— 现网零变化。 */
+html.gx-desktop-shell .gx-shell-app {
+  height: 100%;
+}
+html.gx-desktop-shell .gx-shell-app-main {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+html.gx-desktop-shell .gx-shell-app-main .h-screen {
+  height: 100%;
+}
+/* 登录页/启动器整页用 min-h-screen(100vh)：在让出底部行的主内容区内按其自身高填满，
+   不再多出底部条那 38px 造成溢出。portal 到 body 的弹层不在此容器内，仍按视口，不受影响。 */
+html.gx-desktop-shell .gx-shell-app-main .min-h-screen {
+  min-height: 100%;
+}
+
+/* 底部条首次淡入（轻微上浮，幅度刻意小，避免常驻条跳眼）。 */
+@keyframes gx-dock-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.gx-shell-dock {
+  animation: gx-dock-in 200ms cubic-bezier(.22, .61, .36, 1) both;
+}
+
+/* 遮罩：淡入 / 淡出。 */
+@keyframes gx-dock-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes gx-dock-overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+.gx-dock-overlay-in { animation: gx-dock-overlay-in 200ms ease-out both; cursor: default; }
+.gx-dock-overlay-out { animation: gx-dock-overlay-out 180ms ease-in both; }
+
+/* 抽屉面板：自右缘滑入 / 向右滑回（与遮罩时长接近，统一手感）。 */
+@keyframes gx-dock-panel-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes gx-dock-panel-out {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+.gx-dock-panel-in {
+  animation: gx-dock-panel-in 220ms cubic-bezier(.22, .61, .36, 1) both;
+}
+.gx-dock-panel-out {
+  animation: gx-dock-panel-out 200ms cubic-bezier(.4, 0, .6, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gx-shell-dock,
+  .gx-dock-overlay-in,
+  .gx-dock-overlay-out,
+  .gx-dock-panel-in,
+  .gx-dock-panel-out {
+    animation: none;
   }
 }

@@ -49,6 +49,11 @@ export interface NodeRow {
   localDesired: "running" | "stopped" | null;
   /** 本地条目永久不可删（戴总硬规则 #2）；远端可删。 */
   removable: boolean;
+  /**
+   * 是否允许行内重命名。注册表真实条目恒 true；
+   * 仅面板为"从未初始化本机"合成的占位本机行为 false（尚未注册，无可改名实体）。
+   */
+  canRename: boolean;
   lastConnectedAt: string | null;
   /**
    * 仅本地行：壳内实时运行相位（由 applyLocalRuntime 从 localStatus 映射）。
@@ -97,6 +102,7 @@ function toRow(
       account: null,
       localDesired: localDesired ?? "running",
       removable: false,
+      canRename: true,
       lastConnectedAt: entry.lastConnectedAt,
     };
   }
@@ -114,6 +120,7 @@ function toRow(
     account: userDisplay(session),
     localDesired: null,
     removable: true,
+    canRename: true,
     lastConnectedAt: entry.lastConnectedAt,
   };
 }
@@ -137,6 +144,44 @@ export function buildNodeRows(
       return a.nodeId < b.nodeId ? -1 : 1;
     })
     .map((e) => toRow(e, state.activeNodeId, state.localDesired, sessions));
+}
+
+/**
+ * "从未初始化本机"的占位行（戴总交互硬规则：即便用户先直连了远端，切换页也要始终给一个
+ * 启动/进入本机的入口）。注册表中并无 local 条目时由 {@link ensureLocalRow} 合成在列表最前。
+ *
+ * nodeId 仍为 LOCAL_NODE_ID：点击「进入本机/启动」走的 connectLocal/startLocal 会幂等自建
+ * local 条目（addLocalNode），占位行随即被真实行取代。runtime 缺省为 undefined：
+ *   - 壳内 applyLocalRuntime 据 localStatus(added=false) 映射为 "absent"（显「未启用 + 进入本机 + 启动」）；
+ *   - 非壳/未注入实时态回落 unknown（单个「使用本机」旧形态，非壳零变化）。
+ * canRename=false：占位实体尚未注册，不提供改名（避免对不存在的条目调 rename → NODE_NOT_FOUND）。
+ */
+export function placeholderLocalRow(): NodeRow {
+  return {
+    kind: "local",
+    nodeId: LOCAL_NODE_ID,
+    title: "本机",
+    label: null,
+    subtitle: "本机数据",
+    baseURL: "",
+    active: false,
+    connected: false,
+    account: null,
+    localDesired: "stopped",
+    removable: false,
+    canRename: false,
+    lastConnectedAt: null,
+  };
+}
+
+/**
+ * 保证展示行里始终存在本机行：已有真实 local 行则原样返回；否则在最前补一个占位本机行。
+ * 纯函数、不改入参。仅用于面板**列表展示**——注册表为空的全新装仍走欢迎双 CTA（vm.isEmpty 不变），
+ * 故此处只在"有远端、无本机"时真正产生差异，修复"直连远端后回不去/起不了本机"的交互缺口。
+ */
+export function ensureLocalRow(rows: readonly NodeRow[]): NodeRow[] {
+  if (rows.some((r) => r.kind === "local")) return [...rows];
+  return [placeholderLocalRow(), ...rows];
 }
 
 /** 启动器整体视图状态：行列表 + 是否存在活动节点（决定进业务界面还是回连接界面）。 */

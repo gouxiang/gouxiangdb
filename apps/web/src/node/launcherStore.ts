@@ -29,7 +29,8 @@ import {
   type ResolverDeps,
 } from "./datasource";
 import type { KvStorage, RemoteSessionView } from "./remoteSessions";
-import { readAllRemoteSessions } from "./remoteSessions";
+import { readAllRemoteSessions, readRemoteSession } from "./remoteSessions";
+import type { UserDTO } from "@gx/shared-types";
 import { resolveApiBase } from "../lib/base";
 import { useAuthStore } from "../store/auth";
 import { loginRemoteNode } from "./handshake";
@@ -94,6 +95,12 @@ export interface LauncherStoreDeps extends ResolverDeps {
   /** 成品壳副作用钩子；不传＝非壳模式，connect/disconnect 走现状同步路径。 */
   shell?: ShellStoreHooks;
   /**
+   * 成品壳本机登录态监听（仅 deps.shell 存在时被订阅）：gx-auth 令牌变化（登录/注册成功、
+   * 登出、跨重启 hydrate）时回调一次，store 据此 refreshActiveLocal() 把 connectLocal 当拍
+   * 冻结的空令牌快照刷新成最新令牌。返回取消订阅。壳生产实现订阅 useAuthStore；非壳不传，零接线。
+   */
+  watchLocalToken?: (onChange: () => void) => () => void;
+  /**
    * 成品壳「添加远端节点」握手工厂（probe 同源转发）；非壳为 undefined，addAndConnectRemote
    * 缺省对显式 baseURL 直连握手。入参为可选最低兼容节点版本（透传 AddRemoteNodeForm）。
    */
@@ -113,6 +120,8 @@ export interface LauncherStore {
    * 只含当前注册表中存在的远端节点，不扫描整个 localStorage；本地 gx-auth 不在内。
    */
   getRemoteSessions(): RemoteSessionView[];
+  /** 读单个远端节点的已存会话（无则 null）；供活动会话 hook 取远端 user。 */
+  getRemoteSession(nodeId: string): RemoteSessionView | null;
   controller: LauncherController;
   /**
    * 是否为成品壳装配（deps.shell 存在）。UI 据此把原本直连 controller 的凭据重连端口
@@ -120,6 +129,18 @@ export interface LauncherStore {
    * 副作用。非壳恒 false，UI 走现状直连 controller，行为逐字节不变。
    */
   readonly shellBound: boolean;
+  /**
+   * 冷启动把壳代理上游补切到「跨重启恢复出的活动远端」的完成承诺。
+   * 背景：Rust 壳进程的代理上游恒从 Upstream::None 启动且**不跨进程持久化**
+   *（apps/desktop/src-tauri/src/upstream.rs），只有 gx:set_active_upstream 会改它；
+   * 而本仓库构造即 restore() 把 web 侧 resolver 指回上次活动节点。二者之间的缺口在
+   * 「App 冷启动 + 上次活动是已登录远端」时会让首个 /api 请求打到 None → 503。
+   * 故构造后仅在**壳装配 + 恢复活动节点是远端**时补一次 syncUpstream(remote)；
+   * 活动节点是本机时**绝不** syncUpstream local（内核冷启动未必在跑，维持由用户点
+   * 「进入本机」触发 start_local 的现状）；非壳/无活动远端恒为已 resolve，零行为变化。
+   * 失败不阻塞首屏（吞掉、壳上游保持 None），用户随后点连接会再切。
+   */
+  readonly restoreReady: Promise<void>;
   // 动作（与控制器同名但在变更后自动持久化 + 通知）
   /**
    * 连接本地。非壳模式：函数体零 await，状态在调用当拍同步提交（返回 Promise 仅为统一壳模式
@@ -129,6 +150,22 @@ export interface LauncherStore {
   connectLocal(): Promise<SwitchOutcome>;
   addRemote(input: { nodeId: string; baseURL: string; label?: string | null }): void;
   connectRemote(nodeId: string, creds?: RemoteCredentials): Promise<SwitchOutcome>;
+  /**
+   * 远端登录/注册成功后，把 JWT+user 写入该节点会话分键；活动节点同时重推带 token 的数据源
+   * （remote-empty → 已登录远端）。会话写在 remoteSessions 分键，**不**改注册表，故无需 persist
+   * 注册表；但要 emit 让订阅会话视图的 UI（账号/免密态）刷新。**不** syncUpstream——选路时
+   * （connectRemote）壳上游已切到该远端，补 token 不改变上游目标。
+   */
+  commitRemoteSession(nodeId: string, token: string, user: UserDTO | null): SwitchOutcome;
+  /** 局部更新某远端会话的 user（改密成功但 me() 失败时的本地兜底）。不改注册表、不通知、不切上游。 */
+  patchRemoteSessionUser(nodeId: string, patch: Partial<UserDTO>): void;
+  /**
+   * 远端会话失效（401）：清该节点会话但**保持选路态**（活动指针不变、壳上游仍指该远端），
+   * 活动节点重推 token=null 数据源（remote-empty），守卫把用户送回该远端自己的登录页。
+   * 与 disconnect 的差别：不 regDisconnect、activeNodeId 不置 null、**不** set_upstream(none)。
+   * 同步动作（无壳副作用），但返回 Promise 仅为与 disconnect 调用点签名统一。
+   */
+  deauthenticateRemote(nodeId: string): Promise<SwitchOutcome>;
   /** 同 connectLocal：非壳零 await 同步提交；壳模式切换后把壳上游对齐（远端/none）。 */
   disconnect(nodeId: string): Promise<SwitchOutcome>;
   /**
@@ -144,6 +181,13 @@ export interface LauncherStore {
   stopLocalOnly(): Promise<void>;
   removeRemote(nodeId: string): void;
   rename(nodeId: string, label: string | null): void;
+  /**
+   * 成品壳本机登录态刷新：当前活动节点是本机且 gx-auth 令牌刚到位（登录/注册成功、跨重启
+   * hydrate）后，用最新本地令牌重新 setActive 同源化数据源。非本机活动/无活动返回 null。
+   * 仅改 resolver 冻结的 token 快照（resolver 内部会通知切源桥；nodeId 不变故不清缓存），
+   * 不写注册表、不 store emit、不切壳上游。
+   */
+  refreshActiveLocal(): SwitchOutcome | null;
   /**
    * 成品壳「添加远端节点」握手工厂（probe 同源转发）；非壳为 undefined，AddRemoteNodeForm
    * 不传 performHandshake，addAndConnectRemote 缺省对显式 baseURL 直连（浏览器零变化）。
@@ -168,7 +212,21 @@ export function createLauncherStore(deps: LauncherStoreDeps): LauncherStore {
   const initial = parseRegistry(deps.storage.getItem(LAUNCHER_REGISTRY_STORAGE_KEY));
   const controller = newLauncherController({ ...deps, initialRegistry: initial });
   // 跨重启：构造即按注册表活动节点 + 已存会话重建活动数据源（resolver setActive）。
-  controller.restore();
+  const restored = controller.restore();
+
+  // 冷启动补切壳代理上游（弥补 Rust 上游不跨进程持久化，见接口 restoreReady 注释）：
+  // 仅壳装配 + 恢复出的活动节点确为远端时，把壳内 Mutex<Upstream> 对齐到该远端。
+  // - 活动节点是本机：不 syncUpstream local（冷启动内核未必在跑，由用户点「进入本机」
+  //   经 connectLocal 的 start_local+sync 触发，保持现状）；
+  // - 无活动节点 / 非壳：恒为已 resolve，不发任何 invoke；
+  // - 同步失败不阻塞首屏（catch 吞掉、上游保持 None），随后用户点连接会再切。
+  let restoreReady: Promise<void> = Promise.resolve();
+  if (deps.shell && restored.active && controller.getActiveNode()?.kind === "remote") {
+    restoreReady = deps.shell
+      .syncUpstream(restored.active, controller.getActiveNode())
+      .then(() => undefined)
+      .catch(() => undefined);
+  }
 
   const listeners = new Set<() => void>();
   function emit() {
@@ -180,6 +238,16 @@ export function createLauncherStore(deps: LauncherStoreDeps): LauncherStore {
   // 初始化即写一次（把可能被 parse 收敛过的形状回写，去脏）。
   persist();
 
+  // 成品壳：订阅 gx-auth 令牌。壳是「先连本机、后登录/注册」，connectLocal 当拍冻结的数据源
+  // 令牌为 null；登录成功令牌到位后，这里把本机活动节点的冻结快照刷新成最新令牌，随后的业务
+  // 请求才带得上 X-GX-Token（修复「登录成功立刻被弹回登录页」）。仅壳装配（deps.shell）接线；
+  // 非壳不传 watchLocalToken，零订阅、零行为变化。nodeId 恒为 local，切源桥不会清 react-query。
+  if (deps.shell && deps.watchLocalToken) {
+    deps.watchLocalToken(() => {
+      controller.refreshActiveLocal();
+    });
+  }
+
   function afterAction<T>(outcome: T): T {
     persist();
     emit();
@@ -189,6 +257,7 @@ export function createLauncherStore(deps: LauncherStoreDeps): LauncherStore {
   return {
     controller,
     shellBound: deps.shell !== undefined,
+    restoreReady,
     getState: () => controller.getState(),
     subscribe(fn) {
       listeners.add(fn);
@@ -208,6 +277,8 @@ export function createLauncherStore(deps: LauncherStoreDeps): LauncherStore {
         deps.storage,
         remoteEntries(controller.getState()).map((e) => e.nodeId),
       ),
+    // 读单个远端节点的会话（供活动会话 hook 取远端 user/守卫判定 mustChangePassword）。
+    getRemoteSession: (nodeId: string) => readRemoteSession(deps.storage, nodeId),
     // ── 非壳分支函数体内零 await：async 函数在首个 await 前同步执行到底，
     //    故浏览器/fnOS（deps.shell 缺省）下 persist/emit 与旧同步版本同拍发生，SSR 与同步测试零漂移。
     async connectLocal() {
@@ -237,6 +308,23 @@ export function createLauncherStore(deps: LauncherStoreDeps): LauncherStore {
         //（target=注册表保存的真实 http(s) 基址；JWT 仍由 X-GX-Token 透传，壳不持令牌）。
         await deps.shell.syncUpstream(outcome.active, controller.getActiveNode());
       }
+      emit();
+      return outcome;
+    },
+    commitRemoteSession(nodeId, token, user) {
+      // 会话写的是 remoteSessions 分键（控制器内部写 storage），注册表形状不变 → 无需 persist 注册表。
+      const outcome = controller.commitRemoteSession(nodeId, token, user);
+      // 不 syncUpstream：选路时壳上游已指向该远端，补 token 不改变上游目标。
+      emit();
+      return outcome;
+    },
+    patchRemoteSessionUser(nodeId, patch) {
+      controller.patchRemoteSessionUser(nodeId, patch);
+    },
+    async deauthenticateRemote(nodeId) {
+      // 清会话但保持选路态：控制器不 regDisconnect、activeNodeId 不变；壳上游**不**改（仍指该远端），
+      // 故这里刻意不调 deps.shell.syncUpstream。注册表未变也无需 persist；仍 emit 让会话视图刷新。
+      const outcome = controller.deauthenticateRemote(nodeId);
       emit();
       return outcome;
     },
@@ -281,6 +369,11 @@ export function createLauncherStore(deps: LauncherStoreDeps): LauncherStore {
     rename(nodeId, label) {
       controller.rename(nodeId, label);
       afterAction(undefined);
+    },
+    refreshActiveLocal() {
+      // 仅壳「先连本机、后登录」需要：把 connectLocal 当拍冻结的空令牌快照刷新为最新 gx-auth。
+      // 控制器内部只在活动节点确为本机时重推数据源；非本机/无活动返回 null（无任何副作用）。
+      return controller.refreshActiveLocal();
     },
     // 壳模式提供 probe 握手工厂；非壳为 undefined（AddRemoteNodeForm 回落直连握手）。
     addHandshake: deps.probeHandshake,
@@ -340,6 +433,14 @@ function shellDefaultDeps(): Omit<LauncherStoreDeps, "storage"> {
     getOrigin,
     getLocalToken: () => useAuthStore.getState().token ?? null,
     deriveDs: (entry, token) => deriveShellActiveDataSource(entry, token, getOrigin),
+    // 订阅 gx-auth 令牌：登录/注册成功（setAuth）后把本机活动数据源冻结的空令牌刷新为最新值。
+    // zustand 原生 subscribe 回调为 (state, prevState)；仅在 token 真正变化（登录/登出）时刷新，
+    // updateUser 等无关变更不触发。localStorage persist 同步 hydrate，故拿到的总是最新登录态。
+    // 仅壳装配消费（见 createLauncherStore 内 deps.shell 门控）。
+    watchLocalToken: (onChange) =>
+      useAuthStore.subscribe((state, prev) => {
+        if (state.token !== prev.token) onChange();
+      }),
     loginRemote: probeLoginRemote,
     probeHandshake: probePerformHandshake,
     shell: {

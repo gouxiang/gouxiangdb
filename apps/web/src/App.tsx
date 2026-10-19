@@ -13,7 +13,6 @@
 import type { ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from "react-router-dom";
 
-import { useAuthStore } from "./store/auth";
 import { CHANGE_PASSWORD_PATH, shouldForceChangePassword } from "./features/auth/force-change-guard";
 import { useBases, useTables, useViews, useCanCreateLibrary } from "./api/hooks";
 import { Spinner } from "./components/ui";
@@ -43,8 +42,9 @@ import { WorkspaceSettingsPage } from "./features/workspace/WorkspaceSettingsPag
 import PermPanel from "./features/authz/PermPanel";
 import { NodeLauncherGate } from "./node/NodeLauncherGate";
 import { launcherEnabled } from "./node/desktopGate";
-import { useRemoteSessionActive } from "./node/useActiveSession";
-import { LauncherBubble } from "./node/LauncherBubble";
+import { useActiveSession } from "./node/activeSession";
+import { useHasActiveNode, isNodeGateExemptPath } from "./node/useHasActiveNode";
+import { ShellStatusDock } from "./node/ShellStatusDock";
 
 function Loading() {
   return (
@@ -57,26 +57,50 @@ function Loading() {
 /**
  * 强制改密守卫：已登录且 user.mustChangePassword=true 时，除改密页外一律重定向过去
  * （判定与路径常量见 features/auth/force-change-guard.ts）。
+ * user 统一读活动会话视图：本地槽取 gx-auth.user，远端槽取该节点会话分键里的 user，
+ * 故远端节点自己的首管理员改密要求同样生效；门控关时与直接读 gx-auth 逐字节等价。
  */
 function RequirePasswordChanged({ children }: { children: ReactNode }) {
-  const user = useAuthStore((s) => s.user);
+  const session = useActiveSession();
   const { pathname } = useLocation();
-  if (shouldForceChangePassword(user, pathname)) {
+  if (shouldForceChangePassword(session.user, pathname)) {
     return <Navigate to={CHANGE_PASSWORD_PATH} replace />;
   }
   return <>{children}</>;
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  const token = useAuthStore((s) => s.token);
-  // 桌面节点启动器（门控开启）下，连远端节点时本地 gx-auth 无 token，但 resolver 活动槽
-  // 是已登录远端会话（apiFetch 自动带远端 JWT）——此时也放行。门控关闭（浏览器/fnOS/服务器）
-  // 恒为 false，整个判定与今天逐字节一致。
-  const remoteActive = useRemoteSessionActive();
-  if (token) return <>{children}</>;
-  if (remoteActive) return <>{children}</>;
-  // 桌面未连任何节点 → 回启动器；现网门控关 → 回本地登录页（原行为）。
-  return <Navigate to={launcherEnabled() ? "/launcher" : "/login"} replace />;
+  // 活动会话视图：本地槽认 gx-auth token；远端槽认 resolver 当前数据源的 token
+  //（remote-empty 选路态 authenticated=false）。门控关时 session 即纯本地视图，与今天一致。
+  const session = useActiveSession();
+  if (session.authenticated) return <>{children}</>;
+  // 桌面未认证：已选路到远端（remote-empty）→ 去该远端自己的登录页；连节点都没选 → 回启动器。
+  // 现网门控关 → 回本地登录页（原行为）。
+  if (launcherEnabled()) {
+    return <Navigate to={session.kind === "remote" ? "/login" : "/launcher"} replace />;
+  }
+  return <Navigate to="/login" replace />;
+}
+
+/**
+ * 活动节点顶层守卫（仅桌面壳生效）：必须在启动器里选了某个活动节点（注册表 activeNodeId
+ * 非空）才允许停留在任何「需要连着节点」的页面——**包括 /login 在内**。
+ *
+ * 背景（2026-10-19 两次修死锁）：在抽屉里断开当前活动节点后 activeNodeId=null、壳上游切 none。
+ * 若只在业务壳套守卫，用户从**登录页**里打开抽屉断开时（登录页在业务守卫之外）仍会停在登录页、
+ * 而底部状态条因无活动节点整条隐藏（连切换入口都没了）→ 死锁。故提到全局，任何非豁免页都回
+ * /launcher 重新选路。
+ *
+ * 豁免（无活动节点也合法）：/launcher（节点选择页本身）与公开匿名页（/s /share /join /invite）。
+ * 门控关/非壳 useHasActiveNode 恒 true，浏览器/fnOS 现网零变化。
+ */
+function RequireNode({ children }: { children: ReactNode }) {
+  const hasActive = useHasActiveNode();
+  const { pathname } = useLocation();
+  if (!hasActive && !isNodeGateExemptPath(pathname)) {
+    return <Navigate to="/launcher" replace />;
+  }
+  return <>{children}</>;
 }
 
 /** / → 第一个 Base */
@@ -130,21 +154,30 @@ function TableIndexRedirect({ baseId, tableId }: { baseId?: string; tableId?: st
 }
 
 export default function App() {
-  const token = useAuthStore((s) => s.token);
+  // /login 只在「活动源已认证」时跳走：本地已登录（gx-auth 有 token）或远端节点会话已带 JWT。
+  // remote-empty 选路态不跳——用户正是要在该页看到远端节点自己的登录表单。
+  const session = useActiveSession();
   const location = useLocation();
   // 路由切换时重置错误边界（否则一次崩溃后切到其它页面仍显示错误态）
   const boundaryKey = location.pathname;
 
   return (
-    <>
+    <div className="gx-shell-app flex h-full flex-col">
       {/* R-D-19 离线横幅：在线时渲染 null（零布局影响）；恢复后自动消失 */}
       <OfflineBanner />
       {/* 浏览器标题跟随后台品牌产品名（所有路由共享，含登录页/公开分享页） */}
       <BrandingTitle />
-      {/* 桌面节点悬浮入口：门控关闭（浏览器/fnOS）恒为 null，零布局影响；门控开才显示当前源 */}
-      <LauncherBubble />
+      {/* 主内容区：壳内 flex:1 自适应，把底部一行让给 ShellStatusDock（见 index.css
+          gx-shell-app：仅 html.gx-desktop-shell 作用域生效，浏览器/fnOS 下仍随 h-screen 布局，零变化）。 */}
+      <div className="gx-shell-app-main flex min-h-0 flex-1 flex-col">
+      {/* 顶层活动节点守卫：覆盖含 /login 在内的所有页（无活动节点即回 /launcher），豁免启动器
+          自身与公开匿名页。这样无论从业务页还是登录页打开抽屉断开，都不会卡死。 */}
+      <RequireNode>
       <Routes>
-      <Route path="/login" element={token ? <Navigate to="/" replace /> : <LoginPage />} />
+      <Route
+        path="/login"
+        element={session.authenticated ? <Navigate to="/" replace /> : <LoginPage />}
+      />
       {/*
         桌面节点启动器（DESIGN-MACOS §8.5）：仅桌面构建注入 VITE_NODE_LAUNCHER=1 时可进入；
         浏览器/fnOS/服务器构建下 NodeLauncherGate 内部直接重定向回 "/"，本路由对现网零行为变化。
@@ -180,17 +213,17 @@ export default function App() {
         统一一壳）；off（menu 404）→ ShellGate 内部按路径回退旧 AppShell/KbShell。
         内容路由只有一组、路径全部不变（N5/ADR-0028），旧两壳文件保留供回退。
       */}
-      <Route
-        element={
-          <RequireAuth>
-            <RequirePasswordChanged>
-              <ErrorBoundary key={`shell-${boundaryKey}`}>
-                <ShellGate />
-              </ErrorBoundary>
-            </RequirePasswordChanged>
-          </RequireAuth>
-        }
-      >
+        <Route
+          element={
+            <RequireAuth>
+              <RequirePasswordChanged>
+                <ErrorBoundary key={`shell-${boundaryKey}`}>
+                  <ShellGate />
+                </ErrorBoundary>
+              </RequirePasswordChanged>
+            </RequireAuth>
+          }
+        >
         <Route path="/" element={<RootRedirect />} />
 
         {/* 数据表资产（旧 AppShell 内容） */}
@@ -219,6 +252,12 @@ export default function App() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
-    </>
+      </RequireNode>
+      </div>
+      {/* 桌面壳底部状态条（节点/信号+实时ms/核心版本/壳版本）＋节点切换侧滑抽屉：
+          门控开且物理在 Tauri 壳内才渲染，浏览器/fnOS 恒为 null（不占这一行）。
+          作为壳附加 chrome 的最后一行（shrink-0），内容区整体上移、互不遮挡。取代旧右下悬浮球。 */}
+      <ShellStatusDock />
+    </div>
   );
 }

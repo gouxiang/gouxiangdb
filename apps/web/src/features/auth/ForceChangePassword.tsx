@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Auth, ApiError } from "../../api/client";
 import { useAuthStore } from "../../store/auth";
+import { patchActiveRemoteUser, refreshActiveSourceUser } from "../../node/activeAuth";
 import { Button, toast } from "../../components/ui";
 import { LoginBrandPanel } from "./LoginBrandPanel";
 import { PasswordInput } from "./PasswordInput";
@@ -66,11 +67,18 @@ export default function ForceChangePassword() {
       // 这里拉一次最新 user 写回 store，否则 App 里的守卫会立刻把人挡回本页形成死循环。
       try {
         const { user } = await Auth.me();
-        setAuth(useAuthStore.getState().token ?? "", user);
+        // 分槽：活动源是远端节点时，用当前活动数据源 token + 最新 user 重写该节点会话分键
+        //（改密接口只回 {ok:true}，JWT 是否换发以随后请求携带的当前 token 为准）；
+        // 本地源/门控关 handled=false，维持原写 gx-auth 行为，现网逐字节不变。
+        const { handled } = refreshActiveSourceUser(user);
+        if (!handled) setAuth(useAuthStore.getState().token ?? "", user);
       } catch {
         // GET /api/auth/me 在闸门白名单内，正常不会失败。万一网络抖动，按「改密已成功」
-        // 这个事实在本地清标记，避免把用户永久卡在本页出不去。
-        updateUser({ mustChangePassword: false });
+        // 这个事实清掉 mustChangePassword 标记，避免把用户永久卡在本页出不去。
+        // 远端源就地补丁该节点会话 user；本地源照旧 updateUser 写 gx-auth。
+        if (!patchActiveRemoteUser({ mustChangePassword: false })) {
+          updateUser({ mustChangePassword: false });
+        }
       }
       qc.invalidateQueries({ queryKey: ["me"] });
       toast("密码已修改，正在进入工作台", "success");

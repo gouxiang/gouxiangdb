@@ -11,7 +11,7 @@
 // 定位 fixed 右下角、最高浮层；不进业务壳布局流，对任何页面尺寸无影响。
 
 import { useLocation, useNavigate } from "react-router-dom";
-import { Icon } from "../components/icons";
+import { BrandMark } from "../components/icons";
 import { launcherEnabled } from "./desktopGate";
 import { useLauncher } from "./useLauncher";
 import type { LauncherStore } from "./launcherStore";
@@ -44,14 +44,22 @@ function BubbleInner({ store }: { store?: LauncherStore }) {
       title="管理节点"
       aria-label="管理节点"
       className={
-        "gx-z-popover fixed bottom-4 right-4 inline-flex h-9 items-center gap-1.5 rounded-full " +
+        "gx-launcher-bubble gx-z-popover fixed bottom-4 right-4 inline-flex h-9 items-center gap-1.5 rounded-full " +
         "border border-gx-border bg-gx-surface pl-2.5 pr-3 text-gx-13 font-medium " +
-        "text-gx-text-secondary shadow-gx-md transition-colors duration-[120ms] " +
+        "text-gx-text-secondary shadow-gx-md " +
         "hover:bg-gx-row-hover focus:outline-none focus:ring-2 focus:ring-gx-accent/50"
       }
     >
-      <span className={row.active ? "text-gx-accent" : "text-gx-text-tertiary"}>
-        <Icon name={row.kind === "local" ? "database" : "globe"} size={15} />
+      <span
+        className={
+          row.kind === "local"
+            ? "shrink-0"
+            : row.active
+              ? "shrink-0 text-gx-accent"
+              : "shrink-0 text-gx-text-tertiary"
+        }
+      >
+        <BrandMark tone={row.kind === "local" ? "color" : "mono"} className="h-[15px] w-[15px]" />
       </span>
       <span className="max-w-[140px] truncate">{label}</span>
     </button>

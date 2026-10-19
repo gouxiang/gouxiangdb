@@ -5,7 +5,7 @@
 // 非壳/测试）时维持单个「使用本机」旧形态——非壳零变化的关键。
 
 import { Button, IconButton, Input } from "../components/ui";
-import { Icon, type IconName } from "../components/icons";
+import { Icon, BrandMark } from "../components/icons";
 import type { NodeRow, LocalRuntimePhase } from "./launcherViewModel";
 import { hostLabel } from "./launcherViewModel";
 
@@ -25,6 +25,8 @@ export interface NodeListProps {
   onDisconnect?: (nodeId: string) => void;
   onRemove?: (nodeId: string) => void;
   onConnectLocal?: () => void;
+  /** 本机已是活动节点（使用中）时点「进入」直接进工作区，不重连、不重启内核。 */
+  onEnterLocal?: () => void;
   /** 独立启动本机内核（不进入）；未注入或 runtime 未知时不渲染启停按钮。 */
   onStartLocal?: () => void;
   /** 独立停止本机内核（不断开活动指针）。 */
@@ -37,7 +39,11 @@ export interface NodeListProps {
 
 function statusText(row: NodeRow): string {
   if (row.active) return "使用中";
-  if (row.kind === "remote") return row.connected ? "可免密重连" : "未连接";
+  if (row.kind === "remote") {
+    // 纯选路后两种非活动态只描述该节点记住的会话：点「进入」都会切到该远端，
+    // 有记住会话直接进业务壳，无会话打开它自己的登录页（remote-empty）。
+    return row.connected ? "已记住登录" : "需要登录";
+  }
   // 本地行：壳内四态走实时相位；unknown（非壳/未注入）回落期望态旧推导。
   switch (row.runtime) {
     case "ready":
@@ -62,7 +68,14 @@ function RuntimeDot({ phase }: { phase: LocalRuntimePhase | undefined }) {
       : phase === "starting"
         ? "bg-gx-warning"
         : "bg-gx-text-faint";
-  return <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${cls}`} />;
+  // ready 点柔和呼吸（1.8s）；starting/stopped/absent 静态，避免误导。
+  const pulse = phase === "ready" ? " gx-launcher-dot-live" : "";
+  return (
+    <span
+      aria-hidden="true"
+      className={`h-1.5 w-1.5 shrink-0 rounded-full${pulse} ${cls}`}
+    />
+  );
 }
 
 /** 清空自定义名后回落的默认名（本地「本机」；远端取 host）。 */
@@ -140,6 +153,7 @@ export function NodeList({
   onDisconnect,
   onRemove,
   onConnectLocal,
+  onEnterLocal,
   onStartLocal,
   onStopLocal,
   onStartRename,
@@ -156,25 +170,41 @@ export function NodeList({
   }
   return (
     <ul className="flex flex-col gap-1.5">
-      {rows.map((row) => {
+      {rows.map((row, idx) => {
         // 面板本地 busy id 形如 "local-enter"/"local-start"（旧测试直接传 "local"）；远端 id 为 hex。
         const localBusy =
           row.kind === "local" && !!busyNodeId && busyNodeId.startsWith("local");
         const busy = busyNodeId === row.nodeId || localBusy;
         const editing = rename?.nodeId === row.nodeId;
-        const icon: IconName = row.kind === "local" ? "database" : "globe";
+        // 统一品牌 G：本机行用彩色品牌带，远端行用单色 currentColor（活动行随 gx-accent）。
+        const isLocal = row.kind === "local";
         return (
           <li
             key={row.nodeId}
+            style={{ animationDelay: `${Math.min(idx * 40, 200)}ms` }}
             className={
-              "flex items-center gap-2.5 rounded-gx-lg border px-3 py-2.5 " +
+              "gx-launcher-row gx-launcher-rise relative flex items-center gap-2.5 rounded-gx-lg border px-3 py-2.5 " +
               (row.active
                 ? "border-gx-accent/40 bg-gx-accent-bg"
-                : "border-gx-border bg-gx-surface")
+                : "border-gx-border bg-gx-surface hover:border-gx-accent/30 hover:bg-gx-row-hover")
             }
           >
-            <span className={row.active ? "text-gx-accent" : "text-gx-text-tertiary"}>
-              <Icon name={icon} size={16} />
+            {row.active && (
+              <span
+                aria-hidden="true"
+                className="absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-gx-accent/60"
+              />
+            )}
+            <span
+              className={
+                isLocal
+                  ? "shrink-0"
+                  : row.active
+                    ? "shrink-0 text-gx-accent"
+                    : "shrink-0 text-gx-text-tertiary"
+              }
+            >
+              <BrandMark tone={isLocal ? "color" : "mono"} className="h-4 w-4" />
             </span>
 
             <div className="min-w-0 flex-1">
@@ -206,7 +236,7 @@ export function NodeList({
                   <span className="truncate text-gx-14 font-medium text-gx-text-primary">
                     {row.title}
                   </span>
-                  {onStartRename && (
+                  {onStartRename && row.canRename && (
                     <IconButton
                       icon="edit"
                       size={13}
@@ -248,16 +278,48 @@ export function NodeList({
                     onClick={() => onRenameCancel?.()}
                   />
                 </>
+              ) : row.active && row.kind === "local" ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={busy}
+                    onClick={() => onEnterLocal?.()}
+                  >
+                    进入
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    loading={busy}
+                    disabled={busy}
+                    onClick={() => onDisconnect?.(row.nodeId)}
+                  >
+                    断开
+                  </Button>
+                </>
               ) : row.active ? (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  loading={busy}
-                  disabled={busy}
-                  onClick={() => onDisconnect?.(row.nodeId)}
-                >
-                  断开
-                </Button>
+                // 活动远端行：给「进入」（对已活动远端幂等重选路，记住会话毫秒直进工作区）
+                // +「断开」。修复"远端登录后回切换页无法再回到该远端"的回归。
+                <>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={busy}
+                    onClick={() => onConnectRemote?.(row.nodeId)}
+                  >
+                    进入
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    loading={busy}
+                    disabled={busy}
+                    onClick={() => onDisconnect?.(row.nodeId)}
+                  >
+                    断开
+                  </Button>
+                </>
               ) : row.kind === "local" ? (
                 <LocalActions
                   runtime={row.runtime}
@@ -274,7 +336,7 @@ export function NodeList({
                   disabled={busy}
                   onClick={() => onConnectRemote?.(row.nodeId)}
                 >
-                  连接
+                  进入
                 </Button>
               )}
               {!editing && row.removable && (

@@ -13,6 +13,7 @@ import {
 } from "./nodeMessages";
 import {
   addAndConnectRemote,
+  addAndRouteRemote,
   connectExistingRemote,
   normalizeNodeLabel,
   shellConnectPort,
@@ -435,6 +436,149 @@ describe("connectExistingRemote", () => {
       store,
     );
     expect(r).toEqual({ kind: "error", error: { stage: "login", code: "invalid_credentials" } });
+    expect(store.activeNodeId).toBeNull();
+  });
+});
+
+describe("addAndRouteRemote（连接＝只选路，无账号密码）", () => {
+  /** 纯选路版假仓库：connectRemote 不登录，active 数据源 token 恒 null（remote-empty）。 */
+  function makeRouteStore(opts: { existing?: StoredNodeEntry[]; connectThrows?: boolean } = {}): FakeStore {
+    const entries = [...(opts.existing ?? [])];
+    const store: FakeStore = {
+      entries,
+      activeNodeId: null,
+      calls: [],
+      getState: () => ({
+        version: 1 as const,
+        entries,
+        activeNodeId: store.activeNodeId,
+        localDesired: null,
+      }),
+      getNode: (nodeId: string) => entries.find((e) => e.nodeId === nodeId) ?? null,
+      addRemote(input) {
+        entries.push({
+          kind: "remote",
+          nodeId: input.nodeId,
+          baseURL: input.baseURL,
+          label: input.label ?? null,
+          lastConnectedAt: null,
+        });
+        store.calls.push(`add:${input.nodeId}`);
+      },
+      async connectRemote(nodeId, creds) {
+        if (opts.connectThrows) throw new Error("upstream switch failed");
+        // 纯选路铁律：收到的 creds 必为 undefined（不收集账号密码）。
+        expect(creds).toBeUndefined();
+        store.calls.push(`connect:${nodeId}`);
+        store.activeNodeId = nodeId;
+        const entry = entries.find((e) => e.nodeId === nodeId)!;
+        return {
+          state: store.getState(),
+          active: {
+            nodeId,
+            kind: "remote" as const,
+            baseURL: entry.baseURL,
+            token: null, // remote-empty
+            wsOrigin: "",
+          },
+        };
+      },
+      removeRemote(nodeId) {
+        const i = entries.findIndex((e) => e.nodeId === nodeId);
+        if (i >= 0) entries.splice(i, 1);
+        store.calls.push(`remove:${nodeId}`);
+        if (store.activeNodeId === nodeId) store.activeNodeId = null;
+      },
+    };
+    return store;
+  }
+
+  it("网址非法 → invalid_url，不握手不入册", async () => {
+    const store = makeRouteStore();
+    const performHandshake = vi.fn(async () => okHandshake);
+    for (const url of ["", "   ", "ht tp://x:1", "!!!"]) {
+      const res = await addAndRouteRemote(
+        { url },
+        { store, nodeIdFor: fixedHasher, performHandshake },
+      );
+      expect(res).toEqual({ kind: "error", error: { stage: "form", code: "invalid_url" } });
+    }
+    expect(performHandshake).not.toHaveBeenCalled();
+    expect(store.entries).toHaveLength(0);
+    expect(store.calls).toEqual([]);
+  });
+
+  it("成功：规范化+匿名握手+入册+纯选路（不传凭据、active token=null=remote-empty）", async () => {
+    const store = makeRouteStore();
+    const hs = vi.fn(async () => okHandshake);
+    const res = await addAndRouteRemote(
+      { url: "HOST:3001/app/", label: "  家里的库  " },
+      { store, nodeIdFor: fixedHasher, performHandshake: hs },
+    );
+    expect(hs).toHaveBeenCalledTimes(1);
+    expect(hs).toHaveBeenCalledWith("http://host:3001/app");
+    expect(res.kind).toBe("routed");
+    if (res.kind !== "routed") throw new Error("should route");
+    expect(res.nodeId).toBe("abcdef012345");
+    expect(res.baseURL).toBe("http://host:3001/app");
+    expect(res.handshake).toBe(okHandshake);
+    expect(res.outcome.active?.token).toBeNull();
+    expect(store.entries[0]!.label).toBe("家里的库");
+    expect(store.activeNodeId).toBe("abcdef012345");
+    expect(store.calls).toEqual(["add:abcdef012345", "connect:abcdef012345"]);
+  });
+
+  it("同基址已在注册表 → duplicate，不握手不选路", async () => {
+    const existing: StoredNodeEntry = {
+      kind: "remote",
+      nodeId: "abcdef012345",
+      baseURL: "http://host:3001",
+      label: null,
+      lastConnectedAt: null,
+    };
+    const store = makeRouteStore({ existing: [existing] });
+    const hs = vi.fn(async () => okHandshake);
+    const res = await addAndRouteRemote(
+      { url: "http://host:3001/" },
+      { store, nodeIdFor: fixedHasher, performHandshake: hs },
+    );
+    expect(res).toEqual({ kind: "error", error: { stage: "form", code: "duplicate" } });
+    expect(hs).not.toHaveBeenCalled();
+    expect(store.entries).toHaveLength(1);
+  });
+
+  it("远端空库 not_initialized → fail-closed，握手分类直出、不入册", async () => {
+    const store = makeRouteStore();
+    const res = await addAndRouteRemote(
+      { url: "http://newhost:3001" },
+      {
+        store,
+        nodeIdFor: fixedHasher,
+        performHandshake: vi.fn(async () => {
+          throw new HandshakeError("not_initialized");
+        }),
+      },
+    );
+    expect(res).toEqual({
+      kind: "error",
+      error: { stage: "handshake", code: "not_initialized" },
+    });
+    expect(store.entries).toHaveLength(0);
+    expect(store.activeNodeId).toBeNull();
+  });
+
+  it("选路/壳上游切换失败 → 回滚刚加入的残条目，活动源不变", async () => {
+    const store = makeRouteStore({ connectThrows: true });
+    const res = await addAndRouteRemote(
+      { url: "http://host:3001" },
+      { store, nodeIdFor: fixedHasher, performHandshake: vi.fn(async () => okHandshake) },
+    );
+    expect(res).toEqual({
+      kind: "error",
+      error: { stage: "handshake", code: "unreachable" },
+    });
+    expect(store.entries).toHaveLength(0); // 回滚
+    expect(store.calls).toEqual(["add:abcdef012345", "remove:abcdef012345"]);
     expect(store.activeNodeId).toBeNull();
   });
 });

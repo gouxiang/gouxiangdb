@@ -4,9 +4,11 @@ import { describe, it, expect, afterEach } from "vitest";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import { NodeLauncherGate } from "./NodeLauncherGate";
+import { NodeLauncherGate, enterTargetNow } from "./NodeLauncherGate";
 import { createLauncherStore, type LauncherStore } from "./launcherStore";
 import { __resetLauncherStoreForTest } from "./launcherStore";
+import { dataSourceResolver } from "./datasource";
+import { LOCAL_NODE_ID } from "./resolve";
 import type { KvStorage } from "./remoteSessions";
 import { __resetUnauthorizedBridgeForTest } from "./unauthorizedBridge";
 
@@ -69,5 +71,47 @@ describe("NodeLauncherGate", () => {
     const html = renderGate(true, store);
     expect(html).toContain("本机");
     expect(html).toContain("添加网络节点");
+  });
+});
+
+// enterTargetNow 在选路成功当拍实时读 resolver 单例（避免闭包里的渲染前快照把带会话直进误判成未登录）。
+describe("enterTargetNow（选路成功当拍分流）", () => {
+  afterEach(() => {
+    dataSourceResolver.setActive(null);
+    __resetLauncherStoreForTest();
+  });
+
+  function routedStore(): LauncherStore {
+    return createLauncherStore({
+      storage: new MemStorage(),
+      resolver: dataSourceResolver,
+      getLocalBase: () => "",
+      getOrigin: () => "http://localhost",
+      getLocalToken: () => null,
+    });
+  }
+
+  it("本机首 boot 未登录（local token=null）→ /login 首管理员引导", async () => {
+    const store = routedStore();
+    await store.connectLocal();
+    expect(dataSourceResolver.current().kind).toBe("local");
+    expect(dataSourceResolver.current().nodeId).toBe(LOCAL_NODE_ID);
+    expect(enterTargetNow()).toBe("/login");
+  });
+
+  it("远端无会话纯选路（remote-empty）→ /login，即该远端节点自己的登录页", async () => {
+    const store = routedStore();
+    store.addRemote({ nodeId: "abc123def456", baseURL: "http://nas:3001" });
+    await store.connectRemote("abc123def456");
+    expect(dataSourceResolver.current().kind).toBe("remote");
+    expect(enterTargetNow()).toBe("/login");
+  });
+
+  it("远端有记住会话（带 JWT）→ / 直接进业务壳", async () => {
+    const store = routedStore();
+    store.addRemote({ nodeId: "abc123def456", baseURL: "http://nas:3001" });
+    store.commitRemoteSession("abc123def456", "remembered-jwt", null);
+    await store.connectRemote("abc123def456");
+    expect(enterTargetNow()).toBe("/");
   });
 });

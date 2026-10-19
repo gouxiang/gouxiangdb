@@ -147,6 +147,86 @@ export async function addAndConnectRemote(
   return { kind: "connected", nodeId, baseURL: normalized.baseURL, handshake, outcome };
 }
 
+/** 「只选路」添加节点的入参：只要网址 + 可选名称，不收账号密码。 */
+export interface RouteRemoteInput {
+  /** 用户手输的节点网址（裸 host:port 或完整 http(s)://…[/basePath]）。 */
+  url: string;
+  /** 可选显示名；空白等价于不填。 */
+  label?: string | null;
+}
+
+export type RouteRemoteResult =
+  | {
+      kind: "routed";
+      nodeId: string;
+      baseURL: string;
+      /** 匿名握手画像（供 UI 展示版本等）。 */
+      handshake: NodeHandshake;
+      outcome: SwitchOutcome;
+    }
+  | { kind: "error"; error: AddNodeErrorKind };
+
+/**
+ * 执行「添加并进入远端节点」纯选路编排（2026-10「连接＝只选路」）。
+ *
+ * 与 addAndConnectRemote 的差别：**不收集、不校验、不发送任何账号密码，不发登录请求**。
+ * 走完：规范化网址 → 派生 nodeId → 注册表查重 → 匿名三探针握手（远端空库 not_initialized
+ * 仍 fail-closed）→ 入册 → connectRemote 纯选路（无会话即激活 token=null 的 remote-empty，
+ * 壳上游切到该远端，界面随即展示该远端节点自己的登录页）。connectRemote/壳上游切换若失败，
+ * 回滚刚加入的残条目；绝不静默回落本机、绝不改当前活动数据源（失败时）。
+ */
+export async function addAndRouteRemote(
+  input: RouteRemoteInput,
+  deps: AddRemoteDeps,
+): Promise<RouteRemoteResult> {
+  // 1) 网址规范化（补协议 / host 小写 / 去尾斜杠 / 拒绝非法 host）。
+  const normalized = normalizeNodeUrl(input.url);
+  if (!normalized) return { kind: "error", error: { stage: "form", code: "invalid_url" } };
+
+  const label = normalizeNodeLabel(input.label);
+
+  // 2) 派生稳定 nodeId。
+  const nodeIdFor = deps.nodeIdFor ?? nodeIdFromBaseURL;
+  const nodeId = await nodeIdFor(normalized.baseURL);
+
+  // 3) 注册表查重（同规范化基址 = 同 nodeId）；已在列表则引导直接连接，不重复握手。
+  if (deps.store.getState().entries.some((e: StoredNodeEntry) => e.nodeId === nodeId)) {
+    return { kind: "error", error: { stage: "form", code: "duplicate" } };
+  }
+
+  // 4) 匿名三探针握手（对显式 baseURL）。分类错误直接返回，尚未入册、无污染；
+  //    远端空库 not_initialized 在握手层即 fail-closed（瘦客户端不承接远端自举）。
+  const performHandshake =
+    deps.performHandshake ??
+    ((baseURL: string) => handshakeNode({ baseURL, minNodeVersion: deps.minNodeVersion }));
+  let handshake: NodeHandshake;
+  try {
+    handshake = await performHandshake(normalized.baseURL);
+  } catch (err) {
+    if (err instanceof HandshakeError) {
+      return { kind: "error", error: { stage: "handshake", code: err.code } };
+    }
+    return { kind: "error", error: { stage: "handshake", code: "unreachable" } };
+  }
+
+  // 5) 入册（无活动指针变更前，条目先存在）。
+  deps.store.addRemote({ nodeId, baseURL: normalized.baseURL, label });
+
+  // 6) 纯选路：不传凭据，不登录。有记住的会话则带 JWT 直接进；无会话激活 remote-empty，
+  //    壳上游切到该远端，用户随即看到该远端自己的登录页。
+  let outcome: SwitchOutcome;
+  try {
+    outcome = await deps.store.connectRemote(nodeId);
+  } catch {
+    // 选路/壳上游切换失败 → 回滚第 5 步残条目（removeRemote 对缺失条目幂等）。
+    deps.store.removeRemote(nodeId);
+    // 纯选路无登录环节，统一收口为握手后不可达类错误，不暴露内部细节。
+    return { kind: "error", error: { stage: "handshake", code: "unreachable" } };
+  }
+
+  return { kind: "routed", nodeId, baseURL: normalized.baseURL, handshake, outcome };
+}
+
 // 重新导出哈希类型，便于装配处/测试在不直接依赖 resolve 的情况下引用。
 export type { StringHasher };
 

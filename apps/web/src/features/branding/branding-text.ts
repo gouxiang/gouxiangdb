@@ -36,3 +36,22 @@ export function renderCopyright(
   if (!raw) return "";
   return raw.split("{year}").join(String(year));
 }
+
+/**
+ * 派生「服务端网址」在未手动固定时的当前默认值（0.2.5）。
+ *
+ * 品牌 serverBaseUrl 留空＝自动识别，实际生效的对外地址就是「当前页面来源 + 部署子路径」：
+ *   - 根部署：basePath 传 "" → 仅 origin，如 http://192.168.31.183:5666；
+ *   - 子路径部署：basePath 传去尾斜杠的前缀，如 https://gx.example.com/app/gouxiangdb；
+ *   - 桌面壳：壳在 127.0.0.1 随机口同源托管，得到 http://127.0.0.1:<port>（本机回环地址，
+ *     本就不适合对外分享，仅用于让管理员「看见当前连到哪」）。
+ *
+ * 纯函数、不直接读 window（SSR 下无 window）：由调用方注入 origin / 已去尾斜杠的 basePath，
+ * 便于 node 单测；origin 为空（SSR）时返回 ""，调用方据此不渲染自动地址块。
+ */
+export function deriveAutoServerBaseUrl(origin: string, basePath: string): string {
+  const o = origin.trim();
+  if (!o) return "";
+  const p = basePath.trim().replace(/\/+$/, "");
+  return `${o.replace(/\/+$/, "")}${p}`;
+}

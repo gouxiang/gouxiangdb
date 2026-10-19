@@ -62,6 +62,23 @@ describe("LauncherPanel", () => {
     expect(html).not.toContain("节点网址");
   });
 
+  it("只连过远端、从未初始化本机：列表态仍在最前给本机入口（不因其为占位行而可改名）", () => {
+    const store = makeStore();
+    // 不调 connectLocal：注册表里只有一个远端条目（复现"先直连远端后回切换页"）。
+    store.addRemote({ nodeId: "abc123def456", baseURL: "http://nas:3001", label: "公司库" });
+    const html = renderToStaticMarkup(
+      React.createElement(LauncherPanel, { store }),
+    );
+    // 列表态（非空注册表 → 非欢迎双 CTA）。
+    expect(html).not.toContain("在这台电脑上开始");
+    expect(html).toContain("添加网络节点");
+    // 占位本机行出现：标题本机 + 非壳回落的单个「使用本机」入口。
+    expect(html).toContain("本机");
+    expect(html).toContain("使用本机");
+    // 占位行不渲染重命名（远端行仍有一枚）。
+    expect(html.match(/aria-label="重命名"/g)?.length).toBe(1);
+  });
+
   it("列表视图为每个节点提供行内重命名入口", () => {
     const store = makeStore();
     store.connectLocal();

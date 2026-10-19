@@ -17,13 +17,15 @@ import { Icon } from "../../components/icons";
 import { copyText } from "../../lib/clipboard";
 import { useIsWorkspaceOwner } from "../contacts/contacts-hooks";
 import { useBrandingAdmin, DEFAULT_HERO_URL } from "./useBranding";
-import { DEFAULT_BRANDING, renderCopyright } from "./branding-text";
+import { DEFAULT_BRANDING, deriveAutoServerBaseUrl, renderCopyright } from "./branding-text";
 import {
   HERO_ACCEPTED_TYPES,
   buildBrandingPatch,
   validateBrandingInput,
   validateHeroFile,
 } from "./branding-settings-logic";
+import { useActiveSession } from "../../node/activeSession";
+import { readActiveRemoteOrigin, resolveBrandingAutoOrigin } from "../../node/activeNodeUrl";
 
 /** 两步「恢复默认图」确认窗口：首次点变「确认恢复？」，3 秒内未再点自动还原。 */
 const RESET_CONFIRM_MS = 3000;
@@ -109,12 +111,28 @@ export function BrandingSettingsPanel() {
     setDraft({ productName: DEFAULT_BRANDING.productName, copyright: "", serverBaseUrl: "" });
   }
 
-  // 一键复制「对外访问网址」：仅在已保存了有效网址时可点（多地址环境下内网 IP 登录时
+  // 一键复制「服务端网址」：未手动固定时复制自动识别出的当前地址（多地址环境下内网 IP 登录时
   // 需要把外网可用网址发给外部协作者）。剪贴板失败给手动复制提示。
   const savedServerBaseUrl = config?.serverBaseUrl ?? "";
+  // 当前默认值（自动识别）。门控关（浏览器/fnOS）＝页面来源 origin，与历史行为一致；
+  // 桌面壳里页面同源在 127.0.0.1 随机口，origin 不能对外，故按「活动节点」取正确地址：
+  //   - 连远端：该远端节点的真实 origin（如 http://192.168.31.15:3001）；
+  //   - 连本机：回环口不对外，自动地址留空（待本机局域网地址探测接入），不再显示 127.0.0.1。
+  const session = useActiveSession();
+  const browserOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  const autoOrigin = resolveBrandingAutoOrigin({
+    enabled: session.enabled,
+    kind: session.kind,
+    browserOrigin,
+    routedRemoteOrigin: session.kind === "remote" ? readActiveRemoteOrigin() : "",
+  });
+  const autoServerBaseUrl = deriveAutoServerBaseUrl(autoOrigin, import.meta.env.BASE_URL as string);
+  // 输入框下方实色展示的「当前生效地址」：已固定显示固定值；未固定显示自动识别值（可能为空）。
+  const effectiveServerBaseUrl = savedServerBaseUrl || autoServerBaseUrl;
   async function copyServerBaseUrl() {
-    const ok = await copyText(savedServerBaseUrl);
-    toast(ok ? `已复制：${savedServerBaseUrl}` : "复制失败，请手动选中复制", ok ? "success" : "error");
+    if (!effectiveServerBaseUrl) return;
+    const ok = await copyText(effectiveServerBaseUrl);
+    toast(ok ? `已复制：${effectiveServerBaseUrl}` : "复制失败，请手动选中复制", ok ? "success" : "error");
   }
 
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -259,14 +277,14 @@ export function BrandingSettingsPanel() {
           )}
         </div>
 
-        {/* c2. 服务器对外访问网址（多地址环境：内网 IP 与反代域名并存时手填外网可用地址） */}
+        {/* c2. 服务端网址（多地址环境：内网 IP 与反代域名并存时手填外网可用地址；留空显示并使用自动识别的当前地址） */}
         <div className="flex flex-col gap-1.5 px-4 py-3">
           <div className="flex items-center gap-1.5">
             <label
               htmlFor="branding-server-base-url"
               className="text-gx-13 text-gx-text-primary"
             >
-              服务器访问网址
+              服务端网址
             </label>
             <span className="inline-flex items-center text-gx-text-hint">
               <Icon name="globe" size={13} />
@@ -277,7 +295,11 @@ export function BrandingSettingsPanel() {
               id="branding-server-base-url"
               value={serverBaseUrl}
               maxLength={BRANDING_LIMITS.serverBaseUrlMax}
-              placeholder="留空=自动；例如 https://gouxiang.example.com"
+              placeholder={
+                autoServerBaseUrl
+                  ? `未修改，当前默认：${autoServerBaseUrl}`
+                  : "留空=自动；例如 https://gouxiang.example.com"
+              }
               onChange={(e) =>
                 setDraft({ productName, copyright, serverBaseUrl: e.target.value })
               }
@@ -287,15 +309,25 @@ export function BrandingSettingsPanel() {
               size="sm"
               icon="copy"
               className="shrink-0 px-2"
-              disabled={!savedServerBaseUrl}
-              title={savedServerBaseUrl ? "复制对外可用网址" : "尚未保存网址"}
+              disabled={!effectiveServerBaseUrl}
+              title={effectiveServerBaseUrl ? "复制当前生效网址" : "暂无可复制的网址"}
               onClick={() => void copyServerBaseUrl()}
             >
               复制
             </Button>
           </div>
+          {/* 当前生效地址实色展示：未手动固定时也能直接看到连接地址（戴总 0.2.5-beta 要求）。 */}
+          {effectiveServerBaseUrl && (
+            <div className="flex items-center gap-1.5 text-gx-11 text-gx-text-secondary">
+              <Icon name="link" size={12} className="shrink-0 text-gx-text-faint" />
+              <span className="min-w-0 truncate font-mono" title={effectiveServerBaseUrl}>
+                {savedServerBaseUrl ? "固定网址：" : "当前默认（自动识别）："}
+                {effectiveServerBaseUrl}
+              </span>
+            </div>
+          )}
           <span className="text-gx-11 text-gx-text-hint">
-            当服务器同时有内网 IP 和反代域名、在内网用 IP 登录却需要把外网网址发给他人时，在此填写对外可访问的网址（可含端口/子路径）。仅用于展示与复制正确网址，不改监听、不做跳转；留空则按当前访问地址自动识别。
+            留空则按当前访问地址自动识别；当服务器同时有内网 IP 和反代域名、在内网用 IP 登录却需要把外网网址发给他人时，在此填写对外可访问的固定网址（可含端口/子路径）。仅用于展示与复制正确网址，不改监听、不做跳转。
           </span>
         </div>
 

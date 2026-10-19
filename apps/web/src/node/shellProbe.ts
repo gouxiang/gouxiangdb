@@ -45,8 +45,9 @@ export async function withProbeSession<T>(
 }
 
 /**
- * 壳模式「添加远端节点」三探针握手工厂：返回可注入 addAndConnectRemote 的 performHandshake。
- * 与浏览器直连版唯一差别：目标地址包一层 probe 同源转发；探活/版本/初始化判定仍全在 handshakeNode。
+ * 壳模式「添加远端节点」三探针握手工厂：返回可注入 addAndRouteRemote（现行纯选路表单）或旧
+ * addAndConnectRemote 的 performHandshake。与浏览器直连版唯一差别：目标地址包一层 probe 同源
+ * 转发；探活/版本/初始化判定仍全在 handshakeNode。纯选路只握手不登录，本工厂不含任何凭据请求。
  */
 export function probePerformHandshake(
   minNodeVersion?: string,

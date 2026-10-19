@@ -2,6 +2,7 @@
 // 纯 SVG 图标集（不使用 emoji，保证跨端视觉一致）
 // 统一 24x24 viewBox，stroke 风格，currentColor 着色
 
+import { useId } from "react";
 import type { SVGProps } from "react";
 
 export type IconName =
@@ -494,6 +495,81 @@ export function Icon({
       {PATHS[name].map((d, i) => (
         <path key={i} d={d} />
       ))}
+    </svg>
+  );
+}
+
+/**
+ * 品牌 G 标志（构想）。几何与色带的唯一事实源：branding/app-icon/gen-kit.mjs
+ * （256 逻辑坐标：一条开口圆角描边路径 + 一条内部中横，fill="none" stroke，round 线帽/拐角）。
+ *
+ * - tone="color"（默认）：内置 band 线性渐变（橙黄→橙→玫红→紫→蓝→亮蓝，陡斜轴）。
+ *   渐变 id 用 React.useId() 生成，同一页面多实例不会 id 冲突。
+ * - tone="mono"：不渲染渐变，描边用 currentColor，供节点行小尺寸/活动态跟随文本色。
+ *
+ * 尺寸默认 24×24，也可由 className 的 Tailwind 宽高类（或显式 width/height）覆盖。
+ * 纯装饰用默认 aria-hidden；传入 aria-label 后自动作为可访问图形（role="img"）。
+ */
+export interface BrandMarkProps extends Omit<SVGProps<SVGSVGElement>, "fill"> {
+  /** color＝彩色品牌带（默认）；mono＝currentColor 单色描边。 */
+  tone?: "color" | "mono";
+}
+
+// 与 gen-kit.mjs 完全一致的 6 段色带（陡斜轴，userSpaceOnUse）。
+const BRAND_BAND_STOPS: Array<{ offset: string; color: string }> = [
+  { offset: "0", color: "#F7A81B" },
+  { offset: "0.18", color: "#F5841F" },
+  { offset: "0.38", color: "#E8447A" },
+  { offset: "0.56", color: "#7B4CD8" },
+  { offset: "0.78", color: "#2C7BE5" },
+  { offset: "1", color: "#29B6F6" },
+];
+
+// 开口 G 外轮廓（stroke-width 26）与内部中横（stroke-width 11）。
+const BRAND_G_PATH =
+  "M 182 112 L 182 96 Q 182 74 160 74 L 96 74 Q 74 74 74 96 L 74 160 Q 74 182 96 182 L 160 182 Q 182 182 182 160 L 182 142 L 104 142";
+
+export function BrandMark({ tone = "color", ...rest }: BrandMarkProps) {
+  // React 18 useId：SSR/CSR 稳定且跨实例唯一，冒号在 id 与 url(#…) 引用中均合法。
+  const rawId = useId();
+  const gradientId = `gx-brand-band-${rawId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  const paint = tone === "mono" ? "currentColor" : `url(#${gradientId})`;
+  const labelled = rest["aria-label"] || rest["aria-labelledby"];
+  return (
+    <svg
+      width={24}
+      height={24}
+      viewBox="0 0 256 256"
+      fill="none"
+      role={labelled ? "img" : undefined}
+      aria-hidden={labelled ? undefined : true}
+      focusable="false"
+      {...rest}
+    >
+      {tone === "color" ? (
+        <defs>
+          <linearGradient
+            id={gradientId}
+            x1="76"
+            y1="56"
+            x2="174"
+            y2="206"
+            gradientUnits="userSpaceOnUse"
+          >
+            {BRAND_BAND_STOPS.map((s) => (
+              <stop key={s.offset} offset={s.offset} stopColor={s.color} />
+            ))}
+          </linearGradient>
+        </defs>
+      ) : null}
+      <path
+        d={BRAND_G_PATH}
+        stroke={paint}
+        strokeWidth={26}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <line x1="98" y1="112" x2="146" y2="112" stroke={paint} strokeWidth={11} strokeLinecap="round" />
     </svg>
   );
 }

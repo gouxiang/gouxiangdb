@@ -15,7 +15,7 @@ export function LauncherErrorBar({ message, onClose }: LauncherErrorBarProps) {
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-gx-lg border border-gx-danger bg-gx-danger-bg px-3 py-2 text-gx-13 text-gx-danger"
+      className="gx-launcher-fade flex items-start gap-2 rounded-gx-lg border border-gx-danger bg-gx-danger-bg px-3 py-2 text-gx-13 text-gx-danger"
     >
       <span className="mt-px shrink-0">
         <Icon name="alertCircle" size={15} />

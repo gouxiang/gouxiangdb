@@ -1,7 +1,7 @@
 // 品牌外观面板 SSR 渲染回归（node：react-dom/server + 真实 QueryClient，无 jsdom）。
 // 覆盖：owner 下自定义/默认两种 dto 的字段回填与预览、非 owner 与 isLoading 双保险 return null、
 // 恢复默认图按钮仅自定义态出现。交互/校验细则由 branding-settings-logic.test.ts 纯函数锁定。
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderToString } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { BrandingConfigDTO } from "@gx/shared-types";
@@ -68,8 +68,10 @@ describe("owner + 自定义品牌 dto", () => {
     expect(html).toContain("产品显示名称");
     expect(html).toContain("版权信息");
     expect(html).toContain("登录页广告图");
-    expect(html).toContain("服务器访问网址");
+    expect(html).toContain("服务端网址");
+    expect(html).not.toContain("服务器访问网址");
     expect(html).toContain('value="https://gx.example.com"');
+    expect(html).toContain("固定网址：https://gx.example.com");
     expect(html).toContain("恢复默认文案");
     expect(html).toContain(">保存<");
     expect(html).toContain('id="branding-product-name"');
@@ -139,6 +141,51 @@ describe("访客自主注册开关 checked 反映 config.signupOpen", () => {
     expect(html).toContain("允许访客自主注册");
     expect(html).toContain("bg-gx-border-strong");
     expect(html).not.toMatch(/relative h-5 w-9 rounded-full[^"]*bg-gx-accent/);
+  });
+});
+
+describe("服务端网址：未手动固定时显示当前默认（自动识别）地址（0.2.5-beta 戴总要求）", () => {
+  // node SSR 默认无 window；临时桩一个仅含 location.origin 的 window，让面板派生自动地址，
+  // 渲染完立即还原（不引 jsdom 依赖）。面板渲染期只读 window.location.origin。
+  const savedWindow = (globalThis as { window?: unknown }).window;
+  afterEach(() => {
+    if (savedWindow === undefined) {
+      delete (globalThis as { window?: unknown }).window;
+    } else {
+      (globalThis as { window?: unknown }).window = savedWindow;
+    }
+  });
+
+  function renderWithOrigin(origin: string, config?: BrandingConfigDTO): string {
+    (globalThis as { window?: unknown }).window = { location: { origin } };
+    return render(config);
+  }
+
+  it("serverBaseUrl 为空：实色显示「当前默认（自动识别）：<origin>」+ 占位符带同一地址，复制按钮可用", () => {
+    const html = renderWithOrigin("http://10.0.0.2:3001", {
+      productName: "构想工作台",
+      copyright: "",
+      heroUrl: null,
+      signupOpen: false,
+      serverBaseUrl: "",
+    });
+    expect(html).toContain("服务端网址");
+    expect(html).toContain("当前默认（自动识别）：http://10.0.0.2:3001");
+    expect(html).toContain("未修改，当前默认：http://10.0.0.2:3001");
+    // 输入框 value 仍为空（受控值＝已保存值）：不产生「没改却要保存」的脏态。
+    expect(html).toContain('id="branding-server-base-url"');
+  });
+
+  it("已固定 serverBaseUrl：优先显示固定值，不显示自动识别值", () => {
+    const html = renderWithOrigin("http://10.0.0.2:3001", {
+      productName: "构想工作台",
+      copyright: "",
+      heroUrl: null,
+      signupOpen: false,
+      serverBaseUrl: "https://gx.example.com",
+    });
+    expect(html).toContain("固定网址：https://gx.example.com");
+    expect(html).not.toContain("当前默认（自动识别）");
   });
 });
 

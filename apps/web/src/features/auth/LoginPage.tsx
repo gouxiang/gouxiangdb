@@ -10,6 +10,7 @@ import { useNavigate } from "react-router-dom";
 import { Auth } from "../../api/client";
 import { takeSessionFrom } from "../../lib/session-from";
 import { useAuthStore } from "../../store/auth";
+import { commitLoginForActiveSource } from "../../node/activeAuth";
 import { Button, Input, SegmentedControl, toast } from "../../components/ui";
 import { SessionExpiredNotice } from "../../components/states";
 import {
@@ -56,6 +57,8 @@ export default function LoginPage() {
         password,
         displayName: input.displayName.trim(),
       });
+      // 首管理员引导只可能针对**本地**节点：瘦客户端不承接远端空库自举（远端 not_initialized
+      // 在选路/探活阶段即 fail-closed）。故此处恒定写本地 gx-auth，不走活动源分槽出口。
       setAuth(res.token, res.user);
       // 首登强制改密（mustChangePassword=true）时闸门会挡住除白名单外的全部 /api，必须先去改密页
       navigate(res.user.mustChangePassword === true ? "/change-password" : "/");
@@ -90,7 +93,12 @@ export default function LoginPage() {
               displayName: displayName.trim(),
             })
           : await Auth.login({ email: email.trim(), password });
-      setAuth(res.token, res.user);
+      // 分槽出口：活动源是远端节点（桌面壳 remote-empty 选路态）时，token/user 落该远端节点的
+      // 会话分键（gx-node-session:<nodeId>），控制器随即重推带 token 的数据源；本地源/门控关
+      // （浏览器、fnOS、服务器）返回 false，照旧写 gx-auth，现网行为逐字节不变。
+      if (!commitLoginForActiveSource(res.token, res.user)) {
+        setAuth(res.token, res.user);
+      }
       // 初始超级管理员（mustChangePassword=true）登录后闸门会挡住除白名单外的全部 /api，
       // 必须先去改密页，否则进来就是一片空白。
       // R-D-17：会话过期被拦到登录页时，登录后回到原页（来路由 client.ts 在 401 时记下）

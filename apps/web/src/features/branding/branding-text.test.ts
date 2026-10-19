@@ -3,7 +3,7 @@
 //   - DEFAULT_BRANDING：与后端默认同值，是全站唯一允许的默认产品名字面量。
 
 import { describe, it, expect } from "vitest";
-import { DEFAULT_BRANDING, renderCopyright } from "./branding-text";
+import { DEFAULT_BRANDING, deriveAutoServerBaseUrl, renderCopyright } from "./branding-text";
 
 describe("renderCopyright", () => {
   it("空串 → 空串（调用方据此不渲染版权行）", () => {
@@ -52,5 +52,33 @@ describe("DEFAULT_BRANDING", () => {
 
   it("DEFAULT_BRANDING.signupOpen === false（加载/失败占位 fail-closed）", () => {
     expect(DEFAULT_BRANDING.signupOpen).toBe(false);
+  });
+});
+
+describe("deriveAutoServerBaseUrl（未手动固定时的当前默认地址）", () => {
+  it("根部署：basePath 空 → 仅 origin（去尾斜杠）", () => {
+    expect(deriveAutoServerBaseUrl("http://192.168.31.183:5666", "")).toBe(
+      "http://192.168.31.183:5666",
+    );
+    expect(deriveAutoServerBaseUrl("https://gx.example.com/", "/")).toBe(
+      "https://gx.example.com",
+    );
+  });
+
+  it("子路径部署：origin + 去尾斜杠前缀", () => {
+    expect(
+      deriveAutoServerBaseUrl("https://gx.example.com", "/app/gouxiangdb/"),
+    ).toBe("https://gx.example.com/app/gouxiangdb");
+  });
+
+  it("桌面壳回环口：base 为 / 时得到 http://127.0.0.1:<port>", () => {
+    expect(deriveAutoServerBaseUrl("http://127.0.0.1:49383", "/")).toBe(
+      "http://127.0.0.1:49383",
+    );
+  });
+
+  it("origin 为空（SSR 无 window）→ 空串，调用方据此不渲染自动地址块", () => {
+    expect(deriveAutoServerBaseUrl("", "/app/gouxiangdb")).toBe("");
+    expect(deriveAutoServerBaseUrl("   ", "")).toBe("");
   });
 });

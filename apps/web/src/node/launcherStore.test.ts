@@ -68,16 +68,73 @@ describe("跨重启恢复", () => {
 
   it("活动远端且会话已存：恢复远端数据源（免登）", async () => {
     const storage = new MemStorage();
-    const login = vi.fn(async () => ({ token: "saved-rt", user: null }));
+    const login = vi.fn(async () => ({ token: "should-never-login", user: null }));
     const s1 = createLauncherStore({ storage, ...baseDeps(), loginRemote: login });
     s1.addRemote({ nodeId: "aaaa", baseURL: "http://nas:3001" });
+    // 纯选路：connectRemote 不登录；远端会话由其自己登录页提交后经 commitRemoteSession 记住。
+    s1.commitRemoteSession("aaaa", "saved-rt", null);
     await s1.connectRemote("aaaa");
+    expect(login).not.toHaveBeenCalled();
+    expect(s1.getActive()?.token).toBe("saved-rt");
     expect(storage.getItem(`${REMOTE_SESSION_KEY_PREFIX}:aaaa`)).toContain("saved-rt");
 
     const s2 = createLauncherStore({ storage, ...baseDeps() });
     expect(s2.getActive()?.kind).toBe("remote");
     expect(s2.getActive()?.token).toBe("saved-rt");
     expect(s2.getActive()?.baseURL).toBe("http://nas:3001");
+  });
+
+  it("纯选路无会话：connectRemote 后活动远端 token=null（remote-empty），重启不自动连", async () => {
+    const storage = new MemStorage();
+    const s1 = createLauncherStore({ storage, ...baseDeps() });
+    s1.addRemote({ nodeId: "aaaa", baseURL: "http://nas:3001" });
+    const out = await s1.connectRemote("aaaa");
+    // 在线纯选路允许空 token：界面随即展示远端自己的登录页
+    expect(out.active?.kind).toBe("remote");
+    expect(out.active?.token).toBeNull();
+    expect(storage.getItem(`${REMOTE_SESSION_KEY_PREFIX}:aaaa`)).toBeNull();
+    // 重启：restore 刻意 fail-closed，无会话不自动连远端
+    const s2 = createLauncherStore({ storage, ...baseDeps() });
+    expect(s2.getActive()).toBeNull();
+  });
+
+  it("deauthenticateRemote：清会话并 emit，但不 persist 注册表、不 syncUpstream，活动仍指该远端", async () => {
+    const storage = new MemStorage();
+    const syncUpstream = vi.fn(async () => {});
+    const s1 = createLauncherStore({
+      storage,
+      ...baseDeps(),
+      shell: {
+        ensureLocalReady: vi.fn(async () => {}),
+        syncUpstream,
+        stopLocal: vi.fn(async () => {}),
+        startLocalOnly: vi.fn(async () => ({ firstBoot: false })),
+        stopLocalOnly: vi.fn(async () => {}),
+      },
+    });
+    s1.addRemote({ nodeId: "aaaa", baseURL: "http://nas:3001" });
+    s1.commitRemoteSession("aaaa", "jwt", null);
+    await s1.connectRemote("aaaa");
+    const syncCallsAfterConnect = syncUpstream.mock.calls.length;
+    expect(s1.getActive()?.token).toBe("jwt");
+
+    let emits = 0;
+    const unsub = s1.subscribe(() => {
+      emits += 1;
+    });
+    const regBefore = storage.getItem(LAUNCHER_REGISTRY_STORAGE_KEY);
+    const out = await s1.deauthenticateRemote("aaaa");
+    unsub();
+
+    // 保持选路态：活动仍是该远端、token 清空；会话分键被删
+    expect(out.active?.kind).toBe("remote");
+    expect(out.active?.token).toBeNull();
+    expect(s1.getState().activeNodeId).toBe("aaaa");
+    expect(storage.getItem(`${REMOTE_SESSION_KEY_PREFIX}:aaaa`)).toBeNull();
+    // 注册表形状不变（不 persist）、emit 一次、壳上游不重切
+    expect(storage.getItem(LAUNCHER_REGISTRY_STORAGE_KEY)).toBe(regBefore);
+    expect(emits).toBe(1);
+    expect(syncUpstream.mock.calls.length).toBe(syncCallsAfterConnect);
   });
 
   it("活动远端但会话被清：恢复后无活动（停启动器）", () => {
