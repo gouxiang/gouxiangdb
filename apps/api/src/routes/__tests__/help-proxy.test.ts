@@ -87,6 +87,26 @@ describe("parseWikiSidebar 纯函数", () => {
     // 去重：数据库入门只出现一次
     expect(pages.filter((p) => p.title === "数据库入门")).toHaveLength(1);
   });
+
+  it("排除 wiki 图片/二进制附件（images/ 前缀与扩展名），不把附件当页面", () => {
+    const html = [
+      '<a href="/o/r/wiki/images/tour/02-grid.png">02-grid</a>',
+      '<a href="/o/r/wiki/images/tour/02-grid.png?raw=true">带参图片</a>',
+      '<a href="/o/r/wiki/images%2Ftour%2F03-kanban.png">编码图片</a>',
+      '<a href="/o/r/wiki/attachments/a.zip">zip</a>',
+      '<a href="/o/r/wiki/photo.JPG">大写图片扩展名</a>',
+      '<a href="/o/r/wiki/产品介绍">正常页</a>',
+      '<a href="/o/r/wiki/无扩展名标题">无扩展名标题保留</a>',
+    ].join("\n");
+    const pages = parseWikiSidebar(html, "o", "r");
+    const titles = pages.map((p) => p.title);
+    expect(titles).toContain("产品介绍");
+    expect(titles).toContain("无扩展名标题");
+    expect(titles.some((t) => t.includes(".png"))).toBe(false);
+    expect(titles.some((t) => t.startsWith("images/"))).toBe(false);
+    expect(titles).not.toContain("attachments/a.zip");
+    expect(titles).not.toContain("photo.JPG");
+  });
 });
 
 describe("GET /api/help/wiki", () => {

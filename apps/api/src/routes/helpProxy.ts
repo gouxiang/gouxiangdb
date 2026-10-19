@@ -96,7 +96,24 @@ export function validateAssetPath(raw: string | null | undefined): string | null
  *   /<owner>/<repo>/wiki                       -> Home
  *   /<owner>/<repo>/wiki/<encodeURIComponent标题>
  * 排除 ?action=、/wiki/raw/、带 # 的链接；按出现顺序去重，Home 永远排第一。
+ * 另须排除 wiki 附件（images/ 前缀或图片/二进制扩展名）——Gitea 侧边栏 HTML 会把
+ * 正文中的图片也渲染成 /wiki/images/...png 链接，它们不是可阅读的页面（点开会取到二进制乱码）。
  */
+const ATTACHMENT_EXT = new Set([
+  ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico", ".avif",
+  ".zip", ".tar", ".gz", ".tgz", ".rar", ".7z", ".pdf", ".mp4", ".mov", ".webm", ".mp3", ".wav",
+]);
+
+/** 判断一个已解码的 wiki 条目是否为附件（而非可读页面）。 */
+export function isWikiAttachment(title: string): boolean {
+  const t = title.trim();
+  if (!t) return true;
+  if (t.startsWith("images/") || t.startsWith("attachments/")) return true;
+  const dot = t.lastIndexOf(".");
+  if (dot === -1) return false;
+  return ATTACHMENT_EXT.has(t.slice(dot).toLowerCase());
+}
+
 export function parseWikiSidebar(html: string, owner: string, repo: string): WikiPageEntry[] {
   const collected: WikiPageEntry[] = [];
   const seen = new Set<string>();
@@ -128,7 +145,10 @@ export function parseWikiSidebar(html: string, owner: string, repo: string): Wik
     const rest = href.slice(wikiPrefix.length + 1).split("?")[0];
     if (!rest) continue;
     try {
-      push(decodeURIComponent(rest));
+      const title = decodeURIComponent(rest);
+      // 跳过图片/二进制附件（images/tour/02-grid.png 等），它们不是页面。
+      if (isWikiAttachment(title)) continue;
+      push(title);
     } catch {
       // 非法百分号编码直接忽略。
     }
@@ -209,7 +229,10 @@ export async function fetchWikiPages(
       if (typeof title !== "string" || !title.trim()) {
         throw new Error("wiki pages api entry missing title");
       }
-      pages.push({ title: title.trim(), href: title.trim() });
+      const t = title.trim();
+      // 防御性过滤附件（与匿名解析路径保持一致）。
+      if (isWikiAttachment(t)) continue;
+      pages.push({ title: t, href: t });
     }
     return pages;
   }
@@ -253,6 +276,11 @@ export const helpProxy = new Hono();
 helpProxy.get("/wiki", async (c) => {
   const rawPage = c.req.query("page");
   const page = rawPage && rawPage.trim() ? rawPage.trim() : HELP_HOME;
+  // 纵深防御：附件不是页面，绝不把二进制当 markdown 拉回（否则前端把几十万字符乱码
+  // 塞进 markdown 解析会卡顿）。正常页面列表已不含附件，这里再拦手工构造的 URL。
+  if (page !== HELP_HOME && isWikiAttachment(page)) {
+    return c.json({ ok: false, code: "NOT_A_WIKI_PAGE" }, 404);
+  }
   const settings = resolveWikiSettings();
 
   const url = `${settings.wikiBase}/wiki/raw/${encodeURIComponent(page)}`;
