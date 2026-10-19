@@ -23,6 +23,7 @@ import { audit } from "../../../audit/emit.js";
 import type { AuditEventName } from "../../../audit/audit.js";
 import { buildBaseSnapshot, markSnapshotDone, subscribeBase, subscribeTree, authorizeBaseRead } from "../../../domain/sync/snapshot.js";
 import { pullBaseOps, pullTreeOps } from "../../../domain/sync/pull.js";
+import { buildReplicaBootstrap } from "../../../domain/sync/bootstrap.js";
 import { pushBaseOps, pushTreeOps, retryIncoming, resolveConflict, type IncomingOp, type PushResult } from "../../../domain/sync/push.js";
 import { listIncoming, discardIncoming } from "../../../domain/sync/incoming.js";
 import { buildVisibilityReport } from "../../../domain/sync/visibility.js";
@@ -155,6 +156,25 @@ syncRoutes.get("/pull/tree", async (c) => {
   const clientId = (c.req.query("clientId") ?? "").trim() || null;
 
   const page = await pullTreeOps(clientId, after, limit);
+  return c.json({ result: page });
+});
+
+// ─────────────── S3b-1：空副本下行引导基线（只读；读端点不挂 S0 协议门） ───────────────
+
+/**
+ * GET /bootstrap?baseId=&clientId=&limit= → anchorSeq 时刻的完整活结构（保留 cuid）
+ *   + 按当前权限裁剪的活记录 + 两端可见的活 link_rows。供 S3b-2 本地空副本幂等直插。
+ * clientId 本刀接收但不据此写/推进订阅（保留位，S3b-2 落 replica_state 时再用）。纯只读。
+ */
+syncRoutes.get("/bootstrap", async (c) => {
+  const auth = c.get("auth");
+  const baseId = (c.req.query("baseId") ?? "").trim();
+  if (!baseId) throw new HttpError(400, "缺少 baseId", "SYNC_BAD_REQUEST");
+  const limitRaw = Number(c.req.query("limit") ?? "");
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : undefined;
+  // clientId 为保留位：本刀不据此写/推进订阅（S3b-2 落 replica_state 时再用），故刻意不读取。
+
+  const page = await buildReplicaBootstrap(auth.userId, baseId, limit ? { limit } : {});
   return c.json({ result: page });
 });
 
