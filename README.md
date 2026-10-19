@@ -202,7 +202,7 @@ v1 为 Swift 实现，与当前版本零代码依赖。核心模型（字段、h
 
 | 想找什么 | 去哪 |
 |---|---|
-| **帮助中心（用户向）** | `docs/help-center/` |
+| **帮助中心（用户向）** | 0.2.5 起改为应用内在线拉取 **Gitea 百科(wiki)**（后端同源代理 `GET /api/help/wiki`、`/api/help/asset`，前端 `apps/web/src/features/help/`）；旧内嵌帮助已退役 |
 | **现行规范 / 架构决策** | `docs/adr/`（ADR-0001~0057，唯一权威）；权限专项另见 `docs/decisions/` |
 | **部署** | `docs/deployment/` |
 | **运维手册** | `docs/runbooks/`（deploy / backup / restore / ci / m5-search / mcp / authz-*） |
