@@ -1,158 +1,109 @@
-# 构想工作台 v0.2.5 发版说明（测试版 / Beta）
+# 构想工作台 v0.2.5-beta.1 发版说明（首个桌面端测试版 / Pre-release）
 
-- **版本号**：`0.2.5`（版本单一真源 = 根 `package.json` 的 `version`；运行时与 fpk `manifest.version`、esbuild `GX_VERSION` 同源，禁止硬编码）
-- **展示名**：构想工作台（技术标识 `gouxiangdb`，仅包名/目录使用）
-- **本轮主题**：**离线优先 + 操作级双向同步的「服务端地基」测试版**——为「电脑断网也能用、联网后与服务器对账合并」打底：服务端新增操作日志（oplog）、记录版本钟、订阅 / 增量拉取、push 回放、按【当前】权限裁决、冲突双版本人工选择、库表结构与导航树同步等一整套能力（设计分期 YN0–YN8）。
-- **★ 默认行为零变化（测试版总门）**：整套同步面由环境变量 **`GX_SYNC_SERVER`** 总门控制，**出厂默认关闭（未设置 / 空 / 任何非 `on|true|1` 取值都按关闭处理，fail-closed）**。关闭时 `/api/v1/sync` 整组路由在访问任何数据库之前就短路返回 `404 SYNC_DISABLED`，**不建写、不读取任何 `sync_*` 表、对现有部署面零行为、零 IO 变化**。只有运维显式 `GX_SYNC_SERVER=on` 才启用，且本测试版不建议在生产真实库上开启。
-- **数据库迁移**：共 **42 枚**。本版**只新增 1 枚**迁移 `20261015122228_sync_server_foundation`（仅 `CREATE TABLE` 四张同步新表 + 索引，**无任何外键、不回填、不改一张旧表、不删任何列**）。`prisma migrate deploy` 幂等；不开启总门时这些表永不被读写。
-- **发布日期**：2026-10-16（测试版；**tag / Gitea Release / push 待产品负责人在场授权后执行**）
-- **安装包（飞牛 x86_64）**：`gouxiangdb-0.2.5-x86.fpk`（VM15 构建，manifest.version=0.2.5 / platform=x86）。**大小 / sha256 待构建回填【见文末占位，封版二次提交补齐】。真机 fnOS 183 升级待产品负责人在场确认后执行，夜间不擅动真实数据。**
+- **对外版本名**：`0.2.5-beta.1`（预发布，**不是正式版**）；Git tag：`v0.2.5-beta.1`
+- **内部包版本号**：`0.2.5`（版本单一真源 = 根 `package.json` 的 `version`；运行时与 fpk `manifest.version`、esbuild `GX_VERSION` 同源，禁止硬编码）。对外用 `-beta.1` 后缀表预发布，内部包号不动，避免为测试版改动版本单源。
+- **展示名**：构想工作台（技术标识 `gouxiangdb`，仅包名 / 目录使用）；macOS bundle id `cc.gouxiang.desktop`
+- **发布日期**：2026-10-19
+- **Gitea Release 性质**：**prerelease（勾选预发布）**；**只上传 dmg + fpk 两个安装包，不上传 `update-manifest.json`**。更新器只认「带 update-manifest.json 资产的 release」（`apps/api/src/domain/update/sourceGitea.ts:104`），故本 beta **不会出现在 0.2.4 正式用户的在线更新里**，稳定频道零污染。
+- **本轮主题**：①**全新 macOS 桌面客户端**（Tauri v2 壳 + 内置本地服务内核，双击即用、零配置连本机 / 远程）；②**帮助中心在线百科化**（Gitea Wiki 单一来源，并修复图片附件被当页面的卡顿 / 乱码）；③服务端离线双向同步地基已铺好但**默认关闭**（继承 0.2.5 服务端工作，本 beta 桌面端不含离线同步）。
 
-> 历史发版说明归档：0.2.4 见 `docs/release-notes/0.2.4.md`；0.2.3 见 `docs/release-notes/0.2.3-full.md` / `0.2.3.md`。
+> 历史发版说明归档：0.2.4 见 `docs/release-notes/0.2.4.md`；0.2.3 见 `docs/release-notes/0.2.3-full.md` / `0.2.3.md`；本次对外发布说明见 `docs/release-notes/0.2.5-beta.1.md`。
 >
-> **设计文档**：`docs/design/2026-10-node-mode/DESIGN-OFFLINE-SYNC.md`（离线优先 + 操作级双向同步统一架构）、`DESIGN.md`（节点模式）、`DESIGN-MACOS-APP.md`（macOS 独立 App 与一键更新）。
+> **设计文档**：`docs/design/2026-10-node-mode/DESIGN-MACOS-APP.md`（macOS 独立 App）、`DESIGN-OFFLINE-SYNC.md`（离线同步）、`docs/design/2026-10-license/DESIGN-LICENSE-PRESEED.md`（正版授权预埋，本版仅文档零代码）。
 
 ---
 
-## 〇、给非技术同事的一句话说明
+## 〇、给非技术同事的一句话
 
-这一版**先在服务器内部铺好「同步」这条新马路的路基和红绿灯，但路口目前是封死的**（默认关闭）。你现在升级、日常使用，和 0.2.4 **一模一样、不会有任何变化，也不会动到已有数据**。等后续桌面 App 做好、并且我们在测试环境把断网 / 联网合并各种情况验稳之后，才会打开这个路口。本版主要给技术团队内部验证，**不建议普通用户在主力数据上开启同步开关**。
-
----
-
-## 一、本版做了什么（按设计分期 YN0–YN8）
-
-所有能力均在 `GX_SYNC_SERVER=on` 时才存在，关闭时对系统完全隐形。
-
-- **YN0 服务端同步地基**：新增 1 枚只增迁移，建四张表：
-  - `sync_op_log`：操作日志（事件溯源），带 `baseId+seq`、`entityType+entityId+seq` 等索引；
-  - `sync_entity_versions`：每个记录 / 实体的当前版本钟（乐观锁），带 `baseId+version` 索引；
-  - `sync_incoming`：收到的客户端操作入站台账（accepted / conflict / rejected / quarantined 等状态）；
-  - `sync_subscriptions`：客户端订阅与游标（cursorSeq），支持增量。
-  - 同时落地总门 `GX_SYNC_SERVER`（fail-closed）。
-- **YN1 在线写版本切面 + oplog**：服务端每次写操作记录为带 `clientOpId` 的 operation，写入操作日志，作为后续同步 / 回放 / 对账的唯一事实源。
-- **YN2 订阅 / 权限裁剪快照 / pull 增量**：客户端按范围订阅，服务端按权限裁剪后给出快照与基于游标的增量拉取。
-- **YN4 push 回放 + 幂等 / 顺序 + 接受**：断网期间本地产生的操作联网后 push，服务端按幂等键去重、按顺序回放。
-- **YN5 当前权限裁决 + 隔离 + 同步中心 + 失权可见集 + 审计**：**服务端按操作到达时的【当前】权限，用统一权限引擎 `authz.decide()` 做唯一裁决**，结果为 accepted / conflict / rejected / quarantined（为未来「需审批」预留 `pending_approval` 枚举与 `reviewBaseId` 钩子，本版不建审批表）。被降权后产生的改动**隔离保留、可重试或放弃，绝不静默丢弃**；失去权限后已下载到本地的数据按既定策略处理。全程审计。
-- **YN6 数据冲突双版本快照 + 人工 resolve**：同一记录被两端修改导致乐观锁冲突时，**保留 mine / theirs 两个版本，弹窗由人工选择（mine / theirs / custom 自定义合并），幂等**——绝不静默覆盖任何一边。
-- **YN7 库 / 表 / 字段 / 视图离线结构同步**：表结构（建库、建表、加字段、改视图等）走 oplog「结构轨」，经注册表回放（严守注册表硬约束，不做 `if(entityType===…)` 模块分支）；含结构依赖门、恢复 / 重排回放、类型安全门；**结构分叉同样弹窗人工选择，不自动合并**。该轨最高风险，设计上可独立回滚。
-- **YN8 导航 / 工作区树同步**：
-  - YN8-A 导航树 op 回放：工作区 `treeVersion` 钟 + navnode 注册表 + `/push/tree` + 在线切面；
-  - YN8-B 导航树分叉自动合并 / 树冲突人工 resolve（**结构钟 / 树钟永不置墓碑**，删除与重建可区分）；
-  - YN8-C 工作区树游标增量拉取 + 树订阅，含「在线改树 → 离线 pull 贯通」断言。
-
-### 节点模式（前端，未接线）
-
-- **S1 地基已落地但未启用**：`apps/web/src/node/` 下数据源解析器（resolve）、数据源抽象（datasource，可切 `{baseURL, token}`）、会话骨架（session）。经核对，这三个模块在 `apps/web/src` 内**除自身文件头注释外无任何 import 引用，属于「搭好未接线」**，对现网零影响；配套单测与现有 client / collab 行为逐字节等价（golden）。
-- S2 起的接线改造（面广）以及登录选模式等，**本版不含**，待后续确认 U1–U7 七项后再动。
-
-### 品牌 / 基础信息
-
-- **手动设置「服务器对外访问网址」（0.2.5 新增，戴总追加需求）**：服务端所处网络常有多地址并存（局域网 IP、域名、反代前缀同时可用），系统无法替用户判断"对外该用哪个网址"。在**设置版权名称 / 登录页广告图的同一处（管理后台品牌与基础信息）新增「服务器访问网址」一项，可填、可改、可一键复制**。语义是**声明性**的：只用于在界面上展示 / 复制正确的对外网址（例如在内网默认用 IP 登录时，仍能复制出外网可用的域名网址），**不改服务监听、不做跳转重定向**；留空＝自动。零迁移（复用 `app_settings` KV），默认空＝对现有部署零变化。前后端共用同一规范化纯函数（自动补 `http://`、去尾斜杠、拒绝非法 / 含空白 / 带账号密码 / 路径双斜杠等），非法输入 400 且不落库。
-- **启用定稿应用图标套件**（方形 G 暖冷色带 + 纸白珠光底）：替换 web favicon、`site.webmanifest` 图标与飞牛包图标。该图标提交在 v0.2.4 tag 之后，归属 0.2.5。
-- 0.2.4 的品牌外观自定义、访客注册开关等能力原样保留。
+这是构想工作台**第一个能在苹果电脑上双击使用的测试版**：把服务器内核装进了一个 App，不用再敲命令；连自己电脑里的库或远程服务器都不用做任何网络配置。同时帮助中心改成了在线百科、修好了之前图片乱码卡顿的问题。**这是给试用者的测试版**：桌面版的「断网也能用」这次还没做，软件也还没买苹果签名（第一次要右键打开）。
 
 ---
 
-## 二、本地加密（PoC-4）现状与边界 —— 请务必阅读
+## 一、本版交付内容
 
-离线副本要落在个人电脑上，因此规划了本地加密。本版完成的是**路线验证（PoC），不是交付给终端用户的加密功能**：
+### 1. macOS 桌面客户端（全新，本次主角）
+- `apps/desktop`：Tauri v2（Rust）壳 + 随包 Node 侧车（单二进制 gxnode + server 树 + 41 枚迁移）。
+- **壳内回环出口反代**：壳在 `127.0.0.1` 随机端口静态托管 web 成品，并把 `/api`、`/health(z)`、`/readyz`、`/uploads`、`/ws`、`/__gx/probe` 按当前单活上游（None / Local / Remote / Replica）动态转发（含 WS 裸中继、剥 Origin/Referer、流式不缓冲）。浏览器全程同源，**被连服务器零 CORS 配置、禁止手填白名单**。
+- **节点启动器**：添加 / 重命名 / 切换多个节点；连远程只选路不存密码（remote-empty），登录走远端自己的 `/login`；登录 / 改密按活动节点分槽。
+- **内核生命周期**：sidecar start/stop/status + 首 boot + `/readyz` 五探针；外部 SIGTERM/SIGINT 由壳 reaper 收尸（gxnode 是壳子进程、同进程组，**无 LaunchAgent/Daemon/登录项**，重启无孤儿）。
+- **JWT 密钥入 macOS 钥匙串**（service=`cc.gouxiang.desktop` / account=`jwt-secret`，含损坏短项自愈）；vault 预留 `.vault`。
+- 菜单栏驻留、关窗驻留、彻底退出、Reopen 唤窗；禁用 HTML 拖放（`dragDropEnabled=false`）。
+- 适配 **Apple 芯片 arm64、macOS 11+**；ad-hoc 签名（未公证），**首次右键 → 打开**。
 
-- **选定路线 A：macOS `hdiutil` AES 加密 sparsebundle 磁盘匣**，一个作用域一个匣子，用系统 **Keychain（钥匙串）存密码并自动解锁**，不另设独立口令。选这条路线的关键前提已核实：业务主读写只走 Prisma 引擎，`better-sqlite3` 全部用于 readonly 的 raw / 运维 / search.db，因此不需要更换数据库驱动，sparsebundle 对内核 / 向量检索零侵入。
-- **PoC-4 组 1 项 1–4 / 6 已在本机实测通过**（见提交 `1d43bd9`，含 FileVault 前提与磁盘匣闸门）。
-- **★ 项 5（`.app` 内 Keychain 自动挂载的系统授权弹窗）必须在图形会话、由产品负责人在场点击授权才能验证**，无人值守 / SSH 无法完成，**本版不含此项的真机结论**。
-- 侧车首次同步前的备份提示、oplog 垃圾回收（GC）、加密与结构同步的端到端冒烟等，归属后续桌面 App（Mac 侧车）阶段，本版不含。
+### 2. 帮助中心在线百科
+- 后端无鉴权同源代理 `apps/api/src/routes/helpProxy.ts`（挂 `/help`），匿名拉 Gitea Wiki 首页与侧边栏；配置 `GX_HELP_WIKI_BASE` / `GX_GITEA_API_BASE` / `GX_GITEA_TOKEN`。
+- **附件修复（发布基线 4b36d18）**：新增 `isWikiAttachment()`，侧边栏与正文路由双重过滤 `images/`、`attachments/` 及图片 / 压缩包 / 音视频等扩展名——此前 8 张 `images/tour/*.png` 被当成页面，点开把数十万字符 PNG 二进制塞进 markdown，导致列表出现 png、乱码、卡顿。修复后只剩真实帮助页面，手工图片 URL 返回 `404 NOT_A_WIKI_PAGE`。
+
+### 3. 服务端离线同步地基（默认关闭，桌面端本版不接线）
+- YN0–YN9 已落地于 `apps/api/src/routes/v1/sync/`，由 `GX_SYNC_SERVER` 总门控制（fail-closed）：关闭整组 404、不建表数据。**桌面端离线侧车（#828）本 beta 不含**，仅随 fpk 提供服务端能力供内测环境开启。
+
+### 4. 品牌 / 体验
+- Mac 客户端图标定稿（`icon-mac` 源 + iconset/icns，缩回 macOS 安全边）。
+- 真机目验修复：L2 导航零宽折叠、`gx-z-modal` 弹层层级倒置（800/820/860）、启动器横屏成品。
+- 保留 0.2.4 的品牌外观自定义、注册开关、服务器对外访问网址声明等能力。
 
 ---
 
-## 三、★ 诚实缺口：本版【没有】什么
+## 二、安装包指纹（2026-10-19 发布基线，含附件修复 4b36d18）
 
-为避免误解，明确列出本测试版**不包含**、也**无法在本版交付**的内容：
+### macOS（arm64 / Apple 芯片）
+- 文件：`构想工作台_0.2.5_aarch64.dmg`
+- 大小：**105,757,377 B（100.86 MiB）**
+- sha256：**`476d8a12d25d7abb2d525cd7c45be1f2cf05ba144d9b1c0a8ab23230b81f2fe9`**
+- 本机构建链：`build-web-shell.mjs`（`VITE_NODE_LAUNCHER=1`、base=/、dist-shell）→ `stage-node-sidecar.mjs --web-dist apps/web/dist-shell --out ~/Library/Caches/gouxiangdb-desktop/build/stage` → Tauri CLI 2.12.3 `build --bundles app,dmg`。
+- 校验：`.app` ad-hoc（flags=adhoc,linker-signed，无 TeamIdentifier）、arm64 thin、`CFBundleShortVersionString=0.2.5`、`LSMinimumSystemVersion=11.0`、identifier `cc.gouxiang.desktop`；真机已验含 `NOT_A_WIKI_PAGE` 修复、内核父子关系、回环反代、14 个真实帮助页无图片附件、钥匙串存取、拖入 /Applications 安装。
 
-1. **macOS 完整版桌面 App 尚在搭建中，本批先产出的是飞牛 fpk 测试包，Mac `.app` / `.dmg` 随后在同一版本号下补齐后才统一发布**。产品负责人已明确：macOS 版**要「断网也能用」的完整版**（不是只连服务器的纯封壳）——即 App 内嵌本地服务内核（`apps/api` sidecar）+ 本地 SQLite 库 + 本地加密，可独立使用、也可连网络节点并在联网后双向同步。仓库此前**没有 Tauri 壳工程**（`apps/desktop` 待新建），这是一项多日工程，按 `DESIGN-MACOS-APP.md` 的 **D0 三个 PoC（①干净 .app 内跑 Node sidecar 与原生模块并建库；②WebView 走 loopback 同源调 API / 协同；③无签名一键更新 + 隔离属性实测）→ D1–D6 产品化（启动序列 / 模式选择 / sparsebundle+钥匙串加密 / 离线同步接线 / 更新 / 打包 .app·.dmg）** 推进。**首次 Rust 重编译、macOS 钥匙串与系统授权的图形弹窗必须在产品负责人在场时进行，无人值守不擅跑大编译、不擅动授权。** 因此 0.2.5 的对外发布动作（push / tag / Release）在 Mac 完整版可测前不执行；飞牛 fpk 可先构建供飞牛侧提前验证。
-2. **同步功能默认关闭且未做端到端用户态打通**：本版是服务端 + 前端地基的内部测试版，没有面向最终用户的「断网编辑 / 联网合并」完整入口（该入口随 macOS 完整版在本版后续切片落地）。
-3. **审批 / 流转**：本版只预留 `pending_approval` 枚举与 `reviewBaseId` 钩子，**不建审批表、不做审批界面**。
-4. **不含** Gitea Release 上传、tag、push，以及真机 fnOS 183 升级——这些都待产品负责人在场并明确授权后执行。
+### 飞牛 fnOS（x86_64）
+- 文件：`gouxiangdb-0.2.5-x86.fpk`
+- 大小：**60,659,950 B（57.85 MiB）**
+- sha256：**`326a4c654b7c7a6af91796f9832b624bfb046a3c45568f43caba2cadf7c80bd7`**
+- 构建机：VM15（`192.168.31.15`，Debian12 x86_64，Node v22.22.1，pnpm 9，fnpack 1.2.x），源码基线 `git archive 4b36d18` 干净目录重建（旧 fpk `d8121a1b…` 基于 04ea891，**不含附件修复，已作废**）。
+- 解包复核：外层 `manifest` `version=0.2.5` / `platform=x86`；内层 `server/dist/index.js` 实测含 `NOT_A_WIKI_PAGE`（附件修复新增错误码，旧包无此串）与 `avif` 扩展名；`native/linux-x64/vec0.so` 在位；`node_modules` **零符号链接**（hoisted 布局）；构建期 `/readyz` 五探针冒烟通过、禁带扫描通过。
+- 本包**不内置更新只读令牌**（未设 `GX_READER_TOKEN`），覆盖升级不覆盖现网更新源凭证与 `JWT_SECRET`。
+
+> 两个安装包已归档到本机 `release/0.2.5-beta.1/`（gitignored）。
 
 ---
 
-## 四、质量门实数（2026-10-16，VM15 全量四门，Node v22 / pnpm 9）
+## 三、诚实缺口：本版【没有】什么
 
-> 下表为封版实数，已由 #803 在 VM15 全量重跑（gate-025f，2026-10-16 15:55→16:45 ALL DONE），二次封版提交锁定。
+1. **桌面端离线编辑 / 断网双向同步不含**（#828 侧车：sparsebundle AES 一作用域一匣 + outbox + YN6 冲突双栏手选 + 失权本地擦除，是下一阶段内测形态 B）。
+2. **桌面在线自动更新未接通**：updater 仅在 `GX_POC3=1` 自测门控下注册，正式 tauri.conf 无 updater 段；菜单「检查更新」当前不可用，新版手动下载（#829）。
+3. **无 Apple 开发者签名 / 公证**：仅 ad-hoc，需右键打开；**仅 arm64**，无 Intel / Windows / Linux 桌面包。
+4. **审批 / 工作流**：仅预留 `pending_approval` 枚举与 `reviewBaseId` 钩子。
+5. 飞牛真机 `192.168.31.183` 升级（#881）待本 beta 放行后、产品负责人在场执行（先备份、保数据）。
+
+---
+
+## 四、质量门实数（2026-10-19 发布前亲跑）
 
 | 门 | 结果 |
 |---|---|
-| api 全量测试 | **3390 通过 / 0 失败 / 14 跳过**（324 文件通过 / 2 文件跳过） |
-| web 全量测试 | **1910 通过 / 0 失败**（146 文件；含 node/ 三个新模块 69 测试） |
-| shared-types 测试 | **181 通过 / 0 失败**（10 文件） |
-| canvas 测试 | **51 通过 / 0 失败**（2 文件） |
-| 四包 `tsc --noEmit` | **0 错误** |
-| eslint | **0 error**（四包 exit=0） |
-| web 生产构建 | **exit=0**（Vite 构建成功，仅有 chunk>500kB 的体积提示，非错误） |
-| 迁移 | **42 枚**，本版只增 1 枚 sync 地基（默认 off 不触数据） |
-| 零新第三方依赖 | 同步面零新增运行时依赖；前端零裸 fetch |
+| api help-proxy 定向测试 | **32 用例全绿**（含附件过滤新增用例） |
+| web 全量测试 | **178 文件 / 2261 用例全绿**（默认隔离 `--maxWorkers=2`；注意 singleFork 会混 jsdom/node 造 5 例假失败，非权威） |
+| web / api `tsc --noEmit` | **0 错误** |
+| web eslint | **0 error**（98 warning，阈值 114 内） |
+| Rust 壳 | `CARGO_BUILD_JOBS=2 cargo check` 通过；clippy 清零；headless 用例（含目录穿越 / SPA fallback / WS 重建）绿 |
+| 迁移 | **42 枚**（fpk 与 Mac `.app` 随包同源实测均为 42，最新 `20261015122228_sync_server_foundation`；同步地基默认 off 不触数据） |
+| 桌面真机冒烟 | 壳拉起内核父子进程、五探针全 true、回环反代、百科 14 页无附件、钥匙串、安装流程通过 |
+| 前端依赖 | 零新增第三方 npm 依赖；零裸 fetch；gx-* token |
 
-同步面的关键对抗测试覆盖（随实现提交锁定）：总门 fail-closed（未设 / 空 / `opn` 等笔误均关、`on/true/1` 大小写空白容错才开）、off 时短路 404 且不触库、`clientOpId` 幂等去重与乱序回放、权限按当前态裁决（降权隔离 / 失权可见集）、乐观锁冲突双版本 + 人工 resolve、结构依赖门与类型安全门、树钟不置墓碑、在线改树到离线 pull 的贯通。
-
----
-
-## 五、升级须知（默认关闭，对现网零影响）
-
-1. 覆盖安装 / 升级后执行 `prisma migrate deploy`（幂等）：会**新建**四张 `sync_*` 空表，**不修改、不回填、不删除任何旧表旧数据**；升级前后既有数据、登录态（`JWT_SECRET` 不变）、附件、品牌图全部保留。
-2. **不要在生产 / 主力真实库设置 `GX_SYNC_SERVER=on`**。本版是测试地基，开启后同步面虽受权限引擎保护，但其冲突 / 隔离 / 结构分叉的完整用户流程尚未端到端收口。
-3. 不设置 `GX_SYNC_SERVER` 时，升级后体验与 0.2.4 完全一致；新增的四张表不会被读写。
-4. 若曾在测试库开启过总门：关闭总门即恢复整组 404；测试写入的 `sync_*` 数据可整表清理（不影响业务表），但**清理前先备份**，且本版不提供自动清理脚本。
-5. 飞牛包升级的数据保留策略、Node 必须 v22、`X-GX-Token` 头等运维约束与 0.2.4 相同，见根 README「运维硬约束」。
+> 本机 16GB 纪律：全量测试 / 重构建在 VM15 跑；本机仅 tsc / lint / 定向测试与 Tauri 打包（target 落本地缓存，避开 iCloud）。
 
 ---
 
-## 六、本版提交（自 tag `v0.2.4` 起，共 21 个；其中 2 个已在远端 origin/main，其余仅本地待授权 push）
+## 五、升级 / 数据须知
 
-**同步主线（YN0–YN8，默认 off 零行为）**
-
-- `3c5870b` feat(sync)：YN0 服务端同步地基——只增四表迁移 + GX_SYNC_SERVER 默认关闭总门
-- `86e2420` feat(sync)：YN1 在线写版本切面 + oplog
-- `e6707d8` feat(sync)：YN2 subscribe / 权限裁剪快照 / pull 增量
-- `e2a32a2` feat(sync)：YN4 push 回放 + 幂等 / 顺序 + 接受
-- `dc1a48e` feat(sync)：YN5 当前权限裁决 + 隔离 + 同步中心 + 失权可见集 + 审计
-- `a7f716c` feat(sync)：YN6 数据冲突双版本快照 + 人工 resolve（mine/theirs/custom）+ 幂等
-- `43a06c0` feat(sync)：YN7 库 / 表 / 字段 / 视图离线结构同步（oplog 结构轨 + 注册表回放）
-- `2e68ba0` feat(sync)：YN7 结构依赖门 + 恢复 / 重排回放 + 类型安全门 + 结构冲突人工 resolve
-- `4b677c2` feat(sync)：YN8-A 导航树 op 回放——treeVersion 钟 + navnode 注册表 + /push/tree + 在线切面
-- `6c66a84` feat(sync)：YN8-B 导航树分叉自动合并 / 树冲突人工 resolve
-- `6f18f23` feat(sync)：YN8-C 工作区树游标增量拉取 + 树订阅
-- `df72462` test(sync)：YN8-C 补在线改树→离线 pull 贯通断言
-
-**加密 / 设计文档 / 前端地基 / 品牌**
-
-- `1d43bd9` docs(sync)：PoC-4 加密磁盘匣闸门——路线 A 组 1 项 1-4/6 本机实测通过
-- `c055a37` docs(node)：离线优先 + 操作级双向同步统一架构
-- `66120a5` docs(node)：macOS 独立桌面 App（Tauri v2）+ 一键更新设计与 D0–D6 / 三 PoC
-- `8a13235` docs(sync)：新增长期演进框架纪律章
-- `7d26e5c` feat(web,node)：节点模式 S1 地基（数据源解析器 / URL 规范化 / 双槽会话骨架，未接线）【已在 origin/main】
-- `8d96bb5` docs(node)：节点模式设计与落地方案【已在 origin/main】
-- `1aa5a78` feat(branding)：启用定稿应用图标套件（替换 web / 飞牛包图标）
-- `08131fb` feat(branding)：手动设置服务器对外访问网址（0.2.5，戴总追加需求；零迁移、声明性、默认空零变化，含 shared/api/web 测试）
-- `ba72dff` chore(release)：封版 0.2.5（一）——版本号升 0.2.5、归档 0.2.4 RELEASE、重写本文件、刷新 README 基线表（四门实数与 fpk 指纹由二次提交回填）
+- **飞牛覆盖安装**：执行 `prisma migrate deploy`（幂等），只新增不改旧表；存量数据、登录态、附件、品牌图保留；要求 Node **v22**（better-sqlite3@13 NAPI v10，Node20 会 SIGSEGV）；令牌头 `X-GX-Token`。
+- **macOS 数据落点**：`~/Library/Application Support/cc.gouxiang.desktop/`（dev.db / uploads / .audit），钥匙串 service `cc.gouxiang.desktop`。删除 `.app` 后数据目录按 macOS 惯例保留（符合沙盒外应用通行做法）；需彻底清空可手动删该目录与钥匙串项。
+- 是否需要初始化取决于**本地数据目录是否已有 dev.db**（与服务器 users 表首管理员判定是两层独立逻辑）。
 
 ---
 
-## 七、发布动作清单（★ 全部待产品负责人在场授权）
+## 六、发布动作（2026-10-19 产品负责人已在场授权）
 
-以下动作**尚未执行**，本地提交已备好但**未 push、未 tag、未建 Release**。按产品负责人最新拍板，**飞牛 fpk 与 macOS 完整版两类安装包都可测后，才统一打 0.2.5 测试版**：
-
-1. 完成 macOS 完整版（D0 三 PoC → D1–D6），产出可测的 `构想工作台.app` / `.dmg`（首次 Rust 重编译、钥匙串 / 系统授权弹窗须产品负责人在场）；
-2. `git push origin main`（本地领先 19 个提交）；
-3. 打 tag `v0.2.5` 并 push tag；
-4. Gitea `GouXiang/gouxiangdb` 建 Release `v0.2.5`，上传 `gouxiangdb-0.2.5-x86.fpk`、macOS `.dmg` 与本说明；
-5. 真机 fnOS `192.168.31.183` 覆盖升级（先备份、走既有数据保留验证）；
-6. macOS 钥匙串自动挂载 / 系统授权的真机弹窗（PoC-4 项 5）——在图形会话、产品负责人在场点击确认。
-
-**安装包指纹（封版二次提交锁定，#804 于 VM15 构建）**
-
-- 文件：`gouxiangdb-0.2.5-x86.fpk`
-- 大小（字节 / MiB）：**65,128,252 B / 62.11 MiB**
-- sha256：**`c46df44f60508bf21a6f7c388d4a48eb2fa6a124e46b3e8ad08de40dc8f91910`**
-- 构建机：VM15（`192.168.31.15`），Node v22，fnpack 零软链 / hoisted 布局
-- 解包复核：外层 manifest `version=0.2.5`、`platform=x86`；内层 `server/prisma/migrations` 共 42 枚；四入口 `index.js / mcp-stdio.js / nav-reconcile.js / init-admin.js` 齐全；`serverBaseUrl`（服务器对外访问网址功能）已烤入 bundle；构建期产物冒烟 `/readyz` 五探针全 true、零软链、vec0.so(linux-x64) 在位、禁带扫描通过。
-- 本包**不内置更新只读令牌**（构建时未设 `GX_READER_TOKEN`）；在 0.2.4 之上覆盖升级时，`upgrade_callback` 令牌刷新守卫遇空值即跳过，不覆盖现网 `gouxiangdb.env` 已有的更新源凭证与 `JWT_SECRET`。
+1. 帮助附件修复 `4b36d18` 推送到 `origin/feat/macos-desktop-d0`（已完成：`04ea891..4b36d18`）。
+2. VM15 用含修复的 `git archive 4b36d18` 重打飞牛 x86 fpk，回算指纹（已完成）。
+3. 打 tag `v0.2.5-beta.1`，Gitea 建 **prerelease** Release（名「构想工作台 0.2.5-beta.1」），上传 dmg + fpk + 本发布说明，**不传 update-manifest.json**。
+4. 发布后把最新代码并入 `main`（main 是 feat 分支祖先，fast-forward 合并后 push，不强推、不覆盖）。
+5. 正版授权预埋仅交付设计文档（`docs/design/2026-10-license/DESIGN-LICENSE-PRESEED.md`），**零产品代码改动**；商业化加固（进程守护自检、恢复出厂、备份轮转、JS 混淆→字节码→核心下沉 Rust→机密服务端）列入未来计划。
