@@ -5,7 +5,7 @@
 // 供 Rust 壳在回环口静态托管（resource_dir/server/public），与现网 / fnOS 的普通构建严格隔离。
 //
 // 与普通 build 的关系：
-//   - 普通 `pnpm --filter @gx/web build`（sync-help-center + tsc + vite build）产物落
+//   - 普通 `pnpm --filter @gx/web build`（tsc + vite build）产物落
 //     apps/web/dist，不注入门控，供现网 / fnOS 部署，本脚本【不替代】它。
 //   - 本脚本是 vite 直调（跳过 web build 里的 tsc）：类型由调用方 / CI 的 typecheck 把关，
 //     调用前应已过 web typecheck（pnpm --filter @gx/web typecheck）。
@@ -21,10 +21,9 @@
 //
 // 用法：
 //   node apps/desktop/scripts/build-web-shell.mjs                 # 默认产物 apps/web/dist-shell
-//   node apps/desktop/scripts/build-web-shell.mjs --skip-sync     # 跳过帮助中心同步（调试用）
 //   node apps/desktop/scripts/build-web-shell.mjs --out <dir>     # 覆盖输出目录（相对路径按调用 cwd 解析）
 //
-// 退出码：同步 / 构建失败，或产物硬校验不过 => 非 0。
+// 退出码：构建失败，或产物硬校验不过 => 非 0。
 
 import fs from "node:fs";
 import path from "node:path";
@@ -37,10 +36,8 @@ const webDir = path.join(repoRoot, "apps", "web");
 
 const args = process.argv.slice(2);
 let outOpt = "";
-let skipSync = false;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--out") outOpt = args[++i];
-  else if (args[i] === "--skip-sync") skipSync = true;
 }
 
 // 默认 dist-shell 固定在 apps/web 下；--out 相对路径按调用方 cwd 解析，再转绝对路径交给 vite，
@@ -60,21 +57,13 @@ function run(cmd, argv, opts = {}) {
 
 log(`repoRoot=${repoRoot}`);
 
-// --- 1) 帮助中心同步（对齐 web package.json build 的前置步骤）-------------------------
-if (skipSync) {
-  log("--skip-sync：跳过帮助中心同步");
-} else {
-  log("同步帮助中心（node ../../scripts/sync-help-center.mjs，cwd=apps/web）");
-  run("node", ["../../scripts/sync-help-center.mjs"], { cwd: webDir });
-}
-
-// --- 2) vite 门控构建（直调 vite，跳过 tsc；类型由调用方 / CI typecheck 把关）----------
+// --- 1) vite 门控构建（直调 vite，跳过 tsc；类型由调用方 / CI typecheck 把关）----------
 const buildEnv = { ...process.env, VITE_NODE_LAUNCHER: "1", VITE_BASE_PATH: "/" };
 log("注入构建环境：VITE_NODE_LAUNCHER=1 VITE_BASE_PATH=/（其余 env 原样继承，含 PATH）");
 log(`vite 构建，产物目录：${outDir}`);
 run("pnpm", ["exec", "vite", "build", "--outDir", outDir, "--emptyOutDir"], { cwd: webDir, env: buildEnv });
 
-// --- 3) 产物硬校验 -------------------------------------------------------------------
+// --- 2) 产物硬校验 -------------------------------------------------------------------
 const indexHtml = path.join(outDir, "index.html");
 if (!fs.existsSync(indexHtml)) fail(`缺少产物 ${indexHtml}（vite 构建未产出 index.html）`);
 const html = fs.readFileSync(indexHtml, "utf8");

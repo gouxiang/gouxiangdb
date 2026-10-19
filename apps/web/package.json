@@ -4,14 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "sync:help": "node ../../scripts/sync-help-center.mjs",
-    "dev": "node ../../scripts/sync-help-center.mjs && vite",
-    "build": "node ../../scripts/sync-help-center.mjs && tsc && vite build",
+    "dev": "vite",
+    "build": "tsc && vite build",
     "preview": "vite preview",
-    "typecheck": "node ../../scripts/sync-help-center.mjs && tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 114",
-    "test": "node ../../scripts/sync-help-center.mjs && vitest run --passWithNoTests",
-    "test:unit": "node ../../scripts/sync-help-center.mjs && vitest run",
+    "test": "vitest run --passWithNoTests",
+    "test:unit": "vitest run",
     "test:e2e": "playwright test"
   },
   "dependencies": {
