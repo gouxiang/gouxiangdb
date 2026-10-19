@@ -11,6 +11,7 @@
 //   permissions.ts  — RBAC 角色与权限位
 //   api.ts          — 前后端 HTTP 契约（唯一真源）
 //   layoutVersion.ts — 表单设计器布局版本信封（前后端共用的唯一真源）
+//   sync.ts         — 离线同步协议握手契约（探针版本协商 + 写端点协议错误码）
 
 export * from "./ids.js";
 export * from "./fields.js";
@@ -35,5 +36,6 @@ export * from "./policy.js";
 export * from "./share.js";
 export * from "./collab.js";
 export * from "./layoutVersion.js";
+export * from "./sync.js";
 export * from "./update.js";
 export * from "./branding.js";

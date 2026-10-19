@@ -26,6 +26,13 @@ import { pullBaseOps, pullTreeOps } from "../../../domain/sync/pull.js";
 import { pushBaseOps, pushTreeOps, retryIncoming, resolveConflict, type IncomingOp, type PushResult } from "../../../domain/sync/push.js";
 import { listIncoming, discardIncoming } from "../../../domain/sync/incoming.js";
 import { buildVisibilityReport } from "../../../domain/sync/visibility.js";
+import {
+  gateClientProtocol,
+  SYNC_PROTOCOL_VERSION,
+  SYNC_PROTOCOL_MIN_VERSION,
+  SYNC_PROTOCOL_MAX_VERSION,
+  SYNC_CAPABILITIES,
+} from "../../../domain/sync/protocol.js";
 
 export const syncRoutes = new Hono();
 
@@ -51,6 +58,12 @@ syncRoutes.get("/", (c) => {
     // 阶段标识随 YN 推进刷新；客户端据此判断可用端点集。
     phase: "YN8",
     serverVersion: VERSION,
+    // S0 协议握手：探针只读宣告协议协商窗口与能力（additive，旧键全部保留）。
+    // 读端点不做协议门；客户端据此在写之前判断是否需要升级自己或服务端（脑裂防护）。
+    protocolVersion: SYNC_PROTOCOL_VERSION,
+    minProtocolVersion: SYNC_PROTOCOL_MIN_VERSION,
+    maxProtocolVersion: SYNC_PROTOCOL_MAX_VERSION,
+    capabilities: [...SYNC_CAPABILITIES],
     auth: {
       userId: auth.userId,
       workspaceId: auth.workspaceId,
@@ -151,6 +164,16 @@ syncRoutes.get("/pull/tree", async (c) => {
 const PUSH_MAX_OPS = 1000;
 
 /**
+ * S0 写端点协议门（脑裂防护）：在 body 已解析、但遍历 ops 与【任何 DB 访问之前】裁决。
+ * 三种不通过情形都抛 HttpError(400, message, code)；此处绝不落任何 sync_incoming/op_log。
+ * 缺省（旧客户端不带 protocolVersion）由 gateClientProtocol 按 v1 放行（additive）。
+ */
+function enforceProtocolGate(body: { protocolVersion?: unknown } | null): void {
+  const result = gateClientProtocol(body?.protocolVersion);
+  if (!result.ok) throw new HttpError(400, result.message, result.code);
+}
+
+/**
  * 对本次请求【新落】的终态回执发审计（§9.5）。只认 _freshTerminal（幂等重放回执不带，不刷审计）。
  * accepted/rejected/quarantined 三态落 sync_push_*；conflict 属 YN6（sync_conflict_resolved 在用户
  * 弹窗裁决时才产生，单纯版本冲突不在 push 打点）。detail 只带标识与原因码，【绝不落字段明文】。
@@ -189,8 +212,11 @@ function auditFreshTerminal(
 syncRoutes.post("/push", async (c) => {
   const auth = c.get("auth");
   const body = (await c.req.json().catch(() => null)) as
-    | { baseId?: unknown; clientId?: unknown; ops?: unknown }
+    | { baseId?: unknown; clientId?: unknown; ops?: unknown; protocolVersion?: unknown }
     | null;
+
+  // S0 协议门 fail-closed：在形状校验/遍历 ops/任何 DB 访问之前；旧客户端缺省字段放行。
+  enforceProtocolGate(body);
 
   const baseId = typeof body?.baseId === "string" ? body.baseId.trim() : "";
   const clientId = typeof body?.clientId === "string" ? body.clientId.trim() : "";
@@ -256,8 +282,11 @@ syncRoutes.post("/push", async (c) => {
 syncRoutes.post("/push/tree", async (c) => {
   const auth = c.get("auth");
   const body = (await c.req.json().catch(() => null)) as
-    | { clientId?: unknown; ops?: unknown }
+    | { clientId?: unknown; ops?: unknown; protocolVersion?: unknown }
     | null;
+
+  // S0 协议门 fail-closed：与 /push 同位（解析 body 后、遍历 ops/任何 DB 之前）。
+  enforceProtocolGate(body);
 
   const clientId = typeof body?.clientId === "string" ? body.clientId.trim() : "";
   if (!clientId) throw new HttpError(400, "缺少 clientId", "SYNC_BAD_REQUEST");

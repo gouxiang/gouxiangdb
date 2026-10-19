@@ -119,6 +119,10 @@ describe("D/E. 开关 on：门放行，鉴权独立，探针 200", () => {
         sync: boolean;
         phase: string;
         serverVersion: string;
+        protocolVersion: number;
+        minProtocolVersion: number;
+        maxProtocolVersion: number;
+        capabilities: unknown;
         auth: { userId: string; workspaceId: string | null };
       }>(res);
       expect(body.apiVersion).toBe("v1");
@@ -127,6 +131,14 @@ describe("D/E. 开关 on：门放行，鉴权独立，探针 200", () => {
       expect(body.phase).toBe("YN8");
       expect(typeof body.serverVersion).toBe("string");
       expect(body.auth.userId).toBe("yn0_user");
+      // S0 additive：协议握手四新键存在且类型/取值正确（不断言旧键删除）。
+      expect(body.protocolVersion).toBe(1);
+      expect(body.minProtocolVersion).toBe(1);
+      expect(body.maxProtocolVersion).toBe(1);
+      expect(Array.isArray(body.capabilities)).toBe(true);
+      expect((body.capabilities as unknown[]).length).toBeGreaterThan(0);
+      for (const cap of body.capabilities as unknown[]) expect(typeof cap).toBe("string");
+      expect(body.capabilities).toContain("record-sync");
     }));
 
   it("笔误值（opn）按 fail-closed 仍 404", () =>
