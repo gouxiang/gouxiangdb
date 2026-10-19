@@ -19,6 +19,8 @@ import { loadTableFields } from "./recordService.js";
 import { deleteRecordsTx, restoreRecordsTx, syncRecordsTx } from "./fieldIndex/sync.js";
 import { enqueueChangeEventTx } from "./search/outbox.js";
 import { recordSyncOpTx, writeSyncOpTx, type ReplaySyncIdentity, type SyncOp } from "./sync/oplog.js";
+import { recordLocalReplicaTx } from "./sync/localOutbox.js";
+import { offlineNodeId, offlineClientId } from "../configOfflineReplica.js";
 import { sidecarUniqueMatch, findUniqueConflictTx } from "./queryPlan/uniqueSidecar.js";
 import { diffRecordFields } from "./recordChanges/diff.js";
 import { appendRecordChangeTx } from "./recordChanges/store.js";
@@ -392,6 +394,12 @@ export async function softDeleteRecordTx(
     entityType: "record", entityId: recordId, tableId: deleted.tableId,
     op: "delete", actorId, changes: [],
   });
+  // S2b：本机作为离线副本时，同事务登记 local_outbox（待发）；默认关则原语首行 return null。
+  // 只挂在线直写 else 分支——push/pull 回放走上面 if(sync)，绝不进 outbox（防回放循环）。
+  await recordLocalReplicaTx(tx, {
+    entityType: "record", entityId: recordId, tableId: deleted.tableId,
+    op: "delete", actorId, changes: [],
+  }, { nodeId: offlineNodeId(), clientId: offlineClientId() });
   return { sync: null };
 }
 
@@ -467,6 +475,11 @@ export async function restoreRecordTx(
     entityType: "record", entityId: recordId, tableId,
     op: "restore", actorId, changes: [],
   });
+  // S2b：离线副本同事务登记 local_outbox（op=restore，changes 恒空）；默认关零行为。
+  await recordLocalReplicaTx(tx, {
+    entityType: "record", entityId: recordId, tableId,
+    op: "restore", actorId, changes: [],
+  }, { nodeId: offlineNodeId(), clientId: offlineClientId() });
   return { sync: null };
 }
 
@@ -552,6 +565,11 @@ export async function createRecordTx(tx: DbTx, params: CreateRecordParams): Prom
         entityType: "record", entityId: created.id, tableId: params.tableId,
         op: "create", actorId: params.userId, changes: fieldChanges,
       });
+      // S2b：离线副本同事务登记 local_outbox（op=create，changes=全字段初始快照）；默认关零行为。
+      await recordLocalReplicaTx(tx, {
+        entityType: "record", entityId: created.id, tableId: params.tableId,
+        op: "create", actorId: params.userId, changes: fieldChanges,
+      }, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
     return { id: created.id, tableId: params.tableId, sync: syncResult };
 }
@@ -604,6 +622,11 @@ export async function updateRecordTx(tx: DbTx, params: UpdateRecordParams): Prom
         entityType: "record", entityId: params.recordId, tableId: params.tableId,
         op: "update", actorId: params.userId, changes,
       });
+      // S2b：离线副本同事务登记 local_outbox（op=update，changes=字段 diff）；默认关零行为。
+      await recordLocalReplicaTx(tx, {
+        entityType: "record", entityId: params.recordId, tableId: params.tableId,
+        op: "update", actorId: params.userId, changes,
+      }, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
     return { changes, sync: syncResult };
 }
