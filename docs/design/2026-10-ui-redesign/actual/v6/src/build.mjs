@@ -125,6 +125,7 @@ ${menu}    </div>`;
   return `<div class="app" id="app">
   <aside class="rail">
     <div class="rail-mark">${logo}</div>
+    <div class="rail-sep"></div>
     <button class="rail-create" id="createLib" title="新建库">${I.plus}<span>新建库</span></button>
     <nav class="rail-nav">
 ${rail(active)}    </nav>

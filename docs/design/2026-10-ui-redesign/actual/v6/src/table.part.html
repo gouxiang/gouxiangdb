@@ -63,8 +63,8 @@
   /* 第三行：网格专属设置项 */
   .sbar { display: flex; align-items: center; gap: 5px; padding: 7px 10px; border-bottom: 1px solid var(--line-2); background: var(--sub); }
 
-  /* 筛选条：生效条件的常驻条（真实产品：筛选生效后显示「筛选中」可清空） */
-  .fbar { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-bottom: 1px solid var(--line-2); background: var(--sub); }
+  /* 筛选条件 chips：生效后跟在「筛选」按钮后，不再单独占一行 */
+  .s-grp { display: flex; align-items: center; gap: 4px; flex: none; }
   .fchip {
     display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 4px 0 9px;
     background: #fff; border: 1px solid var(--line); border-radius: var(--r-pill);
@@ -237,10 +237,15 @@
       字段
     </button>
     <span style="width:1px;height:18px;background:var(--line);flex:none;margin:0 2px;"></span>
-    <button class="tb is-on">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>
-      筛选<span class="cnt">2</span>
-    </button>
+    <div class="s-grp">
+      <button class="tb is-on">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>
+        筛选<span class="cnt">2</span>
+      </button>
+      <span class="fchip">状态 <b>是</b> 进行中 <i>×</i></span>
+      <span class="fchip">负责人 <b>是</b> 我 <i>×</i></span>
+      <button class="fadd">+ 添加筛选</button>
+    </div>
     <button class="tb">分组</button>
     <button class="tb">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10"/><path d="M4 12h7"/><path d="M4 17h4"/><path d="M17 5v14"/><path d="M14 16l3 3 3-3"/></svg>
@@ -251,14 +256,6 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1 0 1.6-.7 1.6-1.5 0-.4-.2-.8-.5-1.1-.3-.3-.5-.7-.5-1.1 0-.8.7-1.5 1.6-1.5h1.8A4.5 4.5 0 0 0 21 12a9 9 0 0 0-9-9z"/><circle cx="7.5" cy="11" r="1"/><circle cx="11" cy="7.5" r="1"/><circle cx="15.5" cy="11" r="1"/></svg>
       行颜色
     </button>
-  </div>
-
-  <!-- 筛选条件条 -->
-  <div class="fbar">
-    <span class="fchip">状态 <b>是</b> 进行中 <i>×</i></span>
-    <span class="fchip">负责人 <b>是</b> 我 <i>×</i></span>
-    <button class="fadd">+ 添加筛选</button>
-    <button class="fclear">清空筛选</button>
   </div>
 
   <!-- 表格 -->

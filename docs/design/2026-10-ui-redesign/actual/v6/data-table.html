@@ -64,42 +64,36 @@ svg { display: block; }
 /* ---------------- 应用外壳：导航轨 + 内容 ---------------- */
 .app { position: relative; display: flex; height: 100vh; overflow: hidden; }
 
-/* ---------------- L1 一级导航：图标轨 ---------------- */
+/* ---------------- L1 一级导航：图标轨 ----------------
+   三层分层，装饰只留一层：① 品牌区 ② 主导航（库） ③ 底部管理区
+   ────────────────────────────────────────────────────── */
 .rail {
-  width: 88px; flex: none;
+  width: 76px; flex: none;
   display: flex; flex-direction: column; align-items: center;
-  padding: 14px 0 12px;
-  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  padding: 14px 0 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #fafbfd 100%);
   border-right: 1px solid var(--line);
-  position: relative;
-}
-/* 右侧一道极淡的竖向高光，把导航与内容区分开（不用重阴影） */
-.rail::after {
-  content: ""; position: absolute; top: 0; right: -1px; bottom: 0; width: 1px;
-  background: rgba(16, 24, 40, .04);
-}
-.rail-mark {
-  width: 34px; height: 34px; border-radius: 9px; overflow: hidden; flex: none;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, .12), 0 4px 10px -4px rgba(16, 24, 40, .28);
 }
 
-/* 建库：一级导航顶部的主入口（真实产品同位置同文案） */
+/* ① 品牌区：logo 下方一道极淡分隔 */
+.rail-mark {
+  width: 36px; height: 36px; border-radius: 10px; overflow: hidden; flex: none;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .10), 0 5px 12px -5px rgba(16, 24, 40, .30);
+}
+.rail-sep { width: 26px; height: 1px; background: var(--line); margin: 13px 0 10px; flex: none; }
+
+/* 新建库：虚线「添加」行——比导航项轻，比裸图标清楚 */
 .rail-create {
-  margin-top: 14px; width: 72px; height: 30px; flex: none;
+  width: 64px; height: 30px; flex: none;
   display: inline-flex; align-items: center; justify-content: center; gap: 4px;
-  border: 0; border-radius: 9px; cursor: pointer;
-  background: linear-gradient(180deg, #3d86ea 0%, #2c7be5 100%);
-  color: #fff; font-size: 11.5px; font-weight: 600; letter-spacing: .01em;
-  box-shadow: 0 1px 2px rgba(44, 123, 229, .35), 0 6px 14px -8px rgba(44, 123, 229, .7),
-              inset 0 1px 0 rgba(255, 255, 255, .28);
-  transition: filter .15s, box-shadow .15s, transform .12s;
+  border: 1px dashed #d3dae6; border-radius: 9px;
+  background: transparent; color: var(--ink-3);
+  font-size: 11.5px; font-weight: 500; cursor: pointer;
+  transition: background .15s ease-out, color .15s ease-out, border-color .15s ease-out;
 }
 .rail-create:hover {
-  filter: brightness(1.05);
-  box-shadow: 0 1px 2px rgba(44, 123, 229, .38), 0 10px 20px -8px rgba(44, 123, 229, .8),
-              inset 0 1px 0 rgba(255, 255, 255, .32);
+  background: var(--brand-soft); color: var(--brand-ink); border-color: #b9d3f7;
 }
-.rail-create:active { transform: translateY(.5px); filter: brightness(.97); }
 
 .rail-nav {
   display: flex; flex-direction: column; align-items: center;
@@ -110,64 +104,55 @@ svg { display: block; }
 .rail-nav::-webkit-scrollbar { width: 0; }
 
 .rail-item {
-  width: 72px; padding: 7px 0 6px; flex: none;
-  border: 0; border-radius: 11px; background: transparent;
-  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  width: 64px; padding: 6px 0 5px; flex: none;
+  border: 0; border-radius: 12px; background: transparent;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
   color: var(--ink-3); cursor: pointer; position: relative;
-  transition: background .16s ease-out, color .16s ease-out, box-shadow .16s ease-out;
+  transition: background .16s ease-out, color .16s ease-out;
 }
-/* 图标砖：柔和圆角方底，选中/悬停才上色——比裸图标更「成品感」 */
+/* 图标砖：统一柔和圆角方底；未选中不上底色，压住轨道噪点 */
 .rail-item .rd {
-  width: 34px; height: 34px; border-radius: 10px; flex: none;
+  width: 36px; height: 36px; border-radius: 11px; flex: none;
   display: grid; place-items: center;
   background: transparent; color: var(--ink-3);
-  transition: background .16s ease-out, color .16s ease-out, box-shadow .16s ease-out;
+  transition: background .16s ease-out, color .16s ease-out;
 }
-.rail-item .rd svg { width: 17px; height: 17px; }
+.rail-item .rd svg { width: 18px; height: 18px; }
 .rail-item .nm {
-  font-size: 11px; line-height: 1.25; letter-spacing: .01em;
-  max-width: 66px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10.5px; line-height: 1.3; letter-spacing: .01em;
+  max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-weight: 500;
 }
-.rail-item:hover { background: #f1f5fc; color: var(--ink-1); }
-.rail-item:hover .rd { background: #fff; color: var(--ink-2); box-shadow: var(--sh-card); }
+.rail-item:hover { background: #f2f6fd; color: var(--ink-2); }
+.rail-item:hover .rd { background: #fff; box-shadow: var(--sh-card); }
 
-/* 选中：白底浮起卡（规范 R-N-09：白底 + 圆角 + accent 字 600；左侧色条是反例，不用） */
-.rail-item.is-active {
-  background: #fff; color: var(--brand-ink);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 6px 16px -10px rgba(16, 24, 40, .35),
-              inset 0 0 0 1px rgba(44, 123, 229, .16);
-}
-.rail-item.is-active .rd {
-  background: var(--brand-soft); color: var(--brand);
-  box-shadow: inset 0 0 0 1px rgba(44, 123, 229, .14);
-}
+/* 选中：淡品牌底 + 白底浮起砖 + accent 图标/文字。
+   不用白色卡片——近白轨道上白卡只能靠阴影硬分界，会显脏；左侧色条是规范反例，也不用。 */
+.rail-item.is-active { background: var(--brand-soft); color: var(--brand-ink); }
+.rail-item.is-active .rd { background: #fff; color: var(--brand); box-shadow: var(--sh-card); }
 .rail-item.is-active .nm { font-weight: 600; }
-/* 底部居中短指示条 */
-.rail-item.is-active::after {
-  content: ""; position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%);
-  width: 14px; height: 2px; border-radius: 999px; background: var(--brand);
-}
 
 .rail-grp {
-  width: 72px; flex: none; margin: 9px 0 5px;
-  display: flex; align-items: center; gap: 6px;
+  width: 64px; flex: none; margin: 10px 0 2px;
+  display: flex; align-items: center; gap: 5px;
 }
-.rail-grp::before, .rail-grp::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.rail-grp::before, .rail-grp::after { content: ""; flex: 1; height: 1px; background: var(--line-2); }
 .rail-grp span {
-  font-size: 10px; line-height: 1; color: var(--ink-4); letter-spacing: .06em;
+  font-size: 9.5px; line-height: 1; color: var(--ink-4); letter-spacing: .1em;
   white-space: nowrap; flex: none;
 }
+
+/* ③ 底部管理区：横排图标按钮，比主导航轻一档，不再占半条轨道 */
 .rail-foot {
-  flex: none; margin-top: auto; padding-top: 8px; width: 100%;
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  flex: none; margin-top: auto; padding-top: 9px;
+  width: calc(100% - 14px);
+  display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 3px;
   border-top: 1px solid var(--line-2);
 }
-/* 管理区比库区更轻一档：图标砖 30 + 10px 小字，和上面的库项拉开层级 */
-.rail-foot .rail-item { padding: 5px 0 4px; gap: 3px; }
+.rail-foot .rail-item { width: 32px; padding: 3px 0; border-radius: 9px; gap: 0; }
 .rail-foot .rail-item .rd { width: 30px; height: 30px; border-radius: 9px; }
 .rail-foot .rail-item .rd svg { width: 16px; height: 16px; }
-.rail-foot .rail-item .nm { font-size: 10px; }
+.rail-foot .rail-item .nm { display: none; }   /* 纯图标 + title tooltip */
 
 /* ---------------- 主区 ---------------- */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -533,6 +518,7 @@ svg { display: block; }
     fill="none" stroke="url(#gxlogo-bandk)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
   <line x1="98" y1="112" x2="146" y2="112" stroke="url(#gxlogo-bandk)" stroke-width="11" stroke-linecap="round"/>
 </svg></div>
+    <div class="rail-sep"></div>
     <button class="rail-create" id="createLib" title="新建库"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg><span>新建库</span></button>
     <nav class="rail-nav">
       <div class="rail-grp"><span>数据库</span></div>
@@ -783,8 +769,8 @@ svg { display: block; }
   /* 第三行：网格专属设置项 */
   .sbar { display: flex; align-items: center; gap: 5px; padding: 7px 10px; border-bottom: 1px solid var(--line-2); background: var(--sub); }
 
-  /* 筛选条：生效条件的常驻条（真实产品：筛选生效后显示「筛选中」可清空） */
-  .fbar { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-bottom: 1px solid var(--line-2); background: var(--sub); }
+  /* 筛选条件 chips：生效后跟在「筛选」按钮后，不再单独占一行 */
+  .s-grp { display: flex; align-items: center; gap: 4px; flex: none; }
   .fchip {
     display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 4px 0 9px;
     background: #fff; border: 1px solid var(--line); border-radius: var(--r-pill);
@@ -957,10 +943,15 @@ svg { display: block; }
       字段
     </button>
     <span style="width:1px;height:18px;background:var(--line);flex:none;margin:0 2px;"></span>
-    <button class="tb is-on">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>
-      筛选<span class="cnt">2</span>
-    </button>
+    <div class="s-grp">
+      <button class="tb is-on">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>
+        筛选<span class="cnt">2</span>
+      </button>
+      <span class="fchip">状态 <b>是</b> 进行中 <i>×</i></span>
+      <span class="fchip">负责人 <b>是</b> 我 <i>×</i></span>
+      <button class="fadd">+ 添加筛选</button>
+    </div>
     <button class="tb">分组</button>
     <button class="tb">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10"/><path d="M4 12h7"/><path d="M4 17h4"/><path d="M17 5v14"/><path d="M14 16l3 3 3-3"/></svg>
@@ -971,14 +962,6 @@ svg { display: block; }
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1 0 1.6-.7 1.6-1.5 0-.4-.2-.8-.5-1.1-.3-.3-.5-.7-.5-1.1 0-.8.7-1.5 1.6-1.5h1.8A4.5 4.5 0 0 0 21 12a9 9 0 0 0-9-9z"/><circle cx="7.5" cy="11" r="1"/><circle cx="11" cy="7.5" r="1"/><circle cx="15.5" cy="11" r="1"/></svg>
       行颜色
     </button>
-  </div>
-
-  <!-- 筛选条件条 -->
-  <div class="fbar">
-    <span class="fchip">状态 <b>是</b> 进行中 <i>×</i></span>
-    <span class="fchip">负责人 <b>是</b> 我 <i>×</i></span>
-    <button class="fadd">+ 添加筛选</button>
-    <button class="fclear">清空筛选</button>
   </div>
 
   <!-- 表格 -->

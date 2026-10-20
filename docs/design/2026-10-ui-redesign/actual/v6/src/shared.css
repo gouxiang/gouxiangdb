@@ -58,42 +58,36 @@ svg { display: block; }
 /* ---------------- 应用外壳：导航轨 + 内容 ---------------- */
 .app { position: relative; display: flex; height: 100vh; overflow: hidden; }
 
-/* ---------------- L1 一级导航：图标轨 ---------------- */
+/* ---------------- L1 一级导航：图标轨 ----------------
+   三层分层，装饰只留一层：① 品牌区 ② 主导航（库） ③ 底部管理区
+   ────────────────────────────────────────────────────── */
 .rail {
-  width: 88px; flex: none;
+  width: 76px; flex: none;
   display: flex; flex-direction: column; align-items: center;
-  padding: 14px 0 12px;
-  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  padding: 14px 0 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #fafbfd 100%);
   border-right: 1px solid var(--line);
-  position: relative;
-}
-/* 右侧一道极淡的竖向高光，把导航与内容区分开（不用重阴影） */
-.rail::after {
-  content: ""; position: absolute; top: 0; right: -1px; bottom: 0; width: 1px;
-  background: rgba(16, 24, 40, .04);
-}
-.rail-mark {
-  width: 34px; height: 34px; border-radius: 9px; overflow: hidden; flex: none;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, .12), 0 4px 10px -4px rgba(16, 24, 40, .28);
 }
 
-/* 建库：一级导航顶部的主入口（真实产品同位置同文案） */
+/* ① 品牌区：logo 下方一道极淡分隔 */
+.rail-mark {
+  width: 36px; height: 36px; border-radius: 10px; overflow: hidden; flex: none;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .10), 0 5px 12px -5px rgba(16, 24, 40, .30);
+}
+.rail-sep { width: 26px; height: 1px; background: var(--line); margin: 13px 0 10px; flex: none; }
+
+/* 新建库：虚线「添加」行——比导航项轻，比裸图标清楚 */
 .rail-create {
-  margin-top: 14px; width: 72px; height: 30px; flex: none;
+  width: 64px; height: 30px; flex: none;
   display: inline-flex; align-items: center; justify-content: center; gap: 4px;
-  border: 0; border-radius: 9px; cursor: pointer;
-  background: linear-gradient(180deg, #3d86ea 0%, #2c7be5 100%);
-  color: #fff; font-size: 11.5px; font-weight: 600; letter-spacing: .01em;
-  box-shadow: 0 1px 2px rgba(44, 123, 229, .35), 0 6px 14px -8px rgba(44, 123, 229, .7),
-              inset 0 1px 0 rgba(255, 255, 255, .28);
-  transition: filter .15s, box-shadow .15s, transform .12s;
+  border: 1px dashed #d3dae6; border-radius: 9px;
+  background: transparent; color: var(--ink-3);
+  font-size: 11.5px; font-weight: 500; cursor: pointer;
+  transition: background .15s ease-out, color .15s ease-out, border-color .15s ease-out;
 }
 .rail-create:hover {
-  filter: brightness(1.05);
-  box-shadow: 0 1px 2px rgba(44, 123, 229, .38), 0 10px 20px -8px rgba(44, 123, 229, .8),
-              inset 0 1px 0 rgba(255, 255, 255, .32);
+  background: var(--brand-soft); color: var(--brand-ink); border-color: #b9d3f7;
 }
-.rail-create:active { transform: translateY(.5px); filter: brightness(.97); }
 
 .rail-nav {
   display: flex; flex-direction: column; align-items: center;
@@ -104,64 +98,55 @@ svg { display: block; }
 .rail-nav::-webkit-scrollbar { width: 0; }
 
 .rail-item {
-  width: 72px; padding: 7px 0 6px; flex: none;
-  border: 0; border-radius: 11px; background: transparent;
-  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  width: 64px; padding: 6px 0 5px; flex: none;
+  border: 0; border-radius: 12px; background: transparent;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
   color: var(--ink-3); cursor: pointer; position: relative;
-  transition: background .16s ease-out, color .16s ease-out, box-shadow .16s ease-out;
+  transition: background .16s ease-out, color .16s ease-out;
 }
-/* 图标砖：柔和圆角方底，选中/悬停才上色——比裸图标更「成品感」 */
+/* 图标砖：统一柔和圆角方底；未选中不上底色，压住轨道噪点 */
 .rail-item .rd {
-  width: 34px; height: 34px; border-radius: 10px; flex: none;
+  width: 36px; height: 36px; border-radius: 11px; flex: none;
   display: grid; place-items: center;
   background: transparent; color: var(--ink-3);
-  transition: background .16s ease-out, color .16s ease-out, box-shadow .16s ease-out;
+  transition: background .16s ease-out, color .16s ease-out;
 }
-.rail-item .rd svg { width: 17px; height: 17px; }
+.rail-item .rd svg { width: 18px; height: 18px; }
 .rail-item .nm {
-  font-size: 11px; line-height: 1.25; letter-spacing: .01em;
-  max-width: 66px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10.5px; line-height: 1.3; letter-spacing: .01em;
+  max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-weight: 500;
 }
-.rail-item:hover { background: #f1f5fc; color: var(--ink-1); }
-.rail-item:hover .rd { background: #fff; color: var(--ink-2); box-shadow: var(--sh-card); }
+.rail-item:hover { background: #f2f6fd; color: var(--ink-2); }
+.rail-item:hover .rd { background: #fff; box-shadow: var(--sh-card); }
 
-/* 选中：白底浮起卡（规范 R-N-09：白底 + 圆角 + accent 字 600；左侧色条是反例，不用） */
-.rail-item.is-active {
-  background: #fff; color: var(--brand-ink);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 6px 16px -10px rgba(16, 24, 40, .35),
-              inset 0 0 0 1px rgba(44, 123, 229, .16);
-}
-.rail-item.is-active .rd {
-  background: var(--brand-soft); color: var(--brand);
-  box-shadow: inset 0 0 0 1px rgba(44, 123, 229, .14);
-}
+/* 选中：淡品牌底 + 白底浮起砖 + accent 图标/文字。
+   不用白色卡片——近白轨道上白卡只能靠阴影硬分界，会显脏；左侧色条是规范反例，也不用。 */
+.rail-item.is-active { background: var(--brand-soft); color: var(--brand-ink); }
+.rail-item.is-active .rd { background: #fff; color: var(--brand); box-shadow: var(--sh-card); }
 .rail-item.is-active .nm { font-weight: 600; }
-/* 底部居中短指示条 */
-.rail-item.is-active::after {
-  content: ""; position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%);
-  width: 14px; height: 2px; border-radius: 999px; background: var(--brand);
-}
 
 .rail-grp {
-  width: 72px; flex: none; margin: 9px 0 5px;
-  display: flex; align-items: center; gap: 6px;
+  width: 64px; flex: none; margin: 10px 0 2px;
+  display: flex; align-items: center; gap: 5px;
 }
-.rail-grp::before, .rail-grp::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.rail-grp::before, .rail-grp::after { content: ""; flex: 1; height: 1px; background: var(--line-2); }
 .rail-grp span {
-  font-size: 10px; line-height: 1; color: var(--ink-4); letter-spacing: .06em;
+  font-size: 9.5px; line-height: 1; color: var(--ink-4); letter-spacing: .1em;
   white-space: nowrap; flex: none;
 }
+
+/* ③ 底部管理区：横排图标按钮，比主导航轻一档，不再占半条轨道 */
 .rail-foot {
-  flex: none; margin-top: auto; padding-top: 8px; width: 100%;
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  flex: none; margin-top: auto; padding-top: 9px;
+  width: calc(100% - 14px);
+  display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 3px;
   border-top: 1px solid var(--line-2);
 }
-/* 管理区比库区更轻一档：图标砖 30 + 10px 小字，和上面的库项拉开层级 */
-.rail-foot .rail-item { padding: 5px 0 4px; gap: 3px; }
+.rail-foot .rail-item { width: 32px; padding: 3px 0; border-radius: 9px; gap: 0; }
 .rail-foot .rail-item .rd { width: 30px; height: 30px; border-radius: 9px; }
 .rail-foot .rail-item .rd svg { width: 16px; height: 16px; }
-.rail-foot .rail-item .nm { font-size: 10px; }
+.rail-foot .rail-item .nm { display: none; }   /* 纯图标 + title tooltip */
 
 /* ---------------- 主区 ---------------- */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
