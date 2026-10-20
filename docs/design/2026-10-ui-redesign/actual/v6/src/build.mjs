@@ -16,10 +16,11 @@ logo = logo.replace('width="1024" height="1024"', 'width="36" height="36"');
 
 const S = 'fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"';
 const I = {
-  home: `<svg width="19" height="19" viewBox="0 0 24 24" ${S} stroke-width="1.75"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg>`,
-  db: `<svg width="19" height="19" viewBox="0 0 24 24" ${S} stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>`,
+  /* 注：class="gx-ic-*" 供图标视觉重量配平使用（不同形状视觉尺寸不同） */
+  home: `<svg class="gx-ic-home" width="19" height="19" viewBox="0 0 24 24" ${S} stroke-width="1.75"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg>`,
+  db: `<svg class="gx-ic-db" width="19" height="19" viewBox="0 0 24 24" ${S} stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>`,
   book: `<svg width="19" height="19" viewBox="0 0 24 24" ${S} stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
-  users: `<svg width="19" height="19" viewBox="0 0 24 24" ${S} stroke-width="1.75"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>`,
+  users: `<svg class="gx-ic-users" width="19" height="19" viewBox="0 0 24 24" ${S} stroke-width="1.75"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>`,
   cog: `<svg width="19" height="19" viewBox="0 0 24 24" ${S} stroke-width="1.75"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
   bell: `<svg width="17" height="17" viewBox="0 0 24 24" ${S} stroke-width="1.85"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>`,
   help: `<svg width="17" height="17" viewBox="0 0 24 24" ${S} stroke-width="1.85"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.6 2.3c-.7.4-1.2 1-1.2 1.8v.4"/><circle cx="12" cy="17.2" r=".8" fill="currentColor" stroke="none"/></svg>`,
