@@ -52,7 +52,23 @@ function menuIcon(name) {
   return `<svg width="14" height="14" viewBox="0 0 24 24" ${S} stroke-width="1.8">${d}</svg>`;
 }
 
-/* L1 = 数据库组 + 知识库组 + 底部管理区（与 PrimaryNav / nav-footer 真实结构一致） */
+/* ════════════════════════════════════════════════════════════════════════════
+   L1 = 数据库组 + 知识库组 + 底部管理区（与 PrimaryNav / nav-footer 真实结构一致）
+
+   ★ 重要契约：grp / grpLabel 字段必须永远保留在数据模型里 ★
+   当前（企业工作台方向）**刻意不渲染**分组标题与分割线 —— 只是表层 UI 不做体现，
+   **功能与数据层面依然是分组的**。请勿因为"页面上没看到"就删除这些字段，
+   也不要把它们当作"分组已取消"来重构。
+
+   分组信息在以下地方被（或将被）实际使用：
+   ① 排序：库列表按 RAIL 顺序渲染，base 组在前、kb 组在后，依赖 grp 连续分段；
+   ② DOM 标识：渲染时输出 data-grp="base|kb"，供将来恢复分组标题、分组折叠、
+      分组级权限/配额统计、以及自动化测试按组断言；
+   ③ 无障碍：恢复分组时可用 role="group" + aria-label 承载 grpLabel。
+
+   若将来要恢复视觉分组：只需在 rail() 里重新输出 .rail-grp 节点即可，
+   数据模型与 data-grp 无需改动（.rail-grp 样式在 shared.css 中保留未删）。
+   ════════════════════════════════════════════════════════════════════════════ */
 const RAIL = [
   { k: 'base1', label: '产品中心', icon: I.db, href: 'data-table.html', grp: 'base', grpLabel: '数据库' },
   { k: 'base2', label: '客户与合同', icon: I.db, href: '#', grp: 'base' },
@@ -70,19 +86,17 @@ const RAIL_FOOT = [
   { k: 'settings', label: '工作区设置', icon: I.cog },
 ];
 
+/* 渲染 L1 库列表。
+   注意：**分组只是不画线，不是不存在**——每项的 data-grp 仍会输出，
+   分组的语义边界完整保留在 DOM 里（详见上方 RAIL 契约注释）。
+   此处不再输出 .rail-grp 分割标题：企业工作台场景下，菜单被横线切成
+   「数据库 / 知识库」两块会显得突兀、割裂，视觉上应读作连续的一条库列表。 */
 function rail(active) {
-  let out = '';
-  let prev = null;
-  for (const r of RAIL) {
-    if (r.grp !== prev) {
-      out += `      <div class="rail-grp"><span>${r.grpLabel}</span></div>\n`;
-      prev = r.grp;
-    }
-    out += `      <a class="rail-item${r.k === active ? ' is-active' : ''}" href="${r.href}" title="${r.label}">
+  return RAIL.map(
+    r => `      <a class="rail-item${r.k === active ? ' is-active' : ''}" href="${r.href}" data-grp="${r.grp}" title="${r.label}">
         <span class="rd">${r.icon}</span><span class="nm">${r.label}</span>
-      </a>\n`;
-  }
-  return out;
+      </a>\n`,
+  ).join('');
 }
 
 function railFoot() {

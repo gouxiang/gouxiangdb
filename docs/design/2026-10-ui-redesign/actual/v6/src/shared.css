@@ -136,6 +136,12 @@ svg { display: block; }
 }
 .rail-item.is-active .nm { font-weight: 600; }
 
+/* 分组标题（左「线 文字 线」）。
+   ★ 当前 UI 刻意不渲染此节点，但样式保留不要删 ★
+   背景：企业工作台形态下，菜单被横线切成「数据库 / 知识库」两块显得突兀、割裂，
+   应读作连续的一条库列表。 **分组在数据与功能层面依然成立**（见 build.mjs 的 RAIL 契约），
+   只是表层不做视觉体现。
+   将来若需恢复分组标题，或用于其它带分组标题的场景，直接复用本样式即可。 */
 .rail-grp {
   width: 64px; flex: none; margin: 10px 0 2px;
   display: flex; align-items: center; gap: 5px;

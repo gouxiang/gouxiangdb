@@ -142,6 +142,12 @@ svg { display: block; }
 }
 .rail-item.is-active .nm { font-weight: 600; }
 
+/* 分组标题（左「线 文字 线」）。
+   ★ 当前 UI 刻意不渲染此节点，但样式保留不要删 ★
+   背景：企业工作台形态下，菜单被横线切成「数据库 / 知识库」两块显得突兀、割裂，
+   应读作连续的一条库列表。 **分组在数据与功能层面依然成立**（见 build.mjs 的 RAIL 契约），
+   只是表层不做视觉体现。
+   将来若需恢复分组标题，或用于其它带分组标题的场景，直接复用本样式即可。 */
 .rail-grp {
   width: 64px; flex: none; margin: 10px 0 2px;
   display: flex; align-items: center; gap: 5px;
@@ -559,21 +565,19 @@ svg { display: block; }
 </svg></div>
     <div class="rail-sep"></div>
     <nav class="rail-nav">
-      <div class="rail-grp"><span>数据库</span></div>
-      <a class="rail-item is-active" href="data-table.html" title="产品中心">
+      <a class="rail-item is-active" href="data-table.html" data-grp="base" title="产品中心">
         <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span><span class="nm">产品中心</span>
       </a>
-      <a class="rail-item" href="#" title="客户与合同">
+      <a class="rail-item" href="#" data-grp="base" title="客户与合同">
         <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span><span class="nm">客户与合同</span>
       </a>
-      <a class="rail-item" href="#" title="运营指标">
+      <a class="rail-item" href="#" data-grp="base" title="运营指标">
         <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span><span class="nm">运营指标</span>
       </a>
-      <div class="rail-grp"><span>知识库</span></div>
-      <a class="rail-item" href="#" title="产品知识库">
+      <a class="rail-item" href="#" data-grp="kb" title="产品知识库">
         <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span><span class="nm">产品知识库</span>
       </a>
-      <a class="rail-item" href="#" title="研发手册">
+      <a class="rail-item" href="#" data-grp="kb" title="研发手册">
         <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span><span class="nm">研发手册</span>
       </a>
     </nav>
