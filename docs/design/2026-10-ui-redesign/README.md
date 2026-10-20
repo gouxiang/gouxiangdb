@@ -20,16 +20,22 @@
 ## 目录
 
 ```
-index.html            查看器容器（左侧清单 + 右侧画布）
-standalone.html       生成物：资源全内联的单文件版（受限预览环境用）
+index.html            ★ 实际 UI 改造工作台（iframe 装载 actual/ 页面，浏览器打开）
+skeleton.html         早期骨架查看器（32 页虚线结构，已让位，保留备查）
+standalone.html       骨架查看器的单文件版
+actual/               ★ 实际 UI 抽离区（设计改造的主场）
+  index.html          actual 专用查看器（同根 index.html，多一份入口）
+  pages/*.html        抽离页面：自包含单文件（真实 CSS 已内联，预览面板可直接看）
+  assets/real-ui.css  真实 Tailwind 产物（apps/web/dist-shell 复制，只读勿改）
+  build-inline.mjs    把页面里的 real-ui.css link 内联成 <style>（幂等，加新页面后重跑）
+assets/               骨架查看器的资源（tokens.css / proto.css / pages.js / app.js）
 build-standalone.mjs  standalone.html 的生成脚本
-assets/
-  tokens.css      ★ 设计令牌唯一取值来源（禁止在别处写 hex）
-  proto.css       查看器 chrome + 骨架块样式
-  pages.js        ★ 全站页面清单 + 每页信息结构（数据源）
-  app.js          骨架渲染器
-DECISIONS.md      拍板记录（只追加，不改写）
+DECISIONS.md          拍板记录（只追加，不改写）
 ```
+
+**预览面板限制（重要）**：WorkBuddy 预览面板按「单文件」托管，跨文件相对引用（CSS/JS/iframe）一律 404。
+因此：`actual/pages/*.html` 必须是自包含单文件（CSS 内联）；聚合查看器（iframe）只在浏览器里可用。
+新页面流程：写 `pages/xxx.html`（先引用 `../assets/real-ui.css`）→ 跑 `node build-inline.mjs` 内联 → 在两处页面清单各加一条。
 
 **健壮性约定**：页面切换一律用 `<button>` + 直接渲染，不依赖 `<a href="#...">` 导航
 （预览面板 / iframe sandbox 会拦同文档跳转导致"点不动"）；hash 只做状态同步，

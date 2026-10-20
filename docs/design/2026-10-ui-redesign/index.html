@@ -3,33 +3,73 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>构想工作台 · UI v2 全域骨架</title>
-<link rel="stylesheet" href="./assets/tokens.css" />
-<link rel="stylesheet" href="./assets/proto.css" />
-</head>
-<body class="booting">
+<title>实际 UI 改造工作台</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 13px; color: #1a1a1c; background: #f7f7f5;
+  }
+  .env-warn {
+    padding: 8px 16px; background: #fffaeb; border-bottom: 1px solid #b54708;
+    font-size: 12px; line-height: 1.6; color: #1a1a1c;
+  }
+  .env-warn code { font-family: ui-monospace, Menlo, monospace; font-size: 11px; background: #fff; padding: 1px 5px; border-radius: 4px; }
 
-<div class="boot-warn" id="bootWarn">
-  <strong>脚本没有执行</strong>，所以左侧清单是空的、点不动。
-  当前环境（预览面板 / 快速预览）很可能拦了本地脚本 —— 请用浏览器打开这个文件：
-  <code>docs/design/2026-10-ui-redesign/index.html</code>
-  <br />
-  或者直接看单文件版 <code>standalone.html</code>（资源全内联，不需要加载外部 js/css）。
+  .viewer { display: grid; grid-template-columns: 240px 1fr; height: calc(100vh - 37px); overflow: hidden; }
+  .rail { background: #fff; border-right: 1px solid #e8e8e5; display: flex; flex-direction: column; overflow: hidden; }
+  .rail-head { padding: 16px 16px 12px; border-bottom: 1px solid #e8e8e5; }
+  .rail-title { font-size: 13px; font-weight: 600; }
+  .rail-sub { margin-top: 2px; font-size: 11px; color: #9a9aa2; line-height: 1.5; }
+  .rail-body { flex: 1; overflow-y: auto; padding: 8px 0 24px; }
+  .rail-group { padding: 12px 16px 4px; font-size: 11px; font-weight: 600; color: #9a9aa2; letter-spacing: .04em; }
+  .rail-item {
+    display: flex; align-items: center; gap: 8px; width: calc(100% - 16px); margin: 1px 8px;
+    padding: 6px 8px; border: 0; border-radius: 6px; background: transparent;
+    font: inherit; font-size: 13px; text-align: left; color: #6b6b73; cursor: pointer; -webkit-appearance: none;
+  }
+  .rail-item:hover { background: #efefec; color: #1a1a1c; }
+  .rail-item.is-active { background: #eaeae6; color: #1a1a1c; font-weight: 600; }
+  .rail-idx { flex: none; width: 18px; font-size: 11px; color: #9a9aa2; font-variant-numeric: tabular-nums; }
+
+  .stage-wrap { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+  .stage-bar {
+    flex: none; height: 48px; display: flex; align-items: center; gap: 12px;
+    padding: 0 16px; background: #fff; border-bottom: 1px solid #e8e8e5;
+  }
+  .stage-name { font-weight: 600; }
+  .stage-route { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #9a9aa2; background: #f2f2ef; padding: 2px 6px; border-radius: 4px; }
+  .stage-spacer { flex: 1; }
+  .seg { display: inline-flex; padding: 2px; background: #f2f2ef; border-radius: 6px; }
+  .seg button { border: 0; background: transparent; font: inherit; font-size: 11px; color: #6b6b73; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+  .seg button.is-on { background: #fff; color: #1a1a1c; font-weight: 600; box-shadow: 0 1px 2px rgba(26,26,28,.06); }
+  .stage-scroll { flex: 1; overflow: auto; padding: 24px; display: flex; justify-content: center; align-items: flex-start; }
+  #fit { flex: none; }
+  #frame { border: 0; background: #fff; border-radius: 10px; box-shadow: 0 0 0 1px #e8e8e5, 0 8px 24px -8px rgba(26,26,28,.14); transform-origin: top left; }
+</style>
+</head>
+<body>
+
+<div class="env-warn">
+  <strong>环境提示：</strong>WorkBuddy 预览面板按「单文件」托管，跨文件引用（本页的画布 iframe）在面板里会空白。
+  单页可直接看自包含的 <code>actual/pages/table-grid.html</code>；完整工作台请用浏览器打开本文件（Finder → 打开方式 → 浏览器）。
 </div>
 
 <div class="viewer">
   <aside class="rail">
     <div class="rail-head">
-      <div class="rail-title">构想工作台 · UI v2 骨架</div>
-      <div class="rail-sub">全站 <span id="pageCount"></span> 页 · 只看结构，不做视觉</div>
+      <div class="rail-title">实际 UI 改造工作台</div>
+      <div class="rail-sub">
+        从真实组件抽取的结构与类名，样式复用真实 Tailwind 产物。<br>
+        去除业务逻辑与数据，只留视图，在此之上改设计。
+      </div>
     </div>
     <div class="rail-body" id="railBody"></div>
   </aside>
 
   <main class="stage-wrap">
     <div class="stage-bar">
-      <button class="stage-btn" id="prevBtn" title="上一页 ↑">↑</button>
-      <button class="stage-btn" id="nextBtn" title="下一页 ↓">↓</button>
       <span class="stage-name" id="stageName"></span>
       <code class="stage-route" id="stageRoute"></code>
       <div class="stage-spacer"></div>
@@ -38,23 +78,86 @@
         <button data-z="0.75" class="is-on">75%</button>
         <button data-z="1">100%</button>
       </div>
-      <button class="stage-btn is-on" id="annotBtn">区域标注</button>
     </div>
 
     <div class="stage-scroll">
-      <div id="canvasFit">
-        <div class="canvas" id="canvas"></div>
-      </div>
+      <div id="fit"><iframe id="frame" src="actual/pages/table-grid.html"></iframe></div>
     </div>
   </main>
 </div>
 
-<script src="./assets/pages.js"></script>
-<script src="./assets/app.js"></script>
 <script>
-  try {
-    document.getElementById("pageCount").textContent = window.GX_PAGES.length;
-  } catch (e) { /* 脚本未加载时保持空，由 boot-warn 提示 */ }
+window.GX_ACTUAL_PAGES = [
+  {
+    id: "table-grid",
+    group: "数据表库",
+    name: "数据表主界面",
+    route: "/base/:baseId/table/:tableId/view/:viewId",
+    src: "actual/pages/table-grid.html",
+  },
+];
+
+(function () {
+  var pages = window.GX_ACTUAL_PAGES;
+  var state = { zoom: 0.75 };
+  var railBody = document.getElementById("railBody");
+  var stageName = document.getElementById("stageName");
+  var stageRoute = document.getElementById("stageRoute");
+  var frame = document.getElementById("frame");
+  var fit = document.getElementById("fit");
+
+  var groups = [];
+  pages.forEach(function (p) { if (groups.indexOf(p.group) < 0) groups.push(p.group); });
+
+  function applyZoom() {
+    frame.style.width = "1440px";
+    frame.style.height = "900px";
+    frame.style.transform = "scale(" + state.zoom + ")";
+    fit.style.width = 1440 * state.zoom + "px";
+    fit.style.height = 900 * state.zoom + "px";
+  }
+
+  function render(id) {
+    var page = pages.filter(function (p) { return p.id === id; })[0] || pages[0];
+
+    railBody.innerHTML = "";
+    groups.forEach(function (g) {
+      var h = document.createElement("div");
+      h.className = "rail-group";
+      h.textContent = g;
+      railBody.appendChild(h);
+      pages.filter(function (p) { return p.group === g; }).forEach(function (p) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "rail-item" + (p.id === page.id ? " is-active" : "");
+        var idx = document.createElement("span");
+        idx.className = "rail-idx";
+        idx.textContent = String(pages.indexOf(p) + 1).padStart(2, "0");
+        var label = document.createElement("span");
+        label.textContent = p.name;
+        b.appendChild(idx); b.appendChild(label);
+        b.addEventListener("click", function () { render(p.id); });
+        railBody.appendChild(b);
+      });
+    });
+
+    stageName.textContent = page.name;
+    stageRoute.textContent = page.route;
+    frame.src = page.src;
+    applyZoom();
+    document.title = page.name + " · 实际 UI 改造";
+  }
+
+  document.getElementById("zoomSeg").addEventListener("click", function (e) {
+    var b = e.target.closest("button");
+    if (!b) return;
+    state.zoom = parseFloat(b.dataset.z);
+    Array.prototype.forEach.call(this.children, function (c) { c.classList.toggle("is-on", c === b); });
+    applyZoom();
+  });
+
+  render(pages[0].id);
+})();
 </script>
 </body>
 </html>
