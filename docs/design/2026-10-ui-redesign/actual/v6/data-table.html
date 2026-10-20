@@ -78,7 +78,9 @@ svg { display: block; }
 .rail {
   width: 76px; flex: none;
   display: flex; flex-direction: column; align-items: center;
-  padding: 14px 0 10px;
+  /* 顶部 10px：让 logo 中心落在 10+18=28px——与二级面板头、主区顶栏（均 56px 高）
+     的垂直中心同在一条 28px 水平线上。「三中心一线」是顶带整齐感的关键锚点。 */
+  padding: 10px 0 10px;
   background: linear-gradient(180deg, #ffffff 0%, #f7f9fd 52%, #eef2f8 100%);
   border-right: 1px solid var(--line);
   /* 右侧内阴影：把轨道压成「嵌进去」的一层，内容区自然显得更前 */
@@ -367,10 +369,13 @@ svg { display: block; }
 .app.l2-collapsed .l2-toggle svg { transform: rotate(180deg); }
 
 /* L2 面板头 */
+/* 高度 56px＝与主区顶栏(.topbar)同高、底边线同色(--line)：
+   两带的底边线在 L2 右缘无缝相接成一条整线。此前 52px + --line-2（更淡），
+   与顶栏差出 4px 断差和一档深浅差——「说不上来的不齐」即来源于此。 */
 .l2-h {
-  height: 52px; flex: none;
+  height: 56px; flex: none;
   display: flex; align-items: center; gap: 7px;
-  padding: 0 8px 0 12px; border-bottom: 1px solid var(--line-2);
+  padding: 0 8px 0 12px; border-bottom: 1px solid var(--line);
 }
 .l2-ico {
   width: 22px; height: 22px; border-radius: 7px; flex: none;
