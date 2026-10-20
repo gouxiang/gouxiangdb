@@ -153,10 +153,15 @@ svg { display: block; }
   white-space: nowrap; flex: none;
 }
 .rail-foot {
-  flex: none; margin-top: auto; padding-top: 10px; width: 100%;
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  flex: none; margin-top: auto; padding-top: 8px; width: 100%;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
   border-top: 1px solid var(--line-2);
 }
+/* 管理区比库区更轻一档：图标砖 30 + 10px 小字，和上面的库项拉开层级 */
+.rail-foot .rail-item { padding: 5px 0 4px; gap: 3px; }
+.rail-foot .rail-item .rd { width: 30px; height: 30px; border-radius: 9px; }
+.rail-foot .rail-item .rd svg { width: 16px; height: 16px; }
+.rail-foot .rail-item .nm { font-size: 10px; }
 
 /* ---------------- 主区 ---------------- */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -362,6 +367,19 @@ svg { display: block; }
   background: var(--sub); color: var(--ink-4); font-size: 12px; cursor: pointer;
 }
 .l2-search:hover { background: #fff; border-color: #d6dce8; }
+/* 新建数据表：面板头下方的入口（无表结构管理权限时不渲染，口径同真实产品） */
+.l2-new { flex: none; padding: 4px 10px 8px; }
+.l2-new-btn {
+  display: flex; width: 100%; align-items: center; gap: 6px;
+  height: 28px; padding: 0 9px; border: 1px dashed var(--line); border-radius: var(--r-ctl);
+  background: transparent; color: var(--ink-3); font-size: 12.5px; cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.l2-new-btn:hover { background: var(--hover); color: var(--brand); border-color: #c9dcf8; }
+.l2-new-in { display: flex; align-items: center; height: 28px; padding: 0 9px;
+  border: 1px solid var(--brand); border-radius: var(--r-ctl); background: #fff; }
+.l2-new-input { width: 100%; border: 0; outline: none; font: inherit; font-size: 12.5px; color: var(--ink-1); }
+.l2-new-input::placeholder { color: var(--ink-4); }
 .l2-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 8px 8px; }
 /* 行外壳：跳转 <a> 与行尾「⋯」是兄弟节点（嵌套 button 非法，且点「⋯」会连带跳转） */
 .l2-row { position: relative; display: flex; align-items: center; gap: 2px; margin-bottom: 1px; }

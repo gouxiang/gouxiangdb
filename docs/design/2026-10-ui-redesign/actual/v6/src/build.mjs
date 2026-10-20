@@ -58,10 +58,12 @@ const RAIL = [
   { k: 'kb2', label: '研发手册', icon: I.book, href: '#', grp: 'kb' },
 ];
 
+/* 底部固定区（与 lib/nav-footer.ts 的 FOOTER_NAV_ITEMS 三项对齐；
+   排序：通讯录 → 帮助中心 → 工作区设置，管理类入口压在最底） */
 const RAIL_FOOT = [
   { k: 'contacts', label: '通讯录', icon: I.users },
-  { k: 'settings', label: '工作区设置', icon: I.cog },
   { k: 'help', label: '帮助中心', icon: I.help },
+  { k: 'settings', label: '工作区设置', icon: I.cog },
 ];
 
 function rail(active) {
@@ -81,7 +83,7 @@ function rail(active) {
 
 function railFoot() {
   return RAIL_FOOT.map(
-    f => `      <button class="rail-item" title="${f.label}">
+    f => `      <button class="rail-item rail-mini" title="${f.label}">
         <span class="rd">${f.icon}</span><span class="nm">${f.label}</span>
       </button>\n`,
   ).join('');
@@ -147,6 +149,12 @@ ${railFoot()}    </div>
         </div>
       </div>
       ${l2.search ? `<div class="l2-search">${I.search}<span>${l2.search}</span></div>` : ''}
+      <div class="l2-new">
+        <button class="l2-new-btn" id="newTableBtn" title="新建数据表">${I.plus}<span>新建数据表</span></button>
+        <div class="l2-new-in" id="newTableIn" style="display:none">
+          <input class="l2-new-input" id="newTableInput" placeholder="表名（Enter 创建 / Esc 取消）" />
+        </div>
+      </div>
       <div class="l2-list">
 ${items}
       </div>
@@ -238,6 +246,28 @@ ${body}
     mask.addEventListener('click', function () { setOpen(false); });
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') setOpen(false);
+    });
+  })();
+
+  /* 新建数据表：点按钮内联展开输入框（真实：SecondaryNavTableOps.panelNode） */
+  (function () {
+    var btn = document.getElementById('newTableBtn');
+    var box = document.getElementById('newTableIn');
+    var input = document.getElementById('newTableInput');
+    if (!btn || !box || !input) return;
+    function open(on) {
+      btn.style.display = on ? 'none' : '';
+      box.style.display = on ? '' : 'none';
+      if (on) input.focus();
+    }
+    btn.addEventListener('click', function () { open(true); });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && input.value.trim()) { input.value = ''; open(false); }
+      if (e.key === 'Escape') { input.value = ''; open(false); }
+    });
+    document.addEventListener('click', function (e) {
+      if (box.style.display === 'none') return;
+      if (!box.contains(e.target) && e.target !== btn) { input.value = ''; open(false); }
     });
   })();
 

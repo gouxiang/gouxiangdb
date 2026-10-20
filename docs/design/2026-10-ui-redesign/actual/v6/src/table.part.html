@@ -5,7 +5,7 @@
   .grid-wrap { flex: 1; min-height: 0; overflow: auto; }
 
   /* 第一行：视图标签条 */
-  .vbar { display: flex; align-items: center; gap: 2px; padding: 8px 10px 6px; border-bottom: 1px solid var(--line-2); }
+  .vbar { display: flex; align-items: center; gap: 2px; padding: 6px 10px 6px; min-height: 40px; border-bottom: 1px solid var(--line-2); }
   .vicon {
     width: 26px; height: 26px; flex: none; border-radius: 8px; border: 1px solid var(--line);
     display: grid; place-items: center; background: var(--brand-soft); color: var(--brand);
@@ -16,17 +16,19 @@
   .vtab {
     height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent;
     color: var(--ink-3); font-size: 12.5px; cursor: pointer; position: relative;
-    display: inline-flex; align-items: center; gap: 5px;
+    display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
     transition: background .15s, color .15s;
   }
   .vtab:hover { background: var(--hover); color: var(--ink-1); }
   .vtab.is-active { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
+  /* 选中标签与其「⋯」同处一个 inline-flex 槽，保证与其它标签同高（避免第一行错位） */
+  .vtab-slot { display: inline-flex; align-items: center; gap: 1px; flex: none; }
   .vtab-more {
     width: 18px; height: 26px; flex: none; border: 0; background: transparent; color: var(--ink-4);
     display: grid; place-items: center; cursor: pointer; opacity: 0; border-radius: 5px;
     transition: opacity .13s, background .13s, color .13s;
   }
-  .vtab.is-active .vtab-more, .vtab-row:hover .vtab-more, .vtab-more.is-open { opacity: 1; }
+  .vtab.is-active .vtab-more, .vtab-slot:hover .vtab-more, .vtab-more.is-open { opacity: 1; }
   .vtab-more:hover { background: #e8eef8; color: var(--ink-1); }
   .vtab-add {
     width: 26px; height: 26px; flex: none; border: 0; border-radius: 7px; background: transparent;
