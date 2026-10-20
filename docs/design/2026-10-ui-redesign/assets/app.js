@@ -27,9 +27,12 @@
       railBody.appendChild(h);
 
       items.forEach(function (p) {
-        var a = document.createElement("a");
+        /* 用 button 而不是 <a href="#...">：不产生任何导航，
+           避免预览面板 / iframe sandbox 拦截同文档跳转导致"点不动" */
+        var a = document.createElement("button");
+        a.type = "button";
         a.className = "rail-item" + (p.id === activeId ? " is-active" : "");
-        a.href = "#/" + p.id;
+        a.dataset.pageId = p.id;
 
         var idx = document.createElement("span");
         idx.className = "rail-idx";
@@ -40,6 +43,10 @@
 
         a.appendChild(idx);
         a.appendChild(label);
+        a.addEventListener("click", function (e) {
+          e.preventDefault();
+          go(p.id);
+        });
         railBody.appendChild(a);
       });
     });
@@ -290,8 +297,9 @@
   }
 
   function render(id) {
-    var page = pages.filter(function (p) { return p.id === id; })[0] || pages[0];
+    var page = pageById(id);
 
+    currentPageId = page.id;
     renderRail(page.id);
     stageName.textContent = page.name;
     stageRoute.textContent = page.route;
@@ -315,12 +323,38 @@
     document.title = page.name + " · UI v2 骨架";
   }
 
+  var currentPageId = null;
+
+  function pageById(id) {
+    return pages.filter(function (p) { return p.id === id; })[0] || pages[0];
+  }
+
   function currentId() {
-    var h = location.hash.replace(/^#\/?/, "");
+    var h = "";
+    try { h = location.hash.replace(/^#\/?/, ""); } catch (e) { h = ""; }
     return h || pages[0].id;
   }
 
-  window.addEventListener("hashchange", function () { render(currentId()); });
+  /* 切换页面：直接渲染，不依赖任何导航行为 */
+  function go(id) {
+    var page = pageById(id);
+    render(page.id);
+    try {
+      if (location.hash !== "#/" + page.id) {
+        history.replaceState(null, "", "#/" + page.id);
+      }
+    } catch (e) { /* 受限环境（sandbox / file://）写不了 hash 也不影响使用 */ }
+  }
+
+  function step(delta) {
+    var i = pages.indexOf(pageById(currentPageId || currentId()));
+    go(pages[(i + delta + pages.length) % pages.length].id);
+  }
+
+  window.addEventListener("hashchange", function () {
+    var id = currentId();
+    if (id !== currentPageId) render(id);
+  });
 
   document.getElementById("zoomSeg").addEventListener("click", function (e) {
     var b = e.target.closest("button");
@@ -338,5 +372,19 @@
     canvas.classList.toggle("annot-off", !state.annot);
   });
 
-  render(currentId());
+  document.getElementById("prevBtn").addEventListener("click", function () { step(-1); });
+  document.getElementById("nextBtn").addEventListener("click", function () { step(1); });
+
+  /* 键盘翻页：多一条不依赖鼠标的路径 */
+  document.addEventListener("keydown", function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+    if (e.key === "ArrowDown" || e.key === "j") { e.preventDefault(); step(1); }
+    if (e.key === "ArrowUp" || e.key === "k") { e.preventDefault(); step(-1); }
+  });
+
+  go(currentId());
+
+  /* 脚本成功跑完 → 收起"未执行"提示 */
+  document.body.classList.remove("booting");
 })();

@@ -7,7 +7,15 @@
 <link rel="stylesheet" href="./assets/tokens.css" />
 <link rel="stylesheet" href="./assets/proto.css" />
 </head>
-<body>
+<body class="booting">
+
+<div class="boot-warn" id="bootWarn">
+  <strong>脚本没有执行</strong>，所以左侧清单是空的、点不动。
+  当前环境（预览面板 / 快速预览）很可能拦了本地脚本 —— 请用浏览器打开这个文件：
+  <code>docs/design/2026-10-ui-redesign/index.html</code>
+  <br />
+  或者直接看单文件版 <code>standalone.html</code>（资源全内联，不需要加载外部 js/css）。
+</div>
 
 <div class="viewer">
   <aside class="rail">
@@ -20,6 +28,8 @@
 
   <main class="stage-wrap">
     <div class="stage-bar">
+      <button class="stage-btn" id="prevBtn" title="上一页 ↑">↑</button>
+      <button class="stage-btn" id="nextBtn" title="下一页 ↓">↓</button>
       <span class="stage-name" id="stageName"></span>
       <code class="stage-route" id="stageRoute"></code>
       <div class="stage-spacer"></div>
@@ -42,7 +52,9 @@
 <script src="./assets/pages.js"></script>
 <script src="./assets/app.js"></script>
 <script>
-  document.getElementById("pageCount").textContent = window.GX_PAGES.length;
+  try {
+    document.getElementById("pageCount").textContent = window.GX_PAGES.length;
+  } catch (e) { /* 脚本未加载时保持空，由 boot-warn 提示 */ }
 </script>
 </body>
 </html>

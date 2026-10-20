@@ -15,6 +15,30 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ============ 脚本未执行兜底提示 ============ */
+.boot-warn {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 99;
+  padding: var(--gx-sp-3) var(--gx-sp-4);
+  background: var(--gx-warn-soft);
+  border-bottom: 1px solid var(--gx-warn);
+  color: var(--gx-text);
+  font-size: var(--gx-fs-12);
+  line-height: 1.6;
+}
+.boot-warn code {
+  font-family: var(--gx-font-mono);
+  font-size: var(--gx-fs-11);
+  background: var(--gx-surface);
+  padding: 1px 5px;
+  border-radius: var(--gx-r-xs);
+}
+body.booting .boot-warn { display: block; }
+
 /* ============ 查看器：左侧页面清单 ============ */
 .viewer {
   display: grid;
@@ -61,14 +85,23 @@ html, body {
   display: flex;
   align-items: center;
   gap: var(--gx-sp-2);
+  width: 100%;
   margin: 1px var(--gx-sp-2);
   padding: 6px var(--gx-sp-2);
+  border: 0;
   border-radius: var(--gx-r-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--gx-fs-13);
+  text-align: left;
   color: var(--gx-text-secondary);
   text-decoration: none;
   line-height: 1.35;
   cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
 }
+.rail-item:focus-visible { outline: none; box-shadow: var(--gx-focus-ring); }
 .rail-item:hover { background: var(--gx-surface-hover); color: var(--gx-text); }
 .rail-item.is-active {
   background: var(--gx-ink-soft);
