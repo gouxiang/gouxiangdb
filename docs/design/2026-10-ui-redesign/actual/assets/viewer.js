@@ -4,10 +4,18 @@ window.GX_ACTUAL_PAGES = [
   {
     id: "table-grid",
     group: "数据表库",
-    name: "数据表主界面",
+    name: "数据表主界面（原版基准）",
     route: "/base/:baseId/table/:tableId/view/:viewId",
     src: "pages/table-grid.html",
     note: "壳层 + 工具条三行 + 网格 + 聚合行 + 状态条",
+  },
+  {
+    id: "table-grid-v2",
+    group: "数据表库",
+    name: "数据表主界面 ★拟物风 v2",
+    route: "/base/:baseId/table/:tableId/view/:viewId",
+    src: "pages/table-grid-v2.html",
+    note: "StreamEx 浅色拟物 + L1 悬浮框改造",
   },
 ];
 
