@@ -59,7 +59,7 @@ function shell({ active, crumb, l2, body }) {
       </a>`).join('\n');
   const foot = (l2.foot || []).map(f => `      <a class="l2-item sub" href="#" title="${f.name}">${f.icon}<span class="nm">${f.name}</span></a>`).join('\n');
 
-  return `<div class="app">
+  return `<div class="app" id="app">
   <aside class="rail">
     <div class="rail-mark">${logo}</div>
     <nav class="rail-nav">
@@ -70,20 +70,23 @@ ${rail(active)}    </nav>
   </aside>
 
   <aside class="l2" id="l2Panel">
-    <div class="l2-h">
-      <span class="l2-title">${l2.title}</span>
-      <span class="tag ${l2.tagClass || 'tag-gray'}">${l2.tag}</span>
-      <button class="icon-btn l2-act" title="${l2.actTitle || '新建'}">${I.plus}</button>
-      <button class="l2-toggle" id="l2Toggle" aria-expanded="true" aria-controls="l2Panel" title="收起二级导航">${I.chevL}</button>
-    </div>
-    ${l2.search ? `<div class="l2-search">${I.search}<span>${l2.search}</span></div>` : ''}
-    <div class="l2-list">
+    <div class="l2-inner">
+      <div class="l2-h">
+        <span class="l2-title">${l2.title}</span>
+        <span class="tag ${l2.tagClass || 'tag-gray'}">${l2.tag}</span>
+        <button class="icon-btn l2-act" title="${l2.actTitle || '新建'}">${I.plus}</button>
+      </div>
+      ${l2.search ? `<div class="l2-search">${I.search}<span>${l2.search}</span></div>` : ''}
+      <div class="l2-list">
 ${items}
-    </div>
-    <div class="l2-foot">
+      </div>
+      <div class="l2-foot">
 ${foot}
+      </div>
     </div>
   </aside>
+
+  <button class="l2-toggle" id="l2Toggle" aria-expanded="true" aria-controls="l2Panel" title="收起二级导航">${I.chevL}</button>
 
   <div class="main">
     <header class="topbar">
@@ -104,21 +107,18 @@ ${body}
 <div class="proto-note">v6 · 企业工作台（L1 工作台/库/知识库 + L2 库内清单）</div>
 <script>
   (function () {
-    var l2 = document.getElementById('l2Panel');
+    var app = document.getElementById('app');
     var btn = document.getElementById('l2Toggle');
-    if (!l2 || !btn) return;
-    var KEY = 'gx.v6.l2.collapsed';
+    if (!app || !btn) return;
     function sync() {
-      var c = l2.classList.contains('is-collapsed');
+      var c = app.classList.contains('l2-collapsed');
       btn.setAttribute('aria-expanded', String(!c));
       btn.title = c ? '展开二级导航' : '收起二级导航';
     }
-    try { if (localStorage.getItem(KEY) === '1') l2.classList.add('is-collapsed'); } catch (e) {}
     sync();
     btn.addEventListener('click', function () {
-      l2.classList.toggle('is-collapsed');
+      app.classList.toggle('l2-collapsed');
       sync();
-      try { localStorage.setItem(KEY, l2.classList.contains('is-collapsed') ? '1' : '0'); } catch (e) {}
     });
   })();
 </script>`;
