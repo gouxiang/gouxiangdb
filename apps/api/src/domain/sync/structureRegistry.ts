@@ -127,14 +127,32 @@ const createTableHandler: StructureOpHandler = {
     const name = str(o.payload.name);
     if (!name) throw new HttpError(400, "create_table 缺少 name", "SYNC_MALFORMED_PAYLOAD");
     const withDefaults = bool(o.payload.withDefaults, false);
+    // S3b-3a：从 payload 读服务端权威子实体 id 组 preset（§8.4 下行保 id）。老 op 缺键 / 键畸形
+    // 一律回退 Prisma 随机生成（与升级前回放逐字节一致）；defaultFieldIds 按 [数量,状态,日期,备注]
+    // 对位，数组非法（非数组/含空串）整体视为缺键，内部缺位也逐位回退随机。
+    const pfId = str(o.payload.primaryFieldId);
+    const dvId = str(o.payload.defaultViewId);
+    const rawDefaultFieldIds = o.payload.defaultFieldIds;
+    const defaultFieldIds = Array.isArray(rawDefaultFieldIds)
+      && rawDefaultFieldIds.every((x) => typeof x === "string" && x.trim() !== "")
+      ? (rawDefaultFieldIds as string[])
+      : undefined;
     const r = await createTableTx(tx, {
       baseId, name, withDefaults, userId,
       // 保留离线表 cuid（§8.4）；撞 id 由 P2002 冒到回放层归一冲突。
       tableId: o.entityId,
+      presetChildIds: {
+        ...(pfId ? { primaryFieldId: pfId } : {}),
+        ...(defaultFieldIds ? { defaultFieldIds } : {}),
+        ...(dvId ? { defaultViewId: dvId } : {}),
+      },
     });
     return {
       entityType: "table", entityId: o.entityId, tableId: o.entityId, op: o.op,
-      payload: { name, withDefaults, primaryFieldId: r.primaryFieldId },
+      payload: {
+        name, withDefaults, primaryFieldId: r.primaryFieldId,
+        defaultFieldIds: r.defaultFieldIds, defaultViewId: r.defaultViewId,
+      },
       resyncMaskTables: [],
     };
   },

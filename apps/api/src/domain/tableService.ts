@@ -47,7 +47,12 @@ export async function createTable(input: CreateTableInput, operatorUserId: strin
     const structInput = {
       entityType: "table" as const, entityId: r.table.id, tableId: r.table.id, baseId: input.baseId,
       op: "create_table", actorId: operatorUserId,
-      payload: { name, withDefaults: input.withDefaults ?? false, primaryFieldId: r.primaryFieldId },
+      // S3b-3a：恒定携带子实体权威 id（withDefaults=false 时 defaultFieldIds=[]），供下行 pull
+      // 回放保住默认字段/默认视图 cuid；在线行为不变，仅 oplog/outbox payload 多两个键。
+      payload: {
+        name, withDefaults: input.withDefaults ?? false, primaryFieldId: r.primaryFieldId,
+        defaultFieldIds: r.defaultFieldIds, defaultViewId: r.defaultViewId,
+      },
     };
     await recordStructureOpTx(tx, structInput);
     // S2c：离线副本同事务落 local_outbox（默认关首行 return null；回放走 *Tx 原语不经 wrapper）。

@@ -1036,6 +1036,27 @@ model ReplicaState {
   @@map("replica_state")
 }
 
+/// 工作区树（baseId=null 的单例树）副本游标——与 per-base 的 ReplicaState 分开装：
+/// 工作区树不是某个 base 的从属资源，订阅/快照/游标按 (nodeId, scopeId) 维度各一行。
+/// beta.2 S3b-3a 只增建表；本刀无任何应用代码读写它（下行树 pull 泵 #923 才接线）。
+model ReplicaTreeState {
+  id            String    @id @default(cuid())
+  /// 目标节点：本地 "local" 或远端节点 id（与 ReplicaState.nodeId 同口径）
+  nodeId        String
+  /// 树作用域：默认工作区 "ws_default"（预留多工作区）
+  scopeId       String    @default("ws_default")
+  pullCursorSeq BigInt    @default(0)
+  snapshotDone  Boolean   @default(false)
+  /// 已对齐的工作区树版本钟（字符串，与 nav 树版本口径一致）
+  treeVersion   String    @default("0")
+  /// 拉取时服务端返回的树可见集/权限版本，重连后比对（§6.3、§9.2）
+  authzVersion  String?
+  lastPulledAt  DateTime?
+
+  @@unique([nodeId, scopeId])
+  @@map("replica_tree_state")
+}
+
 /// 远端主键 ↔ 本地主键映射（离线新建；多数情况下服务端保留客户端 id，此表为兜底）
 model SyncIdMap {
   id             String  @id @default(cuid())

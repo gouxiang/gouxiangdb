@@ -280,6 +280,117 @@ describe("B/C/D/E. 结构 op 回放 happy path（保留离线 id + 结构版本�
     expect(r.results![0]!.status).toBe("rejected");
     expect(await h.prisma.view.findUnique({ where: { id: onlyView.id } })).not.toBeNull();
   });
+
+  // S3b-3a：create_table 回放保子实体权威 id（§8.4）。直接喂注册表 handler.apply（不经 push
+  // HTTP/权限裁决/引擎记账），故只跑 *Tx 原语、不写 local_outbox/sync_op_log。
+  it("create_table 回放：payload 带 primaryFieldId/defaultFieldIds/defaultViewId 时子实体 id 逐字保留；老 payload 缺键回退随机", async () => {
+    const { withWriteTx } = await import("../../../../db.js");
+    const { getStructureOpHandler } = await import("../../../../domain/sync/structureRegistry.js");
+    const handler = getStructureOpHandler("table", "create_table");
+    expect(handler).toBeTruthy();
+    if (!handler) return;
+
+    // A) 保 id：主字段/4 默认字段/默认视图全部按 payload 权威 cuid 落地。
+    const presetTableId = "tbl_preset_0001";
+    const presetPfId = "fld_name_0001";
+    const presetDefaults = ["fld_qty_0001", "fld_status_0001", "fld_date_0001", "fld_note_0001"];
+    const presetViewId = "view_grid_0001";
+    let outcomeA: { payload: Record<string, unknown> } | null = null;
+    await withWriteTx("yn7.preset.createTable", async (tx) => {
+      outcomeA = await handler.apply(tx, OWNER, baseId, {
+        clientOpId: "yn7-preset-ct",
+        entityType: "table",
+        entityId: presetTableId,
+        op: "create_table",
+        baseVersion: 0n,
+        payload: {
+          name: "保id表",
+          withDefaults: true,
+          primaryFieldId: presetPfId,
+          defaultFieldIds: presetDefaults,
+          defaultViewId: presetViewId,
+        },
+      });
+    });
+
+    const tA = await h.prisma.table.findUniqueOrThrow({ where: { id: presetTableId } });
+    expect(tA.name).toBe("保id表");
+    expect(tA.primaryFieldId).toBe(presetPfId);
+
+    const expectedFields: Array<[string, string, string]> = [
+      [presetPfId, "名称", "singleLineText"],
+      [presetDefaults[0], "数量", "number"],
+      [presetDefaults[1], "状态", "singleSelect"],
+      [presetDefaults[2], "日期", "date"],
+      [presetDefaults[3], "备注", "longText"],
+    ];
+    for (const [fid, fname, ftype] of expectedFields) {
+      const f = await h.prisma.field.findUnique({ where: { id: fid } });
+      expect(f).not.toBeNull();
+      expect(f!.tableId).toBe(presetTableId);
+      expect(f!.deletedAt).toBeNull();
+      expect(f!.name).toBe(fname);
+      expect(f!.type).toBe(ftype);
+    }
+    const vA = await h.prisma.view.findUniqueOrThrow({ where: { id: presetViewId } });
+    expect(vA.type).toBe("grid");
+    expect(vA.tableId).toBe(presetTableId);
+
+    expect(outcomeA).not.toBeNull();
+    expect(outcomeA!.payload.primaryFieldId).toBe(presetPfId);
+    expect(outcomeA!.payload.defaultFieldIds).toEqual(presetDefaults);
+    expect(outcomeA!.payload.defaultViewId).toBe(presetViewId);
+    // *Tx 原语层不经 wrapper/引擎记账：local_outbox 与 sync_op_log 对该表零写入。
+    expect(await h.prisma.localOutbox.count({ where: { entityId: presetTableId } })).toBe(0);
+    expect(
+      await h.prisma.syncOpLog.count({ where: { entityId: presetTableId, op: "create_table" } }),
+    ).toBe(0);
+
+    // B) 老 op：payload 仅 {name,withDefaults}，缺三新键 → 子实体 id 全部回退随机 cuid，
+    // 但回放结果 payload 仍恒定带 defaultFieldIds(4)/defaultViewId。
+    const legacyTableId = "tbl_legacy_0001";
+    const presetIds = new Set<string>([presetPfId, ...presetDefaults, presetViewId]);
+    let outcomeB: { payload: Record<string, unknown> } | null = null;
+    await withWriteTx("yn7.legacy.createTable", async (tx) => {
+      outcomeB = await handler.apply(tx, OWNER, baseId, {
+        clientOpId: "yn7-legacy-ct",
+        entityType: "table",
+        entityId: legacyTableId,
+        op: "create_table",
+        baseVersion: 0n,
+        payload: { name: "老表", withDefaults: true },
+      });
+    });
+
+    const tB = await h.prisma.table.findUniqueOrThrow({ where: { id: legacyTableId } });
+    expect(tB.name).toBe("老表");
+    expect(tB.primaryFieldId).toBeTruthy();
+    expect(presetIds.has(tB.primaryFieldId)).toBe(false);
+
+    const fieldsB = await h.prisma.field.findMany({
+      where: { tableId: legacyTableId, deletedAt: null },
+    });
+    expect(fieldsB).toHaveLength(5);
+    for (const f of fieldsB) expect(presetIds.has(f.id)).toBe(false);
+    expect(
+      fieldsB.some(
+        (f) => f.id === tB.primaryFieldId && f.name === "名称" && f.type === "singleLineText",
+      ),
+    ).toBe(true);
+
+    const viewsB = await h.prisma.view.findMany({ where: { tableId: legacyTableId } });
+    expect(viewsB).toHaveLength(1);
+    expect(presetIds.has(viewsB[0]!.id)).toBe(false);
+
+    expect(outcomeB).not.toBeNull();
+    const bDefaults = outcomeB!.payload.defaultFieldIds;
+    expect(Array.isArray(bDefaults)).toBe(true);
+    expect(bDefaults as unknown[]).toHaveLength(4);
+    for (const id of bDefaults as string[]) expect(presetIds.has(id)).toBe(false);
+    expect(typeof outcomeB!.payload.defaultViewId).toBe("string");
+    expect(outcomeB!.payload.defaultViewId).not.toBe(presetViewId);
+    expect(await h.prisma.localOutbox.count({ where: { entityId: legacyTableId } })).toBe(0);
+  });
 });
 
 describe("F. 结构版本门", () => {

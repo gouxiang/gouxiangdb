@@ -114,11 +114,25 @@ export interface CreateTableTxInput {
    * 在线建表恒不传 → Prisma 照常生成 cuid，默认行为逐字节不变。
    */
   tableId?: string;
+  /**
+   * S3b-3a 下行回放可选：保主字段/4 默认字段/默认网格视图的服务端权威 cuid（§8.4），供 pull 泵
+   * 回放「订阅后新建的表」时子实体 id 与服务端一致。在线恒不传 → 全随机；数组按
+   * [数量,状态,日期,备注] 对位，缺位/缺键回退随机（老 op 无此键即整体不传）。
+   */
+  presetChildIds?: {
+    primaryFieldId?: string;
+    defaultFieldIds?: readonly string[];
+    defaultViewId?: string;
+  };
 }
 
 interface CreateTableTxResult {
   table: { id: string; createdAt: Date };
   primaryFieldId: string;
+  /** 实际落地的 4 默认字段 id（withDefaults=false 恒为 []）。 */
+  defaultFieldIds: string[];
+  /** 实际落地的默认网格视图 id。 */
+  defaultViewId: string;
 }
 
 /**
@@ -127,6 +141,8 @@ interface CreateTableTxResult {
  */
 export async function createTableTx(tx: DbTx, input: CreateTableTxInput): Promise<CreateTableTxResult> {
   const { baseId, name, userId } = input;
+  // S3b-3a：下行回放透传的权威子实体 id；在线路径 input.presetChildIds 恒为 undefined → 全随机。
+  const preset = input.presetChildIds;
   await assertTableNameFree(tx, baseId, name);
   // shareEnabled 继承当前库级总闸：表级开关是库级「允许分享」的快照，
   // tableShareAllowed() 两级都判。不继承的话，管理员打开库开关之后新建的表依旧是 0。
@@ -143,37 +159,56 @@ export async function createTableTx(tx: DbTx, input: CreateTableTxInput): Promis
     },
   });
 
+  // 主字段：回放可保权威 cuid（preset.primaryFieldId）；在线缺省 → Prisma 生成。
   const nameField = await tx.field.create({
-    data: { tableId: t.id, name: "名称", type: "singleLineText", order: 0 },
+    data: {
+      ...(preset?.primaryFieldId ? { id: preset.primaryFieldId } : {}),
+      tableId: t.id, name: "名称", type: "singleLineText", order: 0,
+    },
   });
   await tx.table.update({ where: { id: t.id }, data: { primaryFieldId: nameField.id } });
 
+  // 4 默认字段按 [数量,状态,日期,备注] 对位保 id；withDefaults=false 时不建、返回 []。
+  // 各 data 保持完整字面量（不收敛成 Record<string,unknown>），Prisma 枚举/列类型照常强校验。
+  const defaultFieldIds: string[] = [];
   if (input.withDefaults) {
-    await tx.field.create({
-      data: { tableId: t.id, name: "数量", type: "number", order: 1, precision: 0 },
+    const p = preset?.defaultFieldIds ?? [];
+    const qty = await tx.field.create({
+      data: { ...(p[0] ? { id: p[0] } : {}), tableId: t.id, name: "数量", type: "number", order: 1, precision: 0 },
     });
-    await tx.field.create({
+    const status = await tx.field.create({
       data: {
-        tableId: t.id,
-        name: "状态",
-        type: "singleSelect",
-        order: 2,
+        ...(p[1] ? { id: p[1] } : {}),
+        tableId: t.id, name: "状态", type: "singleSelect", order: 2,
         options: JSON.stringify(makeOptions(["未开始", "进行中", "已完成"])),
       },
     });
-    await tx.field.create({ data: { tableId: t.id, name: "日期", type: "date", order: 3 } });
-    await tx.field.create({ data: { tableId: t.id, name: "备注", type: "longText", order: 4 } });
+    const date = await tx.field.create({
+      data: { ...(p[2] ? { id: p[2] } : {}), tableId: t.id, name: "日期", type: "date", order: 3 },
+    });
+    const note = await tx.field.create({
+      data: { ...(p[3] ? { id: p[3] } : {}), tableId: t.id, name: "备注", type: "longText", order: 4 },
+    });
+    defaultFieldIds.push(qty.id, status.id, date.id, note.id);
   }
 
-  await tx.view.create({
-    data: { tableId: t.id, name: "网格视图", type: "grid", order: 0, config: JSON.stringify(defaultGridViewConfig()) },
+  // 默认网格视图：回放可保权威 cuid（preset.defaultViewId）；在线缺省 → Prisma 生成。
+  const view = await tx.view.create({
+    data: {
+      ...(preset?.defaultViewId ? { id: preset.defaultViewId } : {}),
+      tableId: t.id, name: "网格视图", type: "grid", order: 0,
+      config: JSON.stringify(defaultGridViewConfig()),
+    },
   });
   // M3/S3：同事务同步 table + view 节点（field 不建节点）。
   await syncNavFromEntitiesTx(tx);
   // P1/S7：为该库每条命中 scope 角色补新表节点 scope:role 策略 + role_admin 隐含策略。
   await syncTableForAllScopesTx(tx, "base", baseId, t.id, "add", userId);
   await projectAdminForNewTableTx(tx, baseId, t.id, userId);
-  return { table: t, primaryFieldId: nameField.id };
+  return {
+    table: t, primaryFieldId: nameField.id,
+    defaultFieldIds, defaultViewId: view.id,
+  };
 }
 
 export interface UpdateTableTxInput {
