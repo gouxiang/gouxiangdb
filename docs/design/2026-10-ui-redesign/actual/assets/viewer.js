@@ -25,6 +25,14 @@ window.GX_ACTUAL_PAGES = [
     src: "pages/table-grid-v3.html",
     note: "L1 横向并入顶栏凹槽轨道 / L2 留内容区左侧，无收起箭头",
   },
+  {
+    id: "table-grid-v4",
+    group: "数据表库",
+    name: "数据表主界面 ★拟物风 v4（顶栏两行）",
+    route: "/base/:baseId/table/:tableId/view/:viewId",
+    src: "pages/table-grid-v4.html",
+    note: "上排 品牌+搜索居中+用户（v2 布局）/ 下排一级导航轨道",
+  },
 ];
 
 (function () {
