@@ -235,7 +235,10 @@
   .gx-v5 .v3-main {
     border-radius: var(--r-card); background: var(--surface); box-shadow: var(--elev-1);
   }
-  .gx-v5 .v3-logo { box-shadow: 0 4px 10px -4px rgba(61, 106, 239, .5); }
+  .gx-v5 .v3-logo {
+    background: none; border-radius: 7px;
+    box-shadow: 0 2px 6px -2px rgba(48, 68, 120, .30);
+  }
   .gx-v5 .v3-avatar { box-shadow: 0 3px 8px -3px rgba(61, 106, 239, .45); }
 
   /* ---------- 控件：统一内凹槽 + 控件圆角 ---------- */
@@ -296,9 +299,53 @@
   <header class="v3-topbar">
     <div class="v3-row-top">
       <div class="v3-brand">
-        <span class="v3-logo">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8c4.4 0 8-1.3 8-3s-3.6-3-8-3-8 1.3-8 3 3.6 3 8 3z"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>
-        </span>
+        <span class="v3-logo"><svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="28" height="28">
+
+  <defs>
+    <linearGradient id="gxlogo-paperk" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.38" stop-color="#FDFBF5"/>
+      <stop offset="0.72" stop-color="#F7F4EC"/>
+      <stop offset="1" stop-color="#FFFDF8"/>
+    </linearGradient>
+    <linearGradient id="gxlogo-pearlk" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFE4EE" stop-opacity="0.55"/>
+      <stop offset="0.28" stop-color="#FFF4D6" stop-opacity="0.30"/>
+      <stop offset="0.52" stop-color="#E2F2FF" stop-opacity="0.50"/>
+      <stop offset="0.76" stop-color="#ECE6FF" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.65"/>
+    </linearGradient>
+    <linearGradient id="gxlogo-glossk" x1="0" y1="0" x2="0.55" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="0.42" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="gxlogo-sheenk" cx="0.32" cy="0.22" r="0.62">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gxlogo-bandk" x1="76" y1="56" x2="174" y2="206" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F7A81B"/>
+      <stop offset="0.18" stop-color="#F5841F"/>
+      <stop offset="0.38" stop-color="#E8447A"/>
+      <stop offset="0.56" stop-color="#7B4CD8"/>
+      <stop offset="0.78" stop-color="#2C7BE5"/>
+      <stop offset="1" stop-color="#29B6F6"/>
+    </linearGradient>
+  </defs>
+
+      <rect width="256" height="256" rx="57" fill="url(#gxlogo-paperk)"/>
+      <rect width="256" height="256" rx="57" fill="url(#gxlogo-pearlk)"/>
+      <rect width="256" height="256" rx="57" fill="url(#gxlogo-glossk)"/>
+      <rect width="256" height="256" rx="57" fill="url(#gxlogo-sheenk)"/>
+      <rect x="0.8" y="0.8" width="254.4" height="254.4" rx="56.4" fill="none" stroke="#E6E0D5" stroke-opacity="0.85" stroke-width="1.6"/>
+      <rect x="3" y="3" width="250" height="250" rx="54" fill="none" stroke="#FFFFFF" stroke-opacity="0.75" stroke-width="2"/>
+
+  <path d="M 182 112 L 182 96 Q 182 74 160 74 L 96 74 Q 74 74 74 96 L 74 160 Q 74 182 96 182 L 160 182 Q 182 182 182 160 L 182 142 L 104 142"
+    fill="none" stroke="url(#gxlogo-bandk)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="98" y1="112" x2="146" y2="112" stroke="url(#gxlogo-bandk)" stroke-width="11" stroke-linecap="round"/>
+</svg></span>
         <span class="text-gx-13 font-semibold text-gx-text-primary">构想工作台</span>
       </div>
 
