@@ -56,6 +56,8 @@ export default function HelpCenterPage() {
   const [activeTitle, setActiveTitle] = useState(HOME_PAGE);
   const [markdown, setMarkdown] = useState("");
   const [state, setState] = useState<LoadState>("loading");
+  // 最近一次正文是否来自后端离线持久缓存（cached:true）；仅控制顶部陈旧提示条，不进 error 态。
+  const [cached, setCached] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // 旧请求晚回来不得覆盖新页：每次发请求自增，回调只认最新一次
@@ -64,12 +66,14 @@ export default function HelpCenterPage() {
   const loadPage = useCallback((title: string) => {
     const seq = ++reqSeqRef.current;
     setState("loading");
+    setCached(false);
     fetchHelpWiki(title)
       .then((data) => {
         if (seq !== reqSeqRef.current) return;
         setActiveTitle(data.page || title);
         setMarkdown(data.markdown ?? "");
         if (Array.isArray(data.pages) && data.pages.length > 0) setPages(data.pages);
+        setCached(data.cached === true);
         setState("ready");
       })
       .catch((err: unknown) => {
@@ -182,11 +186,24 @@ export default function HelpCenterPage() {
               </button>
             </div>
           ) : (
-            <article
-              className={ARTICLE_CLASS}
-              dangerouslySetInnerHTML={{ __html: html }}
-              onClick={onContentClick}
-            />
+            <>
+              {cached ? (
+                <div
+                  role="status"
+                  className="mx-auto mb-gx-md flex max-w-[75ch] items-center gap-2 rounded-gx-lg border border-gx-separator bg-gx-bg px-gx-md py-gx-xs text-gx-12 text-gx-text-secondary"
+                >
+                  <Icon name="clock" size={14} className="shrink-0 text-gx-text-hint" />
+                  <span className="m-0">
+                    当前为离线缓存的帮助内容，可能不是最新，联网后将自动刷新
+                  </span>
+                </div>
+              ) : null}
+              <article
+                className={ARTICLE_CLASS}
+                dangerouslySetInnerHTML={{ __html: html }}
+                onClick={onContentClick}
+              />
+            </>
           )}
         </div>
       </div>

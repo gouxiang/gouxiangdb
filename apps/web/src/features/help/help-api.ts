@@ -20,6 +20,12 @@ export interface HelpWikiResponse {
   imageBase: string;
   pages: WikiPageEntry[];
   updatedAt?: string;
+  /**
+   * true 表示正文来自后端 dataDir 持久离线缓存（上游 Gitea 不可达时回退），
+   * 内容可能陈旧；联网成功的鲜活响应不带此键。cachedAt 为缓存写入时间（ISO 字符串）。
+   */
+  cached?: boolean;
+  cachedAt?: string;
 }
 
 /** 后端 502 结构化信封（百科服务器不可达/离线）。 */

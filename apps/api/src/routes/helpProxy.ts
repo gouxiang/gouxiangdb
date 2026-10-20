@@ -10,9 +10,11 @@
 //   - 上游短超时（8s），失败一律 502 结构化信封，绝不把内网错误/堆栈透给浏览器；
 //   - /asset 严格白名单（images/ 前缀 + 图片扩展名），防路径穿越，SVG 固定 image/svg+xml。
 
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
 import path from "node:path";
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 
 import { config } from "../config.js";
 
@@ -268,6 +270,134 @@ export function __resetHelpProxyCacheForTest(): void {
   pagesCache = null;
 }
 
+// ---------------------------------------------------------------- 持久离线缓存
+//
+// S7a：断网/Gitea 挂了时帮助中心仍可读「上次成功打开过」的页面与图片。在线成功时把正文
+// JSON 与图片字节 best-effort 落到 <dataDir>/help-cache，不设 TTL/不淘汰（本版离线安全网，
+// 戴总已拍板不做配额）。任何写/读盘错误都不得拖垮在线 200；仅在上游失败时才回读缓存。
+
+interface CachedWikiPayload {
+  ok: true;
+  page: string;
+  home: string;
+  markdown: string;
+  imageBase: string;
+  pages: WikiPageEntry[];
+  updatedAt?: string;
+}
+
+interface CachedWikiEnvelope {
+  fetchedAt: string;
+  payload: CachedWikiPayload;
+}
+
+interface CachedAssetMeta {
+  contentType: string;
+  fetchedAt: string;
+}
+
+let cacheRootOverride: string | null = null;
+
+/** 测试注入：把持久缓存根指到临时目录；传 null 恢复默认 <dataDir>/help-cache。 */
+export function __setHelpCacheRootForTest(root: string | null): void {
+  cacheRootOverride = root;
+}
+
+function helpCacheRoot(): string {
+  return cacheRootOverride ?? path.join(config.dataDir, "help-cache");
+}
+
+function cacheHash(key: string): string {
+  return crypto.createHash("sha256").update(key).digest("hex");
+}
+
+function wikiCachePath(page: string): { dir: string; file: string } {
+  const dir = path.join(helpCacheRoot(), "pages");
+  return { dir, file: path.join(dir, `${cacheHash(`wiki:${page}`)}.json`) };
+}
+
+function assetCachePaths(safePath: string): { dir: string; bin: string; meta: string } {
+  const dir = path.join(helpCacheRoot(), "assets");
+  const hash = cacheHash(`asset:${safePath}`);
+  return { dir, bin: path.join(dir, `${hash}.bin`), meta: path.join(dir, `${hash}.meta.json`) };
+}
+
+/**
+ * 原子写：临时文件与目标【同目录】（同设备，rename 原子），再 fs.rename 落位。
+ * 刻意不用 os.tmpdir()：Docker/飞牛上 dataDir 常是独立 volume（/data），与容器层 /tmp
+ * 跨挂载点，rename 会 EXDEV 导致离线缓存永远写不进去；同目录 rename 无此问题。
+ * 任何失败都吞掉（best-effort）。
+ */
+async function atomicWrite(targetDir: string, targetFile: string, data: string | Uint8Array): Promise<void> {
+  let tmp: string | null = null;
+  try {
+    await fs.mkdir(targetDir, { recursive: true });
+    tmp = path.join(
+      targetDir,
+      `.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    await fs.writeFile(tmp, data);
+    await fs.rename(tmp, targetFile);
+    tmp = null;
+  } catch {
+    // 离线缓存是纯增益：写盘失败静默，绝不影响在线响应。
+  } finally {
+    if (tmp) fs.unlink(tmp).catch(() => {});
+  }
+}
+
+async function writeWikiCache(page: string, payload: CachedWikiPayload): Promise<void> {
+  const { dir, file } = wikiCachePath(page);
+  const envelope: CachedWikiEnvelope = { fetchedAt: new Date().toISOString(), payload };
+  await atomicWrite(dir, file, JSON.stringify(envelope));
+}
+
+/** 读持久正文缓存；不存在/损坏一律返回 null（调用方维持 502）。 */
+async function readWikiCache(page: string): Promise<CachedWikiEnvelope | null> {
+  try {
+    const { file } = wikiCachePath(page);
+    const raw = await fs.readFile(file, "utf8");
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && "payload" in parsed) {
+      return parsed as CachedWikiEnvelope;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeAssetCache(safePath: string, bytes: Uint8Array, contentType: string): Promise<void> {
+  const { dir, bin, meta } = assetCachePaths(safePath);
+  const metaBody: CachedAssetMeta = { contentType, fetchedAt: new Date().toISOString() };
+  await atomicWrite(dir, bin, bytes);
+  await atomicWrite(dir, meta, JSON.stringify(metaBody));
+}
+
+/** 读持久图片缓存（bin + meta）；任一缺失/损坏返回 null。 */
+async function readAssetCache(
+  safePath: string,
+): Promise<{ bytes: ArrayBuffer; meta: CachedAssetMeta } | null> {
+  try {
+    const { bin, meta: metaPath } = assetCachePaths(safePath);
+    const [binBuf, metaRaw] = await Promise.all([
+      fs.readFile(bin),
+      fs.readFile(metaPath, "utf8"),
+    ]);
+    const meta: unknown = JSON.parse(metaRaw);
+    if (!meta || typeof meta !== "object" || typeof (meta as CachedAssetMeta).contentType !== "string") {
+      return null;
+    }
+    // 拷进独立 ArrayBuffer：fs 读出的 Buffer 类型是 Uint8Array<ArrayBufferLike>，不能直接
+    // 作为 fetch Response 的 BodyInit（lib.dom 要 ArrayBuffer 支撑视图），故显式建 ArrayBuffer。
+    const bytes = new ArrayBuffer(binBuf.byteLength);
+    new Uint8Array(bytes).set(binBuf);
+    return { bytes, meta: meta as CachedAssetMeta };
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------- 路由
 
 export const helpProxy = new Hono();
@@ -288,11 +418,11 @@ helpProxy.get("/wiki", async (c) => {
   try {
     upstream = await fetchWithTimeout(url, { headers: { Accept: "text/plain" } });
   } catch {
-    return c.json({ ok: false, code: "WIKI_UNREACHABLE" }, 502);
+    return respondWikiOffline(c, page);
   }
   if (!upstream.ok) {
     upstream.body?.cancel().catch(() => {});
-    return c.json({ ok: false, code: "WIKI_UNREACHABLE" }, 502);
+    return respondWikiOffline(c, page);
   }
 
   const markdownRaw = await upstream.text();
@@ -300,8 +430,7 @@ helpProxy.get("/wiki", async (c) => {
   const pages = await getPages(settings);
   const lastModified = upstream.headers.get("last-modified");
 
-  c.header("Cache-Control", "public, max-age=60");
-  return c.json({
+  const payload: CachedWikiPayload = {
     ok: true,
     page,
     home: HELP_HOME,
@@ -309,8 +438,28 @@ helpProxy.get("/wiki", async (c) => {
     imageBase: ASSET_ROUTE,
     pages,
     ...(lastModified ? { updatedAt: lastModified } : {}),
-  });
+  };
+
+  // 在线成功：best-effort 持久化（内部吞错，绝不拖垮/拖慢成用户可感错误）。
+  await writeWikiCache(page, payload);
+
+  c.header("Cache-Control", "public, max-age=60");
+  // 鲜活响应刻意不带 cached/cachedAt（保持现契约逐字段断言）。
+  return c.json(payload);
 });
+
+/**
+ * 上游不可达时的离线出口：命中 dataDir 持久缓存则 200 返回陈旧正文并标 cached:true
+ *（不进浏览器 60s 缓存，避免恢复联网后仍被旧内容挡住）；读不到才维持 502。
+ */
+async function respondWikiOffline(c: Context, page: string) {
+  const cached = await readWikiCache(page);
+  if (cached) {
+    c.header("Cache-Control", "no-cache");
+    return c.json({ ...cached.payload, cached: true, cachedAt: cached.fetchedAt });
+  }
+  return c.json({ ok: false, code: "WIKI_UNREACHABLE" }, 502);
+}
 
 // GET /api/help/asset?path=images/tour/02-grid.png
 helpProxy.get("/asset", async (c) => {
@@ -330,11 +479,11 @@ helpProxy.get("/asset", async (c) => {
   try {
     upstream = await fetchWithTimeout(url, { headers: { Accept: "image/*" } });
   } catch {
-    return c.json({ ok: false, code: "WIKI_UNREACHABLE" }, 502);
+    return respondAssetOffline(c, safePath);
   }
   if (!upstream.ok || !upstream.body) {
     upstream.body?.cancel().catch(() => {});
-    return c.json({ ok: false, code: "WIKI_UNREACHABLE" }, 502);
+    return respondAssetOffline(c, safePath);
   }
 
   // SVG 强制 image/svg+xml（上游偶尔给 text/html 或 text/xml，绝不能当 HTML 透）；
@@ -350,12 +499,36 @@ helpProxy.get("/asset", async (c) => {
       : (ASSET_MIME[ext] ?? "application/octet-stream");
   }
 
-  const outHeaders = new Headers();
-  outHeaders.set("Content-Type", contentType);
-  outHeaders.set("Cache-Control", "public, max-age=3600");
-  outHeaders.set("X-Content-Type-Options", "nosniff");
-  const contentLength = upstream.headers.get("content-length");
-  if (contentLength) outHeaders.set("Content-Length", contentLength);
+  // wiki 图片体积小：整包缓冲（同时用于持久缓存），Content-Length 与实际字节保持一致。
+  const bytes = new Uint8Array(await upstream.arrayBuffer());
+  await writeAssetCache(safePath, bytes, contentType);
 
-  return new Response(upstream.body, { status: upstream.status, headers: outHeaders });
+  return new Response(bytes, {
+    status: upstream.status,
+    headers: buildAssetHeaders(contentType, bytes.byteLength, false),
+  });
 });
+
+/** 组装图片响应头：在线 miss 不带标记；离线命中带 X-GX-Help-Cache: hit。 */
+function buildAssetHeaders(contentType: string, contentLength: number, fromCache: boolean): Headers {
+  const headers = new Headers();
+  headers.set("Content-Type", contentType);
+  // 离线命中不给长缓存（避免恢复联网后浏览器仍卡旧图）；在线图维持 1h 不变。
+  headers.set("Cache-Control", fromCache ? "no-cache" : "public, max-age=3600");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Content-Length", String(contentLength));
+  if (fromCache) headers.set("X-GX-Help-Cache", "hit");
+  return headers;
+}
+
+/** 上游不可达时读持久图片缓存：命中则 200 回相同字节/meta.contentType，否则维持 502。 */
+async function respondAssetOffline(c: Context, safePath: string) {
+  const cached = await readAssetCache(safePath);
+  if (cached) {
+    return new Response(cached.bytes, {
+      status: 200,
+      headers: buildAssetHeaders(cached.meta.contentType, cached.bytes.byteLength, true),
+    });
+  }
+  return c.json({ ok: false, code: "WIKI_UNREACHABLE" }, 502);
+}
