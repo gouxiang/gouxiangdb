@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>构想工作台 · 工作台</title>
+<style>
+/* ============================================================
+   v6 · 企业工作台设计体系
+   参考：飞书/钉钉工作台（应用轨 + 宫格 + 待办）、Linear/Notion（克制灰度 + ⌘K）、
+        Airtable/Jira（视图切换 + 高密度表格）、Salesforce（KPI + 时间线）
+   规矩：所有取值走令牌，禁止局部手调
+   ============================================================ */
+:root {
+  /* 中性灰 4 级（文字） */
+  --ink-1: #101828;
+  --ink-2: #475467;
+  --ink-3: #667085;
+  --ink-4: #8b95a7;
+  /* 品牌（取自 logo 色带） */
+  --brand: #2c7be5;
+  --brand-ink: #1f5fbf;
+  --brand-soft: #eaf2fe;
+  --violet: #7b4cd8;
+  --violet-soft: #f2ecfe;
+  --warm: #f5a623;
+  --warm-soft: #fef4e4;
+  /* 语义 */
+  --ok: #0e9f6e;
+  --ok-soft: #e6f6ef;
+  --danger: #d92d20;
+  --danger-soft: #fdecea;
+  /* 面 */
+  --bg: #f4f6fa;
+  --card: #ffffff;
+  --sub: #f7f9fc;
+  --hover: #f5f8fd;
+  /* 线 */
+  --line: #e7eaf0;
+  --line-2: #eef1f6;
+  /* 圆角 3 档 */
+  --r-card: 12px;
+  --r-ctl: 8px;
+  --r-pill: 999px;
+  /* 投影 2 级 */
+  --sh-card: 0 1px 2px rgba(16, 24, 40, .04), 0 1px 3px rgba(16, 24, 40, .05);
+  --sh-pop: 0 10px 28px -10px rgba(16, 24, 40, .18), 0 2px 6px rgba(16, 24, 40, .06);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink-2);
+  font: 400 13px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+        "Microsoft YaHei", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; }
+a { color: inherit; text-decoration: none; }
+svg { display: block; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* ---------------- 应用外壳：导航轨 + 内容 ---------------- */
+.app { display: flex; height: 100vh; overflow: hidden; }
+
+.rail {
+  width: 76px; flex: none;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 14px 0 12px;
+  background: var(--card);
+  border-right: 1px solid var(--line);
+}
+.rail-mark { width: 32px; height: 32px; border-radius: 8px; overflow: hidden; }
+.rail-nav { display: flex; flex-direction: column; gap: 4px; margin-top: 18px; width: 100%; align-items: center; }
+.rail-item {
+  width: 60px; padding: 7px 0 6px; border: 0; border-radius: 10px; background: transparent;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  color: var(--ink-3); cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.rail-item span { font-size: 10.5px; line-height: 1.2; letter-spacing: .01em; }
+.rail-item:hover { background: var(--hover); color: var(--ink-1); }
+.rail-item.is-active { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
+.rail-foot { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+
+/* ---------------- 主区 ---------------- */
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.topbar {
+  height: 56px; flex: none;
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 20px;
+  background: var(--card); border-bottom: 1px solid var(--line);
+}
+.crumb { display: flex; align-items: center; gap: 7px; flex: none; min-width: 0; }
+.crumb .c1 { font-size: 12px; color: var(--ink-4); }
+.crumb .sep { color: var(--ink-4); opacity: .6; }
+.crumb .c2 { font-size: 14px; font-weight: 600; color: var(--ink-1); white-space: nowrap; }
+
+.cmd {
+  margin: 0 auto; flex: 0 1 400px; min-width: 160px;
+  height: 32px; display: flex; align-items: center; gap: 8px;
+  padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r-ctl);
+  background: var(--sub); color: var(--ink-3); cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.cmd:hover { background: #fff; border-color: #d6dce8; }
+.cmd .ph { flex: 1; min-width: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kbd {
+  flex: none; font-size: 10.5px; color: var(--ink-4); letter-spacing: .02em;
+  padding: 1px 5px; border: 1px solid var(--line); border-radius: 5px; background: #fff;
+}
+
+.top-right { display: flex; align-items: center; gap: 6px; flex: none; }
+.icon-btn {
+  width: 30px; height: 30px; border: 0; border-radius: var(--r-ctl);
+  display: grid; place-items: center; background: transparent; color: var(--ink-3); cursor: pointer;
+  position: relative; transition: background .15s, color .15s;
+}
+.icon-btn:hover { background: var(--hover); color: var(--ink-1); }
+.icon-btn .dot {
+  position: absolute; top: 5px; right: 6px; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--danger); box-shadow: 0 0 0 2px #fff;
+}
+.vline { width: 1px; height: 20px; background: var(--line); margin: 0 4px; }
+.who { display: flex; align-items: center; gap: 8px; padding: 0 6px 0 2px; height: 34px; border-radius: var(--r-ctl); cursor: pointer; }
+.who:hover { background: var(--hover); }
+.who .nm { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+
+.scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.wrap { max-width: 1480px; margin: 0 auto; padding: 20px 24px 32px; }
+
+/* ---------------- 头像 ---------------- */
+.av {
+  width: 22px; height: 22px; border-radius: 50%; flex: none;
+  display: grid; place-items: center;
+  font-size: 10.5px; font-weight: 600; color: #fff; letter-spacing: 0;
+}
+.av-md { width: 28px; height: 28px; font-size: 11.5px; }
+.av-lg { width: 34px; height: 34px; font-size: 12.5px; }
+.av-a { background: linear-gradient(135deg, #4b8ef0, #2c7be5); }
+.av-b { background: linear-gradient(135deg, #9b7ae8, #7b4cd8); }
+.av-c { background: linear-gradient(135deg, #33b98a, #0e9f6e); }
+.av-d { background: linear-gradient(135deg, #f5bd57, #f5a623); }
+.av-e { background: linear-gradient(135deg, #f0796b, #d92d20); }
+.av-f { background: linear-gradient(135deg, #7cc4f0, #2f9fd0); }
+.av-stack { display: flex; align-items: center; }
+.av-stack .av { margin-left: -6px; box-shadow: 0 0 0 2px #fff; }
+.av-stack .av:first-child { margin-left: 0; }
+
+/* ---------------- 卡片 ---------------- */
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card);
+  box-shadow: var(--sh-card);
+}
+.card-h {
+  display: flex; align-items: center; gap: 8px;
+  padding: 13px 16px; border-bottom: 1px solid var(--line-2);
+}
+.card-t { font-size: 13px; font-weight: 600; color: var(--ink-1); }
+.card-sub { font-size: 11.5px; color: var(--ink-4); }
+.card-more {
+  margin-left: auto; border: 0; background: transparent; color: var(--ink-3);
+  font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; padding: 2px 4px; border-radius: 6px;
+}
+.card-more:hover { color: var(--brand-ink); background: var(--brand-soft); }
+.card-b { padding: 6px 8px 8px; }
+
+/* ---------------- 按钮 ---------------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 30px; padding: 0 11px;
+  border: 1px solid var(--line); border-radius: var(--r-ctl);
+  background: #fff; color: var(--ink-2); font-size: 12.5px; font-weight: 500;
+  cursor: pointer; white-space: nowrap;
+  transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
+}
+.btn:hover { background: var(--sub); border-color: #d6dce8; color: var(--ink-1); }
+.btn-primary {
+  background: var(--brand); border-color: var(--brand); color: #fff;
+  box-shadow: 0 1px 2px rgba(44, 123, 229, .30);
+}
+.btn-primary:hover { background: var(--brand-ink); border-color: var(--brand-ink); color: #fff; }
+.btn-ghost { border-color: transparent; background: transparent; color: var(--ink-3); }
+.btn-ghost:hover { background: var(--hover); border-color: transparent; color: var(--ink-1); }
+.btn-sm { height: 26px; padding: 0 9px; font-size: 12px; }
+.btn-icon { width: 30px; padding: 0; }
+
+/* ---------------- 徽标 ---------------- */
+.tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 7px; border-radius: 6px;
+  font-size: 11px; font-weight: 500; white-space: nowrap;
+}
+.tag i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }
+.tag-blue { background: var(--brand-soft); color: var(--brand-ink); }
+.tag-violet { background: var(--violet-soft); color: var(--violet); }
+.tag-warm { background: var(--warm-soft); color: #b26a00; }
+.tag-ok { background: var(--ok-soft); color: var(--ok); }
+.tag-danger { background: var(--danger-soft); color: var(--danger); }
+.tag-gray { background: #f2f4f7; color: var(--ink-2); }
+
+/* ---------------- 区块标题 ---------------- */
+.sec-h { display: flex; align-items: baseline; gap: 8px; margin: 0 0 12px; }
+.sec-t { font-size: 14px; font-weight: 600; color: var(--ink-1); margin: 0; }
+.sec-s { font-size: 12px; color: var(--ink-4); }
+
+/* ---------------- 布局栅格 ---------------- */
+.cols { display: grid; grid-template-columns: minmax(0, 1fr) 336px; gap: 16px; align-items: start; }
+.stack { display: flex; flex-direction: column; gap: 16px; }
+.row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+
+/* ---------------- 列表行 ---------------- */
+.li {
+  display: flex; align-items: center; gap: 10px;
+  height: 40px; padding: 0 8px; border-radius: var(--r-ctl);
+  color: var(--ink-2); cursor: pointer;
+  transition: background .13s;
+}
+.li:hover { background: var(--hover); }
+.li .t { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.li .m { font-size: 11.5px; color: var(--ink-4); flex: none; }
+.li .ico { color: var(--ink-3); flex: none; }
+
+.empty { padding: 28px 12px; text-align: center; color: var(--ink-4); font-size: 12px; }
+
+/* 滚动条 */
+.scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.scroll::-webkit-scrollbar-thumb { background: #dbe1ec; border: 3px solid var(--bg); border-radius: 999px; }
+.scroll::-webkit-scrollbar-thumb:hover { background: #c6ceda; }
+
+.proto-note {
+  position: fixed; right: 20px; bottom: 16px; z-index: 40;
+  padding: 5px 10px; border-radius: 8px;
+  background: rgba(16, 24, 40, .82); color: #fff; font-size: 11.5px; line-height: 1.5;
+}
+
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="rail-mark"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="32" height="32">
+
+  <defs>
+    <linearGradient id="gxlogo-paperk" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.38" stop-color="#FDFBF5"/>
+      <stop offset="0.72" stop-color="#F7F4EC"/>
+      <stop offset="1" stop-color="#FFFDF8"/>
+    </linearGradient>
+    <linearGradient id="gxlogo-pearlk" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFE4EE" stop-opacity="0.55"/>
+      <stop offset="0.28" stop-color="#FFF4D6" stop-opacity="0.30"/>
+      <stop offset="0.52" stop-color="#E2F2FF" stop-opacity="0.50"/>
+      <stop offset="0.76" stop-color="#ECE6FF" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.65"/>
+    </linearGradient>
+    <linearGradient id="gxlogo-glossk" x1="0" y1="0" x2="0.55" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="0.42" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="gxlogo-sheenk" cx="0.32" cy="0.22" r="0.62">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gxlogo-bandk" x1="76" y1="56" x2="174" y2="206" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F7A81B"/>
+      <stop offset="0.18" stop-color="#F5841F"/>
+      <stop offset="0.38" stop-color="#E8447A"/>
+      <stop offset="0.56" stop-color="#7B4CD8"/>
+      <stop offset="0.78" stop-color="#2C7BE5"/>
+      <stop offset="1" stop-color="#29B6F6"/>
+    </linearGradient>
+  </defs>
+
+      <rect width="256" height="256" rx="57" fill="url(#gxlogo-paperk)"/>
+      <rect width="256" height="256" rx="57" fill="url(#gxlogo-pearlk)"/>
+      <rect width="256" height="256" rx="57" fill="url(#gxlogo-glossk)"/>
+      <rect width="256" height="256" rx="57" fill="url(#gxlogo-sheenk)"/>
+      <rect x="0.8" y="0.8" width="254.4" height="254.4" rx="56.4" fill="none" stroke="#E6E0D5" stroke-opacity="0.85" stroke-width="1.6"/>
+      <rect x="3" y="3" width="250" height="250" rx="54" fill="none" stroke="#FFFFFF" stroke-opacity="0.75" stroke-width="2"/>
+
+  <path d="M 182 112 L 182 96 Q 182 74 160 74 L 96 74 Q 74 74 74 96 L 74 160 Q 74 182 96 182 L 160 182 Q 182 182 182 160 L 182 142 L 104 142"
+    fill="none" stroke="url(#gxlogo-bandk)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="98" y1="112" x2="146" y2="112" stroke="url(#gxlogo-bandk)" stroke-width="11" stroke-linecap="round"/>
+</svg></div>
+    <nav class="rail-nav">
+        <a class="rail-item is-active" href="workbench.html"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg><span>工作台</span></a>
+        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.9 9.9 0 0 1-2.8-.4L3 21l1.9-4.6A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/></svg><span>消息</span></a>
+        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M3 11h18"/></svg><span>日程</span></a>
+        <a class="rail-item" href="data-table.html"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>数据</span></a>
+        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>知识</span></a>
+        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>通讯录</span></a>
+    </nav>
+    <div class="rail-foot">
+      <button class="rail-item" title="设置"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>设置</span></button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="crumb"><span class="c1">工作台</span><span class="sep">/</span><span class="c2">概览</span></div>
+      <button class="cmd"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M21 21l-4.35-4.35"/></svg><span class="ph">搜索数据表、文档、成员…</span><span class="kbd">⌘K</span></button>
+      <div class="top-right">
+        <button class="icon-btn" title="通知"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="dot"></span></button>
+        <button class="icon-btn" title="帮助"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.6 2.3c-.7.4-1.2 1-1.2 1.8v.4"/><circle cx="12" cy="17.2" r=".8" fill="currentColor" stroke="none"/></svg></button>
+        <div class="vline"></div>
+        <div class="who"><span class="av av-md av-a">戴</span><span class="nm">戴静</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--ink-4)"><path d="M6 9l6 6 6-6"/></svg></div>
+      </div>
+    </header>
+    <div class="scroll">
+<style>
+  /* ===== 工作台首页 ===== */
+  .hero {
+    display: flex; align-items: flex-end; gap: 20px;
+    padding: 4px 2px 18px;
+  }
+  .hero-l { min-width: 0; }
+  .hero-date { font-size: 12px; color: var(--ink-4); letter-spacing: .02em; }
+  .hero h1 { margin: 4px 0 6px; font-size: 22px; line-height: 1.25; font-weight: 600; color: var(--ink-1); letter-spacing: -.01em; }
+  .hero-sub { font-size: 12.5px; color: var(--ink-3); }
+  .hero-sub b { color: var(--ink-1); font-weight: 600; }
+  .hero-r { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+
+  /* KPI */
+  .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+  .kpi { padding: 14px 16px 15px; display: flex; flex-direction: column; gap: 6px; }
+  .kpi-t { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); }
+  .kpi-v { font-size: 24px; font-weight: 600; color: var(--ink-1); letter-spacing: -.02em; line-height: 1.1; }
+  .kpi-v .u { font-size: 12px; font-weight: 400; color: var(--ink-4); margin-left: 3px; letter-spacing: 0; }
+  .kpi-f { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-4); }
+  .delta { display: inline-flex; align-items: center; gap: 2px; font-weight: 500; }
+  .delta.up { color: var(--ok); }
+  .delta.down { color: var(--danger); }
+  .kpi.alert .kpi-v { color: var(--warm); }
+
+  /* 待办行 */
+  .todo { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 8px; border-radius: var(--r-ctl); cursor: pointer; }
+  .todo:hover { background: var(--hover); }
+  .todo .cb {
+    width: 15px; height: 15px; flex: none; border: 1.5px solid #cdd5e3; border-radius: 4px; background: #fff;
+  }
+  .todo .tt { flex: 1; min-width: 0; }
+  .todo .tt b { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .todo .tt span { display: block; font-size: 11.5px; color: var(--ink-4); margin-top: 1px; }
+  .todo .due { font-size: 11.5px; color: var(--ink-3); flex: none; display: inline-flex; align-items: center; gap: 4px; }
+  .todo .due.soon { color: var(--danger); }
+
+  /* 趋势图 */
+  .chart { padding: 4px 8px 10px; }
+  .chart-legend { display: flex; align-items: center; gap: 14px; padding: 0 8px 8px; font-size: 11.5px; color: var(--ink-3); }
+  .chart-legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 5px; }
+  .chart-foot { display: flex; align-items: center; justify-content: space-between; padding: 2px 10px 0; font-size: 11.5px; color: var(--ink-4); }
+
+  /* 审批 */
+  .approve { display: flex; align-items: center; gap: 10px; padding: 11px 8px; border-radius: var(--r-ctl); cursor: pointer; }
+  .approve + .approve { border-top: 1px solid var(--line-2); }
+  .approve:hover { background: var(--hover); }
+  .approve .tt { flex: 1; min-width: 0; }
+  .approve .tt b { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink-1); }
+  .approve .tt span { display: block; font-size: 11.5px; color: var(--ink-4); margin-top: 1px; }
+
+  /* 应用宫格 */
+  .apps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 6px 8px 10px; }
+  .app-t {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 10px 4px 8px; border-radius: 10px; cursor: pointer; border: 0; background: transparent;
+    transition: background .15s;
+  }
+  .app-t:hover { background: var(--hover); }
+  .app-i { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: #fff; }
+  .app-t span { font-size: 11.5px; color: var(--ink-2); }
+  .app-blue { background: linear-gradient(135deg, #5a97f0, #2c7be5); }
+  .app-violet { background: linear-gradient(135deg, #9b7ae8, #7b4cd8); }
+  .app-ok { background: linear-gradient(135deg, #33b98a, #0e9f6e); }
+  .app-warm { background: linear-gradient(135deg, #f7bc5e, #f5a623); }
+  .app-cyan { background: linear-gradient(135deg, #59c2e8, #2f9fd0); }
+  .app-rose { background: linear-gradient(135deg, #f0796b, #d92d20); }
+  .app-slate { background: linear-gradient(135deg, #8b96ac, #667085); }
+
+  /* 动态流 */
+  .feed { padding: 4px 8px 8px; }
+  .fi { display: flex; gap: 9px; padding: 9px 8px; border-radius: var(--r-ctl); }
+  .fi:hover { background: var(--hover); }
+  .fi .fc { flex: 1; min-width: 0; font-size: 12px; color: var(--ink-2); line-height: 1.55; }
+  .fi .fc b { color: var(--ink-1); font-weight: 600; }
+  .fi .fc em { font-style: normal; color: var(--brand-ink); }
+  .fi .ft { display: block; font-size: 11px; color: var(--ink-4); margin-top: 2px; }
+
+  /* 日程 */
+  .sch { padding: 4px 8px 8px; }
+  .si { display: flex; gap: 10px; padding: 9px 8px; border-radius: var(--r-ctl); }
+  .si:hover { background: var(--hover); }
+  .si .st { width: 42px; flex: none; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; padding-top: 1px; }
+  .si .sc { flex: 1; min-width: 0; border-left: 2px solid var(--brand-soft); padding-left: 9px; }
+  .si.violet .sc { border-left-color: var(--violet-soft); }
+  .si.warm .sc { border-left-color: var(--warm-soft); }
+  .si .sc b { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink-1); }
+  .si .sc span { display: block; font-size: 11.5px; color: var(--ink-4); margin-top: 1px; }
+</style>
+
+<div class="wrap">
+
+  <!-- ===== 问候区 ===== -->
+  <div class="hero">
+    <div class="hero-l">
+      <div class="hero-date">2026 年 10 月 20 日 · 周二</div>
+      <h1>下午好，戴静</h1>
+      <div class="hero-sub">你有 <b>5</b> 项待办、<b>2</b> 条审批待处理，<b>1</b> 个交付今日到期</div>
+    </div>
+    <div class="hero-r">
+      <button class="btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
+        新建数据表
+      </button>
+      <button class="btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2z"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+        新建文档
+      </button>
+      <button class="btn btn-primary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        发起流程
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== KPI ===== -->
+  <div class="kpis">
+    <section class="card kpi">
+      <div class="kpi-t">在办项目</div>
+      <div class="kpi-v tnum">12<span class="u">个</span></div>
+      <div class="kpi-f"><span class="delta up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>2</span> 较上周</div>
+    </section>
+    <section class="card kpi alert">
+      <div class="kpi-t">待处理审批</div>
+      <div class="kpi-v tnum">2<span class="u">条</span></div>
+      <div class="kpi-f">其中 1 条已超 24 小时</div>
+    </section>
+    <section class="card kpi">
+      <div class="kpi-t">本周新增记录</div>
+      <div class="kpi-v tnum">348<span class="u">条</span></div>
+      <div class="kpi-f"><span class="delta up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>18%</span> 环比</div>
+    </section>
+    <section class="card kpi">
+      <div class="kpi-t">团队活跃</div>
+      <div class="kpi-v tnum">18<span class="u">/ 22 人</span></div>
+      <div class="kpi-f">
+        <span class="av-stack">
+          <span class="av av-a">戴</span><span class="av av-b">王</span><span class="av av-c">李</span><span class="av av-d">陈</span><span class="av av-e">周</span>
+        </span>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===== 主栅格 ===== -->
+  <div class="cols">
+    <div class="stack">
+
+      <!-- 我的待办 -->
+      <section class="card">
+        <div class="card-h">
+          <span class="card-t">我的待办</span>
+          <span class="tag tag-gray">5</span>
+          <button class="card-more">全部待办
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+        <div class="card-b">
+          <div class="todo">
+            <span class="cb"></span>
+            <div class="tt"><b>补充 Q4 产品路线图评审材料</b><span>产品中心 · 负责人 戴静</span></div>
+            <span class="tag tag-danger">高</span>
+            <span class="due soon">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              今日 18:00
+            </span>
+          </div>
+          <div class="todo">
+            <span class="cb"></span>
+            <div class="tt"><b>客户合同模板条款复核</b><span>客户与合同 · 负责人 李哲</span></div>
+            <span class="tag tag-warm">中</span>
+            <span class="due">明日 12:00</span>
+          </div>
+          <div class="todo">
+            <span class="cb"></span>
+            <div class="tt"><b>数据表权限模型设计确认</b><span>平台能力 · 负责人 王倩</span></div>
+            <span class="tag tag-danger">高</span>
+            <span class="due">10-22</span>
+          </div>
+          <div class="todo">
+            <span class="cb"></span>
+            <div class="tt"><b>供应商对账异常排查</b><span>财务 · 负责人 周敏</span></div>
+            <span class="tag tag-warm">中</span>
+            <span class="due">10-23</span>
+          </div>
+          <div class="todo">
+            <span class="cb"></span>
+            <div class="tt"><b>研发手册目录结构整理</b><span>研发手册 · 负责人 陈然</span></div>
+            <span class="tag tag-gray">低</span>
+            <span class="due">10-25</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="row2">
+        <!-- 趋势 -->
+        <section class="card">
+          <div class="card-h">
+            <span class="card-t">记录增长</span>
+            <span class="card-sub">近 7 天</span>
+            <button class="card-more">详情
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+            </button>
+          </div>
+          <div class="chart-legend"><span><i style="background:#2c7be5"></i>新增记录</span><span><i style="background:#c7d9f6"></i>上周同期</span></div>
+          <div class="chart">
+            <svg viewBox="0 0 420 128" width="100%" height="128" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <linearGradient id="wb-area" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#2c7be5" stop-opacity="0.18"/>
+                  <stop offset="1" stop-color="#2c7be5" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <line x1="0" y1="24" x2="420" y2="24" stroke="#eef1f6" stroke-width="1"/>
+              <line x1="0" y1="56" x2="420" y2="56" stroke="#eef1f6" stroke-width="1"/>
+              <line x1="0" y1="88" x2="420" y2="88" stroke="#eef1f6" stroke-width="1"/>
+              <line x1="0" y1="112" x2="420" y2="112" stroke="#e7eaf0" stroke-width="1"/>
+              <path d="M10 88 L77 72 L144 80 L211 48 L278 56 L345 30 L410 38" fill="none" stroke="#c7d9f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4 4"/>
+              <path d="M10 96 L77 66 L144 74 L211 40 L278 62 L345 26 L410 44 L410 112 L10 112 Z" fill="url(#wb-area)"/>
+              <path d="M10 96 L77 66 L144 74 L211 40 L278 62 L345 26 L410 44" fill="none" stroke="#2c7be5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="345" cy="26" r="3.5" fill="#fff" stroke="#2c7be5" stroke-width="2"/>
+            </svg>
+          </div>
+          <div class="chart-foot">
+            <span>周一</span><span>周二</span><span>周三</span><span>周四</span><span>周五</span><span>周六</span><span>周日</span>
+          </div>
+        </section>
+
+        <!-- 待我审批 -->
+        <section class="card">
+          <div class="card-h">
+            <span class="card-t">待我审批</span>
+            <span class="tag tag-warm">2</span>
+            <button class="card-more">审批中心
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+            </button>
+          </div>
+          <div class="card-b">
+            <div class="approve">
+              <span class="av av-e">张</span>
+              <div class="tt"><b>采购申请 · ¥12,800</b><span>张伟 · 已等待 2 小时</span></div>
+              <button class="btn btn-sm">处理</button>
+            </div>
+            <div class="approve">
+              <span class="av av-c">李</span>
+              <div class="tt"><b>数据导出授权</b><span>李哲 · 产品库 → 外部</span></div>
+              <button class="btn btn-sm">处理</button>
+            </div>
+            <div class="approve">
+              <span class="av av-b">王</span>
+              <div class="tt"><b>文档发布申请</b><span>王倩 · 研发手册 v2.1</span></div>
+              <button class="btn btn-sm">处理</button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- 最近访问 -->
+      <section class="card">
+        <div class="card-h">
+          <span class="card-t">最近访问</span>
+          <button class="card-more">全部
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+        <div class="card-b" style="display:grid;grid-template-columns:1fr 1fr;gap:0 8px">
+          <div class="li">
+            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
+            <span class="t">需求池</span><span class="m">2 分钟前</span>
+          </div>
+          <div class="li">
+            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2z"/></svg>
+            <span class="t">Q4 产品路线图</span><span class="m">1 小时前</span>
+          </div>
+          <div class="li">
+            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
+            <span class="t">客户档案</span><span class="m">昨天</span>
+          </div>
+          <div class="li">
+            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            <span class="t">发布流程规范</span><span class="m">昨天</span>
+          </div>
+          <div class="li">
+            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
+            <span class="t">迭代计划</span><span class="m">10-18</span>
+          </div>
+          <div class="li">
+            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
+            <span class="t">供应商对账</span><span class="m">10-17</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 右列 -->
+    <div class="stack">
+      <!-- 常用应用 -->
+      <section class="card">
+        <div class="card-h">
+          <span class="card-t">常用应用</span>
+          <button class="card-more">全部应用
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+        <div class="apps">
+          <button class="app-t"><span class="app-i app-blue"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span>数据表</span></button>
+          <button class="app-t"><span class="app-i app-violet"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2z"/></svg></span><span>文档</span></button>
+          <button class="app-t"><span class="app-i app-ok"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="10" rx="1.5"/></svg></span><span>看板</span></button>
+          <button class="app-t"><span class="app-i app-warm"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l3 4v12H6V8z"/><path d="M9 13h6"/><path d="M9 16h4"/></svg></span><span>表单</span></button>
+          <button class="app-t"><span class="app-i app-cyan"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span><span>审批</span></button>
+          <button class="app-t"><span class="app-i app-rose"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M3 11h18"/></svg></span><span>日程</span></button>
+          <button class="app-t"><span class="app-i app-slate"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg></span><span>通讯录</span></button>
+          <button class="app-t"><span class="app-i app-blue"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V11"/><path d="M10 20V5"/><path d="M16 20v-6"/><path d="M22 20V8"/></svg></span><span>报表</span></button>
+        </div>
+      </section>
+
+      <!-- 团队动态 -->
+      <section class="card">
+        <div class="card-h">
+          <span class="card-t">团队动态</span>
+          <button class="card-more">更多
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+        <div class="feed">
+          <div class="fi">
+            <span class="av av-b">王</span>
+            <div class="fc"><b>王倩</b> 在 <em>需求池</em> 新增 3 条记录<span class="ft">12 分钟前</span></div>
+          </div>
+          <div class="fi">
+            <span class="av av-c">李</span>
+            <div class="fc"><b>李哲</b> 发布文档 <em>支付网关接入规范 v1.2</em><span class="ft">40 分钟前</span></div>
+          </div>
+          <div class="fi">
+            <span class="av av-a">陈</span>
+            <div class="fc"><b>陈然</b> 完成任务 <em>鉴权中间件重构</em><span class="ft">2 小时前</span></div>
+          </div>
+          <div class="fi">
+            <span class="av av-e">周</span>
+            <div class="fc"><b>周敏</b> 提交审批 <em>采购申请 ¥12,800</em><span class="ft">2 小时前</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 今日日程 -->
+      <section class="card">
+        <div class="card-h">
+          <span class="card-t">今日日程</span>
+          <span class="card-sub">3 项</span>
+          <button class="card-more">日历
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+        <div class="sch">
+          <div class="si"><span class="st">10:00</span><div class="sc"><b>产品周会</b><span>45 分钟 · 会议室 A</span></div></div>
+          <div class="si violet"><span class="st">14:30</span><div class="sc"><b>客户方案评审</b><span>线上 · 腾讯会议</span></div></div>
+          <div class="si warm"><span class="st">17:00</span><div class="sc"><b>UI 走查对齐</b><span>与设计组 · 30 分钟</span></div></div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+    </div>
+  </div>
+</div>
+<div class="proto-note">v6 · 企业工作台新方向（旧拟物系列已封存）</div>
+</body>
+</html>

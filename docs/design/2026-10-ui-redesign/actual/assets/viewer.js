@@ -36,10 +36,26 @@ window.GX_ACTUAL_PAGES = [
   {
     id: "table-grid-v5",
     group: "数据表库",
-    name: "数据表主界面 ★拟物风 v5（统一令牌体系）",
+    name: "数据表主界面 ★拟物风 v5（统一令牌体系 · 已封存）",
     route: "/base/:baseId/table/:tableId/view/:viewId",
     src: "pages/table-grid-v5.html",
-    note: "全页单一令牌表 + 产品 gx-* 桥接，破除局部手调",
+    note: "全页单一令牌表 + 产品 gx-* 桥接，破除局部手调（已封存）",
+  },
+  {
+    id: "v6-workbench",
+    group: "v6 企业工作台（新方向）",
+    name: "工作台首页 ★v6",
+    route: "/workspace/:wsId/home",
+    src: "v6/workbench.html",
+    note: "76px 应用轨 + 全宽内容：问候/KPI/待办/审批/趋势/动态/日程/应用宫格",
+  },
+  {
+    id: "v6-data-table",
+    group: "v6 企业工作台（新方向）",
+    name: "数据表内容页 ★v6",
+    route: "/base/:baseId/table/:tableId",
+    src: "v6/data-table.html",
+    note: "视图切换 + 筛选条 + 高密度表格，验证外壳承载内容页",
   },
 ];
 

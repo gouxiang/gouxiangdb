@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>构想工作台 · 需求池</title>
+<style>
+/* ============================================================
+   v6 · 企业工作台设计体系
+   参考：飞书/钉钉工作台（应用轨 + 宫格 + 待办）、Linear/Notion（克制灰度 + ⌘K）、
+        Airtable/Jira（视图切换 + 高密度表格）、Salesforce（KPI + 时间线）
+   规矩：所有取值走令牌，禁止局部手调
+   ============================================================ */
+:root {
+  /* 中性灰 4 级（文字） */
+  --ink-1: #101828;
+  --ink-2: #475467;
+  --ink-3: #667085;
+  --ink-4: #8b95a7;
+  /* 品牌（取自 logo 色带） */
+  --brand: #2c7be5;
+  --brand-ink: #1f5fbf;
+  --brand-soft: #eaf2fe;
+  --violet: #7b4cd8;
+  --violet-soft: #f2ecfe;
+  --warm: #f5a623;
+  --warm-soft: #fef4e4;
+  /* 语义 */
+  --ok: #0e9f6e;
+  --ok-soft: #e6f6ef;
+  --danger: #d92d20;
+  --danger-soft: #fdecea;
+  /* 面 */
+  --bg: #f4f6fa;
+  --card: #ffffff;
+  --sub: #f7f9fc;
+  --hover: #f5f8fd;
+  /* 线 */
+  --line: #e7eaf0;
+  --line-2: #eef1f6;
+  /* 圆角 3 档 */
+  --r-card: 12px;
+  --r-ctl: 8px;
+  --r-pill: 999px;
+  /* 投影 2 级 */
+  --sh-card: 0 1px 2px rgba(16, 24, 40, .04), 0 1px 3px rgba(16, 24, 40, .05);
+  --sh-pop: 0 10px 28px -10px rgba(16, 24, 40, .18), 0 2px 6px rgba(16, 24, 40, .06);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink-2);
+  font: 400 13px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+        "Microsoft YaHei", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; }
+a { color: inherit; text-decoration: none; }
+svg { display: block; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* ---------------- 应用外壳：导航轨 + 内容 ---------------- */
+.app { display: flex; height: 100vh; overflow: hidden; }
+
+.rail {
+  width: 76px; flex: none;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 14px 0 12px;
+  background: var(--card);
+  border-right: 1px solid var(--line);
+}
+.rail-mark { width: 32px; height: 32px; border-radius: 8px; overflow: hidden; }
+.rail-nav { display: flex; flex-direction: column; gap: 4px; margin-top: 18px; width: 100%; align-items: center; }
+.rail-item {
+  width: 60px; padding: 7px 0 6px; border: 0; border-radius: 10px; background: transparent;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  color: var(--ink-3); cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.rail-item span { font-size: 10.5px; line-height: 1.2; letter-spacing: .01em; }
+.rail-item:hover { background: var(--hover); color: var(--ink-1); }
+.rail-item.is-active { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
+.rail-foot { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+
+/* ---------------- 主区 ---------------- */
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.topbar {
+  height: 56px; flex: none;
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 20px;
+  background: var(--card); border-bottom: 1px solid var(--line);
+}
+.crumb { display: flex; align-items: center; gap: 7px; flex: none; min-width: 0; }
+.crumb .c1 { font-size: 12px; color: var(--ink-4); }
+.crumb .sep { color: var(--ink-4); opacity: .6; }
+.crumb .c2 { font-size: 14px; font-weight: 600; color: var(--ink-1); white-space: nowrap; }
+
+.cmd {
+  margin: 0 auto; flex: 0 1 400px; min-width: 160px;
+  height: 32px; display: flex; align-items: center; gap: 8px;
+  padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r-ctl);
+  background: var(--sub); color: var(--ink-3); cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.cmd:hover { background: #fff; border-color: #d6dce8; }
+.cmd .ph { flex: 1; min-width: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kbd {
+  flex: none; font-size: 10.5px; color: var(--ink-4); letter-spacing: .02em;
+  padding: 1px 5px; border: 1px solid var(--line); border-radius: 5px; background: #fff;
+}
+
+.top-right { display: flex; align-items: center; gap: 6px; flex: none; }
+.icon-btn {
+  width: 30px; height: 30px; border: 0; border-radius: var(--r-ctl);
+  display: grid; place-items: center; background: transparent; color: var(--ink-3); cursor: pointer;
+  position: relative; transition: background .15s, color .15s;
+}
+.icon-btn:hover { background: var(--hover); color: var(--ink-1); }
+.icon-btn .dot {
+  position: absolute; top: 5px; right: 6px; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--danger); box-shadow: 0 0 0 2px #fff;
+}
+.vline { width: 1px; height: 20px; background: var(--line); margin: 0 4px; }
+.who { display: flex; align-items: center; gap: 8px; padding: 0 6px 0 2px; height: 34px; border-radius: var(--r-ctl); cursor: pointer; }
+.who:hover { background: var(--hover); }
+.who .nm { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+
+.scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.wrap { max-width: 1480px; margin: 0 auto; padding: 20px 24px 32px; }
+
+/* ---------------- 头像 ---------------- */
+.av {
+  width: 22px; height: 22px; border-radius: 50%; flex: none;
+  display: grid; place-items: center;
+  font-size: 10.5px; font-weight: 600; color: #fff; letter-spacing: 0;
+}
+.av-md { width: 28px; height: 28px; font-size: 11.5px; }
+.av-lg { width: 34px; height: 34px; font-size: 12.5px; }
+.av-a { background: linear-gradient(135deg, #4b8ef0, #2c7be5); }
+.av-b { background: linear-gradient(135deg, #9b7ae8, #7b4cd8); }
+.av-c { background: linear-gradient(135deg, #33b98a, #0e9f6e); }
+.av-d { background: linear-gradient(135deg, #f5bd57, #f5a623); }
+.av-e { background: linear-gradient(135deg, #f0796b, #d92d20); }
+.av-f { background: linear-gradient(135deg, #7cc4f0, #2f9fd0); }
+.av-stack { display: flex; align-items: center; }
+.av-stack .av { margin-left: -6px; box-shadow: 0 0 0 2px #fff; }
+.av-stack .av:first-child { margin-left: 0; }
+
+/* ---------------- 卡片 ---------------- */
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card);
+  box-shadow: var(--sh-card);
+}
+.card-h {
+  display: flex; align-items: center; gap: 8px;
+  padding: 13px 16px; border-bottom: 1px solid var(--line-2);
+}
+.card-t { font-size: 13px; font-weight: 600; color: var(--ink-1); }
+.card-sub { font-size: 11.5px; color: var(--ink-4); }
+.card-more {
+  margin-left: auto; border: 0; background: transparent; color: var(--ink-3);
+  font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; padding: 2px 4px; border-radius: 6px;
+}
+.card-more:hover { color: var(--brand-ink); background: var(--brand-soft); }
+.card-b { padding: 6px 8px 8px; }
+
+/* ---------------- 按钮 ---------------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 30px; padding: 0 11px;
+  border: 1px solid var(--line); border-radius: var(--r-ctl);
+  background: #fff; color: var(--ink-2); font-size: 12.5px; font-weight: 500;
+  cursor: pointer; white-space: nowrap;
+  transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
+}
+.btn:hover { background: var(--sub); border-color: #d6dce8; color: var(--ink-1); }
+.btn-primary {
+  background: var(--brand); border-color: var(--brand); color: #fff;
+  box-shadow: 0 1px 2px rgba(44, 123, 229, .30);
+}
+.btn-primary:hover { background: var(--brand-ink); border-color: var(--brand-ink); color: #fff; }
+.btn-ghost { border-color: transparent; background: transparent; color: var(--ink-3); }
+.btn-ghost:hover { background: var(--hover); border-color: transparent; color: var(--ink-1); }
+.btn-sm { height: 26px; padding: 0 9px; font-size: 12px; }
+.btn-icon { width: 30px; padding: 0; }
+
+/* ---------------- 徽标 ---------------- */
+.tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 7px; border-radius: 6px;
+  font-size: 11px; font-weight: 500; white-space: nowrap;
+}
+.tag i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }
+.tag-blue { background: var(--brand-soft); color: var(--brand-ink); }
+.tag-violet { background: var(--violet-soft); color: var(--violet); }
+.tag-warm { background: var(--warm-soft); color: #b26a00; }
+.tag-ok { background: var(--ok-soft); color: var(--ok); }
+.tag-danger { background: var(--danger-soft); color: var(--danger); }
+.tag-gray { background: #f2f4f7; color: var(--ink-2); }
+
+/* ---------------- 区块标题 ---------------- */
+.sec-h { display: flex; align-items: baseline; gap: 8px; margin: 0 0 12px; }
+.sec-t { font-size: 14px; font-weight: 600; color: var(--ink-1); margin: 0; }
+.sec-s { font-size: 12px; color: var(--ink-4); }
+
+/* ---------------- 布局栅格 ---------------- */
+.cols { display: grid; grid-template-columns: minmax(0, 1fr) 336px; gap: 16px; align-items: start; }
+.stack { display: flex; flex-direction: column; gap: 16px; }
+.row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+
+/* ---------------- 列表行 ---------------- */
+.li {
+  display: flex; align-items: center; gap: 10px;
+  height: 40px; padding: 0 8px; border-radius: var(--r-ctl);
+  color: var(--ink-2); cursor: pointer;
+  transition: background .13s;
+}
+.li:hover { background: var(--hover); }
+.li .t { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.li .m { font-size: 11.5px; color: var(--ink-4); flex: none; }
+.li .ico { color: var(--ink-3); flex: none; }
+
+.empty { padding: 28px 12px; text-align: center; color: var(--ink-4); font-size: 12px; }
+
+/* 滚动条 */
+.scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.scroll::-webkit-scrollbar-thumb { background: #dbe1ec; border: 3px solid var(--bg); border-radius: 999px; }
+.scroll::-webkit-scrollbar-thumb:hover { background: #c6ceda; }
+
+.proto-note {
+  position: fixed; right: 20px; bottom: 16px; z-index: 40;
+  padding: 5px 10px; border-radius: 8px;
+  background: rgba(16, 24, 40, .82); color: #fff; font-size: 11.5px; line-height: 1.5;
+}
+
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="rail-mark"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="32" height="32">
+
+  <defs>
+    <linearGradient id="gxlogo-paperk" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.38" stop-color="#FDFBF5"/>
+      <stop offset="0.72" stop-color="#F7F4EC"/>
+      <stop offset="1" stop-color="#FFFDF8"/>
+    </linearGradient>
+    <linearGradient id="gxlogo-pearlk" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFE4EE" stop-opacity="0.55"/>
+      <stop offset="0.28" stop-color="#FFF4D6" stop-opacity="0.30"/>
+      <stop offset="0.52" stop-color="#E2F2FF" stop-opacity="0.50"/>
+      <stop offset="0.76" stop-color="#ECE6FF" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.65"/>
+    </linearGradient>
+    <linearGradient id="gxlogo-glossk" x1="0" y1="0" x2="0.55" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="0.42" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="gxlogo-sheenk" cx="0.32" cy="0.22" r="0.62">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gxlogo-bandk" x1="76" y1="56" x2="174" y2="206" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F7A81B"/>
+      <stop offset="0.18" stop-color="#F5841F"/>
+      <stop offset="0.38" stop-color="#E8447A"/>
+      <stop offset="0.56" stop-color="#7B4CD8"/>
+      <stop offset="0.78" stop-color="#2C7BE5"/>
+      <stop offset="1" stop-color="#29B6F6"/>
+    </linearGradient>
+  </defs>
+
+      <rect width="256" height="256" rx="57" fill="url(#gxlogo-paperk)"/>
+      <rect width="256" height="256" rx="57" fill="url(#gxlogo-pearlk)"/>
+      <rect width="256" height="256" rx="57" fill="url(#gxlogo-glossk)"/>
+      <rect width="256" height="256" rx="57" fill="url(#gxlogo-sheenk)"/>
+      <rect x="0.8" y="0.8" width="254.4" height="254.4" rx="56.4" fill="none" stroke="#E6E0D5" stroke-opacity="0.85" stroke-width="1.6"/>
+      <rect x="3" y="3" width="250" height="250" rx="54" fill="none" stroke="#FFFFFF" stroke-opacity="0.75" stroke-width="2"/>
+
+  <path d="M 182 112 L 182 96 Q 182 74 160 74 L 96 74 Q 74 74 74 96 L 74 160 Q 74 182 96 182 L 160 182 Q 182 182 182 160 L 182 142 L 104 142"
+    fill="none" stroke="url(#gxlogo-bandk)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="98" y1="112" x2="146" y2="112" stroke="url(#gxlogo-bandk)" stroke-width="11" stroke-linecap="round"/>
+</svg></div>
+    <nav class="rail-nav">
+        <a class="rail-item" href="workbench.html"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg><span>工作台</span></a>
+        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.9 9.9 0 0 1-2.8-.4L3 21l1.9-4.6A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/></svg><span>消息</span></a>
+        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M3 11h18"/></svg><span>日程</span></a>
+        <a class="rail-item is-active" href="data-table.html"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>数据</span></a>
+        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>知识</span></a>
+        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>通讯录</span></a>
+    </nav>
+    <div class="rail-foot">
+      <button class="rail-item" title="设置"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>设置</span></button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="crumb"><span class="c1">数据</span><span class="sep">/</span><span class="c2">需求池</span></div>
+      <button class="cmd"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M21 21l-4.35-4.35"/></svg><span class="ph">搜索数据表、文档、成员…</span><span class="kbd">⌘K</span></button>
+      <div class="top-right">
+        <button class="icon-btn" title="通知"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="dot"></span></button>
+        <button class="icon-btn" title="帮助"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.6 2.3c-.7.4-1.2 1-1.2 1.8v.4"/><circle cx="12" cy="17.2" r=".8" fill="currentColor" stroke="none"/></svg></button>
+        <div class="vline"></div>
+        <div class="who"><span class="av av-md av-a">戴</span><span class="nm">戴静</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--ink-4)"><path d="M6 9l6 6 6-6"/></svg></div>
+      </div>
+    </header>
+    <div class="scroll">
+<style>
+  /* ===== 数据表内容页 ===== */
+  /* 内容页卡片撑满视口（Airtable 式），表头吸顶、空区留在表格内部 */
+  .wrap { min-height: 100%; display: flex; flex-direction: column; }
+  .phead { flex: none; }
+  .wrap > .card { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .grid-wrap { flex: 1; max-height: none; }
+  .phead { display: flex; align-items: flex-end; gap: 16px; padding: 2px 2px 16px; }
+  .phead h1 { margin: 0; font-size: 20px; font-weight: 600; color: var(--ink-1); letter-spacing: -.01em; }
+  .pmeta { margin-top: 5px; font-size: 12px; color: var(--ink-4); display: flex; align-items: center; gap: 8px; }
+  .pmeta .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-4); }
+  .pact { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+
+  .vbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line-2); }
+  .vtabs { display: flex; align-items: center; gap: 2px; margin-right: 4px; }
+  .vtab {
+    height: 30px; padding: 0 11px; border: 0; border-radius: 7px; background: transparent;
+    color: var(--ink-3); font-size: 12.5px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+    transition: background .15s, color .15s;
+  }
+  .vtab:hover { background: var(--hover); color: var(--ink-1); }
+  .vtab.is-active { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
+  .vbar .sep { width: 1px; height: 18px; background: var(--line); margin: 0 2px; flex: none; }
+  .vbar-r { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; }
+  .cnt {
+    min-width: 15px; height: 15px; padding: 0 4px; border-radius: 4px;
+    background: #eef1f6; color: var(--ink-2); font-size: 10.5px; font-weight: 600;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .tsearch {
+    display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px;
+    border: 1px solid var(--line); border-radius: var(--r-ctl); background: #fff;
+    color: var(--ink-4); font-size: 12px; width: 168px;
+  }
+  .tsearch:hover { border-color: #d6dce8; }
+
+  .fbar { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line-2); background: var(--sub); }
+  .fchip {
+    display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 4px 0 8px;
+    background: #fff; border: 1px solid var(--line); border-radius: var(--r-pill);
+    font-size: 11.5px; color: var(--ink-2);
+  }
+  .fchip b { font-weight: 600; color: var(--ink-1); }
+  .fchip i { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; color: var(--ink-4); cursor: pointer; font-style: normal; }
+  .fchip i:hover { background: #eef1f6; color: var(--ink-1); }
+  .fadd { border: 0; background: transparent; color: var(--ink-3); font-size: 11.5px; cursor: pointer; padding: 3px 7px; border-radius: 6px; }
+  .fadd:hover { background: #fff; color: var(--ink-1); }
+
+  .grid-wrap { overflow: auto; max-height: calc(100vh - 300px); }
+  table.rec { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
+  .rec thead th {
+    position: sticky; top: 0; z-index: 2;
+    height: 34px; padding: 0 12px; text-align: left; white-space: nowrap;
+    font-size: 11.5px; font-weight: 500; color: var(--ink-3);
+    background: var(--sub); border-bottom: 1px solid var(--line);
+  }
+  .rec thead th + th { border-left: 1px solid var(--line-2); }
+  .rec tbody td {
+    height: 42px; padding: 0 12px; border-bottom: 1px solid var(--line-2); color: var(--ink-2);
+    white-space: nowrap;
+  }
+  .rec tbody tr:hover td { background: var(--hover); }
+  .rec tbody td.name { color: var(--ink-1); font-weight: 500; }
+  .rec tbody td.idx { color: var(--ink-4); font-variant-numeric: tabular-nums; width: 44px; }
+  .rec .ck { width: 16px; height: 16px; border: 1.5px solid #cdd5e3; border-radius: 4px; background: #fff; display: block; }
+  .rec td.ckcell { width: 34px; padding-left: 14px; }
+  .rec .who { display: inline-flex; align-items: center; gap: 6px; }
+  .rec .num { font-variant-numeric: tabular-nums; color: var(--ink-3); }
+  .rec .addrow td { height: 36px; color: var(--ink-4); cursor: pointer; border-bottom: 0; }
+  .rec .addrow td { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .rec .addrow:hover td { background: var(--hover); color: var(--brand-ink); }
+  .tfoot {
+    display: flex; align-items: center; gap: 14px; height: 34px; padding: 0 14px;
+    border-top: 1px solid var(--line-2); background: var(--sub);
+    font-size: 11.5px; color: var(--ink-4);
+  }
+  .tfoot .r { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+</style>
+
+<div class="wrap">
+
+  <div class="phead">
+    <div>
+      <h1>需求池</h1>
+      <div class="pmeta">
+        <span>128 条记录</span><span class="dot"></span>
+        <span>12 位成员</span><span class="dot"></span>
+        <span>更新于 2 分钟前</span>
+      </div>
+    </div>
+    <div class="pact">
+      <span class="av-stack">
+        <span class="av av-a">戴</span><span class="av av-b">王</span><span class="av av-c">李</span><span class="av av-d">陈</span>
+      </span>
+      <button class="btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>
+        分享
+      </button>
+      <button class="btn btn-icon" title="更多">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <section class="card">
+    <!-- 视图栏 -->
+    <div class="vbar">
+      <div class="vtabs">
+        <button class="vtab is-active">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/><path d="M15 10v10"/></svg>
+          表格
+        </button>
+        <button class="vtab">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="10" rx="1.5"/></svg>
+          看板
+        </button>
+        <button class="vtab">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M3 11h18"/></svg>
+          日历
+        </button>
+        <button class="vtab">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l3 4v12H6V8z"/><path d="M9 13h6"/></svg>
+          表单
+        </button>
+        <button class="vtab" title="新建视图">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        </button>
+      </div>
+      <div class="sep"></div>
+      <div class="vbar-r">
+        <button class="btn btn-sm btn-ghost">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>
+          筛选<span class="cnt">2</span>
+        </button>
+        <button class="btn btn-sm btn-ghost">分组</button>
+        <button class="btn btn-sm btn-ghost">排序</button>
+        <div class="tsearch">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M21 21l-4.35-4.35"/></svg>
+          搜索记录
+        </div>
+        <button class="btn btn-primary btn-sm">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+          新建记录
+        </button>
+      </div>
+    </div>
+
+    <!-- 筛选条 -->
+    <div class="fbar">
+      <span class="fchip">状态 <b>是</b> 进行中 <i>×</i></span>
+      <span class="fchip">负责人 <b>是</b> 我 <i>×</i></span>
+      <button class="fadd">+ 添加筛选</button>
+    </div>
+
+    <!-- 表格 -->
+    <div class="grid-wrap">
+      <table class="rec">
+        <thead>
+          <tr>
+            <th class="ckcell"><span class="ck"></span></th>
+            <th style="width:44px">#</th>
+            <th>需求名称</th>
+            <th style="width:104px">状态</th>
+            <th style="width:88px">优先级</th>
+            <th style="width:112px">负责人</th>
+            <th style="width:104px">截止日期</th>
+            <th style="width:88px">预估</th>
+            <th style="width:104px">更新时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="ckcell"><span class="ck"></span></td>
+            <td class="idx">1</td>
+            <td class="name">多端离线编辑冲突合并策略</td>
+            <td><span class="tag tag-blue"><i></i>进行中</span></td>
+            <td><span class="tag tag-danger">高</span></td>
+            <td><span class="who"><span class="av av-b">王</span>王倩</span></td>
+            <td class="num">10-22</td>
+            <td class="num">5 d</td>
+            <td class="num">12 分钟前</td>
+          </tr>
+          <tr>
+            <td class="ckcell"><span class="ck"></span></td>
+            <td class="idx">2</td>
+            <td class="name">数据表字段级权限模型</td>
+            <td><span class="tag tag-violet"><i></i>待评审</span></td>
+            <td><span class="tag tag-danger">高</span></td>
+            <td><span class="who"><span class="av av-a">戴</span>戴静</span></td>
+            <td class="num">10-24</td>
+            <td class="num">8 d</td>
+            <td class="num">1 小时前</td>
+          </tr>
+          <tr>
+            <td class="ckcell"><span class="ck"></span></td>
+            <td class="idx">3</td>
+            <td class="name">视图筛选器支持嵌套条件</td>
+            <td><span class="tag tag-blue"><i></i>进行中</span></td>
+            <td><span class="tag tag-warm">中</span></td>
+            <td><span class="who"><span class="av av-c">李</span>李哲</span></td>
+            <td class="num">10-26</td>
+            <td class="num">3 d</td>
+            <td class="num">2 小时前</td>
+          </tr>
+          <tr>
+            <td class="ckcell"><span class="ck"></span></td>
+            <td class="idx">4</td>
+            <td class="name">批量导入模板校验提示优化</td>
+            <td><span class="tag tag-ok"><i></i>已完成</span></td>
+            <td><span class="tag tag-gray">低</span></td>
+            <td><span class="who"><span class="av av-d">陈</span>陈然</span></td>
+            <td class="num">10-18</td>
+            <td class="num">2 d</td>
+            <td class="num">昨天</td>
+          </tr>
+          <tr>
+            <td class="ckcell"><span class="ck"></span></td>
+            <td class="idx">5</td>
+            <td class="name">审批流节点支持会签与或签</td>
+            <td><span class="tag tag-violet"><i></i>待评审</span></td>
+            <td><span class="tag tag-warm">中</span></td>
+            <td><span class="who"><span class="av av-e">周</span>周敏</span></td>
+            <td class="num">10-28</td>
+            <td class="num">6 d</td>
+            <td class="num">昨天</td>
+          </tr>
+          <tr>
+            <td class="ckcell"><span class="ck"></span></td>
+            <td class="idx">6</td>
+            <td class="name">表格视图列宽拖拽记忆</td>
+            <td><span class="tag tag-blue"><i></i>进行中</span></td>
+            <td><span class="tag tag-gray">低</span></td>
+            <td><span class="who"><span class="av av-f">张</span>张伟</span></td>
+            <td class="num">10-30</td>
+            <td class="num">1 d</td>
+            <td class="num">10-18</td>
+          </tr>
+          <tr>
+            <td class="ckcell"><span class="ck"></span></td>
+            <td class="idx">7</td>
+            <td class="name">工作台模块支持自定义排序</td>
+            <td><span class="tag tag-gray"><i></i>待规划</span></td>
+            <td><span class="tag tag-warm">中</span></td>
+            <td><span class="who"><span class="av av-a">戴</span>戴静</span></td>
+            <td class="num">11-02</td>
+            <td class="num">4 d</td>
+            <td class="num">10-17</td>
+          </tr>
+          <tr>
+            <td class="ckcell"><span class="ck"></span></td>
+            <td class="idx">8</td>
+            <td class="name">API 分页游标统一改造</td>
+            <td><span class="tag tag-ok"><i></i>已完成</span></td>
+            <td><span class="tag tag-gray">低</span></td>
+            <td><span class="who"><span class="av av-c">李</span>李哲</span></td>
+            <td class="num">10-15</td>
+            <td class="num">3 d</td>
+            <td class="num">10-16</td>
+          </tr>
+          <tr class="addrow">
+            <td colspan="9">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+              新建记录
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="tfoot">
+      <span>共 128 条记录</span>
+      <span>已加载 8 条</span>
+      <div class="r">
+        <span>最后同步 14:32</span>
+        <span class="tag tag-ok"><i></i>已连接</span>
+      </div>
+    </div>
+  </section>
+</div>
+
+    </div>
+  </div>
+</div>
+<div class="proto-note">v6 · 企业工作台新方向（旧拟物系列已封存）</div>
+</body>
+</html>
