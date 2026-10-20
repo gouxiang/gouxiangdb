@@ -64,26 +64,105 @@ svg { display: block; }
 /* ---------------- 应用外壳：导航轨 + 内容 ---------------- */
 .app { position: relative; display: flex; height: 100vh; overflow: hidden; }
 
+/* ---------------- L1 一级导航：图标轨 ---------------- */
 .rail {
-  width: 84px; flex: none;
+  width: 88px; flex: none;
   display: flex; flex-direction: column; align-items: center;
   padding: 14px 0 12px;
-  background: var(--card);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
   border-right: 1px solid var(--line);
+  position: relative;
 }
-.rail-mark { width: 32px; height: 32px; border-radius: 8px; overflow: hidden; }
-.rail-nav { display: flex; flex-direction: column; gap: 4px; margin-top: 18px; width: 100%; align-items: center; }
+/* 右侧一道极淡的竖向高光，把导航与内容区分开（不用重阴影） */
+.rail::after {
+  content: ""; position: absolute; top: 0; right: -1px; bottom: 0; width: 1px;
+  background: rgba(16, 24, 40, .04);
+}
+.rail-mark {
+  width: 34px; height: 34px; border-radius: 9px; overflow: hidden; flex: none;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .12), 0 4px 10px -4px rgba(16, 24, 40, .28);
+}
+
+/* 建库：一级导航顶部的主入口（真实产品同位置同文案） */
+.rail-create {
+  margin-top: 14px; width: 72px; height: 30px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  border: 0; border-radius: 9px; cursor: pointer;
+  background: linear-gradient(180deg, #3d86ea 0%, #2c7be5 100%);
+  color: #fff; font-size: 11.5px; font-weight: 600; letter-spacing: .01em;
+  box-shadow: 0 1px 2px rgba(44, 123, 229, .35), 0 6px 14px -8px rgba(44, 123, 229, .7),
+              inset 0 1px 0 rgba(255, 255, 255, .28);
+  transition: filter .15s, box-shadow .15s, transform .12s;
+}
+.rail-create:hover {
+  filter: brightness(1.05);
+  box-shadow: 0 1px 2px rgba(44, 123, 229, .38), 0 10px 20px -8px rgba(44, 123, 229, .8),
+              inset 0 1px 0 rgba(255, 255, 255, .32);
+}
+.rail-create:active { transform: translateY(.5px); filter: brightness(.97); }
+
+.rail-nav {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 3px; margin-top: 12px; width: 100%;
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  padding: 4px 0 8px; scrollbar-width: none;
+}
+.rail-nav::-webkit-scrollbar { width: 0; }
+
 .rail-item {
-  width: 68px; padding: 7px 0 6px; border: 0; border-radius: 10px; background: transparent;
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  color: var(--ink-3); cursor: pointer;
-  transition: background .15s, color .15s;
+  width: 72px; padding: 7px 0 6px; flex: none;
+  border: 0; border-radius: 11px; background: transparent;
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  color: var(--ink-3); cursor: pointer; position: relative;
+  transition: background .16s ease-out, color .16s ease-out, box-shadow .16s ease-out;
 }
-.rail-item span { font-size: 10px; line-height: 1.2; letter-spacing: .01em; max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rail-sep { width: 26px; height: 1px; background: var(--line); margin: 5px 0; flex: none; }
-.rail-item:hover { background: var(--hover); color: var(--ink-1); }
-.rail-item.is-active { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
-.rail-foot { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+/* 图标砖：柔和圆角方底，选中/悬停才上色——比裸图标更「成品感」 */
+.rail-item .rd {
+  width: 34px; height: 34px; border-radius: 10px; flex: none;
+  display: grid; place-items: center;
+  background: transparent; color: var(--ink-3);
+  transition: background .16s ease-out, color .16s ease-out, box-shadow .16s ease-out;
+}
+.rail-item .rd svg { width: 17px; height: 17px; }
+.rail-item .nm {
+  font-size: 11px; line-height: 1.25; letter-spacing: .01em;
+  max-width: 66px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 500;
+}
+.rail-item:hover { background: #f1f5fc; color: var(--ink-1); }
+.rail-item:hover .rd { background: #fff; color: var(--ink-2); box-shadow: var(--sh-card); }
+
+/* 选中：白底浮起卡（规范 R-N-09：白底 + 圆角 + accent 字 600；左侧色条是反例，不用） */
+.rail-item.is-active {
+  background: #fff; color: var(--brand-ink);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 6px 16px -10px rgba(16, 24, 40, .35),
+              inset 0 0 0 1px rgba(44, 123, 229, .16);
+}
+.rail-item.is-active .rd {
+  background: var(--brand-soft); color: var(--brand);
+  box-shadow: inset 0 0 0 1px rgba(44, 123, 229, .14);
+}
+.rail-item.is-active .nm { font-weight: 600; }
+/* 底部居中短指示条 */
+.rail-item.is-active::after {
+  content: ""; position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%);
+  width: 14px; height: 2px; border-radius: 999px; background: var(--brand);
+}
+
+.rail-grp {
+  width: 72px; flex: none; margin: 9px 0 5px;
+  display: flex; align-items: center; gap: 6px;
+}
+.rail-grp::before, .rail-grp::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.rail-grp span {
+  font-size: 10px; line-height: 1; color: var(--ink-4); letter-spacing: .06em;
+  white-space: nowrap; flex: none;
+}
+.rail-foot {
+  flex: none; margin-top: auto; padding-top: 10px; width: 100%;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  border-top: 1px solid var(--line-2);
+}
 
 /* ---------------- 主区 ---------------- */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -231,8 +310,10 @@ svg { display: block; }
 .scroll::-webkit-scrollbar-thumb { background: #dbe1ec; border: 3px solid var(--bg); border-radius: 999px; }
 .scroll::-webkit-scrollbar-thumb:hover { background: #c6ceda; }
 
-/* ---------------- L2：库内清单（真实二级导航） ---------------- */
-/* 收起＝整栏收起（v2 手感）：面板宽度归零 + 淡出，箭头骑在左右边界中线上 */
+/* ============================================================
+   L2：库内清单（真实二级导航）
+   收起＝整栏收起（v2 手感）：面板宽度归零 + 淡出，箭头骑在边界中线上
+   ============================================================ */
 .l2 {
   width: 236px; flex: none;
   overflow: hidden;
@@ -247,7 +328,7 @@ svg { display: block; }
 
 /* 卡片右缘中点的圆形浮动箭头（折叠时跟随边缘左移） */
 .l2-toggle {
-  position: absolute; top: 50%; left: 307px; z-index: 8;   /* 84(rail) + 236 - 13 */
+  position: absolute; top: 50%; left: 311px; z-index: 8;   /* 88(rail) + 236 - 13 */
   width: 26px; height: 26px; flex: none;
   display: grid; place-items: center;
   border: 1px solid var(--line); border-radius: 50%;
@@ -257,7 +338,7 @@ svg { display: block; }
   transition: left .3s cubic-bezier(.4, 0, .2, 1), transform .3s cubic-bezier(.4, 0, .2, 1),
               box-shadow .2s, color .2s, border-color .2s;
 }
-.app.l2-collapsed .l2-toggle { left: 71px; }              /* 84 - 13 */
+.app.l2-collapsed .l2-toggle { left: 75px; }              /* 88 - 13 */
 .l2-toggle:hover {
   color: var(--brand); border-color: #d3e0f8;
   transform: translateY(-50%) scale(1.1);
@@ -266,12 +347,19 @@ svg { display: block; }
 .l2-toggle:active { transform: translateY(-50%) scale(.96); }
 .l2-toggle svg { transition: transform .3s cubic-bezier(.4, 0, .2, 1); }
 .app.l2-collapsed .l2-toggle svg { transform: rotate(180deg); }
+
+/* L2 面板头 */
 .l2-h {
-  height: 56px; flex: none;
+  height: 52px; flex: none;
   display: flex; align-items: center; gap: 7px;
-  padding: 0 8px 0 14px; border-bottom: 1px solid var(--line-2);
+  padding: 0 8px 0 12px; border-bottom: 1px solid var(--line-2);
 }
-.l2-title { font-size: 13px; font-weight: 600; color: var(--ink-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.l2-ico {
+  width: 22px; height: 22px; border-radius: 7px; flex: none;
+  display: grid; place-items: center;
+  background: var(--brand-soft); color: var(--brand);
+}
+.l2-title { font-size: 13.5px; font-weight: 600; color: var(--ink-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .l2-act { margin-left: auto; }
 .l2-search {
   display: flex; align-items: center; gap: 6px; flex: none;
@@ -281,6 +369,9 @@ svg { display: block; }
 }
 .l2-search:hover { background: #fff; border-color: #d6dce8; }
 .l2-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 8px 8px; }
+/* 行外壳：跳转 <a> 与行尾「⋯」是兄弟节点（嵌套 button 非法，且点「⋯」会连带跳转） */
+.l2-row { position: relative; display: flex; align-items: center; gap: 2px; margin-bottom: 1px; }
+.l2-row .l2-item { flex: 1; min-width: 0; }
 .l2-item {
   display: flex; align-items: center; gap: 8px;
   height: 32px; padding: 0 8px; border-radius: 7px;
@@ -297,8 +388,77 @@ svg { display: block; }
 .l2-foot { flex: none; border-top: 1px solid var(--line-2); padding: 6px 8px 8px; }
 .l2-item.sub { height: 30px; font-size: 12px; color: var(--ink-3); }
 
+/* ---------------- 下拉菜单（原型用：真实实现走 Popover/Menu） ---------------- */
+.pop {
+  position: absolute; z-index: 30; min-width: 180px;
+  padding: 5px; border: 1px solid var(--line); border-radius: 10px;
+  background: #fff; box-shadow: var(--sh-pop);
+  display: none;
+}
+.pop.is-open { display: block; }
+.mi {
+  display: flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 8px; border-radius: 7px;
+  font-size: 12.5px; color: var(--ink-2); cursor: pointer; width: 100%;
+  border: 0; background: transparent; text-align: left;
+}
+.mi:hover { background: var(--hover); color: var(--ink-1); }
+.mi .sub { margin-left: auto; font-size: 11px; color: var(--ink-4); }
+.mi.danger { color: var(--danger); }
+.mi.danger:hover { background: var(--danger-soft); }
+.pop-sep { height: 1px; background: var(--line-2); margin: 4px 6px; }
+.pop-h { padding: 6px 8px 4px; font-size: 10.5px; color: var(--ink-4); letter-spacing: .04em; }
+
+/* 行尾「⋯」：默认隐藏，整行 hover 或菜单展开时显形（与真实产品同款行为） */
+.row-more {
+  width: 20px; height: 20px; flex: none; border: 0; border-radius: 5px;
+  display: grid; place-items: center; background: transparent; color: var(--ink-4);
+  cursor: pointer; opacity: 0; transition: opacity .13s, background .13s, color .13s;
+}
+.l2-item:hover .row-more, .l2-row:hover .row-more, .row-more.is-open { opacity: 1; }
+.row-more:hover { background: #eef2f8; color: var(--ink-1); }
+
+/* ---------------- 弹窗（原型用：建库 / 重命名） ---------------- */
+.mask {
+  position: fixed; inset: 0; z-index: 60; display: none;
+  background: rgba(16, 24, 40, .38);
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.mask.is-open { display: block; }
+.modal {
+  position: fixed; z-index: 61; left: 50%; top: 42%;
+  transform: translate(-50%, -50%); width: 420px; display: none;
+  background: #fff; border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 24px 60px -20px rgba(16, 24, 40, .45);
+}
+.modal.is-open { display: block; }
+.modal-h { display: flex; align-items: center; gap: 8px; padding: 14px 16px 10px; }
+.modal-t { font-size: 14px; font-weight: 600; color: var(--ink-1); }
+.modal-x {
+  margin-left: auto; width: 26px; height: 26px; border: 0; border-radius: 7px;
+  display: grid; place-items: center; background: transparent; color: var(--ink-4); cursor: pointer;
+}
+.modal-x:hover { background: var(--hover); color: var(--ink-1); }
+.modal-b { padding: 0 16px 14px; display: flex; flex-direction: column; gap: 12px; }
+.modal-f { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px 14px; border-top: 1px solid var(--line-2); }
+.fld-l { font-size: 12px; color: var(--ink-3); margin-bottom: 6px; }
+.inp {
+  display: flex; align-items: center; height: 32px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: var(--r-ctl); background: #fff;
+  font-size: 12.5px; color: var(--ink-4);
+}
+.typ { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.typ-c {
+  padding: 10px 11px; border: 1px solid var(--line); border-radius: 10px;
+  background: #fff; text-align: left; cursor: pointer;
+}
+.typ-c.is-on { border-color: var(--brand); background: var(--brand-soft); }
+.typ-c b { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-1); }
+.typ-c b svg { color: var(--brand); }
+.typ-c span { display: block; margin-top: 3px; font-size: 11px; color: var(--ink-4); }
+
 .proto-note {
-  position: fixed; right: 20px; bottom: 16px; z-index: 40;
+  position: fixed; right: 20px; bottom: 16px; z-index: 70;
   padding: 5px 10px; border-radius: 8px;
   background: rgba(16, 24, 40, .82); color: #fff; font-size: 11.5px; line-height: 1.5;
 }
@@ -355,56 +515,172 @@ svg { display: block; }
     fill="none" stroke="url(#gxlogo-bandk)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
   <line x1="98" y1="112" x2="146" y2="112" stroke="url(#gxlogo-bandk)" stroke-width="11" stroke-linecap="round"/>
 </svg></div>
+    <button class="rail-create" id="createLib" title="新建库"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg><span>新建库</span></button>
     <nav class="rail-nav">
-      <a class="rail-item" href="workbench.html"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg><span>工作台</span></a>
-      <div class="rail-sep"></div>
-      <a class="rail-item is-active" href="data-table.html"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>产品中心</span></a>
-      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>客户与合同</span></a>
-      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>运营指标</span></a>
-      <div class="rail-sep"></div>
-      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>产品知识库</span></a>
-      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>研发手册</span></a>
-      <div class="rail-sep"></div>
-      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>通讯录</span></a>
+      <div class="rail-grp"><span>数据库</span></div>
+      <a class="rail-item is-active" href="data-table.html" title="产品中心">
+        <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span><span class="nm">产品中心</span>
+      </a>
+      <a class="rail-item" href="#" title="客户与合同">
+        <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span><span class="nm">客户与合同</span>
+      </a>
+      <a class="rail-item" href="#" title="运营指标">
+        <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span><span class="nm">运营指标</span>
+      </a>
+      <div class="rail-grp"><span>知识库</span></div>
+      <a class="rail-item" href="#" title="产品知识库">
+        <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span><span class="nm">产品知识库</span>
+      </a>
+      <a class="rail-item" href="#" title="研发手册">
+        <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span><span class="nm">研发手册</span>
+      </a>
     </nav>
     <div class="rail-foot">
-      <button class="rail-item" title="设置"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>设置</span></button>
+      <button class="rail-item" title="通讯录">
+        <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg></span><span class="nm">通讯录</span>
+      </button>
+      <button class="rail-item" title="工作区设置">
+        <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="nm">工作区设置</span>
+      </button>
+      <button class="rail-item" title="帮助中心">
+        <span class="rd"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.85"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.6 2.3c-.7.4-1.2 1-1.2 1.8v.4"/><circle cx="12" cy="17.2" r=".8" fill="currentColor" stroke="none"/></svg></span><span class="nm">帮助中心</span>
+      </button>
     </div>
   </aside>
 
   <aside class="l2" id="l2Panel">
     <div class="l2-inner">
       <div class="l2-h">
+        <span class="l2-ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span>
         <span class="l2-title">产品中心</span>
         <span class="tag tag-gray">库</span>
-        <button class="icon-btn l2-act" title="新建数据表"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg></button>
+        <button class="icon-btn l2-act" id="baseMenu" data-menu="baseMenu" title="重命名库 / 库设置">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+        </button>
+        <div class="pop" data-menu-panel="baseMenu" style="right:6px; top:40px; width:192px;">
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg><span>重命名库</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>库设置</span></button>
+          <div class="pop-sep"></div>
+          <button class="mi danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span>删除库</span></button>
+        </div>
       </div>
       <div class="l2-search"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M21 21l-4.35-4.35"/></svg><span>搜索数据表</span></div>
       <div class="l2-list">
+      <div class="l2-row">
       <a class="l2-item is-active" href="data-table.html" title="需求池">
         <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">需求池</span><span class="cnt">128</span>
       </a>
+        <button class="row-more" data-menu="t0" aria-label="需求池 表操作菜单" aria-haspopup="menu">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+        </button>
+        <div class="pop" data-menu-panel="t0" style="right:4px; top:30px; width:196px;">
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg><span>重命名</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 9h8"/><path d="M8 13h8"/><path d="M8 17h4"/></svg><span>编辑表单</span><span class="sub">进入表单设计器</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>复制表（含数据）</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>复制表（不含数据）</span></button>
+          <button class="mi danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span>清空数据</span></button>
+          <button class="mi danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span>删除表</span></button>
+        </div>
+    </div>
+      <div class="l2-row">
       <a class="l2-item" href="#" title="迭代计划">
         <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">迭代计划</span><span class="cnt">24</span>
       </a>
+        <button class="row-more" data-menu="t1" aria-label="迭代计划 表操作菜单" aria-haspopup="menu">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+        </button>
+        <div class="pop" data-menu-panel="t1" style="right:4px; top:30px; width:196px;">
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg><span>重命名</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 9h8"/><path d="M8 13h8"/><path d="M8 17h4"/></svg><span>编辑表单</span><span class="sub">进入表单设计器</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>复制表（含数据）</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>复制表（不含数据）</span></button>
+          <button class="mi danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span>清空数据</span></button>
+          <button class="mi danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span>删除表</span></button>
+        </div>
+    </div>
+      <div class="l2-row">
       <a class="l2-item" href="#" title="缺陷跟踪">
         <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">缺陷跟踪</span><span class="cnt">61</span>
       </a>
+        <button class="row-more" data-menu="t2" aria-label="缺陷跟踪 表操作菜单" aria-haspopup="menu">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+        </button>
+        <div class="pop" data-menu-panel="t2" style="right:4px; top:30px; width:196px;">
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg><span>重命名</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 9h8"/><path d="M8 13h8"/><path d="M8 17h4"/></svg><span>编辑表单</span><span class="sub">进入表单设计器</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>复制表（含数据）</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>复制表（不含数据）</span></button>
+          <button class="mi danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span>清空数据</span></button>
+          <button class="mi danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span>删除表</span></button>
+        </div>
+    </div>
+      <div class="l2-row">
       <a class="l2-item" href="#" title="客户档案">
         <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">客户档案</span><span class="cnt">78</span>
       </a>
+        <button class="row-more" data-menu="t3" aria-label="客户档案 表操作菜单" aria-haspopup="menu">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+        </button>
+        <div class="pop" data-menu-panel="t3" style="right:4px; top:30px; width:196px;">
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg><span>重命名</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 9h8"/><path d="M8 13h8"/><path d="M8 17h4"/></svg><span>编辑表单</span><span class="sub">进入表单设计器</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>复制表（含数据）</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>复制表（不含数据）</span></button>
+          <button class="mi danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span>清空数据</span></button>
+          <button class="mi danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span>删除表</span></button>
+        </div>
+    </div>
+      <div class="l2-row">
       <a class="l2-item" href="#" title="内容排期">
         <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">内容排期</span><span class="cnt">32</span>
       </a>
+        <button class="row-more" data-menu="t4" aria-label="内容排期 表操作菜单" aria-haspopup="menu">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+        </button>
+        <div class="pop" data-menu-panel="t4" style="right:4px; top:30px; width:196px;">
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg><span>重命名</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 9h8"/><path d="M8 13h8"/><path d="M8 17h4"/></svg><span>编辑表单</span><span class="sub">进入表单设计器</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>复制表（含数据）</span></button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>复制表（不含数据）</span></button>
+          <button class="mi danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span>清空数据</span></button>
+          <button class="mi danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span>删除表</span></button>
+        </div>
+    </div>
       </div>
       <div class="l2-foot">
-      <a class="l2-item sub" href="#" title="库设置"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="nm">库设置</span></a>
       <a class="l2-item sub" href="#" title="回收站"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span class="nm">回收站</span></a>
       </div>
     </div>
   </aside>
 
   <button class="l2-toggle" id="l2Toggle" aria-expanded="true" aria-controls="l2Panel" title="收起二级导航"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg></button>
+
+  <!-- 建库弹窗（真实：CreateLibraryModal，名称 + 库类型二选一） -->
+  <div class="mask" id="createMask"></div>
+  <div class="modal" id="createModal" role="dialog" aria-modal="true" aria-label="新建库">
+    <div class="modal-h"><span class="modal-t">新建库</span>
+      <button class="modal-x" id="createClose" aria-label="关闭">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-b">
+      <div>
+        <div class="fld-l">名称</div>
+        <div class="inp">库名称，如：客户管理 / 产品资料库</div>
+      </div>
+      <div>
+        <div class="fld-l">库类型</div>
+        <div class="typ">
+          <button class="typ-c is-on" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><b>智能数据库</b><span>表格 / 视图 / 字段</span></button>
+          <button class="typ-c" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><b>知识库</b><span>文档 / 画布</span></button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-f">
+      <button class="btn btn-sm" id="createCancel">取消</button>
+      <button class="btn btn-primary btn-sm">创建</button>
+    </div>
+  </div>
 
   <div class="main">
     <header class="topbar">
@@ -419,55 +695,87 @@ svg { display: block; }
     </header>
     <div class="scroll">
 <style>
-  /* ===== 数据表内容页 ===== */
-  /* 内容页卡片撑满视口（Airtable 式），表头吸顶、空区留在表格内部 */
-  .wrap { min-height: 100%; display: flex; flex-direction: column; }
-  .phead { flex: none; }
-  .wrap > .card { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  .grid-wrap { flex: 1; max-height: none; }
-  .phead { display: flex; align-items: flex-end; gap: 16px; padding: 2px 2px 16px; }
-  .phead h1 { margin: 0; font-size: 20px; font-weight: 600; color: var(--ink-1); letter-spacing: -.01em; }
-  .pmeta { margin-top: 5px; font-size: 12px; color: var(--ink-4); display: flex; align-items: center; gap: 8px; }
-  .pmeta .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-4); }
-  .pact { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+  /* ===== 数据表内容页（Airtable 式：卡片撑满，三行工具条 + 高密度表格） ===== */
+  .wrap { min-height: 100%; display: flex; flex-direction: column; padding: 0; max-width: none; }
+  .wrap > .card { flex: 1; display: flex; flex-direction: column; min-height: 0; margin: 16px 20px 20px; }
+  .grid-wrap { flex: 1; min-height: 0; overflow: auto; }
 
-  .vbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line-2); }
-  .vtabs { display: flex; align-items: center; gap: 2px; margin-right: 4px; }
+  /* 第一行：视图标签条 */
+  .vbar { display: flex; align-items: center; gap: 2px; padding: 8px 10px 6px; border-bottom: 1px solid var(--line-2); }
+  .vicon {
+    width: 26px; height: 26px; flex: none; border-radius: 8px; border: 1px solid var(--line);
+    display: grid; place-items: center; background: var(--brand-soft); color: var(--brand);
+    cursor: pointer; margin-right: 6px;
+    transition: box-shadow .15s, border-color .15s;
+  }
+  .vicon:hover { border-color: #c9dcf8; box-shadow: 0 2px 8px -3px rgba(44,123,229,.45); }
   .vtab {
-    height: 30px; padding: 0 11px; border: 0; border-radius: 7px; background: transparent;
-    color: var(--ink-3); font-size: 12.5px; cursor: pointer;
+    height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent;
+    color: var(--ink-3); font-size: 12.5px; cursor: pointer; position: relative;
     display: inline-flex; align-items: center; gap: 5px;
     transition: background .15s, color .15s;
   }
   .vtab:hover { background: var(--hover); color: var(--ink-1); }
   .vtab.is-active { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
-  .vbar .sep { width: 1px; height: 18px; background: var(--line); margin: 0 2px; flex: none; }
-  .vbar-r { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; }
+  .vtab-more {
+    width: 18px; height: 26px; flex: none; border: 0; background: transparent; color: var(--ink-4);
+    display: grid; place-items: center; cursor: pointer; opacity: 0; border-radius: 5px;
+    transition: opacity .13s, background .13s, color .13s;
+  }
+  .vtab.is-active .vtab-more, .vtab-row:hover .vtab-more, .vtab-more.is-open { opacity: 1; }
+  .vtab-more:hover { background: #e8eef8; color: var(--ink-1); }
+  .vtab-add {
+    width: 26px; height: 26px; flex: none; border: 0; border-radius: 7px; background: transparent;
+    color: var(--ink-3); display: grid; place-items: center; cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .vtab-add:hover { background: var(--hover); color: var(--brand); }
+
+  /* 第二行：新建记录 + 搜索 / 导入 / 导出 / 更多 */
+  .tbar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line-2); }
+  .tbar-r { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; }
+  .tb {
+    display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px;
+    border: 0; border-radius: 7px; background: transparent; color: var(--ink-3);
+    font-size: 12.5px; cursor: pointer; white-space: nowrap;
+    transition: background .15s, color .15s;
+  }
+  .tb:hover { background: var(--hover); color: var(--ink-1); }
+  .tb.is-on { background: var(--brand-soft); color: var(--brand-ink); font-weight: 500; }
+  .tsearch {
+    display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px;
+    border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--sub);
+    color: var(--ink-4); font-size: 12px; width: 170px;
+  }
+  .tsearch:hover { border-color: #d6dce8; }
   .cnt {
     min-width: 15px; height: 15px; padding: 0 4px; border-radius: 4px;
     background: #eef1f6; color: var(--ink-2); font-size: 10.5px; font-weight: 600;
     display: inline-flex; align-items: center; justify-content: center;
   }
-  .tsearch {
-    display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px;
-    border: 1px solid var(--line); border-radius: var(--r-ctl); background: #fff;
-    color: var(--ink-4); font-size: 12px; width: 168px;
-  }
-  .tsearch:hover { border-color: #d6dce8; }
 
-  .fbar { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line-2); background: var(--sub); }
+  /* 第三行：网格专属设置项 */
+  .sbar { display: flex; align-items: center; gap: 5px; padding: 7px 10px; border-bottom: 1px solid var(--line-2); background: var(--sub); }
+
+  /* 筛选条：生效条件的常驻条（真实产品：筛选生效后显示「筛选中」可清空） */
+  .fbar { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-bottom: 1px solid var(--line-2); background: var(--sub); }
   .fchip {
-    display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 4px 0 8px;
+    display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 4px 0 9px;
     background: #fff; border: 1px solid var(--line); border-radius: var(--r-pill);
     font-size: 11.5px; color: var(--ink-2);
   }
   .fchip b { font-weight: 600; color: var(--ink-1); }
-  .fchip i { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; color: var(--ink-4); cursor: pointer; font-style: normal; }
+  .fchip i {
+    width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center;
+    color: var(--ink-4); cursor: pointer; font-style: normal; font-size: 12px;
+  }
   .fchip i:hover { background: #eef1f6; color: var(--ink-1); }
-  .fadd { border: 0; background: transparent; color: var(--ink-3); font-size: 11.5px; cursor: pointer; padding: 3px 7px; border-radius: 6px; }
+  .fadd { border: 0; background: transparent; color: var(--ink-3); font-size: 11.5px; cursor: pointer; padding: 3px 8px; border-radius: 6px; }
   .fadd:hover { background: #fff; color: var(--ink-1); }
+  .fclear { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; color: var(--brand); font-size: 11.5px; cursor: pointer; padding: 3px 6px; border-radius: 6px; }
+  .fclear:hover { background: var(--brand-soft); }
 
-  .grid-wrap { overflow: auto; max-height: calc(100vh - 300px); }
+  /* 表格 */
   table.rec { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
   .rec thead th {
     position: sticky; top: 0; z-index: 2;
@@ -478,232 +786,322 @@ svg { display: block; }
   .rec thead th + th { border-left: 1px solid var(--line-2); }
   .rec tbody td {
     height: 42px; padding: 0 12px; border-bottom: 1px solid var(--line-2); color: var(--ink-2);
-    white-space: nowrap;
+    border-right: 1px solid transparent;
   }
+  .rec tbody td:first-child { border-right: 0; }
   .rec tbody tr:hover td { background: var(--hover); }
+  .rec tbody tr:hover .idx { color: var(--ink-3); }
   .rec tbody td.name { color: var(--ink-1); font-weight: 500; }
-  .rec tbody td.idx { color: var(--ink-4); font-variant-numeric: tabular-nums; width: 44px; }
-  .rec .ck { width: 16px; height: 16px; border: 1.5px solid #cdd5e3; border-radius: 4px; background: #fff; display: block; }
-  .rec td.ckcell { width: 34px; padding-left: 14px; }
-  .rec .who { display: inline-flex; align-items: center; gap: 6px; }
-  .rec .num { font-variant-numeric: tabular-nums; color: var(--ink-3); }
-  .rec .addrow td { height: 36px; color: var(--ink-4); cursor: pointer; border-bottom: 0; }
-  .rec .addrow td { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-  .rec .addrow:hover td { background: var(--hover); color: var(--brand-ink); }
-  .tfoot {
-    display: flex; align-items: center; gap: 14px; height: 34px; padding: 0 14px;
-    border-top: 1px solid var(--line-2); background: var(--sub);
-    font-size: 11.5px; color: var(--ink-4);
+  .rec tbody td.num { font-variant-numeric: tabular-nums; color: var(--ink-3); }
+  .rec tbody td.idx { width: 44px; font-size: 11.5px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+  .rec tbody td.ckcell, .rec thead th.ckcell { width: 40px; padding: 0 0 0 12px; }
+  .ck {
+    width: 14px; height: 14px; border-radius: 4px; border: 1px solid #d3dae6; background: #fff;
+    display: inline-block;
   }
-  .tfoot .r { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  .addrow td {
+    height: 36px; color: var(--ink-4); cursor: pointer; border-bottom: 0;
+  }
+  .addrow:hover td { background: var(--sub); color: var(--brand); }
+
+  /* 底部状态栏 */
+  .tfoot {
+    flex: none; height: 32px; display: flex; align-items: center; gap: 10px;
+    padding: 0 12px; border-top: 1px solid var(--line-2); background: var(--card);
+    border-radius: 0 0 12px 12px; font-size: 11.5px; color: var(--ink-4);
+  }
+  .tfoot .r { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 </style>
 
 <div class="wrap">
-
-  <div class="phead">
-    <div>
-      <h1>需求池</h1>
-      <div class="pmeta">
-        <span>128 条记录</span><span class="dot"></span>
-        <span>12 位成员</span><span class="dot"></span>
-        <span>更新于 2 分钟前</span>
+<div class="card" style="display:flex;flex-direction:column;min-height:0;flex:1;">
+  <!-- 第一行：数据表图标入口 + 视图标签条（选中项带「⋯」） + 新建视图 -->
+  <div class="vbar" style="position:relative;">
+    <button class="vicon" title="数据表图标与颜色" data-menu="vicon">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
+    </button>
+    <div class="pop" data-menu-panel="vicon" style="left:10px; top:40px; width:264px;">
+      <div class="pop-h">选择图标</div>
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;padding:2px 4px 8px;">
+        <button class="mi" style="height:32px;padding:0;justify-content:center;background:var(--brand-soft);color:var(--brand);border-radius:8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></button>
+        <button class="mi" style="height:32px;padding:0;justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/></svg></button>
+        <button class="mi" style="height:32px;padding:0;justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></button>
+        <button class="mi" style="height:32px;padding:0;justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M15 10v10"/></svg></button>
+        <button class="mi" style="height:32px;padding:0;justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="10" rx="1.5"/></svg></button>
+        <button class="mi" style="height:32px;padding:0;justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg></button>
+      </div>
+      <div class="pop-sep"></div>
+      <div class="pop-h">选择颜色</div>
+      <div style="display:flex;gap:6px;padding:2px 6px 6px;">
+        <span style="width:20px;height:20px;border-radius:50%;background:#2c7be5;box-shadow:0 0 0 2px #fff,0 0 0 3.5px #2c7be5"></span>
+        <span style="width:20px;height:20px;border-radius:50%;background:#7b4cd8"></span>
+        <span style="width:20px;height:20px;border-radius:50%;background:#0e9f6e"></span>
+        <span style="width:20px;height:20px;border-radius:50%;background:#f5a623"></span>
+        <span style="width:20px;height:20px;border-radius:50%;background:#d92d20"></span>
+        <span style="width:20px;height:20px;border-radius:50%;background:#64748b"></span>
       </div>
     </div>
-    <div class="pact">
-      <span class="av-stack">
-        <span class="av av-a">戴</span><span class="av av-b">王</span><span class="av av-c">李</span><span class="av av-d">陈</span>
-      </span>
-      <button class="btn">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>
-        分享
-      </button>
-      <button class="btn btn-icon" title="更多">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
-      </button>
-    </div>
-  </div>
 
-  <section class="card">
-    <!-- 视图栏 -->
-    <div class="vbar">
-      <div class="vtabs">
-        <button class="vtab is-active">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/><path d="M15 10v10"/></svg>
-          表格
-        </button>
-        <button class="vtab">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="10" rx="1.5"/></svg>
-          看板
-        </button>
-        <button class="vtab">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M3 11h18"/></svg>
-          日历
-        </button>
-        <button class="vtab">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l3 4v12H6V8z"/><path d="M9 13h6"/></svg>
-          表单
-        </button>
-        <button class="vtab" title="新建视图">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-        </button>
-      </div>
-      <div class="sep"></div>
-      <div class="vbar-r">
-        <button class="btn btn-sm btn-ghost">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>
-          筛选<span class="cnt">2</span>
-        </button>
-        <button class="btn btn-sm btn-ghost">分组</button>
-        <button class="btn btn-sm btn-ghost">排序</button>
-        <div class="tsearch">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M21 21l-4.35-4.35"/></svg>
-          搜索记录
+    <div class="vtab-row" style="display:flex;align-items:center;gap:2px;min-width:0;overflow-x:auto;scrollbar-width:none;">
+      <div class="vtab-slot" style="position:relative;">
+        <div class="vtab is-active" style="display:inline-flex;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="3 10h18"/><path d="M9 10v10"/><path d="M15 10v10"/></svg>
+          <span>表格</span>
         </div>
-        <button class="btn btn-primary btn-sm">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-          新建记录
+        <button class="vtab-more" data-menu="vmore" aria-label="视图操作：表格" title="重命名 / 视图设置 / 删除视图">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
         </button>
       </div>
+      <button class="vtab">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="10" rx="1.5"/></svg>
+        看板
+      </button>
+      <button class="vtab">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M3 11h18"/></svg>
+        日历
+      </button>
+      <button class="vtab">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 8h8"/><path d="M8 12h8"/><path d="M8 16h5"/></svg>
+        画廊
+      </button>
+      <button class="vtab">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l3 4v12H6V8z"/><path d="M9 13h6"/></svg>
+        表单
+      </button>
+      <button class="vtab">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 9h8"/><path d="M8 13h8"/><path d="M8 17h4"/></svg>
+        详情
+      </button>
     </div>
 
-    <!-- 筛选条 -->
-    <div class="fbar">
-      <span class="fchip">状态 <b>是</b> 进行中 <i>×</i></span>
-      <span class="fchip">负责人 <b>是</b> 我 <i>×</i></span>
-      <button class="fadd">+ 添加筛选</button>
-    </div>
+      <div class="pop" data-menu-panel="vmore" style="left:44px; top:38px; width:176px;">
+        <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>重命名视图</button>
+        <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>视图设置</button>
+        <div class="pop-sep"></div>
+        <button class="mi danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>删除视图</button>
+      </div>
 
-    <!-- 表格 -->
-    <div class="grid-wrap">
-      <table class="rec">
-        <thead>
-          <tr>
-            <th class="ckcell"><span class="ck"></span></th>
-            <th style="width:44px">#</th>
-            <th>需求名称</th>
-            <th style="width:104px">状态</th>
-            <th style="width:88px">优先级</th>
-            <th style="width:112px">负责人</th>
-            <th style="width:104px">截止日期</th>
-            <th style="width:88px">预估</th>
-            <th style="width:104px">更新时间</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td class="ckcell"><span class="ck"></span></td>
-            <td class="idx">1</td>
-            <td class="name">多端离线编辑冲突合并策略</td>
-            <td><span class="tag tag-blue"><i></i>进行中</span></td>
-            <td><span class="tag tag-danger">高</span></td>
-            <td><span class="who"><span class="av av-b">王</span>王倩</span></td>
-            <td class="num">10-22</td>
-            <td class="num">5 d</td>
-            <td class="num">12 分钟前</td>
-          </tr>
-          <tr>
-            <td class="ckcell"><span class="ck"></span></td>
-            <td class="idx">2</td>
-            <td class="name">数据表字段级权限模型</td>
-            <td><span class="tag tag-violet"><i></i>待评审</span></td>
-            <td><span class="tag tag-danger">高</span></td>
-            <td><span class="who"><span class="av av-a">戴</span>戴静</span></td>
-            <td class="num">10-24</td>
-            <td class="num">8 d</td>
-            <td class="num">1 小时前</td>
-          </tr>
-          <tr>
-            <td class="ckcell"><span class="ck"></span></td>
-            <td class="idx">3</td>
-            <td class="name">视图筛选器支持嵌套条件</td>
-            <td><span class="tag tag-blue"><i></i>进行中</span></td>
-            <td><span class="tag tag-warm">中</span></td>
-            <td><span class="who"><span class="av av-c">李</span>李哲</span></td>
-            <td class="num">10-26</td>
-            <td class="num">3 d</td>
-            <td class="num">2 小时前</td>
-          </tr>
-          <tr>
-            <td class="ckcell"><span class="ck"></span></td>
-            <td class="idx">4</td>
-            <td class="name">批量导入模板校验提示优化</td>
-            <td><span class="tag tag-ok"><i></i>已完成</span></td>
-            <td><span class="tag tag-gray">低</span></td>
-            <td><span class="who"><span class="av av-d">陈</span>陈然</span></td>
-            <td class="num">10-18</td>
-            <td class="num">2 d</td>
-            <td class="num">昨天</td>
-          </tr>
-          <tr>
-            <td class="ckcell"><span class="ck"></span></td>
-            <td class="idx">5</td>
-            <td class="name">审批流节点支持会签与或签</td>
-            <td><span class="tag tag-violet"><i></i>待评审</span></td>
-            <td><span class="tag tag-warm">中</span></td>
-            <td><span class="who"><span class="av av-e">周</span>周敏</span></td>
-            <td class="num">10-28</td>
-            <td class="num">6 d</td>
-            <td class="num">昨天</td>
-          </tr>
-          <tr>
-            <td class="ckcell"><span class="ck"></span></td>
-            <td class="idx">6</td>
-            <td class="name">表格视图列宽拖拽记忆</td>
-            <td><span class="tag tag-blue"><i></i>进行中</span></td>
-            <td><span class="tag tag-gray">低</span></td>
-            <td><span class="who"><span class="av av-f">张</span>张伟</span></td>
-            <td class="num">10-30</td>
-            <td class="num">1 d</td>
-            <td class="num">10-18</td>
-          </tr>
-          <tr>
-            <td class="ckcell"><span class="ck"></span></td>
-            <td class="idx">7</td>
-            <td class="name">工作台模块支持自定义排序</td>
-            <td><span class="tag tag-gray"><i></i>待规划</span></td>
-            <td><span class="tag tag-warm">中</span></td>
-            <td><span class="who"><span class="av av-a">戴</span>戴静</span></td>
-            <td class="num">11-02</td>
-            <td class="num">4 d</td>
-            <td class="num">10-17</td>
-          </tr>
-          <tr>
-            <td class="ckcell"><span class="ck"></span></td>
-            <td class="idx">8</td>
-            <td class="name">API 分页游标统一改造</td>
-            <td><span class="tag tag-ok"><i></i>已完成</span></td>
-            <td><span class="tag tag-gray">低</span></td>
-            <td><span class="who"><span class="av av-c">李</span>李哲</span></td>
-            <td class="num">10-15</td>
-            <td class="num">3 d</td>
-            <td class="num">10-16</td>
-          </tr>
-          <tr class="addrow">
-            <td colspan="9">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-              新建记录
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <button class="vtab-add" title="新建视图">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+    </button>
+  </div>
 
-    <div class="tfoot">
-      <span>共 128 条记录</span>
-      <span>已加载 8 条</span>
-      <div class="r">
-        <span>最后同步 14:32</span>
-        <span class="tag tag-ok"><i></i>已连接</span>
+  <!-- 第二行：新建记录 + 搜索 / 导入 / 导出 / 更多（真实全站唯一入口） -->
+  <div class="tbar">
+    <button class="btn btn-primary btn-sm">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+      新建记录
+    </button>
+    <div class="tbar-r">
+      <div class="tsearch">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M21 21l-4.35-4.35"/></svg>
+        搜索此视图…
+      </div>
+      <button class="tb">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 20h16"/></svg>
+        导入
+      </button>
+      <button class="tb">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>
+        导出
+      </button>
+      <div style="position:relative;">
+        <button class="tb" data-menu="more">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+          更多
+        </button>
+        <div class="pop" data-menu-panel="more" style="right:0; top:32px; width:180px;">
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.5l6.8-4"/><path d="M8.6 13.5l6.8 4"/></svg>分享</button>
+          <button class="mi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>复制视图</button>
+          <div class="pop-sep"></div>
+          <button class="mi danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>清空表</button>
+        </div>
       </div>
     </div>
-  </section>
+  </div>
+
+  <!-- 第三行：网格专属设置（行高 / 字段 / 筛选 / 分组 / 排序 / 行颜色） -->
+  <div class="sbar">
+    <button class="tb">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></svg>
+      行高
+    </button>
+    <button class="tb">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+      字段
+    </button>
+    <span style="width:1px;height:18px;background:var(--line);flex:none;margin:0 2px;"></span>
+    <button class="tb is-on">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>
+      筛选<span class="cnt">2</span>
+    </button>
+    <button class="tb">分组</button>
+    <button class="tb">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10"/><path d="M4 12h7"/><path d="M4 17h4"/><path d="M17 5v14"/><path d="M14 16l3 3 3-3"/></svg>
+      排序
+    </button>
+    <span style="width:1px;height:18px;background:var(--line);flex:none;margin:0 2px;"></span>
+    <button class="tb">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1 0 1.6-.7 1.6-1.5 0-.4-.2-.8-.5-1.1-.3-.3-.5-.7-.5-1.1 0-.8.7-1.5 1.6-1.5h1.8A4.5 4.5 0 0 0 21 12a9 9 0 0 0-9-9z"/><circle cx="7.5" cy="11" r="1"/><circle cx="11" cy="7.5" r="1"/><circle cx="15.5" cy="11" r="1"/></svg>
+      行颜色
+    </button>
+  </div>
+
+  <!-- 筛选条件条 -->
+  <div class="fbar">
+    <span class="fchip">状态 <b>是</b> 进行中 <i>×</i></span>
+    <span class="fchip">负责人 <b>是</b> 我 <i>×</i></span>
+    <button class="fadd">+ 添加筛选</button>
+    <button class="fclear">清空筛选</button>
+  </div>
+
+  <!-- 表格 -->
+  <div class="grid-wrap">
+    <table class="rec">
+      <thead>
+        <tr>
+          <th class="ckcell"><span class="ck"></span></th>
+          <th style="width:44px">#</th>
+          <th>需求名称</th>
+          <th style="width:104px">状态</th>
+          <th style="width:88px">优先级</th>
+          <th style="width:112px">负责人</th>
+          <th style="width:104px">截止日期</th>
+          <th style="width:88px">预估</th>
+          <th style="width:104px">更新时间</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="ckcell"><span class="ck"></span></td>
+          <td class="idx">1</td>
+          <td class="name">多端离线编辑冲突合并策略</td>
+          <td><span class="tag tag-blue"><i></i>进行中</span></td>
+          <td><span class="tag tag-danger">高</span></td>
+          <td><span class="who"><span class="av av-b">王</span>王倩</span></td>
+          <td class="num">10-22</td>
+          <td class="num">5 d</td>
+          <td class="num">12 分钟前</td>
+        </tr>
+        <tr>
+          <td class="ckcell"><span class="ck"></span></td>
+          <td class="idx">2</td>
+          <td class="name">数据表字段级权限模型</td>
+          <td><span class="tag tag-violet"><i></i>待评审</span></td>
+          <td><span class="tag tag-danger">高</span></td>
+          <td><span class="who"><span class="av av-a">戴</span>戴静</span></td>
+          <td class="num">10-24</td>
+          <td class="num">8 d</td>
+          <td class="num">1 小时前</td>
+        </tr>
+        <tr>
+          <td class="ckcell"><span class="ck"></span></td>
+          <td class="idx">3</td>
+          <td class="name">视图筛选器支持嵌套条件</td>
+          <td><span class="tag tag-blue"><i></i>进行中</span></td>
+          <td><span class="tag tag-warm">中</span></td>
+          <td><span class="who"><span class="av av-c">李</span>李然</span></td>
+          <td class="num">10-28</td>
+          <td class="num">3 d</td>
+          <td><span class="tag tag-ok"><i></i>已完成</span></td>
+        </tr>
+        <tr>
+          <td class="ckcell"><span class="ck"></span></td>
+          <td class="idx">4</td>
+          <td class="name">知识库文档版本对比视图</td>
+          <td><span class="tag tag-blue"><i></i>进行中</span></td>
+          <td><span class="tag tag-warm">中</span></td>
+          <td><span class="who"><span class="av av-d">周</span>周桐</span></td>
+          <td class="num">11-02</td>
+          <td class="num">6 d</td>
+          <td class="num">3 小时前</td>
+        </tr>
+        <tr>
+          <td class="ckcell"><span class="ck"></span></td>
+          <td class="idx">5</td>
+          <td class="name">回收站保留期与自动清理策略</td>
+          <td><span class="tag tag-gray"><i></i>待开始</span></td>
+          <td><span class="tag tag-gray">低</span></td>
+          <td><span class="who"><span class="av av-e">赵</span>赵敏</span></td>
+          <td class="num">11-05</td>
+          <td class="num">2 d</td>
+          <td class="num">昨天</td>
+        </tr>
+        <tr>
+          <td class="ckcell"><span class="ck"></span></td>
+          <td class="idx">6</td>
+          <td class="name">导入向导字段映射记忆</td>
+          <td><span class="tag tag-blue"><i></i>进行中</span></td>
+          <td><span class="tag tag-danger">高</span></td>
+          <td><span class="who"><span class="av av-f">孙</span>孙宇</span></td>
+          <td class="num">11-08</td>
+          <td class="num">4 d</td>
+          <td class="num">2 天前</td>
+        </tr>
+        <tr class="addrow">
+          <td class="ckcell"></td>
+          <td colspan="8">
+            <span style="display:inline-flex;align-items:center;gap:6px;padding-left:4px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+              新建记录
+            </span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 底部状态栏 -->
+  <div class="tfoot">
+    <span>128 条记录</span>
+    <span>·</span>
+    <span>已筛选 42 条</span>
+    <span class="r">
+      <span>行高 中</span>
+      <span>·</span>
+      <span>9 个字段（2 个隐藏）</span>
+    </span>
+  </div>
+</div>
+
+<script>
+  // 原型用下拉：data-menu="<id>" 控制 [data-menu-panel="<id>"]，点外部关闭。
+  (function () {
+    var openId = null;
+    function closeAll() {
+      document.querySelectorAll('[data-menu-panel]').forEach(function (p) {
+        p.classList.remove('is-open');
+      });
+      document.querySelectorAll('[data-menu]').forEach(function (b) {
+        b.classList.remove('is-open');
+      });
+      openId = null;
+    }
+    document.querySelectorAll('[data-menu]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var id = btn.getAttribute('data-menu');
+        var panel = document.querySelector('[data-menu-panel="' + id + '"]');
+        if (!panel) return;
+        if (openId === id) { closeAll(); return; }
+        closeAll();
+        panel.classList.add('is-open');
+        btn.classList.add('is-open');
+        openId = id;
+      });
+    });
+    document.addEventListener('click', closeAll);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(); });
+  })();
+</script>
 </div>
 
     </div>
   </div>
 </div>
-<div class="proto-note">v6 · 企业工作台（L1 工作台/库/知识库 + L2 库内清单）</div>
+<div class="proto-note">v6 · 企业工作台 · 严格对齐真实功能入口</div>
 <script>
+  /* L2 收起 / 展开：整栏收起（v2 手感），箭头骑在边界中点 */
   (function () {
     var app = document.getElementById('app');
     var btn = document.getElementById('l2Toggle');
@@ -717,6 +1115,42 @@ svg { display: block; }
     btn.addEventListener('click', function () {
       app.classList.toggle('l2-collapsed');
       sync();
+    });
+  })();
+
+  /* 建库弹窗（真实：CreateLibraryModal —— 名称 + 库类型二选一） */
+  (function () {
+    var openers = [document.getElementById('createLib')].filter(Boolean);
+    var mask = document.getElementById('createMask');
+    var modal = document.getElementById('createModal');
+    if (!mask || !modal) return;
+    function setOpen(on) {
+      mask.classList.toggle('is-open', on);
+      modal.classList.toggle('is-open', on);
+    }
+    openers.forEach(function (b) { b.addEventListener('click', function () { setOpen(true); }); });
+    ['createClose', 'createCancel'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('click', function () { setOpen(false); });
+    });
+    mask.addEventListener('click', function () { setOpen(false); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') setOpen(false);
+    });
+  })();
+
+  /* 库级「⋯」菜单：重命名库 / 库设置 / 删除库 */
+  (function () {
+    var btn = document.getElementById('baseMenu');
+    var panel = document.querySelector('[data-menu-panel="baseMenu"]');
+    if (!btn || !panel) return;
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      panel.classList.toggle('is-open');
+    });
+    document.addEventListener('click', function () { panel.classList.remove('is-open'); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') panel.classList.remove('is-open');
     });
   })();
 </script>
