@@ -33,6 +33,14 @@ window.GX_ACTUAL_PAGES = [
     src: "pages/table-grid-v4.html",
     note: "上排 品牌+搜索居中+用户（v2 布局）/ 下排一级导航轨道",
   },
+  {
+    id: "table-grid-v5",
+    group: "数据表库",
+    name: "数据表主界面 ★拟物风 v5（统一令牌体系）",
+    route: "/base/:baseId/table/:tableId/view/:viewId",
+    src: "pages/table-grid-v5.html",
+    note: "全页单一令牌表 + 产品 gx-* 桥接，破除局部手调",
+  },
 ];
 
 (function () {
