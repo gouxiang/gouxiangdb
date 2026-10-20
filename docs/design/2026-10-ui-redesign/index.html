@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>构想工作台 · UI v2 全域骨架</title>
+<link rel="stylesheet" href="./assets/tokens.css" />
+<link rel="stylesheet" href="./assets/proto.css" />
+</head>
+<body>
+
+<div class="viewer">
+  <aside class="rail">
+    <div class="rail-head">
+      <div class="rail-title">构想工作台 · UI v2 骨架</div>
+      <div class="rail-sub">全站 <span id="pageCount"></span> 页 · 只看结构，不做视觉</div>
+    </div>
+    <div class="rail-body" id="railBody"></div>
+  </aside>
+
+  <main class="stage-wrap">
+    <div class="stage-bar">
+      <span class="stage-name" id="stageName"></span>
+      <code class="stage-route" id="stageRoute"></code>
+      <div class="stage-spacer"></div>
+      <div class="seg" id="zoomSeg">
+        <button data-z="0.5">50%</button>
+        <button data-z="0.75" class="is-on">75%</button>
+        <button data-z="1">100%</button>
+      </div>
+      <button class="stage-btn is-on" id="annotBtn">区域标注</button>
+    </div>
+
+    <div class="stage-scroll">
+      <div id="canvasFit">
+        <div class="canvas" id="canvas"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="./assets/pages.js"></script>
+<script src="./assets/app.js"></script>
+<script>
+  document.getElementById("pageCount").textContent = window.GX_PAGES.length;
+</script>
+</body>
+</html>

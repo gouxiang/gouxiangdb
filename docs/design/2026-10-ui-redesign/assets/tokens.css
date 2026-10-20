@@ -1,0 +1,96 @@
+/* ============================================================
+   构想工作台 · UI v2 设计令牌（唯一取值来源）
+   ------------------------------------------------------------
+   规则：
+   1) 原型里任何颜色/圆角/字号/间距，只能引用本文件的变量。
+      出现散落 hex 即视为不合格（与旧 UI-SPEC §0.2 同一条纪律）。
+   2) 将来落地时，本文件逐条映射到
+      packages/design-tokens/src/colors.ts（现 106 行）与 layout.ts。
+      改取值即可，不重新解读设计稿。
+   3) 命名对齐项目现有 gx-* 习惯，方便对照替换。
+   ============================================================ */
+
+:root {
+  /* ---------- 表面 / 层次 ---------- */
+  --gx-bg: #f7f7f5;            /* 壳层底色：暖中性，比旧版冷灰更沉静 */
+  --gx-surface: #ffffff;       /* 内容区、面板、卡片 */
+  --gx-surface-sunken: #f2f2ef;/* 凹陷：表头、代码块、输入内槽 */
+  --gx-surface-hover: #efefec; /* hover 底 */
+  --gx-surface-active: #e6e6e2;/* pressed / 选中底 */
+
+  /* ---------- 文字 ---------- */
+  --gx-text: #1a1a1c;          /* 主文字（近墨黑，非纯黑） */
+  --gx-text-secondary: #6b6b73;/* 次要：说明、副标题 */
+  --gx-text-tertiary: #9a9aa2; /* 弱：占位、元信息 */
+  --gx-text-inverse: #ffffff;
+
+  /* ---------- 描边 ---------- */
+  --gx-line: #e8e8e5;          /* 默认分隔线（极淡，靠留白分层） */
+  --gx-line-strong: #d7d7d2;   /* 输入框、需要强调的边界 */
+
+  /* ---------- 主强调：墨黑 ---------- */
+  /* 刻意不用彩色做主强调：让业务色标（行色、标签、状态）成为唯一的色彩来源 */
+  --gx-ink: #1a1a1c;
+  --gx-ink-hover: #2e2e33;
+  --gx-ink-soft: #eaeae6;      /* 墨黑弱底：选中/徽标 */
+  --gx-ink-text: #1a1a1c;
+
+  /* ---------- 焦点环 / 链接（唯一彩色强调，只用于可访问性） ---------- */
+  --gx-focus: #4338ca;
+  --gx-focus-ring: 0 0 0 3px rgba(67, 56, 202, 0.18);
+  --gx-link: #3a34b8;
+
+  /* ---------- 语义色 ---------- */
+  --gx-danger: #b42318;
+  --gx-danger-soft: #fef3f2;
+  --gx-warn: #b54708;
+  --gx-warn-soft: #fffaeb;
+  --gx-success: #067647;
+  --gx-success-soft: #ecfdf3;
+  --gx-info: #175cd3;
+  --gx-info-soft: #eff8ff;
+
+  /* ---------- 圆角 ---------- */
+  --gx-r-xs: 4px;
+  --gx-r-sm: 6px;              /* 列表项、按钮、输入 */
+  --gx-r-md: 10px;             /* 卡片、面板 */
+  --gx-r-lg: 14px;             /* 浮层、弹窗、抽屉 */
+  --gx-r-full: 999px;
+
+  /* ---------- 字号 / 行高 ---------- */
+  --gx-fs-11: 11px;
+  --gx-fs-12: 12px;
+  --gx-fs-13: 13px;            /* 基准字号，比旧版 14 更紧凑 */
+  --gx-fs-15: 15px;
+  --gx-fs-18: 18px;
+  --gx-fs-24: 24px;
+  --gx-lh-tight: 1.3;
+  --gx-lh-normal: 1.55;
+
+  /* ---------- 间距（4 基数） ---------- */
+  --gx-sp-1: 4px;
+  --gx-sp-2: 8px;
+  --gx-sp-3: 12px;
+  --gx-sp-4: 16px;
+  --gx-sp-5: 20px;
+  --gx-sp-6: 24px;
+  --gx-sp-8: 32px;
+  --gx-sp-10: 40px;
+
+  /* ---------- 阴影（极克制，仅浮层） ---------- */
+  --gx-shadow-1: 0 1px 2px rgba(26, 26, 28, 0.06);
+  --gx-shadow-2: 0 2px 6px rgba(26, 26, 28, 0.06), 0 8px 24px -8px rgba(26, 26, 28, 0.14);
+  --gx-shadow-3: 0 4px 12px rgba(26, 26, 28, 0.08), 0 24px 48px -16px rgba(26, 26, 28, 0.18);
+
+  /* ---------- 壳层尺寸（与旧规范对齐，落地方便对照） ---------- */
+  --gx-h-topbar: 56px;
+  --gx-w-l1: 224px;
+  --gx-w-l1-collapsed: 56px;
+  --gx-w-l2: 240px;
+  --gx-h-viewtabs: 44px;
+
+  /* ---------- 字体 ---------- */
+  --gx-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --gx-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
