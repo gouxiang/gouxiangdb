@@ -40,18 +40,65 @@
     padding: 0 22px;
   }
   .gx-v2 .v2-mid { gap: 14px; }
-  .gx-v2 .v2-l1 {
-    border-right: 0;
-    border-radius: 22px;
-    background: rgba(255, 255, 255, .55);
-    box-shadow: 0 20px 44px -18px rgba(58, 82, 152, .40), inset 0 1px 0 rgba(255, 255, 255, .9);
-  }
-  .gx-v2 .v2-l2 {
-    border-right: 0;
+
+  /* ---- L1 + L2 融合为一张导航卡：竖线分隔，L2 像是从 L1 延伸出来 ---- */
+  .gx-v2 .v2-navcard {
+    position: relative;
+    display: flex;
+    flex: none;
     border-radius: 22px;
     background: #fff;
-    box-shadow: 0 20px 44px -18px rgba(58, 82, 152, .35), 0 2px 6px rgba(58, 82, 152, .06);
+    box-shadow: 0 20px 44px -18px rgba(58, 82, 152, .40), 0 2px 6px rgba(58, 82, 152, .06);
   }
+  /* 导航保留拟物：内高光 + 淡蓝渐变底 + 竖线分界 */
+  .gx-v2 .v2-navcard .v2-l1 {
+    border-right: 1px solid rgba(58, 82, 152, .12);
+    border-radius: 22px 0 0 22px;
+    background: linear-gradient(180deg, #f8fbff 0%, #eef3fd 100%);
+    box-shadow: inset 0 1px 0 #fff;
+    overflow: hidden;
+  }
+  .gx-v2 .v2-navcard .v2-l2 {
+    border-right: 0;
+    border-radius: 0 22px 22px 0;
+    background: #fff;
+    box-shadow: none;
+    overflow: hidden;
+    transition: width .3s cubic-bezier(.4, 0, .2, 1), opacity .22s ease;
+  }
+  /* 内容定宽，收起时裁切而非挤压变形 */
+  .gx-v2 .v2-navcard .v2-l2 > * { flex: none; width: 240px; }
+  .gx-v2 .v2-navcard.l2-collapsed .v2-l2 { width: 0 !important; opacity: 0; }
+
+  /* 卡片右缘中点的收起/展开箭头 */
+  .gx-v2 .v2-l2-toggle {
+    position: absolute;
+    right: -13px;
+    top: 50%;
+    z-index: 6;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: 1px solid rgba(58, 82, 152, .14);
+    background: #fff;
+    color: #6b7392;
+    cursor: pointer;
+    transform: translateY(-50%);
+    box-shadow: 0 6px 16px -4px rgba(58, 82, 152, .38);
+    transition: transform .3s cubic-bezier(.4, 0, .2, 1), box-shadow .2s, color .2s;
+  }
+  .gx-v2 .v2-l2-toggle:hover {
+    color: #3d6aef;
+    box-shadow: 0 10px 22px -4px rgba(61, 106, 239, .5);
+    transform: translateY(-50%) scale(1.1);
+  }
+  .gx-v2 .v2-l2-toggle:active { transform: translateY(-50%) scale(.96); }
+  .gx-v2 .v2-l2-toggle svg { transition: transform .3s cubic-bezier(.4, 0, .2, 1); }
+  .gx-v2 .v2-navcard.l2-collapsed .v2-l2-toggle svg { transform: rotate(180deg); }
+
   .gx-v2 .v2-main {
     border-radius: 22px;
     background: #fff;
@@ -84,13 +131,27 @@
   }
   .gx-v2 .v2-primary:hover { filter: brightness(1.06); }
 
-  /* 选中视图标签 → 白卡浮起 */
+  /* 视图切换：不做拟物 —— 文字 + 渐变指示条，与内容区融为一体 */
   .gx-v2 .v2-tab-active {
+    position: relative;
     border: 0;
-    background: #fff;
+    background: transparent;
     color: #3d6aef;
-    box-shadow: 0 6px 16px -6px rgba(76, 96, 160, .38), 0 0 0 1px rgba(61, 106, 239, .14);
+    box-shadow: none;
+    font-weight: 600;
   }
+  .gx-v2 .v2-tab-active::after {
+    content: "";
+    position: absolute;
+    left: 9px;
+    right: 9px;
+    bottom: -3px;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, #41c3f2, #3d6aef);
+  }
+  .gx-v2 .v2-tabs > span:not(.v2-tab-active) { background: transparent; }
+  .gx-v2 .v2-tabs > span:not(.v2-tab-active):hover { background: rgba(238, 242, 251, .95); color: #3d4a6b; }
 
   /* 搜索框 → 胶囊内凹 */
   .gx-v2 .v2-search {
@@ -139,6 +200,12 @@
   </header>
 
   <div class="relative flex min-h-0 flex-1 v2-mid">
+
+    <!-- ===== L1 + L2 融合导航卡（竖线分隔，右缘箭头收起/展开 L2） ===== -->
+    <div class="v2-navcard">
+      <button type="button" class="v2-l2-toggle" id="l2Toggle" aria-label="收起二级面板" aria-expanded="true">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
 
     <!-- ===== L1 一级导航：SideRail（WorkspaceShell.tsx:195），真实宽 196 ===== -->
     <div class="flex h-full shrink-0 flex-col border-r border-gx-hairline bg-gx-nav1 v2-l1" style="width:196px">
@@ -247,6 +314,7 @@
         </button>
       </div>
     </div>
+    </div><!-- /v2-navcard -->
 
     <!-- ===== 内容区：GridView ===== -->
     <main class="min-w-0 flex-1 overflow-hidden v2-main">
@@ -255,7 +323,7 @@
         <!-- 工具条：GridToolbar.tsx:71 -->
         <div class="shrink-0 border-b border-gx-separator bg-gx-surface">
           <!-- 第一行：视图标签条（h-9=36） -->
-          <div class="flex h-9 min-w-0 items-center gap-1 px-2 pt-1">
+          <div class="v2-tabs flex h-9 min-w-0 items-center gap-1 px-2 pt-1">
             <span class="v2-tab-active flex items-center gap-1.5 rounded-full border border-gx-border bg-gx-accent-bg px-2.5 py-1 text-gx-12 font-medium text-gx-accent">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18v14H3z"/><path d="M3 10h18"/><path d="M3 15h18"/><path d="M9 5v14"/><path d="M15 5v14"/></svg>
               表格视图
@@ -452,6 +520,20 @@
   </div>
 </div>
 
-<div class="proto-note">UI v2 拟物风改造 · 数据表主界面<br>参考 StreamEx 浅色拟物 + L1 悬浮框 · 原版见 table-grid.html</div>
+<div class="proto-note">UI v2 拟物风改造 · 数据表主界面<br>参考 StreamEx 浅色拟物 + L1/L2 融合导航卡 · 原版见 table-grid.html</div>
+
+<script>
+  // L2 收起 / 展开（仅原型交互，真实实现走 WorkspaceShell 的 collapse 状态机）
+  (function () {
+    var card = document.querySelector(".v2-navcard");
+    var btn = document.getElementById("l2Toggle");
+    if (!card || !btn) return;
+    btn.addEventListener("click", function () {
+      var collapsed = card.classList.toggle("l2-collapsed");
+      btn.setAttribute("aria-expanded", String(!collapsed));
+      btn.setAttribute("aria-label", collapsed ? "展开二级面板" : "收起二级面板");
+    });
+  })();
+</script>
 </body>
 </html>
