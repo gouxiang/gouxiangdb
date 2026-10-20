@@ -11,7 +11,8 @@ const css = fs.readFileSync(path.join(SRC, 'shared.css'), 'utf8');
 
 let logo = fs.readFileSync(BRAND, 'utf8').trim();
 for (const g of ['paperk', 'pearlk', 'glossk', 'sheenk', 'bandk']) logo = logo.split(g).join('gxlogo-' + g);
-logo = logo.replace('width="1024" height="1024"', 'width="32" height="32"');
+// 与 .rail-mark 容器同尺寸（36），否则位图不填满、四周留缝 → 视觉上「不贴合」
+logo = logo.replace('width="1024" height="1024"', 'width="36" height="36"');
 
 const S = 'fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"';
 const I = {
@@ -25,6 +26,8 @@ const I = {
   search: `<svg width="13" height="13" viewBox="0 0 24 24" ${S} stroke-width="2"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M21 21l-4.35-4.35"/></svg>`,
   chev: `<svg width="13" height="13" viewBox="0 0 24 24" ${S} stroke-width="2" style="color:var(--ink-4)"><path d="M6 9l6 6 6-6"/></svg>`,
   plus: `<svg width="14" height="14" viewBox="0 0 24 24" ${S} stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
+  /* 建库主入口：更粗更满，配品牌底色做高亮 */
+  plusBig: `<svg width="16" height="16" viewBox="0 0 24 24" ${S} stroke-width="2.6"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
   table: `<svg width="14" height="14" viewBox="0 0 24 24" ${S} stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>`,
   gear2: `<svg width="14" height="14" viewBox="0 0 24 24" ${S} stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
   chevL: `<svg width="15" height="15" viewBox="0 0 24 24" ${S} stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg>`,
@@ -58,12 +61,13 @@ const RAIL = [
   { k: 'kb2', label: '研发手册', icon: I.book, href: '#', grp: 'kb' },
 ];
 
-/* 底部固定区（与 lib/nav-footer.ts 的 FOOTER_NAV_ITEMS 三项对齐；
-   排序：通讯录 → 帮助中心 → 工作区设置，管理类入口压在最底） */
+/* 底部固定区：前三项＝ nav-footer.ts 的 FOOTER_NAV_ITEMS（通讯录 / 帮助中心 / 工作区设置），
+   末项＝建库主入口（NavLibraryBlock）。全部竖排、纯图标 + tooltip。 */
 const RAIL_FOOT = [
   { k: 'contacts', label: '通讯录', icon: I.users },
   { k: 'help', label: '帮助中心', icon: I.help },
   { k: 'settings', label: '工作区设置', icon: I.cog },
+  { k: 'create', label: '新建库', icon: I.plusBig, create: true },
 ];
 
 function rail(active) {
@@ -83,7 +87,7 @@ function rail(active) {
 
 function railFoot() {
   return RAIL_FOOT.map(
-    f => `      <button class="rail-item rail-mini" title="${f.label}">
+    f => `      <button class="rail-item rail-mini${f.create ? ' is-create' : ''}"${f.create ? ' id="createLib"' : ''} title="${f.label}">
         <span class="rd">${f.icon}</span><span class="nm">${f.label}</span>
       </button>\n`,
   ).join('');
@@ -113,9 +117,10 @@ ${TABLE_ROW_MENU.map(m => {
   return `          <button class="mi${m.danger ? ' danger' : ''}">${menuIcon(m.icon)}<span>${m.label}</span>${d}</button>`;
 }).join('\n')}
         </div>\n`;
-    return `      <div class="l2-row">
+    // 选中高亮挂在整行（含行尾「⋯」），而不是只挂在 <a> 上
+    return `      <div class="l2-row${it.active ? ' is-active' : ''}">
       <a class="l2-item${it.active ? ' is-active' : ''}" href="${it.href || '#'}" title="${it.name}">
-        <span class="ico">${it.icon || I.table}</span><span class="nm">${it.name}</span>${it.cnt ? `<span class="cnt">${it.cnt}</span>` : ''}
+        <span class="ico">${it.icon || I.table}</span><span class="nm">${it.name}</span>
       </a>
 ${menu}    </div>`;
   }).join('\n');
@@ -126,13 +131,13 @@ ${menu}    </div>`;
   <aside class="rail">
     <div class="rail-mark">${logo}</div>
     <div class="rail-sep"></div>
-    <button class="rail-create" id="createLib" title="新建库">${I.plus}<span>新建库</span></button>
     <nav class="rail-nav">
 ${rail(active)}    </nav>
     <div class="rail-foot">
 ${railFoot()}    </div>
   </aside>
 
+  <div class="l2-wrap">
   <aside class="l2" id="l2Panel">
     <div class="l2-inner">
       <div class="l2-h">
@@ -166,6 +171,7 @@ ${foot}
   </aside>
 
   <button class="l2-toggle" id="l2Toggle" aria-expanded="true" aria-controls="l2Panel" title="收起二级导航">${I.chevL}</button>
+  </div>
 
   <!-- 建库弹窗（真实：CreateLibraryModal，名称 + 库类型二选一） -->
   <div class="mask" id="createMask"></div>
@@ -313,11 +319,11 @@ const L2_BASE = {
   title: '产品中心', tag: '库', actTitle: '新建数据表',
   search: '搜索数据表',
   items: [
-    { name: '需求池', cnt: '128', active: true, href: 'data-table.html' },
-    { name: '迭代计划', cnt: '24' },
-    { name: '缺陷跟踪', cnt: '61' },
-    { name: '客户档案', cnt: '78' },
-    { name: '内容排期', cnt: '32' },
+    { name: '需求池', active: true, href: 'data-table.html' },
+    { name: '迭代计划' },
+    { name: '缺陷跟踪' },
+    { name: '客户档案' },
+    { name: '内容排期' },
   ],
   // 真实：列表末尾固定「回收站」（/base/:id/trash）；库设置在面板头「⋯」里
   foot: [{ name: '回收站', icon: I.trash }],

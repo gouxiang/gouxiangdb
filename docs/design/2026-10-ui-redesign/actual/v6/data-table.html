@@ -75,25 +75,16 @@ svg { display: block; }
   border-right: 1px solid var(--line);
 }
 
-/* ① 品牌区：logo 下方一道极淡分隔 */
+/* ① 品牌区：logo 下方一道极淡分隔。
+   logo 是珠光白底板，直接放在近白轨道上会糊成一片 → 用 box-shadow 描一圈极淡的边定住轮廓，
+   比额外加 border 好：inset 描边跟随圆角，且不改变盒模型尺寸（容器 36 ＝ svg 36，严丝合缝）。 */
 .rail-mark {
   width: 36px; height: 36px; border-radius: 10px; overflow: hidden; flex: none;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, .10), 0 5px 12px -5px rgba(16, 24, 40, .30);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .10), 0 5px 12px -5px rgba(16, 24, 40, .30),
+              inset 0 0 0 1px rgba(16, 24, 40, .07);
 }
 .rail-sep { width: 26px; height: 1px; background: var(--line); margin: 13px 0 10px; flex: none; }
 
-/* 新建库：虚线「添加」行——比导航项轻，比裸图标清楚 */
-.rail-create {
-  width: 64px; height: 30px; flex: none;
-  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
-  border: 1px dashed #d3dae6; border-radius: 9px;
-  background: transparent; color: var(--ink-3);
-  font-size: 11.5px; font-weight: 500; cursor: pointer;
-  transition: background .15s ease-out, color .15s ease-out, border-color .15s ease-out;
-}
-.rail-create:hover {
-  background: var(--brand-soft); color: var(--brand-ink); border-color: #b9d3f7;
-}
 
 .rail-nav {
   display: flex; flex-direction: column; align-items: center;
@@ -142,17 +133,28 @@ svg { display: block; }
   white-space: nowrap; flex: none;
 }
 
-/* ③ 底部管理区：横排图标按钮，比主导航轻一档，不再占半条轨道 */
+/* ③ 底部管理区：竖排、纯图标 + tooltip，重量比主导航降一档 */
 .rail-foot {
-  flex: none; margin-top: auto; padding-top: 9px;
-  width: calc(100% - 14px);
-  display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 3px;
+  flex: none; margin-top: auto; padding-top: 8px; width: 100%;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
   border-top: 1px solid var(--line-2);
 }
-.rail-foot .rail-item { width: 32px; padding: 3px 0; border-radius: 9px; gap: 0; }
-.rail-foot .rail-item .rd { width: 30px; height: 30px; border-radius: 9px; }
-.rail-foot .rail-item .rd svg { width: 16px; height: 16px; }
+.rail-foot .rail-item { width: 56px; padding: 4px 0; border-radius: 10px; gap: 0; }
+.rail-foot .rail-item .rd { width: 32px; height: 32px; border-radius: 10px; }
+.rail-foot .rail-item .rd svg { width: 17px; height: 17px; }
 .rail-foot .rail-item .nm { display: none; }   /* 纯图标 + title tooltip */
+
+/* 建库主入口：整条轨道里唯一用色的一枚，靠品牌底色跳出来 */
+.rail-foot .rail-item.is-create { margin-top: 4px; }
+.rail-foot .rail-item.is-create .rd {
+  background: linear-gradient(180deg, #3d86ea 0%, #2c7be5 100%);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(44, 123, 229, .35), 0 5px 12px -5px rgba(44, 123, 229, .75),
+              inset 0 1px 0 rgba(255, 255, 255, .30);
+}
+.rail-foot .rail-item.is-create:hover .rd {
+  background: linear-gradient(180deg, #2f7ae0 0%, #1f5fbf 100%);
+}
 
 /* ---------------- 主区 ---------------- */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -304,31 +306,35 @@ svg { display: block; }
    L2：库内清单（真实二级导航）
    收起＝整栏收起（v2 手感）：面板宽度归零 + 淡出，箭头骑在边界中线上
    ============================================================ */
+/* .l2 只负责「被裁剪的动画宽度」；内容定宽放在 .l2-inner 里，收起时被裁切而非挤压变形。
+   箭头是 .l2-wrap 的兄弟节点（不在 .l2 内），因此不会被 overflow 裁掉，
+   且用 right:-13px 骑在边缘上——宽度变化时自动跟随，无需硬编码 left。 */
+.l2-wrap { position: relative; flex: none; display: flex; }
 .l2 {
   width: 236px; flex: none;
   overflow: hidden;
-  transition: width .3s cubic-bezier(.4, 0, .2, 1), opacity .22s ease;
+  transition: width .3s cubic-bezier(.4, 0, .2, 1);
 }
 .l2-inner {
   width: 236px; height: 100%;
-  display: flex; flex-direction: column;   /* 内容定宽：收起时被裁切，不挤压变形 */
+  display: flex; flex-direction: column;
   background: var(--card); border-right: 1px solid var(--line);
+  transition: opacity .22s ease;
 }
-.app.l2-collapsed .l2 { width: 0; opacity: 0; }
+.app.l2-collapsed .l2 { width: 0; }
+.app.l2-collapsed .l2-inner { opacity: 0; }
 
-/* 卡片右缘中点的圆形浮动箭头（折叠时跟随边缘左移） */
+/* 卡片右缘中点的圆形浮动箭头 */
 .l2-toggle {
-  position: absolute; top: 50%; left: 311px; z-index: 8;   /* 88(rail) + 236 - 13 */
+  position: absolute; top: 50%; right: -13px; z-index: 8;
   width: 26px; height: 26px; flex: none;
   display: grid; place-items: center;
   border: 1px solid var(--line); border-radius: 50%;
   background: #fff; color: var(--ink-3); cursor: pointer;
   transform: translateY(-50%);
   box-shadow: 0 1px 2px rgba(16,24,40,.06), 0 6px 16px -6px rgba(16,24,40,.30);
-  transition: left .3s cubic-bezier(.4, 0, .2, 1), transform .3s cubic-bezier(.4, 0, .2, 1),
-              box-shadow .2s, color .2s, border-color .2s;
+  transition: transform .3s cubic-bezier(.4, 0, .2, 1), box-shadow .2s, color .2s, border-color .2s;
 }
-.app.l2-collapsed .l2-toggle { left: 75px; }              /* 88 - 13 */
 .l2-toggle:hover {
   color: var(--brand); border-color: #d3e0f8;
   transform: translateY(-50%) scale(1.1);
@@ -375,6 +381,12 @@ svg { display: block; }
 /* 行外壳：跳转 <a> 与行尾「⋯」是兄弟节点（嵌套 button 非法，且点「⋯」会连带跳转） */
 .l2-row { position: relative; display: flex; align-items: center; gap: 2px; margin-bottom: 1px; }
 .l2-row .l2-item { flex: 1; min-width: 0; }
+/* 选中＝整行底色（含行尾「⋯」），<a> 自身不再单独上底色，避免出现两层色块 */
+.l2-row.is-active { background: var(--brand-soft); border-radius: 8px; }
+.l2-row.is-active .l2-item { background: transparent; }
+.l2-row.is-active .l2-item .ico,
+.l2-row.is-active .l2-item .nm { color: var(--brand-ink); }
+.l2-row.is-active .l2-item .nm { font-weight: 600; }
 .l2-item {
   display: flex; align-items: center; gap: 8px;
   height: 32px; padding: 0 8px; border-radius: 7px;
@@ -471,7 +483,7 @@ svg { display: block; }
 <body>
 <div class="app" id="app">
   <aside class="rail">
-    <div class="rail-mark"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="32" height="32">
+    <div class="rail-mark"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="36" height="36">
 
   <defs>
     <linearGradient id="gxlogo-paperk" x1="0" y1="0" x2="1" y2="1">
@@ -519,7 +531,6 @@ svg { display: block; }
   <line x1="98" y1="112" x2="146" y2="112" stroke="url(#gxlogo-bandk)" stroke-width="11" stroke-linecap="round"/>
 </svg></div>
     <div class="rail-sep"></div>
-    <button class="rail-create" id="createLib" title="新建库"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg><span>新建库</span></button>
     <nav class="rail-nav">
       <div class="rail-grp"><span>数据库</span></div>
       <a class="rail-item is-active" href="data-table.html" title="产品中心">
@@ -549,9 +560,13 @@ svg { display: block; }
       <button class="rail-item rail-mini" title="工作区设置">
         <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="nm">工作区设置</span>
       </button>
+      <button class="rail-item rail-mini is-create" id="createLib" title="新建库">
+        <span class="rd"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.6"><path d="M12 5v14"/><path d="M5 12h14"/></svg></span><span class="nm">新建库</span>
+      </button>
     </div>
   </aside>
 
+  <div class="l2-wrap">
   <aside class="l2" id="l2Panel">
     <div class="l2-inner">
       <div class="l2-h">
@@ -576,9 +591,9 @@ svg { display: block; }
         </div>
       </div>
       <div class="l2-list">
-      <div class="l2-row">
+      <div class="l2-row is-active">
       <a class="l2-item is-active" href="data-table.html" title="需求池">
-        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">需求池</span><span class="cnt">128</span>
+        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">需求池</span>
       </a>
         <button class="row-more" data-menu="t0" aria-label="需求池 表操作菜单" aria-haspopup="menu">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
@@ -594,7 +609,7 @@ svg { display: block; }
     </div>
       <div class="l2-row">
       <a class="l2-item" href="#" title="迭代计划">
-        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">迭代计划</span><span class="cnt">24</span>
+        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">迭代计划</span>
       </a>
         <button class="row-more" data-menu="t1" aria-label="迭代计划 表操作菜单" aria-haspopup="menu">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
@@ -610,7 +625,7 @@ svg { display: block; }
     </div>
       <div class="l2-row">
       <a class="l2-item" href="#" title="缺陷跟踪">
-        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">缺陷跟踪</span><span class="cnt">61</span>
+        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">缺陷跟踪</span>
       </a>
         <button class="row-more" data-menu="t2" aria-label="缺陷跟踪 表操作菜单" aria-haspopup="menu">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
@@ -626,7 +641,7 @@ svg { display: block; }
     </div>
       <div class="l2-row">
       <a class="l2-item" href="#" title="客户档案">
-        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">客户档案</span><span class="cnt">78</span>
+        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">客户档案</span>
       </a>
         <button class="row-more" data-menu="t3" aria-label="客户档案 表操作菜单" aria-haspopup="menu">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
@@ -642,7 +657,7 @@ svg { display: block; }
     </div>
       <div class="l2-row">
       <a class="l2-item" href="#" title="内容排期">
-        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">内容排期</span><span class="cnt">32</span>
+        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">内容排期</span>
       </a>
         <button class="row-more" data-menu="t4" aria-label="内容排期 表操作菜单" aria-haspopup="menu">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
@@ -664,6 +679,7 @@ svg { display: block; }
   </aside>
 
   <button class="l2-toggle" id="l2Toggle" aria-expanded="true" aria-controls="l2Panel" title="收起二级导航"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg></button>
+  </div>
 
   <!-- 建库弹窗（真实：CreateLibraryModal，名称 + 库类型二选一） -->
   <div class="mask" id="createMask"></div>

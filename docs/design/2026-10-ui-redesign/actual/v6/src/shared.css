@@ -69,25 +69,16 @@ svg { display: block; }
   border-right: 1px solid var(--line);
 }
 
-/* ① 品牌区：logo 下方一道极淡分隔 */
+/* ① 品牌区：logo 下方一道极淡分隔。
+   logo 是珠光白底板，直接放在近白轨道上会糊成一片 → 用 box-shadow 描一圈极淡的边定住轮廓，
+   比额外加 border 好：inset 描边跟随圆角，且不改变盒模型尺寸（容器 36 ＝ svg 36，严丝合缝）。 */
 .rail-mark {
   width: 36px; height: 36px; border-radius: 10px; overflow: hidden; flex: none;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, .10), 0 5px 12px -5px rgba(16, 24, 40, .30);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .10), 0 5px 12px -5px rgba(16, 24, 40, .30),
+              inset 0 0 0 1px rgba(16, 24, 40, .07);
 }
 .rail-sep { width: 26px; height: 1px; background: var(--line); margin: 13px 0 10px; flex: none; }
 
-/* 新建库：虚线「添加」行——比导航项轻，比裸图标清楚 */
-.rail-create {
-  width: 64px; height: 30px; flex: none;
-  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
-  border: 1px dashed #d3dae6; border-radius: 9px;
-  background: transparent; color: var(--ink-3);
-  font-size: 11.5px; font-weight: 500; cursor: pointer;
-  transition: background .15s ease-out, color .15s ease-out, border-color .15s ease-out;
-}
-.rail-create:hover {
-  background: var(--brand-soft); color: var(--brand-ink); border-color: #b9d3f7;
-}
 
 .rail-nav {
   display: flex; flex-direction: column; align-items: center;
@@ -136,17 +127,28 @@ svg { display: block; }
   white-space: nowrap; flex: none;
 }
 
-/* ③ 底部管理区：横排图标按钮，比主导航轻一档，不再占半条轨道 */
+/* ③ 底部管理区：竖排、纯图标 + tooltip，重量比主导航降一档 */
 .rail-foot {
-  flex: none; margin-top: auto; padding-top: 9px;
-  width: calc(100% - 14px);
-  display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 3px;
+  flex: none; margin-top: auto; padding-top: 8px; width: 100%;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
   border-top: 1px solid var(--line-2);
 }
-.rail-foot .rail-item { width: 32px; padding: 3px 0; border-radius: 9px; gap: 0; }
-.rail-foot .rail-item .rd { width: 30px; height: 30px; border-radius: 9px; }
-.rail-foot .rail-item .rd svg { width: 16px; height: 16px; }
+.rail-foot .rail-item { width: 56px; padding: 4px 0; border-radius: 10px; gap: 0; }
+.rail-foot .rail-item .rd { width: 32px; height: 32px; border-radius: 10px; }
+.rail-foot .rail-item .rd svg { width: 17px; height: 17px; }
 .rail-foot .rail-item .nm { display: none; }   /* 纯图标 + title tooltip */
+
+/* 建库主入口：整条轨道里唯一用色的一枚，靠品牌底色跳出来 */
+.rail-foot .rail-item.is-create { margin-top: 4px; }
+.rail-foot .rail-item.is-create .rd {
+  background: linear-gradient(180deg, #3d86ea 0%, #2c7be5 100%);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(44, 123, 229, .35), 0 5px 12px -5px rgba(44, 123, 229, .75),
+              inset 0 1px 0 rgba(255, 255, 255, .30);
+}
+.rail-foot .rail-item.is-create:hover .rd {
+  background: linear-gradient(180deg, #2f7ae0 0%, #1f5fbf 100%);
+}
 
 /* ---------------- 主区 ---------------- */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -298,31 +300,35 @@ svg { display: block; }
    L2：库内清单（真实二级导航）
    收起＝整栏收起（v2 手感）：面板宽度归零 + 淡出，箭头骑在边界中线上
    ============================================================ */
+/* .l2 只负责「被裁剪的动画宽度」；内容定宽放在 .l2-inner 里，收起时被裁切而非挤压变形。
+   箭头是 .l2-wrap 的兄弟节点（不在 .l2 内），因此不会被 overflow 裁掉，
+   且用 right:-13px 骑在边缘上——宽度变化时自动跟随，无需硬编码 left。 */
+.l2-wrap { position: relative; flex: none; display: flex; }
 .l2 {
   width: 236px; flex: none;
   overflow: hidden;
-  transition: width .3s cubic-bezier(.4, 0, .2, 1), opacity .22s ease;
+  transition: width .3s cubic-bezier(.4, 0, .2, 1);
 }
 .l2-inner {
   width: 236px; height: 100%;
-  display: flex; flex-direction: column;   /* 内容定宽：收起时被裁切，不挤压变形 */
+  display: flex; flex-direction: column;
   background: var(--card); border-right: 1px solid var(--line);
+  transition: opacity .22s ease;
 }
-.app.l2-collapsed .l2 { width: 0; opacity: 0; }
+.app.l2-collapsed .l2 { width: 0; }
+.app.l2-collapsed .l2-inner { opacity: 0; }
 
-/* 卡片右缘中点的圆形浮动箭头（折叠时跟随边缘左移） */
+/* 卡片右缘中点的圆形浮动箭头 */
 .l2-toggle {
-  position: absolute; top: 50%; left: 311px; z-index: 8;   /* 88(rail) + 236 - 13 */
+  position: absolute; top: 50%; right: -13px; z-index: 8;
   width: 26px; height: 26px; flex: none;
   display: grid; place-items: center;
   border: 1px solid var(--line); border-radius: 50%;
   background: #fff; color: var(--ink-3); cursor: pointer;
   transform: translateY(-50%);
   box-shadow: 0 1px 2px rgba(16,24,40,.06), 0 6px 16px -6px rgba(16,24,40,.30);
-  transition: left .3s cubic-bezier(.4, 0, .2, 1), transform .3s cubic-bezier(.4, 0, .2, 1),
-              box-shadow .2s, color .2s, border-color .2s;
+  transition: transform .3s cubic-bezier(.4, 0, .2, 1), box-shadow .2s, color .2s, border-color .2s;
 }
-.app.l2-collapsed .l2-toggle { left: 75px; }              /* 88 - 13 */
 .l2-toggle:hover {
   color: var(--brand); border-color: #d3e0f8;
   transform: translateY(-50%) scale(1.1);
@@ -369,6 +375,12 @@ svg { display: block; }
 /* 行外壳：跳转 <a> 与行尾「⋯」是兄弟节点（嵌套 button 非法，且点「⋯」会连带跳转） */
 .l2-row { position: relative; display: flex; align-items: center; gap: 2px; margin-bottom: 1px; }
 .l2-row .l2-item { flex: 1; min-width: 0; }
+/* 选中＝整行底色（含行尾「⋯」），<a> 自身不再单独上底色，避免出现两层色块 */
+.l2-row.is-active { background: var(--brand-soft); border-radius: 8px; }
+.l2-row.is-active .l2-item { background: transparent; }
+.l2-row.is-active .l2-item .ico,
+.l2-row.is-active .l2-item .nm { color: var(--brand-ink); }
+.l2-row.is-active .l2-item .nm { font-weight: 600; }
 .l2-item {
   display: flex; align-items: center; gap: 8px;
   height: 32px; padding: 0 8px; border-radius: 7px;
