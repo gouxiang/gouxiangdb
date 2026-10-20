@@ -16,6 +16,12 @@
     font-size: 12px; line-height: 1.6; color: #1a1a1c;
   }
   .env-warn code { font-family: ui-monospace, Menlo, monospace; font-size: 11px; background: #fff; padding: 1px 5px; border-radius: 4px; }
+  .handoff-note {
+    padding: 8px 16px; background: #eff8ff; border-bottom: 1px solid #2e90fa;
+    font-size: 12px; line-height: 1.6; color: #1a1a1c;
+  }
+  .handoff-note code { font-family: ui-monospace, Menlo, monospace; font-size: 11px; background: #fff; padding: 1px 5px; border-radius: 4px; }
+  .handoff-note a { color: #175cd3; }
 
   .viewer { display: grid; grid-template-columns: 240px 1fr; height: calc(100vh - 37px); overflow: hidden; }
   .rail { background: #fff; border-right: 1px solid #e8e8e5; display: flex; flex-direction: column; overflow: hidden; }
@@ -53,7 +59,14 @@
 
 <div class="env-warn">
   <strong>环境提示：</strong>WorkBuddy 预览面板按「单文件」托管，跨文件引用（本页的画布 iframe）在面板里会空白。
-  单页可直接看自包含的 <code>actual/pages/table-grid.html</code>；完整工作台请用浏览器打开本文件（Finder → 打开方式 → 浏览器）。
+  单页可直接看自包含的   <code>actual/pages/table-grid.html</code>；完整工作台请用浏览器打开本文件（Finder → 打开方式 → 浏览器）。
+</div>
+
+<div class="handoff-note">
+  <strong>UI 重构交接：</strong>v6 底板已完成验证，全站 UI 重构<b>尚未动工</b>。
+  动工前必读 <a href="actual/v6/HANDOFF.md">HANDOFF.md</a>（契约与红线）与
+  <a href="actual/v6/REFACTOR-SCOPE.md">REFACTOR-SCOPE.md</a>（施工范围与顺序），
+  并先跑 <code>node scripts/snapshot.mjs</code> 取当前真实状态。
 </div>
 
 <div class="viewer">

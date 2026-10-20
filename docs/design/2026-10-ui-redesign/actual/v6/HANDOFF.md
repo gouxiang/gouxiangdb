@@ -5,6 +5,36 @@
 
 ---
 
+## 动工会话 · 启动指令（把这段直接粘给新会话）
+
+```
+请接手「构想工作台全站 UI 视觉重构」任务。
+
+先用两步建立上下文，缺一不可：
+1. 读 docs/design/2026-10-ui-redesign/actual/v6/HANDOFF.md  （契约与红线）
+   再读 docs/design/2026-10-ui-redesign/actual/v6/REFACTOR-SCOPE.md（施工范围与顺序）
+2. 跑 node docs/design/2026-10-ui-redesign/actual/v6/scripts/snapshot.mjs
+   取当前代码的真实状态（路由表、关键文件、令牌冲突自检）。
+   文档是静态的，可能已过期，必须以脚本输出为准。
+
+目标：以 actual/v6/data-table.html 为基准底板，对 apps/web 做全站 UI 视觉重构。
+硬约束（违反即回退）：
+- 尽可能不改动功能。只改 className / style / 令牌取值 / 图标资源；
+  不动 props 语义、状态机、数据流、API 契约、数据结构、路由表、权限判定。
+- 视觉拿不准时照抄底板数值，禁止自行发明间距与色值。
+
+优先级：
+- P0 一比一：一级导航（L1 图标轨）、二级导航（L2 库内清单）、数据表页。
+- P1 依据底板样式统一优化：库设置/回收站/ER 图/知识库各页/通讯录/权限/工作区设置/帮助/登录。
+- P2 公共组件与浮层：模态框、菜单 Popover、Toast、骨架屏、空态·异常态·无权限态。
+
+施工顺序：严格按 REFACTOR-SCOPE.md 的阶段 0 → 4，每阶段独立 commit。
+每步必须通过四门检查（vitest 收集数不减 / 三包 tsc 零错误 / eslint 零 error / S0 golden 通过），
+全量测试与构建走 VM15（192.168.31.15），本机 16GB 禁止。
+```
+
+---
+
 ## ★ 契约零：v6 原型与 UI-SPEC 的关系（先看这条）
 
 | 文档 | 定位 | 是否可执行 |
