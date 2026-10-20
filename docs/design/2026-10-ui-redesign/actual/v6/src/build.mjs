@@ -61,13 +61,13 @@ const RAIL = [
   { k: 'kb2', label: '研发手册', icon: I.book, href: '#', grp: 'kb' },
 ];
 
-/* 底部固定区：前三项＝ nav-footer.ts 的 FOOTER_NAV_ITEMS（通讯录 / 帮助中心 / 工作区设置），
-   末项＝建库主入口（NavLibraryBlock）。全部竖排、纯图标 + tooltip。 */
+/* 底部固定区：建库（+，高亮）在最上，其下＝ nav-footer.ts 的 FOOTER_NAV_ITEMS
+   （通讯录 / 帮助中心 / 工作区设置）。全部竖排、纯图标 + tooltip。 */
 const RAIL_FOOT = [
+  { k: 'create', label: '新建库', icon: I.plusBig, create: true },
   { k: 'contacts', label: '通讯录', icon: I.users },
   { k: 'help', label: '帮助中心', icon: I.help },
   { k: 'settings', label: '工作区设置', icon: I.cog },
-  { k: 'create', label: '新建库', icon: I.plusBig, create: true },
 ];
 
 function rail(active) {

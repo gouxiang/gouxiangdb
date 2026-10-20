@@ -44,6 +44,12 @@
   /* 投影 2 级 */
   --sh-card: 0 1px 2px rgba(16, 24, 40, .04), 0 1px 3px rgba(16, 24, 40, .05);
   --sh-pop: 0 10px 28px -10px rgba(16, 24, 40, .18), 0 2px 6px rgba(16, 24, 40, .06);
+  /* 拟物质感 3 级：凸起 / 凸起加强（悬停）/ 按下凹槽（选中） */
+  --sh-raise: 0 1px 1px rgba(16, 24, 40, .06), 0 2px 5px -1px rgba(16, 24, 40, .10),
+                 inset 0 1px 0 rgba(255, 255, 255, .95);
+  --sh-raise-hi: 0 2px 4px rgba(16, 24, 40, .08), 0 7px 15px -4px rgba(16, 24, 40, .20),
+                    inset 0 1px 0 rgba(255, 255, 255, .95);
+  --sh-press: inset 0 1px 3px rgba(16, 24, 40, .16), inset 0 -1px 0 rgba(255, 255, 255, .70);
 }
 
 * { box-sizing: border-box; }
@@ -65,14 +71,18 @@ svg { display: block; }
 .app { position: relative; display: flex; height: 100vh; overflow: hidden; }
 
 /* ---------------- L1 一级导航：图标轨 ----------------
-   三层分层，装饰只留一层：① 品牌区 ② 主导航（库） ③ 底部管理区
+   轻量拟物（非重装饰）：用「顶高光 + 底暗部」模拟一层薄薄的厚度，
+     未选中＝可点击的凸起；悬停＝上浮；选中＝按下凹槽（语义＝当前所在）。
+   三层分层：① 品牌区 ② 主导航（库） ③ 底部管理区
    ────────────────────────────────────────────────────── */
 .rail {
   width: 76px; flex: none;
   display: flex; flex-direction: column; align-items: center;
   padding: 14px 0 10px;
-  background: linear-gradient(180deg, #ffffff 0%, #fafbfd 100%);
+  background: linear-gradient(180deg, #ffffff 0%, #f7f9fd 52%, #eef2f8 100%);
   border-right: 1px solid var(--line);
+  /* 右侧内阴影：把轨道压成「嵌进去」的一层，内容区自然显得更前 */
+  box-shadow: inset -7px 0 14px -9px rgba(16, 24, 40, .13);
 }
 
 /* ① 品牌区：logo 下方一道极淡分隔。
@@ -101,26 +111,33 @@ svg { display: block; }
   color: var(--ink-3); cursor: pointer; position: relative;
   transition: background .16s ease-out, color .16s ease-out;
 }
-/* 图标砖：统一柔和圆角方底；未选中不上底色，压住轨道噪点 */
+/* 图标砖：一层薄凸起（顶高光 + 底暗部），未选中也比轨道亮半档，压住噪点 */
 .rail-item .rd {
   width: 36px; height: 36px; border-radius: 11px; flex: none;
   display: grid; place-items: center;
-  background: transparent; color: var(--ink-3);
-  transition: background .16s ease-out, color .16s ease-out;
+  background: linear-gradient(180deg, #ffffff 0%, #f2f6fc 100%);
+  color: var(--ink-3);
+  box-shadow: var(--sh-raise);
+  transition: background .16s ease-out, color .16s ease-out,
+              box-shadow .16s ease-out, transform .16s ease-out;
 }
-.rail-item .rd svg { width: 18px; height: 18px; }
+.rail-item .rd svg { width: 17px; height: 17px; }
 .rail-item .nm {
   font-size: 10.5px; line-height: 1.3; letter-spacing: .01em;
   max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-weight: 500;
 }
-.rail-item:hover { background: #f2f6fd; color: var(--ink-2); }
-.rail-item:hover .rd { background: #fff; box-shadow: var(--sh-card); }
-
-/* 选中：淡品牌底 + 白底浮起砖 + accent 图标/文字。
-   不用白色卡片——近白轨道上白卡只能靠阴影硬分界，会显脏；左侧色条是规范反例，也不用。 */
+.rail-item:hover .rd {
+  transform: translateY(-1px);
+  box-shadow: var(--sh-raise-hi);
+}
+/* 选中＝按下：砖变凹槽，外层上淡品牌底 */
 .rail-item.is-active { background: var(--brand-soft); color: var(--brand-ink); }
-.rail-item.is-active .rd { background: #fff; color: var(--brand); box-shadow: var(--sh-card); }
+.rail-item.is-active .rd {
+  background: linear-gradient(180deg, #e9eff8 0%, #f6f9fd 100%);
+  color: var(--brand);
+  box-shadow: var(--sh-press);
+}
 .rail-item.is-active .nm { font-weight: 600; }
 
 .rail-grp {
@@ -133,27 +150,32 @@ svg { display: block; }
   white-space: nowrap; flex: none;
 }
 
-/* ③ 底部管理区：竖排、纯图标 + tooltip，重量比主导航降一档 */
+/* ③ 底部固定区：竖排、纯图标 + tooltip，比主导航轻一档 */
 .rail-foot {
   flex: none; margin-top: auto; padding-top: 8px; width: 100%;
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
   border-top: 1px solid var(--line-2);
 }
-.rail-foot .rail-item { width: 56px; padding: 4px 0; border-radius: 10px; gap: 0; }
+.rail-foot .rail-item { width: 40px; padding: 4px 0; border-radius: 10px; gap: 0; }
 .rail-foot .rail-item .rd { width: 32px; height: 32px; border-radius: 10px; }
 .rail-foot .rail-item .rd svg { width: 17px; height: 17px; }
 .rail-foot .rail-item .nm { display: none; }   /* 纯图标 + title tooltip */
 
-/* 建库主入口：整条轨道里唯一用色的一枚，靠品牌底色跳出来 */
-.rail-foot .rail-item.is-create { margin-top: 4px; }
+/* 建库主入口：整条轨道里唯一用色的一枚——实心 + 顶部高光 + 落影，像一枚可按下去的按钮 */
 .rail-foot .rail-item.is-create .rd {
-  background: linear-gradient(180deg, #3d86ea 0%, #2c7be5 100%);
+  background: linear-gradient(180deg, #4b90ec 0%, #2c7be5 58%, #2470d8 100%);
   color: #fff;
-  box-shadow: 0 1px 2px rgba(44, 123, 229, .35), 0 5px 12px -5px rgba(44, 123, 229, .75),
-              inset 0 1px 0 rgba(255, 255, 255, .30);
+  box-shadow: 0 1px 1px rgba(16, 24, 40, .10),
+              0 3px 8px -2px rgba(44, 123, 229, .55),
+              inset 0 1px 0 rgba(255, 255, 255, .38);
 }
 .rail-foot .rail-item.is-create:hover .rd {
-  background: linear-gradient(180deg, #2f7ae0 0%, #1f5fbf 100%);
+  background: linear-gradient(180deg, #3d84e6 0%, #2066ca 100%);
+  transform: translateY(-1px);
+}
+.rail-foot .rail-item.is-create:active .rd {
+  transform: translateY(0);
+  box-shadow: var(--sh-press);
 }
 
 /* ---------------- 主区 ---------------- */
@@ -551,6 +573,9 @@ svg { display: block; }
       </a>
     </nav>
     <div class="rail-foot">
+      <button class="rail-item rail-mini is-create" id="createLib" title="新建库">
+        <span class="rd"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.6"><path d="M12 5v14"/><path d="M5 12h14"/></svg></span><span class="nm">新建库</span>
+      </button>
       <button class="rail-item rail-mini" title="通讯录">
         <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg></span><span class="nm">通讯录</span>
       </button>
@@ -559,9 +584,6 @@ svg { display: block; }
       </button>
       <button class="rail-item rail-mini" title="工作区设置">
         <span class="rd"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="nm">工作区设置</span>
-      </button>
-      <button class="rail-item rail-mini is-create" id="createLib" title="新建库">
-        <span class="rd"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.6"><path d="M12 5v14"/><path d="M5 12h14"/></svg></span><span class="nm">新建库</span>
       </button>
     </div>
   </aside>
