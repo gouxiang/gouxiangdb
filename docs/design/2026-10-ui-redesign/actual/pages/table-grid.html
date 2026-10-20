@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>数据表主界面 · 实际 UI 抽离</title>
+<!-- 真实 Tailwind 产物（从 apps/web/dist-shell 复制，只读，勿改） -->
+<link rel="stylesheet" href="../assets/real-ui.css" />
+<style>
+  /* 仅用于原型说明：真实项目无此标记 */
+  body { margin: 0; }
+  .proto-note {
+    position: fixed; left: 12px; bottom: 12px; z-index: 9999;
+    padding: 6px 10px; border-radius: 8px;
+    background: rgba(26,26,28,.82); color: #fff; font-size: 12px; line-height: 1.5;
+  }
+  /* 单元格文本：与项目 cells 渲染口径一致的截断 */
+  .cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<!-- ===== 真实壳层：WorkspaceShell（GX_ENTERPRISE_NAV 默认 on 时的实际生效壳） ===== -->
+<div class="flex h-screen flex-col bg-gx-bg">
+
+  <!-- TopBar：WorkspaceTopBar.tsx:26 -->
+  <header class="flex h-14 shrink-0 items-center gap-3 border-b border-gx-hairline bg-gx-surface px-5">
+    <button type="button" class="flex shrink-0 items-center gap-1.5 rounded-gx-sm px-1 py-1 hover:bg-gx-bg">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gx-accent">
+        <path d="M12 8c4.4 0 8-1.3 8-3s-3.6-3-8-3-8 1.3-8 3 3.6 3 8 3z"/>
+        <path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/>
+        <path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>
+      </svg>
+      <span class="hidden text-gx-13 font-semibold text-gx-text-primary lg:inline">构想工作台</span>
+    </button>
+
+    <button type="button" class="mx-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-gx-lg border border-gx-border bg-gx-bg text-gx-12 text-gx-text-tertiary transition-colors hover:bg-gx-row-hover md:w-full md:max-w-md md:justify-start md:gap-2 md:px-2.5">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M21 21l-4.35-4.35"/>
+      </svg>
+      <span class="hidden min-w-0 flex-1 truncate whitespace-nowrap text-left md:block">搜索表、文档、成员…</span>
+      <span class="hidden rounded bg-gx-surface px-1 text-gx-11 text-gx-text-hint md:inline-block">⌘K</span>
+    </button>
+
+    <div class="ml-auto flex shrink-0 items-center gap-2 rounded-gx-sm py-1 pl-1 pr-2 hover:bg-gx-bg lg:ml-0">
+      <span class="flex h-6 w-6 items-center justify-center rounded-full text-gx-11 font-semibold text-white" style="background:#3A6DF0">戴</span>
+      <span class="hidden text-gx-12 text-gx-text-secondary md:inline">戴 · 工作区所有人</span>
+    </div>
+  </header>
+
+  <div class="relative flex min-h-0 flex-1">
+
+    <!-- ===== L1 一级导航：SideRail（WorkspaceShell.tsx:195），真实宽 196 ===== -->
+    <div class="flex h-full shrink-0 flex-col border-r border-gx-hairline bg-gx-nav1" style="width:196px">
+
+      <!-- NavLibraryBlock：当前库切换块 -->
+      <div class="shrink-0 px-1.5 pt-2">
+        <div class="flex w-full items-center gap-2 rounded-gx-lg px-2 py-1.5 text-gx-13 text-gx-text-primary hover:bg-gx-row-hover">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-80">
+            <path d="M3 5h18v14H3z"/><path d="M3 10h18"/><path d="M9 10v9"/><path d="M15 10v9"/>
+          </svg>
+          <span class="flex-1 truncate text-left font-semibold">产品中心</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-gx-text-tertiary"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto">
+        <div class="flex flex-col px-1.5">
+          <div class="flex w-full items-center rounded-gx-lg px-2 text-gx-11 font-medium text-gx-text-hint" style="height:28px">工作区数据库</div>
+
+          <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg bg-white px-2 text-gx-13 font-semibold text-gx-accent transition-colors duration-150 ease-out">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-gx-accent"><path d="M3 5h18v14H3z"/><path d="M3 10h18"/><path d="M9 10v9"/><path d="M15 10v9"/></svg>
+            <span class="flex-1 truncate text-left">产品中心</span>
+          </button>
+          <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-13 text-gx-text-primary transition-colors duration-150 ease-out hover:bg-gx-row-hover">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-80"><path d="M3 5h18v14H3z"/><path d="M3 10h18"/><path d="M9 10v9"/><path d="M15 10v9"/></svg>
+            <span class="flex-1 truncate text-left">客户与合同</span>
+          </button>
+          <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-13 text-gx-text-primary transition-colors duration-150 ease-out hover:bg-gx-row-hover">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-80"><path d="M3 5h18v14H3z"/><path d="M3 10h18"/><path d="M9 10v9"/><path d="M15 10v9"/></svg>
+            <span class="flex-1 truncate text-left">运营指标</span>
+          </button>
+
+          <div class="flex w-full items-center rounded-gx-lg px-2 text-gx-11 font-medium text-gx-text-hint" style="height:28px;margin-top:8px">知识库</div>
+          <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-13 text-gx-text-primary transition-colors duration-150 ease-out hover:bg-gx-row-hover">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-80"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            <span class="flex-1 truncate text-left">产品知识库</span>
+          </button>
+          <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-13 text-gx-text-primary transition-colors duration-150 ease-out hover:bg-gx-row-hover">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-80"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            <span class="flex-1 truncate text-left">研发手册</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 底部固定区 -->
+      <div class="flex shrink-0 flex-col gap-0.5 border-t border-gx-hairline p-1.5">
+        <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-13 text-gx-text-primary transition-colors duration-150 ease-out hover:bg-gx-row-hover">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-80"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/></svg>
+          <span class="flex-1 truncate text-left">通讯录</span>
+        </button>
+        <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-13 text-gx-text-primary transition-colors duration-150 ease-out hover:bg-gx-row-hover">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-80"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span class="flex-1 truncate text-left">工作区设置</span>
+        </button>
+      </div>
+
+      <!-- 折叠开关 -->
+      <div class="shrink-0 border-t border-gx-hairline p-1.5">
+        <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-12 text-gx-text-tertiary transition-colors hover:bg-gx-row-hover hover:text-gx-text-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><path d="M15 18l-6-6 6-6"/></svg>
+          <span class="flex-1 truncate text-left">收起导航</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ===== L2 二级面板：SecondaryNav（真实宽 240） ===== -->
+    <div class="flex h-full shrink-0 flex-col border-r border-gx-hairline bg-gx-surface" style="width:240px">
+      <div class="shrink-0 border-b border-gx-hairline px-2 py-2">
+        <div class="flex items-center gap-1.5">
+          <span class="flex-1 truncate text-gx-13 font-semibold text-gx-text-primary">表</span>
+          <button type="button" class="rounded p-0.5 text-gx-text-tertiary hover:bg-gx-bg hover:text-gx-text-primary" title="新建数据表">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="min-h-0 flex-1 overflow-y-auto px-1.5 py-1">
+        <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg bg-white px-2 text-gx-13 font-semibold text-gx-accent transition-colors duration-150 ease-out">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-gx-accent"><path d="M3 5h18v14H3z"/><path d="M3 10h18"/><path d="M9 10v9"/><path d="M15 10v9"/></svg>
+          <span class="flex-1 truncate text-left">需求池</span>
+        </button>
+        <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-13 text-gx-text-primary transition-colors duration-150 ease-out hover:bg-gx-row-hover">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-80"><path d="M3 5h18v14H3z"/><path d="M3 10h18"/><path d="M9 10v9"/><path d="M15 10v9"/></svg>
+          <span class="flex-1 truncate text-left">迭代计划</span>
+        </button>
+        <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-13 text-gx-text-primary transition-colors duration-150 ease-out hover:bg-gx-row-hover">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-80"><path d="M3 5h18v14H3z"/><path d="M3 10h18"/><path d="M9 10v9"/><path d="M15 10v9"/></svg>
+          <span class="flex-1 truncate text-left">缺陷跟踪</span>
+        </button>
+        <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-13 text-gx-text-primary transition-colors duration-150 ease-out hover:bg-gx-row-hover">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-80"><path d="M3 5h18v14H3z"/><path d="M3 10h18"/><path d="M9 10v9"/><path d="M15 10v9"/></svg>
+          <span class="flex-1 truncate text-left">客户档案</span>
+        </button>
+        <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-13 text-gx-text-primary transition-colors duration-150 ease-out hover:bg-gx-row-hover">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-80"><path d="M3 5h18v14H3z"/><path d="M3 10h18"/><path d="M9 10v9"/><path d="M15 10v9"/></svg>
+          <span class="flex-1 truncate text-left">内容排期</span>
+        </button>
+      </div>
+      <div class="shrink-0 border-t border-gx-hairline p-1.5">
+        <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-12 text-gx-text-tertiary transition-colors hover:bg-gx-row-hover hover:text-gx-text-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span class="flex-1 truncate text-left">库设置</span>
+        </button>
+        <button type="button" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-12 text-gx-text-tertiary transition-colors hover:bg-gx-row-hover hover:text-gx-text-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+          <span class="flex-1 truncate text-left">回收站</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ===== 内容区：GridView ===== -->
+    <main class="min-w-0 flex-1 overflow-hidden">
+      <div class="flex h-full flex-col bg-gx-surface">
+
+        <!-- 工具条：GridToolbar.tsx:71 -->
+        <div class="shrink-0 border-b border-gx-separator bg-gx-surface">
+          <!-- 第一行：视图标签条（h-9=36） -->
+          <div class="flex h-9 min-w-0 items-center gap-1 px-2 pt-1">
+            <span class="flex items-center gap-1.5 rounded-full border border-gx-border bg-gx-accent-bg px-2.5 py-1 text-gx-12 font-medium text-gx-accent">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18v14H3z"/><path d="M3 10h18"/><path d="M3 15h18"/><path d="M9 5v14"/><path d="M15 5v14"/></svg>
+              表格视图
+            </span>
+            <span class="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-gx-12 text-gx-text-tertiary hover:bg-gx-bg">看板</span>
+            <span class="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-gx-12 text-gx-text-tertiary hover:bg-gx-bg">画廊</span>
+            <span class="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-gx-12 text-gx-text-tertiary hover:bg-gx-bg">日历</span>
+            <span class="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-gx-12 text-gx-text-tertiary hover:bg-gx-bg">表单</span>
+          </div>
+
+          <!-- 第二行：新建记录 + 搜索 / 导入 / 导出 / 更多（h-11=44） -->
+          <div class="flex h-11 min-w-0 items-center gap-1 px-2">
+            <span class="inline-flex shrink-0">
+              <button type="button" class="inline-flex items-center justify-center gap-1 rounded-gx-sm bg-gx-accent px-2 py-1 text-gx-12 font-medium text-white hover:brightness-95">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                新建记录
+              </button>
+            </span>
+
+            <div class="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1 md:flex-none">
+              <div class="flex h-7 w-full items-center gap-1.5 rounded-gx-sm border border-gx-border bg-gx-bg px-2 text-gx-12 text-gx-text-tertiary md:w-[170px]">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M21 21l-4.35-4.35"/></svg>
+                <span class="truncate">搜索此视图…</span>
+              </div>
+            </div>
+
+            <button type="button" class="inline-flex items-center gap-1 rounded-gx-sm px-1.5 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9"/><path d="M7 14l5-5 5 5"/><path d="M4 3h16"/></svg>
+              导入
+            </button>
+            <button type="button" class="inline-flex items-center gap-1 rounded-gx-sm px-1.5 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>
+              导出
+            </button>
+            <button type="button" class="inline-flex items-center gap-1 rounded-gx-sm px-1.5 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+              更多
+            </button>
+          </div>
+        </div>
+
+        <!-- 第三行（网格专属六项） -->
+        <div class="flex h-10 shrink-0 items-center gap-1 border-b border-gx-separator px-2">
+          <button type="button" class="inline-flex items-center gap-1 rounded-gx-sm px-1.5 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover">行高</button>
+          <button type="button" class="inline-flex items-center gap-1 rounded-gx-sm px-1.5 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover">字段</button>
+          <button type="button" class="inline-flex items-center gap-1 rounded-gx-sm px-1.5 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18"/><path d="M6 12h12"/><path d="M10 19h4"/></svg>
+            筛选
+          </button>
+          <button type="button" class="inline-flex items-center gap-1 rounded-gx-sm px-1.5 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover">分组</button>
+          <button type="button" class="inline-flex items-center gap-1 rounded-gx-sm px-1.5 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover">排序</button>
+          <button type="button" class="inline-flex items-center gap-1 rounded-gx-sm px-1.5 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover">行颜色</button>
+        </div>
+
+        <!-- 表格区 -->
+        <div class="flex-1 overflow-auto outline-none">
+          <table class="table-fixed border-separate border-spacing-0" style="width:100%;min-width:1100px">
+            <thead class="sticky top-0 z-10">
+              <tr>
+                <th class="sticky left-0 z-30 border-b border-r border-gx-hairline bg-gx-table-header" style="width:56px;min-width:56px;height:36px">
+                  <div class="flex h-full items-center justify-center">
+                    <span class="flex h-3.5 w-3.5 items-center justify-center rounded-sm border border-gx-border-strong bg-gx-surface"></span>
+                  </div>
+                </th>
+                <th class="sticky left-[56px] z-20 border-b border-r border-gx-hairline bg-gx-table-header px-3 text-left" style="width:260px;min-width:260px;height:36px">
+                  <div class="flex h-full items-center gap-1">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gx-text-hint"><path d="M4 7h16"/><path d="M4 12h10"/><path d="M4 17h6"/></svg>
+                    <span class="flex-1 truncate text-gx-12 font-medium text-gx-text-tertiary">需求名称</span>
+                  </div>
+                </th>
+                <th class="relative border-b border-gx-hairline bg-gx-table-header px-3 text-left" style="width:120px;min-width:120px;height:36px">
+                  <div class="flex h-full items-center gap-1">
+                    <span class="flex-1 truncate text-gx-12 font-medium text-gx-text-tertiary">状态</span>
+                  </div>
+                </th>
+                <th class="relative border-b border-gx-hairline bg-gx-table-header px-3 text-left" style="width:120px;min-width:120px;height:36px">
+                  <div class="flex h-full items-center gap-1">
+                    <span class="flex-1 truncate text-gx-12 font-medium text-gx-text-tertiary">负责人</span>
+                  </div>
+                </th>
+                <th class="relative border-b border-gx-hairline bg-gx-table-header px-3 text-left" style="width:110px;min-width:110px;height:36px">
+                  <div class="flex h-full items-center gap-1">
+                    <span class="flex-1 truncate text-gx-12 font-medium text-gx-text-tertiary">优先级</span>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gx-accent"><path d="M4 7h10"/><path d="M4 12h7"/><path d="M4 17h4"/><path d="M17 17V7"/><path d="M17 7l-3 3"/></svg>
+                  </div>
+                </th>
+                <th class="relative border-b border-gx-hairline bg-gx-table-header px-3 text-left" style="width:140px;min-width:140px;height:36px">
+                  <div class="flex h-full items-center gap-1">
+                    <span class="flex-1 truncate text-gx-12 font-medium text-gx-text-tertiary">截止日期</span>
+                  </div>
+                </th>
+                <th class="relative border-b border-gx-hairline bg-gx-table-header px-3 text-right" style="width:110px;min-width:110px;height:36px">
+                  <div class="flex h-full items-center justify-end gap-1">
+                    <span class="flex-1 truncate text-gx-12 font-medium text-gx-text-tertiary">预估工时</span>
+                  </div>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- 行高 44（medium 档） -->
+              <tr class="bg-gx-surface hover:bg-gx-row-hover cursor-pointer">
+                <td class="sticky left-0 z-20 border-b border-r border-gx-hairline bg-inherit" style="width:56px;min-width:56px;height:44px">
+                  <div class="flex h-full items-center gap-1 px-1.5">
+                    <span class="w-5 text-center text-gx-11 text-gx-text-hint">1</span>
+                  </div>
+                </td>
+                <td class="sticky left-[56px] z-10 border-b border-r border-gx-hairline bg-inherit px-3 text-gx-13 text-gx-text-primary"><div class="cell-text">登录支持短信验证码</div></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-gx-11" style="background:#EAF2FC;color:#2F5FD6">进行中</span></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13 text-gx-text-secondary"><div class="cell-text">张伟</div></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-gx-11" style="background:#FEF3F2;color:#B42318">高</span></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13 text-gx-text-secondary">2026-10-28</td>
+                <td class="border-b border-gx-hairline px-3 text-right text-gx-13 tabular-nums text-gx-text-secondary">16</td>
+              </tr>
+              <tr class="bg-gx-surface hover:bg-gx-row-hover cursor-pointer">
+                <td class="sticky left-0 z-20 border-b border-r border-gx-hairline bg-inherit" style="width:56px;min-width:56px;height:44px">
+                  <div class="flex h-full items-center gap-1 px-1.5"><span class="w-5 text-center text-gx-11 text-gx-text-hint">2</span></div>
+                </td>
+                <td class="sticky left-[56px] z-10 border-b border-r border-gx-hairline bg-inherit px-3 text-gx-13 text-gx-text-primary"><div class="cell-text">数据表支持批量导入 Excel</div></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-gx-11" style="background:#ECFDF3;color:#067647">已完成</span></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13 text-gx-text-secondary"><div class="cell-text">李娜</div></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-gx-11" style="background:#FFFAEB;color:#B54708">中</span></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13 text-gx-text-secondary">2026-10-22</td>
+                <td class="border-b border-gx-hairline px-3 text-right text-gx-13 tabular-nums text-gx-text-secondary">8</td>
+              </tr>
+              <tr class="bg-gx-surface hover:bg-gx-row-hover cursor-pointer">
+                <td class="sticky left-0 z-20 border-b border-r border-gx-hairline bg-inherit" style="width:56px;min-width:56px;height:44px">
+                  <div class="flex h-full items-center gap-1 px-1.5"><span class="w-5 text-center text-gx-11 text-gx-text-hint">3</span></div>
+                </td>
+                <td class="sticky left-[56px] z-10 border-b border-r border-gx-hairline bg-inherit px-3 text-gx-13 text-gx-text-primary"><div class="cell-text">知识库文档支持导出 PDF</div></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-gx-11" style="background:#F1F5FB;color:#5B6785">待规划</span></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13 text-gx-text-secondary"><div class="cell-text">王强</div></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-gx-11" style="background:#FFFAEB;color:#B54708">中</span></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13 text-gx-text-secondary">2026-11-05</td>
+                <td class="border-b border-gx-hairline px-3 text-right text-gx-13 tabular-nums text-gx-text-secondary">12</td>
+              </tr>
+              <tr class="bg-gx-accent-bg cursor-pointer">
+                <td class="sticky left-0 z-20 border-b border-r border-gx-hairline bg-inherit" style="width:56px;min-width:56px;height:44px">
+                  <div class="flex h-full items-center gap-1 px-1.5"><span class="w-5 text-center text-gx-11 text-gx-text-hint">4</span></div>
+                </td>
+                <td class="sticky left-[56px] z-10 border-b border-r border-gx-hairline bg-inherit px-3 text-gx-13 text-gx-text-primary"><div class="cell-text">看板视图拖拽排序</div></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-gx-11" style="background:#EAF2FC;color:#2F5FD6">进行中</span></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13 text-gx-text-secondary"><div class="cell-text">陈静</div></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-gx-11" style="background:#FEF3F2;color:#B42318">高</span></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13 text-gx-text-secondary">2026-10-31</td>
+                <td class="border-b border-gx-hairline px-3 text-right text-gx-13 tabular-nums text-gx-text-secondary">20</td>
+              </tr>
+              <tr class="bg-gx-surface hover:bg-gx-row-hover cursor-pointer">
+                <td class="sticky left-0 z-20 border-b border-r border-gx-hairline bg-inherit" style="width:56px;min-width:56px;height:44px">
+                  <div class="flex h-full items-center gap-1 px-1.5"><span class="w-5 text-center text-gx-11 text-gx-text-hint">5</span></div>
+                </td>
+                <td class="sticky left-[56px] z-10 border-b border-r border-gx-hairline bg-inherit px-3 text-gx-13 text-gx-text-primary"><div class="cell-text">桌面端离线编辑冲突处理</div></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-gx-11" style="background:#F1F5FB;color:#5B6785">待规划</span></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13 text-gx-text-secondary"><div class="cell-text">戴</div></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-gx-11" style="background:#FEF3F2;color:#B42318">高</span></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13 text-gx-text-secondary">2026-11-15</td>
+                <td class="border-b border-gx-hairline px-3 text-right text-gx-13 tabular-nums text-gx-text-secondary">40</td>
+              </tr>
+              <tr class="bg-gx-surface hover:bg-gx-row-hover cursor-pointer">
+                <td class="sticky left-0 z-20 border-b border-r border-gx-hairline bg-inherit" style="width:56px;min-width:56px;height:44px">
+                  <div class="flex h-full items-center gap-1 px-1.5"><span class="w-5 text-center text-gx-11 text-gx-text-hint">6</span></div>
+                </td>
+                <td class="sticky left-[56px] z-10 border-b border-r border-gx-hairline bg-inherit px-3 text-gx-13 text-gx-text-primary"><div class="cell-text">权限矩阵支持按角色复制</div></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-gx-11" style="background:#ECFDF3;color:#067647">已完成</span></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13 text-gx-text-secondary"><div class="cell-text">刘洋</div></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-gx-11" style="background:#FFFAEB;color:#B54708">中</span></td>
+                <td class="border-b border-gx-hairline px-3 text-gx-13 text-gx-text-secondary">2026-10-18</td>
+                <td class="border-b border-gx-hairline px-3 text-right text-gx-13 tabular-nums text-gx-text-secondary">6</td>
+              </tr>
+              <!-- 聚合行（h-8=32） -->
+              <tr class="bg-gx-bg">
+                <td class="sticky left-0 z-20 border-b border-r border-gx-hairline bg-gx-bg" style="width:56px;min-width:56px;height:32px">
+                  <div class="flex h-8 items-center px-2 text-gx-11 text-gx-text-hint">合计</div>
+                </td>
+                <td class="sticky left-[56px] z-10 border-b border-r border-gx-hairline bg-gx-bg px-3 text-gx-12 text-gx-text-hint" style="width:260px">6 条</td>
+                <td class="border-b border-gx-hairline bg-gx-bg px-3"></td>
+                <td class="border-b border-gx-hairline bg-gx-bg px-3"></td>
+                <td class="border-b border-gx-hairline bg-gx-bg px-3"></td>
+                <td class="border-b border-gx-hairline bg-gx-bg px-3"></td>
+                <td class="border-b border-gx-hairline bg-gx-bg px-3 text-right text-gx-12 tabular-nums text-gx-text-secondary">102</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 状态条（h-7=28） -->
+        <div class="flex h-7 items-center gap-3 border-t border-gx-separator bg-gx-bg px-3 text-gx-11 text-gx-text-hint">
+          <span>共 128 条</span>
+          <span>已加载 6 条</span>
+          <span class="flex-1"></span>
+          <span>表格视图</span>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="proto-note">实际 UI 抽离 · 数据表主界面<br>样式=真实 Tailwind 产物，结构=真实组件类名，无业务逻辑</div>
+</body>
+</html>

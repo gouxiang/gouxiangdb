@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>实际 UI 抽离 · 改造工作台</title>
+<link rel="stylesheet" href="./assets/viewer.css" />
+</head>
+<body>
+
+<div class="viewer">
+  <aside class="rail">
+    <div class="rail-head">
+      <div class="rail-title">实际 UI 抽离 · 改造工作台</div>
+      <div class="rail-sub">
+        从真实组件抽取的结构与类名，样式直接复用真实 Tailwind 产物。<br>
+        去除业务逻辑与数据，只留视图，用于在此之上改设计。
+      </div>
+    </div>
+    <div class="rail-body" id="railBody"></div>
+  </aside>
+
+  <main class="stage-wrap">
+    <div class="stage-bar">
+      <span class="stage-name" id="stageName"></span>
+      <code class="stage-route" id="stageRoute"></code>
+      <div class="stage-spacer"></div>
+      <div class="seg" id="zoomSeg">
+        <button data-z="0.5">50%</button>
+        <button data-z="0.75" class="is-on">75%</button>
+        <button data-z="1">100%</button>
+      </div>
+    </div>
+
+    <div class="stage-scroll">
+      <div id="fit"><iframe id="frame" src="pages/table-grid.html"></iframe></div>
+    </div>
+  </main>
+</div>
+
+<script src="./assets/viewer.js"></script>
+</body>
+</html>
