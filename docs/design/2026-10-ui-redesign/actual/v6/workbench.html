@@ -65,7 +65,7 @@ svg { display: block; }
 .app { display: flex; height: 100vh; overflow: hidden; }
 
 .rail {
-  width: 76px; flex: none;
+  width: 84px; flex: none;
   display: flex; flex-direction: column; align-items: center;
   padding: 14px 0 12px;
   background: var(--card);
@@ -74,12 +74,13 @@ svg { display: block; }
 .rail-mark { width: 32px; height: 32px; border-radius: 8px; overflow: hidden; }
 .rail-nav { display: flex; flex-direction: column; gap: 4px; margin-top: 18px; width: 100%; align-items: center; }
 .rail-item {
-  width: 60px; padding: 7px 0 6px; border: 0; border-radius: 10px; background: transparent;
+  width: 68px; padding: 7px 0 6px; border: 0; border-radius: 10px; background: transparent;
   display: flex; flex-direction: column; align-items: center; gap: 3px;
   color: var(--ink-3); cursor: pointer;
   transition: background .15s, color .15s;
 }
-.rail-item span { font-size: 10.5px; line-height: 1.2; letter-spacing: .01em; }
+.rail-item span { font-size: 10px; line-height: 1.2; letter-spacing: .01em; max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-sep { width: 26px; height: 1px; background: var(--line); margin: 5px 0; flex: none; }
 .rail-item:hover { background: var(--hover); color: var(--ink-1); }
 .rail-item.is-active { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
 .rail-foot { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; }
@@ -230,6 +231,43 @@ svg { display: block; }
 .scroll::-webkit-scrollbar-thumb { background: #dbe1ec; border: 3px solid var(--bg); border-radius: 999px; }
 .scroll::-webkit-scrollbar-thumb:hover { background: #c6ceda; }
 
+/* ---------------- L2：库内清单（真实二级导航） ---------------- */
+.l2 {
+  width: 236px; flex: none;
+  display: flex; flex-direction: column;
+  background: var(--card); border-right: 1px solid var(--line);
+}
+.l2-h {
+  height: 56px; flex: none;
+  display: flex; align-items: center; gap: 7px;
+  padding: 0 8px 0 14px; border-bottom: 1px solid var(--line-2);
+}
+.l2-title { font-size: 13px; font-weight: 600; color: var(--ink-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.l2-act { margin-left: auto; }
+.l2-search {
+  display: flex; align-items: center; gap: 6px; flex: none;
+  margin: 8px 10px 4px; height: 28px; padding: 0 9px;
+  border: 1px solid var(--line); border-radius: var(--r-ctl);
+  background: var(--sub); color: var(--ink-4); font-size: 12px; cursor: pointer;
+}
+.l2-search:hover { background: #fff; border-color: #d6dce8; }
+.l2-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 8px 8px; }
+.l2-item {
+  display: flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 8px; border-radius: 7px;
+  color: var(--ink-2); font-size: 12.5px; cursor: pointer;
+  transition: background .13s, color .13s;
+}
+.l2-item .ico { color: var(--ink-4); display: flex; flex: none; }
+.l2-item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l2-item .cnt { font-size: 11px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.l2-item:hover { background: var(--hover); color: var(--ink-1); }
+.l2-item.is-active { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
+.l2-item.is-active .ico, .l2-item.is-active .cnt { color: var(--brand-ink); }
+.l2-item.is-active .cnt { opacity: .8; }
+.l2-foot { flex: none; border-top: 1px solid var(--line-2); padding: 6px 8px 8px; }
+.l2-item.sub { height: 30px; font-size: 12px; color: var(--ink-3); }
+
 .proto-note {
   position: fixed; right: 20px; bottom: 16px; z-index: 40;
   padding: 5px 10px; border-radius: 8px;
@@ -289,44 +327,70 @@ svg { display: block; }
   <line x1="98" y1="112" x2="146" y2="112" stroke="url(#gxlogo-bandk)" stroke-width="11" stroke-linecap="round"/>
 </svg></div>
     <nav class="rail-nav">
-        <a class="rail-item is-active" href="workbench.html"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg><span>工作台</span></a>
-        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.9 9.9 0 0 1-2.8-.4L3 21l1.9-4.6A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/></svg><span>消息</span></a>
-        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M3 11h18"/></svg><span>日程</span></a>
-        <a class="rail-item" href="data-table.html"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>数据</span></a>
-        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>知识</span></a>
-        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>通讯录</span></a>
+      <a class="rail-item is-active" href="workbench.html"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg><span>工作台</span></a>
+      <div class="rail-sep"></div>
+      <a class="rail-item" href="data-table.html"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>产品中心</span></a>
+      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>客户与合同</span></a>
+      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>运营指标</span></a>
+      <div class="rail-sep"></div>
+      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>产品知识库</span></a>
+      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>研发手册</span></a>
+      <div class="rail-sep"></div>
+      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>通讯录</span></a>
     </nav>
     <div class="rail-foot">
-      <button class="rail-item" title="设置"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>设置</span></button>
+      <button class="rail-item" title="设置"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>设置</span></button>
+    </div>
+  </aside>
+
+  <aside class="l2">
+    <div class="l2-h">
+      <span class="l2-title">个人工作台</span>
+      <span class="tag tag-warm">规划中</span>
+      <button class="icon-btn l2-act" title="工作台设置"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg></button>
+    </div>
+    
+    <div class="l2-list">
+      <a class="l2-item is-active" href="workbench.html">
+        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">概览</span>
+      </a>
+      <a class="l2-item" href="#">
+        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">我负责的记录</span><span class="cnt">24</span>
+      </a>
+      <a class="l2-item" href="#">
+        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">我的收藏</span><span class="cnt">8</span>
+      </a>
+      <a class="l2-item" href="#">
+        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">最近访问</span>
+      </a>
+    </div>
+    <div class="l2-foot">
+      <a class="l2-item sub" href="#"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="nm">工作台设置</span></a>
     </div>
   </aside>
 
   <div class="main">
     <header class="topbar">
       <div class="crumb"><span class="c1">工作台</span><span class="sep">/</span><span class="c2">概览</span></div>
-      <button class="cmd"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M21 21l-4.35-4.35"/></svg><span class="ph">搜索数据表、文档、成员…</span><span class="kbd">⌘K</span></button>
+      <button class="cmd"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M21 21l-4.35-4.35"/></svg><span class="ph">搜索数据表、文档、成员…</span><span class="kbd">⌘K</span></button>
       <div class="top-right">
-        <button class="icon-btn" title="通知"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="dot"></span></button>
-        <button class="icon-btn" title="帮助"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.6 2.3c-.7.4-1.2 1-1.2 1.8v.4"/><circle cx="12" cy="17.2" r=".8" fill="currentColor" stroke="none"/></svg></button>
+        <button class="icon-btn" title="通知"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.85"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="dot"></span></button>
+        <button class="icon-btn" title="帮助"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.85"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.6 2.3c-.7.4-1.2 1-1.2 1.8v.4"/><circle cx="12" cy="17.2" r=".8" fill="currentColor" stroke="none"/></svg></button>
         <div class="vline"></div>
-        <div class="who"><span class="av av-md av-a">戴</span><span class="nm">戴静</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--ink-4)"><path d="M6 9l6 6 6-6"/></svg></div>
+        <div class="who"><span class="av av-md av-a">戴</span><span class="nm">戴静</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" style="color:var(--ink-4)"><path d="M6 9l6 6 6-6"/></svg></div>
       </div>
     </header>
     <div class="scroll">
 <style>
-  /* ===== 工作台首页 ===== */
-  .hero {
-    display: flex; align-items: flex-end; gap: 20px;
-    padding: 4px 2px 18px;
-  }
+  /* ===== 工作台首页（个人工作台 · 规划中） ===== */
+  .hero { display: flex; align-items: flex-end; gap: 20px; padding: 2px 2px 18px; }
   .hero-l { min-width: 0; }
   .hero-date { font-size: 12px; color: var(--ink-4); letter-spacing: .02em; }
-  .hero h1 { margin: 4px 0 6px; font-size: 22px; line-height: 1.25; font-weight: 600; color: var(--ink-1); letter-spacing: -.01em; }
+  .hero h1 { margin: 4px 0 6px; font-size: 22px; line-height: 1.25; font-weight: 600; color: var(--ink-1); letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
   .hero-sub { font-size: 12.5px; color: var(--ink-3); }
   .hero-sub b { color: var(--ink-1); font-weight: 600; }
   .hero-r { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
 
-  /* KPI */
   .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
   .kpi { padding: 14px 16px 15px; display: flex; flex-direction: column; gap: 6px; }
   .kpi-t { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); }
@@ -335,42 +399,23 @@ svg { display: block; }
   .kpi-f { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-4); }
   .delta { display: inline-flex; align-items: center; gap: 2px; font-weight: 500; }
   .delta.up { color: var(--ok); }
-  .delta.down { color: var(--danger); }
-  .kpi.alert .kpi-v { color: var(--warm); }
 
-  /* 待办行 */
   .todo { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 8px; border-radius: var(--r-ctl); cursor: pointer; }
   .todo:hover { background: var(--hover); }
-  .todo .cb {
-    width: 15px; height: 15px; flex: none; border: 1.5px solid #cdd5e3; border-radius: 4px; background: #fff;
-  }
+  .todo .cb { width: 15px; height: 15px; flex: none; border: 1.5px solid #cdd5e3; border-radius: 4px; background: #fff; }
   .todo .tt { flex: 1; min-width: 0; }
   .todo .tt b { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .todo .tt span { display: block; font-size: 11.5px; color: var(--ink-4); margin-top: 1px; }
   .todo .due { font-size: 11.5px; color: var(--ink-3); flex: none; display: inline-flex; align-items: center; gap: 4px; }
   .todo .due.soon { color: var(--danger); }
 
-  /* 趋势图 */
   .chart { padding: 4px 8px 10px; }
   .chart-legend { display: flex; align-items: center; gap: 14px; padding: 0 8px 8px; font-size: 11.5px; color: var(--ink-3); }
   .chart-legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 5px; }
   .chart-foot { display: flex; align-items: center; justify-content: space-between; padding: 2px 10px 0; font-size: 11.5px; color: var(--ink-4); }
 
-  /* 审批 */
-  .approve { display: flex; align-items: center; gap: 10px; padding: 11px 8px; border-radius: var(--r-ctl); cursor: pointer; }
-  .approve + .approve { border-top: 1px solid var(--line-2); }
-  .approve:hover { background: var(--hover); }
-  .approve .tt { flex: 1; min-width: 0; }
-  .approve .tt b { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink-1); }
-  .approve .tt span { display: block; font-size: 11.5px; color: var(--ink-4); margin-top: 1px; }
-
-  /* 应用宫格 */
   .apps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 6px 8px 10px; }
-  .app-t {
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
-    padding: 10px 4px 8px; border-radius: 10px; cursor: pointer; border: 0; background: transparent;
-    transition: background .15s;
-  }
+  .app-t { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px 8px; border-radius: 10px; cursor: pointer; border: 0; background: transparent; transition: background .15s; }
   .app-t:hover { background: var(--hover); }
   .app-i { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: #fff; }
   .app-t span { font-size: 11.5px; color: var(--ink-2); }
@@ -382,7 +427,6 @@ svg { display: block; }
   .app-rose { background: linear-gradient(135deg, #f0796b, #d92d20); }
   .app-slate { background: linear-gradient(135deg, #8b96ac, #667085); }
 
-  /* 动态流 */
   .feed { padding: 4px 8px 8px; }
   .fi { display: flex; gap: 9px; padding: 9px 8px; border-radius: var(--r-ctl); }
   .fi:hover { background: var(--hover); }
@@ -391,26 +435,21 @@ svg { display: block; }
   .fi .fc em { font-style: normal; color: var(--brand-ink); }
   .fi .ft { display: block; font-size: 11px; color: var(--ink-4); margin-top: 2px; }
 
-  /* 日程 */
-  .sch { padding: 4px 8px 8px; }
-  .si { display: flex; gap: 10px; padding: 9px 8px; border-radius: var(--r-ctl); }
-  .si:hover { background: var(--hover); }
-  .si .st { width: 42px; flex: none; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; padding-top: 1px; }
-  .si .sc { flex: 1; min-width: 0; border-left: 2px solid var(--brand-soft); padding-left: 9px; }
-  .si.violet .sc { border-left-color: var(--violet-soft); }
-  .si.warm .sc { border-left-color: var(--warm-soft); }
-  .si .sc b { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink-1); }
-  .si .sc span { display: block; font-size: 11.5px; color: var(--ink-4); margin-top: 1px; }
+  .fav { display: flex; align-items: center; gap: 9px; padding: 9px 8px; border-radius: var(--r-ctl); cursor: pointer; }
+  .fav:hover { background: var(--hover); }
+  .fav .fi2 { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; flex: none; }
+  .fav .tt { flex: 1; min-width: 0; }
+  .fav .tt b { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink-1); }
+  .fav .tt span { display: block; font-size: 11px; color: var(--ink-4); margin-top: 1px; }
 </style>
 
 <div class="wrap">
 
-  <!-- ===== 问候区 ===== -->
   <div class="hero">
     <div class="hero-l">
       <div class="hero-date">2026 年 10 月 20 日 · 周二</div>
-      <h1>下午好，戴静</h1>
-      <div class="hero-sub">你有 <b>5</b> 项待办、<b>2</b> 条审批待处理，<b>1</b> 个交付今日到期</div>
+      <h1>下午好，戴静 <span class="tag tag-warm">规划中</span></h1>
+      <div class="hero-sub">我有 <b>24</b> 条负责的记录，其中 <b>3</b> 条本周到期；团队本周新增 <b>348</b> 条记录</div>
     </div>
     <div class="hero-r">
       <button class="btn">
@@ -422,28 +461,27 @@ svg { display: block; }
         新建文档
       </button>
       <button class="btn btn-primary">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-        发起流程
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>
+        导入数据
       </button>
     </div>
   </div>
 
-  <!-- ===== KPI ===== -->
   <div class="kpis">
     <section class="card kpi">
-      <div class="kpi-t">在办项目</div>
-      <div class="kpi-v tnum">12<span class="u">个</span></div>
-      <div class="kpi-f"><span class="delta up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>2</span> 较上周</div>
+      <div class="kpi-t">我的数据表</div>
+      <div class="kpi-v tnum">6<span class="u">张</span></div>
+      <div class="kpi-f">分布在 3 个库</div>
     </section>
-    <section class="card kpi alert">
-      <div class="kpi-t">待处理审批</div>
-      <div class="kpi-v tnum">2<span class="u">条</span></div>
-      <div class="kpi-f">其中 1 条已超 24 小时</div>
+    <section class="card kpi">
+      <div class="kpi-t">我负责的记录</div>
+      <div class="kpi-v tnum">24<span class="u">条</span></div>
+      <div class="kpi-f">其中 <span style="color:var(--danger);font-weight:500">3 条</span> 本周到期</div>
     </section>
     <section class="card kpi">
       <div class="kpi-t">本周新增记录</div>
       <div class="kpi-v tnum">348<span class="u">条</span></div>
-      <div class="kpi-f"><span class="delta up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>18%</span> 环比</div>
+      <div class="kpi-f"><span class="delta up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>18%</span> 环比上周</div>
     </section>
     <section class="card kpi">
       <div class="kpi-t">团队活跃</div>
@@ -456,23 +494,22 @@ svg { display: block; }
     </section>
   </div>
 
-  <!-- ===== 主栅格 ===== -->
   <div class="cols">
     <div class="stack">
 
-      <!-- 我的待办 -->
       <section class="card">
         <div class="card-h">
-          <span class="card-t">我的待办</span>
-          <span class="tag tag-gray">5</span>
-          <button class="card-more">全部待办
+          <span class="card-t">我负责的记录</span>
+          <span class="tag tag-gray">24</span>
+          <span class="card-sub">按截止日期</span>
+          <button class="card-more">全部
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
           </button>
         </div>
         <div class="card-b">
           <div class="todo">
             <span class="cb"></span>
-            <div class="tt"><b>补充 Q4 产品路线图评审材料</b><span>产品中心 · 负责人 戴静</span></div>
+            <div class="tt"><b>多端离线编辑冲突合并策略</b><span>需求池 · 产品中心</span></div>
             <span class="tag tag-danger">高</span>
             <span class="due soon">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
@@ -481,33 +518,32 @@ svg { display: block; }
           </div>
           <div class="todo">
             <span class="cb"></span>
-            <div class="tt"><b>客户合同模板条款复核</b><span>客户与合同 · 负责人 李哲</span></div>
-            <span class="tag tag-warm">中</span>
-            <span class="due">明日 12:00</span>
-          </div>
-          <div class="todo">
-            <span class="cb"></span>
-            <div class="tt"><b>数据表权限模型设计确认</b><span>平台能力 · 负责人 王倩</span></div>
+            <div class="tt"><b>数据表字段级权限模型</b><span>需求池 · 产品中心</span></div>
             <span class="tag tag-danger">高</span>
-            <span class="due">10-22</span>
+            <span class="due">10-24</span>
           </div>
           <div class="todo">
             <span class="cb"></span>
-            <div class="tt"><b>供应商对账异常排查</b><span>财务 · 负责人 周敏</span></div>
+            <div class="tt"><b>客户合同模板条款复核</b><span>客户档案 · 客户与合同</span></div>
             <span class="tag tag-warm">中</span>
             <span class="due">10-23</span>
           </div>
           <div class="todo">
             <span class="cb"></span>
-            <div class="tt"><b>研发手册目录结构整理</b><span>研发手册 · 负责人 陈然</span></div>
-            <span class="tag tag-gray">低</span>
+            <div class="tt"><b>离线同步异常提示文案确认</b><span>迭代计划 · 产品中心</span></div>
+            <span class="tag tag-warm">中</span>
             <span class="due">10-25</span>
+          </div>
+          <div class="todo">
+            <span class="cb"></span>
+            <div class="tt"><b>研发手册目录结构整理</b><span>研发手册 · 文档</span></div>
+            <span class="tag tag-gray">低</span>
+            <span class="due">10-28</span>
           </div>
         </div>
       </section>
 
       <div class="row2">
-        <!-- 趋势 -->
         <section class="card">
           <div class="card-h">
             <span class="card-t">记录增长</span>
@@ -521,7 +557,7 @@ svg { display: block; }
             <svg viewBox="0 0 420 128" width="100%" height="128" preserveAspectRatio="none" aria-hidden="true">
               <defs>
                 <linearGradient id="wb-area" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stop-color="#2c7be5" stop-opacity="0.18"/>
+                  <stop offset="0" stop-color="#2c7be5" stop-opacity="0.16"/>
                   <stop offset="1" stop-color="#2c7be5" stop-opacity="0"/>
                 </linearGradient>
               </defs>
@@ -540,36 +576,43 @@ svg { display: block; }
           </div>
         </section>
 
-        <!-- 待我审批 -->
         <section class="card">
           <div class="card-h">
-            <span class="card-t">待我审批</span>
-            <span class="tag tag-warm">2</span>
-            <button class="card-more">审批中心
+            <span class="card-t">我的收藏</span>
+            <span class="tag tag-gray">8</span>
+            <button class="card-more">管理
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
             </button>
           </div>
           <div class="card-b">
-            <div class="approve">
-              <span class="av av-e">张</span>
-              <div class="tt"><b>采购申请 · ¥12,800</b><span>张伟 · 已等待 2 小时</span></div>
-              <button class="btn btn-sm">处理</button>
+            <div class="fav">
+              <span class="fi2" style="background:var(--brand-soft);color:var(--brand-ink)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
+              </span>
+              <div class="tt"><b>需求池</b><span>数据表 · 产品中心</span></div>
             </div>
-            <div class="approve">
-              <span class="av av-c">李</span>
-              <div class="tt"><b>数据导出授权</b><span>李哲 · 产品库 → 外部</span></div>
-              <button class="btn btn-sm">处理</button>
+            <div class="fav">
+              <span class="fi2" style="background:var(--violet-soft);color:var(--violet)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2z"/></svg>
+              </span>
+              <div class="tt"><b>发布流程规范</b><span>文档 · 研发手册</span></div>
             </div>
-            <div class="approve">
-              <span class="av av-b">王</span>
-              <div class="tt"><b>文档发布申请</b><span>王倩 · 研发手册 v2.1</span></div>
-              <button class="btn btn-sm">处理</button>
+            <div class="fav">
+              <span class="fi2" style="background:var(--brand-soft);color:var(--brand-ink)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
+              </span>
+              <div class="tt"><b>客户档案</b><span>数据表 · 客户与合同</span></div>
+            </div>
+            <div class="fav">
+              <span class="fi2" style="background:var(--brand-soft);color:var(--brand-ink)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
+              </span>
+              <div class="tt"><b>迭代计划</b><span>数据表 · 产品中心</span></div>
             </div>
           </div>
         </section>
       </div>
 
-      <!-- 最近访问 -->
       <section class="card">
         <div class="card-h">
           <span class="card-t">最近访问</span>
@@ -579,36 +622,34 @@ svg { display: block; }
         </div>
         <div class="card-b" style="display:grid;grid-template-columns:1fr 1fr;gap:0 8px">
           <div class="li">
-            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
+            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
             <span class="t">需求池</span><span class="m">2 分钟前</span>
           </div>
           <div class="li">
-            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2z"/></svg>
+            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2z"/></svg>
             <span class="t">Q4 产品路线图</span><span class="m">1 小时前</span>
           </div>
           <div class="li">
-            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
+            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
             <span class="t">客户档案</span><span class="m">昨天</span>
           </div>
           <div class="li">
-            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
             <span class="t">发布流程规范</span><span class="m">昨天</span>
           </div>
           <div class="li">
-            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
+            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
             <span class="t">迭代计划</span><span class="m">10-18</span>
           </div>
           <div class="li">
-            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
+            <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
             <span class="t">供应商对账</span><span class="m">10-17</span>
           </div>
         </div>
       </section>
     </div>
 
-    <!-- 右列 -->
     <div class="stack">
-      <!-- 常用应用 -->
       <section class="card">
         <div class="card-h">
           <span class="card-t">常用应用</span>
@@ -620,15 +661,14 @@ svg { display: block; }
           <button class="app-t"><span class="app-i app-blue"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span>数据表</span></button>
           <button class="app-t"><span class="app-i app-violet"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2z"/></svg></span><span>文档</span></button>
           <button class="app-t"><span class="app-i app-ok"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="10" rx="1.5"/></svg></span><span>看板</span></button>
-          <button class="app-t"><span class="app-i app-warm"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l3 4v12H6V8z"/><path d="M9 13h6"/><path d="M9 16h4"/></svg></span><span>表单</span></button>
-          <button class="app-t"><span class="app-i app-cyan"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span><span>审批</span></button>
-          <button class="app-t"><span class="app-i app-rose"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M3 11h18"/></svg></span><span>日程</span></button>
+          <button class="app-t"><span class="app-i app-warm"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M3 11h18"/></svg></span><span>日历</span></button>
+          <button class="app-t"><span class="app-i app-cyan"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l3 4v12H6V8z"/><path d="M9 13h6"/><path d="M9 16h4"/></svg></span><span>表单</span></button>
           <button class="app-t"><span class="app-i app-slate"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg></span><span>通讯录</span></button>
-          <button class="app-t"><span class="app-i app-blue"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V11"/><path d="M10 20V5"/><path d="M16 20v-6"/><path d="M22 20V8"/></svg></span><span>报表</span></button>
+          <button class="app-t"><span class="app-i app-rose"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg></span><span>回收站</span></button>
+          <button class="app-t"><span class="app-i app-blue"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg></span><span>画廊</span></button>
         </div>
       </section>
 
-      <!-- 团队动态 -->
       <section class="card">
         <div class="card-h">
           <span class="card-t">团队动态</span>
@@ -646,31 +686,15 @@ svg { display: block; }
             <div class="fc"><b>李哲</b> 发布文档 <em>支付网关接入规范 v1.2</em><span class="ft">40 分钟前</span></div>
           </div>
           <div class="fi">
-            <span class="av av-a">陈</span>
-            <div class="fc"><b>陈然</b> 完成任务 <em>鉴权中间件重构</em><span class="ft">2 小时前</span></div>
+            <span class="av av-d">陈</span>
+            <div class="fc"><b>陈然</b> 更新 <em>迭代计划</em> 的 5 条记录<span class="ft">2 小时前</span></div>
           </div>
           <div class="fi">
             <span class="av av-e">周</span>
-            <div class="fc"><b>周敏</b> 提交审批 <em>采购申请 ¥12,800</em><span class="ft">2 小时前</span></div>
+            <div class="fc"><b>周敏</b> 导入 <em>供应商对账</em> 128 条数据<span class="ft">昨天</span></div>
           </div>
         </div>
       </section>
-
-      <!-- 今日日程 -->
-      <section class="card">
-        <div class="card-h">
-          <span class="card-t">今日日程</span>
-          <span class="card-sub">3 项</span>
-          <button class="card-more">日历
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
-          </button>
-        </div>
-        <div class="sch">
-          <div class="si"><span class="st">10:00</span><div class="sc"><b>产品周会</b><span>45 分钟 · 会议室 A</span></div></div>
-          <div class="si violet"><span class="st">14:30</span><div class="sc"><b>客户方案评审</b><span>线上 · 腾讯会议</span></div></div>
-          <div class="si warm"><span class="st">17:00</span><div class="sc"><b>UI 走查对齐</b><span>与设计组 · 30 分钟</span></div></div>
-        </div>
-      </section>
     </div>
   </div>
 </div>
@@ -678,6 +702,6 @@ svg { display: block; }
     </div>
   </div>
 </div>
-<div class="proto-note">v6 · 企业工作台新方向（旧拟物系列已封存）</div>
+<div class="proto-note">v6 · 企业工作台（L1 工作台/库/知识库 + L2 库内清单）</div>
 </body>
 </html>

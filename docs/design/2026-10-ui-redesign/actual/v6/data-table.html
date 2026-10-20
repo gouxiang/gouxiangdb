@@ -65,7 +65,7 @@ svg { display: block; }
 .app { display: flex; height: 100vh; overflow: hidden; }
 
 .rail {
-  width: 76px; flex: none;
+  width: 84px; flex: none;
   display: flex; flex-direction: column; align-items: center;
   padding: 14px 0 12px;
   background: var(--card);
@@ -74,12 +74,13 @@ svg { display: block; }
 .rail-mark { width: 32px; height: 32px; border-radius: 8px; overflow: hidden; }
 .rail-nav { display: flex; flex-direction: column; gap: 4px; margin-top: 18px; width: 100%; align-items: center; }
 .rail-item {
-  width: 60px; padding: 7px 0 6px; border: 0; border-radius: 10px; background: transparent;
+  width: 68px; padding: 7px 0 6px; border: 0; border-radius: 10px; background: transparent;
   display: flex; flex-direction: column; align-items: center; gap: 3px;
   color: var(--ink-3); cursor: pointer;
   transition: background .15s, color .15s;
 }
-.rail-item span { font-size: 10.5px; line-height: 1.2; letter-spacing: .01em; }
+.rail-item span { font-size: 10px; line-height: 1.2; letter-spacing: .01em; max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-sep { width: 26px; height: 1px; background: var(--line); margin: 5px 0; flex: none; }
 .rail-item:hover { background: var(--hover); color: var(--ink-1); }
 .rail-item.is-active { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
 .rail-foot { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; }
@@ -230,6 +231,43 @@ svg { display: block; }
 .scroll::-webkit-scrollbar-thumb { background: #dbe1ec; border: 3px solid var(--bg); border-radius: 999px; }
 .scroll::-webkit-scrollbar-thumb:hover { background: #c6ceda; }
 
+/* ---------------- L2：库内清单（真实二级导航） ---------------- */
+.l2 {
+  width: 236px; flex: none;
+  display: flex; flex-direction: column;
+  background: var(--card); border-right: 1px solid var(--line);
+}
+.l2-h {
+  height: 56px; flex: none;
+  display: flex; align-items: center; gap: 7px;
+  padding: 0 8px 0 14px; border-bottom: 1px solid var(--line-2);
+}
+.l2-title { font-size: 13px; font-weight: 600; color: var(--ink-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.l2-act { margin-left: auto; }
+.l2-search {
+  display: flex; align-items: center; gap: 6px; flex: none;
+  margin: 8px 10px 4px; height: 28px; padding: 0 9px;
+  border: 1px solid var(--line); border-radius: var(--r-ctl);
+  background: var(--sub); color: var(--ink-4); font-size: 12px; cursor: pointer;
+}
+.l2-search:hover { background: #fff; border-color: #d6dce8; }
+.l2-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 8px 8px; }
+.l2-item {
+  display: flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 8px; border-radius: 7px;
+  color: var(--ink-2); font-size: 12.5px; cursor: pointer;
+  transition: background .13s, color .13s;
+}
+.l2-item .ico { color: var(--ink-4); display: flex; flex: none; }
+.l2-item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l2-item .cnt { font-size: 11px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.l2-item:hover { background: var(--hover); color: var(--ink-1); }
+.l2-item.is-active { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
+.l2-item.is-active .ico, .l2-item.is-active .cnt { color: var(--brand-ink); }
+.l2-item.is-active .cnt { opacity: .8; }
+.l2-foot { flex: none; border-top: 1px solid var(--line-2); padding: 6px 8px 8px; }
+.l2-item.sub { height: 30px; font-size: 12px; color: var(--ink-3); }
+
 .proto-note {
   position: fixed; right: 20px; bottom: 16px; z-index: 40;
   padding: 5px 10px; border-radius: 8px;
@@ -289,27 +327,61 @@ svg { display: block; }
   <line x1="98" y1="112" x2="146" y2="112" stroke="url(#gxlogo-bandk)" stroke-width="11" stroke-linecap="round"/>
 </svg></div>
     <nav class="rail-nav">
-        <a class="rail-item" href="workbench.html"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg><span>工作台</span></a>
-        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.9 9.9 0 0 1-2.8-.4L3 21l1.9-4.6A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/></svg><span>消息</span></a>
-        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M3 11h18"/></svg><span>日程</span></a>
-        <a class="rail-item is-active" href="data-table.html"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>数据</span></a>
-        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>知识</span></a>
-        <a class="rail-item" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>通讯录</span></a>
+      <a class="rail-item" href="workbench.html"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg><span>工作台</span></a>
+      <div class="rail-sep"></div>
+      <a class="rail-item is-active" href="data-table.html"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>产品中心</span></a>
+      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>客户与合同</span></a>
+      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>运营指标</span></a>
+      <div class="rail-sep"></div>
+      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>产品知识库</span></a>
+      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>研发手册</span></a>
+      <div class="rail-sep"></div>
+      <a class="rail-item" href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>通讯录</span></a>
     </nav>
     <div class="rail-foot">
-      <button class="rail-item" title="设置"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>设置</span></button>
+      <button class="rail-item" title="设置"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>设置</span></button>
+    </div>
+  </aside>
+
+  <aside class="l2">
+    <div class="l2-h">
+      <span class="l2-title">产品中心</span>
+      <span class="tag tag-gray">库</span>
+      <button class="icon-btn l2-act" title="新建数据表"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg></button>
+    </div>
+    <div class="l2-search"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M21 21l-4.35-4.35"/></svg><span>搜索数据表</span></div>
+    <div class="l2-list">
+      <a class="l2-item is-active" href="data-table.html">
+        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">需求池</span><span class="cnt">128</span>
+      </a>
+      <a class="l2-item" href="#">
+        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">迭代计划</span><span class="cnt">24</span>
+      </a>
+      <a class="l2-item" href="#">
+        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">缺陷跟踪</span><span class="cnt">61</span>
+      </a>
+      <a class="l2-item" href="#">
+        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">客户档案</span><span class="cnt">78</span>
+      </a>
+      <a class="l2-item" href="#">
+        <span class="ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg></span><span class="nm">内容排期</span><span class="cnt">32</span>
+      </a>
+    </div>
+    <div class="l2-foot">
+      <a class="l2-item sub" href="#"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="nm">库设置</span></a>
+      <a class="l2-item sub" href="#"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span class="nm">回收站</span></a>
     </div>
   </aside>
 
   <div class="main">
     <header class="topbar">
-      <div class="crumb"><span class="c1">数据</span><span class="sep">/</span><span class="c2">需求池</span></div>
-      <button class="cmd"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M21 21l-4.35-4.35"/></svg><span class="ph">搜索数据表、文档、成员…</span><span class="kbd">⌘K</span></button>
+      <div class="crumb"><span class="c1">产品中心</span><span class="sep">/</span><span class="c2">需求池</span></div>
+      <button class="cmd"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M21 21l-4.35-4.35"/></svg><span class="ph">搜索数据表、文档、成员…</span><span class="kbd">⌘K</span></button>
       <div class="top-right">
-        <button class="icon-btn" title="通知"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="dot"></span></button>
-        <button class="icon-btn" title="帮助"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.6 2.3c-.7.4-1.2 1-1.2 1.8v.4"/><circle cx="12" cy="17.2" r=".8" fill="currentColor" stroke="none"/></svg></button>
+        <button class="icon-btn" title="通知"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.85"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="dot"></span></button>
+        <button class="icon-btn" title="帮助"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.85"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.6 2.3c-.7.4-1.2 1-1.2 1.8v.4"/><circle cx="12" cy="17.2" r=".8" fill="currentColor" stroke="none"/></svg></button>
         <div class="vline"></div>
-        <div class="who"><span class="av av-md av-a">戴</span><span class="nm">戴静</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--ink-4)"><path d="M6 9l6 6 6-6"/></svg></div>
+        <div class="who"><span class="av av-md av-a">戴</span><span class="nm">戴静</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" style="color:var(--ink-4)"><path d="M6 9l6 6 6-6"/></svg></div>
       </div>
     </header>
     <div class="scroll">
@@ -597,6 +669,6 @@ svg { display: block; }
     </div>
   </div>
 </div>
-<div class="proto-note">v6 · 企业工作台新方向（旧拟物系列已封存）</div>
+<div class="proto-note">v6 · 企业工作台（L1 工作台/库/知识库 + L2 库内清单）</div>
 </body>
 </html>
