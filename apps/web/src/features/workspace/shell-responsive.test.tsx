@@ -25,13 +25,22 @@ describe("R-D-30/31/32/33 壳层断点接线", () => {
     expect(shell).not.toContain("L2_WIDTH_COMPACT");
   });
 
-  it("R-D-31/32：浮出档（768–1279）L2 是覆盖内容区左侧的浮层，不是常驻列", () => {
+  it("R-D-31/32：浮出档（768–1279）L2 是覆盖右列内容体左侧的浮层，不是常驻列", () => {
     expect(shell).toContain('data-l2="floating"');
     // 浮层必须用分层 token（规范禁止裸 z-[数字]）
     expect(shell).toContain("gx-z-drawer");
     expect(shell).toContain("isFloatingL2Tier");
     // 浮层从「内容区首行工具带」下沿起算：不盖住 新建记录/筛选/搜索 这一行
     expect(shell).toContain("L2_FLOATING_TOP_PX");
+    // v6 S3 横向栅格：浮层渲染在右列内容体内（rail 已在外层左列），故相对 left 为 0；
+    // 视口绝对几何不变（面板仍在 x=76）。旧实现相对「顶栏下方全行」定位写 left:l1Width。
+    expect(shell).toContain("left: 0");
+    expect(shell).not.toContain("left: l1Width");
+  });
+
+  it("v6 S3：static 档（≥1280）L2 是与 rail/右列并列的常驻 wrap 列（data-l2=static-wrap，wrap 给宽 236）", () => {
+    expect(shell).toContain('data-l2="static-wrap"');
+    expect(shell).toContain("<WorkspaceTopBar");
   });
 
   it("R-D-32（v6 S1）：768–1023 档 L1 不再折叠——恒 76 图标轨、无 CollapseToggle", () => {
@@ -63,12 +72,14 @@ describe("R-D-30/31/32/33 壳层断点接线", () => {
     expect(L2_WIDTH_COLLAPSED).toBe(56);
     // 唤回钮只在非浮出档渲染：浮出档插常驻竖栏会反向挤压内容宽度（R-D-31/32）
     expect(shell).toContain("<SecondaryNavRail");
-    expect(shell).toContain("!floatingL2 && (");
-    // Rail 已改为零宽 absolute 悬浮钮（不再竖排占栏），位置骑在 L1 右缘
+    expect(shell).toContain("!floatingL2 && !showL2");
+    // v6 S3：壳层不再传 l1Width（Rail 渲染在右列内容体内，定位写死 left:-13）
+    expect(shell).not.toContain("l1Width=");
+    // Rail 是零宽 absolute 悬浮钮（不竖排占栏），骑在右列内容体左缘（= rail 右缘 x=76）
     const rail = read("./SecondaryNavRail.tsx");
     expect(rail).toContain('data-l2="collapsed-tab"');
-    expect(rail).toContain("absolute");
-    expect(rail).toContain("l1Width");
+    expect(rail).toContain("left: -13");
+    expect(rail).not.toContain("l1Width");
     expect(rail).not.toContain("writingMode");
   });
 

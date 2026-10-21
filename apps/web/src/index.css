@@ -889,7 +889,8 @@ html.gx-desktop-shell .gx-shell-app-main .min-h-screen {
 
 /* 收起 / 唤回圆箭头（底板 .l2-toggle，352–368 行）：26×26 骑缝，默认中性阴影、
    hover 蓝调阴影 + 放大 1.1，active 回收 0.96。定位（absolute/top/translate）集中在
-   本类；左右骑缝值由组件内联（展开钮 right:-13 / 唤回钮 left:l1Width-13），
+   本类；左右骑缝值由组件内联（展开钮 right:-13 / 唤回钮 S3 起 left:-13，
+   因其已渲染在右列内容体内、左缘即 rail 右缘 x=76），
    z 层级仍由 tailwind gx-z-drawer 承载（见 form-designer-layer 层级裁决）。 */
 .gx-l2-toggle {
   position: absolute;
@@ -935,5 +936,184 @@ html.gx-desktop-shell .gx-shell-app-main .min-h-screen {
   .gx-l2-toggle:hover,
   .gx-l2-toggle:active {
     transform: translateY(-50%);
+  }
+}
+
+/* ============================================================
+   v6 S3：主区顶栏（底板 shared.css 186-236 行 .topbar/.crumb/.cmd/.kbd/.top-right/
+   .icon-btn/.vline/.who/.av-md；结构参照 data-table.html 742-752 行）。
+   裸值（#d6dce8、rgba 无、#f5f8fd 等）全部收口在本段，组件源码零 hex。
+   ============================================================ */
+
+/* 面包屑（.crumb 192-195）：gap 7px，不伸缩；c1 12px hint 色、c2 14px/600 主色。 */
+.gx-crumb {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  min-width: 0;
+  overflow: hidden;
+}
+.gx-crumb-c1 {
+  flex: none;
+  max-width: 220px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  color: #8b95a7;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+a.gx-crumb-c1:hover,
+button.gx-crumb-c1:hover {
+  color: #475467;
+}
+.gx-crumb-sep {
+  flex: none;
+  font-size: 12px;
+  color: #8b95a7;
+  opacity: 0.6;
+  user-select: none;
+}
+.gx-crumb-c2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 600;
+  color: #101828;
+  white-space: nowrap;
+}
+
+/* 命令条（.cmd 197-209）。
+   移动优先：<768 是 32×32 纯图标钮（R-D-33，ph/kbd 在组件内 hidden）；
+   ≥768 恢复底板规格：flex 0 1 400 / min 160 / max 400 / 左右 auto 居中区段。 */
+.gx-cmd {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0;
+  border: 1px solid #e7eaf0;
+  border-radius: 8px;
+  background: #f7f9fc;
+  color: #667085;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.gx-cmd:hover {
+  background: #ffffff;
+  border-color: #d6dce8;
+}
+.gx-cmd:focus-visible {
+  outline: 2px solid #2c7be5;
+  outline-offset: 1px;
+}
+@media (min-width: 768px) {
+  .gx-cmd {
+    flex: 0 1 400px;
+    width: auto;
+    min-width: 160px;
+    max-width: 400px;
+    margin: 0 auto;
+    padding: 0 10px;
+    justify-content: flex-start;
+  }
+}
+.gx-cmd-ph {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gx-kbd {
+  flex: none;
+  font-family: inherit;
+  font-size: 10.5px;
+  color: #8b95a7;
+  letter-spacing: 0.02em;
+  padding: 1px 5px;
+  border: 1px solid #e7eaf0;
+  border-radius: 5px;
+  background: #ffffff;
+}
+
+/* 顶栏右上图标钮（.icon-btn 212-221）：30×30、r8、透明底、ink-3，hover 浅色底 + ink-1。
+   不用裸 .icon-btn 类名，避免与全局/底板同名类冲突。角标由组件内 tailwind 类承载。 */
+.gx-top-icon-btn {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border: 0;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: #667085;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s, color 0.15s;
+}
+.gx-top-icon-btn:hover {
+  background: #f5f8fd;
+  color: #101828;
+}
+.gx-top-icon-btn:focus-visible,
+.gx-who:focus-visible {
+  outline: 2px solid #2c7be5;
+  outline-offset: 1px;
+}
+
+/* 竖分隔线（.vline 222）：1×20，左右 4px。 */
+.gx-top-vline {
+  width: 1px;
+  height: 20px;
+  flex: none;
+  background: #e7eaf0;
+  margin: 0 4px;
+}
+
+/* 个人中心（.who 223-225 + .av-md 236）：头像 28、名字 12.5 ink-2、高 34 r8。 */
+.gx-who {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 2px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.gx-who:hover {
+  background: #f5f8fd;
+}
+.gx-who-nm {
+  font-size: 12.5px;
+  color: #475467;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 减弱动态效果：关闭顶栏各元素过渡（照 S2 L2 段口径）。 */
+@media (prefers-reduced-motion: reduce) {
+  .gx-crumb-c1,
+  .gx-cmd,
+  .gx-top-icon-btn,
+  .gx-who {
+    transition: none;
   }
 }

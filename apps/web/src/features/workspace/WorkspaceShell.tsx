@@ -1,14 +1,22 @@
-// M3/S8 新工作区外壳（GX_ENTERPRISE_NAV on 时由 App 选用，替代旧 AppShell/KbShell 两壳）：
-//   顶栏 56（品牌 / 全局搜索 / 个人中心）
-//   左 L1 v6 图标轨：恒 76px（轻量拟物砖 + 底部建库实心蓝钮），无折叠档
+// M3/S8 新工作区外壳（GX_ENTERPRISE_NAV on 时由 App 选用，替代旧 AppShell/KbShell 两壳）。
+//
+// v6 S3 横向栅格（底板 .app/.main，shared.css 65/184；data-table.html 517/600/742）：
+//   外壳是 flex-row 两段（REFACTOR-SCOPE P0：三带顶边共线）——
+//     左列：L1 图标轨（恒 76，全高；自身 padding-top:10 由 .gx-rail-surface 承载，
+//           logo 中心=28）；static 档 L2 常驻列（236，wrap 给宽）。
+//     右列（.main：flex-1 min-w-0 flex-col）：顶栏 56 + 抽屉触发条（<768）+ 内容体（flex-1）。
+//   rail 顶 / L2 头 56 / 顶栏 56 三者顶边都在 y=0、底边都在 y=56（差 0px），
+//   内容中心共线 28px。旧实现是「顶栏全宽压顶 + 下方行」，L2 头比顶栏低一截；S3 拉平。
 //   L2 二级面板恒 236（v6 S2 起底板同宽、不分档；无二级内容时收起为 0 宽，不占位）
-//   内容 Outlet
+//   内容 Outlet 在右列内容体内。
+//
 // 窄宽退化（UI-SPEC v1.0 R-D-30~R-D-33）：
 //   1280–1439  L2 恒 236（v6 S2 起 R-D-30 紧凑档 208 废止）
-//   1024–1279  L2 改浮出面板（可折叠，覆盖内容区左侧）（R-D-31）
+//   1024–1279  L2 改浮出面板（可折叠，覆盖右列内容体左侧）（R-D-31）
 //   768–1023   L2 浮出面板（R-D-32；v6 起 L1 不再折叠，恒为 76 图标轨）
-//   <768       单栏：L1/L2 全部进抽屉（R-D-33）
-// 档位由 lib/breakpoint.ts 判定：三档的结构不同（常驻栏 / 浮出面板 / 抽屉），
+//   <768       单栏：L1/L2 全部进抽屉（R-D-33），抽屉覆盖层渲染在右列内容体内
+//
+// 档位由 lib/breakpoint.ts 判定：三档的结构不同（常驻列 / 浮出面板 / 抽屉），
 // 不是同一元素的 class 切换，故必须走 JS 档位；断档数值与 Tailwind 断点一致。
 // URL 与旧壳完全一致；旧 AppShell/KbShell 文件保留供 flag off 回退。
 //
@@ -19,6 +27,9 @@
 //   - 库级「重命名 / 设置」从 L1 行尾菜单迁到 L2 面板头（SecondaryNav 的库操作「…」），
 //     重命名弹窗在本壳层挂载（PrimaryNavRenameModal + useLibraryRename）；
 //   - NavLibraryBlock / LibrarySwitcher 本体保留（旧两壳 flag off 仍在用），新壳不再接线。
+//
+// v6 S3 顶栏（WorkspaceTopBar）：品牌钮下线（品牌已在 rail logo），左为面包屑 deriveCrumb、
+//   中为命令条（SearchDialog / ⌘K）、右为同步中心 / 帮助 / 个人中心；无通知铃（产品无此功能）。
 //
 // L2 机制（R-N-07/08'，一字未动）：收起/展开写 gx.l2.collapsed；三级优先级
 // 用户显式意图 > 响应式档位默认（浮出档收起 / 常驻档展开），见 lib/l2-collapse.ts。
@@ -154,7 +165,7 @@ function RailFoot({
 }
 
 /**
- * L1 侧栏：v6 恒 76px 图标轨。宽度走内联 style（L1_WIDTH），表面样式全部在
+ * L1 侧栏：v6 恒 76px 图标轨（全高）。宽度走内联 style（L1_WIDTH），表面样式全部在
  * index.css 的 .gx-rail-surface（组件源码零 hex）。
  */
 function SideRail({
@@ -314,8 +325,6 @@ export function WorkspaceShell() {
   const peekCurrent =
     (floatingL2 || drawer) && !showL2 && activeContainer ? peekL2 : undefined;
 
-  // v6：L1 恒为 76px 图标轨（浮出 left 与 SecondaryNavRail 的 l1Width 都取此值）。
-  const l1Width = L1_WIDTH;
   // v6 S2：L2 按底板 .l2 恒为 236px，紧凑档（208）已废止，所有响应式档同宽。
   const l2Width = L2_WIDTH;
 
@@ -334,105 +343,119 @@ export function WorkspaceShell() {
   ) : null;
 
   return (
-    <div className="flex h-screen flex-col bg-gx-bg">
-      <WorkspaceTopBar onOpenSearch={() => setSearchOpen(true)} />
+    // v6 S3：底板 .app——flex-row 全高，rail/L2/右列横向并排（旧实现是顶栏压顶的 flex-col）。
+    <div className="relative flex h-screen flex-row overflow-hidden bg-gx-bg">
+      {/* 左列①：非抽屉档 rail 全高（顶边 y=0，与 L2 头/顶栏共线）。 */}
+      {!drawer && (
+        <SideRail
+          bases={bases ?? []}
+          kbs={kbs ?? []}
+          navLoading={basesLoading || kbsLoading}
+          navError={basesError || kbsError}
+          secondaryToggle={
+            floatingL2 && !showL2 && activeContainer
+              ? {
+                  label: `展开「${activeContainer.name}」二级面板`,
+                  onOpen: expandL2,
+                }
+              : null
+          }
+          onPeekCurrent={peekCurrent}
+        />
+      )}
 
-      {/* 窄屏抽屉触发条（R-D-33） */}
-      {drawer && (
-        <div className="flex items-center border-b border-gx-hairline bg-gx-surface px-2 py-1">
-          <button
-            type="button"
-            onClick={() => setDrawerOpen(true)}
-            className="flex items-center gap-1.5 rounded-gx-sm px-2 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover"
-          >
-            <Icon name="menu" size={15} />
-            导航
-          </button>
+      {/* 左列②：static 档常驻 L2（wrap 给宽 236，宽随 showL2 有无整体零占位）。
+          浮出/收起/抽屉档本列不渲染；浮出在右列内容体内覆盖，抽屉叠层也在内容体内。 */}
+      {!drawer && !floatingL2 && showL2 && (
+        <div
+          className="relative flex h-full shrink-0"
+          style={{ width: l2Width }}
+          data-l2="static-wrap"
+        >
+          {secondary}
         </div>
       )}
 
-      <div className="relative flex min-h-0 flex-1">
-        {drawer ? (
-          drawerOpen && (
-            <>
-              <button
-                type="button"
-                aria-label="关闭导航"
-                className="absolute inset-0 z-20 bg-black/20"
-                onClick={() => setDrawerOpen(false)}
-              />
-              {/* R-D-33：L1/L2 全部进抽屉。L1 常驻抽屉内（恒 76 图标轨）；L2 叠在 L1
-                  之上（不是并排——76+236 也会挤出 390 屏宽），其 × 收起后回到 L1，
-                  等价于「返回上一级」 */}
-              <div className="absolute left-0 top-0 bottom-0 z-30 flex">
-                <SideRail
-                  bases={bases ?? []}
-                  kbs={kbs ?? []}
-                  navLoading={basesLoading || kbsLoading}
-                  navError={basesError || kbsError}
-                  onPeekCurrent={peekCurrent}
-                  onFootNavigate={() => setDrawerOpen(false)}
+      {/* 右列（底板 .main）：顶栏 56 与左列 rail/L2 头物理并排；其下为内容体。 */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <WorkspaceTopBar
+          onOpenSearch={() => setSearchOpen(true)}
+          containerName={activeContainer?.name ?? null}
+          containerKind={activeContainer?.kind ?? null}
+        />
+
+        {/* 窄屏抽屉触发条（R-D-33） */}
+        {drawer && (
+          <div className="flex items-center border-b border-gx-hairline bg-gx-surface px-2 py-1">
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              className="flex items-center gap-1.5 rounded-gx-sm px-2 py-1 text-gx-12 text-gx-text-secondary hover:bg-gx-row-hover"
+            >
+              <Icon name="menu" size={15} />
+              导航
+            </button>
+          </div>
+        )}
+
+        <div className="relative flex min-h-0 flex-1">
+          {/* R-D-33 抽屉：覆盖层渲染在右列内容体内（顶栏保留在覆盖层上方、不被盖）。
+              L1 恒 76 常驻抽屉内；L2 叠在 L1 之上（76+236 不并排，避免挤出 390 屏宽），
+              其 × 收起后回到 L1，等价于「返回上一级」。 */}
+          {drawer
+            && drawerOpen
+            && (
+              <>
+                <button
+                  type="button"
+                  aria-label="关闭导航"
+                  className="absolute inset-0 z-20 bg-black/20"
+                  onClick={() => setDrawerOpen(false)}
                 />
-                {showL2 && secondary && (
-                  <div className="absolute left-0 top-0 bottom-0 gx-z-drawer shadow-gx-lg">
-                    {secondary}
-                  </div>
-                )}
-              </div>
-            </>
-          )
-        ) : (
-          <SideRail
-            bases={bases ?? []}
-            kbs={kbs ?? []}
-            navLoading={basesLoading || kbsLoading}
-            navError={basesError || kbsError}
-            secondaryToggle={
-              floatingL2 && !showL2 && activeContainer
-                ? {
-                    label: `展开「${activeContainer.name}」二级面板`,
-                    onOpen: expandL2,
-                  }
-                : null
-            }
-            onPeekCurrent={peekCurrent}
-          />
-        )}
+                <div className="absolute bottom-0 left-0 right-0 top-0 z-30 flex">
+                  <SideRail
+                    bases={bases ?? []}
+                    kbs={kbs ?? []}
+                    navLoading={basesLoading || kbsLoading}
+                    navError={basesError || kbsError}
+                    onPeekCurrent={peekCurrent}
+                    onFootNavigate={() => setDrawerOpen(false)}
+                  />
+                  {showL2 && secondary && (
+                    <div className="absolute bottom-0 left-0 top-0 gx-z-drawer shadow-gx-lg">
+                      {secondary}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
 
-        {!drawer && activeContainer && (
-          showL2 ? (
-            floatingL2 ? (
-              // R-D-31 / R-D-32：浮出面板——绝对定位贴内容区左侧，覆盖内容但不挤压内容宽度。
-              // top 从「内容区首行工具带」下沿起算（工具栏高 48，见附录 C.1）：面板只覆盖内容，
-              // 不盖住「新建记录 / 筛选 / 搜索」这一行——一号原则是功能始终可达。
-              <div
-                className="absolute bottom-0 gx-z-drawer"
-                style={{ left: l1Width, top: L2_FLOATING_TOP_PX }}
-                data-l2="floating"
-              >
-                {secondary}
-              </div>
-            ) : (
-              secondary
-            )
-          ) : (
-            // 收起态（常驻档）：彻底收起、零内容占位，只在 L1 右缘垂直中点留一个圆形悬浮
-            // 箭头唤回（SecondaryNavRail 已改为不占宽的 absolute 钮，骑在当前 L1 右缘）。
-            // 浮出档不渲染本件（会占内容宽度，违反 R-D-31/32），唤回入口在轨道底部。
-            !floatingL2 && (
-              <SecondaryNavRail
-                key={`rail-${activeContainer.id}`}
-                containerName={activeContainer.name}
-                onExpand={expandL2}
-                l1Width={l1Width}
-              />
-            )
-          )
-        )}
+          {/* R-D-31/32 浮出 L2：相对右列内容体定位，故 left 为 0（视口绝对几何仍是
+              x=76：rail 76 在外层左列）；top 仍从工具带下沿 48px 起，不盖主操作。 */}
+          {!drawer && floatingL2 && showL2 && (
+            <div
+              className="absolute bottom-0 gx-z-drawer"
+              style={{ left: 0, top: L2_FLOATING_TOP_PX }}
+              data-l2="floating"
+            >
+              {secondary}
+            </div>
+          )}
 
-        <main className="min-w-0 flex-1 overflow-hidden">
-          <Outlet />
-        </main>
+          {/* static 档收起态：零内容占位，只在 rail 右缘（= 内容体左缘 x=76）垂直中点
+              留圆形悬浮箭头唤回（left:-13 骑缝）。浮出档不渲染本件（唤回入口在轨道底部）。 */}
+          {!drawer && !floatingL2 && !showL2 && activeContainer && (
+            <SecondaryNavRail
+              key={`rail-${activeContainer.id}`}
+              containerName={activeContainer.name}
+              onExpand={expandL2}
+            />
+          )}
+
+          <main className="min-w-0 flex-1 overflow-hidden">
+            <Outlet />
+          </main>
+        </div>
       </div>
 
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />

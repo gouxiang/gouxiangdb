@@ -327,7 +327,7 @@ describe("R-I-16 表级操作行（第四批：导入 / 导出已收敛到网格
   });
 });
 
-describe("骨架 S-1：L2 恒 236 / nav2 底；主壳无面包屑", () => {
+describe("骨架 S-1：L2 恒 236 / nav2 底；v6 S3 新壳顶栏有面包屑（但不引回旧组件）", () => {
   it("L2 面板宽 236、底为 gx-nav2、发丝线分隔", () => {
     const html = renderToString(
       <StaticRouter location="/">
@@ -339,15 +339,26 @@ describe("骨架 S-1：L2 恒 236 / nav2 底；主壳无面包屑", () => {
     expect(html).toContain("border-gx-hairline");
   });
 
-  it("主壳不引入面包屑组件；旧顶栏的面包屑链已整段下线", () => {
-    for (const f of ["./WorkspaceShell.tsx", "./PrimaryNav.tsx", "./SecondaryNav.tsx"]) {
+  it("v6 S3：面包屑由 WorkspaceTopBar + deriveCrumb 承载，壳层传入 containerName；旧面包屑组件红线不变", () => {
+    // 新面包屑落点：TopBar 引纯函数 + gx-crumb 结构，壳层把 activeContainer 名字传下去
+    const topbarSrc = read("./WorkspaceTopBar.tsx");
+    expect(topbarSrc).toContain("deriveCrumb");
+    expect(topbarSrc).toContain("gx-crumb");
+    expect(code("./WorkspaceShell.tsx")).toContain("containerName=");
+    // 旧 Breadcrumb / NodeBreadcrumb 组件仍不许引回（导航三件套 + TopBar 都不碰）
+    for (const f of [
+      "./WorkspaceShell.tsx",
+      "./PrimaryNav.tsx",
+      "./SecondaryNav.tsx",
+      "./WorkspaceTopBar.tsx",
+    ]) {
       const src = read(f);
       expect(src).not.toContain("Breadcrumb");
       expect(src).not.toContain("NodeBreadcrumb");
     }
     // 旧壳 TopBar：原「库名 › 表名」链移除后，这条只服务于面包屑的旧形不再存在
-    const topbar = read("../shell/TopBar.tsx");
-    expect(topbar).not.toContain("navigate(`/base/${baseId}/table/${tableId}`)");
+    const oldTopbar = read("../shell/TopBar.tsx");
+    expect(oldTopbar).not.toContain("navigate(`/base/${baseId}/table/${tableId}`)");
   });
 
   it("L1 表面为 gx-rail-surface、宽度恒走 L1_WIDTH(76)，L2 随容器有无收起（无容器不占位）", () => {

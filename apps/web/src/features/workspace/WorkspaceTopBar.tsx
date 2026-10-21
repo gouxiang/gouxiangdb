@@ -1,14 +1,19 @@
-// M3/S8 新工作区外壳顶栏：左品牌、中部全局搜索（提权现有 SearchDialog，⌘K 不变）、右侧个人中心。
-// v6 S1：整条 76px 图标轨就是库列表，建库入口在轨道底部实心蓝钮（不再有库切换器区块）；
-// LibrarySwitcher 组件本身不删（旧两壳 Sidebar/KbSidebar 仍在用）。
+// M3/S8 新工作区外壳顶栏（v6 S3 按底板 .topbar 重做，shared.css 186-225）：
+//   左：面包屑 .crumb（替代品牌钮——品牌已在 rail logo，顶栏不再放产品名/数据库图标）
+//   中：命令条 .cmd（全局搜索，提权现有 SearchDialog，⌘K 由 Shell 绑定）
+//   右：同步中心（副本启用时）/ 帮助 / 竖分隔线 / 个人中心 .who
+// 不做通知铃：产品没有通知功能，底板有铃但 SCOPE 明确不放假入口。
+// 视觉字面值全部收口 index.css 的 .gx-* 类，本组件零 hex。
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useLocation, useMatch } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { useAuthStore } from "../../store/auth";
 import { AVATAR_PALETTE } from "@gx/design-tokens";
 import { PersonalCenterDrawer } from "../settings/PersonalCenterDrawer";
-import { useProductName } from "../branding/useBranding";
 import { useSyncStore } from "../../store/sync";
+import { useTables } from "../../api/hooks";
+import { useKbDocs } from "../kb/kb-hooks";
+import { deriveCrumb } from "./lib/route-crumb";
 
 function avatarColor(seed: string): string {
   let h = 0;
@@ -16,12 +21,19 @@ function avatarColor(seed: string): string {
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length]!;
 }
 
-export function WorkspaceTopBar({ onOpenSearch }: { onOpenSearch: () => void }) {
-  const navigate = useNavigate();
+export function WorkspaceTopBar({
+  onOpenSearch,
+  /** 当前库名（壳层 activeContainer.name；工作区级路由/未就绪时为 null，面包屑按路由自洽）。 */
+  containerName = null,
+  containerKind = null,
+}: {
+  onOpenSearch: () => void;
+  containerName?: string | null;
+  containerKind?: "base" | "kb" | null;
+}) {
   const user = useAuthStore((s) => s.user);
-  const productName = useProductName();
   // 离线同步中心入口：仅「桌面壳 + 副本功能已确认启用」时 store.enabled=true；浏览器/非副本
-  // 恒 false（useSyncStatus 未挂载，enabled 永不翻真），按钮不渲染，顶栏逐字节不变。
+  // 恒 false（useSyncStatus 未挂载，enabled 永不翻真），按钮不渲染。
   const syncEnabled = useSyncStore((s) => s.enabled);
   const syncBadge = useSyncStore(
     (s) => s.report.conflictCount + s.report.quarantinedCount + s.report.pendingOutbox,
@@ -30,80 +42,115 @@ export function WorkspaceTopBar({ onOpenSearch }: { onOpenSearch: () => void }) 
   const openSyncCenter = useSyncStore((s) => s.openCenter);
   const [personalCenterOpen, setPersonalCenterOpen] = useState(false);
 
+  // 布局路由内 useParams 取不到参数（同 Shell/SecondaryNav 口径），一律 useMatch。
+  const location = useLocation();
+  const tableMatch = useMatch("/base/:baseId/table/:tableId/*");
+  const docMatch = useMatch("/kb/:kbId/doc/:docId");
+  const canvasMatch = useMatch("/kb/:kbId/canvas/:docId");
+  const docRoute = docMatch ?? canvasMatch;
+
+  // 仅在确有表/文档上下文时取数：hook 不能条件调用，靠「参数置空 + hook 内 enabled 门控」
+  // （useTables enabledOf(baseId)、useKbDocs enabled:!!kbId），与 SecondaryNav 同 queryKey 缓存复用。
+  const tablesQ = useTables(tableMatch ? (tableMatch.params.baseId ?? null) : null);
+  const docsQ = useKbDocs(docRoute?.params.kbId, docRoute ? "all" : undefined);
+
+  const tableId = tableMatch?.params.tableId ?? null;
+  const docId = docRoute?.params.docId ?? null;
+  const tableName = tablesQ.data?.find((t) => t.id === tableId)?.name ?? null;
+  const docTitle = docsQ.data?.find((d) => d.id === docId)?.title ?? null;
+
+  const crumbs = deriveCrumb({
+    pathname: location.pathname,
+    baseName: containerKind === "base" ? containerName : null,
+    kbName: containerKind === "kb" ? containerName : null,
+    tableName,
+    docTitle,
+  });
+
+  const who = user?.displayName ?? user?.email ?? "";
+
   return (
-    // 骨架 S-1（UI-SPEC A.3）：顶栏高 56、左右 padding 20、元素间距 12。
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-gx-hairline bg-gx-surface px-5">
-      {/* 品牌 + 工作区切换 */}
-      <button
-        type="button"
-        onClick={() => navigate("/")}
-        className="flex shrink-0 items-center gap-1.5 rounded-gx-sm px-1 py-1 hover:bg-gx-bg"
-        title={productName}
-      >
-        <Icon name="database" size={16} className="text-gx-accent" />
-        <span className="hidden text-gx-13 font-semibold text-gx-text-primary lg:inline">{productName}</span>
-      </button>
+    <header className="flex h-14 shrink-0 items-center gap-4 border-b border-gx-hairline bg-gx-surface px-5">
+      {/* 左：面包屑（零段不渲染 nav；单段按底板 c2 14/600；两段 c1 + 斜杠 + c2）。 */}
+      {crumbs.length > 0 && (
+        <nav className="gx-crumb" aria-label="面包屑">
+          {crumbs.length === 1 ? (
+            <span className="gx-crumb-c2">{crumbs[0]!.label}</span>
+          ) : (
+            <>
+              {crumbs[0]!.to ? (
+                <Link className="gx-crumb-c1" to={crumbs[0]!.to} title={`返回${crumbs[0]!.label}`}>
+                  {crumbs[0]!.label}
+                </Link>
+              ) : (
+                <span className="gx-crumb-c1">{crumbs[0]!.label}</span>
+              )}
+              <span className="gx-crumb-sep" aria-hidden>/</span>
+              <span className="gx-crumb-c2">{crumbs[crumbs.length - 1]!.label}</span>
+            </>
+          )}
+        </nav>
+      )}
 
       {/*
-        v6 S1：整条图标轨即库列表、建库在轨道底部（RailFoot 实心蓝钮）：
-        顶栏只留品牌 / 全局搜索 / 个人中心。
-        搜索按钮自带 mx-auto，撤下切换器后剩余空间由它吃掉，不留空位。
-      */}
-      {/*
-        全局搜索（提权顶栏；⌘K 由 Shell 绑定，此处点击同样打开）。
-        R-D-33（<768）：折叠为 32×32 图标按钮。原实现是 `w-full max-w-md` 的长文案按钮，
-        窄屏下被压到内容宽度以下后中文逐字换行（与工具栏同一类断行），且规范本档就要求
-        「顶栏搜索折叠为图标」。≥768 的形态与改动前完全一致（文案、⌘K 徽标、mx-auto 居中）。
+        中：命令条（底板 .cmd）。⌘K 由 Shell 绑定，此处点击同样打开 SearchDialog。
+        R-D-33（<768）：折叠为 32×32 图标按钮（仅图标，ph/kbd 隐藏）；md 起按底板展开
+        （flex 0 1 400 / min 160 / max 400 / px 10）。颜色/描边/圆角在 .gx-cmd（index.css）。
       */}
       <button
         type="button"
         onClick={onOpenSearch}
-        aria-label="搜索记录、文档与画布"
+        aria-label="搜索表格记录、知识库文档与画布"
         title="搜索（⌘K）"
-        className="mx-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-gx-lg border border-gx-border bg-gx-bg text-gx-12 text-gx-text-tertiary transition-colors hover:bg-gx-row-hover md:w-full md:max-w-md md:justify-start md:gap-2 md:px-2.5"
+        className="gx-cmd shrink-0"
       >
-        <Icon name="search" size={14} />
-        <span className="hidden min-w-0 flex-1 truncate whitespace-nowrap text-left md:block">
-          搜索记录、文档与画布
-        </span>
-        <span className="hidden rounded bg-gx-surface px-1 text-gx-11 text-gx-text-hint md:inline-block">
-          ⌘K
-        </span>
+        <Icon name="search" size={13} />
+        <span className="gx-cmd-ph hidden md:block">搜索表格记录、知识库文档与画布</span>
+        <kbd className="gx-kbd hidden md:inline-block">⌘K</kbd>
       </button>
 
-      {/* 离线同步中心：仅副本功能启用时出现（默认零像素）；放在个人中心前。 */}
-      {syncEnabled ? (
+      {/* 右：同步中心 / 帮助 / 竖线 / 个人中心（gap 6px）。 */}
+      <div className="flex flex-none items-center gap-1.5">
+        {syncEnabled ? (
+          <button
+            type="button"
+            onClick={() => openSyncCenter()}
+            className="gx-top-icon-btn"
+            title="同步中心"
+            aria-label="打开同步中心"
+          >
+            <Icon name="sync" size={16} className={syncActive ? "animate-spin" : ""} />
+            {syncBadge > 0 ? (
+              <span className="absolute right-0.5 top-0.5 min-w-[14px] rounded-full bg-gx-accent px-1 text-center text-gx-10 leading-none text-white tabular-nums">
+                {syncBadge > 99 ? "99+" : syncBadge}
+              </span>
+            ) : null}
+          </button>
+        ) : null}
+
+        <Link to="/help" className="gx-top-icon-btn" title="帮助中心" aria-label="帮助中心">
+          <Icon name="help" size={17} />
+        </Link>
+
+        <div className="gx-top-vline" aria-hidden />
+
         <button
           type="button"
-          onClick={() => openSyncCenter()}
-          className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-gx-lg text-gx-text-tertiary transition-colors hover:bg-gx-bg hover:text-gx-text-primary lg:ml-0"
-          title="同步中心"
-          aria-label="打开同步中心"
+          onClick={() => setPersonalCenterOpen(true)}
+          className="gx-who"
+          title="打开个人中心"
+          aria-label="打开个人中心"
         >
-          <Icon name="sync" size={16} className={syncActive ? "animate-spin" : ""} />
-          {syncBadge > 0 ? (
-            <span className="absolute right-0.5 top-0.5 min-w-[14px] rounded-full bg-gx-accent px-1 text-center text-gx-10 leading-none text-white tabular-nums">
-              {syncBadge > 99 ? "99+" : syncBadge}
-            </span>
-          ) : null}
+          <span
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11.5px] font-semibold text-white"
+            style={{ backgroundColor: avatarColor(who || "?") }}
+          >
+            {(who || "?").charAt(0).toUpperCase()}
+          </span>
+          <span className="gx-who-nm hidden md:inline">{who}</span>
+          <Icon name="chevronDown" size={13} className="hidden text-gx-text-hint md:block" />
         </button>
-      ) : null}
-
-      {/* 个人中心（真实入口：资料/账号；不放假"帮助"占位） */}
-      <button
-        type="button"
-        onClick={() => setPersonalCenterOpen(true)}
-        className="ml-auto flex shrink-0 items-center gap-2 rounded-gx-sm py-1 pl-1 pr-2 hover:bg-gx-bg lg:ml-0"
-        title="打开个人中心"
-        aria-label="打开个人中心"
-      >
-        <span
-          className="flex h-6 w-6 items-center justify-center rounded-full text-gx-11 font-semibold text-white"
-          style={{ backgroundColor: avatarColor(user?.displayName ?? user?.email ?? "?") }}
-        >
-          {(user?.displayName ?? user?.email ?? "?").charAt(0).toUpperCase()}
-        </span>
-      </button>
+      </div>
 
       <PersonalCenterDrawer open={personalCenterOpen} onClose={() => setPersonalCenterOpen(false)} />
     </header>
