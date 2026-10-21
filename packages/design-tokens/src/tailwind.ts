@@ -50,6 +50,8 @@ export const gxTailwindConfig: Partial<Config> = {
           "warning-bg": colors.warningBg,
           danger: colors.danger,
           "danger-bg": colors.dangerBg,
+          // 次级强调（亮紫）软底：底板 --violet-soft
+          "secondary-alt-bg": colors.secondaryAltBg,
           // —— v1 遗留，附录 A 未列，保留供旧类名使用（去留由后续切片决定）——
           "card-bg": colors.cardBg,
           zebra: colors.zebra,
@@ -62,6 +64,12 @@ export const gxTailwindConfig: Partial<Config> = {
         "gx-md": shadow.md,
         "gx-lg": shadow.lg,
         "gx-xl": shadow.xl,
+        // v6 底板新增档（墨色冷调）
+        "gx-card": shadow.card,
+        "gx-pop": shadow.pop,
+        "gx-raise": shadow.raise,
+        "gx-raise-hi": shadow.raiseHi,
+        "gx-press": shadow.press,
       },
       spacing: {
         "gx-xxs": `${spacing.xxs}px`,

@@ -46,10 +46,24 @@ export const fontWeight = {
 } as const;
 
 export const shadow = {
+  // —— 既有四档（黑灰投影）：键值不动，旧类名 shadow-gx-sm/md/lg/xl 零视觉回归 ——
   sm: "0 1px 2px rgba(0, 0, 0, 0.04)",
   md: "0 2px 6px rgba(0, 0, 0, 0.08)",
   lg: "0 4px 12px rgba(0, 0, 0, 0.10)",
   xl: "0 8px 24px rgba(0, 0, 0, 0.12)",
+
+  // —— v6 底板新增档（墨色冷调，逐字取自 v6/src/shared.css :root）——
+  // 卡片：极轻双层投影（--sh-card）
+  card: "0 1px 2px rgba(16, 24, 40, .04), 0 1px 3px rgba(16, 24, 40, .05)",
+  // 弹层/浮起：--sh-pop
+  pop: "0 10px 28px -10px rgba(16, 24, 40, .18), 0 2px 6px rgba(16, 24, 40, .06)",
+  // 拟物三态（L1 图标砖）：凸起 / 悬停上浮 / 选中按下凹槽（--sh-raise / -hi / -press）
+  raise:
+    "0 1px 1px rgba(16, 24, 40, .06), 0 2px 5px -1px rgba(16, 24, 40, .10), inset 0 1px 0 rgba(255, 255, 255, .95)",
+  raiseHi:
+    "0 2px 4px rgba(16, 24, 40, .08), 0 7px 15px -4px rgba(16, 24, 40, .20), inset 0 1px 0 rgba(255, 255, 255, .95)",
+  press:
+    "inset 0 1px 3px rgba(16, 24, 40, .16), inset 0 -1px 0 rgba(255, 255, 255, .70)",
 } as const;
 
 // 全局 z-index 分层（见 docs/decisions/KB-EDITOR-ROUND-5.md §2.5）

@@ -474,6 +474,53 @@ flowchart LR
 
 ## A.1 色彩
 
+> ⚠️ **R1 已改板（2026-10 v6 重构）——以下旧表（#3A6DF0/#F7F9FC/#E9EFF9 体系）整板作废，仅留作历史对照。**
+> 现行真源是 v6 底板 `docs/design/2026-10-ui-redesign/actual/v6/src/shared.css` 的 `:root`，
+> 落值在 `packages/design-tokens/src/colors.ts`。凡冲突，以 **v6 + 本表 A.1-v6** 为准
+> （见 `docs/design/2026-10-ui-redesign/actual/v6/HANDOFF.md` R1 裁决）。
+> 键名 / Tailwind 类名一律不变，只换底层取值；含红黄绿状态色在内整套跟随 v6；
+> `FIELD_TYPE_COLOR`（字段分类色板）与 `features/kb/kb.css` 编辑器内核色板不在本次改板范围。
+
+**A.1-v6 现行落值（2026-10 起）**
+
+| 语义令牌 | Tailwind 类 | v6 落值 | v6 底板变量 |
+|---|---|---|---|
+| `gx-accent` | `bg/text-gx-accent` | **#2c7be5** | `--brand` |
+| `gx-accent-hover` | `hover:bg-gx-accent-hover` | **#1f5fbf** | `--brand-ink` |
+| `gx-accent-bg` / `gx-selected` | `bg-gx-accent-bg` / `bg-gx-selected` | **#eaf2fe** | `--brand-soft` |
+| `gx-text-primary` | `text-gx-text-primary` | **#101828** | `--ink-1` |
+| `gx-text-secondary` | `text-gx-text-secondary` | **#475467** | `--ink-2` |
+| `gx-text-tertiary` | `text-gx-text-tertiary` | **#667085** | `--ink-3` |
+| `gx-text-hint` | `text-gx-text-hint` | **#8b95a7** | `--ink-4` |
+| `gx-text-faint` | `text-gx-text-faint` | **#a7b0c0** | ink-4 再柔一档（延伸） |
+| `gx-bg` | `bg-gx-bg` | **#f4f6fa** | `--bg` |
+| `gx-nav1`（L1 轨底） | `bg-gx-nav1` | **#f7f9fd**（阶段1叠白→#eef2f8 渐变） | 底板 `.rail` 渐变基色 |
+| `gx-nav2`（L2 面板底） | `bg-gx-nav2` | **#ffffff** | `.l2-inner`=`--card` |
+| `gx-surface` | `bg-gx-surface` | **#FFFFFF** | `--card` |
+| `gx-table-header` | `bg-gx-table-header` | **#f7f9fc** | `--sub` |
+| `gx-control` | `bg-gx-control` | **#f7f9fc**（平面，不做凹槽） | `--sub` |
+| `gx-hover` / `gx-row-hover` | `bg-gx-row-hover` | **#f5f8fd** | `--hover` |
+| `gx-hairline` | `border-gx-hairline` | **#e7eaf0** | `--line` |
+| `gx-border` | `border-gx-border` | **#d6dce8** | hover 边线 `#d6dce8` |
+| `gx-border-strong` | `border-gx-border-strong` | **#c6ceda** | 滚动条 thumb hover（延伸） |
+| `gx-divider-v` | `bg-gx-divider-v` | **#e7eaf0** | `--line` |
+| `gx-logo-block` | — | **#eaf2fe** | `--brand-soft` |
+| `gx-avatar-sample` | — | **#f5a623** | `--warm` |
+| `gx-success` / `-bg` | `text/bg-gx-success(-bg)` | **#0e9f6e / #e6f6ef** | `--ok` / `--ok-soft` |
+| `gx-warning` / `-bg` | `text/bg-gx-warning(-bg)` | **#f5a623 / #fef4e4** | `--warm` / `--warm-soft` |
+| `gx-danger` / `-bg` | `text/bg-gx-danger(-bg)` | **#d92d20 / #fdecea** | `--danger` / `--danger-soft` |
+| `gx-secondary-alt` / `-bg` | `text/bg-gx-secondary-alt(-bg)` | **#7b4cd8 / #f2ecfe** | `--violet` / `--violet-soft` |
+| v1 暖灰遗留 `card-bg`/`zebra` | `bg-gx-card-bg` / `bg-gx-zebra` | **#f7f9fc**（暖灰收编冷灰） | `--sub` |
+
+**A.1-v6 阴影新增档**（`packages/design-tokens/src/layout.ts`，Tailwind 类 `shadow-gx-*`）：
+`gx-card`（`--sh-card`）、`gx-pop`（`--sh-pop`）、拟物三态
+`gx-raise`（凸起）/`gx-raise-hi`（悬停上浮）/`gx-press`（选中凹槽）。
+旧 `gx-sm/md/lg/xl` 四档黑灰投影保留不动，旧类零回归。
+
+---
+
+<details><summary>旧表（#3A6DF0 体系，已作废，仅历史对照）</summary>
+
 | 语义令牌 | Tailwind 类 | 参考设计值 | 当前值（须替换） | 用途基准（参考设计节点） |
 |---|---|---|---|---|
 | `gx-accent` | `bg-gx-accent` / `text-gx-accent` | **#3A6DF0** | #378ADD | 主按钮「新建记录」底、选中 Tab 文字、L1/L2 选中文字、分享数据格文字 |
@@ -499,6 +546,8 @@ flowchart LR
 | `gx-avatar-sample` | — | **#E08A34** | —（新增） | 头像（实际按 `AVATAR_PALETTE` 取色） |
 | `gx-success` / `gx-warning` / `gx-danger` | `text-gx-*` | **沿用当前值** #1D9E75 / #BA7517 / #E24B4A | 不变 | 参考设计未覆盖 → 沿用现有令牌，禁止新增 |
 | `gx-danger-bg` 等 | `bg-gx-*-bg` | 沿用当前值 | 不变 | 同上 |
+
+</details>
 
 ## A.2 尺寸 / 字号 / 圆角 / 阴影
 
