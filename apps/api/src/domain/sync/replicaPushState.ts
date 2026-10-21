@@ -9,6 +9,7 @@ import type { LocalOutbox } from "@prisma/client";
 import type { DbTx } from "../../db.js";
 import { ADAPT_MALFORMED_CODE } from "./replicaPushAdapter.js";
 import type { WirePushResult } from "./replicaPushTransport.js";
+import { bindRemoteIdTx } from "./idMap.js";
 
 const MAX_LAST_ERROR = 500;
 
@@ -84,6 +85,18 @@ export async function settleRowsTx(
         where: { clientOpId: row.clientOpId },
         data: { status: "acked", serverClientOpId: res.clientOpId, reasonCode: null, lastError: null, updatedAt: now },
       });
+      // id 会合：回执带服务端实体 id 时回填 sync_id_map（默认保 cuid 时二者相等也无妨，幂等 upsert）。
+      // 服务端已确认所有 accepted 路径均回 entityId（push.ts create=applied.id / patch=o.entityId / tree）；
+      // 此处仍守一道非空，以兼容未来某类不回 id 的 accepted（如仅状态推进的幂等 tombstone）。
+      if (res.entityId) {
+        await bindRemoteIdTx(tx, {
+          nodeId: row.nodeId,
+          entityType: row.entityType,
+          localEntityId: row.entityId,
+          clientOpId: row.clientOpId,
+          remoteEntityId: res.entityId,
+        });
+      }
       counts.acked++;
     } else if (res.status === "conflict") {
       await tx.localOutbox.update({

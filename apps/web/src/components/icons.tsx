@@ -127,7 +127,11 @@ export type IconName =
   | "checkSquare"
   // 评论：@ 提及 / 回复
   | "at"
-  | "reply";
+  | "reply"
+  // 离线同步：同步中心 / 合并裁决 / 失权隔离
+  | "sync"
+  | "merge"
+  | "shieldOff";
 
 const PATHS: Record<IconName, string[]> = {
   chevronDown: ["M6 9l6 6 6-6"],
@@ -466,6 +470,20 @@ const PATHS: Record<IconName, string[]> = {
   ],
   // 回复：转弯箭头（与 cornerDownRight 同语义，独立名便于评论内引用）
   reply: ["M15 10l5 5-5 5", "M4 4v7a4 4 0 0 0 4 4h12"],
+  // 离线同步：双向环形箭头（区别于 refresh 的单向弧）
+  sync: [
+    "M20 12a8 8 0 0 1-13.7 5.7",
+    "M4 12a8 8 0 0 1 13.7-5.7",
+    "M18 2v5h-5",
+    "M6 22v-5h5",
+  ],
+  // 合并裁决：两条分支汇入一条主干
+  merge: ["M7 4v6a4 4 0 0 0 4 4h6", "M17 4v6", "M7 20h10"],
+  // 失权隔离：盾牌 + 斜杠
+  shieldOff: [
+    "M12 3l7 3v5.5c0 4.6-3 7.8-7 9-4-1.2-7-4.4-7-9V6z",
+    "M4 4l16 16",
+  ],
 };
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {

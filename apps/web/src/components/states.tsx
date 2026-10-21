@@ -21,6 +21,9 @@ import { createPortal } from "react-dom";
 import { clsx } from "clsx";
 import { Button, FOCUS_RING } from "./ui";
 import { Icon, type IconName } from "./icons";
+import { useSyncStore } from "../store/sync";
+import { syncShellGateEnabled } from "../node/syncGate";
+import { bannerModel } from "../features/sync/bannerModel";
 
 /** R-D-26 骨架行数硬边界：少于 3 行不像骨架，多于 8 行等于铺满整屏。 */
 export function clampSkeletonRows(rows: number): number {
@@ -326,8 +329,25 @@ export function useOnlineStatus(): boolean {
   return online;
 }
 
-/** 顶部 12px 横幅：在线时不渲染任何节点（零像素、零布局影响）。 */
+/**
+ * 顶部 12px 横幅。
+ *
+ * 默认零行为：普通浏览器 / 非壳 / 副本功能未启用时（syncShellGateEnabled()=false）走
+ * <LegacyOfflineBanner>——与改造前逐字节相同（useOnlineStatus 二态、在线 return null、
+ * 同样的深色 12px 细条），不订阅同步 store、不产生轮询。
+ *
+ * 仅桌面壳 + 副本语境（门控开）改由 <SyncPhaseBanner> 读六态：在线/同步中 return null（零像素），
+ * 其余态显示 12px 可点击细条，点击打开同步中心对应分区。
+ */
 export function OfflineBanner({ text = "网络已断开，改动已本地保存", className }: { text?: string; className?: string }) {
+  // syncShellGateEnabled 只读 import.meta.env + Tauri 桥，纯布尔、无副作用；浏览器面恒 false。
+  const inSyncShell = syncShellGateEnabled();
+  if (!inSyncShell) return <LegacyOfflineBanner text={text} className={className} />;
+  return <SyncPhaseBanner className={className} />;
+}
+
+/** 改造前的原二态横幅（逐字节保留），作为非壳/门控关时的唯一分支。 */
+function LegacyOfflineBanner({ text, className }: { text: string; className?: string }) {
   const online = useOnlineStatus();
   if (online) return null;
   return (
@@ -342,6 +362,35 @@ export function OfflineBanner({ text = "网络已断开，改动已本地保存"
       <Icon name="alertCircle" size={11} className="shrink-0" />
       {text}
     </div>
+  );
+}
+
+/** 壳 + 副本语境：六态横幅，在线/同步中零像素；其余态点击打开同步中心。 */
+function SyncPhaseBanner({ className }: { className?: string }) {
+  const phase = useSyncStore((s) => s.phase);
+  const enabled = useSyncStore((s) => s.enabled);
+  const openCenter = useSyncStore((s) => s.openCenter);
+  // enabled 未确认（探活前/404）时不渲染任何同步 UI（零行为）。
+  const model = enabled ? bannerModel(phase) : null;
+  if (!model) return null;
+  const danger = model.tone === "danger";
+  return (
+    <button
+      type="button"
+      role="status"
+      data-gx-offline="true"
+      data-sync-banner={model.tone}
+      onClick={() => openCenter(model.tab)}
+      title="点击打开同步中心"
+      className={clsx(
+        "flex w-full cursor-pointer items-center justify-center gap-1.5 px-4 py-1 text-gx-11 text-white",
+        danger ? "bg-gx-danger" : "bg-gx-text-primary",
+        className,
+      )}
+    >
+      <Icon name={danger ? "shieldOff" : "alertCircle"} size={11} className="shrink-0" />
+      {model.text}
+    </button>
   );
 }
 

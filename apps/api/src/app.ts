@@ -34,6 +34,8 @@ import { pub } from "./routes/public.js";
 import { search } from "./routes/search.js";
 import { v1 } from "./routes/v1/index.js";
 import { syncRoutes } from "./routes/v1/sync/index.js";
+import { localSyncRoutes } from "./routes/localSync.js";
+import { localSyncProxyRoutes } from "./routes/localSyncProxy.js";
 import { adminUpdateDownloadRoutes } from "./routes/v1/adminUpdateDownload.js";
 import { inviteRoutes } from "./routes/v1/authInvite.js";
 import { publicBranding, adminBranding } from "./routes/branding.js";
@@ -228,6 +230,16 @@ function createMount(webRoot: string | null): Hono {
   //   若 v1 先注册，未登录请求会被它先判 401，同步组自己的"off→404 在鉴权前"闸就永远到不了。
   //   同步组自带 gate + requireActiveUser 两道，路径 /api/v1/sync 与 invite/update 不重叠。
   mount.route("/api/v1/sync", syncRoutes);
+
+  // 本机侧车定时同步引擎【只读状态】面（beta.2 B2）：挂 /api/local-sync，绝不进 /api/v1/sync 组
+  // （那是服务端面，GX_SYNC_SERVER 门）。组首中间件按 replicaSyncConfig() 请求期判定，默认配置
+  // （GX_OFFLINE_REPLICA 未开或未配 GX_REPLICA_REMOTE_URL）-> 404 SYNC_DISABLED，默认零额外读。
+  // 必须挂在企业 v1 全局 requireActiveUser【之外】：本子路由自带配置门 + requireActiveUser 两道。
+  mount.route("/api/local-sync", localSyncRoutes);
+  // 冲突/隔离明细与人工裁决的【侧车代理】面（beta.2 B2）：挂 /api/local-sync/conflicts，
+  //   用引擎 remoteToken 纯转发远端 /api/v1/sync/incoming|resolve。与上面只读 /status 不撞路径
+  //   （proxy 自带同款 replicaSyncConfig() 配置门 + requireActiveUser，默认 404，零本地表访问）。
+  mount.route("/api/local-sync/conflicts", localSyncProxyRoutes);
 
   // M2/M3 企业面：/api/v1 与 /api 平级独立实例；两个 flag 任一 on 即挂载，
   // 子路由在 v1/index.ts 内按各自 flag 条件挂载，未启用的子面请求落入 notFound 404。

@@ -24,6 +24,8 @@ import { useShellRuntime } from "./useShellRuntime";
 import { useShellHealth } from "./useShellHealth";
 import { LauncherPanel } from "./LauncherPanel";
 import type { LauncherStore } from "./launcherStore";
+import { useSyncStatus } from "../hooks/useSyncStatus";
+import { useSyncStore } from "../store/sync";
 
 /** 匿名/公开路由及启动器整页下不显示底部条（无活动会话，也不该把节点信息露给分享页）。 */
 const HIDDEN_PREFIXES = ["/launcher", "/s/", "/share/", "/join/", "/invite/"];
@@ -84,6 +86,15 @@ function DockInner({ store }: { store?: LauncherStore }) {
   const rt = useShellRuntime(resolved.shellBound);
   // 同源 /healthz 计时：实时延迟 ms + 核心版本号。
   const health = useShellHealth(resolved.shellBound);
+  // 离线同步状态轮询：仅壳内且有活动节点（本组件已在 ShellStatusDock 门控后）才挂载；
+  // 非壳零 timer/fetch。返回的 enabled=壳语境，真正「副本功能启用」以 store.enabled 收敛。
+  useSyncStatus({ enabled: resolved.shellBound });
+  const syncEnabled = useSyncStore((s) => s.enabled);
+  const syncPhase = useSyncStore((s) => s.phase);
+  const syncBadge = useSyncStore(
+    (s) => s.report.conflictCount + s.report.quarantinedCount + s.report.pendingOutbox,
+  );
+  const openSyncCenter = useSyncStore((s) => s.openCenter);
 
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -165,6 +176,31 @@ function DockInner({ store }: { store?: LauncherStore }) {
           <span title="核心版本">核心 {coreVersion ? `v${coreVersion}` : "—"}</span>
           <span title="壳版本">壳 {shellVersion ? `v${shellVersion}` : "—"}</span>
         </span>
+
+        {/* 离线同步中心入口：仅「副本功能已确认启用」才渲染（浏览器/非副本恒无此节点，零像素）。 */}
+        {syncEnabled ? (
+          <>
+            <span className="mx-2 h-4 w-px bg-gx-separator" />
+            <button
+              type="button"
+              onClick={() => openSyncCenter()}
+              title="同步中心"
+              aria-label="打开同步中心"
+              className="flex h-full items-center gap-1.5 px-2 font-medium text-gx-text-secondary transition-colors hover:text-gx-text-primary"
+            >
+              <Icon
+                name="sync"
+                size={14}
+                className={syncPhase === "syncing" ? "animate-spin" : "shrink-0"}
+              />
+              {syncBadge > 0 ? (
+                <span className="rounded-full bg-gx-accent px-1.5 text-gx-10 leading-4 text-white tabular-nums">
+                  {syncBadge}
+                </span>
+              ) : null}
+            </button>
+          </>
+        ) : null}
       </div>
     </div>
   );

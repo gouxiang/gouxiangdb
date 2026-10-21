@@ -32,6 +32,11 @@ import { syncNavFromEntitiesTx } from "../domain/nav/sync.js";
 import { syncTableForAllScopesTx } from "../domain/authz/scopeProjectionTx.js";
 import { projectAdminForNewTableTx } from "../domain/authz/scopeDoubleWrite.js";
 import { entityIconSchema, entityIconColorSchema } from "../validators/entity-icon.js";
+import {
+  recordLocalStructureReplicaTx,
+  recordLocalReplicaTx,
+} from "../domain/sync/localOutbox.js";
+import { offlineNodeId, offlineClientId } from "../configOfflineReplica.js";
 
 export const tables = new Hono();
 
@@ -232,6 +237,9 @@ tables.post("/:tableId/duplicate", async (c) => {
   // 复制成独立表会产生悬挂引用/误配对反向字段，统一跳过（与 NocoDB 复制表语义一致）。
   const SKIP_COPY_TYPES = new Set(["links", "subtable", "lookup", "rollup", "count"]);
   const idMap = new Map<string, string>();
+  // S2c 补盲：复制出的普通字段（跨表类型已跳过）收集 (newFieldId,name,type)，在 create_table
+  // outbox 之后统一落 add_field（顺序即 push 回放顺序：先建表再建字段）。
+  const copiedFields: { id: string; name: string; type: string }[] = [];
   for (const f of fields) {
     if (SKIP_COPY_TYPES.has(f.type)) continue;
     const nf = await tx.field.create({
@@ -253,6 +261,24 @@ tables.post("/:tableId/duplicate", async (c) => {
       },
     });
     idMap.set(f.id, nf.id);
+    copiedFields.push({ id: nf.id, name: f.name, type: f.type });
+  }
+  // S2c 补盲：复制表是「裸建表 + 逐字段复制」，不是 withDefaults 建表，故 create_table 记
+  // withDefaults:false、不含子实体 preset 键（与在线 wrapper 对裸建表的忠实表达一致）；字段随后
+  // 逐条 add_field。默认关首行零 IO；异常随本事务整体回滚。
+  await recordLocalStructureReplicaTx(tx, {
+    entityType: "table", entityId: copy.id, tableId: copy.id, baseId,
+    op: "create_table", actorId: userId,
+    payload: { name, withDefaults: false },
+  }, { nodeId: offlineNodeId(), clientId: offlineClientId() });
+  for (const cf of copiedFields) {
+    // input 严格照 fieldService.ts add_field 拼法：payload 仅 tableId/name/type（跨表类型已跳过，
+    // 无 create_link_field / reverseFieldId）。
+    await recordLocalStructureReplicaTx(tx, {
+      entityType: "field", entityId: cf.id, tableId: copy.id, baseId,
+      op: "add_field", actorId: userId,
+      payload: { tableId: copy.id, name: cf.name, type: cf.type },
+    }, { nodeId: offlineNodeId(), clientId: offlineClientId() });
   }
 
   // 重映射 tabsConfig 内部引用的字段 id（fieldIds / widths 的 key / rows.items.fieldId）
@@ -286,6 +312,18 @@ tables.post("/:tableId/duplicate", async (c) => {
 
   const primary = idMap.get(src.primaryFieldId) ?? fields[0]?.id ?? "";
   await tx.table.update({ where: { id: copy.id }, data: { primaryFieldId: primary } });
+  // S2c 补盲：主字段设置无独立物理写、create_table(withDefaults:false) 也不带 preset，故回放后
+  // 服务端 primaryFieldId 会停在 create 时的空串——必须再发一条 update_table_settings 表达。
+  // 仅当 primary 非空【且确为本次复制出的新字段 id】时发：既有 fallback `fields[0]?.id` 取的是
+  // 源表字段 id（跨表类型被跳过时可能落到它），那不是新表活字段，回放端会 400，不能发。
+  if (primary && copiedFields.some((cf) => cf.id === primary)) {
+    await recordLocalStructureReplicaTx(tx, {
+      entityType: "table", entityId: copy.id, tableId: copy.id, baseId,
+      op: "update_table_settings", actorId: userId,
+      // 键名严格照回放端 structureRegistry update_table_settings 读取的 payload.primaryFieldId。
+      payload: { primaryFieldId: primary },
+    }, { nodeId: offlineNodeId(), clientId: offlineClientId() });
+  }
 
   // 数据复制
   if (withData) {
@@ -302,13 +340,17 @@ tables.post("/:tableId/duplicate", async (c) => {
       });
       recMap.set(r.id, nr.id);
     }
-    // 重映射记录内的字段 id
+    // S2c 补盲：复制记录的字段名快照（newFieldId -> name），供 outbox changes 落 fieldName。
+    const newFieldName = new Map(copiedFields.map((cf) => [cf.id, cf.name]));
+    // 重映射记录内的字段 id；同时收集每条新记录的 FieldChange[]（create：before=null），供
+    // 结构 outbox 落完后逐条落 record create（push 适配层把 changes.after 映射成 create.fields）。
+    const copiedRecs: { newRecId: string; changes: { fieldId: string; fieldName: string; before: null; after: unknown }[] }[] = [];
     for (const [oldId, newRecId] of recMap) {
       const r = recs.find((x) => x.id === oldId);
       if (!r) continue;
+      let remapped: Record<string, unknown> = {};
       try {
         const obj = JSON.parse(r.fields) as Record<string, unknown>;
-        const remapped: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(obj)) {
           remapped[idMap.get(k) ?? k] = v;
         }
@@ -316,6 +358,19 @@ tables.post("/:tableId/duplicate", async (c) => {
       } catch {
         /* 忽略解析失败 */
       }
+      // 只为成功复制的字段（newFieldName 命中）生成 changes；跨表跳过字段残留旧 id，不进 outbox。
+      const changes = Object.entries(remapped)
+        .filter(([fid]) => newFieldName.has(fid))
+        .map(([fid, v]) => ({ fieldId: fid, fieldName: newFieldName.get(fid) ?? fid, before: null, after: v }));
+      copiedRecs.push({ newRecId, changes });
+    }
+    // S2b 补盲：逐条落 record create outbox（在 add_field 之后、create_view 之前；changes 照记录
+    // 实际写入字段构造，op=create）。默认关首行零 IO。
+    for (const cr of copiedRecs) {
+      await recordLocalReplicaTx(tx, {
+        entityType: "record", entityId: cr.newRecId, tableId: copy.id,
+        op: "create", actorId: userId, changes: cr.changes,
+      }, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
     // M5/S1：复制产生的新记录逐条登记 upsert（id 为新表记录 id）。
     const dupVersion = BigInt(Date.now());
@@ -345,9 +400,16 @@ tables.post("/:tableId/duplicate", async (c) => {
     detailFieldIds: [],
     detailLayout: null,
   };
-  await tx.view.create({
+  const newView = await tx.view.create({
     data: { tableId: copy.id, name: "网格视图", type: "grid", order: 0, config: JSON.stringify(config) },
   });
+  // S2c 补盲：复制表固定新建一个网格视图（不复制源表视图），对它落 create_view（input 照
+  //   viewService.ts create_view 拼法：payload={tableId,name,type,config}；默认关首行零 IO）。
+  await recordLocalStructureReplicaTx(tx, {
+    entityType: "view", entityId: newView.id, tableId: copy.id, baseId,
+    op: "create_view", actorId: userId,
+    payload: { tableId: copy.id, name: "网格视图", type: "grid", config },
+  }, { nodeId: offlineNodeId(), clientId: offlineClientId() });
 
   // M1/S4：复制表的数据已按新字段 id 重映射落库，全量重建新表 sidecar（派生冗余）。
   if (withData) {

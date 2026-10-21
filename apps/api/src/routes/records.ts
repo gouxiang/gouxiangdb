@@ -54,6 +54,8 @@ export const records = new Hono();
 // M6/S4：写原语已移入 domain/recordWrite.ts（纯移动）+ re-export 保持既有导入点不变。
 import { applyFieldWrites, assertUnique, createRecordTx, parseStoredFields, restoreRecordTx, runMaskWriteGate, softDeleteRecordTx, updateRecordTx } from "../domain/recordWrite.js";
 import { recordSyncOpTx, recordSyncOpsTx } from "../domain/sync/oplog.js";
+import { recordLocalReplicaTx } from "../domain/sync/localOutbox.js";
+import { offlineNodeId, offlineClientId } from "../configOfflineReplica.js";
 import { fieldWriteGate } from "../domain/authz/libraryPolicy.js";
 export { assertRequiredOnCreate, assertUnique } from "../domain/recordWrite.js";
 
@@ -662,6 +664,11 @@ records.post("/bulk-update", async (c) => {
         entityType: "record", entityId: id, tableId: first.tableId,
         op: "update", actorId: userId, changes: rowChanges,
       });
+      // S2b 补盲：批量更新逐行同事务登记 local_outbox（复用同一份 rowChanges；默认关零行为）。
+      await recordLocalReplicaTx(tx, {
+        entityType: "record", entityId: id, tableId: first.tableId,
+        op: "update", actorId: userId, changes: rowChanges,
+      }, { nodeId: offlineNodeId(), clientId: offlineClientId() });
     }
     // M1/S4：整批 fields 在同一事务内统一重建一次 sidecar（避免逐行重复删插）。
     await syncRecordsTx(tx, first.tableId, scopedIds);
@@ -810,6 +817,11 @@ records.post("/csv-import", async (c) => {
           entityType: "record", entityId: rec.id, tableId,
           op: "create", actorId: userId, changes: rowChanges,
         });
+        // S2b 补盲：CSV 逐行导入同事务登记 local_outbox（复用同一 rowChanges；默认关零行为）。
+        await recordLocalReplicaTx(tx, {
+          entityType: "record", entityId: rec.id, tableId,
+          op: "create", actorId: userId, changes: rowChanges,
+        }, { nodeId: offlineNodeId(), clientId: offlineClientId() });
       });
       createdRecords += 1;
     } catch (e) {

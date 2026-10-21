@@ -9,6 +9,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { ToastHost } from "./components/ui";
 import { ConfirmHost } from "./components/feedback";
+import { ConflictResolverHost } from "./features/sync/ConflictResolverHost";
+import { SyncCenterHost } from "./features/sync/SyncCenterDrawer";
 import {
   bindQueryClientClearing,
   registerQueryClient,
@@ -64,6 +66,9 @@ async function bootstrap(): Promise<void> {
           {/* R-D-20 Toast 宿主（右下角 / 最多 3 条） + R-D-23 危险操作确认宿主（L1~L5） */}
           <ToastHost />
           <ConfirmHost />
+          {/* 离线同步：冲突双栏命令式宿主 + 同步中心抽屉宿主（内部读门控，浏览器面 return null，零像素） */}
+          <ConflictResolverHost />
+          <SyncCenterHost />
         </BrowserRouter>
       </QueryClientProvider>
     </StrictMode>,

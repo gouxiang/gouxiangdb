@@ -13,7 +13,7 @@
 // on|true|1 之外任何值（含笔误、大写）= 关闭。默认安装即便升级也与旧版逐字节一致——不多写
 // local_outbox、不额外推进本地钟；只有显式开启才激活 record 轨离线捕获。
 
-/** 开放态字面量集合（小写比较）；不在此集合内一律关闭。 */
+/** 开放态字面量集合（精确小写）；不在此集合内一律关闭。 */
 const OFFLINE_OPEN_VALUES = new Set(["on", "true", "1"]);
 
 /** 节点 id 缺省值（单机本地节点；未来由壳注入安装实例/远端节点 id 覆盖）。 */
@@ -21,10 +21,14 @@ export const OFFLINE_DEFAULT_NODE_ID = "local";
 /** 本地内核里代表「本机直写」的 clientId（未来 S3 安装实例 id 由壳注入覆盖）。 */
 export const OFFLINE_DEFAULT_CLIENT_ID = "local-replica";
 
-/** 纯函数：原始 env 值 -> 是否启用离线副本捕获。默认关，仅精确小写 on/true/1 为开。 */
+/**
+ * 纯函数：原始 env 值 -> 是否启用离线副本捕获。默认关，仅精确小写 on/true/1 为开。
+ * fail-closed 纪律与 configM5Search 一致：不 trim、不 toLowerCase——
+ * "ON"/"On"/"on "/带空格或笔误一律判关（派工契约：见本文件头与 configReplica 测试）。
+ */
 export function parseOfflineReplicaFlag(raw: string | undefined): boolean {
   if (raw === undefined) return false;
-  return OFFLINE_OPEN_VALUES.has(raw.trim().toLowerCase());
+  return OFFLINE_OPEN_VALUES.has(raw);
 }
 
 /** 运行时读 env：record 直写切面在事务内调用判定，测试亦可进程内切换。 */

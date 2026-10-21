@@ -8,6 +8,7 @@ import { useAuthStore } from "../../store/auth";
 import { AVATAR_PALETTE } from "@gx/design-tokens";
 import { PersonalCenterDrawer } from "../settings/PersonalCenterDrawer";
 import { useProductName } from "../branding/useBranding";
+import { useSyncStore } from "../../store/sync";
 
 function avatarColor(seed: string): string {
   let h = 0;
@@ -19,6 +20,14 @@ export function WorkspaceTopBar({ onOpenSearch }: { onOpenSearch: () => void }) 
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const productName = useProductName();
+  // 离线同步中心入口：仅「桌面壳 + 副本功能已确认启用」时 store.enabled=true；浏览器/非副本
+  // 恒 false（useSyncStatus 未挂载，enabled 永不翻真），按钮不渲染，顶栏逐字节不变。
+  const syncEnabled = useSyncStore((s) => s.enabled);
+  const syncBadge = useSyncStore(
+    (s) => s.report.conflictCount + s.report.quarantinedCount + s.report.pendingOutbox,
+  );
+  const syncActive = useSyncStore((s) => s.phase === "syncing");
+  const openSyncCenter = useSyncStore((s) => s.openCenter);
   const [personalCenterOpen, setPersonalCenterOpen] = useState(false);
 
   return (
@@ -61,6 +70,24 @@ export function WorkspaceTopBar({ onOpenSearch }: { onOpenSearch: () => void }) 
           ⌘K
         </span>
       </button>
+
+      {/* 离线同步中心：仅副本功能启用时出现（默认零像素）；放在个人中心前。 */}
+      {syncEnabled ? (
+        <button
+          type="button"
+          onClick={() => openSyncCenter()}
+          className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-gx-lg text-gx-text-tertiary transition-colors hover:bg-gx-bg hover:text-gx-text-primary lg:ml-0"
+          title="同步中心"
+          aria-label="打开同步中心"
+        >
+          <Icon name="sync" size={16} className={syncActive ? "animate-spin" : ""} />
+          {syncBadge > 0 ? (
+            <span className="absolute right-0.5 top-0.5 min-w-[14px] rounded-full bg-gx-accent px-1 text-center text-gx-10 leading-none text-white tabular-nums">
+              {syncBadge > 99 ? "99+" : syncBadge}
+            </span>
+          ) : null}
+        </button>
+      ) : null}
 
       {/* 个人中心（真实入口：资料/账号；不放假"帮助"占位） */}
       <button

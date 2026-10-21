@@ -14,6 +14,7 @@ import { config } from "./config.js";
 import { createApp } from "./app.js";
 import { prisma } from "./db.js";
 import { startSearchWorker, stopSearchWorker } from "./domain/search/workerRuntime.js";
+import { startReplicaSync, stopReplicaSync } from "./domain/sync/replicaSyncRuntime.js";
 // 协同：WS 通道挂在每个 http.Server 的 upgrade 上，两处 createServer 都要挂（§8-1）。
 import { attachCollab, flushAllAndClose } from "./collab/index.js";
 
@@ -34,6 +35,22 @@ function bootSearchWorker(): void {
   });
 }
 
+/**
+ * beta.2 B2：本机侧车定时同步引擎启动（门控全在 replicaSyncConfig 内）。
+ * GX_OFFLINE_REPLICA 未精确开 或 GX_REPLICA_REMOTE_URL 缺省（出厂默认）时 start 直接返回 false：
+ * 不建 timer、不建任何 fetch 传输（不发网络）、不查库，既有启动姿态逐字节不变。
+ * 失败只记日志，不影响监听与在线读路径（引擎自身已分阶段吞错，这里再兜一层）。
+ */
+function bootReplicaSync(): void {
+  void startReplicaSync({ env: process.env })
+    .then((ok) => {
+      if (ok) console.log("[GouXiangDB API] 离线副本定时同步引擎已启动");
+    })
+    .catch((e) => {
+      console.warn("[replica-sync] start failed", e);
+    });
+}
+
 const { app, webRoot } = createApp();
 
 const port = config.port;
@@ -48,6 +65,7 @@ function startTcp(): void {
     const webNote = webRoot ? ` web=${webRoot}` : "";
     console.log(`[GouXiangDB API] http://localhost:${port}${hostNote}${prefixNote}${webNote}`);
     bootSearchWorker();
+    bootReplicaSync();
   });
 
   // 优雅关闭：停止接收 → 排空在途请求 → 关闭 Prisma/SQLite 连接（释放热 WAL 帧，避免重启/升级
@@ -71,6 +89,8 @@ function startTcp(): void {
         // 先停 worker 再断 Prisma：worker 循环可能正在用 prisma 认领/回写 change_events，
         // 先断连接会让在途那一条抛错并被判 failed（下次启动还得重跑）。
         stopSearchWorker();
+        // 同步引擎同理：先停 timer/释放单写者锁（其内部用 prisma 续期），再断连接。
+        await stopReplicaSync();
         try {
           await prisma.$disconnect();
         } catch {
@@ -104,6 +124,7 @@ function startUnixSocket(socketPath: string): void {
     const webNote = webRoot ? ` web=${webRoot}` : "";
     console.log(`[GouXiangDB API] unix:${socketPath}${prefixNote}${webNote}`);
     bootSearchWorker();
+    bootReplicaSync();
   });
 
   // 优雅关闭：停止接收 → 排空在途请求 → 删除 socket 文件。10s 兜底强退防 keep-alive 悬挂。
@@ -123,6 +144,7 @@ function startUnixSocket(socketPath: string): void {
       }
       server.close(async () => {
         stopSearchWorker(); // 同上：先停 worker 再断 Prisma。
+        await stopReplicaSync(); // 同步引擎：先停 timer/释放锁，再断连接。
         try {
           fs.rmSync(socketPath, { force: true });
           await prisma.$disconnect();
