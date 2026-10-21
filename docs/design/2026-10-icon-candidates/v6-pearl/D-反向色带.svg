@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  
+  <defs>
+    <linearGradient id="paperd" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.38" stop-color="#FDFBF5"/>
+      <stop offset="0.72" stop-color="#F7F4EC"/>
+      <stop offset="1" stop-color="#FFFDF8"/>
+    </linearGradient>
+    <linearGradient id="pearld" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFE4EE" stop-opacity="0.55"/>
+      <stop offset="0.28" stop-color="#FFF4D6" stop-opacity="0.30"/>
+      <stop offset="0.52" stop-color="#E2F2FF" stop-opacity="0.50"/>
+      <stop offset="0.76" stop-color="#ECE6FF" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.65"/>
+    </linearGradient>
+    <linearGradient id="glossd" x1="0" y1="0" x2="0.55" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="0.42" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="sheend" cx="0.32" cy="0.22" r="0.62">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="256" height="256" rx="57" fill="url(#paperd)"/>
+  <rect width="256" height="256" rx="57" fill="url(#pearld)"/>
+  <rect width="256" height="256" rx="57" fill="url(#glossd)"/>
+  <rect width="256" height="256" rx="57" fill="url(#sheend)"/>
+  <rect x="0.8" y="0.8" width="254.4" height="254.4" rx="56.4" fill="none" stroke="#E6E0D5" stroke-opacity="0.85" stroke-width="1.6"/>
+  <rect x="3" y="3" width="250" height="250" rx="54" fill="none" stroke="#FFFFFF" stroke-opacity="0.75" stroke-width="2"/>
+  <defs>
+    <linearGradient id="bandd" x1="200" y1="58" x2="62" y2="198" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFC93D"/>
+      <stop offset="0.14" stop-color="#FFB52A"/>
+      <stop offset="0.27" stop-color="#FF8A1F"/>
+      <stop offset="0.34" stop-color="#FF7A29"/>
+      <stop offset="0.42" stop-color="#F2622B"/>
+      <stop offset="0.52" stop-color="#6A46C8"/>
+      <stop offset="0.60" stop-color="#1B3FD8"/>
+      <stop offset="0.72" stop-color="#2450E8"/>
+      <stop offset="0.84" stop-color="#3A6DF0"/>
+      <stop offset="0.93" stop-color="#77A6F7"/>
+      <stop offset="1" stop-color="#A9D2FF"/>
+    </linearGradient></defs>
+      <path d="M 182 112 L 182 106 Q 182 74 150 74 L 106 74 Q 74 74 74 106 L 74 150 Q 74 182 106 182 L 150 182 Q 182 182 182 150 L 182 142 L 104 142" fill="none" stroke="url(#bandd)" stroke-width="32"
+        stroke-linecap="round" stroke-linejoin="round"/>
+      <line x1="98" y1="112" x2="146" y2="112" stroke="url(#bandd)" stroke-width="11" stroke-linecap="round"/>
+</svg>
