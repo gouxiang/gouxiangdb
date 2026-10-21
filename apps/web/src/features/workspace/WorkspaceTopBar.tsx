@@ -1,5 +1,5 @@
 // M3/S8 新工作区外壳顶栏：左品牌、中部全局搜索（提权现有 SearchDialog，⌘K 不变）、右侧个人中心。
-// 库切换器与新建库入口已下移到左侧一级导航 NavLibraryBlock（建库/切库都发生在导航里）；
+// v6 S1：整条 76px 图标轨就是库列表，建库入口在轨道底部实心蓝钮（不再有库切换器区块）；
 // LibrarySwitcher 组件本身不删（旧两壳 Sidebar/KbSidebar 仍在用）。
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -45,8 +45,8 @@ export function WorkspaceTopBar({ onOpenSearch }: { onOpenSearch: () => void }) 
       </button>
 
       {/*
-        库切换器与「新建库」入口已下移到左侧一级导航（NavLibraryBlock）：
-        建库/切库都发生在导航里，顶栏只留品牌 / 全局搜索 / 个人中心。
+        v6 S1：整条图标轨即库列表、建库在轨道底部（RailFoot 实心蓝钮）：
+        顶栏只留品牌 / 全局搜索 / 个人中心。
         搜索按钮自带 mx-auto，撤下切换器后剩余空间由它吃掉，不留空位。
       */}
       {/*

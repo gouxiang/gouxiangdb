@@ -1,63 +1,50 @@
 // M3/S8 新工作区外壳（GX_ENTERPRISE_NAV on 时由 App 选用，替代旧 AppShell/KbShell 两壳）：
-//   顶栏 56（品牌/库切换 + 全局搜索 + 个人中心）
-//   左 L1 一级导航 224（折叠档 56）+ 底部固定区
-//   L2 二级面板 240（骨架 S-1 常驻；无二级内容的入口收起为 0 宽，不占位）
+//   顶栏 56（品牌 / 全局搜索 / 个人中心）
+//   左 L1 v6 图标轨：恒 76px（轻量拟物砖 + 底部建库实心蓝钮），无折叠档
+//   L2 二级面板 240（无二级内容的入口收起为 0 宽，不占位）
 //   内容 Outlet
-// 窄宽退化（UI-SPEC v1.0 R-D-30~R-D-33，取代原先「一刀切 <1024 切抽屉」）：
-//   1280–1439  L1 224、L2 压到 208（R-D-30）
+// 窄宽退化（UI-SPEC v1.0 R-D-30~R-D-33）：
+//   1280–1439  L2 压到 208（R-D-30）
 //   1024–1279  L2 改浮出面板（可折叠，覆盖内容区左侧）（R-D-31）
-//   768–1023   L1 折叠到 56 图标档 + L2 浮出面板（R-D-32）
+//   768–1023   L2 浮出面板（R-D-32；v6 起 L1 不再折叠，恒为 76 图标轨）
 //   <768       单栏：L1/L2 全部进抽屉（R-D-33）
 // 档位由 lib/breakpoint.ts 判定：三档的结构不同（常驻栏 / 浮出面板 / 抽屉），
 // 不是同一元素的 class 切换，故必须走 JS 档位；断档数值与 Tailwind 断点一致。
 // URL 与旧壳完全一致；旧 AppShell/KbShell 文件保留供 flag off 回退。
 //
-// 阶段 1 壳层重构（UI-SPEC v1.0 骨架 S-1）：
-//   R-N-07/08   L1 两档 224/56，折叠态写 localStorage（不写 URL），刷新保持
-//   R-N-07/08'  L2 同构：收起/展开态写 gx.l2.collapsed，刷新保持；收起后常驻档留 56 窄条唤回。
-//               三级优先级：用户显式意图 > 响应式档位默认（浮出档收起 / 常驻档展开）。
-//   R-N-09/10   L1/L2 选中态 = 白底卡片 + 圆角 8 + accent 字 600（左侧色条已删）
-//   R-N-02      L2 归属由 URL 反推（useMatch 取参），刷新/直访完整还原
-//   R-N-19      主壳内不渲染面包屑（本壳本来就没有，保持为零）
+// v6 S1（2026-10 UI 重做第一刀）：
+//   - L1 从「196/56 两档文字栏」改为恒 76px 图标轨，折叠态 localStorage 机制整体废止
+//     （lib/l1-collapse.ts 只剩几何常量）；
+//   - 整条图标轨就是库列表（PrimaryNav），建库入口移到轨道底部 RailFoot 的实心蓝钮；
+//   - 库级「重命名 / 设置」从 L1 行尾菜单迁到 L2 面板头（SecondaryNav 的库操作「…」），
+//     重命名弹窗在本壳层挂载（PrimaryNavRenameModal + useLibraryRename）；
+//   - NavLibraryBlock / LibrarySwitcher 本体保留（旧两壳 flag off 仍在用），新壳不再接线。
 //
-// 阶段 6 菜单精细化：底部固定区与 L1 主区共用同一套行规格（高 32 / 图标 14 / 文字 13 /
-// 圆角 8 / 左右 padding 8 / 150ms ease-out），图标按语义重排（工作区设置 = settings）；
-// 底部固定区 + 折叠开关（原先最底的「用户卡片」已于交互治理阶段下线：
-//   个人信息/登出入口统一收口到右上角 WorkspaceTopBar 的个人中心抽屉，避免同一入口两处并存）。
-//
-// 第三批导航重构（本文件接线的三处变化）：
-//   1. L1 不再读 menu_items：改用 useBases() / useKbList() 两条既有查询喂给 PrimaryNav；
-//   2. L2 的「当前容器」不再由 menu 容器**反推**，而直接由 URL 的 base/kb id + 上述列表得出；
-//   3. `picked`（手动点一级容器开二级）随之删除 —— L1 点库就是导航，二级归属唯一真源是 URL。
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+// L2 机制（R-N-07/08'，一字未动）：收起/展开写 gx.l2.collapsed；三级优先级
+// 用户显式意图 > 响应式档位默认（浮出档收起 / 常驻档展开），见 lib/l2-collapse.ts。
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
-import { Icon, type IconName } from "../../components/icons";
-import type { ActiveLibrary } from "../../components/LibrarySwitcher";
+import { Icon } from "../../components/icons";
 import { buildEntityIconIndex } from "../../components/EntityIconPicker";
-import { useBases } from "../../api/hooks";
+import { useBases, useCanCreateLibrary } from "../../api/hooks";
 import { useKbList } from "../kb/kb-hooks";
 import { SearchDialog } from "../search/SearchDialog";
 import { useAuthzCapability } from "../authz/useAuthzCapability";
 import { visibleFooterNav } from "./lib/nav-gate";
-import { FOOTER_NAV_ITEMS } from "./lib/nav-footer";
+import { FOOTER_NAV_ITEMS, type FooterNavItem } from "./lib/nav-footer";
 import type { LibraryEntity } from "./lib/menu-sections";
+import { canManageLibrary } from "./lib/menu-sections";
 import { deriveScopeContainer } from "./lib/route-container";
 import { useMyOrgActions } from "../contacts/contacts-hooks";
 import { WorkspaceTopBar } from "./WorkspaceTopBar";
-import { NavLibraryBlock } from "./NavLibraryBlock";
-import { L1_ROW_IDLE, L1_ROW_SELECTED, NAV_ROW_TRANSITION, PrimaryNav } from "./PrimaryNav";
+import { PrimaryNav } from "./PrimaryNav";
+import { PrimaryNavRenameModal, type RenameTarget } from "./PrimaryNavRenameModal";
+import { CreateLibraryModal } from "../../components/CreateLibraryModal";
 import { SecondaryNav, type SecondaryContainer } from "./SecondaryNav";
 import { useLibraryRename } from "./useLibraryRename";
 import { SecondaryNavRail } from "./SecondaryNavRail";
 import { useBreakpointTier, isDrawerTier, isFloatingL2Tier } from "../../lib/breakpoint";
-import {
-  L1_WIDTH_COLLAPSED,
-  L1_WIDTH_EXPANDED,
-  L2_WIDTH,
-  L2_WIDTH_COMPACT,
-  readL1Collapsed,
-  writeL1Collapsed,
-} from "./lib/l1-collapse";
+import { L1_WIDTH, L2_WIDTH, L2_WIDTH_COMPACT } from "./lib/l1-collapse";
 import { readL2Collapsed, resolveL2Collapsed, writeL2Collapsed } from "./lib/l2-collapse";
 
 /** L2 当前容器：一级选中库本体（kind + id + name），由 URL 与实体列表得出。 */
@@ -71,46 +58,27 @@ type ActiveContainer = SecondaryContainer;
 const L2_FLOATING_TOP_PX = 48;
 
 /**
- * 底部固定区四项（D-5 §2.2 定稿顺序不变，单一真源在 lib/nav-footer.ts）。
- * 图标按语义重排：工作区设置由 database 改为 settings（database 已用于「数据库」类实体，
- * 挂在设置入口上语义错配）。行规格与 L1 主区共用 L1_ROW_* 与 NAV_ROW_TRANSITION。
- *
- * 门控（交互治理第一批）：四项各按自己那套能力判定渲染 —— 无能力即**不渲染该行**
- * （不是 disabled 假装禁用）。判定与 loading 语义全部下沉到 lib/nav-gate.ts 的纯函数，
- * 这里只装配 hook 信号，便于对同一套判定写单测而不必渲染整壳。
+ * ③ 图标轨底部固定区（v6 底板 .rail-foot）：
+ *   1. 建库实心蓝钮（仅 useCanCreateLibrary() 为真；库类型在弹窗内二选一）；
+ *   2. 能力门控后的底部项（通讯录 / 帮助 / 设置，门控沿用 nav-gate，fail-closed）；
+ *   3. 浮出档 L2 收起时的唤回砖。
+ * 一项都没有时不渲染容器（不留空边线）。全部纯图标 + title tooltip（砖名由 CSS 隐藏）。
  */
-function FooterNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
+function RailFoot({
+  secondaryToggle = null,
+  onNavigate,
+}: {
+  secondaryToggle?: { label: string; onOpen: () => void } | null;
+  /** 抽屉档点击后关抽屉；常驻档不传。 */
+  onNavigate?: () => void;
+}) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const [creating, setCreating] = useState(false);
+  // 权限门：无 create_library 的用户整个建库钮不渲染（不是 disabled）；加载中按无权限。
+  const canCreate = useCanCreateLibrary();
   const { actions, isLoading: actionsLoading } = useMyOrgActions();
   const { canManage: authzManage } = useAuthzCapability();
-
-  const go = (path: string) => {
-    navigate(path);
-    onNavigate?.();
-  };
-
-  const item = ({ path, icon, label }: { path: string; icon: IconName; label: string }) => {
-    const active = pathname === path || pathname.startsWith(`${path}/`);
-    return (
-      <button
-        type="button"
-        onClick={() => go(path)}
-        title={collapsed ? label : undefined}
-        aria-label={label}
-        className={[
-          "flex h-8 w-full items-center rounded-gx-lg text-gx-13",
-          NAV_ROW_TRANSITION,
-          collapsed ? "justify-center px-0" : "gap-2 px-2",
-          // R-N-09/10：与 L1 主区同一真源，选中 = 白底卡片 + accent 字 600
-          active ? L1_ROW_SELECTED : L1_ROW_IDLE,
-        ].join(" ")}
-      >
-        <Icon name={icon} size={14} className={`shrink-0 ${active ? "text-gx-accent" : "opacity-80"}`} />
-        {collapsed ? null : <span className="flex-1 truncate text-left">{label}</span>}
-      </button>
-    );
-  };
 
   const visible = visibleFooterNav(FOOTER_NAV_ITEMS, {
     actions,
@@ -118,118 +86,115 @@ function FooterNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?:
     // 能力探针未回来一律按无能力（fail-closed），否则会先闪出管理入口再消失。
     loading: actionsLoading,
   });
-  // 一项都不可见时不渲染容器：空壳会在 L1 底部留下一条突兀的发丝线 + 内边距。
-  if (visible.length === 0) return null;
 
-  return (
-    <div className="flex shrink-0 flex-col gap-0.5 border-t border-gx-hairline p-1.5">
-      {visible.map((it) => (
-        <div key={it.path}>{item(it)}</div>
-      ))}
-    </div>
-  );
-}
+  const go = (path: string) => {
+    navigate(path);
+    onNavigate?.();
+  };
 
-
-/** R-N-07 折叠开关：折叠档下也必须可点（只留图标 + tooltip），否则用户无法还原。 */
-function CollapseToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
-  const label = collapsed ? "展开导航" : "收起导航";
-  return (
-    <div className="shrink-0 border-t border-gx-hairline p-1.5">
+  const footItem = (it: FooterNavItem) => {
+    const active = pathname === it.path || pathname.startsWith(`${it.path}/`);
+    return (
       <button
+        key={it.path}
         type="button"
-        onClick={onToggle}
-        title={label}
-        aria-label={label}
-        aria-expanded={!collapsed}
-        className={[
-          "flex w-full items-center rounded-gx-lg text-gx-12 text-gx-text-tertiary transition-colors hover:bg-gx-row-hover hover:text-gx-text-primary",
-          collapsed ? "h-8 justify-center px-0" : "h-8 gap-2 px-2",
-        ].join(" ")}
+        onClick={() => go(it.path)}
+        title={it.label}
+        aria-label={it.label}
+        className={["gx-rail-item", active ? "is-active" : ""].filter(Boolean).join(" ")}
       >
-        <Icon name={collapsed ? "chevronRight" : "chevronLeft"} size={14} className="shrink-0" />
-        {collapsed ? null : <span className="flex-1 truncate text-left">收起导航</span>}
+        <span className="gx-rail-tile">
+          <Icon name={it.icon} size={17} />
+        </span>
+        <span className="gx-rail-nm">{it.label}</span>
       </button>
+    );
+  };
+
+  if (!canCreate && visible.length === 0 && !secondaryToggle) return null;
+
+  return (
+    <div className="gx-rail-foot">
+      {canCreate && (
+        <>
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            title="新建库"
+            aria-label="新建库"
+            data-nav-row="library-create"
+            className="gx-rail-item is-create"
+          >
+            <span className="gx-rail-tile">
+              <Icon name="plus" size={17} />
+            </span>
+            <span className="gx-rail-nm">新建库</span>
+          </button>
+          {/* 不传 fixedType：弹窗内渲染「智能数据库 / 知识库」二选一，两条创建流程共用一份 */}
+          <CreateLibraryModal open={creating} title="新建库" onClose={() => setCreating(false)} />
+        </>
+      )}
+      {visible.map(footItem)}
+      {secondaryToggle && (
+        <button
+          type="button"
+          onClick={secondaryToggle.onOpen}
+          title={secondaryToggle.label}
+          aria-label={secondaryToggle.label}
+          className="gx-rail-item"
+        >
+          <span className="gx-rail-tile">
+            <Icon name="chevronRight" size={17} />
+          </span>
+          <span className="gx-rail-nm">展开面板</span>
+        </button>
+      )}
     </div>
   );
 }
 
+/**
+ * L1 侧栏：v6 恒 76px 图标轨。宽度走内联 style（L1_WIDTH），表面样式全部在
+ * index.css 的 .gx-rail-surface（组件源码零 hex）。
+ */
 function SideRail({
-  collapsed,
-  onToggleCollapsed,
-  /** R-D-32：768–1023 档 L1 被强制锁在 56 图标档，此时不给展开开关（点了也不会变宽）。 */
-  showCollapseToggle = true,
-  /**
-   * R-D-31 / R-D-32：L2 以「浮出面板」承载时，收起态的唤回入口。
-   * 放在 L1 底部固定区而不是内容区左上角——浮出面板收起来以后，入口不能再压住内容
-   * （第一张卡片的标题就在那个位置）。折叠档下只留图标 + tooltip，符合 R-N-07。
-   */
+  /** R-D-31 / R-D-32：L2 以「浮出面板」承载时，收起态的唤回砖（放轨道底部）。 */
   secondaryToggle = null,
-  /** L1 数据源：bases / kbs 实体列表（第三批：不再读 menu_items）。 */
+  /** L1 数据源：bases / kbs 实体列表（不读 menu_items）。 */
   bases,
   kbs,
   navLoading = false,
   navError = false,
-  /** 一级导航顶部插槽：库切换器 + 单一「新建库」入口（库类型在弹窗内二选一）。 */
-  header,
-  /** L1 行尾「…」菜单里的「重命名」：需要 QueryClient，故在壳层实现后注入。 */
-  onRename,
   /** 透传给 PrimaryNav：浮出/抽屉档 L2 收起时，点当前容器临时唤出 L2。 */
   onPeekCurrent,
+  /** 抽屉档：点底部项后关抽屉。 */
+  onFootNavigate,
 }: {
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
-  showCollapseToggle?: boolean;
   secondaryToggle?: { label: string; onOpen: () => void } | null;
-  /** L1 数据源所需的最小形态（BaseDTO / KbDTO 都结构化满足）。 */
   bases?: readonly LibraryEntity[];
   kbs?: readonly LibraryEntity[];
   navLoading?: boolean;
   navError?: boolean;
-  header?: ReactNode;
-  onRename?: (kind: "base" | "kb", id: string, name: string) => Promise<void>;
   onPeekCurrent?: () => void;
+  onFootNavigate?: () => void;
 }) {
   return (
     <aside
-      className="flex h-full shrink-0 flex-col border-r border-gx-hairline bg-gx-nav1"
-      style={{ width: collapsed ? L1_WIDTH_COLLAPSED : L1_WIDTH_EXPANDED }}
-      data-l1={collapsed ? "collapsed" : "expanded"}
+      className="gx-rail-surface flex h-full shrink-0 flex-col"
+      style={{ width: L1_WIDTH }}
+      data-l1="rail"
     >
-      {/* PrimaryNav 自身窗口化滚动（S10 大菜单 DOM 有界），不再外包滚动容器避免双滚动条 */}
+      {/* PrimaryNav 自身窗口化滚动（S10 大菜单 DOM 有界）。 */}
       <div className="min-h-0 flex-1">
         <PrimaryNav
           bases={bases}
           kbs={kbs}
           loading={navLoading}
           error={navError}
-          collapsed={collapsed}
-          header={header}
-          onRename={onRename}
           onPeekCurrent={onPeekCurrent}
         />
       </div>
-      <FooterNav collapsed={collapsed} />
-      {secondaryToggle && (
-        <div className="shrink-0 border-t border-gx-hairline p-1.5">
-          <button
-            type="button"
-            onClick={secondaryToggle.onOpen}
-            title={secondaryToggle.label}
-            aria-label={secondaryToggle.label}
-            className={[
-              "flex w-full items-center rounded-gx-lg text-gx-12 text-gx-text-primary transition-colors hover:bg-gx-row-hover",
-              collapsed ? "h-8 justify-center px-0" : "h-8 gap-2 px-2",
-            ].join(" ")}
-          >
-            <Icon name="chevronRight" size={14} className="shrink-0" />
-            {collapsed ? null : <span className="flex-1 truncate text-left">展开面板</span>}
-          </button>
-        </div>
-      )}
-      {showCollapseToggle && (
-        <CollapseToggle collapsed={collapsed} onToggle={onToggleCollapsed} />
-      )}
+      <RailFoot secondaryToggle={secondaryToggle} onNavigate={onFootNavigate} />
     </aside>
   );
 }
@@ -248,21 +213,17 @@ export function WorkspaceShell() {
    */
   const [l2Intent, setL2Intent] = useState<boolean | null>(() => readL2Collapsed());
   const [l2Peeked, setL2Peeked] = useState(false);
-  const [collapsed, setCollapsed] = useState<boolean>(() => readL1Collapsed());
+  /** 库重命名弹窗目标：S1 起由 L2 面板头「库操作」菜单发起，弹窗在壳层挂载。 */
+  const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
   const location = useLocation();
 
-  /** 当前库作用域（base / kb）：L1 数据源、L2 归属、库区块「当前库」的同一处判定。 */
+  /** 当前库作用域（base / kb）：L1 数据源、L2 归属的同一处判定。 */
   const baseMatch = useMatch("/base/:baseId/*");
   const kbMatch = useMatch("/kb/:kbId/*");
   const scopeKind: "base" | "kb" | null = baseMatch ? "base" : kbMatch ? "kb" : null;
   const scopeId = baseMatch?.params.baseId ?? kbMatch?.params.kbId ?? null;
 
-  // 库区块（切换器 + 新建入口）的「当前库」同样由 pathname 反推：
-  // 壳层挂在无 path 的布局路由下，useParams 恒为 {}（同上面 L2 归属的反推）。
-  const activeLibrary: ActiveLibrary =
-    scopeKind === "kb" ? { kind: "kb", id: scopeId } : { kind: "base", id: scopeId };
-
-  /** L1 数据源（第三批：useBases/useKbList 就是一级导航本身，不再读 menu_items）。 */
+  /** L1 数据源：useBases/useKbList 就是一级导航本身，不读 menu_items。 */
   const { data: bases, isLoading: basesLoading, isError: basesError } = useBases();
   const { data: kbs, isLoading: kbsLoading, isError: kbsError } = useKbList();
   /**
@@ -285,10 +246,18 @@ export function WorkspaceShell() {
   );
 
   /**
-   * L1 行尾「…」菜单的「重命名」：实现抽在 useLibraryRename（走 client 方法 + 失效列表缓存），
-   * 这里只取回调透传给 PrimaryNav —— 壳层不自己持有改名逻辑。
+   * L2 头「库操作 → 重命名」的落库实现：useLibraryRename（client 方法 + 失效列表缓存）。
+   * SecondaryNav 头回调只负责发起，真正落库走既有 modal → useLibraryRename。
    */
   const renameLibrary = useLibraryRename();
+
+  /** 当前库实体（用于库操作菜单的 canManage 判定）；未加载完按无管理权限（fail-closed）。 */
+  const activeEntity = routeContainer
+    ? ((bases ?? []).find((b) => b.id === routeContainer.id)
+      ?? (kbs ?? []).find((k) => k.id === routeContainer.id)
+      ?? null)
+    : null;
+  const canManageActiveLib = canManageLibrary(activeEntity?.role);
 
   /** 显式收起：落盘（刷新保持），并清掉会话内 peek，否则 peek 会盖掉这次收起。 */
   const collapseL2 = useCallback(() => {
@@ -297,7 +266,7 @@ export function WorkspaceShell() {
     writeL2Collapsed(true);
   }, []);
 
-  /** 显式展开：落盘（刷新保持）。窄条与 L1 底部唤回入口都走这里。 */
+  /** 显式展开：落盘（刷新保持）。窄条与唤回砖都走这里。 */
   const expandL2 = useCallback(() => {
     setL2Intent(false);
     writeL2Collapsed(false);
@@ -308,14 +277,6 @@ export function WorkspaceShell() {
    * 换路由由既有 effect 复位。浮出/抽屉档 L2 收起时点当前容器使用。
    */
   const peekL2 = useCallback(() => setL2Peeked(true), []);
-
-  const toggleCollapsed = useCallback(() => {
-    setCollapsed((prev) => {
-      const next = !prev;
-      writeL1Collapsed(next);
-      return next;
-    });
-  }, []);
 
   // ⌘K 与旧壳一致
   useEffect(() => {
@@ -331,7 +292,6 @@ export function WorkspaceShell() {
 
   // 跨档位切换（如 1000 → 1200）与路由变化都不再复位 L2：l2Hidden 是纯派生值，
   // 用户显式收起/展开由 l2Intent 承载（跨刷新），档位默认只在「从未操作」时生效。
-  // 原先每次换档/换路由都按档位硬复位，正是「用户选择被档位锁死」的根因。
   useEffect(() => {
     setDrawerOpen(false);
     setL2Peeked(false);
@@ -354,9 +314,8 @@ export function WorkspaceShell() {
   const peekCurrent =
     (floatingL2 || drawer) && !showL2 && activeContainer ? peekL2 : undefined;
 
-  // R-D-32：768–1023 L1 锁定 56 图标档（用户手动折叠态仍然保留，回到 ≥1024 时还原）
-  const l1Collapsed = tier === "md" || collapsed;
-  const l1Width = l1Collapsed ? L1_WIDTH_COLLAPSED : L1_WIDTH_EXPANDED;
+  // v6：L1 恒为 76px 图标轨（浮出 left 与 SecondaryNavRail 的 l1Width 都取此值）。
+  const l1Width = L1_WIDTH;
   // R-D-30：1280–1439 L2 压到 208，其余档 240
   const l2Width = tier === "xl" ? L2_WIDTH_COMPACT : L2_WIDTH;
 
@@ -369,6 +328,8 @@ export function WorkspaceShell() {
       width={l2Width}
       entityIcons={entityIcons}
       onClose={collapseL2}
+      libraryCanManage={canManageActiveLib}
+      onRenameLibrary={(kind, id, name) => setRenameTarget({ kind, id, name })}
     />
   ) : null;
 
@@ -400,19 +361,17 @@ export function WorkspaceShell() {
                 className="absolute inset-0 z-20 bg-black/20"
                 onClick={() => setDrawerOpen(false)}
               />
-              {/* R-D-33：L1/L2 全部进抽屉。L1 常驻抽屉内；L2 叠在 L1 之上（不是并排——
-                  224+240 会超出 390 的屏宽），其 × 收起后回到 L1，等价于「返回上一级」 */}
+              {/* R-D-33：L1/L2 全部进抽屉。L1 常驻抽屉内（恒 76 图标轨）；L2 叠在 L1
+                  之上（不是并排——76+240 也会挤出 390 屏宽），其 × 收起后回到 L1，
+                  等价于「返回上一级」 */}
               <div className="absolute left-0 top-0 bottom-0 z-30 flex">
                 <SideRail
-                  collapsed={collapsed}
-                  onToggleCollapsed={toggleCollapsed}
                   bases={bases ?? []}
                   kbs={kbs ?? []}
                   navLoading={basesLoading || kbsLoading}
                   navError={basesError || kbsError}
-                  header={<NavLibraryBlock active={activeLibrary} collapsed={collapsed} />}
-                  onRename={renameLibrary}
                   onPeekCurrent={peekCurrent}
+                  onFootNavigate={() => setDrawerOpen(false)}
                 />
                 {showL2 && secondary && (
                   <div className="absolute left-0 top-0 bottom-0 gx-z-drawer shadow-gx-lg">
@@ -424,14 +383,10 @@ export function WorkspaceShell() {
           )
         ) : (
           <SideRail
-            collapsed={l1Collapsed}
-            onToggleCollapsed={toggleCollapsed}
             bases={bases ?? []}
             kbs={kbs ?? []}
             navLoading={basesLoading || kbsLoading}
             navError={basesError || kbsError}
-            showCollapseToggle={tier !== "md"}
-            header={<NavLibraryBlock active={activeLibrary} collapsed={l1Collapsed} />}
             secondaryToggle={
               floatingL2 && !showL2 && activeContainer
                 ? {
@@ -440,7 +395,6 @@ export function WorkspaceShell() {
                   }
                 : null
             }
-            onRename={renameLibrary}
             onPeekCurrent={peekCurrent}
           />
         )}
@@ -464,7 +418,7 @@ export function WorkspaceShell() {
           ) : (
             // 收起态（常驻档）：彻底收起、零内容占位，只在 L1 右缘垂直中点留一个圆形悬浮
             // 箭头唤回（SecondaryNavRail 已改为不占宽的 absolute 钮，骑在当前 L1 右缘）。
-            // 浮出档不渲染本件（会占内容宽度，违反 R-D-31/32），唤回入口在 L1 底部固定区。
+            // 浮出档不渲染本件（会占内容宽度，违反 R-D-31/32），唤回入口在轨道底部。
             !floatingL2 && (
               <SecondaryNavRail
                 key={`rail-${activeContainer.id}`}
@@ -476,15 +430,21 @@ export function WorkspaceShell() {
           )
         )}
 
-        {/* 浮出档收起后的唤回入口在 L1 底部固定区（SideRail.secondaryToggle），
-            不浮在内容区上——入口不能反过来挡住内容。 */}
-
         <main className="min-w-0 flex-1 overflow-hidden">
           <Outlet />
         </main>
       </div>
 
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
+
+      {/* 库重命名弹窗：L2 面板头「库操作」发起，落库走 useLibraryRename。 */}
+      <PrimaryNavRenameModal
+        target={renameTarget}
+        bases={bases ?? []}
+        kbs={kbs ?? []}
+        onClose={() => setRenameTarget(null)}
+        onRename={renameLibrary}
+      />
     </div>
   );
 }

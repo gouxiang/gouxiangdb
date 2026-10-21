@@ -34,9 +34,11 @@ describe("R-D-30/31/32/33 壳层断点接线", () => {
     expect(shell).toContain("L2_FLOATING_TOP_PX");
   });
 
-  it("R-D-32：768–1023 档 L1 锁定 56 图标档，且不给会被覆盖的展开开关", () => {
-    expect(shell).toContain('tier === "md" || collapsed');
-    expect(shell).toContain('showCollapseToggle={tier !== "md"}');
+  it("R-D-32（v6 S1）：768–1023 档 L1 不再折叠——恒 76 图标轨、无 CollapseToggle", () => {
+    // v6：L1 折叠档永久废止，md 档只影响 L2（浮出），L1 恒定 76。
+    expect(shell).not.toContain("CollapseToggle");
+    expect(shell).not.toContain('tier === "md"');
+    expect(shell).toContain("L1_WIDTH");
   });
 
   it("R-D-33：<768 走抽屉，且抽屉里 L1 与 L2 都在（L2 叠在 L1 之上，不并排超宽）", () => {

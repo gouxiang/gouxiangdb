@@ -8,13 +8,14 @@
 //
 // 读写同样全量 try/catch：隐私模式 / 配额满时静默降级为「单次会话内有效」。
 
-import { L1_WIDTH_COLLAPSED } from "./l1-collapse";
-
 /** localStorage 键：L2 折叠态（"1" 收起 / "0" 展开 / 缺失或脏值 = 无用户意图）。 */
 export const L2_COLLAPSED_KEY = "gx.l2.collapsed";
 
-/** L2 收起态窄条宽度：与 L1 折叠档同规格（56），两条竖栏并排时视觉不打架。 */
-export const L2_WIDTH_COLLAPSED = L1_WIDTH_COLLAPSED;
+/**
+ * L2 收起态窄条宽度：窄条 56（v6 S1 起 L1 折叠档已废止，该常量在本模块自立，
+ * 不再从 l1-collapse 取——L1 现在恒为 76px 图标轨）。
+ */
+export const L2_WIDTH_COLLAPSED = 56;
 
 /**
  * 读用户显式意图。返回 null 表示「用户从未操作过」，调用方应改用响应式档位默认态。

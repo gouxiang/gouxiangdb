@@ -73,12 +73,12 @@ describe("能力判定：四项各自一套口径", () => {
 });
 
 describe("visibleFooterNav：过滤即剔除，且保持定稿顺序", () => {
-  it("owner（五枚动作齐全）：三项全可见，顺序不变", () => {
+  it("owner（五枚动作齐全）：三项全可见，顺序为 v6 底板通讯录 → 帮助 → 设置", () => {
     const visible = visibleFooterNav(FOOTER_NAV_ITEMS, { actions: OWNER, authzManage: false });
     expect(visible.map((i) => i.path)).toEqual([
       "/workspace/contacts",
-      "/workspace/settings/general",
       "/help",
+      "/workspace/settings/general",
     ]);
   });
 
@@ -108,12 +108,14 @@ describe("visibleFooterNav：过滤即剔除，且保持定稿顺序", () => {
     expect(visible.map((i) => i.path)).toEqual(["/help"]);
   });
 
-  it("部分能力的混合账号按逐条判定，不做全有全无（静态入口始终在）", () => {
+  it("部分能力的混合账号按逐条判定，不做全有全无（静态入口始终在）；顺序照新数组", () => {
     const visible = visibleFooterNav(FOOTER_NAV_ITEMS, {
       actions: setOf("manage_menu"),
       authzManage: false,
     });
-    expect(visible.map((i) => i.path)).toEqual(["/workspace/settings/general", "/help"]);
+    // 新数组顺序为 contacts → help → settings；本账号无 contacts 能力，
+    // 可见集按相对顺序为 help → settings。
+    expect(visible.map((i) => i.path)).toEqual(["/help", "/workspace/settings/general"]);
   });
 
   it("探针未完成（loading）：管理入口一律按无能力，静态入口不受影响", () => {

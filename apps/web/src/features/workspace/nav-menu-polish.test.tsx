@@ -120,19 +120,21 @@ describe("R-N-20 手风琴已下线", () => {
     expect(rows.every((r) => r.kind === "group" || r.nested.length === 0)).toBe(true);
   });
 
-  it("SSR：一级只有「数据库 / 知识库」两个分组标题行，库项平铺直接可见", () => {
+  it("SSR：分组标题行永不渲染（数据层保留、表层不画线），库项平铺直出且带 data-grp", () => {
     const html = renderNav("/", {
+      // 库名刻意避开「数据库 / 知识库」字样，才能断言分组组名文本不出现。
       bases: [{ id: "b1", name: "客户库", icon: null, iconColor: null }],
-      kbs: [{ id: "k1", name: "产品知识库", icon: null, iconColor: null }],
+      kbs: [{ id: "k1", name: "产品手册库", icon: null, iconColor: null }],
     });
-    // 分组标题：11px + hint 色 + 独立行
-    expect(html).toContain('data-nav-row="group"');
-    expect(html).toContain("text-gx-text-hint");
-    // 两个分组 + 平铺的库项都直接渲染出来（不必先展开）
-    expect(html).toContain("数据库");
-    expect(html).toContain("知识库");
+    // v6 S1：分组不做视觉体现——分组行不进 DOM，但每个库砖挂 data-grp 保留分组归属
+    expect(html).not.toContain('data-nav-row="group"');
+    expect(html).toContain('data-grp="base"');
+    expect(html).toContain('data-grp="kb"');
+    // 两个组名文字不渲染（库名本身也刻意不含这两个词）
+    expect(html).not.toContain("数据库");
+    expect(html).not.toContain("知识库");
     expect(html).toContain("客户库");
-    expect(html).toContain("产品知识库");
+    expect(html).toContain("产品手册库");
     // 红线：一级里不得出现任何二级内容（表/文档/画布）
     expect(html).not.toContain('data-nav-entity="table"');
     expect(html).not.toContain('data-nav-entity="doc"');
@@ -174,21 +176,30 @@ describe("R-N-22 节奏统一", () => {
     expect(win.start * 34 - win.padTop).toBeGreaterThan(300);
   });
 
-  it("菜单行规格同一真源：图标 14 / 文字 13 / 圆角 8 / padding 8 / gap 8 / 150ms ease-out", () => {
+  it("图标轨行规格同一真源：砖类 gx-rail-item/tile、砖步进 RAIL_TILE_ROW_H、图标 17", () => {
     const src = read("./PrimaryNav.tsx");
-    expect(src).toContain('flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-13');
-    expect(src).toContain("size={14}");
-    expect(src).toContain('NAV_ROW_TRANSITION = "transition-colors duration-150 ease-out"');
-    // 底部固定区复用同一真源，不另起一套
+    expect(src).toContain("gx-rail-item");
+    expect(src).toContain("gx-rail-tile");
+    expect(src).toContain("RAIL_TILE_ROW_H");
+    expect(src).toContain("size={17}");
+    // 砖的渐变 / 阴影 / 11px 圆角全部在 index.css，组件不写色值
+    const css = read("../../index.css");
+    expect(css).toContain(".gx-rail-tile");
+    expect(css).toContain("11px");
+    // 底部固定区复用同一套砖类，不另起一套；建库钮 is-create 也在壳里
     const shell = code("./WorkspaceShell.tsx");
-    expect(shell).toContain("NAV_ROW_TRANSITION");
-    expect(shell).toContain("L1_ROW_SELECTED");
-    expect(shell).toContain("L1_ROW_IDLE");
+    expect(shell).toContain("gx-rail-surface");
+    expect(shell).toContain("gx-rail-foot");
+    expect(shell).toContain("is-create");
   });
 
-  it("分组标题与菜单项左内边距同一档（都 px-2，不缩进）", () => {
-    const src = read("./PrimaryNav.tsx");
-    expect(src).toContain("flex w-full items-center rounded-gx-lg px-2 text-gx-11 font-medium");
+  it("砖名规格 10.5px 走 index.css（.gx-rail-nm 单一真源，组件内不写字号）", () => {
+    const css = read("../../index.css");
+    expect(css).toContain(".gx-rail-nm");
+    expect(css).toContain("10.5px");
+    const src = code("./PrimaryNav.tsx");
+    expect(src).toContain("gx-rail-nm");
+    expect(src).not.toContain("text-gx-11");
   });
 });
 
@@ -197,10 +208,12 @@ describe("图标语义映射（L1 全站）", () => {
     // P2-B1：权限管理不再是底部固定区的一项——它现在是工作区设置里的一个分区
     //（内嵌 PermPanel），路由 /workspace/authz 保留但不占 L1 固定位。
     // 帮助中心是内容型静态入口：不看角色（门控见 lib/nav-gate.ts 的 STATIC_FOOTER_PATHS）。
+    // v6 S1 顺序照底板 RAIL_FOOT：通讯录 → 帮助中心 → 工作区设置；
+    // 通讯录图标由 building 换 users（双人剪影）。
     expect(FOOTER_NAV_ITEMS).toEqual([
-      { path: "/workspace/contacts", icon: "building", label: "通讯录" },
-      { path: "/workspace/settings/general", icon: "settings", label: "工作区设置" },
+      { path: "/workspace/contacts", icon: "users", label: "通讯录" },
       { path: "/help", icon: "help", label: "帮助中心" },
+      { path: "/workspace/settings/general", icon: "settings", label: "工作区设置" },
     ]);
   });
 
@@ -225,12 +238,12 @@ describe("图标语义映射（L1 全站）", () => {
     expect(navKindIcon("group")).toBe("group");
   });
 
-  it("菜单用到的图标全部能渲染（含新增的 home / checkSquare）", () => {
+  it("菜单用到的图标全部能渲染（含 v6 通讯录 users / 帮助 help）", () => {
     const used: IconName[] = [
       "user", "home", "checkSquare", "star",
-      "building", "shield", "sitemap", "settings",
+      "building", "users", "help", "shield", "sitemap", "settings",
       "folder", "folderOpen", "database", "book", "table", "doc", "canvas", "grid", "group",
-      "chevronRight", "chevronDown", "moreVertical",
+      "chevronRight", "chevronDown", "moreVertical", "plus", "edit",
     ];
     for (const name of used) {
       const html = renderToString(<Icon name={name} size={14} />);
@@ -241,36 +254,35 @@ describe("图标语义映射（L1 全站）", () => {
 });
 
 describe("阶段 1 交付不回退", () => {
-  it("白底卡片选中态与「规划中」徽标仍在，左侧色条仍未回来", () => {
+  it("图标轨选中态走 is-active + gx-rail 类，左侧色条仍未回来", () => {
     const html = renderNav("/base/b1/table/t1", {
       bases: [{ id: "b1", name: "客户库", icon: null, iconColor: null }],
     });
-    expect(html).toContain("bg-white");
-    expect(html).toContain("font-semibold");
-    expect(html).toContain("text-gx-accent");
-    expect(html).toContain("rounded-gx-lg");
+    expect(html).toContain("is-active");
+    expect(html).toContain("gx-rail-item");
+    expect(html).toContain("gx-rail-tile");
     // 「规划中」徽标在 L1 随规划入口一并下线（徽标组件本身仍在别处使用）。
     expect(html).not.toContain("规划中");
     const src = read("./PrimaryNav.tsx");
     expect(src).not.toContain("w-[3px]");
-    expect(src).not.toContain("bg-gx-accent-bg");
+    expect(src).not.toMatch(/#[0-9a-fA-F]{3,8}/);
   });
 
-  it("折叠档（56px）只留图标：不渲染文字节点，保留 title 与可点按钮", () => {
+  it("v6 图标轨恒显示砖名，分组行 data-nav-row=group 永不出现（折叠档已废止）", () => {
     const html = renderNav("/base/b1/table/t1", {
-      collapsed: true,
       bases: [{ id: "b1", name: "客户库", icon: null, iconColor: null }],
     });
-    expect(html).not.toMatch(/>客户库</);
+    // 砖名恒渲染（不再有 collapsed 折叠档）
+    expect(html).toContain(">客户库<");
     expect(html).toContain('title="客户库"');
-    expect(html).toContain("justify-center");
-    // 折叠档下分组标题行不渲染（只留图标行），但菜单项一个不少
+    // 分组标题行永不进 DOM；规划入口也不存在
     expect(html).not.toContain('data-nav-row="group"');
-    // 规划入口已下线，折叠档也不该再有 planned 行。
     expect(html).not.toContain('data-nav-row="planned"');
+    // 分组归属仍在（data-grp 契约）
+    expect(html).toContain('data-grp="base"');
   });
 
-  it("颜色仍全部走 gx-* 令牌：PrimaryNav / WorkspaceShell 不写死 hex", () => {
+  it("颜色仍全部走 gx-* 令牌 / index.css 类：PrimaryNav / WorkspaceShell 不写死 hex", () => {
     for (const f of ["./PrimaryNav.tsx", "./WorkspaceShell.tsx"]) {
       const src = code(f);
       expect(src).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);

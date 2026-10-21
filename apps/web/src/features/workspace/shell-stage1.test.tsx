@@ -46,13 +46,10 @@ import { TableActionRow } from "./TableActionRow";
 import { RowMoreMenu, SecondaryRow } from "./SecondaryNavSections";
 import type { SecondaryEntry } from "./SecondaryNavSections";
 import {
-  L1_WIDTH_COLLAPSED,
-  L1_WIDTH_EXPANDED,
+  L1_WIDTH,
   L2_WIDTH,
-  L1_COLLAPSED_KEY,
+  L2_WIDTH_COMPACT,
   TOPBAR_H,
-  readL1Collapsed,
-  writeL1Collapsed,
 } from "./lib/l1-collapse";
 import { deriveScopeContainer } from "./lib/route-container";
 
@@ -85,18 +82,21 @@ function renderNavAt(location: string, props: Record<string, unknown> = {}) {
 }
 
 
-describe("阶段 1 骨架常量（UI-SPEC A.3）", () => {
-  it("L1 展开 196 / 折叠 56；L2 常驻 240；顶栏 56；折叠键走 gx 前缀约定", () => {
-    expect(L1_WIDTH_EXPANDED).toBe(196);
-    expect(L1_WIDTH_COLLAPSED).toBe(56);
+describe("阶段 1 骨架常量（UI-SPEC A.3；v6 S1：L1 恒 76 图标轨）", () => {
+  it("L1 恒 76、L2 240（紧凑档 208）、顶栏 56", () => {
+    expect(L1_WIDTH).toBe(76);
     expect(L2_WIDTH).toBe(240);
+    expect(L2_WIDTH_COMPACT).toBe(208);
     expect(TOPBAR_H).toBe(56);
-    expect(L1_COLLAPSED_KEY.startsWith("gx")).toBe(true);
   });
 
-  it("SSR 场景（无 window）读折叠态一律为展开，写入不抛", () => {
-    expect(readL1Collapsed()).toBe(false);
-    expect(() => writeL1Collapsed(true)).not.toThrow();
+  it("l1-collapse 只导几何常量：源码不再有折叠态读写（L1 折叠档永久废止）", () => {
+    const src = code("./lib/l1-collapse.ts");
+    expect(src).not.toContain("readL1Collapsed");
+    expect(src).not.toContain("writeL1Collapsed");
+    expect(src).not.toContain("L1_COLLAPSED_KEY");
+    expect(src).not.toContain("localStorage");
+    expect(src).toContain("L1_WIDTH = 76");
   });
 });
 
@@ -137,31 +137,33 @@ describe("L2 容器派生（R-N-02 刷新还原：改由 URL + 实体列表直�
   });
 });
 
-describe("R-N-09 选中态：白底卡片，无左侧色条", () => {
-  it("停在库的任意子资源上 → 该一级库行渲染为白底 + accent 字 + 600 + 圆角 8", () => {
+describe("R-N-09 选中态：图标轨 is-active 凹槽砖，无左侧色条", () => {
+  it("停在库的任意子资源上 → 该一级砖行挂 is-active + gx-rail 类", () => {
     const html = renderNavAt("/base/base_1/table/tbl_1", {
       bases: [{ id: "base_1", name: "客户表", icon: null, iconColor: null }],
     });
     expect(html).toContain("客户表");
-    expect(html).toContain("bg-white");
-    expect(html).toContain("font-semibold");
-    expect(html).toContain("text-gx-accent");
-    expect(html).toContain("rounded-gx-lg");
+    expect(html).toContain("gx-rail-item");
+    expect(html).toContain("gx-rail-tile");
+    expect(html).toContain("is-active");
+    expect(html).toContain('data-grp="base"');
   });
 
-  it("一级导航源码里不再出现 3px 左侧色条（规范明令反例）", () => {
+  it("一级导航源码里不再出现 3px 左侧色条（规范明令反例），选中态走 is-active", () => {
     const src = read("./PrimaryNav.tsx");
     expect(src).not.toContain("w-[3px]");
-    expect(src).not.toContain("bg-gx-accent-bg");
+    expect(src).toContain('"is-active"');
+    // 砖的选中底色在 index.css（.gx-rail-item.is-active），组件源码不写任何色值
+    expect(src).not.toMatch(/#[0-9a-fA-F]{3,8}/);
   });
 
-  it("未命中当前库时是 hover 态而非选中态", () => {
+  it("未命中当前库时不是选中态（不挂 is-active）", () => {
     const html = renderNavAt("/base/other_base/table/tbl_9", {
       bases: [{ id: "base_1", name: "客户表", icon: null, iconColor: null }],
     });
     expect(html).toContain("客户表");
-    expect(html).toContain("hover:bg-gx-row-hover");
-    expect(html).not.toContain('data-nav-row="item" class="flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-gx-13 transition-colors duration-150 ease-out bg-white');
+    expect(html).toContain("gx-rail-item");
+    expect(html).not.toContain("is-active");
   });
 
   it("当前资源走 useMatch 而非 useParams（布局壳里 useParams 恒为 {}，选中态会永远不亮）", () => {
@@ -171,26 +173,23 @@ describe("R-N-09 选中态：白底卡片，无左侧色条", () => {
   });
 });
 
-describe("R-N-07 L1 折叠档（56px 只留图标）", () => {
-  it("折叠态不渲染文字标签，但保留 title tooltip 与可点按钮", () => {
+describe("R-N-07 图标轨：恒渲染砖名 + title，无 collapsed 分支（v6 S1）", () => {
+  it("不传 collapsed：砖名文本与 title tooltip 都在，行即图标轨砖", () => {
     const html = renderNavAt("/base/base_1/table/tbl_1", {
-      collapsed: true,
       bases: [{ id: "base_1", name: "客户表", icon: null, iconColor: null }],
     });
-    // 折叠档只留图标：标签文本节点不渲染（title 里的同名 tooltip 不算渲染文字）
-    expect(html).not.toMatch(/>客户表</);
-    expect(html).not.toContain('class="flex-1 truncate"');
+    expect(html).toContain("gx-rail-item");
+    expect(html).toContain("gx-rail-nm");
+    expect(html).toContain(">客户表<");
     expect(html).toContain('title="客户表"');
-    expect(html).toContain("justify-center");
+    expect(html).toContain('data-nav-row="item"');
   });
 
-  it("展开态正常渲染文字标签", () => {
-    expect(
-      renderNavAt("/base/base_1/table/tbl_1", {
-        collapsed: false,
-        bases: [{ id: "base_1", name: "客户表", icon: null, iconColor: null }],
-      }),
-    ).toContain("客户表");
+  it("PrimaryNav 源码不再接收 collapsed，也不渲染分组标题行", () => {
+    const src = code("./PrimaryNav.tsx");
+    expect(src).not.toContain("collapsed");
+    expect(src).not.toContain('data-nav-row="group"');
+    expect(src).toContain("gx-rail-item");
   });
 });
 
@@ -346,11 +345,15 @@ describe("骨架 S-1：L2 常驻 240 / nav2 底；主壳无面包屑", () => {
     expect(topbar).not.toContain("navigate(`/base/${baseId}/table/${tableId}`)");
   });
 
-  it("L1 底为 gx-nav1、宽度为 224/56 两档，L2 随容器有无收起（无容器不占位）", () => {
+  it("L1 表面为 gx-rail-surface、宽度恒走 L1_WIDTH(76)，L2 随容器有无收起（无容器不占位）", () => {
     const src = read("./WorkspaceShell.tsx");
-    expect(src).toContain("bg-gx-nav1");
-    expect(src).toContain("L1_WIDTH_COLLAPSED : L1_WIDTH_EXPANDED");
+    expect(src).toContain("gx-rail-surface");
+    expect(src).toContain("L1_WIDTH");
     expect(src).toContain("showL2");
+    // v6：196/56 两档与折叠读写已整体废止
+    const codeSrc = code("./WorkspaceShell.tsx");
+    expect(codeSrc).not.toContain("L1_WIDTH_COLLAPSED");
+    expect(codeSrc).not.toContain("readL1Collapsed");
   });
 });
 

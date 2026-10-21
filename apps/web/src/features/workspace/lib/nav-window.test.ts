@@ -247,17 +247,22 @@ describe("窗口化接线源码守卫（防回归：三处必须挂 scrollerRef 
   const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
   const read = (p: string) => readFileSync(here(p), "utf8");
 
-  it("PrimaryNav / SecondaryNav 均把 scrollerRef 挂到 overflow 滚动容器并渲染 virt.windowed", () => {
+  it("PrimaryNav / SecondaryNav 均把 scrollerRef 挂到滚动容器并渲染 virt.windowed", () => {
     const primary = read("../PrimaryNav.tsx");
     expect(primary).toContain("ref={virt.scrollerRef}");
-    expect(primary).toContain("overflow-y-auto");
     expect(primary).toContain("virt.windowed.map");
+    // v6 S1：L1 滚动容器的 overflow-y:auto 收敛到 index.css 的 .gx-rail-nav
+    // （组件源码零 hex/视觉声明纪律），这里同锁两侧接线。
+    expect(primary).toContain("gx-rail-nav");
+    const css = read("../../../index.css");
+    expect(css).toMatch(/\.gx-rail-nav[\s\S]*overflow-y:\s*auto/);
 
     // ComposerTree 源码守卫随组件删除（导航编排树零生产引用），不再需要锁其接线。
 
     const secondary = read("../SecondaryNav.tsx");
     expect(secondary).toContain("ref={virt.scrollerRef}");
     expect(secondary).toContain("virt.windowed.map");
+    expect(secondary).toContain("overflow-y-auto");
   });
 
   it("useMenuVirtualizer 首帧 viewportH 为保守常量（非 0），ResizeObserver 与 passive scroll 接线齐全", () => {

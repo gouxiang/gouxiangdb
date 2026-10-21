@@ -36,6 +36,7 @@ import {
 import { useSecondaryTableOps } from "./SecondaryNavTableOps";
 import { useSecondaryKbOps } from "./SecondaryNavKbOps";
 import { TableActionRow } from "./TableActionRow";
+import { LibraryOpsButton } from "./LibraryOpsButton";
 import { L2_WIDTH } from "./lib/l1-collapse";
 
 /** 知识库二级的两个选项卡（顺序固定：文档在前）。 */
@@ -64,6 +65,8 @@ export function SecondaryNav({
   variant = "static",
   width = L2_WIDTH,
   entityIcons,
+  libraryCanManage = false,
+  onRenameLibrary,
 }: {
   container: SecondaryContainer;
   onClose: () => void;
@@ -81,6 +84,13 @@ export function SecondaryNav({
    * 未自定义时不传色，面板头维持纯文本形态。
    */
   entityIcons?: EntityIconIndex;
+  /**
+   * v6 S1：库级操作（重命名 / 设置）从 L1 行尾菜单迁到 L2 面板头。
+   * false（默认，兼容不传新 props 的旧 SSR 回归）时头部「库操作」钮整个不渲染。
+   */
+  libraryCanManage?: boolean;
+  /** 「重命名」由壳层处理（需 QueryClient）；不传时菜单里只保留「设置」。 */
+  onRenameLibrary?: (kind: "base" | "kb", id: string, name: string) => void;
 }) {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
@@ -247,8 +257,15 @@ export function SecondaryNav({
         <span className="flex-1 truncate text-gx-14 font-semibold text-gx-text-primary" title={container.name}>
           {container.name}
         </span>
+        {/*
+          v6 S1：库级操作「⋯」（重命名 / 设置）从 L1 行尾迁到 L2 面板头，常驻可见
+          （不走 gx-row-more 的 hover 隐藏）。骑缝收起圆箭头在容器外 right:-14px，
+          本按钮在容器内右侧，二者不重叠。无管理权限（libraryCanManage=false）时整个不渲染。
+        */}
+        {libraryCanManage && (
+          <LibraryOpsButton container={container} onRenameLibrary={onRenameLibrary} />
+        )}
       </div>
-
       <div className="border-b border-gx-separator px-2 py-2">
         <div className="flex items-center gap-1.5 rounded-gx-sm border border-gx-separator bg-gx-surface px-2 py-1">
           <Icon name="search" size={13} className="shrink-0 text-gx-text-hint" />

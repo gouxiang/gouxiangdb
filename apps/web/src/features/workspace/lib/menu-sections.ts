@@ -21,6 +21,19 @@ export const NAV_GROUP_ROW_H = 24;
 /** 行距：每行下方 2px，计入窗口化行高（否则窗口化的 padTop/padBottom 会累积漂移）。 */
 export const NAV_ROW_GAP = 2;
 
+/**
+ * v6 图标轨（2026-10 UI 重做 S1）砖行的逐行几何。
+ *
+ * 砖步进 = RAIL_TILE_ROW_H + RAIL_ROW_GAP = 65 + 3 = 68px，窗口化按 68 定高切片。
+ * 65 = 行 padding-top 6 + 图标砖 36 + 砖名 gap 4 + 名行高 13.65（10.5px × 1.3，
+ * 见 index.css .gx-rail-nm）+ padding-bottom 5，向上取整。
+ * 出处：底板 shared.css .rail-item（width:64、padding:6px 0 5px、gap:4px，103–107 行）、
+ * .rail-nav gap:3px（97 行）、.rail-item .rd 36×36（112 行）、.rail-item .nm 10.5/1.3（122 行）。
+ */
+export const RAIL_TILE_ROW_H = 65;
+/** 图标轨行距（底板 .rail-nav gap:3px）。 */
+export const RAIL_ROW_GAP = 3;
+
 /** 一层平铺行：分组标题 或 菜单项（nested 非空表示带侧方浮出子菜单）。 */
 export type NavSectionRow =
   | { kind: "group"; id: string; node: MenuTreeNode }

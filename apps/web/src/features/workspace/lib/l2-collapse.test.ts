@@ -5,7 +5,6 @@
 //   · 显式收起/展开 → 跨刷新保持，且压过档位默认（resolveL2Collapsed）；
 //   · localStorage 不可用 → 静默降级，不抛。
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { L1_WIDTH_COLLAPSED } from "./l1-collapse";
 import {
   L2_COLLAPSED_KEY,
   L2_WIDTH_COLLAPSED,
@@ -33,10 +32,9 @@ afterEach(() => {
 });
 
 describe("L2 折叠档常量与键名", () => {
-  it("键走 gx.l2.* 约定；窄条宽度与 L1 折叠档同规格（56）", () => {
+  it("键走 gx.l2.* 约定；窄条宽度自立常量 56（v6 S1：L1 折叠档废止，不再从 l1-collapse 取）", () => {
     expect(L2_COLLAPSED_KEY).toBe("gx.l2.collapsed");
     expect(L2_WIDTH_COLLAPSED).toBe(56);
-    expect(L2_WIDTH_COLLAPSED).toBe(L1_WIDTH_COLLAPSED);
   });
 });
 

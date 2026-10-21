@@ -10,13 +10,41 @@
 //   三态浏览渲染（alive / soft_dangling / broken）——L1 不再渲染 shortcut；
 //   同一 node 的多条 shortcut 去重 —— L1 直接列实体，一行一库。
 // 纯函数层的编排/三分区/409 行为见 ac-m3-1.test.ts；本文件锁「渲染出来的 HTML」。
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
 import { StaticRouter } from "react-router-dom/server";
 import type { NavNodeDTO } from "@gx/shared-types";
 import { indexNavNodes, navNodeHref } from "./lib/nav-links";
+
+// L2「库操作」新断言需要渲染真实 SecondaryNav：与 secondary-nav-render.test.tsx 同款 mock。
+vi.mock("../../api/hooks", () => ({
+  useTables: (baseId: string | null) => ({
+    data: baseId ? [] : undefined,
+    isLoading: false,
+    isError: false,
+  }),
+  useBase: () => ({ data: { permissions: { canManageSchema: true } } }),
+  useGXMutations: () => ({
+    createTable: { mutateAsync: vi.fn() },
+    updateTable: { mutateAsync: vi.fn() },
+    duplicateTable: { mutateAsync: vi.fn() },
+    clearTable: { mutateAsync: vi.fn() },
+    deleteTable: { mutateAsync: vi.fn() },
+    restoreTrash: { mutateAsync: vi.fn() },
+  }),
+}));
+
+vi.mock("../kb/kb-hooks", () => ({
+  useKbDocs: () => ({ data: [], isLoading: false, isError: false }),
+  useKb: () => ({ data: { role: "owner" } }),
+  useCreateDoc: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useMoveDoc: () => ({ mutateAsync: vi.fn() }),
+}));
+
+import { PrimaryNav } from "./PrimaryNav";
+import { SecondaryNav } from "./SecondaryNav";
 
 const TS = "2026-09-16T00:00:00.000Z";
 
@@ -43,31 +71,34 @@ const BASES: LibDTO[] = [
 ];
 const KBS: LibDTO[] = [{ id: "kb_9", name: "产品知识库", icon: null, iconColor: null }];
 
-function renderNav(location = "/", props: { bases?: LibDTO[]; kbs?: LibDTO[]; collapsed?: boolean } = {}) {
+function renderNav(location = "/", props: { bases?: LibDTO[]; kbs?: LibDTO[] } = {}) {
   return renderToString(
     <StaticRouter location={location}>
-      <PrimaryNav bases={props.bases ?? []} kbs={props.kbs ?? []} collapsed={props.collapsed} />
+      <PrimaryNav bases={props.bases ?? []} kbs={props.kbs ?? []} />
     </StaticRouter>,
   );
 }
-
-import { PrimaryNav } from "./PrimaryNav";
 
 beforeEach(() => {
   // 夹具是常量，无需重置；保留 hook 以满足后续可能的扩展
 });
 
-describe("PrimaryNav 一级只列数据库与知识库（第三批契约）", () => {
-  it("两个分组 + 全部库名都输出；空态不渲染分组", () => {
+describe("PrimaryNav 一级只列数据库与知识库（第三批契约；v6 S1：分组永不画线）", () => {
+  it("全部库名都输出且带 data-grp 分组归属；组名文字不渲染；空态不渲染文字块", () => {
     const html = renderNav("/", { bases: BASES, kbs: KBS });
-    expect(html).toContain("数据库");
-    expect(html).toContain("知识库");
+    // v6 S1：分组在表层不做视觉体现（底板契约），组名文字与 data-nav-row="group" 都不出现
+    expect(html).not.toContain('data-nav-row="group"');
+    expect(html).not.toContain(">数据库<");
+    expect(html).not.toContain(">知识库<");
+    expect(html).toContain('data-grp="base"');
+    expect(html).toContain('data-grp="kb"');
     expect(html).toContain("客户主库");
     expect(html).toContain("订单库");
     expect(html).toContain("产品知识库");
 
+    // 空态：不渲染文字块（建库入口在轨道底部常驻可达，PrimaryNav 本身不挂建库钮）
     const empty = renderNav();
-    expect(empty).toContain("暂无数据库或知识库");
+    expect(empty).not.toContain("暂无数据库或知识库");
     expect(empty).not.toContain('data-nav-row="item"');
   });
 
@@ -95,12 +126,12 @@ describe("PrimaryNav 一级只列数据库与知识库（第三批契约）", ()
 
   it("停在库的任意子资源上，一级对应行仍是选中态（刷新/直访都成立）", () => {
     const html = renderNav("/base/base_1/table/tbl_1", { bases: BASES, kbs: KBS });
-    expect(html).toContain("bg-white");
-    expect(html).toContain("text-gx-accent");
+    expect(html).toContain("is-active");
+    expect(html).toContain("gx-rail-item");
     // 未命中的库不亮选中态
     const other = renderNav("/kb/kb_9/doc/d1", { bases: BASES, kbs: KBS });
-    expect(other).toContain("bg-white");
-    expect(other).toContain("text-gx-accent");
+    expect(other).toContain("is-active");
+    expect(other).toContain("gx-rail-tile");
   });
 
   it("渲染出的入口不含 /w/ 新形前缀；旧形 href 模板仍是 /base/:id 与 /kb/:id", () => {
@@ -113,37 +144,59 @@ describe("PrimaryNav 一级只列数据库与知识库（第三批契约）", ()
   });
 });
 
-describe("L1 行尾「…」菜单（重命名 / 设置）", () => {
-  it("有管理角色：每行一个「…」菜单，label 带库名（读屏能念出是哪一行）", () => {
+describe("L1 砖行不再挂库操作菜单（v6 S1：重命名 / 设置迁到 L2 面板头）", () => {
+  it("L1 砖上没有任何 aria-haspopup，也没有「数据库操作 / 知识库操作」aria-label", () => {
     const html = renderNav("/", { bases: BASES, kbs: KBS });
-    expect(html).toContain('aria-label="数据库操作 客户主库"');
-    expect(html).toContain('aria-label="知识库操作 产品知识库"');
+    expect(html).not.toContain('aria-haspopup="menu"');
+    expect(html).not.toContain("数据库操作");
+    expect(html).not.toContain("知识库操作");
   });
 
-  it("菜单里只有「重命名 / 设置」，不放任何权限项", () => {
+  it("PrimaryNav 源码不再产出库操作菜单项（重命名 / 设置接线已迁走）", () => {
     const src = readFileSync(fileURLToPath(new URL("./PrimaryNav.tsx", import.meta.url)), "utf8");
-    expect(src).toContain('label: "重命名"');
-    expect(src).toContain('label: "设置"');
-    // 权限配置已统一收敛到「工作区设置 → 权限管理」，L1 菜单里不再留第二处入口
-    expect(src).not.toContain('label: "权限');
-    expect(src).not.toContain('label: "成员');
-    expect(src).not.toContain('label: "分享');
+    expect(src).not.toContain("RowMoreMenu");
+    expect(src).not.toContain("打开数据库设置");
+    expect(src).not.toContain("打开知识库设置");
   });
 
-  it("无管理角色（viewer）：不渲染菜单按钮，只留等宽占位（不给无权限的人看到入口）", () => {
+  it("无管理角色（viewer）也与砖行菜单无关：砖行结构对所有角色一致（操作在 L2 头）", () => {
     const html = renderNav("/", {
       bases: [{ id: "base_2", name: "订单库", icon: null, iconColor: null, role: "viewer" }],
     });
     expect(html).toContain("订单库");
-    expect(html).not.toContain('aria-label="数据库操作 订单库"');
-    // 占位 span 仍在（行宽行高不跳变），但它不是可点按钮
+    expect(html).toContain('data-nav-row="item"');
     expect(html).not.toContain('aria-haspopup="menu"');
   });
 
-  it("折叠档（56 图标档）不渲染「…」菜单：折叠态只剩居中图标", () => {
-    const html = renderNav("/", { bases: BASES, kbs: KBS, collapsed: true });
-    expect(html).not.toContain('aria-label="数据库操作 客户主库"');
-    expect(html).not.toContain('aria-haspopup="menu"');
+  it("图标轨恒定渲染（折叠档废止）：不传 collapsed，砖名与 title 恒在", () => {
+    const html = renderNav("/", { bases: BASES, kbs: KBS });
+    expect(html).toContain(">客户主库<");
+    expect(html).toContain('title="客户主库"');
+    expect(html).not.toContain('data-nav-row="group"');
+  });
+
+  it("重命名/设置已迁 L2 头：SecondaryNav 传 libraryCanManage 时出现 aria-label=\"库操作\"", () => {
+    const html = renderToString(
+      <StaticRouter location="/base/b1">
+        <SecondaryNav
+          container={{ kind: "base", id: "b1", name: "客户主数据库" }}
+          onClose={vi.fn()}
+          libraryCanManage
+          onRenameLibrary={vi.fn()}
+        />
+      </StaticRouter>,
+    );
+    expect(html).toContain('aria-label="库操作"');
+    expect(html).toContain('aria-haspopup="menu"');
+  });
+
+  it("默认不传 libraryCanManage 时 L2 头不渲染库操作钮（旧契约不破）", () => {
+    const html = renderToString(
+      <StaticRouter location="/base/b1">
+        <SecondaryNav container={{ kind: "base", id: "b1", name: "客户主数据库" }} onClose={vi.fn()} />
+      </StaticRouter>,
+    );
+    expect(html).not.toContain('aria-label="库操作"');
   });
 });
 
