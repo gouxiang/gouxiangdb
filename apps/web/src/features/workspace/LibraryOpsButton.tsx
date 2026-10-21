@@ -7,7 +7,8 @@
 // 与 RowMoreMenu 的差别（刻意）：
 //   - 常驻可见：不走 gx-row-more 的 hover 显隐（图标轨砖上没有行 hover 容器语义，
 //     且头部「⋯」必须随时可点）；
-//   - 28×28 圆角按钮，弹层复用 components/ui 的同一个 Popover + Menu + MenuItem
+//   - v6 S2：按钮按底板 .icon-btn（shared.css 212–217 行）30×30、8px 圆角、透明底，
+//     弹层复用 components/ui 的同一个 Popover + Menu + MenuItem
 //     （fixed portal，祖先 overflow:auto 不会裁剪）；
 //   - 不放「删除库」，也不放任何权限项（权限统一在工作区设置 → 权限管理）。
 //
@@ -43,9 +44,9 @@ export function LibraryOpsButton({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-gx-lg text-gx-text-tertiary transition-colors hover:bg-gx-row-hover hover:text-gx-text-primary"
+        className="gx-l2-icon-btn"
       >
-        <Icon name="moreVertical" size={15} />
+        <Icon name="moreVertical" size={14} />
       </button>
       {/* 与 RowMoreMenu 同口径：Popover 仅打开时挂载（closed 时它内部 useLayoutEffect
           不做事，SSR 下还会徒增一条 useLayoutEffect 警告）。 */}

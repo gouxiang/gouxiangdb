@@ -7,8 +7,11 @@ import { Menu, MenuItem, Popover } from "../../components/ui";
 import { resolveEntityIcon, resolvedEntityColor, type EntityIconValue } from "../../components/EntityIconPicker";
 import { navKindIcon } from "./PrimaryNav";
 
-/** 二级行固定行高（含段头；py-1.5 + 13px 内容 ≈ 31），窗口化按此映射滚动位置。 */
-export const SECONDARY_ROW_H = 31;
+/**
+ * 二级行窗口化步距（含段头）：v6 S2 按底板 .l2-item 高 32 + .l2-row margin-bottom 1
+ * = 33（底板 shared.css 409/419 行）。窗口化必须按步距映射，否则滚程与点击错位。
+ */
+export const SECONDARY_ROW_H = 33;
 
 export type SectionKind = "table" | "doc" | "canvas";
 
@@ -56,23 +59,7 @@ export function buildSecondaryRows(
   return rows;
 }
 
-/** 段头中文标签。 */
-export function sectionLabel(kind: SectionKind): string {
-  return kind === "table" ? "数据表" : kind === "doc" ? "文档" : "画布";
-}
-
 /** P3-a11y：行尾三点菜单的可访问名称由调用点给出（按行类型给具体作用，不写泛泛的「更多」）。 */
-
-export function SectionHeader({ kind, count }: { kind: SectionKind; count: number }) {
-  return (
-    <div
-      style={{ height: SECONDARY_ROW_H }}
-      className="flex items-center px-2 text-gx-11 font-medium text-gx-text-hint"
-    >
-      {sectionLabel(kind)} {count}
-    </div>
-  );
-}
 
 /**
  * 行尾「竖向三点」操作菜单（R-N-11/12）。L1 库条目与 L2 表行共用同一组件，交互必须一致。
@@ -228,7 +215,9 @@ export function SecondaryRow({
 }) {
   const resolved = resolveEntityIcon(e, { name: navKindIcon(kind) });
   const color = resolvedEntityColor(e);
-  // R-N-10 选中态：白底 + 圆角 8 + accent 字 600；落点态与选中态互斥取一（两个 bg-* 同权重会互相覆盖）。
+  // v6 S2（底板 .l2-row/.l2-item，409–429 行）：选中＝整行 brand-soft 底（外层 is-active，
+  // 含行尾⋯），内层 item 透明底不再单独上色，避免两层色块；未选 hover 底走 .gx-l2-item。
+  // 落点态与选中态互斥取一（dropInto 沿用 gx-accent-bg 令牌，不进底板类）；拖拽中行半透明。
   return (
     <div
       draggable={drag?.draggable ?? false}
@@ -239,12 +228,9 @@ export function SecondaryRow({
       data-drag={drag?.dragging ? "source" : undefined}
       data-drop-into={drag?.dropInto ? "into" : undefined}
       className={[
-        "group relative flex items-center gap-1 rounded-gx-lg py-1.5 pr-1 transition-colors",
-        active
-          ? "bg-white font-semibold text-gx-accent"
-          : drag?.dropInto
-            ? "bg-gx-accent-bg text-gx-accent"
-            : "text-gx-text-primary hover:bg-gx-row-hover",
+        "group gx-l2-row",
+        active ? "is-active" : "",
+        !active && drag?.dropInto ? "rounded-gx-lg bg-gx-accent-bg text-gx-accent" : "",
         drag?.dragging ? "opacity-40" : "",
       ].join(" ")}
       style={{ height: SECONDARY_ROW_H, paddingLeft: 6 + depth * 13 }}
@@ -260,12 +246,6 @@ export function SecondaryRow({
           <Icon name={expanded ? "chevronDown" : "chevronRight"} size={11} />
         </button>
       ) : null}
-      <Icon
-        name={resolved.name}
-        size={13}
-        className={`shrink-0 ${active ? "text-gx-accent" : "text-gx-text-tertiary"}`}
-        style={color ? { color } : undefined}
-      />
       <button
         type="button"
         disabled={!e.href}
@@ -273,9 +253,12 @@ export function SecondaryRow({
         // P3-a11y + 回归可断言：当前所在的二级项要给读屏「当前页」语义（aria-current="page"）
         aria-current={active ? "page" : undefined}
         title={e.name}
-        className={`min-w-0 flex-1 truncate text-left text-gx-13 ${e.href ? "" : "cursor-not-allowed opacity-50"} ${active ? "font-medium text-gx-text-primary" : "text-gx-text-primary"}`}
+        className={`gx-l2-item ${e.href ? "" : "opacity-50"}`}
       >
-        {e.name}
+        <span className="ico" style={color ? { color } : undefined}>
+          <Icon name={resolved.name} size={14} />
+        </span>
+        <span className="nm">{e.name}</span>
       </button>
       {menu && menu.length > 0 ? <RowMoreMenu items={menu} label={menuLabel ?? "行操作"} /> : null}
     </div>

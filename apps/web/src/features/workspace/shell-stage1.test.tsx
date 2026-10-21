@@ -48,7 +48,6 @@ import type { SecondaryEntry } from "./SecondaryNavSections";
 import {
   L1_WIDTH,
   L2_WIDTH,
-  L2_WIDTH_COMPACT,
   TOPBAR_H,
 } from "./lib/l1-collapse";
 import { deriveScopeContainer } from "./lib/route-container";
@@ -82,11 +81,10 @@ function renderNavAt(location: string, props: Record<string, unknown> = {}) {
 }
 
 
-describe("阶段 1 骨架常量（UI-SPEC A.3；v6 S1：L1 恒 76 图标轨）", () => {
-  it("L1 恒 76、L2 240（紧凑档 208）、顶栏 56", () => {
+describe("阶段 1 骨架常量（UI-SPEC A.3；v6：L1 恒 76 图标轨、L2 恒 236）", () => {
+  it("L1 恒 76、L2 恒 236（v6 S2 起不分档）、顶栏 56", () => {
     expect(L1_WIDTH).toBe(76);
-    expect(L2_WIDTH).toBe(240);
-    expect(L2_WIDTH_COMPACT).toBe(208);
+    expect(L2_WIDTH).toBe(236);
     expect(TOPBAR_H).toBe(56);
   });
 
@@ -255,21 +253,28 @@ describe("R-N-11/12 行尾竖向三点：四条护栏", () => {
     expect(css).toContain("prefers-reduced-motion");
   });
 
-  it("二级行选中态为白底卡片，且不再有 3px 色条", () => {
+  it("二级行选中态为整行 brand-soft（v6 S2 底板 .l2-row.is-active），且不再有 3px 色条", () => {
     const entry: SecondaryEntry = {
       id: "t1", name: "客户表", kind: "table", parentId: null,
       href: "/base/b1/table/t1", icon: null, iconColor: null,
     };
     const active = renderOneRow(entry, true);
-    expect(active).toContain("bg-white");
-    expect(active).toContain("font-semibold");
-    expect(active).toContain("text-gx-accent");
+    // 选中＝外层 gx-l2-row + is-active，600 字重与品牌色由 index.css 承载（组件零 hex）
+    expect(active).toContain("gx-l2-row");
+    expect(active).toContain("is-active");
+    expect(active).not.toContain("bg-white");
     const idle = renderOneRow(entry, false);
-    expect(idle).toContain("hover:bg-gx-row-hover");
-    expect(idle).not.toContain("text-gx-accent");
+    expect(idle).toContain("gx-l2-item");
+    expect(idle).not.toContain("is-active");
+    // 底色字面值只允许落在 index.css：#eaf2fe = --brand-soft，hover 底 #f5f8fd = --hover
+    const css = read("../../index.css");
+    expect(css).toMatch(/\.gx-l2-row\.is-active\s*\{/);
+    expect(css).toContain("#eaf2fe");
+    expect(css).toMatch(/\.gx-l2-item:hover/);
+    expect(css).toContain("#f5f8fd");
     const src = read("./SecondaryNavSections.tsx");
     expect(src).not.toContain("w-[3px]");
-    expect(src).toContain('"bg-white font-semibold text-gx-accent"');
+    expect(src).not.toContain('"bg-white font-semibold text-gx-accent"');
   });
 });
 
@@ -322,14 +327,14 @@ describe("R-I-16 表级操作行（第四批：导入 / 导出已收敛到网格
   });
 });
 
-describe("骨架 S-1：L2 常驻 240 / nav2 底；主壳无面包屑", () => {
-  it("L2 面板宽 240、底为 gx-nav2、发丝线分隔", () => {
+describe("骨架 S-1：L2 恒 236 / nav2 底；主壳无面包屑", () => {
+  it("L2 面板宽 236、底为 gx-nav2、发丝线分隔", () => {
     const html = renderToString(
       <StaticRouter location="/">
         <SecondaryNav container={{ kind: "base", id: "b1", name: "默认分组" }} onClose={vi.fn()} />
       </StaticRouter>,
     );
-    expect(html).toContain("width:240px");
+    expect(html).toContain("width:236px");
     expect(html).toContain("bg-gx-nav2");
     expect(html).toContain("border-gx-hairline");
   });

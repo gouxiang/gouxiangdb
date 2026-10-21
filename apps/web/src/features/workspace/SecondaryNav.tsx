@@ -25,7 +25,6 @@ import { useMenuVirtualizer } from "./lib/useMenuVirtualizer";
 import {
   buildSecondaryRows,
   secondaryEmptyText,
-  SectionHeader,
   SecondaryRow,
   SECONDARY_ROW_H,
   type SecondaryEntry,
@@ -76,7 +75,7 @@ export function SecondaryNav({
    *            覆盖内容而不挤压内容宽度（浮层带阴影，符合「浮出面板」语义）。
    */
   variant?: "static" | "floating";
-  /** 面板宽度；R-D-30 档由壳层传 208，缺省仍是规范 240。 */
+  /** 面板宽度；v6 S2 起所有响应式档恒为 L2_WIDTH（底板 .l2 = 236），壳层不再分档传值。 */
   width?: number;
   /**
    * base/kb 实体自定义图标索引（壳层装配后传入，理由同 PrimaryNav：
@@ -220,13 +219,14 @@ export function SecondaryNav({
   return (
     <div className="relative h-full shrink-0" data-l2-expanded={container.kind}>
       {/*
-        收起入口：面板右缘的圆形悬浮箭头（替代旧的头部「X」）。
+        收起入口：面板右缘的圆形悬浮箭头（v6 S2 按底板 .l2-toggle：26×26、right:-13px
+        骑在右缘中线上；视觉类 gx-l2-toggle 在 index.css，逐字取底板 352–368 行）。
         展开态箭头朝左——语义＝点击向左收起这一列（收起态边中间的唤回箭头朝右＝拉回）。
-        绝对定位骑在右缘（right: -14px），不占面板内布局、不挤头部标题，浮出/常驻两态同一位置。
-        层级 gx-z-drawer(400)＝工作区悬浮 chrome：高过业务内容（≤75，浮出面板下也可点），
-        但低于一切应用弹层——全屏表单设计器/字段弹窗是 gx-z-modal(800)、记录抽屉 400(同层
-        但在更后 DOM)，打开即把这个骑缝钮盖在下面，避免圆钮穿出浮在设计器上（2026-10-19 真机）。
-        旧值 gx-z-popover(900) 是全局最高应用层，会穿出所有弹窗，禁用。
+        不占面板内布局、不挤头部标题，浮出/常驻两态同一位置。
+        层级 gx-z-drawer(400)＝工作区悬浮 chrome（类名 gx-l2-collapse-tab/gx-z-drawer
+        由 form-designer-layer 层级裁决锁定）：高过业务内容，但低于一切应用弹层——
+        全屏表单设计器/字段弹窗是 gx-z-modal(800)、记录抽屉 400（同层但在更后 DOM），
+        打开即把这个骑缝钮盖在下面，避免圆钮穿出浮在设计器上（2026-10-19 真机）。
       */}
       <button
         type="button"
@@ -234,10 +234,10 @@ export function SecondaryNav({
         title="收起二级面板"
         aria-expanded
         onClick={onClose}
-        className="gx-l2-collapse-tab gx-z-drawer absolute top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-gx-border bg-gx-surface text-gx-text-secondary shadow-gx-md transition-colors hover:text-gx-text-primary hover:bg-gx-row-hover"
-        style={{ right: -14 }}
+        className="gx-l2-collapse-tab gx-l2-toggle gx-z-drawer"
+        style={{ right: -13 }}
       >
-        <Icon name="chevronLeft" size={15} />
+        <Icon name="chevronLeft" size={14} />
       </button>
     <aside
       className={clsx(
@@ -247,65 +247,71 @@ export function SecondaryNav({
       style={{ width }}
       data-l2-scope={container.kind}
     >
-      <div className="flex h-[52px] shrink-0 items-center gap-2 border-b border-gx-hairline px-3.5">
-        <Icon
-          name={headerIcon.name}
-          size={15}
-          className="shrink-0"
-          style={headerColor ? { color: headerColor } : undefined}
-        />
-        <span className="flex-1 truncate text-gx-14 font-semibold text-gx-text-primary" title={container.name}>
+      {/* v6 S2 面板头（底板 .l2-h，375–386 行）：56px 与主区顶栏同高，padding 12/8。 */}
+      <div className="flex h-[56px] shrink-0 items-center gap-[7px] border-b border-gx-hairline pl-3 pr-2">
+        <span className="gx-l2-ico">
+          <Icon
+            name={headerIcon.name}
+            size={14}
+            style={headerColor ? { color: headerColor } : undefined}
+          />
+        </span>
+        <span className="gx-l2-title" title={container.name}>
           {container.name}
         </span>
+        {/* 库类型徽标：底板 .tag.tag-gray 原型只有一个灰字「库」；产品区分数据库/知识库，
+            保留既有语义（派工单唯一授权的语义化微调），样式逐字照底板。 */}
+        <span className="gx-l2-tag">{container.kind === "base" ? "数据库" : "知识库"}</span>
         {/*
-          v6 S1：库级操作「⋯」（重命名 / 设置）从 L1 行尾迁到 L2 面板头，常驻可见
-          （不走 gx-row-more 的 hover 隐藏）。骑缝收起圆箭头在容器外 right:-14px，
-          本按钮在容器内右侧，二者不重叠。无管理权限（libraryCanManage=false）时整个不渲染。
+          v6 S1：库级操作「⋯」（重命名 / 设置）从 L1 行尾迁到 L2 面板头，常驻可见。
+          底板 .l2-act margin-left:auto；骑缝收起圆箭头在容器外 right:-13px，二者不重叠。
+          无管理权限（libraryCanManage=false）时整个不渲染。
         */}
-        {libraryCanManage && (
-          <LibraryOpsButton container={container} onRenameLibrary={onRenameLibrary} />
-        )}
-      </div>
-      <div className="border-b border-gx-separator px-2 py-2">
-        <div className="flex items-center gap-1.5 rounded-gx-sm border border-gx-separator bg-gx-surface px-2 py-1">
-          <Icon name="search" size={13} className="shrink-0 text-gx-text-hint" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="筛选当前列表…"
-            className="min-w-0 flex-1 bg-transparent text-gx-12 text-gx-text-primary outline-none placeholder:text-gx-text-hint"
-          />
+        <div className="ml-auto">
+          {libraryCanManage && (
+            <LibraryOpsButton container={container} onRenameLibrary={onRenameLibrary} />
+          )}
         </div>
-        {/* 知识库专有：文档 / 画布 两个选项卡 + 按 tab 的「新建」入口。
-            数据库没有第二种子内容，改为渲染「+ 新建数据表」（同一位置、同一规格）。
-            tablist 只包住两个 tab，新建按钮是它的兄弟节点——它不是选项卡，不该进 tablist。 */}
-        {container.kind === "kb" ? (
-          <div className="mt-2 flex items-center gap-1">
-            <div className="flex items-center gap-1" role="tablist" aria-label="知识库内容类型">
-              {KB_TABS.map((t) => (
-                <button
-                  key={t.kind}
-                  type="button"
-                  role="tab"
-                  aria-selected={kbTab === t.kind}
-                  onClick={() => setManualTab({ key: routeKey, tab: t.kind })}
-                  className={[
-                    "rounded-full px-2 py-0.5 text-gx-12 transition-colors",
-                    kbTab === t.kind
-                      ? "bg-white font-semibold text-gx-accent"
-                      : "text-gx-text-secondary hover:bg-gx-row-hover",
-                  ].join(" ")}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <div className="ml-auto flex shrink-0 items-center">{kbOps.createNode}</div>
-          </div>
-        ) : (
-          tableOps.panelNode
-        )}
       </div>
+      {/* v6 S2 搜索框（底板 .l2-search，387–393 行）：保留真实受控 input，只换外壳。 */}
+      <div className="gx-l2-search">
+        <Icon name="search" size={13} className="shrink-0" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="筛选当前列表…"
+        />
+      </div>
+      {/* 知识库专有：文档 / 画布 两个选项卡 + 按 tab 的「新建」入口（底板无 tabs，属产品
+          既有功能：结构与 a11y 不动，仅把容器左右边距与搜索框对齐为 10px）。
+          数据库没有第二种子内容，改为渲染「+ 新建数据表」（.gx-l2-new 自带 10px 边距）。
+          tablist 只包住两个 tab，新建按钮是它的兄弟节点——它不是选项卡，不该进 tablist。 */}
+      {container.kind === "kb" ? (
+        <div className="mt-1.5 flex items-center gap-1 px-2.5">
+          <div className="flex items-center gap-1" role="tablist" aria-label="知识库内容类型">
+            {KB_TABS.map((t) => (
+              <button
+                key={t.kind}
+                type="button"
+                role="tab"
+                aria-selected={kbTab === t.kind}
+                onClick={() => setManualTab({ key: routeKey, tab: t.kind })}
+                className={[
+                  "rounded-full px-2 py-0.5 text-gx-12 transition-colors",
+                  kbTab === t.kind
+                    ? "bg-white font-semibold text-gx-accent"
+                    : "text-gx-text-secondary hover:bg-gx-row-hover",
+                ].join(" ")}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <div className="ml-auto flex shrink-0 items-center">{kbOps.createNode}</div>
+        </div>
+      ) : (
+        tableOps.panelNode
+      )}
 
       {/* R-I-16 表级操作行挂载点（表级能力，不在顶栏也不在表格工具栏）。
           导入 / 导出已收敛到网格工具栏常驻按钮，「分享数据」规划占位已下线，
@@ -317,7 +323,8 @@ export function SecondaryNav({
         baseId={tableMatch?.params.baseId ?? null}
       />
 
-      <div ref={virt.scrollerRef} className="min-h-0 flex-1 overflow-y-auto py-1.5">
+      {/* v6 S2 列表区（底板 .l2-list，407 行）：滚动体自带 8px 两侧 padding。 */}
+      <div ref={virt.scrollerRef} className="gx-l2-list">
         {loading ? (
           <div className="flex h-24 items-center justify-center"><Spinner size={16} /></div>
         ) : error ? (
@@ -334,7 +341,7 @@ export function SecondaryNav({
                 onDrop={kbOps.rootZone.onDrop}
                 data-drop-root={kbOps.rootZone.active ? "true" : undefined}
                 className={[
-                  "mx-1.5 mb-1 rounded-gx-sm border border-dashed px-2 py-1 text-center text-gx-11 transition-colors",
+                  "mx-0 mb-1 rounded-gx-sm border border-dashed px-2 py-1 text-center text-gx-11 transition-colors",
                   kbOps.rootZone.active
                     ? "border-gx-accent bg-gx-accent-bg text-gx-accent"
                     : "border-transparent text-transparent",
@@ -343,10 +350,14 @@ export function SecondaryNav({
                 拖到此处移到顶级
               </div>
             )}
-            <div className="px-1.5" style={{ paddingTop: virt.padTop, paddingBottom: virt.padBottom }}>
+            {/* 窗口垫片：.gx-l2-list 已带两侧 8px padding，这里只保留垂直 padTop/padBottom。
+                v6 S2：段头（含「数据表 N」计数）不再渲染文字，但数据层 buildSecondaryRows
+                仍产 header 行并占据 SECONDARY_ROW_H 步距——渲染为空白定高占位，
+                滚动数学与 DOM 有界性零变化。 */}
+            <div style={{ paddingTop: virt.padTop, paddingBottom: virt.padBottom }}>
               {virt.windowed.map((row) =>
                 row.type === "header" ? (
-                  <SectionHeader key={`h-${row.kind}`} kind={row.kind} count={row.count} />
+                  <div key={`h-${row.kind}`} style={{ height: SECONDARY_ROW_H }} aria-hidden />
                 ) : (
                   <SecondaryRow
                     key={row.entry.id}
@@ -376,25 +387,24 @@ export function SecondaryNav({
         )}
 
         {/* 列表末尾：当前容器的回收站（base → /base/:id/trash，kb → /kb/:id/trash）。
-            两页都已存在，按容器 id 直跳；行规格与列表行一致。 */}
-        <div className="px-1.5 pt-1">
-          <button
-            type="button"
-            onClick={() =>
-              navigate(
-                container.kind === "base"
-                  ? `/base/${container.id}/trash`
-                  : `/kb/${container.id}/trash`,
-              )
-            }
-            title="回收站"
-            data-l2-trash={container.kind}
-            className="flex w-full items-center gap-1 rounded-gx-lg px-1.5 py-1.5 text-gx-13 text-gx-text-primary transition-colors hover:bg-gx-row-hover"
-          >
-            <Icon name="trash" size={13} className="shrink-0 text-gx-text-tertiary" />
-            <span className="truncate">回收站</span>
-          </button>
-        </div>
+            位置逻辑不动（仍在滚动容器内、loading/error 态也常驻）；v6 S2 按底板
+            .l2-item.sub（431 行）：30 高、12px、整行可点。 */}
+        <button
+          type="button"
+          onClick={() =>
+            navigate(
+              container.kind === "base"
+                ? `/base/${container.id}/trash`
+                : `/kb/${container.id}/trash`,
+            )
+          }
+          title="回收站"
+          data-l2-trash={container.kind}
+          className="gx-l2-sub"
+        >
+          <Icon name="trash" size={14} className="shrink-0" />
+          <span className="nm truncate">回收站</span>
+        </button>
       </div>
     </aside>
     </div>

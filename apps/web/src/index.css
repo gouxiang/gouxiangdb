@@ -615,3 +615,325 @@ html.gx-desktop-shell .gx-shell-app-main .min-h-screen {
     animation: none;
   }
 }
+
+/* ============ v6 L2 二级面板（2026-10 UI 重做 S2，逐像素取自底板 ============
+   唯一视觉真源：docs/design/2026-10-ui-redesign/actual/v6/src/shared.css
+   .l2-toggle / .l2-h / .l2-ico / .l2-title / .tag.tag-gray / .l2-search /
+   .l2-new* / .l2-list / .l2-row / .l2-item / .l2-item.sub / .icon-btn
+   （底板 212–217、287–298、352–431 行）；色值取自 :root（7–47 行）。
+   组件源码零 hex：SecondaryNav / SecondaryNavSections / SecondaryNavRail /
+   SecondaryNavTableOps / SecondaryNavKbOps / LibraryOpsButton 只挂类名。
+   语义微调（派工单唯一授权）：.tag 文案按容器类型显「数据库 / 知识库」。 */
+
+/* 面板头库图标砖（底板 .l2-ico，380–384 行）：22×22、圆角 7、brand-soft 底。 */
+.gx-l2-ico {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: #eaf2fe;
+  color: #2c7be5;
+}
+
+/* 面板头标题（底板 .l2-title，385 行）：13.5px / 600 / ink-1，单行省略。 */
+.gx-l2-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #101828;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* 库类型徽标（底板 .tag + .tag-gray，287–298 行）：高 20、6px 圆角、灰底灰字。
+   6px 是底板 .tag 字面值（全站控件 8/4 闸门外的唯一例外，以自定义类承载）。 */
+.gx-l2-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex: none;
+  background: #f2f4f7;
+  color: #475467;
+}
+
+/* 搜索框（底板 .l2-search，387–393 行）：28 高、sub 底、发丝线，hover 转白底深线。
+   底板是 button 原型；产品保留真实受控 input，外壳样式不变。 */
+.gx-l2-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  margin: 8px 10px 4px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid #e7eaf0;
+  border-radius: 8px;
+  background: #f7f9fc;
+  color: #8b95a7;
+  font-size: 12px;
+}
+.gx-l2-search:hover {
+  background: #ffffff;
+  border-color: #d6dce8;
+}
+.gx-l2-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  color: #101828;
+}
+.gx-l2-search input::placeholder {
+  color: #8b95a7;
+}
+
+/* 「新建」区与虚线钮（底板 .l2-new / .l2-new-btn，395–402 行）。 */
+.gx-l2-new {
+  flex: none;
+  padding: 4px 10px 8px;
+}
+.gx-l2-new-btn {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px dashed #e7eaf0;
+  border-radius: 8px;
+  background: transparent;
+  color: #667085;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.gx-l2-new-btn:hover {
+  background: #f5f8fd;
+  color: #2c7be5;
+  border-color: #c9dcf8;
+}
+/* KB tab 行的小号新建入口：与 tabs 同行，宽度自适应（底板无对应物，仅覆盖宽度）。 */
+.gx-l2-new-btn.gx-l2-new-btn-auto {
+  width: auto;
+  height: 26px;
+}
+/* 内联输入态外壳（底板 .l2-new-in，403–404 行）：品牌色实线、白底。 */
+.gx-l2-new-in {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 6px 0 9px;
+  border: 1px solid #2c7be5;
+  border-radius: 8px;
+  background: #ffffff;
+}
+.gx-l2-new-in input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: 12.5px;
+  color: #101828;
+}
+.gx-l2-new-in input::placeholder {
+  color: #8b95a7;
+}
+
+/* 列表滚动体（底板 .l2-list，407 行）。 */
+.gx-l2-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 8px 8px;
+}
+
+/* 行外壳（底板 .l2-row，409–416 行）：33 = 32 行高 + 1 行间距（窗口化步距）。
+   选中＝整行 brand-soft 底（含行尾⋯），内层 item 不再单独上底色，避免两层色块。 */
+.gx-l2-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 33px;
+}
+.gx-l2-row .gx-l2-item {
+  flex: 1;
+  min-width: 0;
+}
+.gx-l2-row.is-active {
+  background: #eaf2fe;
+  border-radius: 8px;
+}
+.gx-l2-row.is-active .gx-l2-item,
+.gx-l2-row.is-active .gx-l2-item:hover {
+  background: transparent;
+}
+/* 拖拽落点态（产品既有能力，底板无对应物）：与选中互斥；品牌蓝文字落在 item 与图标上。
+   背景由组件 tailwind 令牌类（bg-gx-accent-bg）承载，这里只补回被 .gx-l2-item
+   显式字色挡住的继承色；规则置于 is-active 之前，理论上同帧并存时选中态优先。 */
+.gx-l2-row[data-drop-into="into"] .gx-l2-item,
+.gx-l2-row[data-drop-into="into"] .gx-l2-item .ico,
+.gx-l2-row[data-drop-into="into"] .gx-l2-item .nm {
+  color: #2c7be5;
+}
+
+/* 行内主按钮（底板 .l2-item，417–429 行）：32 高、7px 圆角、12.5px。 */
+.gx-l2-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #475467;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.13s, color 0.13s;
+}
+.gx-l2-item .ico {
+  color: #8b95a7;
+  display: flex;
+  flex: none;
+}
+.gx-l2-item .nm {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gx-l2-item:hover {
+  background: #f5f8fd;
+  color: #101828;
+}
+.gx-l2-item:disabled {
+  cursor: not-allowed;
+}
+/* 选中态：brand-ink 字 / 600，图标同色（底色在外层 .gx-l2-row.is-active）。 */
+.gx-l2-row.is-active .gx-l2-item {
+  color: #1f5fbf;
+  font-weight: 600;
+}
+.gx-l2-row.is-active .gx-l2-item .ico,
+.gx-l2-row.is-active .gx-l2-item .nm {
+  color: #1f5fbf;
+}
+.gx-l2-row.is-active .gx-l2-item:hover {
+  color: #1f5fbf;
+}
+
+/* 列表末尾回收站行（底板 .l2-item.sub，431 行）：30 高、12px、ink-3。 */
+.gx-l2-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #667085;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.13s, color 0.13s;
+}
+.gx-l2-sub .nm {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gx-l2-sub:hover {
+  background: #f5f8fd;
+  color: #101828;
+}
+
+/* 面板头库操作钮（底板 .icon-btn，212–217 行）：30×30、8px 圆角、透明底。 */
+.gx-l2-icon-btn {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border: 0;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: #667085;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.gx-l2-icon-btn:hover {
+  background: #f5f8fd;
+  color: #101828;
+}
+
+/* 收起 / 唤回圆箭头（底板 .l2-toggle，352–368 行）：26×26 骑缝，默认中性阴影、
+   hover 蓝调阴影 + 放大 1.1，active 回收 0.96。定位（absolute/top/translate）集中在
+   本类；左右骑缝值由组件内联（展开钮 right:-13 / 唤回钮 left:l1Width-13），
+   z 层级仍由 tailwind gx-z-drawer 承载（见 form-designer-layer 层级裁决）。 */
+.gx-l2-toggle {
+  position: absolute;
+  top: 50%;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid #e7eaf0;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #667085;
+  cursor: pointer;
+  transform: translateY(-50%);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06),
+    0 6px 16px -6px rgba(16, 24, 40, 0.3);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.2s, color 0.2s, border-color 0.2s;
+}
+.gx-l2-toggle:hover {
+  color: #2c7be5;
+  border-color: #d3e0f8;
+  transform: translateY(-50%) scale(1.1);
+  box-shadow: 0 2px 6px rgba(44, 123, 229, 0.16),
+    0 10px 22px -8px rgba(44, 123, 229, 0.46);
+}
+.gx-l2-toggle:active {
+  transform: translateY(-50%) scale(0.96);
+}
+
+/* 减弱动态效果：关闭 L2 各元素过渡，圆箭头不缩放（垂直居中位移保留）。 */
+@media (prefers-reduced-motion: reduce) {
+  .gx-l2-new-btn,
+  .gx-l2-item,
+  .gx-l2-sub,
+  .gx-l2-icon-btn {
+    transition: none;
+  }
+  .gx-l2-toggle {
+    transition: none;
+  }
+  .gx-l2-toggle:hover,
+  .gx-l2-toggle:active {
+    transform: translateY(-50%);
+  }
+}

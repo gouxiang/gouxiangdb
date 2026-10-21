@@ -1,10 +1,10 @@
 // M3/S8 新工作区外壳（GX_ENTERPRISE_NAV on 时由 App 选用，替代旧 AppShell/KbShell 两壳）：
 //   顶栏 56（品牌 / 全局搜索 / 个人中心）
 //   左 L1 v6 图标轨：恒 76px（轻量拟物砖 + 底部建库实心蓝钮），无折叠档
-//   L2 二级面板 240（无二级内容的入口收起为 0 宽，不占位）
+//   L2 二级面板恒 236（v6 S2 起底板同宽、不分档；无二级内容时收起为 0 宽，不占位）
 //   内容 Outlet
 // 窄宽退化（UI-SPEC v1.0 R-D-30~R-D-33）：
-//   1280–1439  L2 压到 208（R-D-30）
+//   1280–1439  L2 恒 236（v6 S2 起 R-D-30 紧凑档 208 废止）
 //   1024–1279  L2 改浮出面板（可折叠，覆盖内容区左侧）（R-D-31）
 //   768–1023   L2 浮出面板（R-D-32；v6 起 L1 不再折叠，恒为 76 图标轨）
 //   <768       单栏：L1/L2 全部进抽屉（R-D-33）
@@ -44,7 +44,7 @@ import { SecondaryNav, type SecondaryContainer } from "./SecondaryNav";
 import { useLibraryRename } from "./useLibraryRename";
 import { SecondaryNavRail } from "./SecondaryNavRail";
 import { useBreakpointTier, isDrawerTier, isFloatingL2Tier } from "../../lib/breakpoint";
-import { L1_WIDTH, L2_WIDTH, L2_WIDTH_COMPACT } from "./lib/l1-collapse";
+import { L1_WIDTH, L2_WIDTH } from "./lib/l1-collapse";
 import { readL2Collapsed, resolveL2Collapsed, writeL2Collapsed } from "./lib/l2-collapse";
 
 /** L2 当前容器：一级选中库本体（kind + id + name），由 URL 与实体列表得出。 */
@@ -316,8 +316,8 @@ export function WorkspaceShell() {
 
   // v6：L1 恒为 76px 图标轨（浮出 left 与 SecondaryNavRail 的 l1Width 都取此值）。
   const l1Width = L1_WIDTH;
-  // R-D-30：1280–1439 L2 压到 208，其余档 240
-  const l2Width = tier === "xl" ? L2_WIDTH_COMPACT : L2_WIDTH;
+  // v6 S2：L2 按底板 .l2 恒为 236px，紧凑档（208）已废止，所有响应式档同宽。
+  const l2Width = L2_WIDTH;
 
   const secondary = activeContainer ? (
     // key 随容器切换：tab/搜索词/展开态全部重挂重置，不把上个容器的视图状态带过来
@@ -362,7 +362,7 @@ export function WorkspaceShell() {
                 onClick={() => setDrawerOpen(false)}
               />
               {/* R-D-33：L1/L2 全部进抽屉。L1 常驻抽屉内（恒 76 图标轨）；L2 叠在 L1
-                  之上（不是并排——76+240 也会挤出 390 屏宽），其 × 收起后回到 L1，
+                  之上（不是并排——76+236 也会挤出 390 屏宽），其 × 收起后回到 L1，
                   等价于「返回上一级」 */}
               <div className="absolute left-0 top-0 bottom-0 z-30 flex">
                 <SideRail

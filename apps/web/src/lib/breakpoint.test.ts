@@ -1,13 +1,13 @@
 // 响应式断点档位回归（node 环境，纯函数，无 jsdom、无新增依赖）。
 //
 // 锁的是 UI-SPEC v1.0 §3.6（R-D-29~R-D-33）五档的**判定口径**：
-//   1600 → 2xl（≥1440 完整三栏）｜1366 → xl（L2 压 208）｜1152 → lg（L2 浮出）｜
-//   900  → md（L1 56 图标档 + L2 浮出 + 表格转卡片）｜390 → sm（抽屉 + 搜索折叠为图标）
+//   1600 → 2xl（≥1440 完整三栏）｜1366 → xl（L2 恒 236，v6 S2 起不分档）｜1152 → lg（L2 浮出）｜
+//   900  → md（L1 恒 76 图标轨 + L2 浮出 + 表格转卡片）｜390 → sm（抽屉 + 搜索折叠为图标）
 // 档位值错一格，L2 宽度 / 抽屉 / 卡片列表就会整体错位，故逐档 + 边界都钉死。
 
 import { describe, it, expect } from "vitest";
 import { tierOfWidth, isDrawerTier, isFloatingL2Tier, TIER_MIN_WIDTH } from "./breakpoint";
-import { L2_WIDTH, L2_WIDTH_COMPACT } from "../features/workspace/lib/l1-collapse";
+import { L2_WIDTH } from "../features/workspace/lib/l1-collapse";
 import { gxTailwindConfig } from "@gx/design-tokens/tailwind";
 
 describe("R-D-29~33 五档判定（QA 走查档位）", () => {
@@ -50,9 +50,8 @@ describe("档位语义（壳层据此切换结构）", () => {
     expect(isFloatingL2Tier("2xl")).toBe(false);
   });
 
-  it("R-D-30：1280–1439 档 L2 压缩宽 = 208，常驻宽仍为 240", () => {
-    expect(L2_WIDTH).toBe(240);
-    expect(L2_WIDTH_COMPACT).toBe(208);
+  it("v6 S2：L2 按底板恒定 236，1280–1439 紧凑档（208）已废止", () => {
+    expect(L2_WIDTH).toBe(236);
   });
 });
 

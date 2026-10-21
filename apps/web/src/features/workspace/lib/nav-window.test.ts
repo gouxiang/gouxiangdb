@@ -80,8 +80,8 @@ describe("virtualWindow 切片：挂载行数只与视口相关（有界性）",
         total * SECONDARY_ROW_H,
       );
     }
-    // 二级 31px、768px 视口：ceil(768/31)=25 可视 + 24 overscan = 最多 49 行
-    expect(Math.ceil(VIEWPORT_H / SECONDARY_ROW_H) + 2 * OVERSCAN).toBe(49);
+    // 二级 33px（v6 S2：底板 32 行高 + 1 行间距）、768px 视口：ceil(768/33)=24 可视 + 24 overscan = 最多 48 行
+    expect(Math.ceil(VIEWPORT_H / SECONDARY_ROW_H) + 2 * OVERSCAN).toBe(48);
     // 一级 32px：24 可视 + 24 = 最多 48 行
     expect(Math.ceil(VIEWPORT_H / PRIMARY_ROW_H) + 2 * OVERSCAN).toBe(48);
   });
@@ -103,7 +103,7 @@ describe("virtualWindow 切片：挂载行数只与视口相关（有界性）",
     const win = virtualWindow(maxScrollTop, VIEWPORT_H, SECONDARY_ROW_H, total, OVERSCAN);
     expect(win.end).toBe(total);
     expect(win.start).toBeGreaterThan(900);
-    expect(win.end - win.start).toBeLessThanOrEqual(49);
+    expect(win.end - win.start).toBeLessThanOrEqual(48);
     expect(win.padBottom).toBe(0);
   });
 
@@ -194,7 +194,7 @@ describe("buildSecondaryRows 三段合并单序列（SecondaryNav 单窗口输�
     ]);
   });
 
-  it("1000 条未收纳 table：总序列 1001 行（含段头），单窗口挂载 ≤ 49 行", () => {
+  it("1000 条未收纳 table：总序列 1001 行（含段头），单窗口挂载 ≤ 48 行", () => {
     const sections = {
       table: Array.from({ length: 1000 }, (_, i) => entry(`t${i}`, "table")),
       doc: [] as SecondaryEntry[],
@@ -203,7 +203,7 @@ describe("buildSecondaryRows 三段合并单序列（SecondaryNav 单窗口输�
     const rows = buildSecondaryRows(sections, new Set(), new Map());
     expect(rows).toHaveLength(1001);
     const win = virtualWindow(400 * SECONDARY_ROW_H, VIEWPORT_H, SECONDARY_ROW_H, rows.length, OVERSCAN);
-    expect(win.end - win.start).toBeLessThanOrEqual(49);
+    expect(win.end - win.start).toBeLessThanOrEqual(48);
   });
 });
 
@@ -262,7 +262,10 @@ describe("窗口化接线源码守卫（防回归：三处必须挂 scrollerRef 
     const secondary = read("../SecondaryNav.tsx");
     expect(secondary).toContain("ref={virt.scrollerRef}");
     expect(secondary).toContain("virt.windowed.map");
-    expect(secondary).toContain("overflow-y-auto");
+    // v6 S2：L2 滚动容器的 overflow-y:auto 收敛到 index.css 的 .gx-l2-list
+    // （组件源码零 hex/视觉声明纪律），滚动语义与 S1 的 gx-rail-nav 同口径锁两侧接线。
+    expect(secondary).toContain("gx-l2-list");
+    expect(css).toMatch(/\.gx-l2-list[\s\S]*overflow-y:\s*auto/);
   });
 
   it("useMenuVirtualizer 首帧 viewportH 为保守常量（非 0），ResizeObserver 与 passive scroll 接线齐全", () => {

@@ -125,9 +125,9 @@ export function useSecondaryKbOps({
             onClick={() => create("doc")}
             title="新建文档"
             aria-label="新建文档"
-            className="flex items-center gap-1 rounded-gx-sm px-1.5 py-1 text-gx-12 text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary"
+            className="gx-l2-new-btn gx-l2-new-btn-auto"
           >
-            <Icon name="plus" size={12} />
+            <Icon name="plus" size={14} />
             <span>新建文档</span>
           </button>
         ) : (
@@ -136,9 +136,9 @@ export function useSecondaryKbOps({
             onClick={() => create("canvas")}
             title="新建画布"
             aria-label="新建画布"
-            className="flex items-center gap-1 rounded-gx-sm px-1.5 py-1 text-gx-12 text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary"
+            className="gx-l2-new-btn gx-l2-new-btn-auto"
           >
-            <Icon name="plus" size={12} />
+            <Icon name="plus" size={14} />
             <span>新建画布</span>
           </button>
         )

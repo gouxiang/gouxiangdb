@@ -168,12 +168,14 @@ export function useSecondaryTableOps({
     rowMenuItems,
     panelNode: (
       <>
-        {/* 面板头「+ 新建数据表」：无表结构管理权限整条不渲染（同 KbHomePage 的 canCreate 口径） */}
+        {/* 面板头「+ 新建数据表」：无表结构管理权限整条不渲染（同 KbHomePage 的 canCreate 口径）。
+            v6 S2 按底板 .l2-new/.l2-new-btn/.l2-new-in（shared.css 395–404 行）：
+            虚线小钮 + 品牌色实线输入态外壳，视觉值全部在 index.css（组件零 hex）。 */}
         {canManageSchema && (
-          <div className="mt-2">
+          <div className="gx-l2-new">
             {showNew ? (
               <div>
-                <div className="flex items-center gap-1 rounded-gx-sm border border-gx-separator bg-gx-surface px-1 py-1">
+                <div className="gx-l2-new-in">
                   <Input
                     autoFocus
                     placeholder="表名（Enter 创建 / Esc 取消）"
@@ -186,7 +188,7 @@ export function useSecondaryTableOps({
                         setNewName("");
                       }
                     }}
-                    className="min-w-0 flex-1 border-0 bg-transparent px-1 py-0 text-gx-12 focus:outline-none focus:ring-0"
+                    className="h-6 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 py-0 text-gx-12 focus:outline-none focus:ring-0"
                   />
                   <button
                     type="button"
@@ -194,8 +196,7 @@ export function useSecondaryTableOps({
                     // R-D-09：禁用必须说明原因（挂 title，鼠标悬停即得）
                     title={newConflict ? tableNameConflictMessage(newConflict) : "创建（Enter）"}
                     disabled={!newName.trim() || !!newConflict}
-                    onClick={createTable}
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-gx-sm text-gx-accent hover:bg-gx-row-hover disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-gx-lg text-gx-accent hover:bg-gx-row-hover disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <Icon name="check" size={13} />
                   </button>
@@ -207,7 +208,7 @@ export function useSecondaryTableOps({
                       setShowNew(false);
                       setNewName("");
                     }}
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-gx-sm text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary"
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-gx-lg text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary"
                   >
                     <Icon name="close" size={13} />
                   </button>
@@ -224,9 +225,9 @@ export function useSecondaryTableOps({
                 type="button"
                 onClick={() => setShowNew(true)}
                 title="新建数据表"
-                className="flex w-full items-center gap-1 rounded-gx-sm px-1.5 py-1 text-left text-gx-12 text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary"
+                className="gx-l2-new-btn text-left"
               >
-                <Icon name="plus" size={12} />
+                <Icon name="plus" size={14} />
                 <span>新建数据表</span>
               </button>
             )}
