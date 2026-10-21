@@ -22,8 +22,10 @@ import { ApiError } from "../../api/client";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { VersionHistoryDrawer } from "./VersionHistoryDrawer";
 import { useDocPersistence } from "./useDocPersistence";
+import { clearDraft } from "./draft";
 // 阶段 2 · 本地光标/占用的发布口（远端光标的水源；协同关闭时内部零副作用）
 import { useDocPresence } from "./collab/useDocPresence";
+import { yOfflineEnabled } from "../collab/yOfflineGate";
 import { ShareModal } from "./ShareModal";
 import { DocOutline } from "./DocOutline";
 import { useShortcuts } from "./hooks/useShortcuts";
@@ -37,6 +39,13 @@ import { useShortcuts } from "./hooks/useShortcuts";
  * collab_docs，不会并回正文表 —— 那时"保存"看起来正常、实际没落库。
  */
 const COLLAB_ENABLED = import.meta.env.VITE_COLLAB === "1";
+/**
+ * 离线 Y 累积门控（构建期常量，普通浏览器构建恒 false）。
+ * 开启（壳/副本构建）时，即便协同总闸 VITE_COLLAB 未开，也建立本地会话：连接层照常取票建连，
+ * 断网/取票失败时进入 connecting/reconnecting/offline，编辑器仍绑定本地 Y.Doc 做字符级累积，
+ * 重连自动合并（gx-y）。普通浏览器构建拿不到 VITE_OFFLINE_Y，本值恒 false，行为与引入前一致。
+ */
+const Y_OFFLINE = yOfflineEnabled();
 
 export default function DocEditorPage() {
   const { kbId, docId } = useParams();
@@ -44,7 +53,9 @@ export default function DocEditorPage() {
   const { data: doc, isLoading, isError, error, refetch } = useDoc(docId);
   const rename = useRenameDoc(docId!, kbId!);
   // 会话建在页面层：三态切换会重挂载编辑器，会话跟着建断会频繁掉线
-  const collab = useCollabSession(COLLAB_ENABLED && docId ? `doc:${docId}` : null);
+  // 协同总闸开 → 协同会话；关但离线 Y 门控开 → 仍建会话（离线累积）；两者皆关 → null（零变化）。
+  const collabRoom = docId && (COLLAB_ENABLED || Y_OFFLINE) ? `doc:${docId}` : null;
+  const collab = useCollabSession(collabRoom);
   const collabActive = collab.status === "connected";
 
   const [title, setTitle] = useState("");
@@ -60,6 +71,15 @@ export default function DocEditorPage() {
 
   const canEdit = doc?.canEdit ?? true;
   const persist = useDocPersistence(docId!, kbId!, doc?.content, canEdit, doc?.contentVersion, collabActive);
+
+  // gx-y 字符级更新已被服务端确认合并（首连或断线重连）：整篇 Markdown 草稿降级为纯崩溃兜底，
+  // 此刻清掉对应 gx-kb-draft，避免下次进文档还弹"恢复草稿"（内容已走 CRDT 上线，无需二选一）。
+  // 只清草稿键，不碰 useDocPersistence 的 pending（门控开但 VITE_COLLAB 关时保存仍走 REST，
+  // 待防抖内容不能被清空）。门控关时 localMergedTick 恒为 0，本 effect 不产生任何行为。
+  useEffect(() => {
+    if (collab.localMergedTick > 0) clearDraft(docId!);
+    // 仅以合并次数为触发源。
+  }, [collab.localMergedTick, docId]);
 
   /**
    * 协同光标层要的是「块正文的行内 Markdown **源码**」（正文存的是 `**粗**` 这种带标记的原文，

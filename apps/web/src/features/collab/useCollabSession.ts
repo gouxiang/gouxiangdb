@@ -14,6 +14,7 @@ import { getCollabPresence } from "../../api/client";
 import { dataSourceResolver } from "../../node/datasource";
 import { createCollabConnection, type CollabConnection, type CollabStatus } from "./collab-provider";
 import { toPresenceEntries } from "./collab-presence";
+import { yOfflineEnabled } from "./yOfflineGate";
 import type { CollabDenyReason, CollabPresenceEntry } from "@gx/shared-types";
 
 export interface UseCollabSessionResult {
@@ -26,6 +27,11 @@ export interface UseCollabSessionResult {
   selfId: string | null;
   /** 协同文档实例（尚未连通时也已存在，可供后续绑定本地内容）；未启用协同时为 null。 */
   doc: Doc | null;
+  /**
+   * 本地 gx-y 累积被确认合并到服务端的次数（首连 / 断线重连，且确有本地更新被带走时自增）。
+   * 门控关时恒为 0、永不自增。页面据此把整篇 gx-kb-draft 降级清掉。
+   */
+  localMergedTick: number;
   /** denied 时的可展示原因文案；其余状态为 null。 */
   error: string | null;
   /**
@@ -53,6 +59,7 @@ export function useCollabSession(roomId: string | null): UseCollabSessionResult 
   const [entries, setEntries] = useState<CollabPresenceEntry[]>([]);
   const [selfId, setSelfId] = useState<string | null>(null);
   const [doc, setDoc] = useState<Doc | null>(null);
+  const [localMergedTick, setLocalMergedTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   // 节点模式 S2：订阅数据源，nodeId 进 effect 依赖——切节点（local↔远端）时本 effect 重跑，
@@ -76,6 +83,7 @@ export function useCollabSession(roomId: string | null): UseCollabSessionResult 
       setEntries([]);
       setSelfId(null);
       setDoc(null);
+      setLocalMergedTick(0);
       setError(null);
       setStatus("idle");
       return;
@@ -84,6 +92,7 @@ export function useCollabSession(roomId: string | null): UseCollabSessionResult 
     let connectedOnce = false;
     setEntries([]);
     setError(null);
+    setLocalMergedTick(0);
 
     // WS 未连通时的首屏兜底名单：一旦连通即让位给 awareness（见下面的 connectedOnce）。
     void getCollabPresence(roomId)
@@ -99,6 +108,11 @@ export function useCollabSession(roomId: string | null): UseCollabSessionResult 
       // S2：WS origin 取当前数据源的纯 host（不含 basePath，wsPath 已自带网关前缀，防双前缀）。
       // effect 内同步读取：重跑时必为当前节点 origin；恒 local 时与旧默认 defaultOrigin 逐字节一致。
       origin: dataSourceResolver.wsHostOrigin(),
+      // 离线 gx-y 累积：门控关时显式传 false（不写任何 localStorage）；门控开时让底座开累积。
+      offlinePersistence: yOfflineEnabled(),
+      onLocalMerged: () => {
+        if (alive) setLocalMergedTick((n) => n + 1);
+      },
       onStatus: (next, reason) => {
         if (!alive) return;
         if (next === "connected") connectedOnce = true;
@@ -124,5 +138,5 @@ export function useCollabSession(roomId: string | null): UseCollabSessionResult 
     // nodeId 入依赖：切节点销毁重建；origin 在 effect 体内同步读 resolver，不进依赖（避免字符串抖动）。
   }, [roomId, nodeId]);
 
-  return { status, entries, selfId, doc, error, publish };
+  return { status, entries, selfId, doc, localMergedTick, error, publish };
 }

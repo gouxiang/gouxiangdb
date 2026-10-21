@@ -12,6 +12,7 @@ export default tseslint.config(
   {
     ignores: [
       "**/dist/**",
+      "**/dist-shell/**",
       "**/node_modules/**",
       "**/build/**",
       "**/*.config.{js,cjs,mjs,ts}",

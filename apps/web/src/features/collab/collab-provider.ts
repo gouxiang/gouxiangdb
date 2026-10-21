@@ -23,6 +23,14 @@ import { COLLAB_CLOSE, isPermanentCollabClose } from "@gx/shared-types";
 import type { CollabDenyReason, CollabServerControlMessage, CollabTicketResponse } from "@gx/shared-types";
 import type { CollabAwarenessStates } from "./collab-presence";
 import { createCollabSocketClass } from "./collab-socket";
+import {
+  appendLocalUpdate,
+  clearLocalUpdates,
+  hasLocalUpdates,
+  loadMergedLocalState,
+  LOCAL_REPLAY_ORIGIN,
+} from "./yOfflinePersistence";
+import { yOfflineEnabled } from "./yOfflineGate";
 
 /** 状态机：idle 未开工（roomId 为空的初态，也是 disconnect 后的终态）／connecting 首次连接中／
  * connected 已接通／reconnecting 正在重试／offline 等退避窗口／denied **终态**（4400–4499 或 revoked）。 */
@@ -43,6 +51,16 @@ export interface CollabConnectionOptions {
   random?: () => number;
   /** WS 地址的 origin 部分，默认当前页面 origin；单测显式注入。 */
   origin?: string;
+  /**
+   * 离线 gx-y 累积开关（YN9/S6-WEB-a，由 yOfflineGate 在壳/副本构建注入）。
+   * 默认读构建门控（普通浏览器构建恒 false）；开则注册本地 update 累积、建 provider 前灌入。
+   */
+  offlinePersistence?: boolean;
+  /**
+   * 本地累积在一次服务端 sync 中被确认合并（gx-y 已清除）时回调；首次 sync 与每次断线重连后
+   * 再次 sync 都会触发。页面据此把整篇 gx-kb-draft 降级清掉（字符级更新已上线，无需快照兜底）。
+   */
+  onLocalMerged?: () => void;
 }
 
 export interface CollabConnection {
@@ -167,6 +185,36 @@ export function createCollabConnection(
   /** 连接级唯一 id：同一账号多个标签页 = 多条 presence（DESIGN.md §5.1）。 */
   const selfId = crypto.randomUUID();
   const awarenessListeners = new Set<(states: CollabAwarenessStates) => void>();
+
+  // —— 离线 gx-y 累积（YN9/S6-WEB-a）。doc/canvas 共用，挂在连接底座上，与房间内容无关 ——
+  const persistOffline = opts.offlinePersistence ?? yOfflineEnabled();
+  /**
+   * 「已与服务端确认合并」窗口：false 时（首次连接前 / 断线重连中）本地事务追加到 gx-y；
+   * 一旦 sync 完成置 true，稳态协同不再落盘（否则 gx-y 随每次击键无限增长），断线再置回 false。
+   */
+  let mergeConfirmed = false;
+
+  if (persistOffline) {
+    // 建任何 WebSocketProvider 之前先把本地累积灌进 doc，避免与服务端 sync step1 竞态：
+    // y-websocket 在建连 onopen 时才发 sync step1（携带本 doc 的 state vector），此刻灌入的
+    // 内容已在 doc 里，会被随后 step1 对服务端缺失的部分作为 update 带走，服务端自然合并。
+    // 灌入在 createCollabConnection 内同步执行、且先于 open()，整段连接生命周期只会发生一次，
+    // 重连换票复用同一 Y.Doc 实例，无需标志位防重。
+    const localState = loadMergedLocalState(roomId);
+    if (localState) {
+      Y.applyUpdate(doc, localState, LOCAL_REPLAY_ORIGIN);
+    }
+    // 只回存「本地编辑事务」。判据是 yjs 的 transaction.local：
+    //   · 编辑器绑定写入 / seedBlocks 播种走 doc.transact(...) → local=true；
+    //   · 从本地存储灌入（Y.applyUpdate，内部强制 transaction.local=false，见 yjs readUpdateV2）
+    //     与服务端 sync step2、跨标签页 BroadcastChannel 转发（都是 applyUpdate）→ local=false。
+    // 因此灌入与远端内容都不会被二次回存，无需识别具体 origin 对象，天然与 roomId/内容解耦。
+    const onLocalUpdate = (update: Uint8Array, _origin: unknown, _d: Y.Doc, transaction: Y.Transaction): void => {
+      if (!transaction.local || mergeConfirmed) return;
+      appendLocalUpdate(roomId, update, { clientId: doc.clientID, ts: Date.now() });
+    };
+    doc.on("update", onLocalUpdate);
+  }
 
   let provider: WebsocketProvider | null = null;
   let status: CollabStatus = "idle";
@@ -295,10 +343,22 @@ export function createCollabConnection(
       // 'disconnected' 不在这里处理：关闭语义统一由 connection-close 判定，避免双路径重入。
     });
     next.on("sync", (isSynced: boolean) => {
-      if (isSynced) markDocSynced(doc);
+      if (!isSynced) return;
+      markDocSynced(doc);
+      if (!persistOffline) return;
+      // 首次（及断线重连后再次）完成 sync：此刻本地更新已随客户端 sync step2 被服务端
+      // 拉取合并（客户端 onopen 发 step1 → 服务端 step1 → 客户端 step2 携带全量本地 diff，
+      // 均在本 step2 到达之前完成）。先记下是否确有待确认的本地累积，再清键并关闭累积窗口；
+      // 仅在确实合并了本地内容时通知上层清整篇 draft（稳态 synced 不应误清无关草稿）。
+      const hadPending = hasLocalUpdates(roomId);
+      clearLocalUpdates(roomId);
+      mergeConfirmed = true;
+      if (hadPending) opts.onLocalMerged?.();
     });
     next.on("connection-close", (event: CloseEvent | null) => {
       if (destroyed) return;
+      // 断了线：确认窗口关闭，离线期间的本地事务重新累积进 gx-y（重连再灌/再带走上行）。
+      mergeConfirmed = false;
       if (event === null) {
         if (!ownClose) scheduleRetry(); // 看门狗断连也要重连
         return;

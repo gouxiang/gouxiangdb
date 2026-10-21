@@ -15,8 +15,10 @@
 //   - 与 stage 的关系：打包时 `stage-node-sidecar.mjs --web-dist apps/web/dist-shell`
 //     把本产物拷入 .stage/server/public；不传 --web-dist 时 stage 仍用 apps/web/dist（零变化）。
 //
-// 强制注入（只覆盖这两个 env，其余 process.env 原样继承，尤其不清 PATH）：
+// 强制注入（只覆盖这三个 env，其余 process.env 原样继承，尤其不清 PATH）：
 //   VITE_NODE_LAUNCHER=1   开启启动器门控（apps/web/src/node/desktopGate.ts 只认 "1"/"true"）
+//   VITE_OFFLINE_Y=1       开启离线 Yjs 累积门控（apps/web/src/features/collab/yOfflineGate.ts，
+//                          gx-y:* 本地更新累积/重连自动合并；普通浏览器构建拿不到此 env，恒关）
 //   VITE_BASE_PATH=/       根路径 base（apps/web/vite.config.ts 归一为 base="/"）
 //
 // 用法：
@@ -58,8 +60,8 @@ function run(cmd, argv, opts = {}) {
 log(`repoRoot=${repoRoot}`);
 
 // --- 1) vite 门控构建（直调 vite，跳过 tsc；类型由调用方 / CI typecheck 把关）----------
-const buildEnv = { ...process.env, VITE_NODE_LAUNCHER: "1", VITE_BASE_PATH: "/" };
-log("注入构建环境：VITE_NODE_LAUNCHER=1 VITE_BASE_PATH=/（其余 env 原样继承，含 PATH）");
+const buildEnv = { ...process.env, VITE_NODE_LAUNCHER: "1", VITE_OFFLINE_Y: "1", VITE_BASE_PATH: "/" };
+log("注入构建环境：VITE_NODE_LAUNCHER=1 VITE_OFFLINE_Y=1 VITE_BASE_PATH=/（其余 env 原样继承，含 PATH）");
 log(`vite 构建，产物目录：${outDir}`);
 run("pnpm", ["exec", "vite", "build", "--outDir", outDir, "--emptyOutDir"], { cwd: webDir, env: buildEnv });
 

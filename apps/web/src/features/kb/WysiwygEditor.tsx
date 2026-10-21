@@ -42,11 +42,15 @@ import { applyPatchToText, type TextPatchGroup } from "./collab/blocksYjs";
 import { applyPatchesToDom, visibleTextOf } from "./collab/domHotPatch";
 import { useCollabDoc } from "./collab/useCollabDoc";
 import type { UseCollabSessionResult } from "../collab/useCollabSession";
+import { isCollabBindingStatus, yOfflineEnabled } from "../collab/yOfflineGate";
 import type { CollabPresenceEntry } from "@gx/shared-types";
 import "./kb.css";
 
 /** 稳定的空名单：避免每次渲染都造新数组，把下游 useMemo/effect 全部打翻。 */
 const NO_PRESENCE: readonly CollabPresenceEntry[] = [];
+
+/** 离线 Y 门控（构建期常量）：门控开时 connecting/reconnecting/offline 也绑定本地 Y.Doc。 */
+const Y_OFFLINE = yOfflineEnabled();
 
 /* ---------------- 文件 -> data URL ---------------- */
 function fileToDataUrl(file: File): Promise<string> {
@@ -228,7 +232,9 @@ export function WysiwygEditor({
   const initialBlocksRef = useRef(blocks);
   const collabDoc = useCollabDoc({
     doc: collab?.doc ?? null,
-    active: collab?.status === "connected",
+    // 门控关：仅 connected 绑定（与引入前 `status === "connected"` 等价）。
+    // 门控开（壳/副本构建）：connecting/reconnecting/offline 也绑定本地 Y.Doc，离线编辑照累积。
+    active: collab ? isCollabBindingStatus(collab.status, Y_OFFLINE) : false,
     entries: collab?.entries ?? NO_PRESENCE,
     selfId: collab?.selfId ?? null,
     initialBlocks: initialBlocksRef.current,
