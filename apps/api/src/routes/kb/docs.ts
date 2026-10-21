@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { collabRoomId } from "@gx/shared-types";
 import { prisma, withWriteTx } from "../../db.js";
+import { injectCanvasContent } from "../../collab/canvasFlush.js";
 import { injectDocContent } from "../../collab/docFlush.js";
 import { onlineRoom } from "../../collab/registry.js";
 import { VersionConflictError, changeEntityOfKind, saveDocContentTx } from "../../domain/kbDocWrite.js";
@@ -162,7 +163,8 @@ docsRoutes.patch("/docs/:docId", async (c) => {
 
 /**
  * DESIGN §3.3：房间在线时的整篇覆盖写改走 CRDT 注入。
- * 返回 null = 不走注入（房间没人在线 / 房间尚未播种 / canvas 尚无 Y 结构），调用方退回直写。
+ * doc / canvas 各走对应注入（解析口径不同：Markdown↔Block / PlaitElement[]↔Y）；
+ * 返回 null = 不走注入（table / 房间没人在线 / 房间尚未播种 / 坏画布 JSON），调用方退回直写。
  */
 async function tryInjectIntoRoom(
   doc: { id: string; kind: string },
@@ -170,11 +172,14 @@ async function tryInjectIntoRoom(
   userId: string,
   title: string | undefined,
 ): Promise<{ contentVersion: number | null; snapshotted: boolean } | null> {
-  // canvas 的 Y 结构尚未定义（阶段 3），保持今天的直写路径。
-  if (doc.kind !== "doc") return null;
-  const room = onlineRoom(collabRoomId({ kind: "doc", objectId: doc.id }));
+  if (doc.kind !== "doc" && doc.kind !== "canvas") return null;
+  const kind = doc.kind;
+  const room = onlineRoom(collabRoomId({ kind, objectId: doc.id }));
   if (!room) return null;
-  const res = await injectDocContent(room, content, userId, title);
+  const res =
+    kind === "canvas"
+      ? await injectCanvasContent(room, content, userId, title)
+      : await injectDocContent(room, content, userId, title);
   return res.injected ? { contentVersion: res.contentVersion, snapshotted: res.snapshotted } : null;
 }
 

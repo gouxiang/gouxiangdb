@@ -4,6 +4,7 @@
 
 import type { CollabPresenceEntry } from "@gx/shared-types";
 import { attachCollab, closeAllCollabSockets } from "./attach.js";
+import { registerCanvasFlusher } from "./canvasFlush.js";
 import { registerDocFlusher } from "./docFlush.js";
 import {
   beginShutdown,
@@ -13,12 +14,14 @@ import {
   stopTimers,
 } from "./registry.js";
 
-// 冷归结实现的装配点：doc 的 flusher 在模块加载时注册进 room.ts 的注入点。
+// 冷归结实现的装配点：doc / canvas 的 flusher 在模块加载时注册进 room.ts 的注入点。
 // 必须早于任何房间建立（房间只有经 attachCollab 的 WS 才会出现，而本模块正是它的出口）。
 registerDocFlusher();
+registerCanvasFlusher();
 
 export { attachCollab };
 export { registerDocFlusher, injectDocContent, flushDocRoom } from "./docFlush.js";
+export { registerCanvasFlusher, injectCanvasContent, flushCanvasRoom } from "./canvasFlush.js";
 export { onlineRoom } from "./registry.js";
 export { registerRoomFlusher } from "./room.js";
 export { issueTicket } from "./tickets.js";
