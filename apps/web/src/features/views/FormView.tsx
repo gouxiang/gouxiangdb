@@ -79,7 +79,7 @@ export default function FormView({
 
   if (!permissions.canEditData) {
     return (
-      <div className="flex h-full items-center justify-center bg-gx-card-bg p-gx-lg">
+      <div className="flex h-full items-center justify-center p-gx-lg">
         <EmptyState icon="lock" title="无权提交" description="当前角色没有填写此表单的权限。" />
       </div>
     );
@@ -87,7 +87,7 @@ export default function FormView({
 
   if (submitted) {
     return (
-      <div className="flex h-full items-center justify-center bg-gx-card-bg p-gx-lg">
+      <div className="flex h-full items-center justify-center p-gx-lg">
         <EmptyState
           icon="check"
           title="提交成功"
@@ -104,14 +104,14 @@ export default function FormView({
 
   if (fields.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center bg-gx-card-bg p-gx-lg">
+      <div className="flex h-full items-center justify-center p-gx-lg">
         <Spinner />
       </div>
     );
   }
 
   return (
-    <div className="h-full overflow-auto bg-gx-card-bg p-gx-lg">
+    <div className="h-full overflow-auto p-gx-lg">
       <div className="mx-auto w-full" style={{ maxWidth: 560 }}>
         <div className="rounded-gx-xl border border-gx-border bg-gx-surface p-gx-lg shadow-sm">
           <h2 className="text-gx-18 font-semibold text-gx-text-primary">

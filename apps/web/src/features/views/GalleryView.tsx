@@ -72,7 +72,7 @@ export default function GalleryView({
   };
 
   return (
-    <div className="h-full overflow-auto bg-gx-card-bg p-gx-lg">
+    <div className="h-full overflow-auto p-gx-lg">
       {(truncated || degraded) && (
         <div className="mb-3">
           <ResultNotice tone="warning" role={degraded ? "alert" : "status"}>

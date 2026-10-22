@@ -42,17 +42,22 @@ export function ToolButton({
       type="button"
       onClick={onClick}
       className={clsx(
-        "inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-gx-lg px-2.5 text-gx-13 transition-colors",
-        active ? "bg-gx-accent-bg text-gx-accent" : "text-gx-text-secondary hover:bg-gx-bg",
+        // v6 #984 底板 .tb：28 高 / px9 / r7（半档圆角收 .gx-tb）/ 12.5（半档字号收 .gx-tb）
+        // / gap5 / icon14；idle ink-3 hover row-hover+ink-1，is-on = brand-soft+brand（守 gx token）。
+        "gx-tb inline-flex h-7 shrink-0 items-center gap-[5px] whitespace-nowrap px-[9px] transition-colors",
+        active
+          ? "bg-gx-accent-bg font-medium text-gx-accent"
+          // 显式 bg-transparent（不依赖 preflight）：与 hover:bg-gx-row-hover 同在 utilities 层，
+          // hover 变体在样式表后位，故悬停灰底必胜；透明/灰底都不落到非分层 .gx-tb（级联层防呆）。
+          : "bg-transparent text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary",
         className,
       )}
     >
-      <Icon name={icon} size={15} />
+      <Icon name={icon} size={14} />
       <span>{label}</span>
       {badge ? (
-        <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-gx-accent px-1 text-gx-11 text-white">
-          {badge}
-        </span>
+        // 底板 .cnt：15×15 灰块（#eef1f6）/r4/10.5/600/ink-2——独立类，不污染 active 按钮字色。
+        <span className="gx-cnt ml-0.5">{badge}</span>
       ) : null}
     </button>
   );

@@ -109,7 +109,7 @@ export default function KanbanView({
   }
 
   return (
-    <div className="flex h-full flex-col bg-gx-card-bg">
+    <div className="flex h-full flex-col">
       {(truncated || degraded) && (
         <div className="shrink-0 px-gx-lg pt-gx-md">
           {degraded ? (
@@ -221,7 +221,7 @@ function KanbanSetup({
   const m = useGXMutations();
   const selectable = fields.filter((f) => f.type === "singleSelect");
   return (
-    <div className="flex h-full items-center justify-center bg-gx-card-bg p-gx-lg">
+    <div className="flex h-full items-center justify-center p-gx-lg">
       <EmptyState
         icon="kanban"
         title="设置看板分组字段"

@@ -1117,3 +1117,124 @@ button.gx-crumb-c1:hover {
     transition: none;
   }
 }
+
+/* ============================================================
+   v6 #984：数据表页（底板 data-table.html 760-871 三行+卡片、819-835 筛选 chips）。
+   半档字号（12.5/11.5/10.5）、半档圆角（r7/r6/r5）、line-2 精确灰、
+   vicon hover 蓝阴影等字面值全部收口本段；颜色语义跟随 gx token 口径。
+   ============================================================ */
+
+/* 第一行数据表图标砖（底板 .vicon 764-772）：基础底/字/边用 tailwind gx 类承载
+   （bg-gx-accent-bg/text-gx-accent/border-gx-hairline），这里只补 hover 蓝边+蓝阴影。 */
+.gx-vicon {
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+.gx-vicon:hover {
+  border-color: #c9dcf8;
+  box-shadow: 0 2px 8px -3px rgba(44, 123, 229, 0.45);
+}
+
+/* 工具按钮（底板 .tb 801-808）：28/px9 已在组件 tailwind 类；半档圆角 7 与字号 12.5 收口。
+   非分层类：禁止写与同元素 tailwind 工具类竞争的 display/background/color/border，否则级联层会
+   压过分层内 bg-*/hidden/md:*（S3/#984 已两度踩坑，与特异性、书写顺序无关）；激活蓝软底 / hover
+   灰底 / 透明底一律放组件 tailwind 类（active: bg-gx-accent-bg，idle: bg-transparent + hover:）。 */
+.gx-tb {
+  border-radius: 7px;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* 按钮上的计数灰块（底板 .cnt 810-814）：15 高、r4、line-2 底、10.5/600、ink-2。 */
+.gx-cnt {
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: #eef1f6;
+  color: #475467;
+  font-size: 10.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 第三行筛选组（底板 .s-grp 821）：按钮 + chips 区 + 添加。
+   与底板 flex:none 不同：chips 区要吃剩余空间并在超宽时裁切，故组本身可收缩（min-w-0）。
+   非分层类：禁止写与同元素 tailwind 工具类竞争的 display/background/color/border，否则级联层会
+   压过分层内 bg-*/hidden/md:*（S3/#984 已两度踩坑，与特异性、书写顺序无关）；显隐完全交给
+   组件 tailwind 类（<768 hidden=none，≥768 md:flex=flex），这里不得再写 display。 */
+.gx-s-grp {
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 筛选条件 chip（底板 .fchip 823-833）：24 高、白底、1px line、pill、11.5 ink-2。 */
+.gx-fchip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 4px 0 9px;
+  background: #ffffff;
+  border: 1px solid #e7eaf0;
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: #475467;
+  white-space: nowrap;
+}
+.gx-fchip b {
+  font-weight: 600;
+  color: #101828;
+}
+.gx-fchip-x {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: #8b95a7;
+  cursor: pointer;
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1;
+  transition: background 0.13s, color 0.13s;
+}
+.gx-fchip-x:hover {
+  background: #eef1f6;
+  color: #101828;
+}
+
+/* 添加筛选（底板 .fadd 834-835）：sub 底行上的文字钮，hover 翻白。 */
+.gx-fadd {
+  border: 0;
+  background: transparent;
+  color: #667085;
+  font-size: 11.5px;
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 6px;
+  transition: background 0.13s, color 0.13s;
+}
+.gx-fadd:hover {
+  background: #ffffff;
+  color: #101828;
+}
+
+/* 减弱动态效果：关闭三行/ chips 过渡。 */
+@media (prefers-reduced-motion: reduce) {
+  .gx-vicon,
+  .gx-tb,
+  .gx-fchip-x,
+  .gx-fadd {
+    transition: none;
+  }
+}

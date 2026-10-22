@@ -18,9 +18,10 @@ import { useState } from "react";
 import type { FieldDTO, ViewConfig } from "@gx/shared-types";
 import { Popover, Menu, MenuItem } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { FilterActiveBadge } from "../../components/interaction";
 import { useBreakpointTier } from "../../lib/breakpoint";
 import { ToolButton, buildGridPanels, countConditions } from "./GridToolbarParts";
+import { deriveFilterChips, removeFilterCondition } from "./filter-chips";
+import { FilterChips } from "./FilterChips";
 
 export interface GridToolbarSettingsRowProps {
   config: ViewConfig;
@@ -61,6 +62,8 @@ export function GridToolbarSettingsRow({
 
   const filterActive = config.filters != null;
   const filterCount = filterActive ? countConditions(config.filters) : 0;
+  // v6 #984：生效条件 chips 化（底板 .s-grp/.fchip），纯派生于 config.filters，不改求值。
+  const filterChips = deriveFilterChips(config.filters, allFields);
 
   // 内联 Popover 与「更多」drill-down 共用同一份面板（GridToolbarParts.buildGridPanels），
   // 关的是自己这个浮层。
@@ -82,7 +85,8 @@ export function GridToolbarSettingsRow({
   };
 
   return (
-    <div className="flex h-10 min-w-0 shrink-0 items-center gap-1 border-b border-gx-separator bg-gx-surface px-2 pb-1">
+    // 底板 .sbar：去固定高/pb，py7/px10/gap5、底线 line-2、sub 底（gx-tableHeader）。
+    <div className="flex min-w-0 shrink-0 items-center gap-[5px] border-b border-gx-separator bg-gx-table-header px-2.5 py-[7px]">
       {/* 行高 / 字段：<1440 收进「更多」菜单（见文件头注释） */}
       {wideLayout && (
         <div className="relative hidden lg:block">
@@ -106,10 +110,10 @@ export function GridToolbarSettingsRow({
         </div>
       )}
 
-      {wideLayout && <div className="h-5 w-px hidden shrink-0 bg-gx-separator lg:block" />}
+      {wideLayout && <div className="mx-0.5 hidden h-[18px] w-px shrink-0 bg-gx-hairline lg:block" />}
 
-      {/* <768 收进「更多」菜单（768–1023 仍常驻） */}
-      <div className="relative hidden md:block">
+      {/* <768 收进「更多」菜单（768–1023 仍常驻）。底板 .s-grp：筛选按钮 + chips + 添加筛选 */}
+      <div className="gx-s-grp relative hidden md:flex">
         <ToolButton
           icon="filter"
           label="筛选"
@@ -117,21 +121,22 @@ export function GridToolbarSettingsRow({
           badge={filterActive ? filterCount : undefined}
           onClick={() => setOpen(open === "filter" ? null : "filter")}
         />
+        {/* chips 区：不换行、不做 overflow-x-auto（否则 Popover 浮层会被裁），超出直接裁切；
+            chip 自身 shrink-0，fadd 在裁切区外固定。 */}
+        <FilterChips
+          chips={filterChips}
+          onRemove={(path) =>
+            onUpdateConfig({ filters: removeFilterCondition(config.filters, path) })
+          }
+          onClearAll={() => onUpdateConfig({ filters: null })}
+          onAdd={() => setOpen("filter")}
+        />
         {open === "filter" && (
           <Popover open onClose={() => setOpen(null)} align="left" width={320} className="p-0">
             {filterPanel}
           </Popover>
         )}
       </div>
-
-      {/* R-I-04：筛选生效后跟在「筛选」后显示「筛选中」徽标，可一键清空 */}
-      {filterActive && (
-        <FilterActiveBadge
-          count={filterCount || undefined}
-          onClear={() => onUpdateConfig({ filters: null })}
-        />
-      )}
-
       <div className="relative hidden md:block">
         <ToolButton
           icon="group"
@@ -160,7 +165,8 @@ export function GridToolbarSettingsRow({
         )}
       </div>
 
-      {/* 行颜色：<1440 收进「更多」菜单（同 行高 / 字段） */}
+      {/* 行颜色：<1440 收进「更多」菜单（同 行高 / 字段）；底板第二根竖线（排序 / 行颜色间） */}
+      {wideLayout && <div className="mx-0.5 hidden h-[18px] w-px shrink-0 bg-gx-hairline lg:block" />}
       {wideLayout && (
         <div className="relative hidden lg:block">
           <ToolButton

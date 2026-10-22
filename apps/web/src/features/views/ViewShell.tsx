@@ -137,19 +137,25 @@ export function ViewShell({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-gx-surface">
+    // v6 #984：底板 .wrap > .card——外层灰底留白（margin 16/20/20 落 padding），
+    // 内层整页白卡片 r12 + 发丝边，overflow-hidden 让三行/卡底状态栏自动收圆角。
+    <div className="flex h-full min-h-0 flex-col bg-gx-bg px-5 pb-5 pt-4">
+     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-gx-2xl border border-gx-hairline bg-gx-surface">
       <GridToolbar
         leading={
           <div className="flex min-w-0 flex-1 items-center gap-1">
             {/* 数据表「图标与颜色」入口：触发器自带 resolved 图标预览，同时是本表页的图标展示位。
-                上提到外壳后六类视图都能改表图标（原先只有网格有）。无表结构管理权限即不渲染。 */}
+                上提到外壳后六类视图都能改表图标（原先只有网格有）。无表结构管理权限即不渲染。
+                v6 #984：底板 .vicon 26×26/r8/brand-soft 底/brand 字（tone=brandSoft + .gx-vicon）。 */}
             {currentTable && permissions.canManageSchema ? (
               <EntityIconPicker
                 icon={currentTable.icon}
                 iconColor={currentTable.iconColor}
                 defaultIcon="table"
                 ariaLabel="数据表图标与颜色"
-                triggerSize={20}
+                triggerSize={26}
+                tone="brandSoft"
+                className="gx-vicon mr-1.5"
                 onChange={(next) =>
                   m.updateTable.mutateAsync({
                     tableId,
@@ -182,9 +188,12 @@ export function ViewShell({
         onShare={() => setShareOpen(true)}
       />
 
-      {/* 视图内容：第三行起（网格自己再渲染一行设置项，其余视图直接进内容区） */}
+      {/* 视图内容：第三行起（网格自己再渲染一行设置项，其余视图直接进内容区）。
+          在卡片内纵向填充，min-h-0 让网格虚拟滚动区正确收高度。 */}
       <div className="flex min-h-0 flex-1 flex-col">{children({ config, onUpdateConfig, onNewRecord })}</div>
+     </div>
 
+      {/* 以下均为 portal 弹窗：留在卡片外（根下），不被卡的 overflow-hidden 裁剪。 */}
       {/* 导入 / 导出向导：表级操作，外壳为六类视图统一挂载一份 */}
       <TableViewIoDialogs
         baseId={baseId}

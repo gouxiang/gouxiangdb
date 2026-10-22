@@ -145,7 +145,7 @@ export function ListSearchBox({
     >
       <Icon
         name="search"
-        size={14}
+        size={13}
         className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-gx-text-hint"
       />
       <input
@@ -154,7 +154,8 @@ export function ListSearchBox({
         placeholder={placeholder}
         aria-label={placeholder}
         className={clsx(
-          "h-8 w-full rounded-gx-lg border border-gx-border bg-gx-control pl-7 pr-2 text-gx-12",
+          // v6 #984 底板 .tsearch：28 高（h-7）、12px、r8、sub 底。
+          "h-7 w-full rounded-gx-lg border border-gx-border bg-gx-control pl-7 pr-2 text-gx-12",
           "text-gx-text-primary placeholder:text-gx-text-hint",
           "transition-colors duration-[120ms] focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50",
           FOCUS_RING,

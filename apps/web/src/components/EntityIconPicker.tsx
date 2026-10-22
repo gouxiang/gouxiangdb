@@ -178,8 +178,16 @@ export interface EntityIconPickerProps {
   ariaLabel?: string;
   /** 浮层宽度；缺省按 6 列网格推算（≈246）。 */
   panelWidth?: number;
-  /** 触发器尺寸：32（默认，设置页/弹窗内）/ 20（行内紧凑入口）。 */
-  triggerSize?: 32 | 20;
+  /** 触发器尺寸：32（默认，设置页/弹窗内）/ 26（v6 数据表页第一行 vicon）/ 20（行内紧凑入口）。 */
+  triggerSize?: 32 | 26 | 20;
+  /**
+   * 触发器视觉语调：default（既有所有调用点，观感零变）；
+   * brandSoft = v6 底板 .vicon（26/r8/brand-soft 底/brand 字/1px 发丝线，hover 蓝阴影）。
+   * hover 阴影由 index.css .gx-vicon 承载，调用方需同时挂该类。
+   */
+  tone?: "default" | "brandSoft";
+  /** 透传给触发器（readOnly 时是 span，否则是 button）的追加类，调用方挂间距/hover 阴影等。 */
+  className?: string;
 }
 
 /**
@@ -202,6 +210,8 @@ export function EntityIconPicker({
   ariaLabel = "图标与颜色",
   panelWidth = ENTITY_ICON_PANEL_W,
   triggerSize = 32,
+  tone = "default",
+  className,
 }: EntityIconPickerProps) {
   const [open, setOpen] = useState(false);
   // 触发器锚点：fixed 模式按它的视口矩形定位（不传 anchorEl 会回退到弹层父元素，坐标不准）
@@ -212,7 +222,7 @@ export function EntityIconPicker({
   const preview = (
     <Icon
       name={resolved.name}
-      size={triggerSize === 32 ? 18 : 14}
+      size={triggerSize === 32 ? 18 : triggerSize === 26 ? 15 : 14}
       style={resolved.color ? { color: resolved.color } : undefined}
     />
   );
@@ -229,7 +239,13 @@ export function EntityIconPicker({
     // 无写权限只展示当前生效图标（未自定义即 fallback），不挂触发器语义
     return (
       <span
-        className="inline-flex shrink-0 items-center justify-center rounded-gx-lg border border-gx-border bg-gx-surface text-gx-text-primary"
+        className={[
+          "inline-flex shrink-0 items-center justify-center rounded-gx-lg border",
+          tone === "brandSoft"
+            ? "border-gx-hairline bg-gx-accent-bg text-gx-accent"
+            : "border-gx-border bg-gx-surface text-gx-text-primary",
+          className,
+        ].filter(Boolean).join(" ")}
         style={{ width: triggerSize, height: triggerSize }}
         title={ariaLabel}
       >
@@ -249,10 +265,16 @@ export function EntityIconPicker({
         title={ariaLabel}
         onClick={() => setOpen((v) => !v)}
         className={[
-          "flex items-center justify-center rounded-gx-lg border border-gx-border bg-gx-surface",
-          "text-gx-text-primary transition-colors duration-150 ease-out hover:bg-gx-row-hover",
+          "flex items-center justify-center rounded-gx-lg border",
+          tone === "brandSoft"
+            ? "gx-vicon border-gx-hairline bg-gx-accent-bg text-gx-accent"
+            : [
+                "border-gx-border bg-gx-surface",
+                "text-gx-text-primary transition-colors duration-150 ease-out hover:bg-gx-row-hover",
+              ].join(" "),
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gx-accent/50",
-        ].join(" ")}
+          className,
+        ].filter(Boolean).join(" ")}
         style={{ width: triggerSize, height: triggerSize }}
         data-entity-icon-trigger={open ? "open" : "closed"}
       >

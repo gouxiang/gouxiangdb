@@ -83,15 +83,16 @@ describe("P1-A 根因：按钮不再被压到内容宽度以下", () => {
   it("第二行 3 个工具按钮（导入 / 导出 / 更多）仍带 shrink-0 + whitespace-nowrap", () => {
     // 改断言原因：行合并后「新建记录」升到第二行左端（它是 Button 不是 ToolButton），
     // 六个设置项留在第三行；本行只剩导入 / 导出 / 更多三个 ToolButton。
+    // v6 #984：几何收口到 .gx-tb（r7/12.5 在 index.css），shrink-0/nowrap 仍在 tailwind 类串。
     const html = renderToolbar();
-    expect(countOf(html, "whitespace-nowrap rounded-gx-lg")).toBe(3);
-    expect(countOf(html, "inline-flex h-8 shrink-0 items-center")).toBe(3);
+    expect(countOf(html, "whitespace-nowrap px-[9px]")).toBe(3);
+    expect(countOf(html, "inline-flex h-7 shrink-0 items-center")).toBe(3);
   });
 
   it("第三行 6 个设置按钮同样带 shrink-0 + whitespace-nowrap", () => {
     const html = renderSettingsRow();
-    expect(countOf(html, "whitespace-nowrap rounded-gx-lg")).toBe(6);
-    expect(countOf(html, "inline-flex h-8 shrink-0 items-center")).toBe(6);
+    expect(countOf(html, "whitespace-nowrap px-[9px]")).toBe(6);
+    expect(countOf(html, "inline-flex h-7 shrink-0 items-center")).toBe(6);
   });
 
   it("导入 / 导出是常驻按钮且落在搜索框右侧（入口收敛后唯一入口）", () => {
@@ -110,23 +111,25 @@ describe("P1-A 根因：按钮不再被压到内容宽度以下", () => {
   it("新建记录与搜索 / 导入 / 导出 / 更多同一行：新建记录在左，其余 ml-auto 靠右", () => {
     const html = renderToolbar();
     expect(html.indexOf("新建记录")).toBeLessThan(html.indexOf("搜索此视图"));
-    // 右端组用 ml-auto 顶到最右，而不是靠 flex-1 平摊
+    // 右端组用 ml-auto 顶到最右，而不是靠 flex-1 平摊（v6 #984：gap 随底板改 1.5）
     const src = read("./GridToolbar.tsx");
-    expect(src).toContain("ml-auto flex min-w-0 flex-1 items-center justify-end gap-1 md:flex-none");
+    expect(src).toContain("ml-auto flex min-w-0 flex-1 items-center justify-end gap-1.5 md:flex-none");
   });
 });
 
 describe("P1-A 收起入口：窄屏只收按钮，不删功能", () => {
   it("<1024 收起 行高 / 字段 / 行颜色（容器 hidden lg:block）", () => {
     const html = renderSettingsRow();
-    // 3 个被收起的按钮容器 + 1 条随字段一起收起的竖分隔线
+    // 3 个被收起的按钮容器 + 2 根竖线（字段后、排序/行颜色间，底板 996/1006 两处）
     expect(countOf(html, "relative hidden lg:block")).toBe(3);
-    expect(countOf(html, "hidden shrink-0 bg-gx-separator lg:block")).toBe(1);
+    expect(countOf(html, "hidden h-[18px] w-px shrink-0 bg-gx-hairline lg:block")).toBe(2);
   });
 
-  it("<768 再收起 筛选 / 分组 / 排序（容器 hidden md:block，768–1023 仍常驻）", () => {
+  it("<768 再收起 筛选 / 分组 / 排序（容器 hidden md:*，768–1023 仍常驻）", () => {
     const html = renderSettingsRow();
-    expect(countOf(html, "relative hidden md:block")).toBe(3);
+    // v6 #984：筛选组换成 hidden md:flex（chips 区同组），分组 / 排序仍是 hidden md:block
+    expect(countOf(html, "relative hidden md:block")).toBe(2);
+    expect(countOf(html, "gx-s-grp relative hidden md:flex")).toBe(1);
   });
 
   it("桌面按钮一个不少：新建记录 / 行高 / 字段 / 筛选 / 分组 / 排序 / 行颜色 / 更多", () => {

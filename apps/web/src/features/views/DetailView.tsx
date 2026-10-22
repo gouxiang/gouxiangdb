@@ -110,7 +110,7 @@ export default function DetailView({
 
   if (editingLayout) {
     return (
-      <div className="flex h-full flex-col bg-gx-card-bg">
+      <div className="flex h-full flex-col">
         <DetailLayoutEditor
           inline
           open
@@ -141,7 +141,7 @@ export default function DetailView({
   }
 
   return (
-    <div className="h-full overflow-auto bg-gx-card-bg p-gx-lg">
+    <div className="h-full overflow-auto p-gx-lg">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
         {degraded && (
           <ResultNotice tone="warning" role="alert">

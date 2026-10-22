@@ -156,7 +156,7 @@ export default function TreeView({ tableId, viewId, view, permissions, onOpenRec
   const windowRows = visibleRows.slice(win.start, win.end);
 
   return (
-    <div className="flex h-full flex-col bg-gx-card-bg">
+    <div className="flex h-full flex-col">
       {(bounded.bounded || degraded) && (
         <div className="shrink-0 px-gx-lg pt-gx-md">
           {degraded ? (
@@ -258,7 +258,7 @@ function TreeSetup({
     (f) => f.type === "links" && !f.isReverse && f.relatedTableId === tableId,
   );
   return (
-    <div className="flex h-full items-center justify-center bg-gx-card-bg p-gx-lg">
+    <div className="flex h-full items-center justify-center p-gx-lg">
       <EmptyState
         icon="sitemap"
         title="设置层级父级字段"

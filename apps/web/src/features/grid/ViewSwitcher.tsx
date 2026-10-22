@@ -194,10 +194,12 @@ export function ViewSwitcher({ baseId, tableId, viewId, canManageSchema, onViewS
                 title={v.name}
                 onClick={() => goToView(v.id)}
                 className={[
-                  "flex h-7 max-w-[168px] items-center gap-1.5 rounded-gx-lg px-2 text-gx-12 transition-colors",
+                  // v6 #984 底板 .vtab：28 高、px10、12.5、idle ink-3 hover row-hover+ink-1；
+                  // active 的 brand-soft/accent/font-medium 保留（view-switcher-tabs 契约）。
+                  "flex h-7 max-w-[168px] items-center gap-1.5 rounded-gx-lg px-2.5 text-gx-12 transition-colors",
                   active
                     ? "bg-gx-accent-bg font-medium text-gx-accent"
-                    : "text-gx-text-secondary hover:bg-gx-bg",
+                    : "text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary",
                 ].join(" ")}
               >
                 <Icon name={VIEW_ICON[v.type] ?? "grid"} size={13} className="shrink-0" />
@@ -271,7 +273,7 @@ export function ViewSwitcher({ baseId, tableId, viewId, canManageSchema, onViewS
           aria-label="新建视图"
           title="新建视图"
           onClick={openNew}
-          className="ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-gx-lg text-gx-text-secondary hover:bg-gx-bg hover:text-gx-accent"
+          className="ml-1 flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-gx-lg text-gx-text-secondary hover:bg-gx-bg hover:text-gx-accent"
         >
           <Icon name="plus" size={14} />
         </button>

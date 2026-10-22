@@ -127,7 +127,7 @@ export default function CalendarView({
   const titleText = mode === "month" ? `${curY} 年 ${curM + 1} 月` : `第 ${WEEKDAYS[cursor.getDay()]} 周`;
 
   return (
-    <div className="flex h-full flex-col bg-gx-card-bg">
+    <div className="flex h-full flex-col">
       {(truncated || degraded) && (
         <div className="shrink-0 px-4 pt-2">
           <ResultNotice tone="warning" role={degraded ? "alert" : "status"}>
@@ -237,7 +237,7 @@ function CalendarSetup({
     ["date", "datetime", "createdTime", "lastModifiedTime"].includes(f.type),
   );
   return (
-    <div className="flex h-full items-center justify-center bg-gx-card-bg p-gx-lg">
+    <div className="flex h-full items-center justify-center p-gx-lg">
       <EmptyState
         icon="calendar"
         title="设置日历日期字段"

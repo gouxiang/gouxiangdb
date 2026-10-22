@@ -68,19 +68,20 @@ export function GridToolbar({
   const newRecordTitle = !permissions.canEditData ? "无编辑权限" : "新建记录";
 
   return (
-    <div className="shrink-0 border-b border-gx-separator bg-gx-surface">
-      {/* 第一行：视图标签条独占整行（多行视图选项卡的横向空间预留，见文件头） */}
+    // v6 #984：底线由三行各自挂（vbar/tbar/sbar 均 border-b line-2），根不再整条压底避免双线。
+    <div className="shrink-0 bg-gx-surface">
+      {/* 第一行：视图标签条独占整行（底板 .vbar：min-h40 / px10 / py6 / gap2 / 底线 line-2） */}
       {leading ? (
         <div
           data-gx-toolbar-view-row=""
-          className="flex h-9 min-w-0 items-center gap-1 px-2 pt-1"
+          className="flex min-h-[40px] min-w-0 items-center gap-0.5 border-b border-gx-separator px-2.5 py-1.5"
         >
           {leading}
         </div>
       ) : null}
 
-      {/* 第二行：新建记录（左） + 搜索 / 导入 / 导出 / 更多（右） */}
-      <div className="flex h-11 min-w-0 items-center gap-1 px-2">
+      {/* 第二行（底板 .tbar：py8/px10/gap6/底线 line-2）：新建记录（左） + 搜索 / 导入 / 导出 / 更多（右） */}
+      <div className="flex min-w-0 items-center gap-1.5 border-b border-gx-separator px-2.5 py-2">
         <span className="inline-flex shrink-0" title={newRecordTitle}>
           <Button
             size="sm"
@@ -89,13 +90,14 @@ export function GridToolbar({
             disabled={!permissions.canEditData}
             loading={newRecordBusy}
             onClick={onNewRecord}
+            className="h-[26px] px-[9px] text-gx-12"
           >
             新建记录
           </Button>
         </span>
 
         {/* 右端组：ml-auto 顶到最右；<768 搜索框随主轴伸缩，≥768 严格回到 170（R-I-03） */}
-        <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1 md:flex-none">
+        <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1.5 md:flex-none">
           <ListSearchBox
             value={search.value}
             onChange={search.setValue}

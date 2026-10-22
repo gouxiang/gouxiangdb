@@ -515,7 +515,8 @@ export default function GridView({
         : "none";
 
   return (
-    <div className="flex h-full flex-col bg-gx-surface">
+    // v6 #984：白卡片已由 ViewShell 内层承载，网格根不再自带白底；三行之下直接是表格滚动区。
+    <div className="flex h-full flex-col">
       {/* 统一外壳第三行：网格专属设置行（行高 / 字段 / 筛选 / 分组 / 排序 / 行颜色）。
           这六项是网格行列概念，数据来自网格自己的无限滚动查询（filteredTotal / degradedCodes）
           与网格内的字段编辑器，所以留在这里渲染，而不是上提到外壳（见 ViewShell 文件头）。
@@ -731,8 +732,8 @@ export default function GridView({
         </div>
       )}
 
-      {/* 状态栏 */}
-      <div className="flex h-7 items-center gap-3 border-t border-gx-separator bg-gx-bg px-3 text-gx-11 text-gx-text-hint">
+      {/* 状态栏（底板 .tfoot：h32、卡白底、border-top line-2、11.5 ink-4；卡圆角由卡 overflow 收） */}
+      <div className="flex h-8 items-center gap-3 border-t border-gx-separator bg-gx-surface px-3 text-gx-11 text-gx-text-hint">
         <span>共 {total} 条</span>
         {/* R-I-02：无限滚动口径下底部要告诉用户「已加载 N 条」 */}
         <span>{loadedCountText(records.length, total)}</span>
