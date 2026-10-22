@@ -34,7 +34,7 @@ const publicDir = path.join(serverDir, "public");
 // iframe 嵌入应用自己的端口，页面与 API 同源在 http://NAS:端口（根路径）。因此前端按
 // vite 默认 base="/" 构建，index.html 资源走 /assets/...、API 走同源 /api/...。
 // 历史 CGI 前缀（/cgi/ThirdParty/gouxiangdb/index.cgi/）已废弃，index.cgi 不再打包。
-const DEFAULT_PORT = "3001";
+const DEFAULT_PORT = "9527";
 const PORT_ENTRY_URL = "/";
 const brandPngDir = path.join(repoRoot, "branding", "app-icon", "png");
 
@@ -255,7 +255,9 @@ run("node", [path.join(serverDir, "scripts", "smoke-dist.mjs")], { cwd: serverDi
 //   2) 入口不是 type=iframe / protocol=http / port=${wizard_port} / url="/" →
 //      门户打不开应用自己的端口（或路径错），点开即空白；
 //   3) 误留 gatewayPrefix/gatewaySocket → 三方应用网关注册不生效，请求被门户拦 invalid token；
-//   4) 向导 wizard/install、wizard/config 缺失或不是合法 JSON → 安装/改端口收集不到 wizard_port。
+//   4) 向导 wizard/install、wizard/upgrade、wizard/config 缺失或不是合法 JSON →
+//      安装/升级/改端口收集不到 wizard_port（升级路径只读 wizard/upgrade）；
+//   5) 入口 icon 必须为连字符 images/icon-{0}.png（真机实际命名，下划线取不到图回退兜底旧图标）。
 (() => {
   const uiDir = path.join(packDir, "app", "ui");
   const cgiPath = path.join(uiDir, "index.cgi");
@@ -286,10 +288,20 @@ run("node", [path.join(serverDir, "scripts", "smoke-dist.mjs")], { cwd: serverDi
     if (e.url !== PORT_ENTRY_URL) {
       fail(`入口 "${e.title}" 的 url="${e.url}"，独立端口根路径部署必须为 "/"`);
     }
+    // 真机实证（fnOS 1.2，官方 dashboard 对照）：桌面 serviceicon 路由按【连字符】
+    // icon-{0}.png 取图；下划线命名取不到文件会回退系统兜底旧图标。
+    if (e.icon !== "images/icon-{0}.png") {
+      fail(`入口 "${e.title}" 的 icon="${e.icon}"，必须为 "images/icon-{0}.png"（连字符，真机实际命名）`);
+    }
   }
-  for (const wiz of ["install", "config"]) {
+  for (const wiz of ["install", "config", "upgrade"]) {
     const wp = path.join(packDir, "wizard", wiz);
-    if (!fs.existsSync(wp)) fail(`缺少 wizard/${wiz}（独立端口需在安装/配置向导收集 wizard_port）`);
+    if (!fs.existsSync(wp)) {
+      fail(
+        `缺少 wizard/${wiz}（独立端口需在安装/升级/配置向导收集 wizard_port；` +
+          `0.2.4→0.2.5 升级只走 wizard/upgrade，缺失会致 \${wizard_port} 字面量注册、桌面白屏）`,
+      );
+    }
     try {
       const parsed = JSON.parse(fs.readFileSync(wp, "utf8"));
       const fields = JSON.stringify(parsed);
@@ -302,13 +314,17 @@ run("node", [path.join(serverDir, "scripts", "smoke-dist.mjs")], { cwd: serverDi
 })();
 
 // --- 5.6) 品牌图标一致性自检（旧图标白屏/错图闸门） --------------------------------
-// 飞牛桌面读 ICON.PNG / ICON_256.PNG 与 app/ui/images/icon_{256,64}.png。四处必须与品牌单源
-// branding/app-icon/png 逐字节一致，避免重打时又带回旧版图标（2026-10 真机曾见桌面显旧图标）。
+// 飞牛读两组图标：应用中心卡片 ICON.PNG / ICON_256.PNG；桌面入口 serviceicon 路由按
+// app/ui/images/icon-{256,64}.png（连字符，真机官方 dashboard 实证；开发者文档示例的下划线
+// 命名在这版系统取不到文件 → 回退系统兜底旧图标，2026-10-22 真机事故）。下划线两份保留仅为
+// 旧文档/旧固件兼容。六处必须与品牌单源 branding/app-icon/png 逐字节一致，防止重打带回旧图标。
 (() => {
   const md5 = (p) => crypto.createHash("md5").update(fs.readFileSync(p)).digest("hex");
   const pairs = [
     ["ICON.PNG", "icon-256.png"],
     ["ICON_256.PNG", "icon-256.png"],
+    ["app/ui/images/icon-256.png", "icon-256.png"],
+    ["app/ui/images/icon-64.png", "icon-64.png"],
     ["app/ui/images/icon_256.png", "icon-256.png"],
     ["app/ui/images/icon_64.png", "icon-64.png"],
   ];
@@ -321,7 +337,7 @@ run("node", [path.join(serverDir, "scripts", "smoke-dist.mjs")], { cwd: serverDi
       fail(`图标 ${dst} 与品牌单源 branding/app-icon/png/${brand} 不一致（md5 不同，疑似旧图标），请先同步再打包`);
     }
   }
-  log("品牌图标一致性自检通过（4 处图标 == branding/app-icon/png）");
+  log("品牌图标一致性自检通过（6 处图标 == branding/app-icon/png，含连字符桌面入口图标）");
 })();
 
 

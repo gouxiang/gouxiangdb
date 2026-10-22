@@ -15,8 +15,8 @@ mkdir -p "$DATA_DIR/uploads" "$DATA_DIR/backups" "${TRIM_PKGVAR}/log"
 
 # 服务端口：来自安装向导字段 wizard_port（app/ui/config 的端口服务入口用 ${wizard_port}
 # 引用同一值）。向导只校验了「纯数字」，范围（1024-65535）必须在脚本里二次校验
-#（飞牛官方要求向导值在使用前再次校验）。未提供（历史/静默安装）时回退默认 3001。
-APP_PORT="${wizard_port:-3001}"
+#（飞牛官方要求向导值在使用前再次校验）。未提供（历史/静默安装）时回退默认 9527。
+APP_PORT="${wizard_port:-9527}"
 if ! [[ "$APP_PORT" =~ ^[0-9]+$ ]] || [ "$APP_PORT" -lt 1024 ] || [ "$APP_PORT" -gt 65535 ]; then
   echo "服务端口非法：${wizard_port}（需为 1024-65535 之间的数字），请在安装向导中重新填写。" > "$TRIM_TEMP_LOGFILE"
   exit 1

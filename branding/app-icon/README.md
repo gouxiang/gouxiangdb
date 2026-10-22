@@ -72,8 +72,9 @@ SVG→PNG 用系统 `qlmanage`，ICNS 用系统 `iconutil`，均无需额外依�
 | :--- | :--- |
 | `deploy/fnos/gouxiangdb/ICON.PNG` | `png/icon-256.png`（**先核对原文件像素尺寸，按原尺寸覆盖**） |
 | `deploy/fnos/gouxiangdb/ICON_256.PNG` | `png/icon-256.png` |
-| `deploy/fnos/gouxiangdb/app/ui/images/icon_256.png` | `png/icon-256.png` |
-| `deploy/fnos/gouxiangdb/app/ui/images/icon_64.png` | `png/icon-64.png` |
+| `deploy/fnos/gouxiangdb/app/ui/images/icon-256.png` | `png/icon-256.png`（**连字符，桌面 serviceicon 实际取此名**） |
+| `deploy/fnos/gouxiangdb/app/ui/images/icon-64.png` | `png/icon-64.png`（**连字符，桌面 serviceicon 实际取此名**） |
+| `deploy/fnos/gouxiangdb/app/ui/images/icon_256.png` / `icon_64.png` | 同上（下划线副本，兼容开发者文档命名，build-fpk.mjs 一并做 md5 校验） |
 
 ### 3. macOS 桌面 App（后续 apps/desktop）
 - 使用 `mac/icon.icns`；若自行组装 `.app`，把 icns 放到 `Contents/Resources/`。

@@ -2,7 +2,7 @@
 # GouXiangDB fnOS 生命周期：start/stop/status
 #
 # 进程以 package 用户（gouxiangdb）运行，监听独立 TCP 端口（PORT 来自持久配置
-# ${TRIM_PKGETC}/gouxiangdb.env，首装由安装向导 wizard_port 写入，默认 3001；
+# ${TRIM_PKGETC}/gouxiangdb.env，首装由安装向导 wizard_port 写入，默认 9527；
 # 应用设置中改端口经 wizard/config + config_callback 回写）。后端默认绑 0.0.0.0，
 # 浏览器可直接 http://NAS:端口 访问，也可对内网穿透/外网映射该端口；飞牛桌面门户以
 # 跨源 iframe 嵌入该端口（app/ui/config 的 "type":"iframe" + "port":"${wizard_port}"）。
@@ -42,8 +42,8 @@ start_app() {
   # shellcheck disable=SC1090
   set -a; source "$ENV_FILE"; set +a
   # 监听 TCP（不设 GX_SOCKET_PATH 即走 TCP 分支）：env 的 PORT 由 install_callback
-  # 写入（向导 wizard_port，默认 3001），config_callback 可改；后端默认绑 0.0.0.0。
-  export PORT="${PORT:-3001}"
+  # 写入（向导 wizard_port，默认 9527），config_callback 可改；后端默认绑 0.0.0.0。
+  export PORT="${PORT:-9527}"
   # 独立端口为根部署（页面与 API 同源在 http://NAS:端口），【不能】设 GX_BASE_PATH，
   # 否则路由会多期望一层前缀而 404。
   unset GX_BASE_PATH

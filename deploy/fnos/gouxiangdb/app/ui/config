@@ -2,7 +2,7 @@
   ".url": {
     "gouxiangdb.main": {
       "title": "构想工作台",
-      "icon": "images/icon_{0}.png",
+      "icon": "images/icon-{0}.png",
       "type": "iframe",
       "protocol": "http",
       "port": "${wizard_port}",

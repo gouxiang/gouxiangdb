@@ -15,8 +15,8 @@ desktop_applaunchname=gouxiangdb.main
 # 独立端口服务（0.2.5 起）：应用在自己的 TCP 端口提供服务，桌面门户以跨源 iframe
 # 嵌入 http://NAS:${wizard_port}（见 app/ui/config 的 "port":"${wizard_port}"）。
 # service_port 仅声明默认端口；实际端口由安装/配置向导 wizard_port 收集并写入 env，
-# 故 checkport=false——静态 checkport 只认这里的 3001，对用户自定义端口会漏检/误判，
+# 故 checkport=false——静态 checkport 只认这里的 9527，对用户自定义端口会漏检/误判，
 # 端口占用改由后端 listen 的 EADDRINUSE 兜底报错。
-service_port=3001
+service_port=9527
 checkport=false
 ctl_stop=true

@@ -1,7 +1,9 @@
 #!/bin/bash
 # GouXiangDB fnOS 升级回调（新版应用文件落地后执行）：
+#   0) 应用升级向导 wizard_port：合法且与现 env PORT 不同则定点回写（未收集到则保留现端口）；
 #   1) 升级前本地在线一致性快照（失败即中止，保护数据）；
-#   2) prisma migrate deploy（只增，已应用自动跳过）。
+#   2) prisma migrate deploy（只增，已应用自动跳过）；
+#   3) nav-reconcile；4) GX_UPDATE_TOKEN 定点轮换（见文件末段）。
 # 回应不回数据：迁移不自动回滚，故先快照；配置 TRIM_PKGETC 与数据 data-share 保留。
 set -euo pipefail
 export PATH=/var/apps/nodejs_v22/target/bin:$PATH
@@ -10,6 +12,55 @@ APP_DIR="${TRIM_APPDEST}/server"
 ENV_FILE="${TRIM_PKGETC}/gouxiangdb.env"
 
 [ -f "$ENV_FILE" ] || { echo "Missing $ENV_FILE during upgrade" > "$TRIM_TEMP_LOGFILE"; exit 1; }
+
+# 0) 升级向导端口（wizard/upgrade 收集 wizard_port）：
+#    0.2.4→0.2.5 升级路径【不读 wizard/install】，若无 wizard/upgrade 则向导值从不收集，
+#    app/ui/config 的 ${wizard_port} 会以字面量注册进桌面入口 → 点开白屏、应用设置显示
+#    "${wizard_port}"（2026-10-22 真机事故）。升级向导与 install/config 同构收集端口，
+#    这里在 source env【之前】定点回写 PORT 行，使后续 main start 直接 source 到新值。
+#    - 未收集到（静默升级/老包路径无该字段）：保留现 env PORT，绝不强改老用户端口；
+#    - 收集到但非法：exit 1 拒绝升级（官方要求向导值使用前二次校验）；
+#    - 与现 PORT 相同：不动文件；
+#    - 逐行重建 + 原子 mv，JWT_SECRET / DATABASE_URL / GX_UPDATE_TOKEN 等行逐字保留。
+UP_PORT="${wizard_port:-}"
+if [ -n "$UP_PORT" ]; then
+  if ! [[ "$UP_PORT" =~ ^[0-9]+$ ]] || [ "$UP_PORT" -lt 1024 ] || [ "$UP_PORT" -gt 65535 ]; then
+    echo "升级向导服务端口非法：${UP_PORT}（需为 1024-65535 之间的数字），升级已中止，端口与数据均未改动。" > "$TRIM_TEMP_LOGFILE"
+    exit 1
+  fi
+  CUR_UP_PORT="$(node -e '
+    const fs=require("fs");
+    const p=process.argv[1];
+    let v="";
+    if(fs.existsSync(p)){for(const l of fs.readFileSync(p,"utf8").split(/\r?\n/)){const m=l.match(/^PORT=(.*)$/);if(m)v=m[1];}}
+    process.stdout.write(v.trim());
+  ' "$ENV_FILE")"
+  if [ "$UP_PORT" != "$CUR_UP_PORT" ]; then
+    echo "升级向导：服务端口 ${CUR_UP_PORT:-未设置} → ${UP_PORT}"
+    umask 077
+    TMP_UP_ENV="$(mktemp "${ENV_FILE}.XXXXXX")"
+    node -e '
+      const fs=require("fs");
+      const [srcFile,dstFile,newPort]=process.argv.slice(1);
+      const text=fs.readFileSync(srcFile,"utf8");
+      const nl=text.endsWith("\n")?"\n":"";
+      const lines=text.split(/\r?\n/);
+      if(nl)lines.pop();
+      let hit=false;
+      const out=lines.map((l)=>{
+        if(/^PORT=/.test(l)){hit=true;return "PORT="+newPort;}
+        return l;
+      });
+      if(!hit)out.push("PORT="+newPort);
+      fs.writeFileSync(dstFile,out.join("\n")+"\n",{mode:0o600});
+    ' "$ENV_FILE" "$TMP_UP_ENV" "$UP_PORT"
+    mv "$TMP_UP_ENV" "$ENV_FILE"
+  else
+    echo "升级向导：服务端口未变化（${CUR_UP_PORT}）"
+  fi
+else
+  echo "升级未收集到 wizard_port（静默升级），保留现服务端口不变。"
+fi
 
 # shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
