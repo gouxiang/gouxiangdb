@@ -12,7 +12,8 @@
 //
 // 保留下来不许丢的能力：S10 窗口化（useMenuVirtualizer，DOM 有界）、
 // 面板收起展开（由壳层持有）、R-I-16 表级操作行、doc 段按 parentId 层级展开。
-import { useMemo, useState } from "react";
+// useEffect 仅用于「挂载后才允许收展过渡」：SSR/首帧直接落到目标宽度，不播动画。
+import { useEffect, useMemo, useState } from "react";
 import { clsx } from "clsx";
 import { useMatch, useNavigate } from "react-router-dom";
 import { Icon, type IconName } from "../../components/icons";
@@ -61,14 +62,21 @@ function filterByName<T extends { name?: string; title?: string }>(rows: T[], qu
 export function SecondaryNav({
   container,
   onClose,
+  onExpand,
   variant = "static",
   width = L2_WIDTH,
+  collapsed = false,
   entityIcons,
   libraryCanManage = false,
   onRenameLibrary,
 }: {
   container: SecondaryContainer;
   onClose: () => void;
+  /**
+   * static 档展开态点击单颗骑缝钮时由壳层展开（宽度 0 → 236 带过渡）。
+   * floating/drawer 档不用：那两档面板由壳层按 showL2 条件挂载，唤回入口在 L1 底部。
+   */
+  onExpand?: () => void;
   /**
    * static   ：骨架 S-1 常驻栏（≥1440 / 1280–1439），在流内占位。
    * floating ：R-D-31 / R-D-32「浮出面板」——768–1279 由壳层绝对定位到内容区左侧，
@@ -77,6 +85,11 @@ export function SecondaryNav({
   variant?: "static" | "floating";
   /** 面板宽度；v6 S2 起所有响应式档恒为 L2_WIDTH（底板 .l2 = 236），壳层不再分档传值。 */
   width?: number;
+  /**
+   * static 档收展态（底板 .app.l2-collapsed）：true 时 wrap 宽度动画到 0、inner 淡出，
+   * 单颗骑缝钮箭头旋转 180°。floating/drawer 档恒为 false（面板随挂载显隐，不做宽度动画）。
+   */
+  collapsed?: boolean;
   /**
    * base/kb 实体自定义图标索引（壳层装配后传入，理由同 PrimaryNav：
    * 本组件的多份 SSR 回归不带 QueryClientProvider，不能在组件内直接取「实体列表」的 mock）。
@@ -94,6 +107,14 @@ export function SecondaryNav({
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [expandedDocs, setExpandedDocs] = useState<Set<string>>(new Set());
+  // static 档收展过渡只在客户端挂载后启用：SSR/首帧（readL2Collapsed 恒 null）直接落到
+  // 目标宽度、不带 transition，避免 hydrate 后从展开态播一段「收起」的误动画。
+  // 同时尊重系统「减弱动态效果」：开启时宽度/透明度也不播（CSS 媒体查询关不掉内联 transition）。
+  const [animatable, setAnimatable] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setAnimatable(!mq.matches);
+  }, []);
 
   // 路由作用域用 useMatch 而非 useParams：本组件挂在无 path 的壳层路由下，
   // useParams 取到的是布局路由自身的 params（恒为空），无法还原当前表/文档。
@@ -217,36 +238,32 @@ export function SecondaryNav({
   const empty = flatRows.length === 0;
 
   return (
-    <div className="relative h-full shrink-0" data-l2-expanded={container.kind}>
-      {/*
-        收起入口：面板右缘的圆形悬浮箭头（v6 S2 按底板 .l2-toggle：26×26、right:-13px
-        骑在右缘中线上；视觉类 gx-l2-toggle 在 index.css，逐字取底板 352–368 行）。
-        展开态箭头朝左——语义＝点击向左收起这一列（收起态边中间的唤回箭头朝右＝拉回）。
-        不占面板内布局、不挤头部标题，浮出/常驻两态同一位置。
-        层级 gx-z-drawer(400)＝工作区悬浮 chrome（类名 gx-l2-collapse-tab/gx-z-drawer
-        由 form-designer-layer 层级裁决锁定）：高过业务内容，但低于一切应用弹层——
-        全屏表单设计器/字段弹窗是 gx-z-modal(800)、记录抽屉 400（同层但在更后 DOM），
-        打开即把这个骑缝钮盖在下面，避免圆钮穿出浮在设计器上（2026-10-19 真机）。
-      */}
-      <button
-        type="button"
-        aria-label="收起二级面板"
-        title="收起二级面板"
-        aria-expanded
-        onClick={onClose}
-        className="gx-l2-collapse-tab gx-l2-toggle gx-z-drawer"
-        style={{ right: -13 }}
-      >
-        <Icon name="chevronLeft" size={14} />
-      </button>
-    <aside
-      className={clsx(
-        "flex h-full shrink-0 flex-col border-r border-gx-hairline bg-gx-nav2",
-        variant === "floating" && "shadow-gx-lg",
-      )}
-      style={{ width }}
-      data-l2-scope={container.kind}
+    // v6 #1003：底板 .l2-wrap（data-table.html 600 / shared.css 342）——position:relative、
+    // flex:none、自身不设宽。宽度动画在内部 aside（.gx-l2）上：收起 0 ↔ 展开 236、.3s 缓动，
+    // aside overflow:hidden 裁掉定宽 236 的 inner（内容不被挤压）。骑缝钮是 wrap 的兄弟节点，
+    // 宽 0 时仍定位在 wrap 右缘。floating/drawer 档 aside 恒 236（面板由壳层条件挂载）。
+    <div
+      className="gx-l2-wrap"
+      data-l2={variant === "static" ? "static-wrap" : "floating-inner"}
+      data-l2-collapsed={variant === "static" && collapsed ? "true" : undefined}
     >
+    <aside
+      className={clsx("gx-l2", variant === "floating" && "shadow-gx-lg")}
+      data-l2-scope={container.kind}
+      id={`gx-l2-panel-${container.kind}`}
+      style={{
+        width: variant === "static" ? (collapsed ? 0 : width) : width,
+        transition: animatable ? "width .3s cubic-bezier(.4,0,.2,1)" : "none",
+      }}
+    >
+      <div
+        className="gx-l2-inner flex h-full flex-col bg-gx-nav2"
+        style={{
+          width,
+          opacity: variant === "static" && collapsed ? 0 : 1,
+          transition: animatable ? "opacity .22s ease" : "none",
+        }}
+      >
       {/* v6 S2 面板头（底板 .l2-h，375–386 行）：56px 与主区顶栏同高，padding 12/8。 */}
       <div className="flex h-[56px] shrink-0 items-center gap-[7px] border-b border-gx-hairline pl-3 pr-2">
         <span className="gx-l2-ico">
@@ -279,7 +296,8 @@ export function SecondaryNav({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="筛选当前列表…"
+          placeholder="搜索数据表"
+          aria-label="搜索数据表"
         />
       </div>
       {/* 知识库专有：文档 / 画布 两个选项卡 + 按 tab 的「新建」入口（底板无 tabs，属产品
@@ -351,44 +369,39 @@ export function SecondaryNav({
               </div>
             )}
             {/* 窗口垫片：.gx-l2-list 已带两侧 8px padding，这里只保留垂直 padTop/padBottom。
-                v6 S2：段头（含「数据表 N」计数）不再渲染文字，但数据层 buildSecondaryRows
-                仍产 header 行并占据 SECONDARY_ROW_H 步距——渲染为空白定高占位，
-                滚动数学与 DOM 有界性零变化。 */}
+                v6 #1003：段头整类下线，序列里只剩实体行（33px 步距不变）。 */}
             <div style={{ paddingTop: virt.padTop, paddingBottom: virt.padBottom }}>
-              {virt.windowed.map((row) =>
-                row.type === "header" ? (
-                  <div key={`h-${row.kind}`} style={{ height: SECONDARY_ROW_H }} aria-hidden />
-                ) : (
-                  <SecondaryRow
-                    key={row.entry.id}
-                    kind={row.kind}
-                    entry={row.entry}
-                    depth={row.depth}
-                    hasDocKids={row.hasDocKids}
-                    expanded={row.expanded}
-                    active={currentResource === row.entry.id}
-                    onToggleDoc={toggleDoc}
-                    onNavigate={(href) => navigate(href)}
-                    // 表行：五项菜单（无 canManageSchema 时 rowMenuItems 返回 [] → 不渲染三点）
-                    menu={
-                      row.kind === "table"
-                        ? tableOps.rowMenuItems({ id: row.entry.id, name: row.entry.name })
-                        : undefined
-                    }
-                    menuLabel={row.kind === "table" ? `${row.entry.name} 表操作菜单` : undefined}
-                    // 文档行：拖拽改层级（画布行不给）
-                    drag={row.kind === "doc" ? kbOps.rowDrag(row.entry.id) : undefined}
-                  />
-                ),
-              )}
+              {virt.windowed.map((row) => (
+                <SecondaryRow
+                  key={row.entry.id}
+                  kind={row.kind}
+                  entry={row.entry}
+                  depth={row.depth}
+                  hasDocKids={row.hasDocKids}
+                  expanded={row.expanded}
+                  active={currentResource === row.entry.id}
+                  onToggleDoc={toggleDoc}
+                  onNavigate={(href) => navigate(href)}
+                  // 表行：五项菜单（无 canManageSchema 时 rowMenuItems 返回 [] → 不渲染三点）
+                  menu={
+                    row.kind === "table"
+                      ? tableOps.rowMenuItems({ id: row.entry.id, name: row.entry.name })
+                      : undefined
+                  }
+                  menuLabel={row.kind === "table" ? `${row.entry.name} 表操作菜单` : undefined}
+                  // 文档行：拖拽改层级（画布行不给）
+                  drag={row.kind === "doc" ? kbOps.rowDrag(row.entry.id) : undefined}
+                />
+              ))}
             </div>
             {empty && <div className="px-4 py-8 text-center text-gx-12 text-gx-text-hint">{emptyText}</div>}
           </>
         )}
+      </div>
 
-        {/* 列表末尾：当前容器的回收站（base → /base/:id/trash，kb → /kb/:id/trash）。
-            位置逻辑不动（仍在滚动容器内、loading/error 态也常驻）；v6 S2 按底板
-            .l2-item.sub（431 行）：30 高、12px、整行可点。 */}
+      {/* v6 #1003：回收站移到滚动列表之外的固定脚（底板 .l2-foot，shared.css 436 / DOM 706）。
+          flex:none + 顶部分隔线，不随列表滚动；loading/error 态也常驻。 */}
+      <div className="gx-l2-foot">
         <button
           type="button"
           onClick={() =>
@@ -406,7 +419,29 @@ export function SecondaryNav({
           <span className="nm truncate">回收站</span>
         </button>
       </div>
+        </div>
     </aside>
+
+      {/*
+        v6 #1003：单颗骑缝圆钮（底板 .l2-toggle，DOM 712 / shared.css 358–375）。
+        它是 wrap 内 aside 之后的兄弟节点，恒 right:-13px 骑在面板右缘中线上，宽度动画时
+        自动跟随、无需硬编码 left；展开态箭头朝左（向左收起），收起态整枚 svg rotate(180°)
+        变朝右（向右拉回）。仅 static 档渲染：floating/drawer 档唤回入口在 L1 底部。
+        层级 gx-z-drawer：高过业务内容、低于应用弹层（form-designer-layer 裁决锁定）。
+      */}
+      {variant === "static" && (
+        <button
+          type="button"
+          aria-label={collapsed ? "展开二级面板" : "收起二级面板"}
+          title={collapsed ? "展开二级面板" : "收起二级面板"}
+          aria-expanded={!collapsed}
+          aria-controls={`gx-l2-panel-${container.kind}`}
+          onClick={collapsed ? onExpand : onClose}
+          className="gx-l2-toggle gx-z-drawer"
+        >
+          <Icon name="chevronLeft" size={15} />
+        </button>
+      )}
     </div>
   );
 }

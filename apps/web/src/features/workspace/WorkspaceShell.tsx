@@ -53,7 +53,6 @@ import { PrimaryNavRenameModal, type RenameTarget } from "./PrimaryNavRenameModa
 import { CreateLibraryModal } from "../../components/CreateLibraryModal";
 import { SecondaryNav, type SecondaryContainer } from "./SecondaryNav";
 import { useLibraryRename } from "./useLibraryRename";
-import { SecondaryNavRail } from "./SecondaryNavRail";
 import { useBreakpointTier, isDrawerTier, isFloatingL2Tier } from "../../lib/breakpoint";
 import { L1_WIDTH, L2_WIDTH } from "./lib/l1-collapse";
 import { readL2Collapsed, resolveL2Collapsed, writeL2Collapsed } from "./lib/l2-collapse";
@@ -335,8 +334,12 @@ export function WorkspaceShell() {
       container={activeContainer}
       variant={floatingL2 || drawer ? "floating" : "static"}
       width={l2Width}
-      entityIcons={entityIcons}
+      // v6 #1003：static 档面板常驻挂载，收起态交给组件内部把宽度动画到 0（单颗骑缝钮
+      // 反向再展开）；floating/drawer 档由壳层按 showL2 条件挂载，collapsed 恒 false。
+      collapsed={!floatingL2 && !drawer && !showL2}
       onClose={collapseL2}
+      onExpand={expandL2}
+      entityIcons={entityIcons}
       libraryCanManage={canManageActiveLib}
       onRenameLibrary={(kind, id, name) => setRenameTarget({ kind, id, name })}
     />
@@ -364,17 +367,11 @@ export function WorkspaceShell() {
         />
       )}
 
-      {/* 左列②：static 档常驻 L2（wrap 给宽 236，宽随 showL2 有无整体零占位）。
-          浮出/收起/抽屉档本列不渲染；浮出在右列内容体内覆盖，抽屉叠层也在内容体内。 */}
-      {!drawer && !floatingL2 && showL2 && (
-        <div
-          className="relative flex h-full shrink-0"
-          style={{ width: l2Width }}
-          data-l2="static-wrap"
-        >
-          {secondary}
-        </div>
-      )}
+      {/* 左列②：static 档常驻 L2 列。v6 #1003：面板不再随 showL2 整体挂载/卸载——
+          容器存在即常驻，收起/展开由 SecondaryNav 内部把宽度在 236↔0 间动画（底板
+          .l2-wrap/.l2/.l2-inner），单颗骑缝钮在 0 宽时仍可见、点击反向展开。
+          无容器（/workspace* 等）时为 null，列不占位。浮出/抽屉档本列不渲染。 */}
+      {!drawer && !floatingL2 && activeContainer && secondary}
 
       {/* 右列（底板 .main）：顶栏 56 与左列 rail/L2 头物理并排；其下为内容体。 */}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -442,15 +439,8 @@ export function WorkspaceShell() {
             </div>
           )}
 
-          {/* static 档收起态：零内容占位，只在 rail 右缘（= 内容体左缘 x=76）垂直中点
-              留圆形悬浮箭头唤回（left:-13 骑缝）。浮出档不渲染本件（唤回入口在轨道底部）。 */}
-          {!drawer && !floatingL2 && !showL2 && activeContainer && (
-            <SecondaryNavRail
-              key={`rail-${activeContainer.id}`}
-              containerName={activeContainer.name}
-              onExpand={expandL2}
-            />
-          )}
+          {/* v6 #1003：static 档收起态不再渲染独立唤回竖条/圆钮——面板常驻、宽度动画到 0，
+              单颗骑缝钮由 SecondaryNav 在 0 宽时自渲染（恒 right:-13），点击反向展开。 */}
 
           <main className="min-w-0 flex-1 overflow-hidden">
             <Outlet />

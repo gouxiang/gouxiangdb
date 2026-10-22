@@ -11,7 +11,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { L2_WIDTH } from "./lib/l1-collapse";
-import { L2_WIDTH_COLLAPSED } from "./lib/l2-collapse";
 import { isDrawerTier, isFloatingL2Tier } from "../../lib/breakpoint";
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
@@ -38,9 +37,15 @@ describe("R-D-30/31/32/33 壳层断点接线", () => {
     expect(shell).not.toContain("left: l1Width");
   });
 
-  it("v6 S3：static 档（≥1280）L2 是与 rail/右列并列的常驻 wrap 列（data-l2=static-wrap，wrap 给宽 236）", () => {
-    expect(shell).toContain('data-l2="static-wrap"');
+  it("v6 #1003：static 档（≥1280）L2 面板常驻挂载（含收起态，靠宽度动画收展，不再条件卸载）", () => {
+    // 壳层：非抽屉/非浮出档只要有容器就挂 SecondaryNav（不再 && showL2 卸载）
+    expect(shell).toContain("!drawer && !floatingL2 && activeContainer && secondary");
     expect(shell).toContain("<WorkspaceTopBar");
+    // 宽度动画与单颗骑缝钮的结构落在 SecondaryNav（gx-l2-wrap 三层 + static 档分支）
+    const nav = read("./SecondaryNav.tsx");
+    expect(nav).toContain('"static-wrap"');
+    expect(nav).toContain("gx-l2-wrap");
+    expect(nav).toContain("cubic-bezier(.4,0,.2,1)");
   });
 
   it("R-D-32（v6 S1）：768–1023 档 L1 不再折叠——恒 76 图标轨、无 CollapseToggle", () => {
@@ -66,28 +71,27 @@ describe("R-D-30/31/32/33 壳层断点接线", () => {
     expect(shell).toContain("展开面板");
   });
 
-  it("L2 收起态持久化：意图写 localStorage，收起后常驻档以零宽悬浮圆钮唤回（不占位）", () => {
+  it("L2 收起态持久化：意图写 localStorage；static 档面板常驻、收起靠宽度动画（不再挂独立唤回竖条）", () => {
     expect(shell).toContain("readL2Collapsed()");
     expect(shell).toContain("writeL2Collapsed(");
-    expect(L2_WIDTH_COLLAPSED).toBe(56);
-    // 唤回钮只在非浮出档渲染：浮出档插常驻竖栏会反向挤压内容宽度（R-D-31/32）
-    expect(shell).toContain("<SecondaryNavRail");
-    expect(shell).toContain("!floatingL2 && !showL2");
-    // v6 S3：壳层不再传 l1Width（Rail 渲染在右列内容体内，定位写死 left:-13）
-    expect(shell).not.toContain("l1Width=");
-    // Rail 是零宽 absolute 悬浮钮（不竖排占栏），骑在右列内容体左缘（= rail 右缘 x=76）
-    const rail = read("./SecondaryNavRail.tsx");
-    expect(rail).toContain('data-l2="collapsed-tab"');
-    expect(rail).toContain("left: -13");
-    expect(rail).not.toContain("l1Width");
-    expect(rail).not.toContain("writingMode");
+    expect(shell).toContain("resolveL2Collapsed(l2Intent, isFloatingL2Tier(tier))");
+    // v6 #1003：独立唤回组件 SecondaryNavRail 已删除（单颗骑缝钮并入 SecondaryNav）
+    expect(shell).not.toContain("SecondaryNavRail");
+    // static 档把 collapsed 透传给面板（floating/drawer 档恒 false，那两档仍条件挂载）
+    expect(shell).toContain("collapsed={!floatingL2 && !drawer && !showL2}");
+    expect(shell).toContain("onExpand={expandL2}");
+    // 唤回钮只在 static 档由 SecondaryNav 内部渲染为单颗兄弟钮（恒 right:-13，无 left:-13 窄条）
+    const nav = read("./SecondaryNav.tsx");
+    expect(nav).toContain('variant === "static" ? "static-wrap" : "floating-inner"');
+    expect(nav).toContain("gx-l2-toggle gx-z-drawer");
+    expect(nav).not.toContain("gx-l2-expand-tab");
+    expect(nav).not.toContain("gx-l2-collapse-tab");
   });
 
   it("SecondaryNav 支持浮出变体：浮层带阴影，宽度由壳层按档传入", () => {
     const nav = read("./SecondaryNav.tsx");
     expect(nav).toContain('variant?: "static" | "floating"');
     expect(nav).toContain('variant === "floating" && "shadow-gx-lg"');
-    expect(nav).toContain("style={{ width }}");
     // 默认恒为 236：桌面 SSR 断言与真机各档一致（v6 S2 起不分档）
     expect(nav).toContain("width = L2_WIDTH");
   });

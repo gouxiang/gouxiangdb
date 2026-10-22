@@ -9,7 +9,7 @@
 //   抽屉用 gx-z-canvas-modal(820) 压在设计器之上，回滚二次确认 860 再上一层；
 //   两个圆钮降为工作区悬浮 chrome 层 gx-z-drawer(400)，弹窗打开即被盖住。
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 
@@ -34,21 +34,13 @@ describe("表单设计器全屏层的层级（盖住工作区 chrome）", () => 
     expect(src).not.toContain("fixed inset-0 gx-z-drawer flex justify-end");
   });
 
-  it("二级收纳圆钮（展开态）降为 gx-z-drawer，不再用全局最高 gx-z-popover", () => {
+  it("二级收/展单颗骑缝圆钮（SecondaryNav 内）降为 gx-z-drawer，不再用全局最高 gx-z-popover", () => {
     const src = read("../workspace/SecondaryNav.tsx");
-    const line = src.split("\n").find((l) => l.includes("gx-l2-collapse-tab"));
+    const line = src.split("\n").find((l) => l.includes('className="gx-l2-toggle gx-z-drawer"'));
     expect(line).toBeTruthy();
-    expect(line).toContain("gx-z-drawer");
     expect(line).not.toContain("gx-z-popover");
-  });
-
-  it("二级唤回圆钮（收起态）降为 gx-z-drawer，不再用全局最高 gx-z-popover，也不叠 Tailwind z-20", () => {
-    const src = read("../workspace/SecondaryNavRail.tsx");
-    const line = src.split("\n").find((l) => l.includes("gx-l2-expand-tab"));
-    expect(line).toBeTruthy();
-    expect(line).toContain("gx-z-drawer");
-    expect(line).not.toContain("gx-z-popover");
-    expect(line).not.toMatch(/\bz-20\b/);
+    // v6 #1003：旧的独立唤回组件 SecondaryNavRail 已删除（收/展并为同一颗钮）
+    expect(existsSync(new URL("../workspace/SecondaryNavRail.tsx", import.meta.url))).toBe(false);
   });
 
   it("层级数值顺序成立：设计器 modal(800) < 历史抽屉 canvasModal(820) < 回滚确认 modalNested(860) < popover(900)", async () => {

@@ -268,8 +268,15 @@ describe("上传限制上提到工作区设置（全局层）", () => {
 
 describe("左栏响应式：<1024 折叠，不横向溢出", () => {
   it("常驻左二级只在 ≥1024 挂载（lg:flex），窄屏改唤出条（lg:hidden）", () => {
-    expect(pageSrc).toMatch(/className="hidden w-52[^"]*\blg:flex\b/);
+    // v6 #1003：宽屏栏从 w-52 灰底改为恒 236、白底 bg-gx-nav2 的 L2 同款面板
+    expect(pageSrc).toMatch(/className="hidden w-\[236px\][^"]*\blg:flex\b/);
     expect(pageSrc).toMatch(/className="[^"]*\blg:hidden\b/);
+  });
+
+  it("v6 #1003：宽/窄两栏的「返回」钮（navigate(-1)）已删除——设置中心无可靠上一级", () => {
+    expect(pageSrc).not.toContain("navigate(-1)");
+    expect(pageSrc).not.toContain("aria-label=\"返回\"");
+    expect(pageSrc).not.toContain(">返回<");
   });
 
   it("外层与内容区都带 min-w-0，内容不被左栏压扁", () => {

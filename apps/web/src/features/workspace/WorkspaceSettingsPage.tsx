@@ -125,7 +125,7 @@ function SectionList({
 }) {
   const wrap = variant === "wrap";
   return (
-    <div className={wrap ? "flex flex-wrap gap-1" : "flex flex-col"}>
+    <div className={wrap ? "flex flex-wrap gap-1" : "flex flex-col gap-0.5 px-2"}>
       {sections.map((s) => {
         const on = active === s.key;
         return (
@@ -135,19 +135,28 @@ function SectionList({
             onClick={() => onPick(s.key)}
             aria-current={on ? "page" : undefined}
             title={s.desc}
-            className={[
-              "flex items-center gap-2 rounded-gx-lg text-gx-13 transition-colors",
-              wrap ? "px-2.5 py-1.5" : "mx-2 px-2 py-1.5 text-left",
-              // R-N-10：L2 选中态 = 白底卡片 + 圆角 8 + accent 600 字，**不用左侧色条**
-              on
-                ? "bg-white font-semibold text-gx-accent"
-                : "text-gx-text-primary hover:bg-gx-row-hover",
-            ].join(" ")}
+            className={
+              wrap
+                ? [
+                    "flex items-center gap-2 rounded-gx-lg px-2.5 py-1.5 text-gx-13 transition-colors",
+                    on
+                      ? "bg-white font-semibold text-gx-accent"
+                      : "text-gx-text-primary hover:bg-gx-row-hover",
+                  ].join(" ")
+                : // v6 #1003：宽屏竖排对齐底板 L2 行（.l2-item/.l2-row.is-active）——
+                  // 整行 h-8、r8，选中＝整行 brand-soft 底 + brand-ink/600 字（不再是白卡片）。
+                  [
+                    "flex h-8 w-full items-center gap-2 rounded-[8px] px-2 text-left text-gx-13 transition-colors",
+                    on
+                      ? "bg-gx-accent-bg font-semibold text-gx-accent-hover"
+                      : "text-gx-text-secondary hover:bg-gx-row-hover hover:text-gx-text-primary",
+                  ].join(" ")
+            }
           >
             <Icon
               name={s.icon}
               size={14}
-              className={`shrink-0 ${on ? "text-gx-accent" : "opacity-80"}`}
+              className={`shrink-0 ${on ? "text-gx-accent-hover" : "opacity-80"}`}
             />
             {s.label}
           </button>
@@ -232,14 +241,8 @@ export function WorkspaceSettingsPage() {
       {/* <1024：左栏折叠成一条唤出条，不再横向硬占 208px（内容区不被压扁） */}
       <div className="shrink-0 border-b border-gx-separator bg-gx-bg lg:hidden">
         <div className="flex items-center gap-1.5 px-3 py-2">
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            aria-label="返回"
-            className="flex shrink-0 items-center rounded-gx-sm p-1.5 text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary"
-          >
-            <Icon name="chevronLeft" size={14} />
-          </button>
+          {/* v6 #1003：原顶条「返回」钮已删除——设置中心是常驻分区，无可靠上一级，
+              返回无意义。仅保留当前分区下拉切换。 */}
           <button
             type="button"
             onClick={() => setNavOpen((v) => !v)}
@@ -283,22 +286,23 @@ export function WorkspaceSettingsPage() {
         )}
       </div>
 
-      {/* ≥1024：常驻左二级 */}
-      <aside className="hidden w-52 shrink-0 flex-col border-r border-gx-separator bg-gx-bg py-3 lg:flex">
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          className="mx-2 mb-2 flex items-center gap-1.5 rounded-gx-sm px-2 py-1.5 text-gx-12 text-gx-text-tertiary hover:bg-gx-row-hover hover:text-gx-text-primary"
-        >
-          <Icon name="chevronLeft" size={14} />
-          返回
-        </button>
-        <SectionList
-          sections={visibleSections}
-          active={effectiveSection}
-          variant="vertical"
-          onPick={goSection}
-        />
+      {/* ≥1024：常驻左二级。v6 #1003：对齐数据表 L2——恒 236 宽、白底 bg-gx-nav2、
+          56px 头区与发丝线（与 L2 面板头同几何）；原顶栏「返回」钮已删除。 */}
+      <aside className="hidden w-[236px] shrink-0 flex-col border-r border-gx-hairline bg-gx-nav2 lg:flex">
+        <div className="flex h-[56px] shrink-0 items-center gap-[7px] border-b border-gx-hairline pl-3 pr-2">
+          <span className="gx-l2-ico">
+            <Icon name="settings" size={14} />
+          </span>
+          <span className="text-gx-13 font-semibold text-gx-text-primary">工作区设置</span>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto py-2">
+          <SectionList
+            sections={visibleSections}
+            active={effectiveSection}
+            variant="vertical"
+            onPick={goSection}
+          />
+        </div>
       </aside>
 
       {/* 右内容 */}

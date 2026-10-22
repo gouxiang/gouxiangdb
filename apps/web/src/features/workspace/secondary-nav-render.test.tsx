@@ -178,11 +178,11 @@ describe("SecondaryNav：选中容器的子项（第三批语义）", () => {
     // 改断言原因：原先按「表名出现次数」计数，第四批给表行回挂了行菜单后，
     // 同一行的表名会多出现在 title / aria-label / 菜单可访问名里（一行 4 处），
     // 计数被放大 4 倍 —— 但那不是 DOM 变多。窗口化要锁的是「渲染了几行」，
-    // 故改为数行元素本身（v6 S2：SECONDARY_ROW_H=33 = 底板 32 行高 + 1 行间距）。
+    // 故改为数行元素本身（v6：SECONDARY_ROW_H=33 = 底板 32 行高 + 1 行间距）。
     const rendered = (html.match(/height:33px/g) ?? []).length;
     expect(rendered).toBeGreaterThan(0);
-    // 窗口：ceil(768/33)=24 可视 + overscan 24 → ≤48，留余量 ≤120（+1 个段头空白占位行）
-    expect(rendered).toBeLessThanOrEqual(121);
+    // 窗口：ceil(768/33)=24 可视 + overscan 24 → ≤48（v6 #1003 段头下线，不再 +1 占位行）
+    expect(rendered).toBeLessThanOrEqual(48);
     expect(rendered).toBeLessThan(1200 / 5);
     console.log(`[S10-metric] SecondaryNav SSR 1200 tables: renderedRows=${rendered}, render=${ms.toFixed(1)}ms`);
     expect(ms).toBeLessThan(1000);

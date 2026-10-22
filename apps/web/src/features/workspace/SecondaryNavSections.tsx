@@ -8,8 +8,12 @@ import { resolveEntityIcon, resolvedEntityColor, type EntityIconValue } from "..
 import { navKindIcon } from "./PrimaryNav";
 
 /**
- * 二级行窗口化步距（含段头）：v6 S2 按底板 .l2-item 高 32 + .l2-row margin-bottom 1
- * = 33（底板 shared.css 409/419 行）。窗口化必须按步距映射，否则滚程与点击错位。
+ * 二级行窗口化步距：v6 按底板 .l2-item 高 32 + .l2-row margin-bottom 1 = 33
+ * （底板 shared.css 409/419 行）。窗口化必须按步距映射，否则滚程与点击错位。
+ *
+ * v6 #1003：段头（header 空白占位行）整类下线——底板 L2 没有任何分组标题，
+ * 此前每段无条件 push 的 33px 空白行让「新建数据表」与首行菜单之间空出一大截。
+ * 去掉后序列里只剩实体行，定高窗口化数学（33 步距）零变化。
  */
 export const SECONDARY_ROW_H = 33;
 
@@ -24,12 +28,16 @@ export interface SecondaryEntry extends EntityIconValue {
   href: string;
 }
 
-/** 摊平后的二级行：段头或实体行（depth 仅 doc 段可能 > 0）。 */
-export type SecondaryFlatRow =
-  | { type: "header"; kind: SectionKind; count: number }
-  | { type: "entry"; kind: SectionKind; entry: SecondaryEntry; depth: number; hasDocKids: boolean; expanded: boolean };
+/** 摊平后的二级行：只剩实体行（段头已下线）；depth 仅 doc 段可能 > 0。 */
+export interface SecondaryFlatRow {
+  kind: SectionKind;
+  entry: SecondaryEntry;
+  depth: number;
+  hasDocKids: boolean;
+  expanded: boolean;
+}
 
-/** 三段合并为一条定高行序列（空段不产段头）；doc 段按 expandedDocs 深度优先摊平并带出 depth。
+/** 三段合并为一条定高行序列（空段不产行）；doc 段按 expandedDocs 深度优先摊平并带出 depth。
  *  纯函数：总行数在此一次确定，组件再用 virtualWindow 切片，DOM 不随总量线性膨胀。 */
 export function buildSecondaryRows(
   sections: Record<SectionKind, SecondaryEntry[]>,
@@ -40,9 +48,8 @@ export function buildSecondaryRows(
   (["table", "doc", "canvas"] as const).forEach((kind) => {
     const entries = sections[kind];
     if (entries.length === 0) return;
-    rows.push({ type: "header", kind, count: entries.length });
     if (kind !== "doc") {
-      for (const entry of entries) rows.push({ type: "entry", kind, entry, depth: 0, hasDocKids: false, expanded: false });
+      for (const entry of entries) rows.push({ kind, entry, depth: 0, hasDocKids: false, expanded: false });
       return;
     }
     const roots = entries.filter((e) => !e.parentId || !docChildren.has(e.parentId));
@@ -50,7 +57,7 @@ export function buildSecondaryRows(
       for (const entry of list) {
         const kids = docChildren.get(entry.id) ?? [];
         const expanded = expandedDocs.has(entry.id);
-        rows.push({ type: "entry", kind, entry, depth, hasDocKids: kids.length > 0, expanded });
+        rows.push({ kind, entry, depth, hasDocKids: kids.length > 0, expanded });
         if (expanded) push(kids, depth + 1);
       }
     };

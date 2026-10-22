@@ -7,7 +7,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   L2_COLLAPSED_KEY,
-  L2_WIDTH_COLLAPSED,
   readL2Collapsed,
   writeL2Collapsed,
   resolveL2Collapsed,
@@ -31,10 +30,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("L2 折叠档常量与键名", () => {
-  it("键走 gx.l2.* 约定；窄条宽度自立常量 56（v6 S1：L1 折叠档废止，不再从 l1-collapse 取）", () => {
+describe("L2 折叠键名", () => {
+  it("键走 gx.l2.* 约定", () => {
     expect(L2_COLLAPSED_KEY).toBe("gx.l2.collapsed");
-    expect(L2_WIDTH_COLLAPSED).toBe(56);
   });
 });
 

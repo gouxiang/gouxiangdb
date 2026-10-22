@@ -12,12 +12,6 @@
 export const L2_COLLAPSED_KEY = "gx.l2.collapsed";
 
 /**
- * L2 收起态窄条宽度：窄条 56（v6 S1 起 L1 折叠档已废止，该常量在本模块自立，
- * 不再从 l1-collapse 取——L1 现在恒为 76px 图标轨）。
- */
-export const L2_WIDTH_COLLAPSED = 56;
-
-/**
  * 读用户显式意图。返回 null 表示「用户从未操作过」，调用方应改用响应式档位默认态。
  * SSR（无 window）一律 null：单测与真机首帧一致地走档位默认。
  */

@@ -149,18 +149,17 @@ function entry(id: string, kind: SecondaryEntry["kind"], parentId: string | null
 }
 
 describe("buildSecondaryRows 三段合并单序列（SecondaryNav 单窗口输入）", () => {
-  it("空段不产段头；段头计数 = 该段条目数；table/canvas depth 恒 0", () => {
+  // v6 #1003：段头整类下线（底板 L2 无分组标题），序列里只剩实体行。
+  it("table/canvas 段只产实体行（无段头），合计 53 行，depth 恒 0", () => {
     const sections = {
       table: Array.from({ length: 50 }, (_, i) => entry(`t${i}`, "table")),
       doc: [] as SecondaryEntry[],
       canvas: Array.from({ length: 3 }, (_, i) => entry(`cv${i}`, "canvas", "kb1")),
     };
     const rows = buildSecondaryRows(sections, new Set(), new Map());
-    expect(
-      rows.filter((r) => r.type === "header").map((r) => (r as { kind: string }).kind),
-    ).toEqual(["table", "canvas"]);
-    expect(rows[0]).toMatchObject({ type: "header", kind: "table", count: 50 });
-    expect(rows.filter((r) => r.type === "entry")).toHaveLength(53);
+    expect(rows.every((r) => !("type" in r))).toBe(true);
+    expect(rows).toHaveLength(53);
+    expect(rows[0]).toMatchObject({ kind: "table", depth: 0 });
   });
 
   it("doc 折叠只出根行；展开按 depth 递增摊平（S9 层级展开行为在窗口化后保持）", () => {
@@ -178,30 +177,25 @@ describe("buildSecondaryRows 三段合并单序列（SecondaryNav 单窗口输�
       ["d1", [sections.doc[2]!]],
     ]);
     const collapsed = buildSecondaryRows(sections, new Set(), docChildren);
-    const collapsedIds = collapsed
-      .filter((r) => r.type === "entry")
-      .map((r) => (r as { entry: SecondaryEntry }).entry.id);
+    const collapsedIds = collapsed.map((r) => r.entry.id);
     expect(collapsedIds).toEqual(["d0"]);
 
     const expanded = buildSecondaryRows(sections, new Set(["d0", "d1"]), docChildren);
-    const entries = expanded.filter(
-      (r) => r.type === "entry",
-    ) as Extract<(typeof expanded)[number], { type: "entry" }>[];
-    expect(entries.map((e) => [e.entry.id, e.depth])).toEqual([
+    expect(expanded.map((e) => [e.entry.id, e.depth])).toEqual([
       ["d0", 0],
       ["d1", 1],
       ["d2", 2],
     ]);
   });
 
-  it("1000 条未收纳 table：总序列 1001 行（含段头），单窗口挂载 ≤ 48 行", () => {
+  it("1000 张 table：总序列 1000 行（无段头），单窗口挂载 ≤ 48 行", () => {
     const sections = {
       table: Array.from({ length: 1000 }, (_, i) => entry(`t${i}`, "table")),
       doc: [] as SecondaryEntry[],
       canvas: [] as SecondaryEntry[],
     };
     const rows = buildSecondaryRows(sections, new Set(), new Map());
-    expect(rows).toHaveLength(1001);
+    expect(rows).toHaveLength(1000);
     const win = virtualWindow(400 * SECONDARY_ROW_H, VIEWPORT_H, SECONDARY_ROW_H, rows.length, OVERSCAN);
     expect(win.end - win.start).toBeLessThanOrEqual(48);
   });
