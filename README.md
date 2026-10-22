@@ -4,7 +4,7 @@
 >
 > 适合想用飞书多维表格 / Airtable / Notion，又希望数据完全自控的个人、家庭与小团队。
 
-- **当前版本**：**`v0.2.5`**（离线优先 + 操作级双向同步「服务端地基」**测试版**，同步面 `GX_SYNC_SERVER` 默认关闭、对现网零影响）
+- **当前版本**：**`v0.2.6`**（首个含 **macOS 桌面客户端**的正式收口版：Tauri v2 壳 + 随包 Node 内核；飞牛 fnOS 改独立端口交付。离线双向同步服务端地基 YN0–YN9 已就绪但由 `GX_SYNC_SERVER` 默认关闭、对现网零影响，桌面离线侧车仍为后续内测形态）
 - **产品名**：构想工作台。技术标识（飞牛应用包名 / 目录 / 仓库名）为 `gouxiangdb`，仅用于开发与安装包，界面一律显示「构想工作台」。
 - **运行形态**：单进程同时提供 Web 界面与后端接口，内置 SQLite 数据库，**无需外部数据库 / Redis**；浏览器打开即用，电脑、平板、手机自适应。
 
@@ -67,7 +67,7 @@
 
 ## 快速开始（飞牛 fnOS）
 
-1. 下载与 NAS 架构匹配的安装包（**x86 或 arm，勿下错**）；
+1. 下载与 NAS 架构匹配的安装包（**当前正式发布仅提供 x86_64（x86）包，勿下错**；arm 包暂未发布）；
 2. 打开飞牛「应用中心」→「手动安装」→ 选择 `.fpk` → 选择安装存储空间；
 3. 从桌面卡片打开应用，**第一个注册的账号自动成为所有者（超级管理员）**，后续成员由管理员创建；
 4. 浏览器打开即用，建议 Chrome / Edge / Safari 最新版。
@@ -87,7 +87,7 @@
 |---|---|
 | 后端 | Node.js（**部署统一 v22**）+ **Hono 4** + **Prisma 5** + **SQLite**（WAL 单写者）；esbuild 扁平生产打包 |
 | 前端 | React 18 + Vite + Tailwind + TanStack Query；图标单一 `icons.tsx`，色板走 `@gx/design-tokens` |
-| 桌面端 | 不在本期范围（Tauri 路线已砍；未来若重启会另起项目基于已有核心封壳） |
+| 桌面端 | **macOS Apple 芯片客户端**（Tauri v2 壳 + 随包 Node 侧车；arm64、macOS 11+、ad-hoc 签名首次右键打开，bundle id `cc.gouxiang.desktop`，0.2.5-beta.1 起提供）；Windows / Linux 暂不支持 |
 | 共享 | `@gx/shared-types`（类型 + 筛选/关系/权限语义）、`@gx/design-tokens`、`@gx/blocks`、`@gx/canvas` |
 | 检索 | 独立 `search.db` + **sqlite-vec（vec0）** + FTS5 trigram；embedding 出厂默认 `off`，仅远端 OpenAI 兼容 API |
 | AI 接入 | **MCP**（官方 Streamable HTTP 传输 + PAT 凭据 + 双闸门）——M6 后为唯一 AI 接入核心 |
@@ -116,7 +116,7 @@ GouXiangDB/
 
 ## 本地开发
 
-前置：Node ≥ 20（**部署侧统一 v22**）、pnpm ≥ 9（`packageManager` 锁定 `pnpm@9.0.0`）。无需外部数据库。
+前置：**Node 统一用 v22**（better-sqlite3@13 走 NAPI v10，Node 20 加载原生模块会直接 SIGSEGV，开发机与部署机同理，不是普通报错）、pnpm ≥ 9（`packageManager` 锁定 `pnpm@9.0.0`）。无需外部数据库。
 
 ```bash
 pnpm install                                   # 安装
@@ -158,7 +158,7 @@ bash scripts/ci-quality.sh                     # CI 质量门
 
 | 形态 | 说明 | 文档 |
 |---|---|---|
-| **飞牛 fnOS（fpk）** | 原生应用包，子路径 `/app/gouxiangdb` 部署；应用中心一键装、桌面卡片打开 | `docs/deployment/fnos-native.md` |
+| **飞牛 fnOS（fpk）** | 原生应用包，**独立 TCP 端口（默认 9527）根路径同源**部署，桌面卡片以跨源 iframe 打开；应用中心一键装 | `docs/deployment/fnos-native.md` |
 | **裸机 systemd** | systemd + Caddy + `deploy.sh`（在线快照 → `migrate deploy` → nav path 重算 → 切换，失败 die 在切换前） | `docs/deployment/README.md`、`docs/runbooks/deploy.md` |
 | **Docker** | `node:22-bookworm` 基础镜像，自包含 Dockerfile / entrypoint / compose | `docs/deployment/docker.md` |
 
@@ -208,7 +208,7 @@ v1 为 Swift 实现，与当前版本零代码依赖。核心模型（字段、h
 | **运维手册** | `docs/runbooks/`（deploy / backup / restore / ci / m5-search / mcp / authz-*） |
 | **接口契约** | `docs/api/openapi.yaml`（冻结）+ `docs/api/m4-error-codes.md` |
 | **出口证据 / 实测基线** | `docs/baseline/` |
-| **发版记录** | 根目录 **`RELEASE.md`**（现行＝v0.2.5 离线同步服务端地基**测试版**，默认关闭；历史归档 `docs/release-notes/`） |
+| **发版记录** | 根目录 **`RELEASE.md`**（现行＝v0.2.6，含 macOS 桌面客户端；历史归档 `docs/release-notes/`，0.2.5-beta.1 等） |
 | **已知问题 / Bug 回归清单** | 根目录 **`KNOWN-ISSUES.md`**（发版前按表回归；条数以该文件标题行实时统计为准） |
 | **待裁决事项（含瘦身清理）** | 根目录 `PENDING-DECISIONS.md` |
 | **历史归档（M0–M6 计划、被取代报告）** | 根目录 `ARCHIVE-LOG.md`（索引摘要）→ 全文副本 `docs/_archive/originals/` |

@@ -13,6 +13,7 @@
 > `docs/acceptance/*.md`、`docs/baseline/*.md`、`docs/design/2026-09-19-editor-nav-remediation/PLAN.md`、
 > `docs/design/2026-09-nav-settings/DEFECT-LIST.md`、`docs/runbooks/*.md`、`git log` 全部修复类提交。
 > 建档日期：2026-09-20 · 当前版本 0.1.7 · HEAD 附近 `1dc7374`。
+> **最近回归基线：0.2.6（见 git tag v0.2.6，2026-10-23 封版）**；本主表历史条目照旧逐条回归。
 >
 > **纪律**：每条均有出处（文件#行号 或 commit hash），无出处的传闻不写；状态拿不准一律写「待确认」。
 > **状态取值**：`已修复（<commit>）` / `未修复` / `已知限制-接受` / `待确认`。
@@ -211,11 +212,11 @@
 ### 部署与运行时
 
 1. **Linux 部署 Node 必须 22**：`better-sqlite3@13` 的 prebuild 是 NAPI v10，Node 20 下 `new Database()` 直接 SIGSEGV（systemd `status=11/SEGV`）。不要试图源码编译——有 prebuild 时 `binding.gyp` 把 target 置 none，`-Dforce_build=1` 也不编译。
-2. **令牌头**：Web 走 **`X-GX-Token`**（飞牛 CGI 网关吞 `Authorization`）；后端 `resolveActiveAuth` 两者都收；MCP/PAT 仍用 `Authorization`。判别来源：网关返回 `200 "invalid token"` 仅 **13 字节**，后端 401 JSON 是 **47 字节**。
+2. **令牌头**：浏览器/Web 统一走 **`X-GX-Token`**（飞牛门户转发链路会丢 `Authorization`——旧 CGI 网关实证；0.2.5 起飞牛改独立 TCP 端口 9527、index.cgi/CGI 已删后，该转发链路依旧丢头）；后端 `resolveActiveAuth` 两者都收；MCP/PAT 走 `Authorization: Bearer`。判别来源：网关返回 `200 "invalid token"` 仅 **13 字节**，后端 401 JSON 是 **47 字节**。
 3. **`prisma migrate deploy` 前必须停服务**（`sudo systemctl stop gouxiangdb-api`），否则 WAL 未 checkpoint → `database is locked` / 522；恢复与 WAL 崩溃处置同理（`docs/runbooks/wal-crash-recovery.md:8-11`、`restore.md:9`）。
 4. 迁移顺序固定：在线快照 → 解包校验 → `prisma migrate deploy` → **nav path 重算** → 原子切换 + restart（`docs/runbooks/deploy.md:111`）。恢复后也要按 §7.5 重跑 nav path 重算。
 5. **`migrate dev` 非交互不可用** → 只能手写 `migration.sql` + `migrate deploy`。
-6. **nav-reconcile 只作只读对账，不得 `--apply`**：第三批（`032168a`+`720e09c`）后 L1 已改为 bases + knowledge_bases 直列，`menu_items` 不再驱动 L1，C4「未收纳」告警是新架构预期常态；`--apply` 只会写回 shortcut，与「编排下线」方向相悖（`.workbuddy/memory/2026-09-20.md:7`）。
+6. **nav-reconcile 部署链接入必须 `--apply`（0.2.6 现行口径，本条结论已翻转，勿再沿用旧判断）**：fpk 的 install_callback/upgrade_callback、裸机 deploy.sh、docker entrypoint 在 `migrate deploy` 后**都必须**执行 `node dist/nav-reconcile.js --apply` 重算非根节点 path/depth——这是升级后导航不失效的硬前置，该步失败即中止发布；只读（不带 `--apply`）模式仅用于本地排查对账。背景（曾经为何主张只读）：第三批（`032168a`+`720e09c`）后 L1 已改为 bases + knowledge_bases 直列，`menu_items` 不再驱动 L1，C4「未收纳」告警是新架构预期常态；0.1.7 时期曾据此认为 `--apply` 只会写回 shortcut、与「编排下线」方向相悖（`.workbuddy/memory/2026-09-20.md:7`）——但升级链路上 path/depth 重算不可省，0.2.6 部署事实以本条开头为准。
 7. **rsync 增量部署必须排除 `apps/api/.env`**（以及 `apps/web/.env*`）：曾发生本机 dev env 覆盖 VM 生产 `JWT_SECRET`（`.workbuddy/memory/2026-09-19.md:190`）。
 8. 健康检查只有 **`/healthz` `/readyz`**，`/health` 是 404（不是服务挂了）。
 9. `sqlite3` CLI 直查 dev.db 报 `no such table: _prisma_migrations` 是**假象**（WAL 未 checkpoint），判定库状态一律以 `db:deploy` 输出与 `/readyz` 为准。
