@@ -66,8 +66,8 @@ export function AggregationBar({
   return (
     <tr className="bg-gx-bg">
       <td
-        // 行首固定列：发丝线 + 冻结边界（与数据行同一口径）
-        className="sticky left-0 z-20 border-b border-r border-gx-hairline bg-gx-bg"
+        // 行首固定列：右冻结边界保留结构线 hairline；底线随表内聚合行走浅档 line-2（与数据行同口径）
+        className="sticky left-0 z-20 border-b border-b-gx-line-2 border-r border-r-gx-hairline bg-gx-bg"
         style={{ width: rowHeaderWidth, minWidth: rowHeaderWidth }}
       >
         <div className="flex h-8 items-center px-2 text-gx-11 text-gx-text-hint">
@@ -83,8 +83,9 @@ export function AggregationBar({
           <td
             key={field.id}
             className={clsx(
-              "relative border-b border-gx-hairline",
-              isPrimary && "sticky z-10 border-r border-gx-hairline bg-gx-bg",
+              // 聚合行底线随表内浅档 line-2；冻结主字段列右边界保留结构线 hairline
+              "relative border-b border-b-gx-line-2",
+              isPrimary && "sticky z-10 border-r border-r-gx-hairline bg-gx-bg",
             )}
             style={{
               width: widthOf(field),

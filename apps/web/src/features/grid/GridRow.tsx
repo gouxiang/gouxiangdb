@@ -90,8 +90,10 @@ export function GridRow(props: GridRowProps) {
     >
       {/* 行首固定列：复选框 + 行号 + 展开 */}
       <td
-        // 行首固定列保留右侧发丝线：它是冻结列与横向滚动内容的层级边界，去掉会出现"文字被切断"的错觉
-        className="sticky left-0 z-20 border-b border-r border-gx-hairline bg-inherit"
+        // 行首固定列：右侧保留发丝线 hairline（冻结列与横向滚动内容的层级边界，去线会有"文字被切断"错觉）；
+        // 行间横线走更浅的表格内线 line-2（底板 tbody td 用 --line-2，区别于结构线 --line）。
+        // 底/右边各挂方向性颜色类，避免两个同权重 border 色类在同一元素互相覆盖。
+        className="sticky left-0 z-20 border-b border-b-gx-line-2 border-r border-r-gx-hairline bg-inherit"
         style={{
           width: rowHeaderWidth,
           minWidth: rowHeaderWidth,
@@ -130,10 +132,10 @@ export function GridRow(props: GridRowProps) {
             // [data-cell-content] 的判定）；td 本身就是单元格区域，故在此打标。
             data-cell-content="true"
             className={clsx(
-              // 行间发丝线（gx-hairline）：列与列之间不画竖线，靠 12px 列间距分隔
-              "relative border-b border-gx-hairline align-middle",
-              // 只有冻结列（首列文本）保留右侧发丝线，与行首固定列同一口径
-              isPrimary && "sticky z-10 border-r border-gx-hairline bg-inherit",
+              // 行间横线走更浅的表格内线 line-2（底板 tbody td 用 --line-2）；列间不画竖线，靠 12px 列间距分隔
+              "relative border-b border-b-gx-line-2 align-middle",
+              // 只有冻结列（首列文本）保留右侧发丝线 hairline，与行首固定列同一口径
+              isPrimary && "sticky z-10 border-r border-r-gx-hairline bg-inherit",
               active && "ring-2 ring-inset ring-gx-accent",
             )}
             style={{

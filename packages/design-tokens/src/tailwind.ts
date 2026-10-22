@@ -39,6 +39,8 @@ export const gxTailwindConfig: Partial<Config> = {
           hover: colors.hover,
           "row-hover": colors.rowHover,
           hairline: colors.hairline,
+          // 表格内线（底板 --line-2 #eef1f6，比 hairline 浅半档）
+          "line-2": colors.line2,
           border: colors.border,
           "border-strong": colors.borderStrong,
           "divider-v": colors.dividerV,

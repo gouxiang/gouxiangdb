@@ -74,7 +74,7 @@ export function GridToolbar({
       {leading ? (
         <div
           data-gx-toolbar-view-row=""
-          className="flex min-h-[40px] min-w-0 items-center gap-0.5 border-b border-gx-separator px-2.5 py-1.5"
+          className="flex min-h-[40px] min-w-0 items-center gap-0.5 border-b border-b-gx-line-2 px-2.5 py-1.5"
         >
           {leading}
         </div>

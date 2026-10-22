@@ -733,7 +733,7 @@ export default function GridView({
       )}
 
       {/* 状态栏（底板 .tfoot：h32、卡白底、border-top line-2、11.5 ink-4；卡圆角由卡 overflow 收） */}
-      <div className="flex h-8 items-center gap-3 border-t border-gx-separator bg-gx-surface px-3 text-gx-11 text-gx-text-hint">
+      <div className="flex h-8 items-center gap-3 border-t border-t-gx-line-2 bg-gx-surface px-3 text-gx-11 text-gx-text-hint">
         <span>共 {total} 条</span>
         {/* R-I-02：无限滚动口径下底部要告诉用户「已加载 N 条」 */}
         <span>{loadedCountText(records.length, total)}</span>

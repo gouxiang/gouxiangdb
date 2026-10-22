@@ -86,7 +86,7 @@ export function GridToolbarSettingsRow({
 
   return (
     // 底板 .sbar：去固定高/pb，py7/px10/gap5、底线 line-2、sub 底（gx-tableHeader）。
-    <div className="flex min-w-0 shrink-0 items-center gap-[5px] border-b border-gx-separator bg-gx-table-header px-2.5 py-[7px]">
+    <div className="flex min-w-0 shrink-0 items-center gap-[5px] border-b border-b-gx-line-2 bg-gx-table-header px-2.5 py-[7px]">
       {/* 行高 / 字段：<1440 收进「更多」菜单（见文件头注释） */}
       {wideLayout && (
         <div className="relative hidden lg:block">

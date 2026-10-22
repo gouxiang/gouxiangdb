@@ -5,7 +5,7 @@
 //   ② 单元格水平内边距统一 12px（px-3），全列一致
 //   ③ 对齐：文本左、数值/工时/金额右，表头与数据列**逐列同侧**
 //   ④ 表头：gx-surface-alt 底 / 12px / 中性弱色 / 无列间竖线 / 与数据区发丝线分隔
-//   ⑤ 行间发丝线 gx-hairline；hover gx-row-hover；选中 gx-accent-bg（选中不被 hover 覆盖）
+//   ⑤ 行间横线 gx-line-2（底板 --line-2 #eef1f6，比结构线 hairline 浅半档）；冻结列右边仍 hairline；hover gx-row-hover；选中 gx-accent-bg（选中不被 hover 覆盖）
 //   ⑥ 状态列走 StatusPill（同色 18% 底 + 语义色压暗字）；优先级列是纯文字带色，不是胶囊
 //   ⑦ 空值统一弱色「—」，不显示空白也不显示 raw 值
 //   ⑧ 首列（主键）文本比其余列重一档（font-medium）
@@ -170,13 +170,17 @@ describe("④ 表头样式：gx-surface-alt 底 / 12px / 中性弱色 / 无列�
   });
 });
 
-describe("⑤ 行间发丝线 / hover / 选中（选中不被 hover 覆盖）", () => {
-  it("数据行用 gx-hairline 发丝线，且不再出现旧的 gx-separator 竖线", () => {
+describe("⑤ 行间横线 / 冻结列竖线 / hover / 选中（选中不被 hover 覆盖）", () => {
+  it("数据行间横线用更浅的 gx-line-2（底板 --line-2），不再用结构线 hairline，也不出现旧的 gx-separator", () => {
     const html = renderRow();
-    expect(html).toContain("border-b border-gx-hairline");
+    // 两列数据行：行首固定列 + 两个数据列，行间横线（方向性 line-2）各 1 处 = 3 处
+    expect(countOf(html, "border-b-gx-line-2")).toBe(3);
     expect(html).not.toContain("border-gx-separator");
-    // 两列数据行：竖线只出现在行首固定列 + 冻结主字段列，共 2 处
-    expect(countOf(html, "border-r")).toBe(2);
+    // 竖线只出现在行首固定列 + 冻结主字段列（共 2 处），且仍是结构线 hairline；
+    // 用方向性类精确计数（它同时含宽度与颜色），避免 "border-r" 被子串重复命中。
+    expect(countOf(html, "border-r-gx-hairline")).toBe(2);
+    // 行间横线不再误用结构线 hairline
+    expect(html).not.toContain("border-b-gx-hairline");
   });
 
   it("未选中行 hover 走 gx-row-hover；选中行恒为 gx-accent-bg 且不带 hover 覆盖", () => {

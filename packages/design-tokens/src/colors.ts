@@ -33,7 +33,9 @@ export const colors = {
   rowHover: "#f5f8fd",
 
   // 边框与分隔（底板 --line / hover 边线 / 滚动条等）
-  hairline: "#e7eaf0", // 发丝线 / 顶带与面板头同色边线
+  hairline: "#e7eaf0", // 发丝线 / 顶带与面板头同色边线（底板 --line，结构线）
+  /** 表格内线（底板 --line-2，比 hairline 更浅半档）：数据表行间横线、列间隙、工具条/底部状态条顶底边 */
+  line2: "#eef1f6",
   border: "#d6dce8", // 控件 hover 边线
   borderStrong: "#c6ceda", // 更强一档（滚动条 thumb hover 等）
   dividerV: "#e7eaf0", // 竖向分隔 1×16
