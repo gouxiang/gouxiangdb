@@ -86,7 +86,7 @@ import type { UpdatePrefetchDTO, UpdateStatusDTO } from "@gx/shared-types";
 // 品牌外观（0.2.4-rc）：匿名读 + 管理员写。契约真源 packages/shared-types/src/branding.ts，
 // 端点真源 apps/api/src/routes/branding.ts。
 import type { BrandingConfigDTO, BrandingUpdateInput } from "@gx/shared-types";
-import { resolveApiBase, withBase as joinBase } from "../lib/base";
+import { resolveApiBase, withBase as joinBase, isPublicSharePathname } from "../lib/base";
 import { saveSessionFrom } from "../lib/session-from";
 // 节点模式 S2（DESIGN §6.1/§8.5 启动器）：API 主请求路径改读数据源解析器单例。
 // 现状该单例恒为 local（buildActive=buildLocal），其 baseURL/headers 与下方既有 BASE_URL/
@@ -245,6 +245,18 @@ let unauthorizedHandled = false;
 function handleUnauthorized(): void {
   if (unauthorizedHandled) return;
   unauthorizedHandled = true;
+  // 纵深防御：匿名公开分享页（/s/:token/...）本就免登录，其上任何私有接口 401
+  // （理论上数据层已在无会话时禁用这些请求，此处只兜意外）都不应登出或硬跳 /login，
+  // 否则外部访客看公开表会被踢去登录页。公开页保持原状、私有数据走各自空态兜底。
+  if (
+    typeof window !== "undefined" &&
+    isPublicSharePathname(window.location.pathname, BASE_URL)
+  ) {
+    setTimeout(() => {
+      unauthorizedHandled = false;
+    }, 3000);
+    return;
+  }
   // 节点模式 S2：按当前数据源分流。远端节点 401 只代表该远端会话失效——
   // 通知启动器清该节点会话/回连接界面，绝不清本地 gx-auth、不跳本地登录页。
   // （401 判定发生在 await fetch 之后，此处同步读当前活动数据源；local 分支逐字节保留旧行为。）

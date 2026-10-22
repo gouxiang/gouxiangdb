@@ -45,3 +45,24 @@ export function withBase(base: string, path: string): string {
   if (!path.startsWith("/")) return `${base}/${path}`;
   return `${base}${path}`;
 }
+
+/**
+ * 判定某个 pathname 是否为「匿名公开分享页」（路由 /s/:token 及其子树
+ * /s/:token/t/:tableId、/s/:token/doc/:docId）。
+ *
+ * 用于 401 拦截器纵深防御：公开页本就免登录，其上任何意外的私有请求 401
+ * 都不应把外部访客踢到 /login。注意 /share/:token 是「登录后加入」页，
+ * 不属匿名公开，故这里只认 /s/ 段。
+ *
+ * 纯字符串运算（无 DOM 依赖），兼容子路径部署：base="/app/gouxiangdb" 时
+ * pathname "/app/gouxiangdb/s/abc/t/1" 剥前缀后为 "/s/abc/t/1" 仍命中。
+ */
+export function isPublicSharePathname(pathname: string, base: string): boolean {
+  let p = pathname;
+  if (base) {
+    const b = base.endsWith("/") ? base.slice(0, -1) : base;
+    if (b && p.startsWith(b)) p = p.slice(b.length);
+  }
+  if (!p.startsWith("/")) p = `/${p}`;
+  return /^\/s\/[^/]+/.test(p);
+}

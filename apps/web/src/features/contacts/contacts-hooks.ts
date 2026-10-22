@@ -25,6 +25,8 @@ import type {
 } from "@gx/shared-types";
 
 import { isAdminLevelSystemKey } from "../../lib/role-policy";
+import { useAuthStore } from "../../store/auth";
+import { useRemoteSessionActive } from "../../node/useActiveSession";
 
 /** 成员目录每页大小：取服务端单页上限 100，配合前端窗口化与触底续翻。 */
 export const ORG_MEMBER_PAGE_SIZE = 100;
@@ -57,7 +59,25 @@ export function useDepartments() {
 
 // ============ 成员（无限分页 + q/deptId/status 服务端过滤） ============
 
+/**
+ * 纯判定（可单测）：组织名册这类**私有**接口当前是否存在可用登录会话。
+ *   - 本地 gx-auth 有 token（普通浏览器/fnOS 登录态），或
+ *   - 桌面壳连的是「已登录远端节点」（S2，门控开时才有意义）。
+ * 两者皆无＝匿名访客（公开分享页），名册查询必须 enabled:false，不发请求，
+ * 否则匿名 401 会被全局拦截器当登录态失效、硬跳 /login。
+ */
+export function hasRosterSession(localToken: string | null, remoteActive: boolean): boolean {
+  return !!localToken || remoteActive;
+}
+
 export function useOrgMembers(filter: MemberFilter) {
+  // 会话门控：组织名册是私有接口（view_directory 门控）。匿名访客打开公开分享页
+  // （/s/:token/...，无本地登录、非已登录远端节点）时绝不发起该请求——否则后端
+  // 401 会被全局拦截器当成登录态失效，硬跳 /login，公开表页（成员列 MemberCell
+  // 无条件用名册）直接崩。成员格子在无名册时由 MemberDisplay 兜底显短 id。
+  const localToken = useAuthStore((s) => s.token);
+  const remoteActive = useRemoteSessionActive();
+  const hasSession = hasRosterSession(localToken, remoteActive);
   const params: MemberListParams = {
     q: filter.q.trim() || undefined,
     deptId: filter.deptId ?? undefined,
@@ -69,6 +89,7 @@ export function useOrgMembers(filter: MemberFilter) {
     initialPageParam: 1,
     queryFn: ({ pageParam }) => OrgMembers.list({ ...params, page: pageParam }),
     getNextPageParam: (last) => (last.hasMore ? last.page + 1 : undefined),
+    enabled: hasSession,
     // 过滤条件变化即新缓存（key 含过滤项），无需手动 reset。
   });
 

@@ -264,3 +264,43 @@ describe("S2-7：401 按数据源 kind 分流", () => {
     expect(useAuthStore.getState().token).toBeNull();
   });
 });
+
+describe("公开分享页 401 纵深防御：匿名 /s/ 页绝不登出、绝不跳 /login", () => {
+  let assign: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    assign = vi.fn();
+    vi.stubGlobal("window", {
+      location: { origin: "http://localhost", pathname: "/s/tok/t/t1", search: "", assign },
+    });
+  });
+
+  afterEach(() => {
+    vi.advanceTimersByTime(3_100);
+    vi.useRealTimers();
+    vi.unstubAllGlobals(); // node 环境还原回「无 window」
+  });
+
+  it("匿名访客在公开表页意外触发私有 401：保留登录态、不跳登录页", async () => {
+    // 匿名：本地无 token（dataSource 恒 local）
+    useAuthStore.setState({ token: null });
+    fetchMock.mockResolvedValue(jsonResponse({ error: "unauthorized" }, { status: 401 }));
+    await expect(apiFetch("/api/v1/org/members?status=ACTIVE&limit=100&page=1")).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(assign).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().token).toBeNull();
+  });
+
+  it("非公开页（如 /bases）的 401 仍照常跳登录页（豁免只限 /s/）", async () => {
+    vi.stubGlobal("window", {
+      location: { origin: "http://localhost", pathname: "/bases/b1", search: "", assign },
+    });
+    useAuthStore.setState({ token: "local-tok" });
+    fetchMock.mockResolvedValue(jsonResponse({ error: "x" }, { status: 401 }));
+    await expect(apiFetch("/api/bases")).rejects.toMatchObject({ status: 401 });
+    expect(assign).toHaveBeenCalledOnce();
+    expect(useAuthStore.getState().token).toBeNull();
+  });
+});
