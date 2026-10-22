@@ -119,8 +119,9 @@ export default function TrashPage() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-gx-surface">
-      <div className="flex h-12 items-center justify-between border-b border-gx-separator px-4">
+    // v6 #985：灰页底（--bg），顶条/选项卡条为白底发丝线，列表为白卡（r12 + sh-card）。
+    <div className="flex h-full flex-col bg-gx-bg">
+      <div className="flex h-12 items-center justify-between border-b border-gx-hairline bg-gx-surface px-4">
         <span className="text-gx-14 font-semibold text-gx-text-primary">回收站</span>
         {canManageBase && visible.length > 0 && (
           <Button size="sm" variant="ghost" className="text-gx-danger" onClick={purgeAll}>
@@ -130,7 +131,7 @@ export default function TrashPage() {
       </div>
 
       {/* 选项卡行：结构类与数据类分开，各自独立的空态 / 计数 / 清空范围 */}
-      <div className="flex items-center gap-2 border-b border-gx-separator px-4 py-2">
+      <div className="flex items-center gap-2 border-b border-gx-hairline bg-gx-surface px-4 py-2">
         <SegmentedControl
           value={tab}
           options={TABS.map((t) => ({ value: t.value, label: t.label }))}
@@ -170,7 +171,7 @@ export default function TrashPage() {
         )}
 
         {!isError && visible.length > 0 && (
-          <div className="overflow-hidden rounded-gx-lg border border-gx-border">
+          <div className="overflow-hidden rounded-gx-2xl border border-gx-hairline bg-gx-surface shadow-gx-card">
             <div className="flex items-center gap-3 border-b border-gx-separator bg-gx-table-header px-3 py-2 text-gx-12 font-medium text-gx-text-secondary">
               <span className="w-16">类型</span>
               <span className="flex-1">名称</span>

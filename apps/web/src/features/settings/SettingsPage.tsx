@@ -27,9 +27,12 @@ const TABS: { key: Tab; label: string; icon: "grid" | "table" | "alertCircle" }[
   { key: "danger", label: "危险操作", icon: "alertCircle" },
 ];
 
+// v6 #985：底板 .card（shared.css 249-252）——白卡 + 发丝线 + r12 + sh-card，落在灰页底上。
+const CARD_CLS = "rounded-gx-2xl border border-gx-hairline bg-gx-surface shadow-gx-card";
+
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-gx-lg border border-gx-border bg-gx-card-bg p-4">
+    <div className={`${CARD_CLS} p-4`}>
       <div className="text-gx-24 font-semibold text-gx-text-primary">{value}</div>
       <div className="mt-1 text-gx-12 text-gx-text-tertiary">{label}</div>
     </div>
@@ -112,17 +115,20 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex h-full bg-gx-surface">
-      {/* 左侧二级导航 */}
-      <div className="w-[180px] shrink-0 border-r border-gx-separator bg-gx-bg p-2">
+    // v6 #985：页面底＝灰（--bg #f4f6fa），白卡浮于其上；左子导航为白底发丝线列。
+    <div className="flex h-full bg-gx-bg">
+      {/* 左侧二级导航（库内设置中心自己的分区；L1/L2 已由外壳承载） */}
+      <div className="w-[180px] shrink-0 border-r border-gx-hairline bg-gx-surface p-2">
         {visibleTabs.map((t) => (
           <button
             key={t.key}
             type="button"
             onClick={() => setTab(t.key)}
             className={[
-              "flex w-full items-center gap-2 rounded-gx-lg px-2 py-1.5 text-left text-gx-13",
-              tab === t.key ? "bg-gx-accent-bg font-medium text-gx-accent" : "text-gx-text-primary hover:bg-gx-row-hover",
+              "flex h-8 w-full items-center gap-2 rounded-gx-lg px-2 text-left text-gx-13 transition-colors",
+              tab === t.key
+                ? "bg-gx-accent-bg font-semibold text-gx-accent-hover"
+                : "text-gx-text-secondary hover:bg-gx-row-hover hover:text-gx-text-primary",
             ].join(" ")}
           >
             <Icon name={t.icon} size={15} />
@@ -134,11 +140,11 @@ export default function SettingsPage() {
       {/* 内容区 */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* 顶部返回 */}
-        <div className="flex h-12 items-center gap-2 border-b border-gx-separator px-3">
+        <div className="flex h-12 items-center gap-2 border-b border-gx-hairline bg-gx-surface px-3">
           <button
             type="button"
             onClick={() => navigate(`/base/${baseId}`)}
-            className="rounded-gx-sm p-1 text-gx-text-tertiary hover:bg-gx-bg"
+            className="rounded-gx-sm p-1 text-gx-text-tertiary hover:bg-gx-row-hover"
             title="返回"
           >
             <Icon name="chevronLeft" size={16} />
@@ -152,7 +158,7 @@ export default function SettingsPage() {
           {tab === "overview" && (
             <div className="flex flex-col gap-6">
               {baseId && (
-                <div className="rounded-gx-lg border border-gx-border bg-gx-surface p-4">
+                <div className={`${CARD_CLS} p-4`}>
                   <div className="flex items-center gap-3">
                     <Icon name="link" size={20} className="text-gx-accent" />
                     <div className="flex-1">
@@ -175,7 +181,7 @@ export default function SettingsPage() {
                 <StatCard label="成员" value={statsQ.data?.memberCount ?? 0} />
               </div>
 
-              <div className="rounded-gx-lg border border-gx-border p-4">
+              <div className={`${CARD_CLS} p-4`}>
                 <div className="mb-3 text-gx-14 font-medium text-gx-text-primary">Base 信息</div>
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center gap-3">
@@ -241,7 +247,7 @@ export default function SettingsPage() {
           )}
 
           {tab === "tables" && (
-            <div className="rounded-gx-lg border border-gx-border">
+            <div className={`${CARD_CLS} overflow-hidden`}>
               {(tables ?? []).map((t) => (
                 <TableStatRow
                   key={t.id}

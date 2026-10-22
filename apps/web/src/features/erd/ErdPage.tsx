@@ -110,7 +110,7 @@ export default function ErdPage() {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
   return (
-    <div className="h-full overflow-auto bg-gx-card-bg p-gx-lg">
+    <div className="h-full overflow-auto bg-gx-bg p-gx-lg">
       <div className="mb-gx-md flex items-center gap-3 text-gx-13 text-gx-text-secondary">
         <Icon name="link" size={14} />
         <span>共 {data.tables.length} 张表，{data.edges.length} 条关联</span>
@@ -177,7 +177,7 @@ export default function ErdPage() {
             <button
               type="button"
               onClick={() => navigate(`/base/${baseId}/table/${n.id}`)}
-              className="group flex h-full w-full flex-col items-start gap-1 rounded-gx-lg border border-gx-border bg-gx-surface p-2 text-left shadow-sm transition hover:border-gx-accent hover:shadow"
+              className="group flex h-full w-full flex-col items-start gap-1 rounded-gx-2xl border border-gx-hairline bg-gx-surface p-2 text-left shadow-gx-card transition hover:border-gx-accent hover:shadow-gx-md"
             >
               <div className="flex w-full items-center gap-1.5">
                 <Icon name="table" size={14} className="text-gx-accent" />
