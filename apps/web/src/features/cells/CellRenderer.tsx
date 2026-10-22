@@ -196,6 +196,7 @@ export function CellRenderer({
         <MdContent
           md={String(value)}
           variant="inline"
+          normalizeBreaks
           className="w-full truncate md-cell-inline"
         />,
       );

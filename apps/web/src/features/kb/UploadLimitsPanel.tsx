@@ -127,7 +127,7 @@ export function UploadLimitsPanel() {
       </div>
 
       <p className="border-t border-gx-separator px-4 py-2.5 text-gx-11 text-gx-text-hint">
-        系统已预填默认可上传格式，你可以补充新的扩展名（用空格或逗号分隔）。限制对文档编辑器内的图片、视频、音频、PDF 与附件上传生效，保存在本机浏览器、跨全部知识库应用。
+        系统已预填默认可上传格式，你可以补充新的扩展名（用空格或逗号分隔）。这是文档编辑器在本机浏览器内的前端上传校验，对图片、视频、音频、PDF 与附件生效；配置仅保存在当前浏览器（localStorage），不随账号同步，也不影响其他成员或其他设备。
       </p>
     </div>
   );

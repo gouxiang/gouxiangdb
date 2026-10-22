@@ -14,6 +14,7 @@
 
 import { renderMarkdown, slugify } from "@gx/blocks";
 import { sanitizeHtml } from "../../lib/sanitize-html";
+import { normalizeLiteralLineBreaks, restoreHtmlBreaks } from "../../lib/text-breaks";
 
 export interface HelpHeading {
   /** 锚点 id：与 renderMarkdown 的 `h-${slugify(text)}` 同一算法 */
@@ -252,13 +253,24 @@ function sanitizeWhenDom(html: string): string {
 }
 
 /**
+ * renderMarkdown 之前的换行规范化：把百科正文里（围栏代码块/行内代码之外）裸写的
+ * `<br>` / `<br/>` / `<br />` 统一归一为真实换行。Gitea Wiki 作者可能直接敲 HTML 换行标签，
+ * markdown 渲染器会把它当普通文本转义成可见的 `&lt;br/&gt;`。代码里出现的 `<br>` 是讲解
+ * 示例，必须保留（由共享的 fence/inline-code 感知扫描保证）。
+ */
+export function normalizeHelpBreaks(md: string): string {
+  return normalizeLiteralLineBreaks(md);
+}
+
+/**
  * 组装最终 HTML：wiki md → { html, headings }。
- * 流程：剥 HTML 注释 → 双链转内部切页链接 → renderMarkdown → 消毒 → 锚点回注。
+ * 流程：剥 HTML 注释 → 双链转内部切页链接 → 裸 br 换行规范化 → renderMarkdown
+ *      → 段落内转义换行还原为 <br/> → 消毒 → 锚点回注。
  * 图片路径保持后端给的同源绝对路径原样，不做任何前端改写。
  */
 export function buildHelpHtml(md: string): { html: string; headings: HelpHeading[] } {
-  const clean = rewriteWikiLinks(stripHtmlComments(md));
+  const clean = normalizeHelpBreaks(rewriteWikiLinks(stripHtmlComments(md)));
   const headings = extractHelpHeadings(clean);
-  const rendered = renderMarkdown(clean);
+  const rendered = restoreHtmlBreaks(renderMarkdown(clean));
   return { html: attachHeadingIds(sanitizeWhenDom(rendered), headings), headings };
 }

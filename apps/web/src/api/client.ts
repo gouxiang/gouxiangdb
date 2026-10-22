@@ -1106,6 +1106,99 @@ export interface KbTreeItemDTO {
   parentId: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// 公开分享（doc / table / base 三类）—— web 本地契约类型
+//
+// 后端按对象族在 GET /api/public/s/:token 分三种响应（见 apps/api/src/routes/public.ts）。
+// 这些类型是**前端本地声明**（packages/shared-types 的 base/tables[].token 字段由后端
+// 同事在增量补齐，为避免跨包耦合，此处只声明 web 需要的形状，新增字段一律给可选）。
+// ---------------------------------------------------------------------------
+
+/** 公开「表 + 视图」分享（含首屏记录）。与 @gx/shared-types PublicTablePayload 同构。 */
+export interface PublicTableShareDTO {
+  kind: "table";
+  token: string;
+  mode: ShareMode;
+  requestedMode: ShareMode;
+  degraded: boolean;
+  canEdit: boolean;
+  table: {
+    id: string;
+    name: string;
+    icon: string | null;
+    iconColor: string | null;
+    primaryFieldId: string;
+    baseId: string;
+    baseName: string;
+  };
+  view: {
+    id: string;
+    name: string;
+    type: string;
+    lockMode: string;
+    config: unknown;
+  } | null;
+  /** 已按分享人字段权限裁剪（隐藏字段不出现）。 */
+  fields: FieldDTO[];
+  /** 视图可见字段子集（渲染列）。 */
+  visibleFields: FieldDTO[];
+  records: RecordDTO[];
+  total: number;
+  filteredTotal: number;
+  page: { limit: number; offset: number };
+}
+
+/** 公开读记录翻页响应（与 PublicTableShareDTO.records 段同构）。 */
+export interface PublicRecordsShareDTO {
+  canEdit: boolean;
+  mode: ShareMode;
+  degraded: boolean;
+  records: RecordDTO[];
+  total: number;
+  filteredTotal: number;
+  page: { limit: number; offset: number };
+}
+
+/** 库分享外壳中「可点进去看」的一张表：仅列自身已开分享且带有效 token 的表。 */
+export interface PublicShareTableItem {
+  id: string;
+  name: string;
+  icon: string | null;
+  /** 该表当前有效的独立 table 分享 token（后端增量字段，缺省视为不可点）。 */
+  token?: string;
+}
+
+/** 库（base）分享外壳：库信息 + 该库内已单独开启分享的表清单，不含任何记录数据。 */
+export interface PublicBaseShareDTO {
+  kind: "base";
+  token: string;
+  mode: ShareMode;
+  canEdit: false;
+  base: { id: string; name: string };
+  tables: PublicShareTableItem[];
+}
+
+/**
+ * 文档（kb_doc）分享响应。
+ * 后端 docShareResponse 实际带 `kind: "doc"`（历史 getShare 类型未显式声明，这里补齐）。
+ */
+export type PublicDocShareDTO = {
+  kind?: "doc";
+  rootToken: string;
+  shareRole: "viewer" | "editor";
+  canEdit: boolean;
+  requestedMode: ShareMode;
+  mode: ShareMode;
+  degraded: boolean;
+  includeChildren: boolean;
+  doc: KbPublicDocDTO;
+  tree: KbTreeItemDTO[];
+};
+
+/** GET /api/public/s/:token 的判别联合：按 kind 分发到 doc / table / base 三类页面。 */
+export type PublicShareAnyDTO = PublicDocShareDTO | PublicTableShareDTO | PublicBaseShareDTO;
+
+
 export interface KbDocVersionDTO {
   id: string;
   version: number;
@@ -1245,6 +1338,44 @@ export const PublicApi = {
       doc: KbPublicDocDTO;
       tree: KbTreeItemDTO[];
     }>(`/api/public/s/${token}`),
+
+  /**
+   * 分享根（三类判别联合）：按对象族分发。
+   *   - 文档/画布（历史 kb_doc，后端 kind 字面量为 "doc"，可能缺省）→ PublicDocShareDTO；
+   *   - 数据表 → PublicTableShareDTO（表结构 + 首屏记录）；
+   *   - 库 base → PublicBaseShareDTO（库信息 + 可点进去看的已分享表清单，不含记录）。
+   * 匿名只读；外部人免登录。文档族正文是否可编辑仍以各自 canEdit 为准。
+   */
+  getPublicShareAny: (token: string) =>
+    publicFetch<PublicShareAnyDTO>(`/api/public/s/${token}`),
+
+  /**
+   * 库分享作用域内的「单表只读」：GET /s/:baseToken/t/:tableId。
+   * 仅当该表自身已单独开启分享（出现在库外壳清单里）才可读，否则后端 404。
+   * 返回与直连表 token（getPublicShareAny 的 table 分支）逐字段同构。
+   */
+  getPublicBaseTable: (baseToken: string, tableId: string, opts?: { limit?: number; offset?: number }) =>
+    publicFetch<PublicTableShareDTO>(
+      `/api/public/s/${baseToken}/t/${tableId}${qs({
+        limit: opts?.limit,
+        offset: opts?.offset,
+      })}`,
+    ),
+
+  /** 库分享作用域内单表翻页读记录（只读）：GET /s/:baseToken/t/:tableId/records。 */
+  getPublicBaseTableRecords: (
+    baseToken: string,
+    tableId: string,
+    opts: { limit: number; offset: number },
+  ) =>
+    publicFetch<PublicRecordsShareDTO>(
+      `/api/public/s/${baseToken}/t/${tableId}/records${qs(opts)}`,
+    ),
+
+  /** 直连数据表 token 的翻页读记录（只读）：GET /s/:tableToken/records。 */
+  getPublicTableRecords: (token: string, opts: { limit: number; offset: number }) =>
+    publicFetch<PublicRecordsShareDTO>(`/api/public/s/${token}/records${qs(opts)}`),
+
   /** 子树内某文档内容（canEdit 为真实值，同分享根口径） */
   getDoc: (token: string, docId: string) =>
     publicFetch<{ doc: KbPublicDocDTO; canEdit: boolean; shareRole: "viewer" | "editor" }>(

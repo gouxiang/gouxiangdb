@@ -32,6 +32,7 @@ import {
   type RecordChangeEntry,
 } from "./client";
 import { useAuthStore } from "../store/auth";
+import { refreshAfterCreateBase, refreshAfterCreateTable } from "./create-refresh";
 import type {
   BaseDTO,
   TableDTO,
@@ -441,7 +442,10 @@ export function useGXMutations() {
     // --- base ---
     createBase: useMutation({
       mutationFn: async (data: { name: string; iconColor?: string }) => (await Bases.create(data)).base,
-      onSuccess: () => invalidateAll(),
+      // 建库后调用方会立刻 navigate('/base/:newId')。必须 await 库列表刷新落地（同 #1006 竞态），
+      // 否则根索引/BaseIndexRedirect 读到旧的 bases 会闪错或误跳。原先只 fire-and-forget 失效
+      // ["bases"]（无 baseId 时唯一覆盖项），这里覆盖范围不变，仅把「触发」升级为「等待落地」。
+      onSuccess: () => refreshAfterCreateBase(qc),
     }),
     updateBase: useMutation({
       mutationFn: async (p: {
@@ -461,7 +465,9 @@ export function useGXMutations() {
     createTable: useMutation({
       mutationFn: async (p: { baseId: string; name: string; withDefaults?: boolean }) =>
         (await Tables.create(p.baseId, { name: p.name, withDefaults: p.withDefaults })).table,
-      onSuccess: (_d, v) => invalidateAll(v.baseId),
+      // 同 #1006：调用方 .then 里立刻 navigate('/base/:id/table/:newId')，必须等
+      // tables/views/fields 刷新落地，否则 TableIndexRedirect 读空 views 会误跳设置页。
+      onSuccess: (t, v) => refreshAfterCreateTable(qc, v.baseId, t.id),
     }),
     updateTable: useMutation({
       mutationFn: async (p: {

@@ -161,10 +161,9 @@ export default function CalendarView({
 
       {/* 星期表头 */}
       <div className="grid grid-cols-7 border-b border-gx-separator bg-gx-surface">
-        {WEEKDAYS.map((w, i) => (
+        {WEEKDAYS.map((w) => (
           <div key={w} className="px-2 py-1.5 text-center text-gx-12 font-medium text-gx-text-tertiary">
             {w}
-            {i === 0 && <span className="ml-1 text-gx-text-hint">日</span>}
           </div>
         ))}
       </div>

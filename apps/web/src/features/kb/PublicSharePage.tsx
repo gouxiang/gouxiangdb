@@ -1,94 +1,39 @@
 // apps/web/src/features/kb/PublicSharePage.tsx
-// 公开分享页（/s/:token）外壳：匿名可访问，无需登录。负责「加载分享 + 选中文档 + 拉内容」，
-// 渲染交给 PublicDocView（可被单测直接渲染）。
+// 公开分享页（/s/:token、/s/:token/doc/:docId、/s/:token/t/:tableId）外壳：匿名可访问，
+// 无需登录。按对象族 kind 分发到三个分支：
+//   - 文档 / 画布（历史 kb_doc，后端 kind:"doc" 或缺省）→ PublicDocShare（保留可编辑能力）；
+//   - 数据表（kind:"table"）→ PublicSharedTable 只读网格（直连表 token，支持分页）；
+//   - 库 base（kind:"base"）→ PublicBaseShell 外壳落地页，点表卡片进 /s/:token/t/:tableId。
 //
-// 正文是否可编辑由**读取接口的真实 canEdit** 决定（fail-closed：缺字段/出错一律按只读）：
-//   - 分享根看 GET /api/public/s/:token 的 canEdit；
-//   - 子树内某篇看 GET /api/public/s/:token/doc/:docId 的 canEdit；
-//     引用闭包内的文档（/ref/）仍恒只读，不属于本次分享子树。
-// 可编辑档位且分享人此刻仍有内容编辑权时 canEdit=true；分享人被降权后后端每次访问现算，
-// 链接自动回落只读。保存走乐观锁（baseUpdatedAt）：冲突回 409 就地刷新为最新内容并提示重编。
-// - 级联分享：左侧文档树，仅展示被分享根节点及其下级，支持展开/收起/点击切换
+// 库作用域表路由（:tableId 存在）不再读分享根，直接按 base token + tableId 拉单表只读网格。
+// 正文是否可编辑仍由文档分支各读取接口的真实 canEdit 决定（fail-closed），见 PublicDocShare。
 
-import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
-import { Spinner, toast } from "../../components/ui";
-import { PublicApi } from "../../api/client";
-import { usePublicShare } from "./kb-hooks";
-import { PublicShareTree } from "./PublicShareTree";
-import { PublicDocView, type RemoteDoc } from "./PublicDocView";
+import { Spinner } from "../../components/ui";
 import { useProductName } from "../branding/useBranding";
+import { usePublicShareAny } from "./kb-hooks";
+import { isDocShare, isTableShare, isBaseShare } from "./public-share-model";
+import { PublicDocShare } from "./PublicDocShare";
+import { PublicSharedTable } from "./PublicSharedTable";
+import { PublicBaseShell } from "./PublicBaseShell";
 
 export default function PublicSharePage() {
-  const { token, docId: routeDocId } = useParams();
+  const { token, docId: routeDocId, tableId } = useParams();
   const navigate = useNavigate();
-  const { data, isLoading, error } = usePublicShare(token);
+  const { data, isLoading, error } = usePublicShareAny(token);
   // 匿名页同样在 QueryClientProvider 内，品牌探针公开可读
   const productName = useProductName();
 
-  const [activeDocId, setActiveDocId] = useState<string | undefined>(undefined);
-  const [remoteDoc, setRemoteDoc] = useState<RemoteDoc | null>(null);
-  const [docLoading, setDocLoading] = useState(false);
-
-  // 当前展示的文档：路由/树选中的子文档，否则根文档
-  const effectiveDocId = routeDocId ?? activeDocId ?? data?.doc.id;
-
-  // 根数据加载后初始化
-  useEffect(() => {
-    if (data) {
-      setRemoteDoc({
-        id: data.doc.id,
-        content: data.doc.content,
-        title: data.doc.title,
-        kind: data.doc.kind,
-        canEdit: data.canEdit === true,
-        updatedAt: data.doc.updatedAt,
-      });
-      setActiveDocId(undefined);
-    }
-  }, [data?.rootToken]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 切换子文档时拉取内容（每篇各自带自己的 canEdit 与 updatedAt 基线）
-  useEffect(() => {
-    if (!token || !effectiveDocId || !data) return;
-    if (effectiveDocId === data.doc.id) {
-      setRemoteDoc({
-        id: data.doc.id,
-        content: data.doc.content,
-        title: data.doc.title,
-        kind: data.doc.kind,
-        canEdit: data.canEdit === true,
-        updatedAt: data.doc.updatedAt,
-      });
-      return;
-    }
-    let alive = true;
-    setDocLoading(true);
-    PublicApi.getDoc(token, effectiveDocId)
-      .then((r) => {
-        if (alive)
-          setRemoteDoc({
-            id: r.doc.id,
-            content: r.doc.content,
-            title: r.doc.title,
-            kind: r.doc.kind,
-            canEdit: r.canEdit === true,
-            updatedAt: r.doc.updatedAt,
-          });
-      })
-      .catch((e) => {
-        if (alive) {
-          // fail-closed：内容没拿到就清空并按只读渲染，绝不沿用上一篇的编辑权
-          setRemoteDoc(null);
-          toast(e instanceof Error ? e.message : "无法加载该内容", "error");
-        }
-      })
-      .finally(() => alive && setDocLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, [effectiveDocId, token]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 库作用域单表：/s/:baseToken/t/:tableId —— 直接渲染只读网格（access=base）。
+  if (tableId && token) {
+    return (
+      <PublicSharedTable
+        access={{ kind: "base", baseToken: token, tableId }}
+        onBack={() => navigate(`/s/${token}`)}
+      />
+    );
+  }
 
   if (isLoading) {
     return (
@@ -115,32 +60,40 @@ export default function PublicSharePage() {
     );
   }
 
-  const showTree = data.includeChildren && data.tree.length > 0;
-  // 宿主分享档位：决定文档/画布里【嵌入的数据表预览】能不能写。
-  // 与「正文能否写」是两件事：正文看 canEdit，嵌入表看 mode（后端按同一档位分别算）。
-  const embedCanEdit = data.mode === "edit";
+  // 数据表（直连表 token）：只读网格。
+  if (isTableShare(data)) {
+    return <PublicSharedTable access={{ kind: "token", tableToken: token! }} />;
+  }
 
+  // 库外壳：库信息 + 可点进去看的已分享表卡片。
+  if (isBaseShare(data)) {
+    return (
+      <PublicBaseShell
+        share={data}
+        isLoading={false}
+        isError={false}
+        onOpenTable={(tid) => navigate(`/s/${token}/t/${tid}`)}
+      />
+    );
+  }
+
+  // 文档 / 画布（缺省族，兼容无 kind 的历史响应）。
+  if (isDocShare(data)) {
+    return <PublicDocShare token={token} data={data} routeDocId={routeDocId} />;
+  }
+
+  // 未知响应形态：fail-closed 按失效处理，不猜测渲染。
   return (
-    <div className="flex h-screen bg-gx-bg">
-      {/* 左侧分享文档树 */}
-      {showTree && (
-        <aside className="flex w-64 shrink-0 flex-col border-r border-gx-separator bg-gx-surface">
-          <div className="border-b border-gx-separator px-3 py-2.5 text-gx-12 font-medium text-gx-text-secondary">分享内容</div>
-          <PublicShareTree items={data.tree} rootId={data.doc.id} activeId={effectiveDocId} onOpen={setActiveDocId} />
-        </aside>
-      )}
-
-      {docLoading ? (
-        <main className="flex min-w-0 flex-1 items-center justify-center">
-          <Spinner size={20} />
-        </main>
-      ) : remoteDoc ? (
-        <PublicDocView key={remoteDoc.id} doc={remoteDoc} token={token} embedCanEdit={embedCanEdit} />
-      ) : (
-        <main className="flex min-w-0 flex-1 items-center justify-center text-gx-13 text-gx-text-tertiary">
-          无法加载该内容
-        </main>
-      )}
+    <div className="flex h-screen flex-col items-center justify-center gap-3 bg-gx-bg text-center">
+      <Icon name="link" size={32} className="text-gx-text-hint" />
+      <div className="text-gx-15 font-semibold text-gx-text-primary">分享链接已失效或被取消</div>
+      <button
+        type="button"
+        onClick={() => navigate("/login")}
+        className="mt-2 rounded-gx-lg bg-gx-accent px-4 py-2 text-gx-13 font-medium text-white hover:brightness-95"
+      >
+        返回{productName}
+      </button>
     </div>
   );
 }

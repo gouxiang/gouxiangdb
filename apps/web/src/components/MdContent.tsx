@@ -9,30 +9,42 @@ import { useNavigate } from "react-router-dom";
 import { renderMarkdown } from "@gx/blocks";
 import { inlineMdToHtml } from "@gx/blocks";
 import { makeLinkClickHandler } from "../lib/internal-links";
+import { normalizeLiteralLineBreaks, restoreBlockLineBreaks } from "../lib/text-breaks";
 
 export function MdContent({
   md,
   variant = "inline",
   className,
   onClick,
+  normalizeBreaks = false,
 }: {
   md: string;
   variant?: "inline" | "block";
   className?: string;
   /** 外层点击（如单元格点击打开记录）；内部链接点击会 stopPropagation 后单独导航 */
   onClick?: (e: React.MouseEvent<HTMLElement>) => void;
+  /**
+   * 渲染前把字面 <br>/<br/> 归一为真实换行（围栏/行内代码感知）。
+   * 用于多行文本字段：历史脏数据混入的字面标签会被 markdown 转义成可见文本，需先归一。
+   */
+  normalizeBreaks?: boolean;
 }) {
   const navigate = useNavigate();
   const onLinkClick = useCallback(makeLinkClickHandler((p) => navigate(p)), [navigate]);
+
+  const source = normalizeBreaks ? normalizeLiteralLineBreaks(md ?? "") : md ?? "";
 
   // 渲染失败降级为纯文本（脏数据/异常块结构不应炸掉整页或整行）
   let html = "";
   let ok = true;
   try {
-    html = variant === "block" ? renderMarkdown(md ?? "") : inlineMdToHtml(md ?? "");
+    html =
+      variant === "block"
+        ? restoreBlockLineBreaks(renderMarkdown(source))
+        : inlineMdToHtml(source);
   } catch {
     ok = false;
-    html = escapeForText(md ?? "");
+    html = escapeForText(source);
   }
 
   return (

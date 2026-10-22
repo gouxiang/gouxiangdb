@@ -943,7 +943,7 @@ function ReadValue({ field, value }: { field: FieldDTO; value: CellValue | undef
   if (Array.isArray(value)) return <span className="text-gx-13">{(value as unknown[]).map(String).join("、 ")}</span>;
   if (typeof value === "boolean") return <span>{value ? "是" : "否"}</span>;
   if (field.type === "longText" && typeof value === "string") {
-    return <MdContent md={value} variant="block" className="md-cell-block text-gx-13" />;
+    return <MdContent md={value} variant="block" normalizeBreaks className="md-cell-block text-gx-13" />;
   }
   return <span className="text-gx-13">{String(value)}</span>;
 }

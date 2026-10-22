@@ -154,6 +154,20 @@ export function usePublicShare(token: string | undefined) {
   });
 }
 
+/**
+ * 分享根（doc / table / base 三类判别联合）。公开分享页按 kind 分发到
+ * 文档视图 / 只读数据表网格 / 库外壳落地页。文档族返回形状与 usePublicShare 同构，
+ * 但可能额外带 kind:"doc"。
+ */
+export function usePublicShareAny(token: string | undefined) {
+  return useQuery({
+    queryKey: ["kb", "public-any", token],
+    queryFn: () => PublicApi.getPublicShareAny(token!),
+    enabled: !!token,
+    retry: false,
+  });
+}
+
 export function usePublicDoc(token: string | undefined, docId: string | undefined) {
   return useQuery({
     queryKey: ["kb", "public", token, "doc", docId],

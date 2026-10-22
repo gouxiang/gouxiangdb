@@ -204,6 +204,8 @@ export default function App() {
       {/* 公开分享页：匿名可访问，不走登录守卫 */}
       <Route path="/s/:token" element={<PublicSharePage />} />
       <Route path="/s/:token/doc/:docId" element={<PublicSharePage />} />
+      {/* 库分享作用域内的单表只读网格：外部人免登录点库外壳卡片进入 */}
+      <Route path="/s/:token/t/:tableId" element={<PublicSharePage />} />
 
       {/* 公开邀请接受页：登录前凭一次性激活码设置密码并激活账号（M2 组织通讯录） */}
       <Route path="/invite/:token" element={<InviteAcceptPage />} />

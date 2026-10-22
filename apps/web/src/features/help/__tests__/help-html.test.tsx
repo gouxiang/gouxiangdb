@@ -15,6 +15,7 @@ import {
   buildHelpHtml,
   extractHelpHeadings,
   filterHelpPages,
+  normalizeHelpBreaks,
   rewriteWikiLinks,
   stripHtmlComments,
   WIKI_PAGE_HASH_PREFIX,
@@ -89,6 +90,43 @@ describe("stripHtmlComments：HTML 注释不泄漏（H-02 纯函数保留）", (
     const out = stripHtmlComments("```html\n<!-- 示例，不删 -->\n```\n<!-- 作者标注，删 -->");
     expect(out).toContain("<!-- 示例，不删 -->");
     expect(out).not.toContain("作者标注");
+  });
+});
+
+describe("裸 <br> 换行规范化（fence / 行内 code 感知）", () => {
+  it("normalizeHelpBreaks：段落里三种裸 br 归一为真实换行，代码内保留", () => {
+    expect(normalizeHelpBreaks("a<br>b")).toBe("a\nb");
+    expect(normalizeHelpBreaks("a<br/>b")).toBe("a\nb");
+    expect(normalizeHelpBreaks("a<br />b")).toBe("a\nb");
+    // 行内代码里的 <br> 是示例，不替换
+    expect(normalizeHelpBreaks("用 `<br/>` 换行<br/>下一行")).toBe("用 `<br/>` 换行\n下一行");
+    // 围栏代码块里的 <br> 保留
+    expect(normalizeHelpBreaks("```html\nx<br/>\n```\n正文<br/>尾")).toBe(
+      "```html\nx<br/>\n```\n正文\n尾",
+    );
+  });
+
+  it("buildHelpHtml：字面 <br/> 在最终 HTML 里成为真实换行元素，不泄漏可见标签文本", () => {
+    const { html } = buildHelpHtml("第一行<br/>第二行");
+    expect(html).toContain("第一行<br/>第二行");
+    expect(html).not.toContain("&lt;br");
+  });
+
+  it("buildHelpHtml：真实换行同样渲染为 <br/>（修渲染器段落连接标记被转义）", () => {
+    const { html } = buildHelpHtml("第一行\n第二行");
+    expect(html).toContain("第一行<br/>第二行");
+  });
+
+  it("buildHelpHtml：代码块与行内代码中的 <br/> 作为示例转义保留，段落中的才还原", () => {
+    const md = ["```html", "<div><br/></div>", "```", "", "调用 `<br>` 标签<br/>正文第二行"].join("\n");
+    const { html } = buildHelpHtml(md);
+    // 代码块原样保留转义文本
+    expect(html).toContain("<pre");
+    expect(html).toContain("&lt;br/&gt;");
+    // 行内代码里的 <br> 也保留为示例
+    expect(html).toContain("<code class=\"md-code-inline\">&lt;br&gt;</code>");
+    // 段落里的字面 br 成为真实换行元素
+    expect(html).toContain("标签<br/>正文第二行");
   });
 });
 

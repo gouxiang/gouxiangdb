@@ -71,14 +71,15 @@ export default function KbSettingsPage() {
           <span className="text-gx-12 text-gx-text-hint">{kb?.name}</span>
         </div>
 
-        {/* 上传限制已上提到工作区设置：它对本机浏览器内的全部知识库生效，
-            不是单个知识库的属性——这里只留说明 + 跳转，避免用户以为能按库分别设限。 */}
+        {/* 上传限制已上提到工作区设置：它是文档编辑器在本机浏览器内的前端校验，
+            对当前浏览器里的全部知识库生效、不属于单个知识库；配置只存在这台浏览器
+            （localStorage），不随账号同步，不影响其他成员或设备。这里只留说明 + 跳转。 */}
         <div className="mb-4 flex items-start gap-2 rounded-gx-2xl border border-gx-hairline bg-gx-surface px-4 py-3 shadow-gx-card">
           <Icon name="paperclip" size={16} className="mt-0.5 shrink-0 text-gx-accent" />
           <div className="min-w-0 flex-1">
             <div className="text-gx-13 font-medium text-gx-text-primary">上传限制</div>
             <p className="mt-0.5 text-gx-12 text-gx-text-tertiary">
-              上传限制对这台浏览器里的全部知识库生效，不属于单个知识库，已移到「工作区设置 → 通用」统一管理。
+              这是文档编辑器在本机浏览器内的前端上传校验，对当前浏览器里的全部知识库生效，不属于单个知识库；配置只存在这台浏览器上（localStorage），不随账号同步、不会影响其他成员或其他设备。已移到「工作区设置 → 通用」统一管理。
             </p>
             <button
               type="button"
