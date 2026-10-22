@@ -186,7 +186,7 @@ export function NodeList({
               "gx-launcher-row gx-launcher-rise relative flex items-center gap-2.5 rounded-gx-lg border px-3 py-2.5 " +
               (row.active
                 ? "border-gx-accent/40 bg-gx-accent-bg"
-                : "border-gx-border bg-gx-surface hover:border-gx-accent/30 hover:bg-gx-row-hover")
+                : "border-gx-hairline bg-gx-surface hover:border-gx-accent/30 hover:bg-gx-row-hover")
             }
           >
             {row.active && (

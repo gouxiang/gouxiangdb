@@ -115,7 +115,7 @@ function IncomingRow({ item, online, onChange }: { item: IncomingItem; online: b
   }
 
   return (
-    <div className="border-b border-gx-separator px-3 py-2">
+    <div className="border-b border-gx-hairline px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-gx-12 font-medium text-gx-text-primary">
           {item.entityType || "内容"} · {item.op || "修改"}
@@ -170,7 +170,7 @@ function StatusSection({
   ];
   return (
     <div>
-      <dl className="divide-y divide-gx-separator">
+      <dl className="divide-y divide-gx-hairline">
         {rows.map(([k, v]) => (
           <div key={k} className="flex items-center justify-between px-3 py-2 text-gx-12">
             <dt className="text-gx-text-tertiary">{k}</dt>
@@ -186,7 +186,7 @@ function StatusSection({
       {report.bases.length > 0 ? (
         <div className="m-3">
           <div className="mb-1 text-gx-11 text-gx-text-tertiary">本地同步的库（{report.bases.length}）</div>
-          <ul className="divide-y divide-gx-separator overflow-hidden rounded-gx-lg border border-gx-border">
+          <ul className="divide-y divide-gx-hairline overflow-hidden rounded-gx-lg border border-gx-hairline">
             {report.bases.map((b) => (
               <li key={b.id} className="flex items-center justify-between gap-2 bg-gx-bg px-3 py-2 text-gx-12">
                 <span className="truncate text-gx-text-primary">{b.name || b.id}</span>
@@ -223,7 +223,7 @@ function ConflictsSection({ conflicts, online }: { conflicts: PendingConflict[];
           type="button"
           key={c.incomingId}
           onClick={() => openConflictResolver()}
-          className="flex w-full items-center justify-between border-b border-gx-separator px-3 py-2 text-left hover:bg-gx-row-hover"
+          className="flex w-full items-center justify-between border-b border-gx-hairline px-3 py-2 text-left hover:bg-gx-row-hover"
         >
           <span className="min-w-0">
             <span className="block truncate text-gx-12 font-medium text-gx-text-primary">
@@ -275,7 +275,7 @@ function IncomingSection({
 
 function StorageSection({ bytes }: { bytes: number }) {
   return (
-    <dl className="divide-y divide-gx-separator">
+    <dl className="divide-y divide-gx-hairline">
       <div className="flex items-center justify-between px-3 py-2 text-gx-12">
         <dt className="text-gx-text-tertiary">本地副本占用</dt>
         <dd className="text-gx-text-primary tabular-nums">{formatBytes(bytes)}</dd>
@@ -329,12 +329,12 @@ export function SyncCenterPanel(props: SyncCenterPanelProps) {
         aria-modal="true"
         aria-label="同步中心"
         className={
-          "relative flex h-full flex-col overflow-hidden border-l border-gx-border bg-gx-surface shadow-gx-lg " +
+          "relative flex h-full flex-col overflow-hidden border-l border-gx-hairline bg-gx-surface shadow-gx-lg " +
           (closing ? "gx-dock-panel-out" : "gx-dock-panel-in")
         }
         style={{ width: DRAWER_WIDTH, maxWidth: "88vw" }}
       >
-        <div className="flex items-center justify-between border-b border-gx-separator px-4 py-3">
+        <div className="flex items-center justify-between border-b border-gx-hairline px-4 py-3">
           <span className="text-gx-14 font-semibold text-gx-text-primary">同步中心</span>
           <button
             type="button"
@@ -347,7 +347,7 @@ export function SyncCenterPanel(props: SyncCenterPanelProps) {
           </button>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-gx-separator px-2 py-1.5">
+        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-gx-hairline px-2 py-1.5">
           {TABS.map((t) => {
             const badge = badgeFor(t.id);
             const active = tab === t.id;

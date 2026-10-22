@@ -156,7 +156,7 @@ function DockInner({ store }: { store?: LauncherStore }) {
           <Icon name="chevronUp" size={13} className="shrink-0 text-gx-text-tertiary" />
         </button>
 
-        <span className="mx-2 h-4 w-px bg-gx-separator" />
+        <span className="mx-2 h-4 w-px bg-gx-hairline" />
 
         {/* 连接稳定度：信号格 + 实时毫秒延迟 */}
         <span
@@ -169,7 +169,7 @@ function DockInner({ store }: { store?: LauncherStore }) {
           </span>
         </span>
 
-        <span className="mx-2 h-4 w-px bg-gx-separator" />
+        <span className="mx-2 h-4 w-px bg-gx-hairline" />
 
         {/* 版本：核心（API/内核）/ 壳（Tauri 外壳） */}
         <span className="flex items-center gap-2 whitespace-nowrap text-gx-text-faint">
@@ -180,7 +180,7 @@ function DockInner({ store }: { store?: LauncherStore }) {
         {/* 离线同步中心入口：仅「副本功能已确认启用」才渲染（浏览器/非副本恒无此节点，零像素）。 */}
         {syncEnabled ? (
           <>
-            <span className="mx-2 h-4 w-px bg-gx-separator" />
+            <span className="mx-2 h-4 w-px bg-gx-hairline" />
             <button
               type="button"
               onClick={() => openSyncCenter()}
@@ -224,7 +224,8 @@ function DockInner({ store }: { store?: LauncherStore }) {
         aria-modal="true"
         aria-label="切换或管理节点"
         className={
-          "relative flex h-full flex-col overflow-hidden border-l border-gx-border bg-gx-surface shadow-gx-lg " +
+          // v6：贴边抽屉面板用 1px 发丝线与遮罩外分隔（结构线，非控件深线）
+          "relative flex h-full flex-col overflow-hidden border-l border-gx-hairline bg-gx-surface shadow-gx-lg " +
           (closing ? "gx-dock-panel-out" : "gx-dock-panel-in")
         }
         style={{ width: DRAWER_WIDTH, maxWidth: "88vw" }}

@@ -78,8 +78,8 @@ function ValueColumn({
   badge: string;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-gx-lg border border-gx-border bg-gx-bg">
-      <div className="flex items-center justify-between border-b border-gx-separator px-3 py-2">
+    <div className="flex min-h-0 flex-1 flex-col rounded-gx-lg border border-gx-hairline bg-gx-bg">
+      <div className="flex items-center justify-between border-b border-gx-hairline px-3 py-2">
         <span className="text-gx-13 font-semibold text-gx-text-primary">{title}</span>
         <span className="rounded-full bg-gx-surface px-2 py-0.5 text-gx-11 text-gx-text-tertiary">
           {badge}

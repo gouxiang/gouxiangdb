@@ -45,7 +45,7 @@ function BubbleInner({ store }: { store?: LauncherStore }) {
       aria-label="管理节点"
       className={
         "gx-launcher-bubble gx-z-popover fixed bottom-4 right-4 inline-flex h-9 items-center gap-1.5 rounded-full " +
-        "border border-gx-border bg-gx-surface pl-2.5 pr-3 text-gx-13 font-medium " +
+        "border border-gx-hairline bg-gx-surface pl-2.5 pr-3 text-gx-13 font-medium " +
         "text-gx-text-secondary shadow-gx-md " +
         "hover:bg-gx-row-hover focus:outline-none focus:ring-2 focus:ring-gx-accent/50"
       }

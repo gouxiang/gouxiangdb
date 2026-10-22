@@ -255,7 +255,7 @@ export function LauncherPanel({ store, onEnterWorkspace, variant = "full" }: Lau
                 onClick={() => openView({ mode: "add" })}
                 style={{ animationDelay: "70ms" }}
                 className={
-                  "gx-launcher-cta gx-launcher-rise relative flex w-full items-center gap-3 rounded-gx-2xl border border-gx-border bg-gx-surface px-4 py-3 text-left " +
+                  "gx-launcher-cta gx-launcher-rise relative flex w-full items-center gap-3 rounded-gx-2xl border border-gx-hairline bg-gx-surface px-4 py-3 text-left " +
                   "hover:border-gx-accent/40 hover:bg-gx-row-hover " +
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gx-accent/50 " +
                   "disabled:cursor-not-allowed disabled:opacity-50"
@@ -318,7 +318,8 @@ export function LauncherPanel({ store, onEnterWorkspace, variant = "full" }: Lau
 
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-gx-bg px-6 py-10">
-      <div className="w-full max-w-[560px] rounded-gx-3xl border border-gx-border bg-gx-surface p-8 shadow-gx-lg">
+      // 全屏焦点白卡（同登录卡口径）：发丝线外框，保留 16 圆角与焦点投影
+      <div className="w-full max-w-[560px] rounded-gx-3xl border border-gx-hairline bg-gx-surface p-8 shadow-gx-lg">
         {content}
       </div>
     </div>
