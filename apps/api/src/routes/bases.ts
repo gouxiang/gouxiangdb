@@ -346,7 +346,7 @@ bases.get("/:baseId/share", async (c) => {
       role: l.role,
       createdAt: l.createdAt.toISOString(),
       expiresAt: l.expiresAt ? l.expiresAt.toISOString() : null,
-      url: `/share/${l.token}`,
+      url: `/s/${l.token}`,
     })),
   });
 });
@@ -378,7 +378,7 @@ bases.post("/:baseId/share", async (c) => {
       role: link.role,
       createdAt: link.createdAt.toISOString(),
       expiresAt: link.expiresAt ? link.expiresAt.toISOString() : null,
-      url: `/share/${link.token}`,
+      url: `/s/${link.token}`,
     },
   }, 201);
 });

@@ -122,6 +122,18 @@ export function recordToRow(r: HydratedRecord, fields: FieldMeta[]): string[] {
           .filter((s) => s !== "")
           .join("; ");
       }
+      // 附件：单元格值是 {id,name,size,mime,url}[]，导出文件名（多值 "; " 连接）。
+      // 必须在通用 links 分支之前——附件对象没有 title，落进 String(x) 会变 [object Object]。
+      if (f.type === "attachment") {
+        return (v as unknown[])
+          .map((x) =>
+            typeof x === "object" && x !== null && "name" in (x as object)
+              ? String((x as { name: unknown }).name ?? "").trim()
+              : "",
+          )
+          .filter((s) => s !== "")
+          .join("; ");
+      }
       // links → title
       const parts = (v as unknown[]).map((x) =>
         typeof x === "object" && x !== null && "title" in (x as object)

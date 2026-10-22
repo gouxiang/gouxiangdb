@@ -165,12 +165,50 @@ export async function resolveShareTarget(token: string, now: Date = new Date()):
   throw new HttpError(404, "分享链接已失效或被取消");
 }
 
-/** 取某个库下的可分享表清单（库级分享链接的只读外壳用）。 */
-export async function shareableTables(baseId: string): Promise<Array<{ id: string; name: string; icon: string | null }>> {
+/** 库分享外壳里的一项可分享表：只列「自身存在有效 table 分享链接」的表，并带出该链接 token。 */
+export interface ShareableTableItem {
+  id: string;
+  name: string;
+  icon: string | null;
+  /** 该表当前有效的 table 分享链接 token（取最新一条）；无有效链接的表不会出现在清单里。 */
+  token: string;
+}
+
+/**
+ * 取某个库下的可分享表清单（库级分享链接的只读外壳用）。
+ *
+ * 两道条件同时满足才列出（避免死胡同与枚举）：
+ *   1. 该表 shareEnabled=1 且未删除（库级总闸由 base 链接解析侧保证）；
+ *   2. 该表存在一条【有效】的 table 分享链接（objectType=table、未撤销、未过期）。
+ *      撤销即删除 share_link 行，故"行不存在"天然覆盖撤销语义。
+ *
+ * N+1 规避：表数量级小，用一次 whereIn 批量取回这些表的全部 table 链接，再在内存按
+ * 未过期过滤 + 取最新一条 join，不逐表查库。
+ */
+export async function shareableTables(baseId: string, now: Date = new Date()): Promise<ShareableTableItem[]> {
   const rows = await prisma.table.findMany({
     where: { baseId, deletedAt: null, shareEnabled: 1 },
     select: { id: true, name: true, icon: true },
     orderBy: { createdAt: "asc" },
   });
-  return rows;
+  if (rows.length === 0) return [];
+
+  const tableIds = rows.map((t) => t.id);
+  const links = await prisma.shareLink.findMany({
+    where: { objectType: "table", objectId: { in: tableIds } },
+    select: { objectId: true, token: true, expiresAt: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  // 每张表只保留最新一条【未过期】链接（findMany 已按 createdAt desc，首个命中即最新）。
+  const tokenByTable = new Map<string, string>();
+  for (const link of links) {
+    if (!link.objectId || tokenByTable.has(link.objectId)) continue;
+    if (link.expiresAt !== null && link.expiresAt.getTime() <= now.getTime()) continue;
+    tokenByTable.set(link.objectId, link.token);
+  }
+
+  return rows
+    .filter((t) => tokenByTable.has(t.id))
+    .map((t) => ({ id: t.id, name: t.name, icon: t.icon, token: tokenByTable.get(t.id)! }));
 }
