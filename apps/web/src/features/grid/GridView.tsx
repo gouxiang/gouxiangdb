@@ -623,8 +623,9 @@ export default function GridView({
                   className="sticky left-0 z-30 border-b border-r border-gx-hairline bg-gx-table-header"
                   style={{ width: ROW_HEADER_W, minWidth: ROW_HEADER_W, height: HEADER_HEIGHT_PX }}
                 >
-                  {/* R-I-13 表头复选框三态：未选 / 部分选（横线）/ 全选，只作用于当前页 */}
-                  <div className="flex h-full items-center justify-center">
+                  {/* R-I-13 表头复选框三态：未选 / 部分选（横线）/ 全选，只作用于当前页。
+                      1:1 底板 thead th.ckcell（padding-left12）：左对齐到与各行复选框同一条 12px 基线，不再居中。 */}
+                  <div className="flex h-full items-center pl-3">
                     <TriStateCheckbox
                       state={headerCheckState}
                       onChange={() => selection.toggleAll(records.map((r) => r.id))}

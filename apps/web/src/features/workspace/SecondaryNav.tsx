@@ -382,10 +382,16 @@ export function SecondaryNav({
                   active={currentResource === row.entry.id}
                   onToggleDoc={toggleDoc}
                   onNavigate={(href) => navigate(href)}
-                  // 表行：五项菜单（无 canManageSchema 时 rowMenuItems 返回 [] → 不渲染三点）
+                  // 表行菜单（无 canManageSchema 时 rowMenuItems 返回 [] → 不渲染三点）。
+                  // 透传当前自定义图标，供「图标与颜色」项弹窗回显。
                   menu={
                     row.kind === "table"
-                      ? tableOps.rowMenuItems({ id: row.entry.id, name: row.entry.name })
+                      ? tableOps.rowMenuItems({
+                          id: row.entry.id,
+                          name: row.entry.name,
+                          icon: row.entry.icon,
+                          iconColor: row.entry.iconColor,
+                        })
                       : undefined
                   }
                   menuLabel={row.kind === "table" ? `${row.entry.name} 表操作菜单` : undefined}

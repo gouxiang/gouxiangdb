@@ -21,15 +21,18 @@ import { useState, type ReactNode } from "react";
 import { useBase, useGXMutations, useTables } from "../../api/hooks";
 import { Icon } from "../../components/icons";
 import { Input, Modal, toast } from "../../components/ui";
+import { EntityIconPanel } from "../../components/EntityIconPicker";
 import { confirmClearTable, confirmDeleteTable } from "../../components/confirm-table";
 import { toastDeleted } from "../../components/interaction";
 import { findTableNameConflict, tableNameConflictMessage } from "./lib/table-name";
 import type { RowMoreItem } from "./SecondaryNavSections";
 
-/** 行菜单只需要 id + 名字（表行的其它字段不参与这些动作）。 */
+/** 行菜单需要 id + 名字（+ 当前自定义图标，供「图标与颜色」弹窗回显）。 */
 export interface SecondaryTableRowRef {
   id: string;
   name: string;
+  icon?: string | null;
+  iconColor?: string | null;
 }
 
 export interface SecondaryTableOps {
@@ -60,6 +63,10 @@ export function useSecondaryTableOps({
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  // 「图标与颜色」行内入口：旧壳 Sidebar 时代挂在重命名弹窗里，L2 重构后只剩表页左上角一处入口，
+  // 在数据表自己的「⋯」菜单里反而找不到（走查反馈「换图标的功能消失了」）。这里接回同一个能力，
+  // 复用统一 EntityIconPanel（30 图标 / 12 色 / 恢复默认），与表页左上角零分叉。
+  const [iconEdit, setIconEdit] = useState<SecondaryTableRowRef | null>(null);
 
   // 即时判重：建表看全库；改名排除自己（同后端 assertTableNameFree 的 excludeTableId）。
   const newConflict = findTableNameConflict(tablesQ.data, newName);
@@ -100,6 +107,16 @@ export function useSecondaryTableOps({
       .mutateAsync({ tableId: renaming.id, data: { name: renaming.name.trim() } })
       .then(() => setRenaming(null))
       .catch((e: unknown) => toast(e instanceof Error ? e.message : "重命名失败", "error"));
+  };
+
+  /** 图标与颜色：与表页左上角 EntityIconPicker 同一通道（updateTable 两键透传），选即持久。 */
+  const commitIcon = (next: { icon: string | null; iconColor: string | null }) => {
+    if (!iconEdit) return;
+    const id = iconEdit.id;
+    setIconEdit((cur) => (cur ? { ...cur, ...next } : cur));
+    void m.updateTable
+      .mutateAsync({ tableId: id, data: { icon: next.icon, iconColor: next.iconColor } })
+      .catch((e: unknown) => toast(e instanceof Error ? e.message : "保存图标失败", "error"));
   };
 
   const duplicateTable = (id: string, withData: boolean) => {
@@ -150,6 +167,11 @@ export function useSecondaryTableOps({
     if (!canManageSchema) return [];
     return [
       { icon: "edit", label: "重命名", onClick: () => setRenaming({ id: row.id, name: row.name }) },
+      {
+        icon: "sparkles",
+        label: "图标与颜色",
+        onClick: () => setIconEdit({ id: row.id, name: row.name, icon: row.icon ?? null, iconColor: row.iconColor ?? null }),
+      },
       {
         icon: "form",
         label: "编辑表单",
@@ -270,6 +292,35 @@ export function useSecondaryTableOps({
               {tableNameConflictMessage(renameConflict)}
             </p>
           )}
+        </Modal>
+
+        {/* 图标与颜色：复用统一 EntityIconPanel，与表页左上角选择器零分叉；
+            默认图标取 table（数据表本征）。 */}
+        <Modal
+          open={!!iconEdit}
+          title={`图标与颜色 · ${iconEdit?.name ?? ""}`}
+          onClose={() => setIconEdit(null)}
+          footer={
+            <button
+              className="text-gx-13 text-gx-text-tertiary hover:text-gx-text-primary"
+              onClick={() => setIconEdit(null)}
+            >
+              完成
+            </button>
+          }
+        >
+          {iconEdit ? (
+            <EntityIconPanel
+              icon={iconEdit.icon ?? null}
+              iconColor={iconEdit.iconColor ?? null}
+              defaultIcon="table"
+              onPickIcon={(name) => commitIcon({ icon: name, iconColor: iconEdit.iconColor ?? null })}
+              onPickColor={(c) =>
+                commitIcon({ icon: c === null ? iconEdit.icon ?? null : iconEdit.icon ?? "table", iconColor: c })
+              }
+              onReset={() => commitIcon({ icon: null, iconColor: null })}
+            />
+          ) : null}
         </Modal>
       </>
     ),

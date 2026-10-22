@@ -78,7 +78,8 @@ export function GridRow(props: GridRowProps) {
         zebra ? "bg-gx-zebra" : selected ? "bg-gx-accent-bg" : "bg-gx-surface",
         // 选中态优先于 hover：选中行恒为 gx-accent-bg(#EAF2FC)，不被 hover 覆盖
         selected ? "" : "hover:bg-gx-row-hover",
-        "cursor-pointer",
+        // group：行首展开按钮靠 group-hover 才淡入（常态只显示复选框，1:1 底板 .ckcell）。
+        "group cursor-pointer",
       )}
       onClick={(e) => {
         // 行任意空白点击 = 打开抽屉
@@ -101,12 +102,14 @@ export function GridRow(props: GridRowProps) {
           ...(rowColor ? { boxShadow: `inset ${ROW_COLOR_BAR_PX}px 0 0 ${rowColor}` } : {}),
         }}
       >
-        <div className="flex h-full items-center gap-1 px-1.5">
+        {/* 1:1 底板 .ckcell（width40 / padding-left12 / 14px 复选框）：复选框恒在左 12px 对齐；
+            展开按钮常态透明、仅整行 hover（或自身键盘聚焦）时淡入，既不挤占复选框、也不丢功能。
+            本列固定 56px，透明按钮仍占位故无布局位移；其行为（打开记录抽屉）与点整行一致。 */}
+        <div className="flex h-full items-center pl-3 pr-1">
           <Checkbox checked={selected} onChange={() => onToggleRowSelect(record.id)} />
-          <span className="w-5 text-center text-gx-11 text-gx-text-hint">{/* 行号占位 */}</span>
           <button
             type="button"
-            className="rounded p-0.5 text-gx-text-hint hover:bg-gx-bg hover:text-gx-text-primary"
+            className="ml-auto rounded p-0.5 text-gx-text-hint opacity-0 transition-opacity duration-150 hover:bg-gx-bg hover:text-gx-text-primary focus-visible:opacity-100 group-hover:opacity-100"
             title="展开记录"
             onClick={() =>
               onOpenRecord({ tableId: record.tableId, recordId: record.id, title: "" })

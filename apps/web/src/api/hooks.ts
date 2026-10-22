@@ -475,7 +475,17 @@ export function useGXMutations() {
         await Tables.remove(p.tableId);
         return p;
       },
-      onSuccess: (_d, v) => invalidateAll(v.baseId),
+      // #1006：必须 await 表列表 refetch 落地后再让 mutateAsync resolve。
+      // 此前只「触发」失效（void），三个删表入口在 .then 里立刻 navigate('/base/:id')，
+      // BaseIndexRedirect 挂载时 useTables 读到的还是删除前的旧缓存（isLoading=false），
+      // tables[0] 若正好是被删表 → 又被重定向回那张已删表的死视图，要手动切走才消失。
+      // await 后调用方跳转时缓存必为新列表（已不含被删表）。
+      onSuccess: async (_d, v) => {
+        await qc.invalidateQueries({ queryKey: ["tables", v.baseId] });
+        void qc.invalidateQueries({ queryKey: ["bases"] });
+        void qc.invalidateQueries({ queryKey: ["base", v.baseId] });
+        void qc.invalidateQueries({ queryKey: ["trash", v.baseId] });
+      },
     }),
     duplicateTable: useMutation({
       mutationFn: async (p: { tableId: string; name?: string; withData?: boolean }) =>
