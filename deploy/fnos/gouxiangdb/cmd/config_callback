@@ -1,14 +1,67 @@
 #!/bin/bash
-# GouXiangDB fnOS 生命周期占位：config_callback
+# GouXiangDB fnOS 生命周期：config_callback（应用设置向导提交后执行）
 #
-# 为什么存在：fnpack 打包校验要求 cmd/ 下 9 个生命周期脚本【全部存在】
-#（main / install_init / install_callback / uninstall_init / uninstall_callback /
-#  upgrade_init / upgrade_callback / config_init / config_callback），
-# 缺任一即报 "Required file "cmd/<name>" is missing" 并拒绝打包。
+# 职责（唯一）：把配置向导字段 wizard_port 定点回写到持久配置
+#   ${TRIM_PKGETC}/gouxiangdb.env 的 PORT 行，其它行（JWT_SECRET / DATABASE_URL /
+#   GX_UPDATE_TOKEN …）逐字保留。回写后由 main start 重新 source env 生效。
 #
-# 为什么只 exit 0：init 阶段（*_init）运行在文件解压前/停止后，
-# 飞牛官方明确 TRIM_PKGETC / TRIM_DATA_SHARE_PATHS 等变量【仅在 *_callback
-# 阶段保证就绪】，在 init 里引用它们会误中止安装/升级。本应用真正的初始化
-#（生成 gouxiangdb.env + prisma migrate deploy + nav reconcile）全部放在
-# install_callback / upgrade_callback，故此处不做任何事。
+# 边界：
+#   - 不在此脚本里自行拉起/重启进程：服务进程归 fnOS 服务管理（PID 在 main 的 app.pid），
+#     自起会脱离管控。配置流程后若系统未自动重启，用户在应用中心「停止/启动」一次即可；
+#   - 向导只在表单层校验「纯数字」，范围 1024-65535 必须在此二次校验（官方要求再次校验）；
+#   - init 阶段（config_init）TRIM_PKGETC 不保证就绪，故逻辑只放本 callback。
+set -euo pipefail
+
+ENV_FILE="${TRIM_PKGETC}/gouxiangdb.env"
+
+if [ ! -f "$ENV_FILE" ]; then
+  echo "配置文件不存在：$ENV_FILE（应用可能尚未完成首装），无法更新端口。" > "$TRIM_TEMP_LOGFILE"
+  exit 1
+fi
+
+NEW_PORT="${wizard_port:-}"
+# 用户没填（配置向导理论上 required，这里兜底）→ 不改动，避免误把端口清空。
+if [ -z "$NEW_PORT" ]; then
+  echo "未收到 wizard_port，保持当前端口不变。"
+  exit 0
+fi
+if ! [[ "$NEW_PORT" =~ ^[0-9]+$ ]] || [ "$NEW_PORT" -lt 1024 ] || [ "$NEW_PORT" -gt 65535 ]; then
+  echo "服务端口非法：${NEW_PORT}（需为 1024-65535 之间的数字），端口未更改。" > "$TRIM_TEMP_LOGFILE"
+  exit 1
+fi
+
+CUR_PORT="$(node -e '
+  const fs=require("fs");
+  const p=process.argv[1];
+  let v="";
+  if(fs.existsSync(p)){for(const l of fs.readFileSync(p,"utf8").split(/\r?\n/)){const m=l.match(/^PORT=(.*)$/);if(m)v=m[1];}}
+  process.stdout.write(v.trim());
+' "$ENV_FILE")"
+
+if [ "$NEW_PORT" = "$CUR_PORT" ]; then
+  echo "端口未变化（${CUR_PORT}），无需更新。"
+  exit 0
+fi
+
+umask 077
+TMP_ENV="$(mktemp "${ENV_FILE}.XXXXXX")"
+# 读【现 env】→ 仅替换/追加 PORT 一行 → 原子 mv，其余行逐字保留。
+node -e '
+  const fs=require("fs");
+  const [srcFile,dstFile,newPort]=process.argv.slice(1);
+  const text=fs.readFileSync(srcFile,"utf8");
+  const nl=text.endsWith("\n")?"\n":"";
+  const lines=text.split(/\r?\n/);
+  if(nl)lines.pop();
+  let hit=false;
+  const out=lines.map((l)=>{
+    if(/^PORT=/.test(l)){hit=true;return "PORT="+newPort;}
+    return l;
+  });
+  if(!hit)out.push("PORT="+newPort);
+  fs.writeFileSync(dstFile,out.join("\n")+"\n",{mode:0o600});
+' "$ENV_FILE" "$TMP_ENV" "$NEW_PORT"
+mv "$TMP_ENV" "$ENV_FILE"
+
+echo "服务端口已更新为 ${NEW_PORT}（原 ${CUR_PORT:-未设置}）；如应用未自动重启，请在应用中心停止再启动一次。"
 exit 0

@@ -15,7 +15,9 @@
 //   --arch 仅决定 manifest.platform 与校验，不会交叉编译原生模块。
 //
 // 设计参考 deploy/bin/package-release.mjs（白名单组装 + 禁带扫描），
-// 但输出到 fnOS 包目录 deploy/fnos/gouxiangdb/app/server，并用网关子路径构建前端。
+// 但输出到 fnOS 包目录 deploy/fnos/gouxiangdb/app/server。0.2.5 起前端按【根路径】构建：
+// fpk 改为独立端口服务（app/ui/config 的 port=${wizard_port}），页面与 API 同源在
+// http://NAS:端口，不再使用 /cgi/ThirdParty/... 子路径。
 
 import fs from "node:fs";
 import path from "node:path";
@@ -28,12 +30,13 @@ const repoRoot = path.resolve(here, "..", "..");
 const packDir = path.join(here, "gouxiangdb");
 const serverDir = path.join(packDir, "app", "server");
 const publicDir = path.join(serverDir, "public");
-// 前端 base 必须是【CGI 入口前缀】，不能是统一网关前缀 /app/gouxiangdb：
-// 三方应用的统一网关注册在 fnOS 1.2.0604 上不生效（实测请求被门户拦在 "invalid token"，
-// 桌面点开即空白页），对外入口是 /cgi/ThirdParty/<appname>/index.cgi/。
-// 该前缀同时决定了 index.html 里的资源路径与前端 API_BASE_URL（import.meta.env.BASE_URL），
-// CGI 脚本会剥离 index.cgi 之前的部分再转发给后端，所以后端看到的是 /api/...、/assets/...。
-const CGI_PREFIX = "/cgi/ThirdParty/gouxiangdb/index.cgi/";
+// 0.2.5 起 fpk 为【独立端口服务】：app/ui/config 用 "port":"${wizard_port}" 让门户跨源
+// iframe 嵌入应用自己的端口，页面与 API 同源在 http://NAS:端口（根路径）。因此前端按
+// vite 默认 base="/" 构建，index.html 资源走 /assets/...、API 走同源 /api/...。
+// 历史 CGI 前缀（/cgi/ThirdParty/gouxiangdb/index.cgi/）已废弃，index.cgi 不再打包。
+const DEFAULT_PORT = "3001";
+const PORT_ENTRY_URL = "/";
+const brandPngDir = path.join(repoRoot, "branding", "app-icon", "png");
 
 const args = process.argv.slice(2);
 let arch = "";
@@ -98,14 +101,14 @@ if (spawnSync("fnpack", ["--help"], { stdio: "ignore" }).status !== 0) {
 const rootPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 const apiPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "apps", "api", "package.json"), "utf8"));
 const version = rootPkg.version || "0.0.0-dev";
-log(`版本 ${version}，目标 arch=${arch}（linux/${wantArch}），CGI 入口前缀 ${CGI_PREFIX}`);
+log(`版本 ${version}，目标 arch=${arch}（linux/${wantArch}），独立端口入口（默认 ${DEFAULT_PORT}，根路径构建）`);
 
-// --- 1) 构建 api（esbuild）与 web（网关子路径） -----------------------------------
+// --- 1) 构建 api（esbuild）与 web（根路径，独立端口同源） -----------------------------------
 log("构建 @gx/api（esbuild）");
 run("pnpm", ["--filter", "@gx/api", "run", "build"]);
-log(`构建 @gx/web（VITE_BASE_PATH=${CGI_PREFIX}）`);
+log("构建 @gx/web（根路径 base=/，独立端口下页面与 /api 同源）");
 run("pnpm", ["--filter", "@gx/web", "run", "build"], {
-  env: { ...process.env, VITE_BASE_PATH: CGI_PREFIX },
+  env: { ...process.env, VITE_BASE_PATH: "/" },
 });
 
 // --- 2) 写 manifest.platform / manifest.version -----------------------------------
@@ -247,20 +250,18 @@ log("产物冒烟：真跑 dist/index.js 到 /readyz + 静态扫描 dist/*.js");
 run("node", [path.join(serverDir, "scripts", "smoke-dist.mjs")], { cwd: serverDir });
 
 // --- 5.5) 入口一致性自检（白屏闸门） ----------------------------------------------
-// 空白页最常见的三个来源，全部在这里堵死：
-//   1) app/ui/index.cgi 缺失或没有可执行位 → CGI 直接失败，iframe 里就是空白；
-//   2) 入口 url 与 CGI_PREFIX 不一致 → 门户打开的是另一个（不存在的）路径；
-//   3) 误留 gatewayPrefix/gatewaySocket → 三方应用的网关注册不生效，请求被门户拦在
-//      "invalid token"，同样表现为空（2026-09-18 真机实测）。
+// 独立端口服务（0.2.5 起）下，空白页的主要来源在这里堵死：
+//   1) 仍残留 app/ui/index.cgi → 说明是旧 CGI 半成品，入口模型不一致（必须已删）；
+//   2) 入口不是 type=iframe / protocol=http / port=${wizard_port} / url="/" →
+//      门户打不开应用自己的端口（或路径错），点开即空白；
+//   3) 误留 gatewayPrefix/gatewaySocket → 三方应用网关注册不生效，请求被门户拦 invalid token；
+//   4) 向导 wizard/install、wizard/config 缺失或不是合法 JSON → 安装/改端口收集不到 wizard_port。
 (() => {
   const uiDir = path.join(packDir, "app", "ui");
   const cgiPath = path.join(uiDir, "index.cgi");
   const cfgPath = path.join(uiDir, "config");
-  if (!fs.existsSync(cgiPath)) fail("缺少 app/ui/index.cgi（CGI 反代入口），装上去必然空白页");
-  try {
-    fs.accessSync(cgiPath, fs.constants.X_OK);
-  } catch {
-    fail("app/ui/index.cgi 没有可执行位，CGI 无法执行（构建产物的权限位必须在打包前设好）");
+  if (fs.existsSync(cgiPath)) {
+    fail("仍存在 app/ui/index.cgi：0.2.5 起已改为独立端口服务，CGI 反代必须删除（git rm）。");
   }
   let cfg;
   try {
@@ -277,13 +278,52 @@ run("node", [path.join(serverDir, "scripts", "smoke-dist.mjs")], { cwd: serverDi
           `三方应用的统一网关注册在真机上不生效（实测被门户拦在 invalid token），会导致空白页。`,
       );
     }
-    if (e.url !== CGI_PREFIX) {
-      fail(`入口 "${e.title}" 的 url="${e.url}" 与 CGI_PREFIX="${CGI_PREFIX}" 不一致，会导致空白页`);
+    if (e.type !== "iframe") fail(`入口 "${e.title}" 的 type="${e.type}"，独立端口门户嵌入必须为 iframe`);
+    if (e.protocol !== "http") fail(`入口 "${e.title}" 的 protocol="${e.protocol}"，端口服务入口必须为 http`);
+    if (e.port !== "${wizard_port}") {
+      fail(`入口 "${e.title}" 的 port="${e.port}"，必须为 "\${wizard_port}"（安装/配置向导收集的端口）`);
     }
-    if (e.type !== "iframe") console.warn(`[fnpack-build] 入口 "${e.title}" 的 type=${e.type}（预期 iframe）`);
+    if (e.url !== PORT_ENTRY_URL) {
+      fail(`入口 "${e.title}" 的 url="${e.url}"，独立端口根路径部署必须为 "/"`);
+    }
   }
-  log(`入口一致性自检通过（${entries.length} 个入口，url=${CGI_PREFIX}，index.cgi 可执行）`);
+  for (const wiz of ["install", "config"]) {
+    const wp = path.join(packDir, "wizard", wiz);
+    if (!fs.existsSync(wp)) fail(`缺少 wizard/${wiz}（独立端口需在安装/配置向导收集 wizard_port）`);
+    try {
+      const parsed = JSON.parse(fs.readFileSync(wp, "utf8"));
+      const fields = JSON.stringify(parsed);
+      if (!fields.includes("wizard_port")) fail(`wizard/${wiz} 未包含 wizard_port 字段`);
+    } catch (e) {
+      fail(`wizard/${wiz} 不是合法 JSON：${e?.message ?? e}`);
+    }
+  }
+  log(`入口一致性自检通过（${entries.length} 个端口服务入口，port=\${wizard_port}，url=/，向导齐备，无 CGI/网关残留）`);
 })();
+
+// --- 5.6) 品牌图标一致性自检（旧图标白屏/错图闸门） --------------------------------
+// 飞牛桌面读 ICON.PNG / ICON_256.PNG 与 app/ui/images/icon_{256,64}.png。四处必须与品牌单源
+// branding/app-icon/png 逐字节一致，避免重打时又带回旧版图标（2026-10 真机曾见桌面显旧图标）。
+(() => {
+  const md5 = (p) => crypto.createHash("md5").update(fs.readFileSync(p)).digest("hex");
+  const pairs = [
+    ["ICON.PNG", "icon-256.png"],
+    ["ICON_256.PNG", "icon-256.png"],
+    ["app/ui/images/icon_256.png", "icon-256.png"],
+    ["app/ui/images/icon_64.png", "icon-64.png"],
+  ];
+  for (const [dst, brand] of pairs) {
+    const dstPath = path.join(packDir, dst);
+    const brandPath = path.join(brandPngDir, brand);
+    if (!fs.existsSync(dstPath)) fail(`缺少飞牛图标 ${dst}`);
+    if (!fs.existsSync(brandPath)) fail(`缺少品牌单源 ${brand}`);
+    if (md5(dstPath) !== md5(brandPath)) {
+      fail(`图标 ${dst} 与品牌单源 branding/app-icon/png/${brand} 不一致（md5 不同，疑似旧图标），请先同步再打包`);
+    }
+  }
+  log("品牌图标一致性自检通过（4 处图标 == branding/app-icon/png）");
+})();
+
 
 // 原生模块架构自检：至少应存在 better-sqlite3 的 .node 与 prisma libquery engine。
 function assertExists(globHint, predicate) {

@@ -13,11 +13,20 @@ ENV_FILE="${TRIM_PKGETC}/gouxiangdb.env"
 
 mkdir -p "$DATA_DIR/uploads" "$DATA_DIR/backups" "${TRIM_PKGVAR}/log"
 
+# 服务端口：来自安装向导字段 wizard_port（app/ui/config 的端口服务入口用 ${wizard_port}
+# 引用同一值）。向导只校验了「纯数字」，范围（1024-65535）必须在脚本里二次校验
+#（飞牛官方要求向导值在使用前再次校验）。未提供（历史/静默安装）时回退默认 3001。
+APP_PORT="${wizard_port:-3001}"
+if ! [[ "$APP_PORT" =~ ^[0-9]+$ ]] || [ "$APP_PORT" -lt 1024 ] || [ "$APP_PORT" -gt 65535 ]; then
+  echo "服务端口非法：${wizard_port}（需为 1024-65535 之间的数字），请在安装向导中重新填写。" > "$TRIM_TEMP_LOGFILE"
+  exit 1
+fi
+
 # 1) 持久配置（已存在则保留：升级重装不重生成密钥，避免登录态全失效）。
 if [ ! -f "$ENV_FILE" ]; then
   JWT_SECRET="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")"
-  # 安装向导若收集 external_origin（无 TRIM_ 前缀）则用作 CORS 来源；
-  # 未配置向导时留占位，安装后由用户在 gouxiangdb.env 填实际来源并重启。
+  # 独立端口服务下浏览器与 API 同源（页面即 http://NAS:端口），CORS 保留默认占位即可：
+  # 后端对同源/无 Origin 请求一律放行（apps/api/src/app.ts 的 cors origin 回调）。
   CORS_ORIGIN="${external_origin:-http://localhost}"
   umask 077
   cat > "$ENV_FILE" <<EOF
@@ -25,7 +34,7 @@ NODE_ENV=production
 JWT_SECRET=${JWT_SECRET}
 DATABASE_URL=file:${DATA_DIR}/app.db
 CORS_ORIGIN=${CORS_ORIGIN}
-PORT=3001
+PORT=${APP_PORT}
 GX_MIN_DISK_MB=1024
 # 应用更新机制：内置只读 Gitea 令牌（仅单仓 read 权限）。
 # 占位符 __GX_UPDATE_TOKEN__ 由 build-fpk.mjs 在打包副本中替换为真实只读令牌，

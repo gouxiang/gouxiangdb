@@ -1,7 +1,7 @@
 // apps/api/src/middleware/__tests__/securityHeaders.test.ts
 // 安全头与请求体上限契约（构造最小 Hono app，不起服务）。
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { secureHeadersMiddleware } from "../secureHeaders.js";
 import { bodyLimitDispatch } from "../bodyLimit.js";
@@ -31,6 +31,29 @@ describe("secureHeaders 中间件", () => {
     expect(res.headers.get("x-dns-prefetch-control")).toBe("off");
     // HSTS 由 Caddy 在 TLS 侧发，应用在 HTTP 反代后不应发
     expect(res.headers.get("strict-transport-security")).toBeNull();
+  });
+});
+
+describe("secureHeaders 飞牛渠道（GX_DEPLOY_CHANNEL=fnos-fpk）", () => {
+  it("不发 X-Frame-Options，允许飞牛门户跨源 iframe 嵌入独立端口", async () => {
+    // 模块在 import 时读 GX_DEPLOY_CHANNEL 决定单例，故先置位再重置模块缓存后动态 import。
+    vi.stubEnv("GX_DEPLOY_CHANNEL", "fnos-fpk");
+    vi.resetModules();
+    try {
+      const mod = await import("../secureHeaders.js");
+      const mw = mod.secureHeadersMiddleware as typeof secureHeadersMiddleware;
+      const app = new Hono();
+      app.use("*", mw);
+      app.get("/", (c) => c.text("ok"));
+      const res = await app.request("/");
+      // 跨源 iframe 必须完全不带 X-Frame-Options（SAMEORIGIN 也会拦跨源端口）。
+      expect(res.headers.get("x-frame-options")).toBeNull();
+      // 其余安全头不受影响。
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 });
 

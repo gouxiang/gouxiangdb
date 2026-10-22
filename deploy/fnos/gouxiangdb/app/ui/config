@@ -4,8 +4,9 @@
       "title": "构想工作台",
       "icon": "images/icon_{0}.png",
       "type": "iframe",
-      "protocol": "",
-      "url": "/cgi/ThirdParty/gouxiangdb/index.cgi/",
+      "protocol": "http",
+      "port": "${wizard_port}",
+      "url": "/",
       "allUsers": true
     }
   }
