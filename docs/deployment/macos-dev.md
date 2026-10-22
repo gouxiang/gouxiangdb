@@ -119,6 +119,8 @@ node dist/index.js
 
 **模拟飞牛网关（unix socket + 子路径）**：
 
+> 【2026-10 注】本节模拟的是 **0.2.4 及以前** 的旧飞牛网关（socket+子路径）形态，当前飞牛已改 9527 独立 TCP 端口（见 `fnos-native.md`）；socket 适配代码仍在、可用于复现旧版，勿当作现行飞牛调试路径。
+
 ```bash
 # 先用子路径构建前端
 VITE_BASE_PATH=/app/gouxiangdb pnpm --filter @gx/web build

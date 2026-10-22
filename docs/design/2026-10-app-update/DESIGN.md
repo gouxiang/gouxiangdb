@@ -5,6 +5,7 @@
 - 作者：高见远（架构）；2026-10-11 项目总监按拍板与实测结果修订
 - 适用版本基线：根 `package.json` version `0.2.2`（fpk 产物 `deploy/fnos/dist/gouxiangdb-0.2.2-x86.fpk`，63,074,943 字节，约 60.15 MiB）
 - 配套示例：同目录 `manifest.example.json`
+- 【0.2.6 现状】本设计应用更新侧已落地；飞牛现行独立 TCP 端口 9527（0.2.5 起，index.cgi/CGI 已删）；0.2.6 正式包仍只发 x86 fpk 与 macOS arm64 dmg，不出飞牛 arm 包（D8 原决策措辞见 §11，保留不动）。
 - 需求来源：产品负责人戴总——「可扩展的应用版本更新机制」，当前只做检查 / 展示 / 下载，不做自动安装
 
 ---
@@ -562,7 +563,7 @@ export const AdminUpdateApi = {
       { method: "POST", body: JSON.stringify(body), timeoutMs: WRITE_TIMEOUT_MS },
     ),
 };
-// 实际下载地址用 withBase(downloadPath) 拼同源前缀（子路径/CGI 部署均正确），
+// 实际下载地址用 withBase(downloadPath) 拼同源前缀（子路径部署亦正确），
 // 交给 <a href>/window.open 原生导航，不走 apiFetch。
 ```
 
@@ -916,7 +917,7 @@ sequenceDiagram
 | D4 | 何时允许自动轮询 | 自动检查能提高新版本触达率 | **不在本机制做**：轮询意味着所有客户 NAS 定时出网（哪怕内网失败也有连接尝试日志），且会让「更新服务挂了」变成全员可见的错误噪音。待 D2 公开清单落地后，再以独立 flag（默认关）、低频（如每 24 小时 + 随机抖动）、仅有网时静默失败的方式单独立项；缓存层已为轮询准备好了结构 |
 | D5 | Gitea 域名变更；**无公网客户怎么办**；内网镜像 | 现域名反代到内网 `192.168.31.88:21350`，匿名错误体/API 的 `browser_download_url` 字段都会泄漏该地址（2026-10-11 实测，见 8.1）；客户现场可能有自己的镜像 | **【戴总 2026-10-11 拍板：本期不考虑无公网/内网镜像环境】** 连不上更新源即直接走前端 error 态「检测失败」，不投入 static 源/内网镜像的出厂适配（`GX_UPDATE_SOURCE=static` 与 `GX_UPDATE_GITEA_BASE_URL`/`GX_UPDATE_MANIFEST_URL` 仅保留扩展位，不写交付文档、不做演练）；无公网客户由我们**单独另行人工提供安装包**。下载地址严禁使用 API 返回的 `browser_download_url`（内网值），必须以 base URL 自行拼公网路径（8.1 节硬约束）；错误体不透传。fpk 出厂默认沿用现域名 |
 | D6 | fpk 签名机制 | 当前安全链条＝飞牛平台对 fpk 的自有校验 + 我们展示 sha256 供人工核对；无密码学签名 | **MVP 不做 GPG/minisign**：manifest 已预留 `signature` 字段与解析兼容；待 D2 公开分发或有合规客户要求时再签（签名公钥需要随客户端分发，又是一套轮换体系，当前投入产出不成立）。sha256 与 Gitea 私有写权限（只有发布人能挂资产）构成现阶段合理防线 |
-| D7 | 经 fnOS CGI 反代下载 60 MiB 的缓冲行为 | 三方应用下载入口必经 `/cgi/ThirdParty/gouxiangdb/index.cgi/`，CGI 实现未知是否整体缓冲/限时 | S6 真机演练第一项；若 CGI 整体缓冲导致内存或超时问题，退路：(a) 下载端点在 fpk 通道改走本机 `service_port` 直连提示（需要 fnOS 登录态，复杂）；(b) 分块下载（Range 多段）由前端自拼（代价大，不推荐）；(c) 接受浏览器层超时重试 + 续传。先测后定 |
+| D7 | 经 fnOS CGI 反代下载 60 MiB 的缓冲行为 | 三方应用下载入口必经 `/cgi/ThirdParty/gouxiangdb/index.cgi/`，CGI 实现未知是否整体缓冲/限时 | S6 真机演练第一项；若 CGI 整体缓冲导致内存或超时问题，退路：(a) 下载端点在 fpk 通道改走本机 `service_port` 直连提示（需要 fnOS 登录态，复杂）；(b) 分块下载（Range 多段）由前端自拼（代价大，不推荐）；(c) 接受浏览器层超时重试 + 续传。先测后定。**【2026-10 更新】飞牛 0.2.5 起改独立 TCP 端口（默认 9527），index.cgi/CGI 已删并被 build-fpk 禁带，应用更新下载走 `http://NAS:端口` 同源直连，本 CGI 缓冲疑问作废。** |
 | D8 | arm64 fpk 的发布频率 | 当前 dist 目录只有 x86 包；飞牛 arm 设备客户是否存在 | **【戴总 2026-10-11 拍板：暂时不考虑 ARM 架构机器】** S6 真机演练只做 x86，本期不构建 arm 包；发布脚本按 dist 中实际存在的 fpk 生成 artifact 条目，**manifest 严禁伪造 arm64 条目**（第 8.2 节断言）。多 artifact 匹配结构保留，将来真有 arm 客户时只加发布产物、不改代码 |
 | D9 | 更新说明的 markdown 渲染安全 | release notes 由发布脚本写入，不存在终端用户输入，但仍须走净化渲染 | 直接复用现有 `components/MdContent.tsx`（`@gx/blocks` 的 `renderMarkdown`，帮助中心与知识库在用，渲染异常自动回落转义纯文本），禁止为这个功能引入 marked/dompurify 等任何新依赖；发布脚本侧同时约束 notes 文件不含原始 HTML（构建期扫描，发现 `<script` 等标签直接 fail） |
 

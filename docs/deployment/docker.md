@@ -62,7 +62,7 @@ VOLUME ["/data"]
 
 ```bash
 cd <仓库根>
-docker build -f deploy/docker/Dockerfile -t gouxiangdb:0.1.7 .
+docker build -f deploy/docker/Dockerfile -t gouxiangdb:0.2.6 .
 ```
 
 ### 2.3 跨架构构建（x86 + arm，发布到多架构）
@@ -72,7 +72,7 @@ docker buildx create --use --name gxbuilder 2>/dev/null || true
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -f deploy/docker/Dockerfile \
-  -t gouxiangdb:0.1.7 --push .
+  -t gouxiangdb:0.2.6 --push .
 ```
 
 - 必须在**目标平台阶段**装原生依赖 + `prisma generate`（Dockerfile 已如此设计）；切勿在 amd64 装好 `node_modules` 再复制进 arm 镜像。
@@ -131,7 +131,7 @@ services:
     build:
       context: ../..            # 仓库根
       dockerfile: deploy/docker/Dockerfile
-    image: gouxiangdb:0.1.7
+    image: gouxiangdb:0.2.6
     container_name: gouxiangdb
     restart: unless-stopped
     ports:
@@ -218,7 +218,7 @@ docker compose -f deploy/docker/docker-compose.yml down        # 停容器，命
 | `GX_ATTACHMENT_MAX_FILE` | 否 | 20（MB） | 附件**单文件**上限，只决定「文件 xxx 超过 20MB 上限」的提示口径，与整包档分名 |
 | `GX_RATE_LIMIT` | 否 | on | 压测才设 off |
 | `GX_INIT_ADMIN_EMAIL`/`GX_INIT_ADMIN_PASSWORD`/`GX_INIT_ADMIN_NAME` | 否 | 空 | 首次部署创建超级管理员；两者（EMAIL/PASSWORD）都非空才执行，空则跳过且不失败，详见 [`first-admin-init.md`](./first-admin-init.md) |
-| `GX_SOCKET_PATH`/`GX_BASE_PATH` | 否 | 空 | Docker 走 TCP 根路径，**不用**；仅飞牛原生用 |
+| `GX_SOCKET_PATH`/`GX_BASE_PATH` | 否 | 空 | 旧网关形态（0.2.4 及以前曾用）的遗留适配变量；Docker 走 TCP 根路径不用，当前飞牛原生（独立端口 9527 + 根路径）同样**不消费** |
 | 备份四变量 | 否 | 关 | 异地加密预留，默认不启用 |
 
 ---
@@ -295,7 +295,7 @@ docker compose -f deploy/docker/docker-compose.yml exec gouxiangdb \
 
 ## 7. 附录：在飞牛 fnOS 内以 Docker 形态交付（docker-project）
 
-同一镜像也能打成飞牛 fpk 的**容器形态**（与 [`fnos-native.md`](./fnos-native.md) 的原生 socket 形态二选一）。要点（对齐飞牛 Docker 应用案例）：
+同一镜像也能打成飞牛 fpk 的**容器形态**（与 [`fnos-native.md`](./fnos-native.md) 的原生独立端口形态二选一）。要点（对齐飞牛 Docker 应用案例）：
 
 - `fnpack create gouxiangdb-docker --template docker`；`config/resource`：
 
@@ -304,8 +304,14 @@ docker compose -f deploy/docker/docker-compose.yml exec gouxiangdb \
   ```
 
 - `app/docker/docker-compose.yaml` 用飞牛变量挂数据目录，二选一暴露：
-  - **端口入口**：`manifest` 写 `service_port`（如 3001）+ `checkport=true`，compose `"${TRIM_SERVICE_PORT}:3001"`，`app/ui/config` 用 `protocol/port`；
-  - **统一网关 socket**（更整合）：把 `${TRIM_APPDEST}:/app/target` 挂进容器，设 `GX_SOCKET_PATH=/app/target/app.sock`、`GX_BASE_PATH=/app/gouxiangdb`，`app/ui/config` 用 `gatewayPrefix:/app/gouxiangdb` + `gatewaySocket:app.sock`（容器内服务监听 `/app/target/app.sock`）。
+
+  > ⚠️ **下列「统一网关 socket」方案已于 2026-09-18 真机证伪，仅保留作历史参考**：
+  > 统一网关注册被门户拦 `invalid token`，CGI 反代依赖 NAS 登录态、无法独立穿透。
+  > **现行飞牛一律走 `service_port` 独立端口（默认 9527）+ 跨源 iframe 形态**，
+  > 见 [`fnos-native.md`](./fnos-native.md)。下述 socket 子条目不要在新包里使用。
+
+  - **端口入口（现行）**：`manifest` 写 `service_port`（如 3001）+ `checkport=true`，compose `"${TRIM_SERVICE_PORT}:3001"`，`app/ui/config` 用 `protocol/port`（容器内服务即下文的 3001，与原生 fpk 的 9527 互不影响）；
+  - **统一网关 socket（历史，已证伪，勿用）**：把 `${TRIM_APPDEST}:/app/target` 挂进容器，设 `GX_SOCKET_PATH=/app/target/app.sock`、`GX_BASE_PATH=/app/gouxiangdb`，`app/ui/config` 用 `gatewayPrefix:/app/gouxiangdb` + `gatewaySocket:app.sock`（容器内服务监听 `/app/target/app.sock`）。
   - 数据持久化挂 `${TRIM_DATA_SHARE_PATHS}` 到容器 `/data`（并在 `config/resource` 同时声明 data-share）。
 - `cmd/main status` 用 `docker inspect --format` 判容器 `running`（运行 0 / 停止 3）。
 - **架构**：即使 fpk 写 `platform=all`，镜像本身仍须支持目标架构（多架构 manifest list），否则容器起不来。
