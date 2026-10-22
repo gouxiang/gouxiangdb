@@ -80,7 +80,7 @@ export function ShareLinksPanel({ baseId, canManageBase }: { baseId: string; can
   }
 
   return (
-    <div className="rounded-gx-lg border border-gx-border bg-gx-surface p-4">
+    <div className="rounded-gx-2xl border border-gx-hairline bg-gx-surface p-4 shadow-gx-card">
       <div className="flex items-start gap-3">
         <Icon name="share" size={20} className="mt-0.5 shrink-0 text-gx-accent" />
         <div className="min-w-0 flex-1">
@@ -114,13 +114,13 @@ export function ShareLinksPanel({ baseId, canManageBase }: { baseId: string; can
 
       {/* 开关没开：不给灰按钮，直接说明原因与先去哪里开。 */}
       {canManageBase && loaded && !shareEnabled && (
-        <div className="mt-3 rounded-gx-lg border border-dashed border-gx-border bg-gx-bg px-3 py-3 text-gx-12 text-gx-text-hint">
+        <div className="mt-3 rounded-gx-lg border border-dashed border-gx-hairline bg-gx-bg px-3 py-3 text-gx-12 text-gx-text-hint">
           这个库还没打开「允许分享」，所以现在不能生成分享链接。请先在上方「谁能访问这个库」里打开「允许把这个库的内容分享出去」，再回到这里生成。
         </div>
       )}
 
       {canManageBase && loaded && shareEnabled && (
-        <div className="mt-3 overflow-hidden rounded-gx-lg border border-gx-border">
+        <div className="mt-3 overflow-hidden rounded-gx-lg border border-gx-hairline">
           {(links ?? []).map((l) => {
             const full = `${window.location.origin}${withBase(l.url)}`;
             return (

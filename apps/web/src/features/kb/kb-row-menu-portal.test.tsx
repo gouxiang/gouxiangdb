@@ -24,7 +24,11 @@ describe("KB 首页行尾菜单不被列表裁剪", () => {
   });
 
   it("卡片圆角/overflow 结构保持原样（不走「圆角下沉到首末行」那条路）", () => {
-    expect(src).toContain("overflow-hidden rounded-gx-lg border border-gx-border bg-gx-surface");
+    // v6 #985：卡片对齐底板 .card（rounded-gx-2xl/hairline/shadow-gx-card），
+    // 但守护的本质仍是「列表卡 overflow-hidden 不拆」——圆角档随底板升级，结构契约不变。
+    expect(src).toContain(
+      "overflow-hidden rounded-gx-2xl border border-gx-hairline bg-gx-surface shadow-gx-card",
+    );
   });
 });
 

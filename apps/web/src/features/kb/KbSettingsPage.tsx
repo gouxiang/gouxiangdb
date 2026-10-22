@@ -73,7 +73,7 @@ export default function KbSettingsPage() {
 
         {/* 上传限制已上提到工作区设置：它对本机浏览器内的全部知识库生效，
             不是单个知识库的属性——这里只留说明 + 跳转，避免用户以为能按库分别设限。 */}
-        <div className="mb-4 flex items-start gap-2 rounded-gx-lg border border-gx-border bg-gx-surface px-4 py-3">
+        <div className="mb-4 flex items-start gap-2 rounded-gx-2xl border border-gx-hairline bg-gx-surface px-4 py-3 shadow-gx-card">
           <Icon name="paperclip" size={16} className="mt-0.5 shrink-0 text-gx-accent" />
           <div className="min-w-0 flex-1">
             <div className="text-gx-13 font-medium text-gx-text-primary">上传限制</div>
@@ -92,7 +92,7 @@ export default function KbSettingsPage() {
         </div>
 
         {/* 基本信息：名称 + 实体图标与颜色（图标/选色即时写库，失败由 EntityIconPicker toast） */}
-        <div className="mb-4 rounded-gx-lg border border-gx-border bg-gx-surface px-4 py-3">
+        <div className="mb-4 rounded-gx-2xl border border-gx-hairline bg-gx-surface px-4 py-3 shadow-gx-card">
           <div className="mb-2 text-gx-13 font-medium text-gx-text-primary">基本信息</div>
           <div className="flex items-center gap-3">
             <EntityIconPicker

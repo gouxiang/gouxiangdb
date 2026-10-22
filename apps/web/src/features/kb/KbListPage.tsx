@@ -67,7 +67,7 @@ export default function KbListPage() {
                 key={k.id}
                 type="button"
                 onClick={() => navigate(`/kb/${k.id}`)}
-                className="group flex items-start gap-3 rounded-gx-lg border border-gx-border bg-gx-surface p-4 text-left transition-shadow hover:shadow-md"
+                className="group flex items-start gap-3 rounded-gx-2xl border border-gx-hairline bg-gx-surface p-4 text-left shadow-gx-card transition-shadow hover:shadow-gx-md"
               >
                 <span
                   className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-gx-lg text-white"
@@ -93,7 +93,7 @@ export default function KbListPage() {
               <button
                 type="button"
                 onClick={() => setShowNew(true)}
-                className="flex items-center justify-center gap-2 rounded-gx-lg border border-dashed border-gx-border-strong bg-gx-surface/50 p-4 text-gx-13 text-gx-text-tertiary hover:border-gx-accent hover:text-gx-accent"
+                className="flex items-center justify-center gap-2 rounded-gx-2xl border border-dashed border-gx-border-strong bg-gx-surface/50 p-4 text-gx-13 text-gx-text-tertiary hover:border-gx-accent hover:text-gx-accent"
               >
                 <Icon name="plus" size={16} />
                 新建知识库

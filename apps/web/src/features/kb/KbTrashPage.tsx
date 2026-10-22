@@ -64,7 +64,7 @@ export default function KbTrashPage() {
 
   return (
     <div className="flex h-full flex-col bg-gx-bg">
-      <div className="border-b border-gx-separator bg-gx-surface px-6 py-4">
+      <div className="border-b border-gx-hairline bg-gx-surface px-6 py-4">
         <div className="flex items-center gap-2">
           <Icon name="trash" size={17} className="text-gx-text-tertiary" />
           <h1 className="text-gx-16 font-semibold text-gx-text-primary">回收站</h1>
@@ -91,7 +91,7 @@ export default function KbTrashPage() {
             description="删除的文档与画布会出现在这里，30 天内可以找回。"
           />
         ) : (
-          <div className="overflow-hidden rounded-gx-lg border border-gx-border bg-gx-surface">
+          <div className="overflow-hidden rounded-gx-2xl border border-gx-hairline bg-gx-surface shadow-gx-card">
             {(docs ?? []).map((d, idx) => {
               const busy = guard.isBusy(`restore:${d.id}`) || guard.isBusy(`purge:${d.id}`);
               return (

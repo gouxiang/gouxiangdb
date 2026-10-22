@@ -50,7 +50,7 @@ export function LibraryAccessPanel({
   }
 
   return (
-    <div className="rounded-gx-lg border border-gx-border bg-gx-surface p-4">
+    <div className="rounded-gx-2xl border border-gx-hairline bg-gx-surface p-4 shadow-gx-card">
       <div className="flex flex-wrap items-start gap-3">
         <Icon name="users" size={20} className="mt-0.5 shrink-0 text-gx-accent" />
         <div className="min-w-0 flex-1">
@@ -91,7 +91,7 @@ export function LibraryAccessPanel({
           </div>
 
           {vis.roles.length > 0 && (
-            <div className="overflow-hidden rounded-gx-lg border border-gx-border">
+            <div className="overflow-hidden rounded-gx-lg border border-gx-hairline">
               <div className="flex items-center gap-3 border-b border-gx-separator bg-gx-table-header px-3 py-1.5 text-gx-12 font-medium text-gx-text-secondary">
                 <span className="flex-1">角色</span>
                 <span className="w-20">在本库</span>

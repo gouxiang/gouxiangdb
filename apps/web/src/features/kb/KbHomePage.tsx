@@ -130,7 +130,7 @@ export default function KbHomePage() {
   return (
     <div className="flex h-full flex-col bg-gx-bg">
       {/* 顶部标题 + 操作 */}
-      <div className="border-b border-gx-separator bg-gx-surface px-6 py-4">
+      <div className="border-b border-gx-hairline bg-gx-surface px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             {/* 库头图标：未自定义（icon 为空）时仍是 accent 色 book，与改动前一致 */}
@@ -195,7 +195,7 @@ export default function KbHomePage() {
             onClearFilters={debouncedQ ? () => onSearch("") : undefined}
           />
         ) : (
-          <div className="overflow-hidden rounded-gx-lg border border-gx-border bg-gx-surface">
+          <div className="overflow-hidden rounded-gx-2xl border border-gx-hairline bg-gx-surface shadow-gx-card">
             {(docs ?? []).map((d, idx) => (
               <div
                 key={d.id}
