@@ -267,6 +267,34 @@
     inset 0 -1px 0 rgba(255, 255, 255, 0.7);
 }
 
+/* 分组标题（底板 .rail-grp，shared.css 145–153）。
+   ★ 当前 UI 刻意不渲染此节点（U3 永久裁决：表层只跳过渲染，数据层 kind:'group' 仍保留、
+   排序分段照旧），但 HANDOFF §4 红线要求样式保留备用——恢复分组视觉时直接挂此类即可，
+   不要新增生产样式。g 前缀防与全局类冲突；逐字取底板值。 */
+.gx-rail-grp {
+  width: 64px;
+  flex: none;
+  margin: 10px 0 2px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.gx-rail-grp::before,
+.gx-rail-grp::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #eef1f6;
+}
+.gx-rail-grp span {
+  font-size: 9.5px;
+  line-height: 1;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  flex: none;
+  color: #8b95a7;
+}
+
 /* 减弱动态效果：关闭砖的位移与过渡（与全站动效兜底同口径）。 */
 @media (prefers-reduced-motion: reduce) {
   .gx-rail-item,

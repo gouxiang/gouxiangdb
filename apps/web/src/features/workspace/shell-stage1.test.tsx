@@ -189,6 +189,14 @@ describe("R-N-07 图标轨：恒渲染砖名 + title，无 collapsed 分支（v6
     expect(src).not.toContain('data-nav-row="group"');
     expect(src).toContain("gx-rail-item");
   });
+
+  it("分组标题样式 .gx-rail-grp 在 index.css 保留备用（HANDOFF §4 红线：U3 只跳过渲染，不删样式）", () => {
+    const css = read("../../index.css");
+    // 底板 shared.css 145–153：左「线 文字 线」三段，恢复分组视觉时直接挂类即可。
+    expect(css).toMatch(/\.gx-rail-grp\s*\{/);
+    expect(css).toMatch(/\.gx-rail-grp::before,\s*\n?\s*\.gx-rail-grp::after/);
+    expect(css).toContain("#eef1f6");
+  });
 });
 
 describe("R-N-17 规划入口：本阶段从界面下线（点了只弹 toast 的假入口属非直觉路径）", () => {
