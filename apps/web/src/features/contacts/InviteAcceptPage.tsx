@@ -66,7 +66,7 @@ export default function InviteAcceptPage() {
 
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-gx-bg px-4">
-      <div className="w-full max-w-sm rounded-gx-xl border border-gx-separator bg-gx-surface p-6 shadow-lg">
+      <div className="w-full max-w-sm rounded-gx-xl border border-gx-hairline bg-gx-surface p-6 shadow-gx-lg">
         <div className="mb-4 flex items-center gap-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-gx-lg bg-gx-accent-bg text-gx-accent">
             <Icon name="keyRound" size={18} />

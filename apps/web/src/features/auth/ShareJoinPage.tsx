@@ -49,7 +49,7 @@ export default function ShareJoinPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gx-bg px-4">
-      <div className="w-[360px] rounded-gx-xl bg-gx-surface p-6 text-center shadow-lg">
+      <div className="w-[360px] rounded-gx-xl border border-gx-hairline bg-gx-surface p-6 text-center shadow-gx-lg">
         {state === "loading" && (
           <div className="flex flex-col items-center gap-3 py-6">
             <Spinner size={22} />

@@ -100,7 +100,7 @@ export default function ForceChangePassword() {
   return (
     // 窄屏（单栏）顶部对齐；桌面双栏垂直居中（与登录页同壳）
     <div className="flex min-h-screen items-start justify-center bg-gx-bg px-4 py-10 md:items-center">
-      <div className="grid w-full max-w-[840px] overflow-hidden rounded-gx-xl bg-gx-surface shadow-gx-lg md:grid-cols-2">
+      <div className="grid w-full max-w-[840px] overflow-hidden rounded-gx-xl border border-gx-hairline bg-gx-surface shadow-gx-lg md:grid-cols-2">
         <LoginBrandPanel slogan="完成初始安全设置，开始使用属于你自己的私有工作台。" />
 
         <div className="flex flex-col justify-center p-6 sm:p-8">

@@ -39,7 +39,7 @@ export default function PermPanel({ embedded }: { embedded?: boolean } = {}) {
 
   return (
     <div className="flex h-full flex-col bg-gx-bg">
-      <header className="flex items-center gap-2 border-b border-gx-separator px-4 py-2.5">
+      <header className="flex items-center gap-2 border-b border-gx-hairline px-4 py-2.5">
         {/* embedded：由宿主（工作区设置分区）提供标题，这里只留面包屑/来源按钮，不重复一个大标题 */}
         {!embedded && (
           <>
@@ -58,7 +58,7 @@ export default function PermPanel({ embedded }: { embedded?: boolean } = {}) {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="w-60 shrink-0 border-r border-gx-separator bg-gx-surface">
+        <aside className="w-60 shrink-0 border-r border-gx-hairline bg-gx-surface">
           <PermNodeTree selectedId={selected?.id ?? null} onSelect={setSelected} />
         </aside>
         <main className="min-w-0 flex-1 bg-gx-bg">

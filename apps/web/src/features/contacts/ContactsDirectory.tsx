@@ -85,7 +85,7 @@ export function ContactsDirectory({ className = "h-full" }: ContactsDirectoryPro
   }
 
   const deptPanel = (
-    <div className="h-full min-h-0 w-60 shrink-0 border-r border-gx-separator bg-gx-surface">
+    <div className="h-full min-h-0 w-60 shrink-0 border-r border-gx-hairline bg-gx-surface">
       <DeptTree
         selectedDeptId={deptId}
         onSelectDept={setDeptId}
@@ -112,7 +112,7 @@ export function ContactsDirectory({ className = "h-full" }: ContactsDirectoryPro
   );
 
   const rolesPanel = (
-    <div className="h-full min-h-0 flex-1 border-l border-gx-separator bg-gx-surface">
+    <div className="h-full min-h-0 flex-1 border-l border-gx-hairline bg-gx-surface">
       <RoleManager
         canCreateRoles={canCreateRoles}
         canEditRoles={canEditRoles}
@@ -138,7 +138,7 @@ export function ContactsDirectory({ className = "h-full" }: ContactsDirectoryPro
   // 窄屏：退化为 tab（成员含左部门树折叠入口）
   return (
     <div className={`${className} flex min-h-0 flex-col bg-gx-bg`}>
-      <div className="flex items-center gap-1 border-b border-gx-separator bg-gx-surface px-2 py-1">
+      <div className="flex items-center gap-1 border-b border-gx-hairline bg-gx-surface px-2 py-1">
         <DirectoryTab active={tab === "members"} icon="users" label="成员与部门" onClick={() => setTab("members")} />
         <DirectoryTab active={tab === "roles"} icon="shield" label="角色" onClick={() => setTab("roles")} />
       </div>

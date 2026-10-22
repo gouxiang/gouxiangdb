@@ -120,7 +120,7 @@ export default function LoginPage() {
   return (
     // 窄屏（单栏）顶部对齐，避免短卡片浮在屏幕中段留下大段空白；桌面双栏垂直居中
     <div className="flex min-h-screen items-start justify-center bg-gx-bg px-4 py-10 md:items-center">
-      <div className="grid w-full max-w-[840px] overflow-hidden rounded-gx-xl bg-gx-surface shadow-gx-lg md:grid-cols-2">
+      <div className="grid w-full max-w-[840px] overflow-hidden rounded-gx-xl border border-gx-hairline bg-gx-surface shadow-gx-lg md:grid-cols-2">
         {/* 左栏：品牌广告区，<768 整栏隐藏（单栏只留表单） */}
         <LoginBrandPanel slogan={SLOGAN} />
 

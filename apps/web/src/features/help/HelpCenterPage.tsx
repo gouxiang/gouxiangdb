@@ -139,7 +139,7 @@ export default function HelpCenterPage() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-gx-surface">
       {compact ? (
-        <header className="flex shrink-0 items-center justify-between border-b border-gx-separator px-gx-md py-gx-xs">
+        <header className="flex shrink-0 items-center justify-between border-b border-gx-hairline px-gx-md py-gx-xs">
           <span className="text-gx-14 font-medium text-gx-text-primary">目录</span>
           <button
             type="button"
@@ -155,12 +155,12 @@ export default function HelpCenterPage() {
 
       {/* 抽屉在流内展开（不覆盖正文）：窄屏下宁可把正文往下推，也不让用户够不着目录 */}
       {compact && drawerOpen ? (
-        <div className="shrink-0 border-b border-gx-separator bg-gx-bg px-gx-md py-gx-sm">{toc}</div>
+        <div className="shrink-0 border-b border-gx-hairline bg-gx-bg px-gx-md py-gx-sm">{toc}</div>
       ) : null}
 
       <div className="flex min-h-0 flex-1">
         {compact ? null : (
-          <aside className="w-56 shrink-0 border-r border-gx-separator bg-gx-bg p-gx-sm">{toc}</aside>
+          <aside className="w-56 shrink-0 border-r border-gx-hairline bg-gx-bg p-gx-sm">{toc}</aside>
         )}
         <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto px-gx-xl py-gx-lg">
           {state === "loading" ? (
