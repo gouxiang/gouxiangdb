@@ -142,7 +142,7 @@ export function ProgressOverlay({
   const safeTotal = Math.max(total, done);
   const pct = safeTotal > 0 ? Math.round((done / safeTotal) * 100) : 0;
   return createPortal(
-    <div className="fixed bottom-6 right-6 gx-z-popover w-[320px] rounded-gx-xl border border-gx-border bg-gx-surface p-4 shadow-gx-lg">
+    <div className="fixed bottom-6 right-6 gx-z-popover w-[320px] rounded-gx-xl border border-gx-hairline bg-gx-surface p-4 shadow-gx-pop">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 text-gx-13 font-medium text-gx-text-primary">{title}</div>
         {onClose && (

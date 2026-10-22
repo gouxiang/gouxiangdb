@@ -487,7 +487,7 @@ export function Badge({
     ? variant === "solid"
       ? { backgroundColor: `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.85)`, color: "#FFFFFF" }
       : { backgroundColor: `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.18)`, color: darkenForText(rgb) }
-    : { backgroundColor: "rgba(0,0,0,0.08)", color: "#444" };
+    : { backgroundColor: "rgba(16, 24, 40, 0.08)", color: colors.textSecondary };
   return (
     <span
       className={clsx(
@@ -689,13 +689,14 @@ export function Modal({
         // tabIndex=-1 只为「打开时移入焦点」，不进 Tab 序列；focus:outline-none 免得整块面板描边
         tabIndex={-1}
         className={clsx(
-          "relative flex w-full flex-col overflow-hidden rounded-gx-xl bg-gx-surface shadow-gx-xl focus:outline-none",
+          // v6 底板 .modal：白卡 + 1px 发丝线外框 + 12 圆角 + 重浮投影
+          "relative flex w-full flex-col overflow-hidden rounded-gx-2xl border border-gx-hairline bg-gx-surface shadow-gx-xl focus:outline-none",
           flush ? "h-[80vh]" : "max-h-[85vh]",
         )}
         style={{ maxWidth: width }}
       >
         {title && (
-          <div className="flex items-center justify-between border-b border-gx-separator px-4 py-3">
+          <div className="flex items-center justify-between border-b border-gx-hairline px-4 py-3">
             <div id={titleId} className="text-gx-14 font-semibold text-gx-text-primary">
               {title}
             </div>
@@ -709,7 +710,7 @@ export function Modal({
         </div>
         )}
         {footer && (
-          <div className="flex items-center justify-end gap-2 border-t border-gx-separator px-4 py-3">
+          <div className="flex items-center justify-end gap-2 border-t border-gx-hairline px-4 py-3">
             {footer}
           </div>
         )}
@@ -816,7 +817,8 @@ export function Popover({
   const clamped = fixed && maxHeight !== null;
 
   const cls = clsx(
-    "overflow-hidden rounded-gx-lg border border-gx-border bg-gx-surface shadow-gx-lg",
+    // v6 底板 .pop：10 圆角 + 1px 发丝线 + --sh-pop 浮起投影（不再用控件深线 border）
+    "overflow-hidden rounded-gx-xl border border-gx-hairline bg-gx-surface shadow-gx-pop",
     // fixed 模式 portal 到 body，归应用浮层 popover(900)；absolute 模式保持容器内局部 z-40
     fixed ? "fixed gx-z-popover" : "absolute top-full z-40 mt-1",
     clamped && "flex flex-col",
@@ -914,7 +916,8 @@ export function MenuItem({
 }
 
 export function MenuDivider() {
-  return <div className="my-1 h-px bg-gx-separator" />;
+  // 底板 .pop-sep：1px 浅结构线（--line-2 档），用发丝线令牌统一冷板
+  return <div className="my-1 h-px bg-gx-hairline" />;
 }
 
 /** 菜单容器（配合 MenuItem 使用） */
@@ -1044,12 +1047,12 @@ export function ContextMenu({
       role="menu"
       data-context-menu="true"
       style={{ position: "fixed", left: pos.left, top: pos.top, width }}
-      className={clsx("gx-z-popover overflow-hidden rounded-gx-lg border border-gx-border bg-gx-surface shadow-gx-lg", menuClassName)}
+      className={clsx("gx-z-popover overflow-hidden rounded-gx-xl border border-gx-hairline bg-gx-surface shadow-gx-pop", menuClassName)}
     >
       <div className="py-1">
         {items.map((it, i) => {
           if (it.kind === "divider") {
-            return <div key={i} className="my-1 h-px bg-gx-separator" />;
+            return <div key={i} className="my-1 h-px bg-gx-hairline" />;
           }
           if (it.kind === "submenu") {
             return (
@@ -1219,7 +1222,7 @@ function ContextSubmenu({
         // 兄弟 submenu 的 mousemove 监听在抢跑帮它重置定时器，定时器到期就关，子菜单瞬间消失。
         // 关闭策略完全交给下面的全局 mousemove 监听：只要鼠标还在 trigger / 当前 submenu /
         // 另一个 sibling trigger 上，就保持打开；否则 scheduleClose()。
-        className="flex w-full items-start gap-2 px-3 py-1.5 text-left text-gx-13 text-gx-text-primary hover:bg-gx-bg"
+        className="flex w-full items-start gap-2 px-3 py-1.5 text-left text-gx-13 text-gx-text-primary transition-colors duration-[120ms] hover:bg-gx-row-hover"
       >
         {icon && <Icon name={icon} size={14} className="mt-0.5 flex-shrink-0" />}
         <span className="flex-1 truncate">{label}</span>

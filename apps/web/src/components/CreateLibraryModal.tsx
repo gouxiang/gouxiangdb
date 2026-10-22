@@ -150,10 +150,11 @@ export function CreateLibraryModal({
                   type="button"
                   onClick={() => setType(opt.t)}
                   className={[
-                    "flex flex-col items-start gap-1 rounded-gx-lg border p-3 text-left transition-colors",
+                    // 底板 .typ-c：10 圆角 + 1px 边；未选发丝线，选中 brand 边 + brand-soft 底
+                    "flex flex-col items-start gap-1 rounded-gx-xl border p-3 text-left transition-colors",
                     type === opt.t
                       ? "border-gx-accent bg-gx-accent-bg"
-                      : "border-gx-border bg-gx-surface hover:bg-gx-bg",
+                      : "border-gx-hairline bg-gx-surface hover:bg-gx-bg",
                   ].join(" ")}
                 >
                   <span className="flex items-center gap-1.5 text-gx-13 font-medium text-gx-text-primary">
