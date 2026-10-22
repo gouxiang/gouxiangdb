@@ -99,7 +99,7 @@ export default function CanvasEditorPage() {
 
   return (
     <div className="flex h-full flex-col bg-gx-bg">
-      <div className="flex items-center gap-2 border-b border-gx-separator bg-gx-surface px-3 py-2">
+      <div className="flex items-center gap-2 border-b border-gx-hairline bg-gx-surface px-3 py-2">
         <button
           type="button"
           onClick={() => navigate(`/kb/${kbId}`)}
@@ -174,7 +174,7 @@ export default function CanvasEditorPage() {
 
       {/* R-D-18 保存冲突（409）：就地二选一，不静默覆盖 */}
       {persist.conflict && (
-        <div className="shrink-0 border-b border-gx-separator px-4 py-2">
+        <div className="shrink-0 border-b border-gx-hairline px-4 py-2">
           <ConflictNotice
             description="保存时发现服务端版本比你的更新。选择「查看最新版本」会丢弃本地未保存内容；选择「保留我的版本」会以你的内容覆盖服务端。"
             onViewLatest={() => {
