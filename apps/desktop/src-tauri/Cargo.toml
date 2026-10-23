@@ -2,7 +2,7 @@
 name = "gouxiangdb-desktop"
 # 仅占位：tauri build 时以 tauri.conf.json 的 version 为准覆盖此值；tauri.conf.json 与根
 # package.json 共同构成版本单源（升版三处同改：根 package.json / tauri.conf.json / 本占位）。
-version = "0.2.6"
+version = "0.2.7"
 description = "GouXiangDB macOS desktop shell"
 edition = "2021"
 rust-version = "1.77"
