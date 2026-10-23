@@ -833,7 +833,15 @@ function DetailCell({ field, value, tableId, recordId, canEdit }: { field: Field
     // 旧实现是左置 label + flex-1 值区，一行放两个字段时值区只剩几十像素被挤压；
     // 且 label 写了内联的像素级宽度上限（绕开间距令牌）。改为纵向两行后
     // 值区始终占满整格宽度，长字段名由容器 min-w-0 + 文本 truncate 收口。
-    <div className="flex min-w-0 flex-col gap-1.5 rounded-gx-sm border border-gx-border bg-gx-surface px-3 py-2">
+    //
+    // 编辑态去外框（#1047）：本容器只读态是一张带边框的字段小卡；但编辑时内嵌的
+    // FieldInput 自带标准边框，外卡若仍保留边框/底色就形成「框中框」，整块比只读态
+    // 大一圈（戴总反馈"输入框异常变大、多一个圆角框"）。故编辑中外卡变透明、只保留
+    // padding（不引发布局跳动），画面上只剩唯一的标准输入框。
+    <div className={clsx(
+      "flex min-w-0 flex-col gap-1.5 rounded-gx-sm px-3 py-2",
+      editing && !readOnly ? "border border-transparent bg-transparent" : "border border-gx-border bg-gx-surface",
+    )}>
       {/* 第一行：字段名（图标 + 名称） */}
       <div className="flex min-w-0 items-center gap-1 text-gx-12 text-gx-text-secondary">
         <span className="flex shrink-0 items-center">

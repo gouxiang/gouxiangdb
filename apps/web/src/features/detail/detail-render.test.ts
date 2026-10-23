@@ -70,6 +70,14 @@ describe("详情抽屉 DetailCell：标签上置（R-F-06）", () => {
     expect(cell).toContain("min-w-0");
     expect(cell).toContain("truncate");
   });
+
+  it("#1047 编辑态外卡必须透明（不得与内嵌 FieldInput 形成框中框），只读态保留描边", () => {
+    const cell = sliceFn("DetailCell");
+    // 编辑中外卡只保留透明描边占位 + 透明底；可见边框只允许来自输入框自身
+    expect(cell).toContain("border-transparent bg-transparent");
+    // 只读态仍需真实描边 + surface 底
+    expect(cell).toContain("border-gx-border bg-gx-surface");
+  });
 });
 
 describe("抽屉显示口径：时间串不再直出（与 formatCell 同源）", () => {

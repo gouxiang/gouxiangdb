@@ -274,7 +274,25 @@ export function FieldInput({
     );
   }
 
-  const common = "w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2 py-1 text-gx-13 text-gx-text-primary focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent-bg disabled:opacity-50";
+  // 编辑控件四态（默认/悬停/焦点/禁用）与 components/ui.tsx 的 Input/Textarea 同一口径
+  // （R-D-05 圆角 8、R-F-05 单行 32 高）：此前这里是另一套 px-2 py-1 + ring-accent-bg，
+  // 与全站控件不一致、聚焦环偏浅偏粗显得"框大一圈"。两套不得再分叉。
+  const inputCommon = clsx(
+    "h-8 w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 text-gx-13 text-gx-text-primary",
+    "transition-colors duration-[120ms]",
+    "hover:border-gx-border-strong",
+    "focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50",
+    "placeholder:text-gx-text-hint",
+    "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gx-border",
+  );
+  const textareaCommon = clsx(
+    "w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 py-1.5 text-gx-13 text-gx-text-primary",
+    "transition-colors duration-[120ms] resize-y",
+    "hover:border-gx-border-strong",
+    "focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50",
+    "placeholder:text-gx-text-hint",
+    "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gx-border",
+  );
 
   switch (field.type) {
     case "member":
@@ -295,7 +313,7 @@ export function FieldInput({
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
           rows={3}
-          className={clsx(common, "resize-y")}
+          className={textareaCommon}
           placeholder="请输入"
         />
       );
@@ -313,7 +331,7 @@ export function FieldInput({
           step={step}
           onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
           onBlur={onBlur}
-          className={common}
+          className={inputCommon}
           placeholder="0"
         />
       );
@@ -340,7 +358,7 @@ export function FieldInput({
           value={resolveSelectOption(field, value)?.name ?? ""}
           onChange={(e) => onChange(e.target.value || null)}
           onBlur={onBlur}
-          className={common}
+          className={inputCommon}
         >
           <option value="">—</option>
           {opts.map((o) => (
@@ -388,7 +406,7 @@ export function FieldInput({
           value={value ? String(value).substring(0, 10) : ""}
           onChange={(e) => onChange(e.target.value || null)}
           onBlur={onBlur}
-          className={clsx(common, "[&::-webkit-clear-button]:hidden [&::-webkit-inner-spin-button]:hidden")}
+          className={clsx(inputCommon, "[&::-webkit-clear-button]:hidden [&::-webkit-inner-spin-button]:hidden")}
         />
       );
     case "datetime":
@@ -400,7 +418,7 @@ export function FieldInput({
           value={value ? String(value).substring(0, 16) : ""}
           onChange={(e) => onChange(e.target.value || null)}
           onBlur={onBlur}
-          className={clsx(common, "[&::-webkit-clear-button]:hidden [&::-webkit-inner-spin-button]:hidden")}
+          className={clsx(inputCommon, "[&::-webkit-clear-button]:hidden [&::-webkit-inner-spin-button]:hidden")}
         />
       );
     case "rating": {
@@ -431,7 +449,7 @@ export function FieldInput({
           value={value == null ? "" : String(value)}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
-          className={common}
+          className={inputCommon}
           placeholder="https://"
         />
       );
@@ -444,7 +462,7 @@ export function FieldInput({
           value={value == null ? "" : String(value)}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
-          className={common}
+          className={inputCommon}
           placeholder="name@example.com"
         />
       );
@@ -457,7 +475,7 @@ export function FieldInput({
           value={value == null ? "" : String(value)}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
-          className={common}
+          className={inputCommon}
           placeholder="电话号码"
         />
       );
@@ -504,7 +522,7 @@ export function FieldInput({
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
           rows={3}
-          className={clsx(common, "font-mono resize-y")}
+          className={clsx(textareaCommon, "font-mono")}
           placeholder="{}"
         />
       );
@@ -517,7 +535,7 @@ export function FieldInput({
           value={value == null ? "" : String(value)}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
-          className={common}
+          className={inputCommon}
           placeholder="请输入"
         />
       );
@@ -553,7 +571,7 @@ function FieldMemberInput({
         type="button"
         disabled={disabled}
         onClick={() => setOpen(true)}
-        className="flex w-full items-center gap-1.5 rounded-gx-lg border border-gx-border bg-gx-surface px-2 py-1 text-left text-gx-13 text-gx-text-primary hover:border-gx-accent disabled:opacity-50"
+        className="flex h-8 w-full items-center gap-1.5 rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 text-left text-gx-13 text-gx-text-primary transition-colors duration-[120ms] hover:border-gx-border-strong focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gx-border"
       >
         {member ? (
           <MemberDisplay userId={value} byId={byId} />
