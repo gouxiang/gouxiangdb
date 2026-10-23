@@ -17,6 +17,8 @@ import { Button, Input, toast } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
 import { Form, FormActions, FormBanner, FormField, FormRow, FormSection } from "../../components/form";
 import { useAuthStore } from "../../store/auth";
+import { useActiveSession } from "../../node/activeSession";
+import { deauthenticateActiveSource, refreshActiveSourceUser } from "../../node/activeAuth";
 import {
   useUpdateMe,
   useChangePassword,
@@ -47,7 +49,9 @@ export function PersonalCenterDrawer({
   open: boolean;
   onClose: () => void;
 }) {
-  const user = useAuthStore((s) => s.user);
+  // 当前活动会话用户：本地槽即 gx-auth.user，远端槽取该节点会话分键（远端登录不写本地 store，
+  // 直读 useAuthStore 会因 user=null 在下方提前 return，抽屉在远端场景永远点不开）。
+  const user = useActiveSession().user;
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("profile");
@@ -64,14 +68,17 @@ export function PersonalCenterDrawer({
 
   if (!open || !user) return null;
 
+  // 退出登录按活动源分槽：远端 → deauthenticateActiveSource 清该节点会话（保持选路态，
+  // 守卫下一拍送回该远端自己的登录页），不清本地 gx-auth；本地 → 原 logout()。两种都回 /login。
   const onLogout = () => {
-    logout();
+    if (!deauthenticateActiveSource()) logout();
     onClose();
     navigate("/login", { replace: true });
   };
 
+  // 注销账号成功后同理：远端会话随账号失效需清分键，本地清 gx-auth。
   const onDeleted = () => {
-    logout();
+    if (!deauthenticateActiveSource()) logout();
     onClose();
     navigate("/login", { replace: true });
   };
@@ -517,6 +524,16 @@ const AVATAR_COMPRESS_THRESHOLD = 1024 * 1024; // 超过 1MB 才压缩
 
 function AvatarTab({ user }: { user: UserDTO }) {
   const updateUser = useAuthStore((s) => s.updateUser);
+  // XHR 头像上传不走 useUploadAvatar hook（要 upload.onprogress），故其成功回写在此独立分槽：
+  // 远端 → 重写该节点会话分键（commit 触发通知，顶栏/抽屉即时刷新）；本地 → 原 gx-auth updateUser。
+  const applyUser = (next: UserDTO) => {
+    try {
+      if (refreshActiveSourceUser(next).handled) return;
+    } catch {
+      // 落到本地兜底
+    }
+    updateUser(next);
+  };
   const removeAvatar = useRemoveAvatar();
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null); // 本地预览 objectURL
@@ -555,7 +572,7 @@ function AvatarTab({ user }: { user: UserDTO }) {
     try {
       const blob = await compressImage(file);
       const res = await uploadAvatarXHR(blob, file.type, (p) => setProgress(p));
-      updateUser(res.user);
+      applyUser(res.user);
       toast("头像已更新", "success");
       URL.revokeObjectURL(url);
       setPreview(null);
@@ -573,8 +590,8 @@ function AvatarTab({ user }: { user: UserDTO }) {
   const onRemove = async () => {
     setErr(null);
     try {
-      const res = await removeAvatar.mutateAsync();
-      updateUser(res.user);
+      await removeAvatar.mutateAsync();
+      // 会话回写由 useRemoveAvatar 的 onSuccess（syncActiveUser）统一分槽，此处不重复写。
       setPreview(null);
       toast("头像已移除", "success");
     } catch {

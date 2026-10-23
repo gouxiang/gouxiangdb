@@ -3,12 +3,13 @@
 //
 // 数据：useComments（后端已按根倒序返回；这里再经 organizeComments 归一，兼容扁平/嵌套两形态）。
 // 权限：canComment 控制输入与回复；删除门控 = canManageSchema || canManageBase || 本人。
-// 当前用户从 useAuthStore 取（与 RecordDrawer 同源），头像经成员名册解析。
+// 当前用户从「当前活动会话」取（本地槽=gx-auth，远端槽=该节点会话分键；与顶栏/个人中心同源），
+// 头像经成员名册解析。
 
 import { useMemo, useState } from "react";
 import type { CreateCommentRequest, PermissionSet } from "@gx/shared-types";
 import { useComments, useGXMutations } from "../../api/hooks";
-import { useAuthStore } from "../../store/auth";
+import { useActiveSession } from "../../node/activeSession";
 import { toast, Spinner } from "../../components/ui";
 import { useWriteGuard } from "../../components/interaction";
 import { useMemberRoster } from "../contacts/member-roster";
@@ -36,7 +37,7 @@ export function CommentSection({
   const m = useGXMutations();
   const guard = useWriteGuard();
   const { members, byId, isLoading: rosterLoading } = useMemberRoster();
-  const storeUser = useAuthStore((s) => s.user);
+  const storeUser = useActiveSession().user;
   const meId = currentUserId ?? storeUser?.id ?? null;
 
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);

@@ -9,6 +9,7 @@ import type {
   LibraryVisibilityResponse,
   PutLibraryScopeInput,
   RoleLibraryScopeDTO,
+  UserDTO,
 } from "@gx/shared-types";
 import {
   useQuery,
@@ -32,7 +33,26 @@ import {
   type RecordChangeEntry,
 } from "./client";
 import { useAuthStore } from "../store/auth";
+import { refreshActiveSourceUser } from "../node/activeAuth";
 import { refreshAfterCreateBase, refreshAfterCreateTable } from "./create-refresh";
+
+/**
+ * 个人资料写成功后的会话回写（统一分流，供 useUpdateMe/useUploadAvatar/useRemoveAvatar）：
+ * 活动源是远端节点（桌面壳）→ 用当前活动数据源 token + 最新 user 重写该节点会话分键
+ * （commit 会触发会话/数据源通知，订阅 useActiveSession 的顶栏/抽屉即时刷新），**不**污染本地
+ * gx-auth；本地源/门控关 handled=false → 维持原 updateUser 写 gx-auth，现网逐字节不变。
+ * 远端无 token 理论不可达（请求刚成功），refreshActiveSourceUser fail-closed 抛错时回落本地，
+ * 绝不吞掉 onSuccess。
+ */
+/** 导出供测试：资料写成功后按当前活动源分槽回写 user（远端会话分键 / 本地 gx-auth）。 */
+export function syncActiveUser(user: UserDTO): void {
+  try {
+    if (refreshActiveSourceUser(user).handled) return;
+  } catch {
+    // 落到本地分支兜底
+  }
+  useAuthStore.getState().updateUser(user);
+}
 import type {
   BaseDTO,
   TableDTO,
@@ -149,8 +169,8 @@ export function useUpdateMe() {
     mutationFn: async (patch: Parameters<typeof Auth.updateMe>[0]) =>
       (await Auth.updateMe(patch)).user,
     onSuccess: (user) => {
-      // 1) 同步 auth store（顶栏 / 抽屉显示）
-      useAuthStore.getState().updateUser(user);
+      // 1) 同步当前活动会话（顶栏 / 抽屉显示）：远端写该节点会话分键，本地写 gx-auth
+      syncActiveUser(user);
       // 2) 失效 useMe 的 query（其它组件读 useMe 的会刷新）
       qc.invalidateQueries({ queryKey: ["me"] });
     },
@@ -171,7 +191,7 @@ export function useUploadAvatar() {
   return useMutation({
     mutationFn: (file: File) => Auth.uploadAvatar(file),
     onSuccess: (res) => {
-      useAuthStore.getState().updateUser(res.user);
+      syncActiveUser(res.user);
       qc.invalidateQueries({ queryKey: ["me"] });
     },
   });
@@ -183,7 +203,7 @@ export function useRemoveAvatar() {
   return useMutation({
     mutationFn: () => Auth.removeAvatar(),
     onSuccess: (res) => {
-      useAuthStore.getState().updateUser(res.user);
+      syncActiveUser(res.user);
       qc.invalidateQueries({ queryKey: ["me"] });
     },
   });

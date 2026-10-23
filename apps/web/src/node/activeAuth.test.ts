@@ -8,6 +8,7 @@ import {
   commitLoginForActiveSource,
   patchActiveRemoteUser,
   refreshActiveSourceUser,
+  deauthenticateActiveSource,
   isActiveRemoteSource,
 } from "./activeAuth";
 import { dataSourceResolver } from "./datasource";
@@ -50,18 +51,26 @@ describe("activeAuth（门控关 / 本地：现网零变化）", () => {
     vi.unstubAllGlobals();
     __resetLauncherStoreForTest();
     dataSourceResolver.setActive(null);
+    useAuthStore.setState({ token: null, user: null });
   });
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     __resetLauncherStoreForTest();
     dataSourceResolver.setActive(null);
+    useAuthStore.setState({ token: null, user: null });
   });
 
   it("门控关：isActiveRemoteSource=false，commit 返回 false（由调用方写本地 gx-auth）", () => {
     expect(isActiveRemoteSource()).toBe(false);
     expect(commitLoginForActiveSource("jwt", user())).toBe(false);
     expect(useAuthStore.getState().token).toBeNull();
+  });
+
+  it("deauthenticateActiveSource：本地源返回 false（由调用方走原 logout），不清本地 store", () => {
+    useAuthStore.getState().setAuth("local-jwt", user());
+    expect(deauthenticateActiveSource()).toBe(false);
+    expect(useAuthStore.getState().token).toBe("local-jwt");
   });
 
   it("门控开但活动源是本机：refresh 返回 handled:false + 当前本地 token，patch 返回 false", () => {
@@ -145,6 +154,27 @@ describe("activeAuth（门控开 + 活动远端，单例 store）", () => {
     expect(r.token).toBe("jwt-after-change");
     expect(store.getRemoteSession("abc123def456")?.user?.mustChangePassword).toBe(false);
     expect(dataSourceResolver.current().token).toBe("jwt-after-change");
+  });
+
+  it("deauthenticateActiveSource：远端源返回 true 且清该节点会话、保持选路态（个人中心退出）", async () => {
+    const store = await setupRoutedRemote();
+    commitLoginForActiveSource("jwt-quit", user());
+    expect(dataSourceResolver.current().token).toBe("jwt-quit");
+    expect(store.getRemoteSession("abc123def456")?.token).toBe("jwt-quit");
+
+    expect(deauthenticateActiveSource()).toBe(true);
+    // fire-and-forget：让出微任务让 deauthenticateRemote 落盘/重推数据源
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // 选路态不变（仍是该远端节点），但会话与数据源 token 已清
+    expect(store.getState().activeNodeId).toBe("abc123def456");
+    expect(store.getRemoteSession("abc123def456")).toBeNull();
+    expect(dataSourceResolver.current().kind).toBe("remote");
+    expect(dataSourceResolver.current().nodeId).toBe("abc123def456");
+    expect(dataSourceResolver.current().token).toBeNull();
+    // 本地 gx-auth 全程不被触碰
+    expect(useAuthStore.getState().token).toBeNull();
   });
 
   it("refreshActiveSourceUser：远端活动源竟无 token → fail-closed 抛错，绝不写空会话", async () => {

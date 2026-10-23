@@ -49,6 +49,24 @@ export function patchActiveRemoteUser(patch: Partial<UserDTO>): boolean {
 }
 
 /**
+ * 退出当前活动会话（个人中心「退出登录」出口）。
+ *   - 远端活动源 → 清该节点会话分键但**保持选路态**（store.deauthenticateRemote：
+ *     activeNodeId 不变、壳上游不动、重推 token=null 的 remote-empty 数据源），
+ *     返回 true（调用方不要再 logout 本地 gx-auth）；
+ *   - 本地源/门控关 → 返回 false，调用方走原 logout() 清 gx-auth + 跳登录页。
+ * 与 401 桥（installLauncher → deauthenticateRemote）同动作；此处供用户主动退出复用。
+ * 动作为异步但无需调用方等待结果（守卫下一拍即见 authenticated=false），故 fire-and-forget。
+ */
+export function deauthenticateActiveSource(): boolean {
+  if (!isActiveRemoteSource()) return false;
+  const ds = dataSourceResolver.current();
+  void getLauncherStore()
+    .deauthenticateRemote(ds.nodeId)
+    .catch(() => undefined);
+  return true;
+}
+
+/**
  * 改密成功且 me() 拿到最新 user 后，用**当前活动数据源的 token** + 最新 user 重写活动会话。
  * 远端：重写该节点会话分键（改密可能换发 JWT，也可能沿用——以随后的请求/401 桥为准）；
  * 本地：返回 false，调用方用 gx-auth 当前 token + 新 user 走 setAuth（现状）。

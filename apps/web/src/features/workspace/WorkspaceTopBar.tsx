@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { Link, useLocation, useMatch } from "react-router-dom";
 import { Icon } from "../../components/icons";
-import { useAuthStore } from "../../store/auth";
+import { useActiveSession } from "../../node/activeSession";
 import { AVATAR_PALETTE } from "@gx/design-tokens";
 import { PersonalCenterDrawer } from "../settings/PersonalCenterDrawer";
 import { useSyncStore } from "../../store/sync";
@@ -31,7 +31,9 @@ export function WorkspaceTopBar({
   containerName?: string | null;
   containerKind?: "base" | "kb" | null;
 }) {
-  const user = useAuthStore((s) => s.user);
+  // 当前活动会话用户：本地槽取 gx-auth.user；远端槽取该节点会话分键里的 user（远端连接
+  // 场景下登录态不写本地 gx-auth，直读 useAuthStore 会拿到 null，头像变 "?" 且抽屉打不开）。
+  const user = useActiveSession().user;
   // 离线同步中心入口：仅「桌面壳 + 副本功能已确认启用」时 store.enabled=true；浏览器/非副本
   // 恒 false（useSyncStatus 未挂载，enabled 永不翻真），按钮不渲染。
   const syncEnabled = useSyncStore((s) => s.enabled);

@@ -44,7 +44,7 @@ vi.mock("../../api/hooks", () => ({
 vi.mock("../../store/auth", () => {
   // 须还原 zustand store 的真实形态：既可作选择器 hook 调用，又带 .getState()——
   // node 数据源单例（node/datasource.ts）在模块加载时经 client.ts 急切读 useAuthStore.getState().token。
-  const state = { user: { id: "me" }, token: null as string | null };
+  const state = { user: null, token: null as string | null };
   return {
     useAuthStore: Object.assign(
       (sel: (s: unknown) => unknown) => sel(state),
@@ -52,6 +52,21 @@ vi.mock("../../store/auth", () => {
     ),
   };
 });
+
+// 当前用户身份改由「当前活动会话」提供（本地槽=gx-auth，远端槽=该节点会话分键）。
+// activeKind/activeUser 由各用例切换：默认本地已登录；远端用例置 kind="remote"，本地 gx-auth 留空。
+let activeKind: "local" | "remote" = "local";
+let activeUser: { id: string; displayName?: string } | null = { id: "me", displayName: "我自己" };
+vi.mock("../../node/activeSession", () => ({
+  useActiveSession: () => ({
+    enabled: activeKind === "remote",
+    kind: activeKind,
+    nodeId: activeKind === "remote" ? "node-remote" : "local",
+    token: activeUser ? "jwt" : null,
+    user: activeUser,
+    authenticated: !!activeUser,
+  }),
+}));
 
 const roster: RosterMember[] = [
   { id: "me", displayName: "我自己", email: "me@x.com", avatarUrl: null },
@@ -182,3 +197,22 @@ describe("CommentSection 权限", () => {
     expect(html).not.toContain('data-gx-composer="true"');
   });
 });
+
+describe("CommentSection 当前用户取活动会话（#1056）", () => {
+  it("远端会话：本地 gx-auth.user 为空时，本人评论仍按远端会话 user.id 识别（出现删除入口）", () => {
+    // 切到远端槽：本地 store mock 的 user 恒为 null（见上方 store/auth mock），
+    // 远端会话用户 id=remote-uid，一条 userId=remote-uid 的评论应被判定为本人 → 可删。
+    activeKind = "remote";
+    activeUser = { id: "remote-uid", displayName: "远端我" };
+    commentsReturn = [
+      mkComment({ id: "c-remote", userId: "remote-uid", displayName: "远端我", body: "我的远端评论" }),
+    ];
+    const html = render();
+    expect(html).toContain("我的远端评论");
+    expect(html).toContain("删除评论");
+    // 复位，避免污染后续套件
+    activeKind = "local";
+    activeUser = { id: "me", displayName: "我自己" };
+  });
+});
+
