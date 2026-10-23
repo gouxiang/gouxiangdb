@@ -87,13 +87,13 @@ sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
 
 恢复点可能早于 nav 迁移或其派生 path 不完整。迁移之后、启动服务之前，必须执行一次 nav path 重算；
 它幂等地只重算 `nav_nodes` 派生 `path/depth`、修复阻断类差异，**不补任何菜单快捷项**（未收纳 C4 只是
-warning，ADR-0025）。该入口由 M3-S11-A 构建进发布包（推荐形态 `dist/cli/nav-reconcile.js`，
-**最终入口路径/文件名以 M3-S11-A 实现为准**；落地前生产包内不存在该入口，不得照占位命令臆造）：
+warning，ADR-0025）。该入口由 M3-S11-A 构建进发布包，确定路径为 **`dist/nav-reconcile.js`**
+（裸机 deploy.sh、Docker entrypoint、飞牛 install_callback 统一调用此路径）：
 
 ```bash
 cd /srv/gouxiangdb/current/api
 sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
-  node dist/cli/nav-reconcile.js --apply        # 占位命令，最终入口以 M3-S11-A 实现为准
+  node dist/nav-reconcile.js --apply
 # 期望：exit 0；再跑一次输出 no changes、exit 0（幂等）。
 # 非零：不得启动服务；恢复点库与当前版本不兼容，按 §9 回滚本次恢复后重新评估。
 ```

@@ -216,7 +216,7 @@ flowchart TB
 
 - **推荐：随包官方 Node 单二进制（darwin-arm64）作为 Tauri sidecar**。在 Mac 构建机一次性下载 `node-v<lts>-darwin-arm64.tar.gz`（缓存到构建缓存，不在日常/CI 临时下载），取其 `bin/node`，按 Tauri sidecar 约定改名放入 `src-tauri/binaries/`（如 `gxnode-aarch64-apple-darwin`），Rust 以 `Command::new_sidecar("gxnode")` 启动并传参 `.../Resources/api-dist/index.js`。
   - 授权：Node 为 MIT，随包分发合规，需在 App 致谢/许可文件中保留 Node 许可声明。
-  - 选 LTS（与 engines `node>=20` 对齐，`package.json:38`；esbuild target `node20`，`build.mjs:80`）。
+  - 选 Node 22 LTS（与 engines `node>=22` 对齐；随包单二进制直接取 `node-v22-darwin-arm64`，运行时不受 esbuild target 影响——后者 `build.mjs:80` 仍为保守的 `node20` 语法目标，Node 22 可正常运行）。
 - 不选 SEA/pkg 单文件可执行：better-sqlite3 的 `.node` 与 Prisma query engine、sqlite-vec dylib 都是外部原生件，强行打进单可执行反而增加加载路径风险；"node 二进制 + 生产 node_modules"最直白、与现网部署同构。
 - **[待 PoC 验证]** Tauri sidecar 对"带额外参数 + 自定义工作目录/环境变量"的支持细节、node 二进制在 ad-hoc 签名下首次启动是否被 Gatekeeper 干预（预期：对 .app 整体做一次 ad-hoc `codesign --force --deep -s -` 后可运行，PoC-1 验证）。
 

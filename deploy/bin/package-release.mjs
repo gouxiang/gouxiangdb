@@ -14,7 +14,7 @@
 //   组装后再做一次禁带文件扫描兜底，命中即非零退出。
 //
 // 用法：node deploy/bin/package-release.mjs
-// 前提：Node>=20、pnpm>=9、可访问 npm registry（安装生产依赖、prisma generate 引擎）。
+// 前提：Node 22（必须；better-sqlite3@13 的 NAPI v10 prebuild 在 Node 20 会 SIGSEGV）、pnpm>=9、可访问 npm registry（安装生产依赖、prisma generate 引擎）。
 // 交叉架构（在 mac 上打 linux 包）不支持原生引擎/prebuild 选择，见 docs/runbooks/deploy.md。
 
 import fs from "node:fs";

@@ -50,7 +50,7 @@ M0 生产基座的可执行运维流程。所有手册与仓内脚本/配置一�
 ## 速查
 
 ```bash
-# 质量门（任何 Node>=20/pnpm9 环境）
+# 质量门（Node 22 / pnpm9 环境；Node 20 会因 better-sqlite3@13 NAPI v10 而 SIGSEGV）
 bash scripts/ci-quality.sh
 
 # 构建发布物并自检

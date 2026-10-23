@@ -21,8 +21,8 @@
 ## 2. 前置条件
 
 - 目标机：Linux x86_64，建议 2 vCPU / 4GB，systemd；与构建机**同 OS/架构**（见 §10）。
-- 构建机：Node >= 20、pnpm 9（`corepack enable && corepack prepare pnpm@9 --activate`）、可访问 npm registry（装生产依赖、拉 prisma engine）、tar/shasum。
-- 目标机运行时：Node >= 20、Caddy 2.x；curl、bash >= 4（mapfile）。
+- 构建机：**必须 Node 22**（与目标机同大版本；Node 20 下 better-sqlite3@13 加载即 SIGSEGV）、pnpm 9（`corepack enable && corepack prepare pnpm@9 --activate`）、可访问 npm registry（装生产依赖、拉 prisma engine）、tar/shasum。
+- 目标机运行时：**必须 Node 22**、Caddy 2.x；curl、bash >= 4（mapfile）。
 
 ## 3. 目标机初始化【需干净 Linux 机】
 
@@ -37,9 +37,9 @@ sudo chown -R gouxiangdb:gouxiangdb /var/lib/gouxiangdb /var/backups/gouxiangdb 
 sudo chmod 750 /var/lib/gouxiangdb /var/backups/gouxiangdb
 sudo chmod 750 /srv/gouxiangdb /srv/gouxiangdb/releases
 
-# 3.3 Node 20（按发行版官方源安装；示例为 NodeSource，离线机用内部分发的 node 包）
+# 3.3 Node 22（必须 22，不能用 20；按发行版官方源安装；示例为 NodeSource，离线机用内部分发的 node 包）
 #   安装后确认 /usr/bin/node 存在；若实际路径不同，部署时用 NODE_BIN=/path/node 覆盖。
-node -v   # 期望 v20+
+node -v   # 期望 v22.x（Node 20 下 better-sqlite3@13 的 NAPI v10 prebuild 会 SIGSEGV）
 
 # 3.4 Caddy（按 https://caddyserver.com/docs/install 的发行版方式）
 caddy version
@@ -153,16 +153,17 @@ nav 回填迁移（`20260916093000_enterprise_nav_backfill`）只给根节点写
 disabled**（M3-S8 真机实证）。重算失败时脚本 die 在原子切换之前，current 仍指旧版本、旧进程继续服务，
 按 [restore.md](restore.md) 评估从发布前快照恢复或排障后重跑部署，不允许带着空 path 切流量。
 
-- 入口由 **M3-S11-A** 提供：经 esbuild 构建进发布包的生产 CLI（推荐形态 `api/dist/cli/nav-reconcile.js`，
-  裸机发布物与 Docker 镜像随 `dist/` 白名单自带，无需 tsx/源码）。**最终入口路径/文件名以 M3-S11-A
-  实现为准**；该切片落地前仓内只有开发态源码脚本 `apps/api/scripts/nav/reconcile-nav.ts`（tsx），
-  生产包尚不可用，不要在目标机臆造命令。
-- 手工补跑/排障（在新版本发布目录内；命令以 S11-A 落地后的实际入口为准）：
+- 入口由 **M3-S11-A** 提供：经 esbuild 构建进发布包的生产 CLI，确定路径为 **`dist/nav-reconcile.js`**
+  （裸机 deploy.sh:133、Docker entrypoint:26、飞牛 install_callback 均调用此路径；
+  package-release.mjs 与 build-fpk.mjs 对其做 fail-fast 存在性断言）。裸机发布物与 Docker 镜像随
+  `dist/` 白名单自带，无需 tsx/源码。开发态源码脚本是 `apps/api/scripts/nav/reconcile-nav.ts`（tsx），
+  仅供本地开发，目标机一律用包内 `dist/nav-reconcile.js`。
+- 手工补跑/排障（在新版本发布目录内）：
 
 ```bash
 cd /srv/gouxiangdb/current/api
 sudo -u gouxiangdb env DATABASE_URL=file:/var/lib/gouxiangdb/app.db \
-  node dist/cli/nav-reconcile.js --apply      # 占位命令，最终入口以 M3-S11-A 实现为准
+  node dist/nav-reconcile.js --apply
 # 期望：首次 pathsRebuilt=N、exit 0；再跑一次输出 no changes、exit 0（幂等）
 ```
 

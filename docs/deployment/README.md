@@ -103,7 +103,7 @@ GouXiangDB 含两个**平台相关**的原生组件：
 
 ### 2.7 首次部署：创建超级管理员
 
-三套部署都在「`prisma migrate deploy` + nav-reconcile 之后、服务启动之前」执行一次 `node dist/init-admin.js`，用 `GX_INIT_ADMIN_EMAIL` / `GX_INIT_ADMIN_PASSWORD` 创建第一个 ACTIVE 用户、授予系统 owner、标记首次登录强制改密。脚本**幂等**（`users` 表已有任何用户即跳过），两个变量任一为空则打印一行提示并**正常继续、不失败**（首个通过 `/api/auth/signup` 注册的用户会自动成为所有者）。生产必须由部署者注入真实凭据，初始化完成后建议从 env 删除这三行。完整顺序、验证 SQL、重试与回滚见 [`first-admin-init.md`](./first-admin-init.md)。
+三套部署都在「`prisma migrate deploy` + nav-reconcile 之后、服务启动之前」执行一次 `node dist/init-admin.js`，用 `GX_INIT_ADMIN_EMAIL` / `GX_INIT_ADMIN_PASSWORD` 创建第一个 ACTIVE 用户、授予系统 owner、标记首次登录强制改密。脚本**幂等**（`users` 表已有任何用户即跳过）。三个包装脚本（fpk `install_callback`、docker entrypoint、裸机 `deploy.sh`）在两个变量任一为空时直接跳过、不调用该脚本，因此**包装层正常继续、不失败**（首个通过 `/api/auth/signup` 注册的用户会自动成为所有者）；但要区分：若在 `NODE_ENV=production` 下**直接执行** `init-admin.js` 且缺凭据，脚本自身以 exit 64 失败（退出码表见 first-admin-init.md）。生产必须由部署者注入真实凭据，初始化完成后建议从 env 删除这三行。完整顺序、验证 SQL、重试与回滚见 [`first-admin-init.md`](./first-admin-init.md)。
 
 ---
 

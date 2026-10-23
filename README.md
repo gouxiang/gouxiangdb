@@ -24,7 +24,7 @@
 
 - 富文本 / Markdown 编辑器：标题、列表、待办、表格、引用块，带悬浮大纲目录；
 - **自动保存 + 版本历史**：每次保存形成命名版本，可查看历史并一键回滚；
-- **公开分享链接**：把文档只读 / 可编辑地发给外部成员，无需为其开账号；
+- **公开分享链接**：文档可只读 / 可编辑分享，数据表、整个库也可生成匿名只读公开链接发给外部成员，无需为其开账号；
 - 文档内可**嵌入实时数据表与画布**，数据更新时文档里同步变化。
 
 ### 🗂️ 自由画布
@@ -45,7 +45,7 @@
 ### 🔒 数据与更新
 
 - 数据库与上传附件全部保存在你选定的存储空间，**不向任何第三方上传数据**；
-- 支持应用内检查更新、在线升级；升级走数据库迁移并自动备份，**卸载重装数据保留**。
+- 更新机制（迁移自动备份、卸载重装数据保留）已内置；**0.2.6 在线更新通道暂未接通**，本版升级请手动下载新包（飞牛先 uninstall 再装新 fpk，数据保留；macOS 重新拖入新版 dmg）。
 
 ---
 
@@ -74,6 +74,15 @@
 
 > 也支持预置初始管理员、自定义外部访问地址等，详见 [`docs/deployment/fnos-native.md`](docs/deployment/fnos-native.md) 与 [`docs/deployment/first-admin-init.md`](docs/deployment/first-admin-init.md)。
 
+## 快速开始（macOS 桌面客户端）
+
+1. 在 [Gitea Releases](https://gitea0.hn.takin.cc/GouXiang/gouxiangdb/releases) 下载 `构想工作台_0.2.6_aarch64.dmg`（**仅 Apple 芯片 / arm64、macOS 11+**，Intel 芯片与 Windows/Linux 暂不支持）；
+2. 双击打开 dmg，把「构想工作台」拖入「应用程序」；
+3. 应用为 ad-hoc 自签名、**未做 Apple 公证**：首次启动在「应用程序」里**右键 → 打开**（直接双击会被 Gatekeeper 拦截），确认后即可；
+4. 打开后在启动器选择「本地节点」（本机起服务、空册即用）或「远程节点」（填团队服务器地址 + 账号）。
+
+> 局限：dmg 未做安装器级真机双击验收、附件大文件上传未压测、应用内「检查更新」在本版为占位（请手动下载新版）。详见 [`docs/release-notes/0.2.6.md`](docs/release-notes/0.2.6.md)「诚实缺口」。
+
 其余部署形态（裸机 systemd、Docker）见下方「[部署形态](#部署形态)」。
 
 ---
@@ -87,7 +96,7 @@
 |---|---|
 | 后端 | Node.js（**部署统一 v22**）+ **Hono 4** + **Prisma 5** + **SQLite**（WAL 单写者）；esbuild 扁平生产打包 |
 | 前端 | React 18 + Vite + Tailwind + TanStack Query；图标单一 `icons.tsx`，色板走 `@gx/design-tokens` |
-| 桌面端 | **macOS Apple 芯片客户端**（Tauri v2 壳 + 随包 Node 侧车；arm64、macOS 11+、ad-hoc 签名首次右键打开，bundle id `cc.gouxiang.desktop`，0.2.5-beta.1 起提供）；Windows / Linux 暂不支持 |
+| 桌面端 | **macOS Apple 芯片客户端**（Tauri v2 壳 + 随包 Node 侧车；arm64、macOS 11+、ad-hoc 签名首次右键打开，bundle id `cc.gouxiang.desktop`，0.2.6 起随正式版发布、0.2.5-beta.1 首测）；Windows / Linux 暂不支持 |
 | 共享 | `@gx/shared-types`（类型 + 筛选/关系/权限语义）、`@gx/design-tokens`、`@gx/blocks`、`@gx/canvas` |
 | 检索 | 独立 `search.db` + **sqlite-vec（vec0）** + FTS5 trigram；embedding 出厂默认 `off`，仅远端 OpenAI 兼容 API |
 | AI 接入 | **MCP**（官方 Streamable HTTP 传输 + PAT 凭据 + 双闸门）——M6 后为唯一 AI 接入核心 |

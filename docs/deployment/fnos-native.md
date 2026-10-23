@@ -496,7 +496,7 @@ node deploy/fnos/build-fpk.mjs --arch arm     # 产 gouxiangdb-0.2.6-arm.fpk
   # 带向导/配置：appcenter-cli install-fpk gouxiangdb-0.2.6-x86.fpk --env config.env
   ```
 
-- **（可选，推荐）预置初始管理员凭据**：`install_callback` 只在 `GX_INIT_ADMIN_EMAIL` 与 `GX_INIT_ADMIN_PASSWORD` **两个都非空**时创建超级管理员，两者读自 `${TRIM_PKGETC}/gouxiangdb.env`（首装由 `install_callback` 生成，可事后编辑并在应用中心重启补跑）。任一为空则跳过——**不阻断安装**，首个通过 `/api/auth/signup` 注册的用户会自动成为所有者。凭据只在 `install_callback`（首次安装）里被消费，`upgrade_callback`（升级）不做初始化。初始化完成后建议把这三行从 env 删除（脚本幂等，删了不会重复创建）。详见 [`first-admin-init.md`](./first-admin-init.md)。
+- **（可选，推荐）预置初始管理员凭据**：`install_callback` 只在 `GX_INIT_ADMIN_EMAIL` 与 `GX_INIT_ADMIN_PASSWORD` **两个都非空**时创建超级管理员，两者读自 `${TRIM_PKGETC}/gouxiangdb.env`（首装由 `install_callback` 生成）。注意：事后编辑该 env **不会**因在应用中心点「重启」而补跑——重启只执行 `cmd/main start`，不重跑 `install_callback`；要补初始化需 SSH 进 NAS 手动执行 `node dist/init-admin.js`（在 server 目录、source env 后），或卸载后重装。任一为空则跳过——**不阻断安装**，首个通过 `/api/auth/signup` 注册的用户会自动成为所有者。凭据只在 `install_callback`（首次安装）里被消费，`upgrade_callback`（升级）不做初始化。初始化完成后建议把这三行从 env 删除（脚本幂等，删了不会重复创建）。详见 [`first-admin-init.md`](./first-admin-init.md)。
 
 ### 7.2 启动 / 停止 / 状态
 

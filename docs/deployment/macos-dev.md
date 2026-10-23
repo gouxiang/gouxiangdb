@@ -1,7 +1,7 @@
 # macOS 直接部署（本地开发与调试）
 
 > 目标：在 Mac（Intel / Apple Silicon 均可）上跑起 GouXiangDB 全栈用于**开发、断点调试、跑测试、本地演示**。这不是生产交付形态——数据在仓库内、无 TLS、用开发密钥、进程由终端管理。
-> 技术栈：Node ≥20（推荐 22）、pnpm 9（corepack）、Vite 5173（前端 dev，热更新）+ Hono/tsx 3001（API）。
+> 技术栈：**Node 必须 22**（better-sqlite3@13 的 prebuild 为 NAPI v10，Node 20 会 SIGSEGV）、pnpm 9（corepack）、Vite 5173（前端 dev，热更新）+ Hono/tsx 3001（API）。
 
 ---
 
@@ -10,7 +10,7 @@
 | 项 | 要求 | 核对命令 |
 | --- | --- | --- |
 | macOS | 12+ 均可；Apple Silicon / Intel 都行（原生模块按本机构架安装，无跨架构问题） | `uname -m` |
-| Node.js | ≥ 20，推荐 **22**（与飞牛 `nodejs_v22`、Docker `node:22` 对齐） | `node -v` |
+| Node.js | **必须 v22**（与飞牛 `nodejs_v22`、Docker `node:22` 对齐；Node 20 下 better-sqlite3@13 会 SIGSEGV） | `node -v` |
 | pnpm | 9.x，用 corepack 启用（仓库 `packageManager=pnpm@9.0.0`） | `pnpm -v` |
 | Git | 拉源码 | `git --version` |
 | 磁盘 | 预留 ≥2GB（node_modules + 构建产物），数据量另计 | — |
@@ -204,7 +204,7 @@ curl -fsS http://localhost:5173/api/health
 
 | 症状 | 原因 / 处理 |
 | --- | --- |
-| `pnpm install` 原生模块失败（better-sqlite3 编译） | 缺 darwin prebuild 或网络；装 Xcode CLT（`xcode-select --install`）后重装；确认 Node 大版本为 20/22；删除 node_modules 与 lock 外的缓存重装 |
+| `pnpm install` 原生模块失败（better-sqlite3 编译） | 缺 darwin prebuild 或网络；装 Xcode CLT（`xcode-select --install`）后重装；确认 Node 大版本为 **22**（Node 20 下 better-sqlite3@13 会 SIGSEGV）；删除 node_modules 与 lock 外的缓存重装 |
 | API 启动即退出码 2，打印 `[config] 启动配置校验失败` | `NODE_ENV` 被设成了 production 但用了开发密钥/相对库路径/CORS 空。本地设回 `NODE_ENV=development` |
 | `EADDRINUSE: 3001` | 端口被占：`lsof -i :3001` 找进程 kill，或改 `.env` 的 `PORT` 并同步 vite proxy |
 | 5173 页面开但接口网络错误/CORS | API（3001）没起；或改了 API 端口没改 proxy target；确认 `pnpm dev:api` 正在运行 |
@@ -222,7 +222,7 @@ curl -fsS http://localhost:5173/api/health
 
 - **密钥**：本地用开发默认 `JWT_SECRET`（生产会被直接拉黑）；生产用 `openssl rand -base64 32`。
 - **数据库路径**：本地相对路径（随 `prisma/` 解析）；生产/Docker/飞牛一律**绝对路径**。
-- **TLS/网关**：本地 http + Vite 代理；生产由 Caddy/飞牛统一网关终结 TLS。
+- **TLS/网关**：本地 http + Vite 代理；裸机/Docker 生产由 Caddy 终结 TLS；飞牛为独立端口（默认 9527）只出 http，TLS/外网暴露由用户自行反代或端口映射，不经旧统一网关/CGI。
 - **进程管理**：本地终端前台 + watch；生产用 systemd / Docker restart / 飞牛 `cmd/main`。
 - **数据位置**：本地在仓库工作树（可随时 reset 清掉）；生产在独立数据目录/卷/data-share，升级只增迁移、不回数据。
 - **架构二进制**：本地只装本机构架；发布 fpk/镜像必须按目标 Linux 架构分别构建。

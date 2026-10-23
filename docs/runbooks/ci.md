@@ -5,21 +5,23 @@
 仓内平台中立脚本是门禁的唯一真相：
 
 ```bash
-bash scripts/ci-quality.sh ; echo "rc=$?"   # 本机/Linux，Node>=20、pnpm>=9；期望 rc=0
+bash scripts/ci-quality.sh ; echo "rc=$?"   # 本机/Linux，Node 22、pnpm>=9；期望 rc=0
 ```
 
-`.workflow/ci.yml`（Gitee Go）只负责"拉起 Linux + Node20/pnpm9 + 调脚本"。Gitee Go 存在新旧两版 YAML 语法，**以仓库开通 Gitee Go 时控制台生成的 schema 为准**；平台语法漂移不影响门禁本身，因为所有判定都在 shell 脚本里。
+> Node 要求 **22**（质量门第 1 步版本断言与 package.json engines 均为 `>=22`）：`better-sqlite3@13` prebuild 为 NAPI v10，Node 20 会在第 5/6 步（真跑 dist、全量测试 `new Database()`）SIGSEGV（见 KNOWN-ISSUES「Linux 部署 Node 必须 22」）。
+
+`.workflow/ci.yml`（Gitee Go）只负责"拉起 Linux + Node22/pnpm9 + 调脚本"。Gitee Go 存在新旧两版 YAML 语法，**以仓库开通 Gitee Go 时控制台生成的 schema 为准**；平台语法漂移不影响门禁本身，因为所有判定都在 shell 脚本里。
 
 ## 2. 八个步骤
 
-1. 工具版本断言（node>=20、pnpm>=9，读 package.json engines）
+1. 工具版本断言（node>=22、pnpm>=9，读 package.json engines；Node 20 会在 better-sqlite3 加载时 SIGSEGV）
 2. `pnpm install --frozen-lockfile`（lock 漂移即失败）
 3. `prisma generate`（构建外置，CI 显式生成）
 4. 三包 `tsc --noEmit`（api / web / shared-types；没有"shared build"伪步骤）
 5. `@gx/api` esbuild 构建，并 `test -f apps/api/dist/index.js`
-6. `pnpm -w test`（api 261 + shared 56；web 当前 passWithNoTests）
+6. `pnpm -w test`（v0.2.6 基线：api 3666、web 2507、shared-types 181、canvas 51；测试数随版本增长，以根 README 测试基线表为准）
 7. `pnpm -w lint`（真 ESLint，各包卡基线）
-8. `prisma migrate deploy` 到 `mktemp` 临时库，断言 11/11 迁移落表 + `integrity_check=ok`，退出即清理（trap）。**不碰业务库、不需要密钥**。
+8. `prisma migrate deploy` 到 `mktemp` 临时库，断言 N/N 迁移全部落表（N 由迁移目录实时计数，脚本 EXPECTED_N 动态取值，不写死；v0.2.6 时 N=44）+ `integrity_check=ok`，退出即清理（trap）。**不碰业务库、不需要密钥**。
 
 任一步失败 `set -euo pipefail` 立即非零退出。
 
@@ -78,7 +80,7 @@ rm apps/api/src/__lintprobe.ts
 
 ## 5. Runner 资源与开通（外部前置）
 
-- Linux x86_64，建议 2 vCPU / 4GB（esbuild + 将来 Playwright 够用）；Node 20 LTS、pnpm 9（corepack）。
+- Linux x86_64，建议 2 vCPU / 4GB（esbuild + 将来 Playwright 够用）；**Node 22 LTS**（必须 22，Node 20 跑 better-sqlite3 会 SIGSEGV）、pnpm 9（corepack）。
 - 缓存：pnpm store，键取 `pnpm-lock.yaml` 哈希；不接私服/远程缓存。
 - 私有仓需 Gitee Go 已开通并有可用 PAT/runner——这是外部输入，未开通前流水线可以不亮灯，本地脚本即完整门禁。
 - Gitee Go 免费构建时长/并发以平台当期说明为准。
