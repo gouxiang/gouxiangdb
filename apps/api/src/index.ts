@@ -13,6 +13,7 @@ import path from "node:path";
 import { config } from "./config.js";
 import { createApp } from "./app.js";
 import { prisma } from "./db.js";
+import { runScopeBackfillBoot } from "./ops/scopeBackfillBoot.js";
 import { startSearchWorker, stopSearchWorker } from "./domain/search/workerRuntime.js";
 import { startReplicaSync, stopReplicaSync } from "./domain/sync/replicaSyncRuntime.js";
 // 协同：WS 通道挂在每个 http.Server 的 upgrade 上，两处 createServer 都要挂（§8-1）。
@@ -167,10 +168,27 @@ function startUnixSocket(socketPath: string): void {
   });
 }
 
-// 仅在直接运行时启动服务（测试里 import app 不应自动起服务）。
-if (process.env.GX_NO_LISTEN !== "1") {
+// 启动主流程：先做老库权限投影自愈（#1046b），再监听。
+async function main(): Promise<void> {
+  // #1046b 老库 scope→auth_policies 投影自愈：listen 前幂等补齐存量缺口（重装/升级即自愈，
+  // 免人工跑脚本）。编排内部承诺永不抛异常——失败只 warn、先备份失败则跳过写入——故无论
+  // 自愈结果如何都继续监听。GX_SCOPE_BACKFILL=off 整体旁路（返回 status=disabled）。
+  await runScopeBackfillBoot({
+    prisma,
+    databaseUrl: config.databaseUrl,
+    // 相对 SQLite 路径按 prisma/ 目录解析（与 CLI/project-scope 同口径；migrationsDir=…/prisma/migrations）。
+    prismaDir: path.dirname(config.migrationsDir),
+    backupDir: config.backupDir,
+    enabled: process.env.GX_SCOPE_BACKFILL !== "off",
+  });
+
   if (config.socketPath) startUnixSocket(config.socketPath);
   else startTcp();
+}
+
+// 仅在直接运行时启动服务（测试里 import app 不应自动起服务；GX_NO_LISTEN=1 也不触发自愈）。
+if (process.env.GX_NO_LISTEN !== "1") {
+  void main();
 }
 
 export default app;
