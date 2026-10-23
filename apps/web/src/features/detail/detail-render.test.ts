@@ -84,6 +84,16 @@ describe("详情抽屉 DetailCell：标签上置（R-F-06）", () => {
 
 describe("详情抽屉 FieldInput：ghost 融入变体接线（#1047）", () => {
   const FC_SRC = readFileSync(new URL("../views/field-controls.tsx", import.meta.url), "utf8");
+  // 只切 FieldInput 函数体，避免命中前面 FieldValue 里同名的 case 分支。
+  const FI_START = FC_SRC.indexOf("export function FieldInput(");
+  const FI_END = FC_SRC.indexOf("function FieldMemberDisplay", FI_START);
+  const FI = FC_SRC.slice(FI_START, FI_END);
+  /** 在 FieldInput 体内抽取某个 case 的源码区间（到下一个 case 或指定终点）。 */
+  const sliceCase = (from: string, to: string): string => {
+    const s = FI.indexOf(from);
+    const e = FI.indexOf(to, s + from.length);
+    return FI.slice(s, e === -1 ? undefined : e);
+  };
 
   it("FieldInput 暴露 variant，默认 default；ghost 派生存在", () => {
     expect(FC_SRC).toContain('variant?: "default" | "ghost"');
@@ -101,6 +111,29 @@ describe("详情抽屉 FieldInput：ghost 融入变体接线（#1047）", () => 
 
   it("成员选择按钮与多选容器在 ghost 下同样去框", () => {
     expect(FC_SRC).toContain("ghost={ghost}");
+  });
+
+  it("ghost 单选：可视胶囊与只读同款 + 透明原生 select 覆盖（不再直出原生 select）", () => {
+    const block = sliceCase('case "singleSelect"', 'case "multiSelect"');
+    // ghost 分支必须存在，且底层是只读同款 optionTone 胶囊
+    expect(block).toContain("if (ghost)");
+    expect(block).toContain("optionTone(selected.color)");
+    // 原生 select 透明铺满，视觉壳由胶囊承担（避免原生 select 丑/撑高）
+    expect(block).toContain("absolute inset-0 h-full w-full cursor-pointer appearance-none bg-transparent opacity-0");
+  });
+
+  it("ghost 日期/时间：可视日期文本 + 透明原生日历覆盖（隐藏内置图标，盒高零跳变）", () => {
+    const block = sliceCase('case "date":', 'case "rating":');
+    expect(block).toContain("if (ghost)");
+    expect(block).toContain("formatDateValue(value, withTime)");
+    expect(block).toContain("absolute inset-0 h-full w-full cursor-pointer appearance-none bg-transparent opacity-0");
+  });
+
+  it("ghost 数字隐藏原生 spinner；评分收到与只读同款 13px 星", () => {
+    expect(FI).toContain("[appearance:textfield]");
+    const block = sliceCase('case "rating"', 'case "url":');
+    expect(block).toContain('size={ghost ? 13 : 16}');
+    expect(block).toContain('ghost ? "gap-0.5 rounded-gx-sm px-1 py-0.5 hover:bg-gx-bg" : "gap-1"');
   });
 });
 

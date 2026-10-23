@@ -352,6 +352,11 @@ export function FieldInput({
     case "percent":
     case "duration": {
       const step = field.precision ? Math.pow(0.1, field.precision) : 1;
+      // ghost：隐藏数字旋钮（与日期内置图标同理，原生装饰会撑高/显脏），
+      // 文本本体仍透明可键入，行高与只读数字一致。
+      const numChrome = ghost
+        ? "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        : "";
       return (
         <input
           type="number"
@@ -361,31 +366,79 @@ export function FieldInput({
           step={step}
           onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
           onBlur={onBlur}
-          className={inputCommon}
+          className={clsx(inputCommon, numChrome)}
           placeholder="0"
         />
       );
     }
     case "checkbox":
       return (
-        <label className="inline-flex items-center gap-2 text-gx-13 text-gx-text-primary">
+        <label
+          className={clsx(
+            "inline-flex items-center gap-1.5 text-gx-13",
+            ghost ? "rounded-gx-sm px-1 py-0.5 text-gx-text-primary hover:bg-gx-bg" : "text-gx-text-primary",
+          )}
+        >
           <input
             type="checkbox"
             disabled={disabled}
             checked={!!value}
             onChange={(e) => onChange(e.target.checked)}
-            className="h-4 w-4 accent-gx-accent"
+            className="h-3.5 w-3.5 accent-gx-accent"
           />
           {value ? "是" : "否"}
         </label>
       );
     case "singleSelect": {
       const opts = field.options ?? [];
+      const selected = resolveSelectOption(field, value);
+      if (ghost) {
+        // ghost：底层渲染成与详情只读态（DetailLayout ReadValue）逐字同款的彩色胶囊
+        // （同 optionTone 混色、同 text-gx-11），上层盖一个透明原生 select 铺满——
+        // 视觉零跳变，点击仍弹系统原生下拉（键盘/移动友好）。
+        const tone = selected ? optionTone(selected.color) : null;
+        return (
+          <div className="group relative w-full">
+            <div className="flex w-full items-center gap-1 rounded-gx-sm px-1 py-0.5 transition-colors duration-[120ms] hover:bg-gx-bg focus-within:bg-gx-bg">
+              {selected ? (
+                <span
+                  className={clsx(
+                    "inline-flex items-center rounded-full border px-2 py-0.5 text-gx-11 font-medium",
+                    tone ? "" : "border-gx-border bg-gx-row-hover text-gx-text-secondary",
+                  )}
+                  style={tone ?? undefined}
+                >
+                  {selected.name}
+                </span>
+              ) : (
+                <span className="text-gx-13 text-gx-text-hint">点击选择</span>
+              )}
+              <Icon name="chevronDown" size={12} className="ml-auto shrink-0 text-gx-text-hint" />
+            </div>
+            <select
+              autoFocus={autoFocus}
+              disabled={disabled}
+              value={selected?.name ?? ""}
+              onChange={(e) => onChange(e.target.value || null)}
+              onBlur={onBlur}
+              aria-label={field.name}
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none bg-transparent opacity-0 focus:outline-none"
+            >
+              <option value="">—</option>
+              {opts.map((o) => (
+                <option key={o.id} value={o.name}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        );
+      }
       return (
         <select
           autoFocus={autoFocus}
           disabled={disabled}
-          value={resolveSelectOption(field, value)?.name ?? ""}
+          value={selected?.name ?? ""}
           onChange={(e) => onChange(e.target.value || null)}
           onBlur={onBlur}
           className={inputCommon}
@@ -410,67 +463,108 @@ export function FieldInput({
         <div
           className={
             ghost
-              ? "flex flex-wrap gap-1 rounded-gx-sm px-1 py-0.5"
+              ? "flex flex-wrap gap-1 rounded-gx-sm px-1 py-0.5 transition-colors duration-[120ms] hover:bg-gx-bg"
               : "flex flex-wrap gap-1 rounded-gx-lg border border-gx-border bg-gx-surface p-2"
           }
         >
           {opts.length === 0 && <span className="text-gx-12 text-gx-text-hint">无选项</span>}
-          {opts.map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              disabled={disabled}
-              onClick={() => toggle(o.name)}
-              className={clsx(
-                "rounded-full px-2 py-0.5 text-gx-12 font-medium transition-colors",
-                current.includes(o.name) ? "text-white" : "border border-gx-border",
-              )}
-              style={current.includes(o.name) ? { backgroundColor: o.color } : { color: o.color }}
-            >
-              {o.name}
-            </button>
-          ))}
+          {opts.map((o) => {
+            const active = current.includes(o.name);
+            return (
+              <button
+                key={o.id}
+                type="button"
+                disabled={disabled}
+                onClick={() => toggle(o.name)}
+                className={clsx(
+                  "rounded-full px-2 py-0.5 text-gx-12 font-medium transition-colors",
+                  active
+                    ? "text-white"
+                    : ghost
+                      ? "border border-gx-border text-gx-text-tertiary hover:border-gx-border-strong"
+                      : "border border-gx-border",
+                )}
+                style={active ? { backgroundColor: o.color } : { color: o.color }}
+              >
+                {o.name}
+              </button>
+            );
+          })}
         </div>
       );
     }
     case "date":
+    case "datetime": {
+      const withTime = field.type === "datetime";
+      const nativeValue = value ? String(value).substring(0, withTime ? 16 : 10) : "";
+      if (ghost) {
+        // ghost：原生 date/datetime-local 即使去掉边框，其内置日历图标与 UA 最小行盒仍会
+        // 撑高（戴总报的"输入框尺寸变化"）。故底层只渲染与只读态逐字一致的日期文本，
+        // 把原生控件透明铺满在上面——点击仍唤起系统原生日历，盒高完全由文本行决定＝零跳变。
+        const display = value ? formatDateValue(value, withTime) : "";
+        return (
+          <div className="relative w-full">
+            <div className="flex w-full items-center gap-1 rounded-gx-sm px-1 py-0.5 transition-colors duration-[120ms] hover:bg-gx-bg focus-within:bg-gx-bg">
+              {display ? (
+                <span className="text-gx-13 text-gx-text-primary">{display}</span>
+              ) : (
+                <span className="text-gx-13 text-gx-text-hint">{withTime ? "选择日期时间" : "选择日期"}</span>
+              )}
+              <Icon name="calendar" size={12} className="ml-auto shrink-0 text-gx-text-hint" />
+            </div>
+            <input
+              type={withTime ? "datetime-local" : "date"}
+              autoFocus={autoFocus}
+              disabled={disabled}
+              value={nativeValue}
+              onChange={(e) => onChange(e.target.value || null)}
+              onBlur={onBlur}
+              aria-label={field.name}
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none bg-transparent opacity-0 focus:outline-none"
+            />
+          </div>
+        );
+      }
       return (
         <input
-          type="date"
+          type={withTime ? "datetime-local" : "date"}
           autoFocus={autoFocus}
           disabled={disabled}
-          value={value ? String(value).substring(0, 10) : ""}
+          value={nativeValue}
           onChange={(e) => onChange(e.target.value || null)}
           onBlur={onBlur}
           className={clsx(inputCommon, "[&::-webkit-clear-button]:hidden [&::-webkit-inner-spin-button]:hidden")}
         />
       );
-    case "datetime":
-      return (
-        <input
-          type="datetime-local"
-          autoFocus={autoFocus}
-          disabled={disabled}
-          value={value ? String(value).substring(0, 16) : ""}
-          onChange={(e) => onChange(e.target.value || null)}
-          onBlur={onBlur}
-          className={clsx(inputCommon, "[&::-webkit-clear-button]:hidden [&::-webkit-inner-spin-button]:hidden")}
-        />
-      );
+    }
     case "rating": {
       const n = Number(value) || 0;
+      // ghost：与只读评分同款 13px 星 + gap-0.5 + 同位 padding（编辑态原是 24px 大按钮，
+      // 点进来整行被撑高）。点击目标仍是按钮，仅收紧视觉，命中区用 py-0.5 保证好点。
       return (
-        <div className="flex items-center gap-1 text-gx-warning">
+        <div
+          className={clsx(
+            "flex items-center text-gx-warning",
+            ghost ? "gap-0.5 rounded-gx-sm px-1 py-0.5 hover:bg-gx-bg" : "gap-1",
+          )}
+        >
           {Array.from({ length: 5 }).map((_, i) => (
             <button
               key={i}
               type="button"
               disabled={disabled}
               onClick={() => onChange(i + 1)}
-              className="inline-flex h-6 w-6 items-center justify-center"
+              className={ghost
+                ? "inline-flex items-center justify-center leading-none"
+                : "inline-flex h-6 w-6 items-center justify-center"}
               aria-label={`${i + 1} 星`}
             >
-              <Icon name="star" size={16} className={i < n ? "opacity-100" : "opacity-25"} />
+              <Icon
+                name="star"
+                size={ghost ? 13 : 16}
+                className={i < n ? "opacity-100" : "opacity-25"}
+                fill={i < n ? "currentColor" : "none"}
+              />
             </button>
           ))}
         </div>
