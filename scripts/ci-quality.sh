@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # GouXiangDB M0 平台中立质量门（S7）。
-# 唯一事实源：任何 Linux/本机（Node>=20、pnpm>=9）都可直接 `bash scripts/ci-quality.sh` 复现。
+# 唯一事实源：任何 Linux/本机（Node 22、pnpm>=9）都可直接 `bash scripts/ci-quality.sh` 复现。
 # Gitee Go / GitHub Actions 只负责拉起运行器并调用本脚本，门禁真相不依赖任何平台 YAML。
 #
 # 步骤：版本断言 → frozen 安装 → prisma 生成 → 三包 typecheck → api 构建 + 产物冒烟 → 全量测试
@@ -36,11 +36,11 @@ fail() { printf '%s[FAIL]%s %s\n' "${C_ERR}" "${C_RST}" "$1" >&2; exit 1; }
 PNPM="${PNPM:-pnpm}"
 
 # ---------------------------------------------------------------------------
-# 1) 工具版本断言（engines: node>=20, pnpm>=9）
+# 1) 工具版本断言（engines: node>=22, pnpm>=9）
 # ---------------------------------------------------------------------------
-step "1/8 工具版本断言（node>=20, pnpm>=9）"
+step "1/8 工具版本断言（node>=22, pnpm>=9）"
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-[[ "${NODE_MAJOR}" -ge 20 ]] || fail "需要 Node >= 20，当前 $(node -v)"
+[[ "${NODE_MAJOR}" -ge 22 ]] || fail "需要 Node >= 22，当前 $(node -v)（better-sqlite3@13 的 NAPI v10 prebuild 在 Node 20 会 SIGSEGV）"
 PNPM_MAJOR="$("${PNPM}" -v | awk -F. '{print $1}')"
 [[ "${PNPM_MAJOR}" -ge 9 ]] || fail "需要 pnpm >= 9，当前 $("${PNPM}" -v)"
 printf 'node %s, pnpm %s\n' "$(node -v)" "$("${PNPM}" -v)"

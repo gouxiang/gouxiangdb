@@ -5,12 +5,12 @@
 #       以仓库【开通 Gitee Go 时控制台自动生成的 schema】为准，本文件不保证逐字可粘贴。
 #       门禁的唯一事实源是仓内平台中立脚本 scripts/ci-quality.sh：
 #         bash scripts/ci-quality.sh
-#       任何 runner / 本机只要有 Node>=20、pnpm>=9 都能复现全部 8 步质量门。
+#       任何 runner / 本机只要有 Node 22、pnpm>=9 都能复现全部 8 步质量门。
 #       因此平台 YAML 语法漂移不会影响门禁本身——流水线只负责"拉起环境 + 调脚本"。
 #
 # 开通前置（见 docs/runbooks/ci.md）：
 #   - Gitee Go 已对该私有仓库开通，有可用 PAT/runner；
-#   - runner：Linux x86_64（建议 2 vCPU / 4GB），Node 20 LTS、pnpm 9（corepack）；
+#   - runner：Linux x86_64（建议 2 vCPU / 4GB），Node 22 LTS、pnpm 9（corepack）；
 #   - 缓存键建议取 pnpm-lock.yaml 哈希（pnpm store）；
 #   - migrate 干跑只写 runner 临时库，不连真实数据库、不需要任何密钥。
 #
@@ -33,7 +33,7 @@ stages:
         name: ci_quality
         displayName: install/typecheck/build/test/lint/migrate-dryrun
         inputs:
-          nodeVersion: '20'     # 仅示意，实际入参字段以控制台 schema 为准
+          nodeVersion: '22'     # 仅示意，实际入参字段以控制台 schema 为准（必须 22，Node 20 会 SIGSEGV）
           goals: |
             set -euo pipefail
             corepack enable
@@ -51,6 +51,6 @@ stages:
 #     - uses: pnpm/action-setup@v4
 #       with: { version: 9 }
 #     - uses: actions/setup-node@v4
-#       with: { node-version: 20, cache: pnpm }
+#       with: { node-version: 22, cache: pnpm }
 #     - run: bash scripts/ci-quality.sh
 # =============================================================================
