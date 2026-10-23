@@ -75,6 +75,10 @@ roles.put("/:id/assignments", requireOrgAction("assign_role_members"), async (c)
     return c.json({ error: "请求体必须是 JSON 对象", code: "BAD_REQUEST" }, 400);
   }
   const actorId = c.get("auth").userId;
+  // 提权硬闸（#1046c）：管理员与超级管理员权限位完全相同，封管理员＝封超管。
+  // assign_role_members 动作只够维护普通/自定义角色成员；动这两枚系统角色必须本人是超级管理员。
+  // 必须在 replaceAssignments 写事务之前拦——非 owner 的管理员连「顺手把自己加成管理员」都到不了库。
+  await roleAdmin.assertCanAssignPrivilegedRole(actorId, id);
   const result = await roleAdmin.replaceAssignments(actorId, id, body);
   if (result.added.length || result.removed.length) {
     audit(c, {

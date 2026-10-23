@@ -10,8 +10,9 @@ import { ORG_ACTIONS } from "@gx/shared-types";
 import { HttpError } from "../../guards.js";
 import { withWriteTx, prisma, type DbTx } from "../../db.js";
 import { getDefaultWorkspaceId } from "./workspace.js";
-import { SYSTEM_ROLE_BY_ID, SYSTEM_ROLE_ID_ORDER, SUPER_ADMIN_ROLE_ID, assertOrgActions } from "./roles.js";
+import { SYSTEM_ROLE_BY_ID, SYSTEM_ROLE_ID_ORDER, SUPER_ADMIN_ROLE_ID, ADMIN_ROLE_ID, assertOrgActions } from "./roles.js";
 import { assertWorkspaceHasOwnerTx } from "./lifecycle.js";
+import { effectiveRoleRows } from "./authorization.js";
 
 /** 动作白名单非法统一为 400（assertOrgActions 抛普通 Error，边界翻译避免冒泡 500）。 */
 function parseActionsStrict(raw: unknown): OrgAction[] {
@@ -238,6 +239,28 @@ export async function grantRole(
     });
     return toAssignmentDTO(created);
   });
+}
+
+/**
+ * 提权硬闸（#1046c，鉴权策略层，非事务内）：管理员级角色（超级管理员 role_owner /
+ * 管理员 role_admin）二者权限位完全相同，能授予管理员就等于能封超级管理员。因此只允许
+ * 超级管理员本人调整这两枚角色的主体集；持 role_admin 或仅靠 assign_role_members 动作的
+ * 自定义角色一律 403——哪怕他勾得到「保存成员」，也封不了官。
+ *
+ * 放在路由层、进写事务之前：领域函数 replaceAssignments 刻意不鉴权（last-owner-bypass
+ * 以无角色 actor 直调验证「最后 owner」数据不变量），鉴权是控制器的职责，不污染事务。
+ * 判定用有效角色（直接授予 ∪ 活部门祖先闭包），与全站 hasOrgAction 同一真相源。
+ */
+export async function assertCanAssignPrivilegedRole(
+  actorId: string,
+  targetRoleId: string,
+): Promise<void> {
+  if (targetRoleId !== SUPER_ADMIN_ROLE_ID && targetRoleId !== ADMIN_ROLE_ID) return;
+  const roles = await effectiveRoleRows(actorId);
+  const isOwner = roles.some((r) => r.roleId === SUPER_ADMIN_ROLE_ID);
+  if (!isOwner) {
+    throw new HttpError(403, "仅超级管理员可授予或调整管理员、超级管理员角色");
+  }
 }
 
 interface ReplaceAssignmentsResult {

@@ -247,6 +247,97 @@ describe("授予/撤销与 scope 约束", () => {
   });
 });
 
+describe("提权硬闸：非超级管理员不得授予管理员/超级管理员（#1046c）", () => {
+  async function putAssignments(token: string, roleId: string, subjects: unknown) {
+    return h.app.request(`/api/v1/org/roles/${roleId}/assignments`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ subjects }),
+    });
+  }
+
+  it("持 role_admin 的管理员授予管理员/超级管理员 -> 均 403，且授予行未落库", async () => {
+    // 操作人：role_admin 持全部 ORG_ACTIONS（含 assign_role_members），但不是超级管理员。
+    await h.createUser("mgr");
+    await h.grant("role_admin", "user", "mgr");
+    await h.createUser("target");
+
+    const mgrToken = await h.token("mgr");
+    const toAdmin = await putAssignments(mgrToken, "role_admin", [{ subjectType: "user", subjectId: "target" }]);
+    expect(toAdmin.status).toBe(403);
+    const toOwner = await putAssignments(mgrToken, "role_owner", [{ subjectType: "user", subjectId: "target" }]);
+    expect(toOwner.status).toBe(403);
+    expect((await json<{ error: string }>(toOwner)).error).toContain("仅超级管理员");
+
+    // 硬闸在写事务前拦截：target 未获得任何管理员级角色，mgr 也没能把自己提权。
+    const rows = await h.prisma.roleAssignment.findMany({
+      where: { roleId: { in: ["role_admin", "role_owner"] }, subjectId: "target" },
+    });
+    expect(rows).toHaveLength(0);
+    const selfPromo = await putAssignments(mgrToken, "role_owner", [{ subjectType: "user", subjectId: "mgr" }]);
+    expect(selfPromo.status).toBe(403);
+  });
+
+  it("仅持 assign_role_members 的自定义角色封官 -> 403（动作位够、身份不够）", async () => {
+    await h.createUser("mgr2");
+    const created = await h.app.request("/api/v1/org/roles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await h.auth("admin")) },
+      body: JSON.stringify({ name: "封官员", actions: ["assign_role_members"] }),
+    });
+    const roleId = (await json<{ id: string }>(created)).id;
+    await h.grant(roleId, "user", "mgr2");
+    await h.createUser("target2");
+
+    const res = await putAssignments(await h.token("mgr2"), "role_admin", [
+      { subjectType: "user", subjectId: "target2" },
+    ]);
+    expect(res.status).toBe(403);
+  });
+
+  it("超级管理员授予管理员/超级管理员 -> 200（白名单不是无脑拦死）", async () => {
+    // beforeEach 已建 admin 并授 role_owner。另建两名 target 分别授 admin / owner。
+    await h.createUser("toAdmin");
+    await h.createUser("toOwner");
+    const ownerToken = await h.token("admin");
+
+    const r1 = await putAssignments(ownerToken, "role_admin", [{ subjectType: "user", subjectId: "toAdmin" }]);
+    expect(r1.status).toBe(200);
+    expect((await json<{ added: unknown[] }>(r1)).added).toHaveLength(1);
+
+    // 授 role_owner 时库里已有 admin 这位在岗 owner，不触发最后 owner 保护，应放行。
+    const r2 = await putAssignments(ownerToken, "role_owner", [
+      { subjectType: "user", subjectId: "admin" },
+      { subjectType: "user", subjectId: "toOwner" },
+    ]);
+    expect(r2.status).toBe(200);
+    expect((await h.prisma.roleAssignment.findMany({ where: { roleId: "role_admin", subjectId: "toAdmin" } }))).toHaveLength(1);
+    expect((await h.prisma.roleAssignment.findMany({ where: { roleId: "role_owner", subjectId: "toOwner" } }))).toHaveLength(1);
+  });
+
+  it("非 owner 维护普通/自定义角色成员仍放行（闸门只护两枚管理员级角色）", async () => {
+    await h.createUser("mgr3");
+    await h.grant("role_admin", "user", "mgr3"); // 持全部动作，非超级管理员
+    await h.createUser("plain");
+    const created = await h.app.request("/api/v1/org/roles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await h.auth("admin")) },
+      body: JSON.stringify({ name: "普通角色", actions: ["manage_members"] }),
+    });
+    const customId = (await json<{ id: string }>(created)).id;
+
+    const custom = await putAssignments(await h.token("mgr3"), customId, [
+      { subjectType: "user", subjectId: "plain" },
+    ]);
+    expect(custom.status).toBe(200);
+
+    const restricted = await putAssignments(await h.token("mgr3"), "role_restricted", [
+      { subjectType: "user", subjectId: "plain" },
+    ]);
+    expect(restricted.status).toBe(200);
+  });
+});
+
 describe("删角色悬挂保护", () => {
   it("有授予 -> 409 带数；指定 reassignTo 迁移后可删；系统角色 405", async () => {
     const a = await h.app.request("/api/v1/org/roles", {
