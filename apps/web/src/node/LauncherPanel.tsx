@@ -318,7 +318,7 @@ export function LauncherPanel({ store, onEnterWorkspace, variant = "full" }: Lau
 
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-gx-bg px-6 py-10">
-      // 全屏焦点白卡（同登录卡口径）：发丝线外框，保留 16 圆角与焦点投影
+      {/* 全屏焦点白卡（同登录卡口径）：发丝线外框，保留 16 圆角与焦点投影 */}
       <div className="w-full max-w-[560px] rounded-gx-3xl border border-gx-hairline bg-gx-surface p-8 shadow-gx-lg">
         {content}
       </div>

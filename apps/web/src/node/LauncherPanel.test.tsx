@@ -45,6 +45,18 @@ describe("LauncherPanel", () => {
     expect(html).not.toContain("还没有节点");
   });
 
+  it("full 变体不泄漏 JSX 裸注释文本，且双入口按钮都在渲染树中", () => {
+    const store = makeStore();
+    const html = renderToStaticMarkup(
+      React.createElement(LauncherPanel, { store, variant: "full" }),
+    );
+    // 0.2.6 真机缺陷：白卡上方一行 // 注释被当成真实文本节点渲染，
+    // 还成为 flex 匿名子项挤偏白卡、遮挡双入口点击。修复后不得出现在产物 HTML。
+    expect(html).not.toContain("全屏焦点白卡");
+    expect(html).toContain("在这台电脑上开始");
+    expect(html).toContain("连接到网络上的另一台电脑");
+  });
+
   it("有本地与远端节点：渲染节点列表与添加按钮，本地在前", () => {
     const store = makeStore();
     store.connectLocal();

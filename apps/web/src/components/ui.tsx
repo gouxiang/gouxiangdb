@@ -398,7 +398,9 @@ export function Switch({
       >
         <span
           className={clsx(
-            "absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform",
+            // left-0 不可省：绝对定位在 left:auto 时静态位置会跟随祖先 text-align，
+            // 右对齐容器（如 justify-between 设置行）会把圆点推到轨道右端甚至溢出。
+            "absolute left-0 top-0.5 h-4 w-4 rounded-full bg-white transition-transform",
             checked ? "translate-x-4" : "translate-x-0.5",
           )}
         />
