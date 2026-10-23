@@ -33,6 +33,55 @@ const ADMIN_ACTIONS: ReadonlySet<ResourceAction> = new Set<ResourceAction>([
   "manage_table",
 ]);
 
+/**
+ * 管理员系统角色锚点（= org/roles.SYSTEM_ROLES 里的 role_admin）。
+ * 本文件是纯域（禁止 import 带 prisma 的 org/roles），故本地锚定同一字面量，
+ * 与 scopeBackfill.ts 本地锚定 SUPER_ADMIN_ROLE_ID 的做法一致。
+ */
+const ADMIN_ROLE_ID = "role_admin";
+
+/**
+ * 管理员「库门」角色级兜底：仅对 base/kb 节点的 enter 成立。
+ *
+ * 为什么必须在引擎里兜（而不只靠物化投影）：role_admin 对全部活库的 enter 隐含授权
+ * （implicitAdminProject F8 强制 visible=true）本是「天然能进全部库」的硬规则，但它只在
+ * 建库/建表/scope PUT 三个【写路径】物化进 auth_policies；双写上线前的存量库从未投影
+ * （迁移 20260921020000 只回填 role_library_scope 台账、不灌 auth_policies），一旦漏投影，
+ * 管理员点老库即被引擎以 no_matching_allow 拒之门外（403）。库门准入不应依赖数据是否补齐，
+ * 故在判定内核按角色硬兜，与超管 isWorkspaceOwner 兜底同性质。
+ *
+ * 红线（越权边界，缺一不可）：
+ *   - 只兜 enter 这一枚「库门准入位」；绝不兜内容动作 r/c/u/d/comment——库节点补内容位会
+ *     绕过 table 节点的逐表 fieldMask 收窄（§1.3 已否决的「库节点补 r」f2 泄漏口）；
+ *   - 绝不兜 edit_data/manage_table/manage_schema/manage_share——管理权只来自
+ *     role_library_scope(canManage) 的物化投影，无投影即只读进门，不凭空放大；
+ *   - 绝不兜 d——删库另有 requireCanDeleteBase conjunction 硬规则，仅超级管理员可删。
+ * 内容读与管理权仍由 policies 物化投影裁决（见 evaluateChainDecision 后半段）。
+ */
+function adminLibraryEnterFallback(
+  subject: ResolvedSubject,
+  node: AuthzNode,
+  action: ResourceAction,
+): Decision | null {
+  if (action !== "enter") return null;
+  if (!subject.roleIds.includes(ADMIN_ROLE_ID)) return null;
+  if (node.resourceType !== "base" && node.resourceType !== "kb") return null;
+  return {
+    allowed: true,
+    action,
+    nodeId: node.id,
+    // 角色来源（非 owner_fallback）：可解释为「管理员系统角色隐含的库门准入」，
+    // subjectId 锚定 role_admin，供 policyQuery 解析为角色名。
+    sources: [{
+      kind: "role",
+      nodeId: node.id,
+      nodeName: node.name,
+      viaAncestor: false,
+      subjectId: ADMIN_ROLE_ID,
+    }],
+  };
+}
+
 /** 由全量活节点索引构建目标节点的祖先链（叶->根，chain[0]=自身）；缺失段容错跳过。 */
 export function buildChain(target: AuthzNode, byId: ReadonlyMap<string, AuthzNode>): AuthzNode[] {
   const ids = target.path.split("/").filter(Boolean).reverse();
@@ -115,6 +164,9 @@ export function evaluateChainDecision(input: ChainEvaluationInput): Decision {
   // creator 兜底只承载内容所有权，不覆盖纯组织/结构管理动作（见 ADMIN_ACTIONS）。
   if (isCreator && !ADMIN_ACTIONS.has(action)) return fallbackDecision(node, "creator", action);
   if (subject.isWorkspaceOwner) return fallbackDecision(node, "workspace_owner", action);
+  // 管理员库门兜底：仅 base/kb 的 enter（天然进全部库），不放大内容读/管理权/删库（见函数注释）。
+  const adminEnter = adminLibraryEnterFallback(subject, node, action);
+  if (adminEnter) return adminEnter;
 
   const sources = policies
     .filter((p) => p.actions.includes(action))

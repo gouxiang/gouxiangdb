@@ -212,3 +212,32 @@ describe("5. nodeId 为 null（资源反查不到活节点）：fail-closed 403"
     expect(await status("GET", tablesUrl(base3Id), OWNER)).toBe(403);
   });
 });
+
+// #1046 存量缺口：双写上线前的老库只有 role_library_scope 台账、auth_policies 里【零条】
+// role_admin 投影。库门准入不应依赖数据是否补齐——引擎对 role_admin 的 base/kb enter 角色兜底
+// + nav 剪枝库门改判 enter，使管理员在零投影老库上仍能进门、导航仍见库；但不放大内容读/管理权/删库。
+describe("6. #1046 老库零投影：管理员库门兜底 + nav 库门判 enter", () => {
+  it("删掉 role_admin 在主库的全部投影后，管理员进门仍 200（不再 403）", async () => {
+    // 构造真实存量形态：auth_policies 无 role_admin 在该 base（及其表）的任何 scope:role 行。
+    await h.prisma.authPolicy.deleteMany({
+      where: { subjectType: "role", subjectId: "role_admin" },
+    });
+    expect(await status("GET", tablesUrl(baseId), ADMIN)).toBe(200);
+  });
+
+  it("零投影老库在权威树根块仍对管理员可见（剪枝库门判 enter，不再被 r 连坐剪掉）", async () => {
+    const res = await call("GET", "/api/v1/workspaces/current/tree?parentId=root&maxDepth=2", ADMIN);
+    expect(res.status).toBe(200);
+    const payload = await json<{ items: Array<{ resourceType: string | null; resourceId: string | null }> }>(res);
+    expect(payload.items.some((n) => n.resourceType === "base" && n.resourceId === baseId)).toBe(true);
+  });
+
+  it("越权边界：零投影不凭空给内容读/管理权——管理员改库结构仍 403（管理权只认 scope 投影）", async () => {
+    // 改表结构走 manage_schema（库节点），零投影 + 引擎不兜管理位 -> 403。
+    expect(
+      await status("POST", `/api/fields?tableId=${tableId}`, ADMIN, { name: "不应建成", type: "singleLineText" }),
+    ).toBe(403);
+    // 删库仍只许超级管理员（conjunction 硬规则）。
+    expect(await status("DELETE", `/api/bases/${baseId}`, ADMIN)).toBe(403);
+  });
+});

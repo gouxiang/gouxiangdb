@@ -212,3 +212,64 @@ describe("evaluateChainDecision（decide/scope 共享判定内核）", () => {
     expect(visible.allowed).toBe(true);
   });
 });
+
+// role_admin「库门」角色级兜底（老库零投影也能进门；越权边界锁死）。
+// 依据：implicitAdminProject F8（管理员对全部活库恒 visible/enter）+ guards P0-A（库门判 enter）。
+describe("evaluateChainDecision · role_admin 库门兜底", () => {
+  const admin = () => subject({ roleIds: ["role_admin"] });
+  const base = mkNode("b1", { resourceType: "base", kind: "base", path: "/b1/", name: "老库" });
+  const kb = mkNode("k1", { resourceType: "kb", kind: "kb", path: "/k1/", name: "老知识库" });
+  const table = mkNode("t1", { resourceType: "table", kind: "table", path: "/b1/t1/", name: "客户表" });
+
+  it("老库零物化投影：管理员对 base 的 enter 仍 allow，来源标 role/role_admin", () => {
+    const d = evaluateChainDecision({
+      subject: admin(), node: base, chain: [base], policies: [], action: "enter", isCreator: false,
+    });
+    expect(d.allowed).toBe(true);
+    expect(d.sources).toEqual([
+      expect.objectContaining({ kind: "role", subjectId: "role_admin" }),
+    ]);
+  });
+
+  it("kb 库门 enter 同样兜底", () => {
+    const d = evaluateChainDecision({
+      subject: admin(), node: kb, chain: [kb], policies: [], action: "enter", isCreator: false,
+    });
+    expect(d.allowed).toBe(true);
+  });
+
+  it("越权边界：不兜内容动作（base r / table r 零投影即 deny），守住 §1.3 字段掩码口", () => {
+    const baseR = evaluateChainDecision({
+      subject: admin(), node: base, chain: [base], policies: [], action: "r", isCreator: false,
+    });
+    expect(baseR.allowed).toBe(false);
+    const tableR = evaluateChainDecision({
+      subject: admin(), node: table, chain: [table], policies: [], action: "r", isCreator: false,
+    });
+    expect(tableR.allowed).toBe(false);
+  });
+
+  it("越权边界：不兜管理权（edit_data/manage_table/manage_schema/manage_share）零投影即 deny", () => {
+    for (const a of ["edit_data", "manage_table", "manage_schema", "manage_share"] as const) {
+      const d = evaluateChainDecision({
+        subject: admin(), node: base, chain: [base], policies: [], action: a, isCreator: false,
+      });
+      expect(d.allowed, a).toBe(false);
+    }
+  });
+
+  it("越权边界：不兜删库（base d 零投影即 deny；删库另有 conjunction 硬规则）", () => {
+    const d = evaluateChainDecision({
+      subject: admin(), node: base, chain: [base], policies: [], action: "d", isCreator: false,
+    });
+    expect(d.allowed).toBe(false);
+  });
+
+  it("非管理员角色不享受该兜底：只有 enter 也不给（避免任何角色天然进库）", () => {
+    const editor = subject({ roleIds: ["role_editor"] });
+    const d = evaluateChainDecision({
+      subject: editor, node: base, chain: [base], policies: [], action: "enter", isCreator: false,
+    });
+    expect(d.allowed).toBe(false);
+  });
+});

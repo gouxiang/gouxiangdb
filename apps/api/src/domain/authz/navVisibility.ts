@@ -25,16 +25,28 @@ function toPruneNode(n: AuthzNode): PruneNode {
   return { id: n.id, parentId: n.parentId, kind: n.kind, path: n.path, resourceType: n.resourceType };
 }
 
-/** 构造单请求生命期的剪枝索引（on 态）；节点判定全部走 scope 内核，动作默认 r。 */
+/**
+ * 剪枝可见性按节点资源类型选动作（与七守 P0-A / preflightScopeVisibility 同口径）：
+ *   - 库门节点 base/kb 判 enter：库节点结构性地不投影内容 r（§1.3 防无 mask 下放），
+ *     库门准入位是 enter；若这里对库节点判 r，则任何只拿到 enter 的合法成员（含天然进全部
+ *     库的管理员）都会让库节点进不了 visible 集，进而被 resourceAncestorsPass 连坐，整库连同
+ *     其下已授权 r 的表/文档一起从权威树与菜单 shortcut 被剪掉——「点得开、导航却没有」。
+ *   - 其余内容节点（table/doc/canvas/view…）仍判 r：内容可见性必须有真实读授权（含 fieldMask）。
+ * 仅决定导航条目的显隐，不返回任何字段数据，故库门用 enter 不会重蹈「库节点补 r」的泄漏口。
+ */
+function navVisibilityAction(node: { resourceType: string | null }): ResourceAction {
+  return node.resourceType === "base" || node.resourceType === "kb" ? "enter" : "r";
+}
+
+/** 构造单请求生命期的剪枝索引（引擎永久生效）；库门判 enter、内容节点判 r（见 navVisibilityAction）。 */
 export async function buildNavVisibility(
   client: AuthzClient,
   userId: string,
-  action: ResourceAction = "r",
 ): Promise<NavVisibility> {
   const prepared = await prepareScope(client, userId);
   const visible = new Set<string>();
   for (const node of prepared.nodes) {
-    if (nodeVisibleInPrepared(prepared, node, action)) visible.add(node.id);
+    if (nodeVisibleInPrepared(prepared, node, navVisibilityAction(node))) visible.add(node.id);
   }
   const [canMenu, canShare] = await Promise.all([
     hasOrgAction(userId, "manage_menu", client),
