@@ -249,6 +249,7 @@ export function FieldInput({
   autoFocus,
   onBlur,
   attachmentContext,
+  variant = "default",
 }: {
   field: FieldDTO;
   value: CellValue;
@@ -257,10 +258,22 @@ export function FieldInput({
   autoFocus?: boolean;
   onBlur?: () => void;
   attachmentContext?: AttachmentContext;
+  /**
+   * default：表单/弹窗里的标准带框控件（32 高、描边、聚焦蓝环）。
+   * ghost：融入详情字段卡——不自画边框/固定高/底色/蓝环，与同卡只读值
+   *   同内边距（px-1 py-0.5）、同行高，仅 hover/focus 泛起一层极浅灰底，
+   *   使「只读 ↔ 编辑」切换时整块大小位置零跳变（#1047）。
+   */
+  variant?: "default" | "ghost";
 }) {
+  // ghost：与 DetailCell 只读 button（rounded-gx-sm px-1 py-0.5 + hover:bg-gx-bg）同位。
+  const ghost = variant === "ghost";
+  const readonlyHintClass = ghost
+    ? "px-1 py-0.5 text-gx-12 text-gx-text-hint"
+    : "rounded-gx-sm bg-gx-bg px-2 py-1 text-gx-12 text-gx-text-hint";
   if (isReadonlyField(field)) {
     return (
-      <div className="rounded-gx-sm bg-gx-bg px-2 py-1 text-gx-12 text-gx-text-hint">
+      <div className={readonlyHintClass}>
         {field.type === "formula"
           ? "公式自动计算"
           : field.type === "rollup"
@@ -277,22 +290,38 @@ export function FieldInput({
   // 编辑控件四态（默认/悬停/焦点/禁用）与 components/ui.tsx 的 Input/Textarea 同一口径
   // （R-D-05 圆角 8、R-F-05 单行 32 高）：此前这里是另一套 px-2 py-1 + ring-accent-bg，
   // 与全站控件不一致、聚焦环偏浅偏粗显得"框大一圈"。两套不得再分叉。
-  const inputCommon = clsx(
-    "h-8 w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 text-gx-13 text-gx-text-primary",
-    "transition-colors duration-[120ms]",
-    "hover:border-gx-border-strong",
-    "focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50",
-    "placeholder:text-gx-text-hint",
-    "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gx-border",
-  );
-  const textareaCommon = clsx(
-    "w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 py-1.5 text-gx-13 text-gx-text-primary",
-    "transition-colors duration-[120ms] resize-y",
-    "hover:border-gx-border-strong",
-    "focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50",
-    "placeholder:text-gx-text-hint",
-    "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gx-border",
-  );
+  const inputCommon = ghost
+    ? clsx(
+        "w-full rounded-gx-sm px-1 py-0.5 text-gx-13 text-gx-text-primary",
+        "transition-colors duration-[120ms]",
+        "hover:bg-gx-bg focus:bg-gx-bg focus:outline-none",
+        "placeholder:text-gx-text-hint",
+        "disabled:cursor-not-allowed disabled:opacity-50",
+      )
+    : clsx(
+        "h-8 w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 text-gx-13 text-gx-text-primary",
+        "transition-colors duration-[120ms]",
+        "hover:border-gx-border-strong",
+        "focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50",
+        "placeholder:text-gx-text-hint",
+        "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gx-border",
+      );
+  const textareaCommon = ghost
+    ? clsx(
+        "w-full rounded-gx-sm px-1 py-0.5 text-gx-13 text-gx-text-primary",
+        "transition-colors duration-[120ms] resize-y",
+        "hover:bg-gx-bg focus:bg-gx-bg focus:outline-none",
+        "placeholder:text-gx-text-hint",
+        "disabled:cursor-not-allowed disabled:opacity-50",
+      )
+    : clsx(
+        "w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 py-1.5 text-gx-13 text-gx-text-primary",
+        "transition-colors duration-[120ms] resize-y",
+        "hover:border-gx-border-strong",
+        "focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50",
+        "placeholder:text-gx-text-hint",
+        "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gx-border",
+      );
 
   switch (field.type) {
     case "member":
@@ -301,6 +330,7 @@ export function FieldInput({
           value={value}
           onChange={onChange}
           disabled={disabled}
+          ghost={ghost}
         />
       );
     case "longText":
@@ -377,7 +407,13 @@ export function FieldInput({
         else onChange([...current, name]);
       };
       return (
-        <div className="flex flex-wrap gap-1 rounded-gx-lg border border-gx-border bg-gx-surface p-2">
+        <div
+          className={
+            ghost
+              ? "flex flex-wrap gap-1 rounded-gx-sm px-1 py-0.5"
+              : "flex flex-wrap gap-1 rounded-gx-lg border border-gx-border bg-gx-surface p-2"
+          }
+        >
           {opts.length === 0 && <span className="text-gx-12 text-gx-text-hint">无选项</span>}
           {opts.map((o) => (
             <button
@@ -497,19 +533,19 @@ export function FieldInput({
       );
     case "links":
       return (
-        <div className="rounded-gx-sm bg-gx-bg px-2 py-1 text-gx-12 text-gx-text-hint">
+        <div className={readonlyHintClass}>
           关联关系请在单元格中维护
         </div>
       );
     case "tabs":
       return (
-        <div className="rounded-gx-sm bg-gx-bg px-2 py-1 text-gx-12 text-gx-text-hint">
+        <div className={readonlyHintClass}>
           选项卡字段仅用于详情页布局分组
         </div>
       );
     case "subtable":
       return (
-        <div className="rounded-gx-sm bg-gx-bg px-2 py-1 text-gx-12 text-gx-text-hint">
+        <div className={readonlyHintClass}>
           子表格字段仅在详情页编辑
         </div>
       );
@@ -556,10 +592,12 @@ function FieldMemberInput({
   value,
   onChange,
   disabled,
+  ghost = false,
 }: {
   value: CellValue;
   onChange: (v: CellValue) => void;
   disabled?: boolean;
+  ghost?: boolean;
 }) {
   const { members, byId, isLoading } = useMemberRoster();
   const [open, setOpen] = useState(false);
@@ -571,7 +609,11 @@ function FieldMemberInput({
         type="button"
         disabled={disabled}
         onClick={() => setOpen(true)}
-        className="flex h-8 w-full items-center gap-1.5 rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 text-left text-gx-13 text-gx-text-primary transition-colors duration-[120ms] hover:border-gx-border-strong focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gx-border"
+        className={
+          ghost
+            ? "flex w-full items-center gap-1.5 rounded-gx-sm px-1 py-0.5 text-left text-gx-13 text-gx-text-primary transition-colors duration-[120ms] hover:bg-gx-bg focus:bg-gx-bg focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            : "flex h-8 w-full items-center gap-1.5 rounded-gx-lg border border-gx-border bg-gx-surface px-2.5 text-left text-gx-13 text-gx-text-primary transition-colors duration-[120ms] hover:border-gx-border-strong focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gx-border"
+        }
       >
         {member ? (
           <MemberDisplay userId={value} byId={byId} />

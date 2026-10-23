@@ -71,12 +71,36 @@ describe("详情抽屉 DetailCell：标签上置（R-F-06）", () => {
     expect(cell).toContain("truncate");
   });
 
-  it("#1047 编辑态外卡必须透明（不得与内嵌 FieldInput 形成框中框），只读态保留描边", () => {
+  it("#1047 返工：编辑/只读同一张卡——外卡恒定描边，内嵌控件用 ghost 融入（零跳变）", () => {
     const cell = sliceFn("DetailCell");
-    // 编辑中外卡只保留透明描边占位 + 透明底；可见边框只允许来自输入框自身
-    expect(cell).toContain("border-transparent bg-transparent");
-    // 只读态仍需真实描边 + surface 底
-    expect(cell).toContain("border-gx-border bg-gx-surface");
+    // 外层字段卡的描边 + 底色在两态下恒定保留（写死在同一张卡上，不再随编辑态切换）
+    expect(cell).toContain("border border-gx-border bg-gx-surface");
+    // 旧的「编辑态把外卡变透明」改法已被戴总否定，不得回流
+    expect(cell).not.toContain("border-transparent bg-transparent");
+    // 内联编辑控件必须以 ghost 变体接入（内层不再自画肥大蓝框）
+    expect(cell).toContain('variant="ghost"');
+  });
+});
+
+describe("详情抽屉 FieldInput：ghost 融入变体接线（#1047）", () => {
+  const FC_SRC = readFileSync(new URL("../views/field-controls.tsx", import.meta.url), "utf8");
+
+  it("FieldInput 暴露 variant，默认 default；ghost 派生存在", () => {
+    expect(FC_SRC).toContain('variant?: "default" | "ghost"');
+    expect(FC_SRC).toContain('variant = "default"');
+    expect(FC_SRC).toContain('const ghost = variant === "ghost";');
+  });
+
+  it("ghost 单行/多行控件去边框、去固定高、去蓝环，padding 对齐只读值（px-1 py-0.5）", () => {
+    // ghost 输入只允许浅灰底反馈，不得自带描边/32 高/聚焦蓝环
+    expect(FC_SRC).toContain("hover:bg-gx-bg focus:bg-gx-bg focus:outline-none");
+    // default 标准带框控件必须原样保留（弹窗表单依赖）
+    expect(FC_SRC).toContain("h-8 w-full rounded-gx-lg border border-gx-border bg-gx-surface px-2.5");
+    expect(FC_SRC).toContain("focus:border-gx-accent focus:outline-none focus:ring-2 focus:ring-gx-accent/50");
+  });
+
+  it("成员选择按钮与多选容器在 ghost 下同样去框", () => {
+    expect(FC_SRC).toContain("ghost={ghost}");
   });
 });
 

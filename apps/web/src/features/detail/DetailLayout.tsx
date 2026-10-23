@@ -834,14 +834,12 @@ function DetailCell({ field, value, tableId, recordId, canEdit }: { field: Field
     // 且 label 写了内联的像素级宽度上限（绕开间距令牌）。改为纵向两行后
     // 值区始终占满整格宽度，长字段名由容器 min-w-0 + 文本 truncate 收口。
     //
-    // 编辑态去外框（#1047）：本容器只读态是一张带边框的字段小卡；但编辑时内嵌的
-    // FieldInput 自带标准边框，外卡若仍保留边框/底色就形成「框中框」，整块比只读态
-    // 大一圈（戴总反馈"输入框异常变大、多一个圆角框"）。故编辑中外卡变透明、只保留
-    // padding（不引发布局跳动），画面上只剩唯一的标准输入框。
-    <div className={clsx(
-      "flex min-w-0 flex-col gap-1.5 rounded-gx-sm px-3 py-2",
-      editing && !readOnly ? "border border-transparent bg-transparent" : "border border-gx-border bg-gx-surface",
-    )}>
+    // 编辑/只读同一张卡（#1047 返工，戴总拍板第①种）：外层字段卡的圆角描边与底色
+    // 在两种状态下恒定保留；编辑时内嵌 FieldInput 用 variant="ghost"——不再自画边框/
+    // 固定高/底色/聚焦蓝环，与只读 button 同内边距（px-1 py-0.5）、同行高，仅
+    // hover/focus 泛起一层极浅灰底（与只读 hover 同色系）。于是点进字段时整块大小、
+    // 位置零跳变，不再出现「外框消失 + 内层肥大蓝框」的不伦不类。
+    <div className="flex min-w-0 flex-col gap-1.5 rounded-gx-sm border border-gx-border bg-gx-surface px-3 py-2">
       {/* 第一行：字段名（图标 + 名称） */}
       <div className="flex min-w-0 items-center gap-1 text-gx-12 text-gx-text-secondary">
         <span className="flex shrink-0 items-center">
@@ -857,7 +855,7 @@ function DetailCell({ field, value, tableId, recordId, canEdit }: { field: Field
           // 落库时没有归属记录，记录删除/清空时后端按 recordId 的悬挂清理与「仍被引用」
           // 判定都覆盖不到它，文件会一直留在磁盘上。baseId 仍留给上传器从
           // /base/:baseId/table/:tableId 路由推导（本组件拿不到）。
-          ? <FieldInput field={field} value={draft ?? null} onChange={handleChange} autoFocus onBlur={commit} attachmentContext={{ tableId, recordId }} />
+          ? <FieldInput field={field} value={draft ?? null} onChange={handleChange} autoFocus onBlur={commit} attachmentContext={{ tableId, recordId }} variant="ghost" />
           : (
             <button type="button" disabled={readOnly} onClick={() => !readOnly && setEditing(true)} className={clsx("block w-full rounded-gx-sm px-1 py-0.5 text-left", readOnly ? "cursor-default text-gx-text-tertiary" : "hover:bg-gx-bg")}>
               <ReadValue field={field} value={value} />
