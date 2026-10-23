@@ -1,4 +1,111 @@
-# 构想工作台 v0.2.5-beta.1 发版说明（首个桌面端测试版 / Pre-release）
+# 构想工作台 v0.2.6 发版说明（首个含 macOS 桌面客户端的正式收口版）
+
+- **对外版本名 / Git tag**：`v0.2.6`（**正式版，非预发布**）
+- **内部包版本号**：`0.2.6`（版本单一真源＝根 `package.json` 的 `version`；与 fpk `manifest.version`、Tauri `tauri.conf.json`、esbuild `GX_VERSION` 同源，禁止硬编码）
+- **展示名**：构想工作台（技术标识 `gouxiangdb`）；macOS bundle id `cc.gouxiang.desktop`
+- **封版日期**：2026-10-23；**Git 基线**：`3ea1f65`
+- **Gitea Release 性质**：**正式 Release（不勾预发布）**；上传 fpk + dmg + 两个 `.sha256`，**不传 `update-manifest.json`**（在线更新器只认带该资产的 release，本版更新通道未正式接通，避免误推）。
+- **本轮主题**：①P0 修复「匿名公开表被硬跳登录」；②飞牛 fnOS 改**独立端口 9527 + 安装向导**（替代吞 `Authorization` 的 CGI 反代）；③公开分享扩到 doc/table/base 三类；④前端 v6 底板令牌全线收口；⑤macOS 桌面客户端随正式版发布（仍 arm64、ad-hoc、首次右键打开）。
+
+> 对外发布说明：`docs/release-notes/0.2.6.md`；历史：0.2.5-beta.1 对外版 `docs/release-notes/0.2.5-beta.1.md`、内部详版 `docs/release-notes/0.2.5-beta.1-internal.md`（本文件末尾亦归档）；0.2.4 见 `docs/release-notes/0.2.4.md`。
+
+---
+
+## 〇、给非技术同事的一句话
+
+这是第一个**带苹果电脑客户端的正式版**：在 0.2.5-beta.1 试用版基础上，飞牛服务器改成独立端口、安装时有向导填端口（修掉跨网络访问偶发白屏 / 被网关拦），并修好「任何人打开公开分享表格都被错误踹去登录页」这个最扎眼的毛病。Mac App 仍只支持 Apple 芯片、未买苹果签名，第一次要右键 → 打开。
+
+---
+
+## 一、相对 0.2.5-beta.1 的关键变化
+
+1. **P0 匿名公开表硬跳登录（`3ea1f65`）**：公开表页 `/s/:token(/t/:tableId)` 匿名打开时，成员列组件无条件请求私有 `GET /api/v1/org/members` → 401 → 全局拦截器硬跳 `/login`。两层修：`useOrgMembers` 加会话门控（匿名 `enabled:false`，成员格兜底短 id/「—」）；新增纯函数 `isPublicSharePathname`，公开路径下私有 401 只复位标志不登出/跳转，品牌名走公开 `/api/auth/branding`。6 文件 +178/-1，新增 13 测试。
+2. **飞牛独立端口交付（`964b6aa`/`d7eb4cc`/`461704e`）**：弃 CGI 反代改独立端口，默认 **9527**，安装/升级向导字段 `wizard_port`（1024–65535）；非交互安装必须 `install-fpk -e <向导文件>`；修连字符图标与向导白屏；Node 统一 v22；Web 令牌头 `X-GX-Token`。
+3. **公开分享三类（`0ff6c20`/`f749a6c`）**：doc/table/base 可公开，base 外壳表带 token 可匿名只读；CSV 附件列导文件名；修四处分享体验缺陷。
+4. **v6 视觉令牌**：左栏 76px 图标轨、二级面板 236、顶栏/工具条/弹层/KB/通讯录/帮助/登录全线迁移冷灰底板 + 发丝线，配套守护测试。
+5. **离线同步地基默认关闭**：YN0–YN9 在 `apps/api/src/routes/v1/sync/`，`GX_SYNC_SERVER` fail-closed；桌面离线侧车本版不含。
+
+---
+
+## 二、安装包指纹（封版基线 `3ea1f65`）
+
+### 飞牛 fnOS（x86_64）
+- 文件：`gouxiangdb-0.2.6-x86.fpk`
+- 大小：**60,822,956 B（58.00 MiB）**
+- sha256：**`be4ebea6b3b98411051143f4c807d9e4ce795fb806dd295508c6dd0d53300d0a`**
+- VM15 构建；解包 `manifest.version=0.2.6/platform=x86`，主入口 `server/public/assets/index-CpXqZ_Ar.js`（1,872,786 B）含 P0 字节标记 `^\/s\/[^/]+`（**marker=1**，旧 0.2.6 包 marker=0 已作废），44 枚迁移，`node_modules` 零符号链接。
+
+### macOS（arm64 / Apple 芯片）
+- 文件：`构想工作台_0.2.6_aarch64.dmg`
+- 大小：**108,586,466 B（103.56 MiB）**
+- sha256：**`90aabec9edf5087ac9990b2056632461781713d42ebeb0552179f1dbb2ed03bc`**
+- ad-hoc（未公证）、arm64 thin、macOS 11+、identifier `cc.gouxiang.desktop`、`CFBundleShortVersionString=0.2.6`，首次右键 → 打开。
+
+> 两包归档本机 `release/0.2.6/`（gitignored），各附 `.sha256` sidecar。
+
+---
+
+## 三、真机换装实证（飞牛 192.168.31.183，2026-10-23）
+
+- **换装前**：183 原跑旧 0.2.6（线上 bundle `index-DTKpWlm-.js`，**marker=0**）。先双备份（在线一致性 `app.db` + 全量目录旁路含 env/uploads/wal/shm）。
+- **换装**：uninstall（**保留** data-share 数据与 env）→ `install-fpk 新fpk -e wizard_port=9527` → start；回调沿用整块 env（`JWT_SECRET` 不重生成），跑 `migrate deploy`（44）+ `nav-reconcile --apply`。
+- **换装后全绿**：新 pid、`/readyz` 五探针全 true、44 迁移、端口 9527；主入口变 `index-CpXqZ_Ar.js`（**marker=1**，与新 fpk 字节一致）。
+- **登录态不踢**：`JWT_SECRET` 指纹换装前后均 `1a6691c8a67f`（自签 owner JWT 实测 `/api/auth/me` 200，匿名 401）。
+- **数据零丢失**：换装前/后逐字一致 `users=1 / bases=3 / tables_live=3 / records=8 / attachments=5 / applied=44 / integrity=ok`。
+- **P0 真机 E2E**：匿名 Chromium 开 `/s/<token>` 渲染 19 列 +1 记录，成员列显「—」，**未跳登录、零 `/api/v1/org/members`、零 401**，仅 3 个公开接口。
+- **10 页巡检零报错**：gallery/form/kanban/gantt/tree/表单问答/KB/库设置/通讯录/回收站，全部未踢登录、无空白、零 5xx、零 pageerror；甘特为优雅空态。
+- **收尾**：临时分享吊销（`share_links=0`）、临时表软删（`temp_table_live=0`），计数回基线。
+
+**历史 P2 五处复核**：代码均已修复，本轮只确认未改码——①日历月视图表头单行不重复；②长文本真换行无字面 `<br/>`；③帮助正文无字面 `<br/>`；④新建表 URL 自动补 `/view/:id`（真机实证）；⑤附件 20MB/40MB/20 个前后端常量对齐有守卫测试。
+
+---
+
+## 四、质量门实数（封版前，VM15）
+
+| 门 | 结果 |
+|---|---|
+| `apps/web` 全量 | **198 文件 / 2507 用例全绿** |
+| `apps/api` 全量 | **350 文件 / 3666 用例全绿** |
+| `@gx/canvas` | **2 文件 / 51 全绿** |
+| `@gx/shared-types` | **10 文件 / 181 全绿** |
+| 三包 `tsc --noEmit` | **0 错误** |
+| web eslint | **0 error** |
+| 迁移 | **44/44**（只增不改旧表） |
+
+> 全量测试 / 重构建只在 VM15；16GB 本机仅 tsc/lint/定向测试，**不在本机跑 Rust release 全量编译**（曾 OOM）。
+
+---
+
+## 五、升级 / 数据须知
+
+- **飞牛**：appcenter 无 upgrade，先 uninstall（**保留数据/env**）→ `install-fpk -e <向导文件>` → start；回调自动 `migrate deploy`（只增），数据/登录态/附件/品牌图保留；Node 必须 v22；**同版本号不能覆盖安装**。
+- **macOS**：数据落 `~/Library/Application Support/cc.gouxiang.desktop/`，钥匙串 service `cc.gouxiang.desktop`；删 `.app` 数据目录按惯例保留。
+
+---
+
+## 六、诚实缺口
+
+1. **dmg 未做实机双击 GUI 安装冒烟**（构建/解包/签名/版本元数据已核，真机 GUI 待产品负责人在场首验）。
+2. 附件限额未做真实大文件上传流（常量 + 守卫测试已对齐）。
+3. **帮助中心首页版本号陈旧**：内容来自后端代理的**外部 Gitea Wiki**（`apps/api/src/routes/helpProxy.ts`），wiki 源仍写「稳定版 v0.2.4 / Mac v0.2.5-beta 内测中」，须在**外部 wiki 仓库**更新，本仓改不到。
+4. 桌面离线编辑 / 断网双向同步不含；在线自动更新未接通（本 Release 不带 update-manifest）；无 Apple 签名/公证，仅 arm64。
+
+---
+
+## 七、发布动作
+
+1. 文档回填（本文件 + `docs/release-notes/0.2.6.md` + README 测试基线）并本地提交（**精确 add，不碰队友 beta.2 Rust WIP**）。
+2. fast-forward 推送 `feat/macos-desktop-d0`，并入 `main` 后 push（不强推、不覆盖）。
+3. 打 tag `v0.2.6`（指向 `3ea1f65` 或含文档提交的最新头），推送 tag。
+4. Gitea 建**正式 Release**，上传 fpk + dmg + 两 `.sha256` + 发布说明，不传 update-manifest；核对仓库 default_branch。
+
+---
+---
+
+# 【归档】v0.2.5-beta.1 发版说明（首个桌面端测试版 / Pre-release，内部详版）
+
+> 对外精简版见 `docs/release-notes/0.2.5-beta.1.md`；以下为内部完整记录。
+
 
 - **对外版本名**：`0.2.5-beta.1`（预发布，**不是正式版**）；Git tag：`v0.2.5-beta.1`
 - **内部包版本号**：`0.2.5`（版本单一真源 = 根 `package.json` 的 `version`；运行时与 fpk `manifest.version`、esbuild `GX_VERSION` 同源，禁止硬编码）。对外用 `-beta.1` 后缀表预发布，内部包号不动，避免为测试版改动版本单源。

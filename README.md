@@ -68,7 +68,7 @@
 ## 快速开始（飞牛 fnOS）
 
 1. 下载与 NAS 架构匹配的安装包（**当前正式发布仅提供 x86_64（x86）包，勿下错**；arm 包暂未发布）；
-2. 打开飞牛「应用中心」→「手动安装」→ 选择 `.fpk` → 选择安装存储空间；
+2. 打开飞牛「应用中心」→「手动安装」→ 选择 `.fpk` → 选择安装存储空间；安装向导的「服务端口」默认 **9527**（可改 1024–65535，独立端口直接服务，不再走旧 CGI 反代）；
 3. 从桌面卡片打开应用，**第一个注册的账号自动成为所有者（超级管理员）**，后续成员由管理员创建；
 4. 浏览器打开即用，建议 Chrome / Edge / Safari 最新版。
 
@@ -141,6 +141,10 @@ bash scripts/ci-quality.sh                     # CI 质量门
 
 | 包 | 实测值 | 记录日期 | 来源 |
 |---|---|---|---|
+| `apps/web` | **2507 passed / 0 failed**（198 files） | 2026-10-23 | v0.2.6 封版全量四门（VM15） |
+| `apps/api` | **3666 passed / 0 failed**（350 files） | 2026-10-23 | v0.2.6 封版全量四门（VM15） |
+| `@gx/canvas` | **51 passed / 0 failed**（2 files） | 2026-10-23 | v0.2.6 质量门（VM15） |
+| `@gx/shared-types` | **181 passed / 0 failed**（10 files） | 2026-10-23 | v0.2.6 质量门（VM15） |
 | `apps/api` | **3390 passed / 0 failed / 14 skipped**（324 files passed，2 skipped） | 2026-10-16 | v0.2.5 收口全量四门 gate-025f（VM15） |
 | `apps/web` | **1910 passed / 0 failed**（146 files；含 node/ 三个新模块 69 测试） | 2026-10-16 | v0.2.5 收口全量四门 gate-025f（VM15） |
 | `@gx/shared-types` | **181 passed / 0 failed**（10 files） | 2026-10-16 | v0.2.5 质量门 gate-025f（VM15） |
@@ -150,7 +154,7 @@ bash scripts/ci-quality.sh                     # CI 质量门
 | `@gx/shared-types` | 172 passed / 0 failed（9 files） | 2026-10-14 | v0.2.4 质量门 |
 | `@gx/canvas` | 51 passed / 0 failed（2 files） | 2026-10-14 | v0.2.4 质量门 |
 
-本表是历史记录、非当前断言。v0.2.5 收口实数已封版锁定（gate-025f，VM15，2026-10-16）：四包 `tsc --noEmit` 零错误、`eslint` 0 error、web build 成功；迁移 **42 枚**（本版**只增 1 枚** `sync_server_foundation` 建四张 `sync_*` 表，**同步面 `GX_SYNC_SERVER` 默认关闭，不触数据**）。v0.2.5 飞牛 x86 安装包已在 VM15 构建并解包复核（`gouxiangdb-0.2.5-x86.fpk`，65,128,252 B / 62.11 MiB，sha256 `c46df44f…f91910`，42 枚迁移、四入口齐全、不内置更新令牌），指纹与升级须知见根 `RELEASE.md`。v0.2.4 为 41 枚（注册开关复用 `app_settings` KV，零新增迁移）。内存 / 压测 / 全量测试类重活不在本机跑，放预览机 VM15；权威出口数字见 `docs/baseline/`。
+本表是历史记录、非当前断言。v0.2.6 封版实数（VM15，2026-10-23，基线 `3ea1f65`）：三包 `tsc --noEmit` 零错误、`eslint` 0 error、web build 成功；迁移 **44 枚**（`prisma migrate deploy` 幂等只增；同步面 `GX_SYNC_SERVER` 默认关闭、不触数据）。双安装包已构建并在飞牛真机 192.168.31.183 换装实证（旧 bundle marker=0 → 新 marker=1，JWT 不踢、数据零丢失、P0 匿名公开表真机通过，详见根 `RELEASE.md`）：`gouxiangdb-0.2.6-x86.fpk`（60,822,956 B，sha256 `be4ebea6…d0a`）与 `构想工作台_0.2.6_aarch64.dmg`（108,586,466 B，sha256 `90aabec9…03bc`）。v0.2.5 收口实数 gate-025f（2026-10-16）：迁移 42 枚（只增 1 枚 `sync_server_foundation` 建四张 `sync_*` 表）。v0.2.4 为 41 枚（注册开关复用 `app_settings` KV，零新增迁移）。内存 / 压测 / 全量测试类重活不在本机跑，放预览机 VM15；权威出口数字见 `docs/baseline/`。
 
 </details>
 
