@@ -24,7 +24,7 @@ import type {
   AssignmentSubjectInput,
 } from "@gx/shared-types";
 
-import { isAdminLevelSystemKey } from "../../lib/role-policy";
+import { isAdminLevelSystemKey, isSuperAdminSystemKey } from "../../lib/role-policy";
 import { useAuthStore } from "../../store/auth";
 import { useRemoteSessionActive } from "../../node/useActiveSession";
 
@@ -140,8 +140,17 @@ export function useEffectiveRoles(memberId: string | null) {
   });
 }
 
-/** 当前登录者的有效组织动作集合（通讯录由 view_directory 门控，写按钮据余下十枚动作显隐）。 */
-export function useMyOrgActions(): { actions: Set<OrgAction>; isLoading: boolean } {
+/**
+ * 当前登录者的有效组织动作集合（通讯录由 view_directory 门控，写按钮据余下十枚动作显隐）。
+ * 顺带派生 isSuperAdmin（#1046c）：管理员/超管两枚角色的授予主体只允许超管本人维护，
+ * 复用同一 myEffectiveRoles 查询，零新增请求。
+ */
+export function useMyOrgActions(): {
+  actions: Set<OrgAction>;
+  /** 当前登录者是否持有超级管理员角色（super_admin / 旧 owner；admin 不算）。 */
+  isSuperAdmin: boolean;
+  isLoading: boolean;
+} {
   const query = useQuery({
     queryKey: ORG_QK.myEffectiveRoles,
     queryFn: async () => await OrgMembers.myEffectiveRoles(),
@@ -152,7 +161,11 @@ export function useMyOrgActions(): { actions: Set<OrgAction>; isLoading: boolean
     for (const r of query.data?.roles ?? []) for (const a of r.actions) s.add(a);
     return s;
   }, [query.data]);
-  return { actions, isLoading: query.isLoading };
+  const isSuperAdmin = useMemo(
+    () => (query.data?.roles ?? []).some((r) => isSuperAdminSystemKey(r.systemKey)),
+    [query.data],
+  );
+  return { actions, isSuperAdmin, isLoading: query.isLoading };
 }
 
 /**

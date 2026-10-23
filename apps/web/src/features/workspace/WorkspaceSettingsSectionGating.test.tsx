@@ -21,6 +21,7 @@ let manageMenu = false;
 vi.mock("../contacts/contacts-hooks", () => ({
   useMyOrgActions: () => ({
     actions: new Set(manageMenu ? ["manage_menu"] : []),
+    isSuperAdmin: true,
     isLoading: false,
   }),
   useIsWorkspaceOwner: () => ({ isOwner, isLoading: false }),

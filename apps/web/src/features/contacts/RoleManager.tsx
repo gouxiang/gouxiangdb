@@ -29,7 +29,10 @@ import { confirmIrreversible } from "../../components/feedback";
 // 角色可见性 / 可否改删的判据与权限管理面板同源（lib/role-policy）：
 // 此前这里按 isSystem 判，把「管理员 / 受限成员」挡在通讯录门外，与权限管理对不上。
 import {
+  ADMIN_LEVEL_ASSIGN_BLOCK_REASON,
   LOCKED_ROLE_REASON,
+  canManageRoleAssignments,
+  isAdminLevelSystemKey,
   isCustomOrgRole,
   isLockedOrgRole,
   isOrgVisibleRole,
@@ -69,6 +72,7 @@ export function RoleManager({
   canEditRoles,
   canDeleteRoles,
   canAssignRoleMembers,
+  isSuperAdmin,
 }: {
   /** create_roles：新建自定义角色。 */
   canCreateRoles: boolean;
@@ -76,8 +80,10 @@ export function RoleManager({
   canEditRoles: boolean;
   /** delete_roles：删除自定义角色（弹窗内的删除按钮）。 */
   canDeleteRoles: boolean;
-  /** assign_role_members：这个角色授予给哪些成员/部门。 */
+  /** assign_role_members：这个角色授予给哪些成员/部门（动作位；管理员级角色还要本人是超管）。 */
   canAssignRoleMembers: boolean;
+  /** #1046c：当前登录者是否为超级管理员（管理员级角色的授予只允许超管本人维护）。 */
+  isSuperAdmin: boolean;
 }) {
   const rolesQ = useOrgRoles();
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
@@ -150,17 +156,35 @@ export function RoleManager({
       {/* 角色详情/主体维护 */}
       <div className="min-w-0 flex-1">
         {selectedRoleId ? (
-          <RoleDetail
-            role={roles.find((r) => r.id === selectedRoleId) ?? null}
-            canEdit={canEditRoles}
-            canAssignRoleMembers={canAssignRoleMembers}
-            onEdit={() => {
-              const r = roles.find((x) => x.id === selectedRoleId) ?? null;
-              // 能否编辑只按 immutable 判：管理员 / 受限成员 isSystem=1 但后端允许改，
-              // 按 isSystem 挡会把它们误锁成只读。
-              if (r && !isLockedOrgRole(r)) setEditing({ role: r });
-            }}
-          />
+          (() => {
+            const selected = roles.find((r) => r.id === selectedRoleId) ?? null;
+            // #1046c：管理员级角色（超管/管理员）的授予主体，非超级管理员即便有
+            // assign_role_members 动作位也不许动——与后端 PUT assignments 的 403 硬闸同源。
+            const canManageThisRoleAssignments = canManageRoleAssignments({
+              hasAssignAction: canAssignRoleMembers,
+              isSuperAdmin,
+              systemKey: selected?.systemKey ?? null,
+            });
+            return (
+              <RoleDetail
+                role={selected}
+                canEdit={canEditRoles}
+                canAssignRoleMembers={canManageThisRoleAssignments}
+                isPrivilegedAndLocked={
+                  !!selected
+                  && isAdminLevelSystemKey(selected.systemKey)
+                  && canAssignRoleMembers
+                  && !isSuperAdmin
+                }
+                onEdit={() => {
+                  const r = roles.find((x) => x.id === selectedRoleId) ?? null;
+                  // 能否编辑只按 immutable 判：管理员 / 受限成员 isSystem=1 但后端允许改，
+                  // 按 isSystem 挡会把它们误锁成只读。
+                  if (r && !isLockedOrgRole(r)) setEditing({ role: r });
+                }}
+              />
+            );
+          })()
         ) : (
           <EmptyState icon="shield" title="选择一个角色" />
         )}
@@ -181,11 +205,14 @@ function RoleDetail({
   role,
   canEdit,
   canAssignRoleMembers,
+  isPrivilegedAndLocked,
   onEdit,
 }: {
   role: OrgRoleDTO | null;
   canEdit: boolean;
   canAssignRoleMembers: boolean;
+  /** #1046c：当前是管理员级角色、登录者非超管（有授予动作位但身份不够）→ 授予区只读+说明。 */
+  isPrivilegedAndLocked: boolean;
   onEdit: () => void;
 }) {
   const assignmentsQ = useRoleAssignments(role?.id ?? null);
@@ -234,6 +261,12 @@ function RoleDetail({
           )}
         </div>
       </div>
+
+      {isPrivilegedAndLocked && (
+        <div className="border-b border-gx-separator bg-gx-warning-bg px-3 py-2 text-gx-12 text-gx-warning">
+          {ADMIN_LEVEL_ASSIGN_BLOCK_REASON}
+        </div>
+      )}
 
       <AssignmentEditor
         role={role}

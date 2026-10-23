@@ -6,12 +6,15 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { OrgRoleDTO } from "@gx/shared-types";
 import {
+  ADMIN_LEVEL_ASSIGN_BLOCK_REASON,
   LOCKED_ROLE_REASON,
   SUPER_ADMIN_LIBRARY_GRANT_REASON,
+  canManageRoleAssignments,
   isCustomOrgRole,
   isLockedOrgRole,
   isOrgVisibleRole,
   isPresetOrgRole,
+  isSuperAdminSystemKey,
   roleGrantBlockReason,
   roleLibraryGrantBlockReason,
 } from "../role-policy";
@@ -202,5 +205,64 @@ describe("权限管理两段配置都走赋权门控（源码级护栏）", () =
 
   it("超级管理员库权限专属文案收在 role-policy，组件里不重写一份", () => {
     expect(src).not.toContain("唯一能删库");
+  });
+});
+
+describe("isSuperAdminSystemKey（#1046c 仅超管判据）", () => {
+  it("super_admin 与旧值 owner 算超管；admin 明确不算", () => {
+    expect(isSuperAdminSystemKey("super_admin")).toBe(true);
+    expect(isSuperAdminSystemKey("owner")).toBe(true);
+    expect(isSuperAdminSystemKey("admin")).toBe(false);
+    expect(isSuperAdminSystemKey("restricted")).toBe(false);
+    expect(isSuperAdminSystemKey(null)).toBe(false);
+  });
+
+  it("比 isAdminLevelSystemKey 更严：admin 落管理员级但非超管", () => {
+    // 这条钉住两把尺子不能混用——封 admin/超管的身份门槛必须用仅超管判据。
+    expect(isSuperAdminSystemKey("admin")).not.toBe(true);
+  });
+});
+
+describe("canManageRoleAssignments（#1046c 授予主体门控）", () => {
+  it("没有 assign_role_members 动作位：任何角色都不可维护", () => {
+    expect(canManageRoleAssignments({ hasAssignAction: false, isSuperAdmin: true, systemKey: "super_admin" })).toBe(false);
+    expect(canManageRoleAssignments({ hasAssignAction: false, isSuperAdmin: false, systemKey: null })).toBe(false);
+  });
+
+  it("管理员级角色：仅超级管理员本人可维护；admin 登录者（非超管）被拦", () => {
+    for (const key of ["super_admin", "admin", "owner"] as const) {
+      expect(canManageRoleAssignments({ hasAssignAction: true, isSuperAdmin: true, systemKey: key })).toBe(true);
+      expect(canManageRoleAssignments({ hasAssignAction: true, isSuperAdmin: false, systemKey: key })).toBe(false);
+    }
+  });
+
+  it("普通/自定义/受限角色：有动作位即可，非超管也能维护", () => {
+    expect(canManageRoleAssignments({ hasAssignAction: true, isSuperAdmin: false, systemKey: null })).toBe(true);
+    expect(canManageRoleAssignments({ hasAssignAction: true, isSuperAdmin: false, systemKey: "restricted" })).toBe(true);
+    expect(canManageRoleAssignments({ hasAssignAction: true, isSuperAdmin: true, systemKey: null })).toBe(true);
+  });
+
+  it("禁用文案非空且点明只有超级管理员能操作", () => {
+    expect(ADMIN_LEVEL_ASSIGN_BLOCK_REASON).toContain("超级管理员");
+  });
+});
+
+// 光有纯判据不够：通讯录授予 UI 必须真的按它门控，而不是退回只看 assign_role_members
+// 动作位（那样管理员又能封管理员/超管，点了才被后端 403 拦——假入口）。
+describe("通讯录角色授予走 #1046c 门控（源码级护栏）", () => {
+  const dir = new URL("../../features/", import.meta.url).pathname;
+  const src = readFileSync(`${dir}contacts/RoleManager.tsx`, "utf8");
+  const directorySrc = readFileSync(`${dir}contacts/ContactsDirectory.tsx`, "utf8");
+
+  it("RoleManager 用 canManageRoleAssignments 计算当前角色能否维护授予，且喂入 isSuperAdmin", () => {
+    expect(src).toMatch(/canManageRoleAssignments\(\{/);
+    expect(src).toMatch(/isSuperAdmin,?\s*\n?\s*systemKey:/);
+    // 不能退回只把动作位透传给授予编辑器。
+    expect(src).toContain("ADMIN_LEVEL_ASSIGN_BLOCK_REASON");
+  });
+
+  it("ContactsDirectory 把登录者 isSuperAdmin 透传给 RoleManager", () => {
+    expect(directorySrc).toMatch(/isSuperAdmin,?\s*isLoading/);
+    expect(directorySrc).toContain("isSuperAdmin={isSuperAdmin}");
   });
 });

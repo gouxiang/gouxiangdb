@@ -55,6 +55,38 @@ export function isAdminLevelSystemKey(systemKey: OrgRoleDTO["systemKey"]): boole
   return systemKey === "super_admin" || systemKey === "admin" || systemKey === "owner";
 }
 
+/**
+ * 「仅超级管理员本人」判据（#1046c）：比 {@link isAdminLevelSystemKey} 更严——
+ * 管理员（admin）与超级管理员权限位完全相同，能授予 admin 就等于能封 super_admin，
+ * 故管理员/超管这两枚角色的【授予主体】只允许超级管理员本人调整。'owner' 是超级管理员
+ * 的旧 systemKey，存量库仍可能挂着，一并认作超管；admin 明确【不算】。
+ */
+export function isSuperAdminSystemKey(systemKey: OrgRoleDTO["systemKey"]): boolean {
+  return systemKey === "super_admin" || systemKey === "owner";
+}
+
+/**
+ * 当前登录者能否维护某角色的授予主体（添加/移除成员、部门）——#1046c 前端镜像门控。
+ * 与后端 PUT /org/roles/:id/assignments 的 assertCanAssignPrivilegedRole 同一裁决：
+ *   - 先要有 assign_role_members 动作位；
+ *   - 目标角色是管理员级（super_admin/admin/旧 owner）时，还必须本人是超级管理员；
+ *   - 其余角色维持仅看动作位。
+ * 纯函数（不碰 React/query），便于表驱动单测。
+ */
+export function canManageRoleAssignments(input: {
+  hasAssignAction: boolean;
+  isSuperAdmin: boolean;
+  systemKey: OrgRoleDTO["systemKey"];
+}): boolean {
+  if (!input.hasAssignAction) return false;
+  if (isAdminLevelSystemKey(input.systemKey)) return input.isSuperAdmin;
+  return true;
+}
+
+/** 非超级管理员维护管理员级角色授予时的禁用说明（与后端 403 文案口径一致）。 */
+export const ADMIN_LEVEL_ASSIGN_BLOCK_REASON =
+  "管理员与超级管理员权限相同，只有超级管理员本人能调整这两个角色的成员——请联系超级管理员操作。";
+
 /** 角色图标：三枚组织预设各有辨识度，自定义角色统一用盾牌。 */
 export function roleIconName(r: OrgRoleDTO): IconName {
   if (r.systemKey === "super_admin" || r.systemKey === "owner") return "crown";

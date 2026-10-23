@@ -23,7 +23,7 @@ export interface ContactsDirectoryProps {
 }
 
 export function ContactsDirectory({ className = "h-full" }: ContactsDirectoryProps) {
-  const { actions, isLoading: actionsLoading } = useMyOrgActions();
+  const { actions, isSuperAdmin, isLoading: actionsLoading } = useMyOrgActions();
   // 企业化定位：通讯录入口由 view_directory 单独门控；写动作各自按细分动词投票，
   // 不再用「manage_departments / manage_roles / manage_members」三枚粗粒度位一把梭
   // （自定义角色只勾新十二枚时旧位为空，按旧位判会把这些人全部挡在门外）。
@@ -118,6 +118,7 @@ export function ContactsDirectory({ className = "h-full" }: ContactsDirectoryPro
         canEditRoles={canEditRoles}
         canDeleteRoles={canDeleteRoles}
         canAssignRoleMembers={canAssignRoleMembers}
+        isSuperAdmin={isSuperAdmin}
       />
     </div>
   );

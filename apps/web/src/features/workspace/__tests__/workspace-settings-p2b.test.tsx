@@ -31,7 +31,7 @@ const PRESET_ROLES = [
 const noopAsync = () => Promise.resolve({ id: "x" });
 
 vi.mock("../../contacts/contacts-hooks", () => ({
-  useMyOrgActions: () => ({ actions: new Set(actions), isLoading: false }),
+  useMyOrgActions: () => ({ actions: new Set(actions), isSuperAdmin: true, isLoading: false }),
   useIsWorkspaceOwner: () => ({ isOwner, isLoading: false }),
   useOrgRoles: () => ({ data: roles, isLoading: false, isError: false, refetch: vi.fn() }),
   useOrgRoleMutations: () => ({
