@@ -25,7 +25,10 @@ use std::sync::{Arc, OnceLock};
 use serde::Serialize;
 use tauri::State;
 
-use crate::sidecar::{KernelPlanner, LocalKernelPlanner, LocalStatus, SidecarManager};
+use crate::sidecar::{
+    http_get_200_body, replica_data_path, sanitize_node_id, KernelPlanner, LocalKernelPlanner,
+    LocalStatus, ReplicaKernelPlanner, ReplicaRemote, SidecarManager,
+};
 use crate::upstream::{normalize_http_base, Shared, Upstream};
 
 /// 壳的统一托管状态：Tauri `.manage()` 与 axum `State` 共用同一个 `Arc<ShellState>`，
@@ -37,7 +40,9 @@ use crate::upstream::{normalize_http_base, Shared, Upstream};
 ///   仅能在 setup 取得 resource_dir，故用 OnceLock 在绑定壳口前设置一次。
 /// - `resource_dir` / `data_dir` 为随包产物根与本地数据目录（R2 sidecar 首 boot 用），
 ///   同样只在 setup 取得一次。
-/// - `sidecar` 为本地内核生命周期托管器（start/stop/status，单活、独立进程组）。
+/// - `sidecar` 为本地主库内核生命周期托管器（start/stop/status，单活、独立进程组）。
+/// - `replica` 为离线副本内核的**独立**托管器：与主库各持一个单进程槽，二者保守单角色互斥
+///   （start 时检查对侧是否在跑，不强杀），退出时各自收尸。
 pub struct ShellState {
     /// 上游 + probeId 表（纯状态层见 upstream.rs）。
     pub shared: Arc<Shared>,
@@ -46,6 +51,7 @@ pub struct ShellState {
     data_dir: OnceLock<PathBuf>,
     port: AtomicU16,
     sidecar: Arc<SidecarManager>,
+    replica: Arc<SidecarManager>,
 }
 
 impl ShellState {
@@ -57,6 +63,7 @@ impl ShellState {
             data_dir: OnceLock::new(),
             port: AtomicU16::new(0),
             sidecar: Arc::new(SidecarManager::new()),
+            replica: Arc::new(SidecarManager::new()),
         }
     }
 
@@ -92,6 +99,11 @@ impl ShellState {
         self.sidecar.clone()
     }
 
+    /// 离线副本内核托管器（与主库独立的单进程槽；退出收尸并列调用）。
+    pub fn replica(&self) -> Arc<SidecarManager> {
+        self.replica.clone()
+    }
+
     /// 用当前 resource_dir/data_dir 构造一个生产内核 planner（Keychain JWT）。
     /// 目录未登记（理论不发生）返回中文错误，不 panic。
     fn kernel_planner(&self) -> Result<LocalKernelPlanner, String> {
@@ -99,6 +111,23 @@ impl ShellState {
             (Some(r), Some(d)) => Ok(LocalKernelPlanner::new(r.clone(), d.clone())),
             _ => Err("本地环境尚未初始化（资源目录缺失），请重启应用后重试".to_string()),
         }
+    }
+
+    /// 构造一个生产副本内核 planner（隔离目录 + 独立钥匙串 account + 6 副本变量）。
+    fn replica_planner(&self, remote: ReplicaRemote) -> Result<ReplicaKernelPlanner, String> {
+        match (self.resource_dir.get(), self.data_dir.get()) {
+            (Some(r), Some(d)) => ReplicaKernelPlanner::new(r.clone(), d, remote),
+            _ => Err("本地环境尚未初始化（资源目录缺失），请重启应用后重试".to_string()),
+        }
+    }
+
+    /// 只读计算某节点副本数据目录路径（**不创建目录**，供 status 的 added 判定）。
+    fn replica_path(&self, node_id: &str) -> Result<PathBuf, String> {
+        let base = self
+            .data_dir
+            .get()
+            .ok_or_else(|| "本地环境尚未初始化（数据目录缺失），请重启应用后重试".to_string())?;
+        replica_data_path(base, node_id)
     }
 }
 
@@ -178,6 +207,13 @@ pub async fn gx_start_local(
     state: State<'_, Arc<ShellState>>,
 ) -> Result<serde_json::Value, String> {
     crate::dbg_log("ENTER gx:start_local");
+    // 保守单角色互斥：离线副本内核在跑时，不允许再起主库（不强杀，中文拒绝、由 UI 串行化）。
+    if state.replica().running_port().is_some() {
+        return Ok(serde_json::json!({
+            "ok": false,
+            "error": "离线副本内核正在运行，请先停止副本再启动本地主库（二者不能同时运行）"
+        }));
+    }
     let planner = match state.kernel_planner() {
         Ok(p) => p,
         Err(e) => return Ok(serde_json::json!({ "ok": false, "error": e })),
@@ -251,6 +287,131 @@ impl From<LocalStatus> for LocalStatusDto {
             kernel_port: s.kernel_port,
         }
     }
+}
+
+/// `gx:start_replica`：按节点 ID 隔离地启动一个离线副本内核（#828 接线）。
+///
+/// - 数据/库/上传/审计/JWT 全部落在 `<data_dir>/replicas/<nodeId>/` 与钥匙串 `replica-jwt:<nodeId>`，
+///   与主库物理隔离；常驻进程额外注入 6 枚副本同步变量（见 [`ReplicaRemote::daemon_env`]）。
+/// - 保守单角色互斥：主库内核在跑则中文拒绝（不强杀），由 UI 串行化。
+/// - 阻塞部分（首 boot migrate/nav + readyz + bootstrap 探测）放 spawn_blocking。
+/// - 令牌只进子进程 env，绝不进 argv / 日志 / 返回体。
+///
+/// 返回：`{ok:true,kernelPort,initialized,nodeId}` 或业务失败体 `{ok:false,error}`（非 reject）。
+#[tauri::command(rename = "gx:start_replica")]
+pub async fn gx_start_replica(
+    state: State<'_, Arc<ShellState>>,
+    remote_base_url: String,
+    node_id: String,
+    remote_token: Option<String>,
+    client_id: Option<String>,
+    sync_interval_ms: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    crate::dbg_log("ENTER gx:start_replica");
+    // 节点 ID 先单独 sanitize：既用于互斥后路径/回退判定，也用于回显（绝不回显 token）。
+    let node = match sanitize_node_id(&node_id) {
+        Ok(n) => n,
+        Err(e) => return Ok(serde_json::json!({ "ok": false, "error": e })),
+    };
+    // 规整远端配置（URL 规范化、token trim、client/interval 缺省与夹限）。非法 → 业务失败体。
+    let remote = match ReplicaRemote::new(
+        &remote_base_url,
+        remote_token.as_deref().unwrap_or(""),
+        &node,
+        client_id.as_deref(),
+        sync_interval_ms,
+    ) {
+        Ok(r) => r,
+        Err(e) => return Ok(serde_json::json!({ "ok": false, "error": e })),
+    };
+    // 互斥：主库内核在跑则拒绝（不强杀）。放在构造 planner【之前】，确保拒绝路径不创建任何副本目录。
+    if state.sidecar().running_port().is_some() {
+        return Ok(serde_json::json!({
+            "ok": false,
+            "error": "本地主库内核正在运行，请先停止主库再启动离线副本（二者不能同时运行）"
+        }));
+    }
+    let planner = match state.replica_planner(remote) {
+        Ok(p) => p,
+        Err(e) => return Ok(serde_json::json!({ "ok": false, "error": e })),
+    };
+
+    // initialized 回退值：bootstrap 探测失败时用隔离目录下是否已有 dev.db（首 boot 前判定）。
+    let fallback_initialized = planner.data_dir().join("dev.db").is_file();
+    let mgr = state.replica();
+    let start_res = tauri::async_runtime::spawn_blocking(move || -> Result<(u16, bool), String> {
+        let port = mgr.start(&planner)?;
+        // 就绪后读免鉴权引导状态，取 initialized（users 表是否已有用户）。
+        let initialized = match http_get_200_body(port, "/api/auth/bootstrap-status") {
+            Some(body) => match serde_json::from_str::<serde_json::Value>(&body) {
+                Ok(v) => v.get("initialized").and_then(|x| x.as_bool()).unwrap_or_else(|| {
+                    crate::dbg_log("bootstrap-status 缺 initialized 字段，回退 dev.db 判定");
+                    fallback_initialized
+                }),
+                Err(e) => {
+                    crate::dbg_log(&format!("bootstrap-status JSON 解析失败（回退 dev.db）: {e}"));
+                    fallback_initialized
+                }
+            },
+            None => {
+                crate::dbg_log("bootstrap-status 探测失败，回退 dev.db 判定 initialized");
+                fallback_initialized
+            }
+        };
+        Ok((port, initialized))
+    })
+    .await
+    .map_err(|e| format!("启动任务执行失败：{e}"))?;
+
+    match start_res {
+        Ok((port, initialized)) => {
+            crate::dbg_log(&format!(
+                "gx:start_replica OK node={node} port={port} initialized={initialized}"
+            ));
+            state.shared.set_upstream(Upstream::Replica { port }).await;
+            Ok(serde_json::json!({
+                "ok": true,
+                "kernelPort": port,
+                "initialized": initialized,
+                "nodeId": node
+            }))
+        }
+        Err(e) => {
+            crate::dbg_log(&format!("gx:start_replica FAIL: {e}"));
+            Ok(serde_json::json!({ "ok": false, "error": e }))
+        }
+    }
+}
+
+/// `gx:stop_replica`：优雅停副本内核（不删隔离数据）。仅当当前上游正是 Replica 时复位 None，
+/// Remote/Local/None 不动。返回 `{ok,wasRunning}`。
+#[tauri::command(rename = "gx:stop_replica")]
+pub async fn gx_stop_replica(
+    state: State<'_, Arc<ShellState>>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.replica();
+    let stopped = tauri::async_runtime::spawn_blocking(move || mgr.stop())
+        .await
+        .map_err(|e| format!("停止任务执行失败：{e}"))??;
+    if matches!(state.shared.get_upstream().await, Upstream::Replica { .. }) {
+        state.shared.set_upstream(Upstream::None).await;
+    }
+    Ok(serde_json::json!({ "ok": true, "wasRunning": stopped }))
+}
+
+/// `gx:replica_status`：指定节点副本的四态（未添加/已添加停止/运行中/就绪）。
+/// 入参 `nodeId`；只做只读路径计算（不创建目录）。readyz 探测放 spawn_blocking。
+#[tauri::command(rename = "gx:replica_status")]
+pub async fn gx_replica_status(
+    state: State<'_, Arc<ShellState>>,
+    node_id: String,
+) -> Result<LocalStatusDto, String> {
+    let dir = state.replica_path(&node_id)?;
+    let mgr = state.replica();
+    let status = tauri::async_runtime::spawn_blocking(move || mgr.status_for_dir(&dir))
+        .await
+        .map_err(|e| format!("读取副本状态失败：{e}"))?;
+    Ok(LocalStatusDto::from(status))
 }
 
 /// `gx:begin_probe`：注册短期 probeId→baseURL（TTL≤120s），不改变当前活动上游。

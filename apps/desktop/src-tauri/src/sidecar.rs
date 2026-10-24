@@ -25,7 +25,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::secret::{ensure_jwt_secret, KeychainStore, SecretStore};
+use crate::secret::{ensure_jwt_secret, KeychainStore, SecretStore, SERVICE_MAIN};
+use crate::upstream::normalize_http_base;
 
 /// 随包 Node 可执行名（Apple Silicon）。
 const NODE_BIN: &str = "gxnode-aarch64-apple-darwin";
@@ -38,6 +39,17 @@ const DEFAULT_READY_TIMEOUT: Duration = Duration::from_secs(40);
 const DEFAULT_STOP_GRACE: Duration = Duration::from_secs(8);
 /// readyz 轮询间隔。
 const POLL_INTERVAL: Duration = Duration::from_millis(150);
+
+/// 副本定时间隔缺省值（毫秒），与内核 configReplica.ts REPLICA_DEFAULT_INTERVAL_MS 对齐。
+const REPLICA_DEFAULT_INTERVAL_MS: u64 = 30_000;
+/// 副本定时间隔下限（毫秒），与内核 REPLICA_MIN_INTERVAL_MS 对齐（防把远端打爆）。
+const REPLICA_MIN_INTERVAL_MS: u64 = 5_000;
+/// 副本节点 ID 长度上限（目录名/钥匙串 account 片段）。
+const REPLICA_NODE_ID_MAX_LEN: usize = 64;
+/// 副本数据目录在主数据目录下的子目录名。
+const REPLICAS_SUBDIR: &str = "replicas";
+/// 缺省副本 clientId（内核同口径 local-replica）。
+const REPLICA_DEFAULT_CLIENT_ID: &str = "local-replica";
 
 /// 一个内核进程的纯启动描述。安全敏感：环境变量里携带 JWT（子进程 env，不进 `ps` 参数）。
 pub struct StartPlan {
@@ -228,7 +240,14 @@ impl SidecarManager {
 
     /// 当前内核状态（§3：added/initialized/running/ready/kernelPort）。
     pub fn status<P: KernelPlanner>(&self, planner: &P) -> LocalStatus {
-        let added = is_added(planner.data_dir());
+        self.status_for_dir(planner.data_dir())
+    }
+
+    /// 按显式数据目录取状态（副本 status 用：只有 nodeId、无远端 URL，不应为判状态伪造 planner，
+    /// 也不应因此创建目录）。`running/ready/kernel_port` 仍来自本托管器单槽，与节点无关；
+    /// `added/initialized` 看给定目录下是否有 `dev.db`。
+    pub fn status_for_dir(&self, data_dir: &Path) -> LocalStatus {
+        let added = is_added(data_dir);
         match self.reap_if_dead() {
             Some((_pid, port)) => {
                 let ready = readyz_is_ready(port);
@@ -296,6 +315,75 @@ fn is_added(data_dir: &Path) -> bool {
     data_dir.join("dev.db").is_file()
 }
 
+/// 校验并规整副本节点 ID（用作隔离目录名与钥匙串 account 片段）。
+///
+/// 规则（fail-closed，任何不满足都返回中文错误）：
+/// - trim 后非空，长度 1..=64；
+/// - 仅允许 `[A-Za-z0-9._-]`（由此天然拒绝 `/`、`\`、`:`、NUL 等任何路径分隔/逃逸字符）；
+/// - 拒绝整体等于 `.` 或 `..`（点段逃逸）；`a..b` 这类含连续点但非点段的名字放行。
+///
+/// 因为白名单已排除路径分隔符，节点名在拼接时只能是【单个目录段】，无法跨目录。
+pub fn sanitize_node_id(raw: &str) -> Result<String, String> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err("节点 ID 不能为空".to_string());
+    }
+    if name.len() > REPLICA_NODE_ID_MAX_LEN {
+        return Err(format!(
+            "节点 ID 长度不能超过 {REPLICA_NODE_ID_MAX_LEN} 个字符（当前 {}）",
+            name.len()
+        ));
+    }
+    if name == "." || name == ".." {
+        return Err("节点 ID 不能是 \".\" 或 \"..\"".to_string());
+    }
+    if let Some(ch) = name
+        .chars()
+        .find(|c| !(c.is_ascii_alphanumeric() || *c == '.' || *c == '_' || *c == '-'))
+    {
+        return Err(format!(
+            "节点 ID 仅允许字母、数字、点、下划线、连字符（收到非法字符 {ch:?}）"
+        ));
+    }
+    Ok(name.to_string())
+}
+
+/// 计算某节点副本的隔离数据目录路径：`<base_data_dir>/replicas/<sanitized_node>/`。
+///
+/// 纯函数：只做 [`sanitize_node_id`] + 单段 join，**不创建目录、不触碰文件系统**。
+/// 因白名单已排除路径分隔符，结果恒为 replicas/ 下的单段名，不存在逃逸。
+/// 供 status 等只读路径使用（不应为"看一眼状态"而建目录）。
+pub fn replica_data_path(base_data_dir: &Path, node: &str) -> Result<PathBuf, String> {
+    let name = sanitize_node_id(node)?;
+    Ok(base_data_dir.join(REPLICAS_SUBDIR).join(name))
+}
+
+/// 计算并确保某节点副本的隔离数据目录存在：`<base_data_dir>/replicas/<sanitized_node>/`。
+///
+/// 除了[`sanitize_node_id`]的字符级防护，再做一次文件系统级的 canonicalize 前缀断言，
+/// 纵深防御符号链接等把目录指到 `replicas/` 之外的情况。返回的路径已 canonicalize。
+pub fn replica_data_dir(base_data_dir: &Path, node: &str) -> Result<PathBuf, String> {
+    let target = replica_data_path(base_data_dir, node)?;
+    let replicas_root = base_data_dir.join(REPLICAS_SUBDIR);
+    // 先建根与目标，canonicalize 才有落点。
+    std::fs::create_dir_all(&target).map_err(|e| format!("创建副本数据目录失败：{e}"))?;
+    let canon_root = replicas_root
+        .canonicalize()
+        .map_err(|e| format!("解析副本根目录失败：{e}"))?;
+    let canon_target = target
+        .canonicalize()
+        .map_err(|e| format!("解析副本数据目录失败：{e}"))?;
+    if !canon_target.starts_with(&canon_root) {
+        // 命中符号链接逃逸等异常：拒绝并报中文错误，绝不据此外泄到根外目录。
+        return Err(format!(
+            "副本数据目录逃逸异常：{} 不在 {} 之下",
+            canon_target.display(),
+            canon_root.display()
+        ));
+    }
+    Ok(canon_target)
+}
+
 /// 绑一个空闲回环端口并立即释放，返回端口号。存在极小竞态（释放后被抢），
 /// 但回环临时口 + 立刻 listen，实测可忽略；内核 listen 失败会在 readyz 轮询中暴露。
 fn free_loopback_port() -> Result<u16, String> {
@@ -351,6 +439,52 @@ fn probe_http_200(port: u16, path: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// 最小 HTTP/1.0 GET：在状态码为 200 时返回**响应体**字符串（供读 `/api/auth/bootstrap-status`
+/// 的 `{initialized}`）。连接失败 / 非 200 / 空体 / 体过大一律返回 `None`（调用方据此回退到
+/// dev.db 判定）。零依赖、短超时；发 `Connection: close`，读到对端 EOF 即完整响应。
+pub fn http_get_200_body(port: u16, path: &str) -> Option<String> {
+    let mut stream = TcpStream::connect_timeout(
+        &std::net::SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+            port,
+        ),
+        Duration::from_millis(800),
+    )
+    .ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(800)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(800)));
+    let req = format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    stream.write_all(req.as_bytes()).ok()?;
+
+    // 读到 EOF（对端 close），64KiB 上盖（bootstrap 体仅几十字节）。
+    let mut all = Vec::new();
+    let mut chunk = [0u8; 1024];
+    loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                all.extend_from_slice(&chunk[..n]);
+                if all.len() > 64 * 1024 {
+                    return None;
+                }
+            }
+            Err(_) => return None,
+        }
+    }
+    let text = String::from_utf8_lossy(&all);
+    let status_line = text.lines().next()?;
+    if !status_line.contains(" 200") {
+        return None;
+    }
+    // 仅取头/体分隔后的 body（弃去响应头，不做 chunked 解码——close 定界、Hono 带 Content-Length）。
+    let sep = text.find("\r\n\r\n")?;
+    let body = text[sep + 4..].trim();
+    if body.is_empty() {
+        return None;
+    }
+    Some(body.to_string())
+}
+
 mod libc_signal {
     pub const TERM: i32 = 15;
     pub const KILL: i32 = 9;
@@ -373,7 +507,7 @@ fn kill_group(pid: u32, sig: i32) {
 
 // ───────────────────────── 生产 planner：随包 Node 内核 ─────────────────────────
 
-/// 生产内核规划器：resource_dir（随包 node/server）+ data_dir（Application Support）。
+/// 本地节点（主库）内核规划器：resource_dir（随包 node/server）+ data_dir（Application Support）。
 /// JWT 走 macOS 钥匙串（[`KeychainStore`]），旧 `.jwt-secret` 文件一次性迁入后删除。
 pub struct LocalKernelPlanner {
     resource_dir: PathBuf,
@@ -402,13 +536,6 @@ impl LocalKernelPlanner {
             secrets,
         }
     }
-
-    fn node_path(&self) -> PathBuf {
-        self.resource_dir.join(NODE_BIN)
-    }
-    fn server_dir(&self) -> PathBuf {
-        self.resource_dir.join(SERVER_DIR)
-    }
 }
 
 impl KernelPlanner for LocalKernelPlanner {
@@ -417,130 +544,288 @@ impl KernelPlanner for LocalKernelPlanner {
     }
 
     fn plan(&self, port: u16) -> Result<StartPlan, String> {
-        let node = self.node_path();
-        let server = self.server_dir();
-        if !node.exists() {
-            return Err(format!("随包 Node 缺失：{}", node.display()));
-        }
-        if !server.join("dist/index.js").exists() {
-            return Err(format!("内核程序缺失：{}/dist/index.js", server.display()));
-        }
+        // 主库：无额外常驻 env（不注入任何副本变量）。
+        build_kernel_plan(
+            &self.resource_dir,
+            &self.data_dir,
+            self.secrets.as_ref(),
+            port,
+            &[],
+        )
+    }
+}
 
-        std::fs::create_dir_all(&self.data_dir).map_err(|e| format!("创建数据目录失败：{e}"))?;
-        let uploads = self.data_dir.join("uploads");
-        let audit = self.data_dir.join(".audit");
-        std::fs::create_dir_all(&uploads).ok();
-        std::fs::create_dir_all(&audit).ok();
+// ─────────────────────── 离线副本（replica）内核规划器 ───────────────────────
 
-        let db_path = self.data_dir.join("dev.db");
-        let first_boot = !db_path.exists();
+/// 副本连远端所需的规整配置（fail-closed：URL/节点非法在构造期即报错）。
+///
+/// `token` 是机密：只允许进入 [`StartPlan`] 的子进程 env，绝不进 argv / 日志 / 命令返回体；
+/// [`StartPlan`] 的手动 Debug 只打 env 键名，单测另断言 `{:?}` 不含令牌明文。
+pub struct ReplicaRemote {
+    /// 已规范化为 origin（无 path/尾斜杠/内嵌凭证）的远端地址。
+    base_url: String,
+    /// 远端访问令牌（X-GX-Token），trim 后可空。
+    token: String,
+    /// 定时间隔毫秒（None→30000，已夹下限 5000）。
+    interval_ms: u64,
+    /// 已 sanitize 的节点 ID（同时是隔离目录段/钥匙串 account 片段）。
+    node_id: String,
+    /// 本机直写 clientId（空→local-replica）。
+    client_id: String,
+}
 
-        // 已有库：首启前冷备（sidecar 尚未起，纯文件拷贝；迁移只增不删，双保险）。
-        if !first_boot {
-            let stamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let bak = self.data_dir.join(format!("dev.db.{stamp}.bak"));
-            if let Err(e) = std::fs::copy(&db_path, &bak) {
-                // 冷备失败不阻断（迁移只增），但明确告知日志。
-                crate::dbg_log(&format!("WARN 冷备 dev.db 失败（继续）: {e}"));
-            }
-        }
-
-        // JWT：钥匙串优先 → 迁移旧 .jwt-secret → 新建。仅首 boot 首次会触发系统授权弹窗。
-        let legacy = self.data_dir.join(".jwt-secret");
-        let outcome = ensure_jwt_secret(self.secrets.as_ref(), &legacy)
-            .map_err(|e| format!("准备本地密钥失败：{e}"))?;
-        crate::dbg_log(&format!(
-            "JWT 来源: {:?}（legacy 删除={}）",
-            outcome.source, outcome.legacy_deleted
-        ));
-        let jwt_secret = outcome.secret;
-
-        let common_env: Vec<(String, String)> = vec![
-            ("NODE_ENV".into(), "production".into()),
-            ("GX_BIND_HOST".into(), "127.0.0.1".into()),
-            (
-                "CORS_ORIGIN".into(),
-                "http://127.0.0.1:*,http://localhost:*".into(),
-            ),
-        ];
-        let database_url = format!("file:{}", db_path.display());
-
-        // 首 boot 的同步步骤（已初始化则跳过——不再重建、不再要求建管理员）。
-        if first_boot {
-            // 1) migrate deploy（只增不删）。
-            let migrate_status = Command::new(&node)
-                .current_dir(&server)
-                .arg("node_modules/prisma/build/index.js")
-                .arg("migrate")
-                .arg("deploy")
-                .arg("--schema=prisma/schema.prisma")
-                .env("DATABASE_URL", &database_url)
-                .env("GX_DATA_DIR", &self.data_dir)
-                .envs(common_env.clone())
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .status()
-                .map_err(|e| format!("启动数据库迁移失败：{e}"))?;
-            if !migrate_status.success() {
-                return Err(format!(
-                    "数据库迁移失败（退出码 {migrate_status}，旧库与备份均已保留）"
-                ));
-            }
-
-            // 2) nav-reconcile --apply（幂等；失败不阻断首启，导航可运行期修复）。
-            let nav = Command::new(&node)
-                .current_dir(&server)
-                .arg("dist/nav-reconcile.js")
-                .arg("--apply")
-                .env("DATABASE_URL", &database_url)
-                .env("GX_DATA_DIR", &self.data_dir)
-                .env("GX_AUDIT_DIR", &audit)
-                .env("JWT_SECRET", &jwt_secret)
-                .envs(common_env.clone())
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .status();
-            match nav {
-                Ok(s) if s.success() => crate::dbg_log("nav-reconcile --apply ok"),
-                Ok(s) => crate::dbg_log(&format!("nav-reconcile 非零退出 {s}（不阻断首启）")),
-                Err(e) => crate::dbg_log(&format!("nav-reconcile 启动失败 {e}（不阻断首启）")),
-            }
-        }
-
-        // 3) 常驻内核进程计划（PORT 用 manager 选定的回环口）。
-        let mut env = vec![
-            ("DATABASE_URL".to_string(), database_url),
-            (
-                "GX_DATA_DIR".to_string(),
-                self.data_dir.display().to_string(),
-            ),
-            ("UPLOAD_ROOT".to_string(), uploads.display().to_string()),
-            ("GX_AUDIT_DIR".to_string(), audit.display().to_string()),
-            (
-                "GX_WEB_DIST".to_string(),
-                server.join("public").display().to_string(),
-            ),
-            (
-                "GX_MIGRATIONS_DIR".to_string(),
-                server.join("prisma/migrations").display().to_string(),
-            ),
-            ("PORT".to_string(), port.to_string()),
-            ("JWT_SECRET".to_string(), jwt_secret),
-        ];
-        env.extend(common_env);
-
-        Ok(StartPlan {
-            program: node.display().to_string(),
-            args: vec!["dist/index.js".to_string()],
-            cwd: server,
-            env,
+impl ReplicaRemote {
+    /// 校验并规整副本远端配置。
+    ///
+    /// - `raw_url`：经 [`normalize_http_base`] 校验，空/非 http(s) 直接中文报错（fail-closed）；
+    /// - `token`：trim 后保存，允许空串；
+    /// - `node_id`：经 [`sanitize_node_id`] 校验（决定隔离目录与钥匙串 account）；
+    /// - `client_id`：None/trim 后空 → `local-replica`；
+    /// - `interval_ms`：None → 30000；Some 夹下限 5000（与内核 parseReplicaIntervalMs 同口径）。
+    pub fn new(
+        raw_url: &str,
+        token: &str,
+        node_id: &str,
+        client_id: Option<&str>,
+        interval_ms: Option<u64>,
+    ) -> Result<Self, String> {
+        let base_url = normalize_http_base(raw_url)?;
+        let node = sanitize_node_id(node_id)?;
+        let cid = client_id
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(REPLICA_DEFAULT_CLIENT_ID);
+        let interval = interval_ms
+            .map(|v| v.max(REPLICA_MIN_INTERVAL_MS))
+            .unwrap_or(REPLICA_DEFAULT_INTERVAL_MS);
+        Ok(Self {
+            base_url,
+            token: token.trim().to_string(),
+            interval_ms: interval,
+            node_id: node,
+            client_id: cid.to_string(),
         })
     }
+
+    /// 已 sanitize 的节点 ID（只读暴露给 planner 建隔离目录/钥匙串 account）。
+    pub fn node_id(&self) -> &str {
+        &self.node_id
+    }
+
+    /// 副本内核【常驻主进程】额外环境变量（6 枚）。
+    ///
+    /// 这些变量**只**注入常驻 `dist/index.js`，绝不进 prisma migrate / nav-reconcile 子进程
+    /// （见 [`build_kernel_plan`] 中两子进程不接 `extra_daemon_env`），避免迁移期触发任何同步网络。
+    fn daemon_env(&self) -> Vec<(String, String)> {
+        vec![
+            // 捕获总门：精确小写 on（configOfflineReplica 仅认 on/true/1）。
+            ("GX_OFFLINE_REPLICA".to_string(), "on".to_string()),
+            ("GX_REPLICA_REMOTE_URL".to_string(), self.base_url.clone()),
+            // 令牌只在子进程 env；StartPlan 手动 Debug 不打值。
+            ("GX_REPLICA_REMOTE_TOKEN".to_string(), self.token.clone()),
+            (
+                "GX_OFFLINE_SYNC_INTERVAL_MS".to_string(),
+                self.interval_ms.to_string(),
+            ),
+            ("GX_OFFLINE_NODE_ID".to_string(), self.node_id.clone()),
+            ("GX_OFFLINE_CLIENT_ID".to_string(), self.client_id.clone()),
+        ]
+    }
+}
+
+/// 离线副本内核规划器：与主库共用同一随包 node/server，但 data_dir 为按节点隔离的
+/// `<base>/replicas/<node>/`，JWT 用独立钥匙串 account `replica-jwt:<node>`，常驻 env 追加 6 副本变量。
+pub struct ReplicaKernelPlanner {
+    resource_dir: PathBuf,
+    data_dir: PathBuf,
+    secrets: std::sync::Arc<dyn SecretStore>,
+    remote: ReplicaRemote,
+}
+
+impl ReplicaKernelPlanner {
+    /// 生产构造：由 base_data_dir 解析出隔离目录，钥匙串 account 按节点独立。
+    pub fn new(
+        resource_dir: PathBuf,
+        base_data_dir: &Path,
+        remote: ReplicaRemote,
+    ) -> Result<Self, String> {
+        let data_dir = replica_data_dir(base_data_dir, remote.node_id())?;
+        let account = format!("replica-jwt:{}", remote.node_id());
+        let secrets = std::sync::Arc::new(KeychainStore::new(SERVICE_MAIN, &account));
+        Ok(Self::with_secret_store(
+            resource_dir, data_dir, secrets, remote,
+        ))
+    }
+
+    /// 构造并注入自定义 SecretStore（生产由 [`Self::new`] 传入按节点独立的钥匙串；
+    /// 测试注入内存 store）。
+    pub fn with_secret_store(
+        resource_dir: PathBuf,
+        data_dir: PathBuf,
+        secrets: std::sync::Arc<dyn SecretStore>,
+        remote: ReplicaRemote,
+    ) -> Self {
+        Self {
+            resource_dir,
+            data_dir,
+            secrets,
+            remote,
+        }
+    }
+}
+
+impl KernelPlanner for ReplicaKernelPlanner {
+    fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+
+    fn plan(&self, port: u16) -> Result<StartPlan, String> {
+        build_kernel_plan(
+            &self.resource_dir,
+            &self.data_dir,
+            self.secrets.as_ref(),
+            port,
+            &self.remote.daemon_env(),
+        )
+    }
+}
+
+/// 主库 / 副本共用的内核启动编排骨架。
+///
+/// 顺序：预检随包 node 与 dist → 建 data_dir/uploads/.audit → 冷备已有 dev.db →
+/// 取/迁/建 JWT（钥匙串按 `secrets` 区分主库/副本命名空间）→ 首 boot 同步跑
+/// `prisma migrate deploy` 与 `nav-reconcile --apply`（**不带** `extra_daemon_env`，
+/// 故迁移子进程永不携带副本同步变量）→ 产出常驻 `dist/index.js` 计划，其 env 在公共变量后
+/// 追加 `extra_daemon_env`（副本为 6 枚同步变量，主库为空）。
+fn build_kernel_plan(
+    resource_dir: &Path,
+    data_dir: &Path,
+    secrets: &dyn SecretStore,
+    port: u16,
+    extra_daemon_env: &[(String, String)],
+) -> Result<StartPlan, String> {
+    let node = resource_dir.join(NODE_BIN);
+    let server = resource_dir.join(SERVER_DIR);
+    if !node.exists() {
+        return Err(format!("随包 Node 缺失：{}", node.display()));
+    }
+    if !server.join("dist/index.js").exists() {
+        return Err(format!("内核程序缺失：{}/dist/index.js", server.display()));
+    }
+
+    std::fs::create_dir_all(data_dir).map_err(|e| format!("创建数据目录失败：{e}"))?;
+    let uploads = data_dir.join("uploads");
+    let audit = data_dir.join(".audit");
+    std::fs::create_dir_all(&uploads).ok();
+    std::fs::create_dir_all(&audit).ok();
+
+    let db_path = data_dir.join("dev.db");
+    let first_boot = !db_path.exists();
+
+    // 已有库：首启前冷备（sidecar 尚未起，纯文件拷贝；迁移只增不删，双保险）。
+    if !first_boot {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let bak = data_dir.join(format!("dev.db.{stamp}.bak"));
+        if let Err(e) = std::fs::copy(&db_path, &bak) {
+            // 冷备失败不阻断（迁移只增），但明确告知日志。
+            crate::dbg_log(&format!("WARN 冷备 dev.db 失败（继续）: {e}"));
+        }
+    }
+
+    // JWT：钥匙串优先 → 迁移旧 .jwt-secret → 新建。仅首 boot 首次会触发系统授权弹窗。
+    let legacy = data_dir.join(".jwt-secret");
+    let outcome = ensure_jwt_secret(secrets, &legacy)
+        .map_err(|e| format!("准备本地密钥失败：{e}"))?;
+    crate::dbg_log(&format!(
+        "JWT 来源: {:?}（legacy 删除={}）",
+        outcome.source, outcome.legacy_deleted
+    ));
+    let jwt_secret = outcome.secret;
+
+    let common_env: Vec<(String, String)> = vec![
+        ("NODE_ENV".into(), "production".into()),
+        ("GX_BIND_HOST".into(), "127.0.0.1".into()),
+        (
+            "CORS_ORIGIN".into(),
+            "http://127.0.0.1:*,http://localhost:*".into(),
+        ),
+    ];
+    let database_url = format!("file:{}", db_path.display());
+
+    // 首 boot 的同步步骤（已初始化则跳过——不再重建、不再要求建管理员）。
+    // 两个子进程都【不】接 extra_daemon_env：migrate/nav 期间绝不携带副本同步变量。
+    if first_boot {
+        // 1) migrate deploy（只增不删）。
+        let migrate_status = Command::new(&node)
+            .current_dir(&server)
+            .arg("node_modules/prisma/build/index.js")
+            .arg("migrate")
+            .arg("deploy")
+            .arg("--schema=prisma/schema.prisma")
+            .env("DATABASE_URL", &database_url)
+            .env("GX_DATA_DIR", data_dir)
+            .envs(common_env.clone())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .status()
+            .map_err(|e| format!("启动数据库迁移失败：{e}"))?;
+        if !migrate_status.success() {
+            return Err(format!(
+                "数据库迁移失败（退出码 {migrate_status}，旧库与备份均已保留）"
+            ));
+        }
+
+        // 2) nav-reconcile --apply（幂等；失败不阻断首启，导航可运行期修复）。
+        let nav = Command::new(&node)
+            .current_dir(&server)
+            .arg("dist/nav-reconcile.js")
+            .arg("--apply")
+            .env("DATABASE_URL", &database_url)
+            .env("GX_DATA_DIR", data_dir)
+            .env("GX_AUDIT_DIR", &audit)
+            .env("JWT_SECRET", &jwt_secret)
+            .envs(common_env.clone())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .status();
+        match nav {
+            Ok(s) if s.success() => crate::dbg_log("nav-reconcile --apply ok"),
+            Ok(s) => crate::dbg_log(&format!("nav-reconcile 非零退出 {s}（不阻断首启）")),
+            Err(e) => crate::dbg_log(&format!("nav-reconcile 启动失败 {e}（不阻断首启）")),
+        }
+    }
+
+    // 3) 常驻内核进程计划（PORT 用 manager 选定的回环口）；副本 6 变量仅在此追加。
+    let mut env = vec![
+        ("DATABASE_URL".to_string(), database_url),
+        ("GX_DATA_DIR".to_string(), data_dir.display().to_string()),
+        ("UPLOAD_ROOT".to_string(), uploads.display().to_string()),
+        ("GX_AUDIT_DIR".to_string(), audit.display().to_string()),
+        (
+            "GX_WEB_DIST".to_string(),
+            server.join("public").display().to_string(),
+        ),
+        (
+            "GX_MIGRATIONS_DIR".to_string(),
+            server.join("prisma/migrations").display().to_string(),
+        ),
+        ("PORT".to_string(), port.to_string()),
+        ("JWT_SECRET".to_string(), jwt_secret),
+    ];
+    env.extend(common_env);
+    env.extend(extra_daemon_env.iter().cloned());
+
+    Ok(StartPlan {
+        program: node.display().to_string(),
+        args: vec!["dist/index.js".to_string()],
+        cwd: server,
+        env,
+    })
 }
 
 // ───────────────────────────── headless 测试 ─────────────────────────────
@@ -764,5 +1049,241 @@ mod tests {
         assert!(!data_dir.join("dev.db").exists(), "失败路径不得建库");
         let _ = std::fs::remove_dir_all(&res_dir);
         let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    // ─────────────── 副本节点 ID 净化与隔离目录（#1148）───────────────
+
+    #[test]
+    fn sanitize_node_id_accepts_legal_and_rejects_traversal() {
+        // 合法：字母数字点下划线连字符，含连续点（非点段）。
+        assert_eq!(sanitize_node_id("node-B").unwrap(), "node-B");
+        assert_eq!(sanitize_node_id("node_1.2-3").unwrap(), "node_1.2-3");
+        assert_eq!(sanitize_node_id("  a..b  ").unwrap(), "a..b", "trim 后 a..b 合法");
+        // 非法：空白/空。
+        assert!(sanitize_node_id("   ").is_err(), "纯空白拒绝");
+        // 非法：路径分隔/穿越。
+        assert!(sanitize_node_id("a/b").is_err(), "斜杠拒绝");
+        assert!(sanitize_node_id("..").is_err(), ".. 拒绝");
+        assert!(sanitize_node_id("../x").is_err(), "../x 拒绝");
+        assert!(sanitize_node_id(".").is_err(), ". 拒绝");
+        // 非法：其它分隔/空白/特殊字符。
+        for bad in ["a\\b", "a b", "a:b", "a\0b", "a/b", "x/.."] {
+            assert!(sanitize_node_id(bad).is_err(), "应拒绝 {bad:?}");
+        }
+        // 含点但非点段的单段名安全（无分隔符，join 后不可逃逸），放行。
+        assert_eq!(sanitize_node_id("..x").unwrap(), "..x");
+        assert_eq!(sanitize_node_id("x..").unwrap(), "x..");
+        // 非法：超长（65 个字符）。
+        assert!(sanitize_node_id(&"a".repeat(65)).is_err(), "65 字符拒绝");
+        // 边界：64 字符合法。
+        assert_eq!(sanitize_node_id(&"a".repeat(64)).unwrap().len(), 64);
+    }
+
+    #[test]
+    fn replica_data_dir_is_isolated_and_within_replicas_root() {
+        let base = unique_dir("repdir-base");
+        // 两个不同节点目录彼此独立，且都落在 replicas/ 下。
+        let d1 = replica_data_dir(&base, "node-B").expect("合法节点应建目录");
+        let d2 = replica_data_dir(&base, "node_1.2-3").expect("合法节点应建目录");
+        let root = base.join(REPLICAS_SUBDIR).canonicalize().unwrap();
+        assert!(d1.starts_with(&root) && d1.ends_with("node-B"));
+        assert!(d2.starts_with(&root) && d2.ends_with("node_1.2-3"));
+        assert_ne!(d1, d2, "两节点目录必须隔离");
+        // 建库文件落在隔离目录内，与主库物理分离。
+        std::fs::write(d1.join("dev.db"), b"rep").unwrap();
+        assert!(!base.join("dev.db").exists(), "副本 dev.db 不得出现在主数据目录根");
+        // 穿越节点名必须在建任何目录前被拒。
+        assert!(replica_data_dir(&base, "../escape").is_err());
+        assert!(replica_data_dir(&base, "..").is_err());
+        assert!(!base.join("escape").exists(), "逃逸目录不得被创建");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // ─────────────── 副本远端配置规整（ReplicaRemote，#1149）───────────────
+
+    #[test]
+    fn replica_remote_validates_and_applies_defaults() {
+        // 合法：URL 规范化去 path/尾斜杠；node trim；client 缺省；interval 缺省 30000。
+        let r = ReplicaRemote::new(
+            "  http://192.168.31.15:3101/sync/  ",
+            "  tok-abc  ",
+            "  node-B ",
+            None,
+            None,
+        )
+        .expect("合法入参应通过");
+        assert_eq!(r.node_id(), "node-B");
+        let env = r.daemon_env();
+        let get = |k: &str| {
+            env.iter()
+                .find(|(ek, _)| ek == k)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_else(|| panic!("缺少 {k}"))
+        };
+        assert_eq!(get("GX_OFFLINE_REPLICA"), "on");
+        assert_eq!(get("GX_REPLICA_REMOTE_URL"), "http://192.168.31.15:3101");
+        assert_eq!(get("GX_REPLICA_REMOTE_TOKEN"), "tok-abc", "token 应 trim");
+        assert_eq!(get("GX_OFFLINE_SYNC_INTERVAL_MS"), "30000");
+        assert_eq!(get("GX_OFFLINE_NODE_ID"), "node-B");
+        assert_eq!(get("GX_OFFLINE_CLIENT_ID"), "local-replica");
+        // 恰好 6 枚。
+        assert_eq!(env.len(), 6);
+
+        // interval 夹下限：1→5000；合法大值原样；自定义 client trim 后透传。
+        let r2 = ReplicaRemote::new(
+            "https://h.example.com",
+            "",
+            "n1",
+            Some("  cli-9  "),
+            Some(1),
+        )
+        .unwrap();
+        let e2 = r2.daemon_env();
+        let g2 = |k: &str| {
+            e2.iter()
+                .find(|(ek, _)| ek == k)
+                .map(|(_, v)| v.as_str())
+                .unwrap()
+        };
+        assert_eq!(g2("GX_OFFLINE_SYNC_INTERVAL_MS"), "5000");
+        assert_eq!(g2("GX_OFFLINE_CLIENT_ID"), "cli-9");
+        assert_eq!(g2("GX_REPLICA_REMOTE_TOKEN"), "", "空 token 允许");
+        let r3 = ReplicaRemote::new("https://h.example.com", "", "n1", None, Some(7000)).unwrap();
+        assert_eq!(
+            r3.daemon_env()
+                .iter()
+                .find(|(k, _)| k == "GX_OFFLINE_SYNC_INTERVAL_MS")
+                .map(|(_, v)| v.as_str())
+                .unwrap(),
+            "7000"
+        );
+
+        // fail-closed：空 / 非 http URL 拒绝；非法节点名拒绝。
+        assert!(ReplicaRemote::new("   ", "t", "node-B", None, None).is_err(), "空 URL 拒绝");
+        assert!(
+            ReplicaRemote::new("ftp://h", "t", "node-B", None, None).is_err(),
+            "非 http(s) 拒绝"
+        );
+        assert!(
+            ReplicaRemote::new("http://h", "t", "../x", None, None).is_err(),
+            "穿越节点名拒绝"
+        );
+        assert!(
+            ReplicaRemote::new("http://user:pass@h", "t", "node-B", None, None).is_err(),
+            "内嵌凭证拒绝"
+        );
+    }
+
+    // ─────────────── 副本 planner：env 注入 / 隔离库 / token 脱敏（#1149）───────────────
+
+    #[test]
+    fn replica_planner_plan_injects_six_env_and_isolates_db_with_token_redacted() {
+        // 假随包产物：让预检 node/dist 通过；预置 dev.db → first_boot=false，
+        // 因此 plan 不会真的 spawn migrate/nav（纯计划构造，零 node 依赖、零钥匙串）。
+        let res = unique_dir("rep-plan-res");
+        std::fs::write(res.join(NODE_BIN), b"#!/bin/sh\n").unwrap();
+        std::fs::create_dir_all(res.join(SERVER_DIR).join("dist")).unwrap();
+        std::fs::write(res.join(SERVER_DIR).join("dist/index.js"), b"// kernel").unwrap();
+
+        let base = unique_dir("rep-plan-base");
+        let data_dir = replica_data_dir(&base, "node-B").expect("隔离目录");
+        // 预置已初始化库 → 跳过首 boot 子进程。
+        std::fs::write(data_dir.join("dev.db"), b"already-booted").unwrap();
+
+        const TOKEN: &str = "SUPER-SECRET-TOKEN-9f3a";
+        let remote = ReplicaRemote::new(
+            "http://192.168.31.15:3101/s/",
+            TOKEN,
+            "node-B",
+            None,
+            Some(1),
+        )
+        .unwrap();
+        let planner = ReplicaKernelPlanner::with_secret_store(
+            res.clone(),
+            data_dir.clone(),
+            std::sync::Arc::new(crate::secret::MemSecretStore::empty()),
+            remote,
+        );
+
+        let plan = planner.plan(41999).expect("plan 应构造成功（不跑 migrate）");
+        let get = |k: &str| {
+            plan.env
+                .iter()
+                .find(|(ek, _)| ek == k)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_else(|| panic!("缺少 {k}"))
+        };
+
+        // 常驻进程是 dist/index.js。
+        assert_eq!(plan.args, vec!["dist/index.js".to_string()]);
+        assert_eq!(get("PORT"), "41999");
+
+        // 6 枚副本变量齐全且仅在常驻 env；捕获门精确 on；URL 规范化；interval 夹下限。
+        assert_eq!(get("GX_OFFLINE_REPLICA"), "on");
+        assert_eq!(get("GX_REPLICA_REMOTE_URL"), "http://192.168.31.15:3101");
+        assert_eq!(get("GX_REPLICA_REMOTE_TOKEN"), TOKEN);
+        assert_eq!(get("GX_OFFLINE_SYNC_INTERVAL_MS"), "5000");
+        assert_eq!(get("GX_OFFLINE_NODE_ID"), "node-B");
+        assert_eq!(get("GX_OFFLINE_CLIENT_ID"), "local-replica");
+
+        // DATABASE_URL 必须指向隔离目录 replicas/node-B/dev.db，与主库物理不同。
+        let db_url = get("DATABASE_URL");
+        assert!(
+            db_url.contains(&format!("{REPLICAS_SUBDIR}/node-B/dev.db")),
+            "副本 DATABASE_URL 应落在 replicas/node-B/，实际 {db_url}"
+        );
+        assert_eq!(
+            db_url,
+            format!("file:{}", data_dir.join("dev.db").display())
+        );
+        assert_ne!(
+            db_url,
+            format!("file:{}", base.join("dev.db").display()),
+            "副本库不得等于主库路径"
+        );
+
+        // 随包 server 资源指向 resource_dir（GX_WEB_DIST / GX_MIGRATIONS_DIR）。
+        assert_eq!(
+            get("GX_WEB_DIST"),
+            res.join(SERVER_DIR).join("public").display().to_string()
+        );
+        assert_eq!(
+            get("GX_MIGRATIONS_DIR"),
+            res.join(SERVER_DIR)
+                .join("prisma/migrations")
+                .display()
+                .to_string()
+        );
+
+        // token 脱敏：手动 Debug 只打 env 键名，绝不含令牌明文（也不含 URL 之外的机密）。
+        let debug = format!("{plan:?}");
+        assert!(!debug.contains(TOKEN), "StartPlan Debug 泄漏 token：{debug}");
+        assert!(debug.contains("GX_REPLICA_REMOTE_TOKEN"), "Debug 应只列键名");
+        assert!(!debug.contains("192.168.31.15"), "Debug 不应打印任何 env 值（含 URL）");
+
+        // 主库计划不带任何副本变量（对照：extra_daemon_env 为空）。
+        let local_data = unique_dir("rep-plan-local");
+        std::fs::write(local_data.join("dev.db"), b"x").unwrap();
+        let local = LocalKernelPlanner::with_secret_store(
+            res.clone(),
+            local_data.clone(),
+            std::sync::Arc::new(crate::secret::MemSecretStore::empty()),
+        );
+        let lp = local.plan(42000).unwrap();
+        for (k, _) in &lp.env {
+            assert!(
+                !(k.starts_with("GX_REPLICA_")
+                    || k == "GX_OFFLINE_REPLICA"
+                    || k == "GX_OFFLINE_NODE_ID"
+                    || k == "GX_OFFLINE_CLIENT_ID"
+                    || k == "GX_OFFLINE_SYNC_INTERVAL_MS"),
+                "主库计划不得携带副本变量，却出现 {k}"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&res);
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local_data);
     }
 }

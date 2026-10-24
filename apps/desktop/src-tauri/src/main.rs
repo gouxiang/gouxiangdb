@@ -150,7 +150,10 @@ fn main() {
       commands::gx_end_probe,
       commands::gx_start_local,
       commands::gx_stop_local,
-      commands::gx_local_status
+      commands::gx_local_status,
+      commands::gx_start_replica,
+      commands::gx_stop_replica,
+      commands::gx_replica_status
     ])
     // R2：关红钮默认隐藏驻留菜单栏，不退出（内核/反代不断）。
     .on_window_event(|window, event| {
@@ -255,6 +258,8 @@ fn main() {
         // R2 托管内核也在替换前优雅停（保 WAL 落盘）。
         if let Some(state) = app_handle.try_state::<std::sync::Arc<commands::ShellState>>() {
           state.sidecar().shutdown_if_running(Duration::from_secs(8));
+          // #828 离线副本内核独立槽，重启前并列优雅收尸。
+          state.replica().shutdown_if_running(Duration::from_secs(8));
         }
         reap_poc_pid(app_handle, Duration::from_secs(5));
         // 不调用 api.prevent_exit()：放行 Tauri 重启流程。
@@ -268,6 +273,8 @@ fn main() {
       dbg_log("RunEvent::Exit -> stop managed sidecar + PoC backstop reaper");
       if let Some(state) = app_handle.try_state::<std::sync::Arc<commands::ShellState>>() {
         state.sidecar().shutdown_if_running(Duration::from_secs(8));
+        // #828 离线副本内核独立槽，退出时并列优雅收尸。
+        state.replica().shutdown_if_running(Duration::from_secs(8));
       }
       reap_poc_pid(app_handle, Duration::from_secs(3));
     }
@@ -370,6 +377,8 @@ fn spawn_signal_reaper(app: tauri::AppHandle) {
         if let Some(state) = app.try_state::<std::sync::Arc<commands::ShellState>>() {
             // 幂等：与托盘彻底退出 / RESTART 的 RunEvent::Exit 收尸共用同一把锁，先到先收。
             state.sidecar().shutdown_if_running(Duration::from_secs(8));
+            // #828 离线副本内核独立槽，外部信号并列优雅收尸。
+            state.replica().shutdown_if_running(Duration::from_secs(8));
         }
         reap_poc_pid(&app, Duration::from_secs(3));
         dbg_log("外部信号收尸完成，退出进程");

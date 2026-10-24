@@ -18,17 +18,14 @@ pub const PROBE_TTL: Duration = Duration::from_secs(120);
 
 /// 当前活动上游。切换节点只替换它，壳口端口全程不变、WebView 永不整页跳转。
 #[derive(Debug, Clone, PartialEq, Eq)]
-// Local(R2 #825) 与 Replica(#828) 是 §2 冻结模型的预留分支，R1 尚无构造点，不能删；
-// 显式允许 dead_code 以过 -D warnings（http_base 对二者的 match 分支一并保留）。
-#[allow(dead_code)]
 pub enum Upstream {
     /// 无活动节点：业务前缀代理回 503 NODE_NOT_ACTIVE，前端据以回启动器。
     None,
-    /// 本地内核 sidecar，口为动态 KERNEL_PORT（R2 才真正起停）。
+    /// 本地主库内核 sidecar，口为动态 KERNEL_PORT（gx:start_local 构造）。
     Local { port: u16 },
     /// 任意远端节点；base 为规范化的 http(s) origin（无尾斜杠、无凭证/query）。
     Remote { base: String },
-    /// 离线副本内核（#828）。R1 仅枚举占位，转发差异本单不实现。
+    /// 离线副本内核（#828，gx:start_replica 构造）；转发与 Local 同走 loopback:port。
     Replica { port: u16 },
 }
 
