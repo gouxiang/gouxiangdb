@@ -13,7 +13,9 @@
 //! 静态服务**手写**（不引 ServeDir/tower-http）：保留与 PoC `serve_one` 等价的目录穿越防护
 //! （canonicalize 后必须仍在 root 内）与同一套 MIME 判定。
 //!
-//! 绑定由调用方（main.rs setup）先建 `tokio::net::TcpListener`（127.0.0.1:0，OS 分配随机口），
+//! 绑定由调用方（main.rs setup）先建 `tokio::net::TcpListener`：默认固定主口 127.0.0.1:47831
+//! （占用则候选 47832..47836 回退、全占才用 :0 随机保底，见 main.rs `bind_shell_listener`）。
+//! 固定口是为了让 WebView origin 跨重启稳定以延续 localStorage（远端节点/会话记忆）。
 //! 拿到实际端口写入 ShellState 后再 spawn [`serve`]，SHELL_PORT 全程不变。
 //
 // TODO(R3): 对齐 tauri.conf frontendDist 壳静态根（R1 先用 resource_dir/server/public）。
@@ -59,7 +61,7 @@ pub fn router(state: Arc<ShellState>) -> Router {
         .with_state(state)
 }
 
-/// 在给定（已绑定随机回环口的）listener 上运行壳口服务。调用方负责 spawn 并自行保活。
+/// 在给定（已绑定固定/回退回环口的）listener 上运行壳口服务。调用方负责 spawn 并自行保活。
 pub async fn serve(listener: tokio::net::TcpListener, state: Arc<ShellState>) {
     let app = router(state);
     if let Err(e) = axum::serve(listener, app).await {

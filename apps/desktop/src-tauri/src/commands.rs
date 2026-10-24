@@ -31,8 +31,8 @@ use crate::upstream::{normalize_http_base, Shared, Upstream};
 /// 壳的统一托管状态：Tauri `.manage()` 与 axum `State` 共用同一个 `Arc<ShellState>`，
 /// 命令（切上游 / probe 注册 / 本地内核起停）与 HTTP/WS 代理看到的是同一份上游与 probe 表。
 ///
-/// - `port` 为 SHELL_PORT：setup 中 axum 绑定随机回环口后写入，App 生命周期内不变；
-///   0 表示尚未绑定（WebView 导航到壳口之后才有命令调用，理论上读不到 0）。
+/// - `port` 为 SHELL_PORT：setup 中绑定固定回环主口 47831（占用则候选回退/随机保底）后写入，
+///   App 生命周期内不变；0 表示尚未绑定（WebView 导航到壳口之后才有命令调用，理论上读不到 0）。
 /// - `web_root` 为壳静态资源根（R1=resource_dir/server/public，R3 对齐 frontendDist），
 ///   仅能在 setup 取得 resource_dir，故用 OnceLock 在绑定壳口前设置一次。
 /// - `resource_dir` / `data_dir` 为随包产物根与本地数据目录（R2 sidecar 首 boot 用），

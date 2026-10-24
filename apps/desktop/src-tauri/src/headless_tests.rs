@@ -776,3 +776,83 @@ fn sha1_known_vector_and_accept_rfc() {
 fn hex_lower(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
+
+// 端口选择（0.2.7 固定壳口记忆修复）：
+// 主口空闲 → 直接用主口；主口被占 → 退到下一个候选；全被占 → :0 随机保底仍能成功。
+//
+// 逻辑测试一律用 OS 动态分配的端口，避免多测试函数并行时抢固定口 47831 互相 flaky；
+// 生产常量 47831 的命中只在最后一个测试里、且先确认其空闲才断言（桌面 App 在跑则跳过）。
+
+/// 从 OS 取一个当前空闲的回环口后立即释放，返回端口号。
+/// 调用方应尽快使用；单机测试里"释放后被他人抢走"的窗口可忽略（标准库常见做法）。
+async fn free_loopback_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shell_port_first_free_candidate_is_used() {
+    let p = free_loopback_port().await;
+    let (listener, port) = crate::bind_loopback_first_available(std::iter::once(p))
+        .await
+        .expect("首个候选空闲时应绑定成功");
+    assert_eq!(port, p, "空闲的首个候选必须原样使用，保证 origin 稳定");
+    drop(listener);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shell_port_falls_through_when_early_candidates_busy() {
+    // 占住前两个动态口，再准备一个空闲口，断言选择器跳过被占口落到空闲候选。
+    let hold1 = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let busy1 = hold1.local_addr().unwrap().port();
+    let hold2 = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let busy2 = hold2.local_addr().unwrap().port();
+    let free = free_loopback_port().await;
+
+    let (listener, port) =
+        crate::bind_loopback_first_available([busy1, busy2, free].into_iter())
+            .await
+            .expect("前两口被占时应退到第三个空闲口");
+    assert_eq!(port, free, "必须跳过被占口落到首个空闲候选");
+    drop(listener);
+    drop(hold1);
+    drop(hold2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shell_port_random_fallback_when_all_busy() {
+    // 动态取一个必被占的口作为"唯一候选"，逼选择器走 :0 随机保底，验证极端情况下仍能起服。
+    let hog = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let busy = hog.local_addr().unwrap().port();
+
+    let (listener, port) = crate::bind_loopback_first_available(std::iter::once(busy))
+        .await
+        .expect("候选全占时应随机保底成功");
+    assert_ne!(port, busy, "保底随机口不能与被占口相同");
+    drop(listener);
+    drop(hog);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shell_production_port_sequence_starts_at_primary() {
+    // 生产序列：主口空闲时必须命中固定主口（这是跨重启记忆成立的关键不变量）。
+    // 先探测主口是否空闲，避免与机器上正在跑的桌面实例/其他测试抢口导致 flaky；被占则跳过。
+    let primary = crate::SHELL_PRIMARY_PORT;
+    if TcpListener::bind(("127.0.0.1", primary)).await.is_ok() {
+        // 探测 listener 随 if 表达式结束被 drop，主口恢复空闲，生产绑定函数随即去占。
+        let (listener, port) = crate::bind_shell_listener()
+            .await
+            .expect("生产端口序列绑定失败");
+        assert_eq!(port, primary, "主口空闲时生产序列必须固定命中主口");
+        // 固定主口 + 候选口序列必须以主口打头。
+        let mut seq = std::iter::once(crate::SHELL_PRIMARY_PORT)
+            .chain(crate::SHELL_FALLBACK_PORTS.iter().copied());
+        assert_eq!(seq.next(), Some(primary));
+        drop(listener);
+    }
+    // 主口已被占（如桌面 App 正在运行）：不断言，回退路径由上面三测覆盖。
+}
