@@ -31,6 +31,19 @@ function render(rows: NodeRow[], props: Record<string, unknown> = {}) {
   );
 }
 
+/** 副本行工厂：kind:"local" 但 role:"replica"（与 toRow 真实副本行一致：可删、副标题是远端基址）。 */
+function replicaRow(over: Partial<NodeRow> = {}): NodeRow {
+  return row({
+    kind: "local",
+    role: "replica",
+    nodeId: "replica-1",
+    title: "办公本-副本",
+    subtitle: "http://nas:3001",
+    removable: true,
+    ...over,
+  });
+}
+
 describe("NodeList", () => {
   it("空列表显示引导空态", () => {
     expect(render([])).toContain("还没有节点，先添加一个节点开始");
@@ -280,5 +293,106 @@ describe("NodeList", () => {
       },
     );
     expect(html).toContain('placeholder="本机"');
+  });
+
+  // ── 切片 3b：副本行（kind:"local" + role:"replica"）全面按 role 判别，不再被当主库 ──
+
+  it("非活动副本：主按钮「进入副本」（重连），无主库启停/使用本机按钮，可删除", () => {
+    const html = render([replicaRow()]);
+    expect(html).toContain("办公本-副本");
+    expect(html).toContain("http://nas:3001");
+    expect(html).toContain(">进入副本<");
+    expect(html).toContain("未连接");
+    expect(html).toContain("删除");
+    // 副本无内核实时相位/独立启停，绝不渲染主库专属动作。
+    expect(html).not.toContain("使用本机");
+    expect(html).not.toContain("进入本机");
+    expect(html).not.toContain(">启动<");
+    expect(html).not.toContain(">停止<");
+    // 非活动态不渲染活动行的「进入」/「断开」。
+    expect(html).not.toContain(">进入<");
+    expect(html).not.toContain(">断开<");
+  });
+
+  it("非活动副本不渲染 RuntimeDot（实时点只属于主库）", () => {
+    // RuntimeDot ready 相位带柔和呼吸 class；副本即便误带 runtime 也不应出现实时点。
+    const html = render([replicaRow({ runtime: "ready" })]);
+    expect(html).not.toContain("gx-launcher-dot-live");
+    // 且不出现主库 ready 才有的「运行中」相位文案（副本副标题走 remoteBaseUrl + 未连接）。
+    expect(html).not.toContain("运行中");
+  });
+
+  it("非活动副本副标题显远端基址 + 未连接状态后缀", () => {
+    const html = render([replicaRow()]);
+    // 同一段副标题文本内两者都在。
+    expect(html).toContain("http://nas:3001 · 未连接");
+  });
+
+  it("已通电但非活动副本（connected=true）：副标题显已连通可进入，仍只给进入副本", () => {
+    const html = render([replicaRow({ connected: true })]);
+    expect(html).toContain("已连通，可进入");
+    expect(html).toContain(">进入副本<");
+  });
+
+  it("活动副本（使用中）：进入（onEnterReplica）+ 断开，无重连按钮，副标题只显基址不补状态", () => {
+    const html = render([replicaRow({ active: true, connected: true })]);
+    expect(html).toContain("使用中");
+    const enterButtons = html.match(/<button[^>]*>进入<\/button>/g) ?? [];
+    expect(enterButtons).toHaveLength(1);
+    expect(html).toContain(">断开<");
+    expect(html).not.toContain(">进入副本<");
+    expect(html).toContain("请先断开再删除");
+    // 活动态副标题不再追加「已连通/未连接」后缀（头部已有使用中标记）。
+    expect(html).not.toContain("已连通，可进入");
+    expect(html).not.toContain("未连接");
+  });
+
+  it("副本 busyNodeId 按 nodeId 精确命中：进入副本按钮 loading/禁用", () => {
+    const html = render([replicaRow()], { busyNodeId: "replica-1" });
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain("disabled");
+  });
+
+  it("主库 busy id（local-start）不误伤副本行：副本按钮仍可点", () => {
+    const html = render([replicaRow()], { busyNodeId: "local-start" });
+    const reconnectBtn = html.match(/<button[^>]*>进入副本<\/button>/g) ?? [];
+    expect(reconnectBtn).toHaveLength(1);
+    expect(reconnectBtn[0]).not.toMatch(/\sdisabled(?=[=\s>])/);
+    expect(reconnectBtn[0]).not.toContain("aria-busy");
+  });
+
+  it("副本行品牌色为单色描边（BrandMark mono），主库为彩色品牌带（color）", () => {
+    // BrandMark SSR：mono→path/line stroke="currentColor" 且无渐变 defs；
+    // color→引用 url(#gx-brand-band-…) 的内置渐变。tone 本身是组件 prop，不落 HTML 属性。
+    const replicaHtml = render([replicaRow()]);
+    expect(replicaHtml).toContain('stroke="currentColor"');
+    expect(replicaHtml).not.toContain("gx-brand-band");
+    // 主库行仍为彩色品牌带（回归）。
+    const primaryHtml = render([
+      row({ kind: "local", nodeId: "local", title: "本机", localDesired: "running" }),
+    ]);
+    expect(primaryHtml).toContain("gx-brand-band");
+    expect(primaryHtml).toContain("使用本机");
+  });
+
+  it("副本行编辑态清空名称后占位符回落「本机副本」（而非主库的「本机」）", () => {
+    const html = render(
+      [replicaRow()],
+      {
+        rename: { nodeId: "replica-1", value: "" },
+        onRenameChange: () => {},
+        onRenameCommit: () => {},
+        onRenameCancel: () => {},
+      },
+    );
+    expect(html).toContain('placeholder="本机副本"');
+  });
+
+  it("主库行回归：非活动主库仍是「使用本机」（runtime unknown），未被副本分支污染", () => {
+    const html = render([
+      row({ kind: "local", role: "primary", nodeId: "local", title: "本机" }),
+    ]);
+    expect(html).toContain("使用本机");
+    expect(html).not.toContain(">进入副本<");
   });
 });

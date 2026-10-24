@@ -19,13 +19,21 @@ import { useLauncher } from "./useLauncher";
 import type { LauncherStore } from "./launcherStore";
 import { NodeList, type NodeRenameState } from "./NodeList";
 import { AddRemoteNodeForm } from "./AddRemoteNodeForm";
+import { AddReplicaNodeForm, type ExistingReplica } from "./AddReplicaNodeForm";
 import { LauncherErrorBar } from "./LauncherErrorBar";
 import { useShellRuntime } from "./useShellRuntime";
 import { applyLocalRuntime, ensureLocalRow } from "./launcherViewModel";
 import type { NodeRow } from "./launcherViewModel";
 import { normalizeNodeLabel } from "./addRemoteFlow";
+import { isPrimaryEntry, isReplicaEntry } from "./registry";
 
-type View = { mode: "list" } | { mode: "add" };
+// list：节点列表；add：添加网络上的远端节点；add-replica：把这台电脑作为本机副本新接入；
+// reconnect-replica：既有副本行重连（条目已在册，只重输令牌，网址/名称只读）。
+export type View =
+  | { mode: "list" }
+  | { mode: "add" }
+  | { mode: "add-replica" }
+  | { mode: "reconnect-replica"; nodeId: string };
 
 export interface LauncherPanelProps {
   /** 生产用浏览器单例（useLauncher 默认）；测试/壳覆盖时注入。 */
@@ -38,17 +46,32 @@ export interface LauncherPanelProps {
    *          不再套居中外层与大卡（连接/起停逻辑与 full 完全一致）。
    */
   variant?: "full" | "drawer";
+  /**
+   * 初始视图（默认列表）。生产挂载层不传＝恒从列表开始；仅测试/将来深链复用，
+   * 传入 reconnect-replica 时其 nodeId 同步作为重连目标（与点击副本行进同一渲染分支）。
+   */
+  initialView?: View;
 }
 
 function errorMessage(e: unknown, fallback: string): string {
   return e instanceof Error && e.message ? e.message : fallback;
 }
 
-export function LauncherPanel({ store, onEnterWorkspace, variant = "full" }: LauncherPanelProps) {
+export function LauncherPanel({
+  store,
+  onEnterWorkspace,
+  variant = "full",
+  initialView = { mode: "list" },
+}: LauncherPanelProps) {
   const { vm, store: resolved } = useLauncher(store);
   // 非壳 shellBound=false：hook 返回全 null 稳定对象，不发任何 invoke/timer（零变化）。
   const rt = useShellRuntime(resolved.shellBound);
-  const [view, setView] = useState<View>({ mode: "list" });
+  const [view, setView] = useState<View>(initialView);
+  // reconnect-replica 视图的目标副本 nodeId；其它视图恒 null（openView 统一清/设，避免残留）。
+  // 初始即 reconnect 时从 initialView 带出同一 nodeId，保证首拍预填与点击进入完全一致。
+  const [reconnectNodeId, setReconnectNodeId] = useState<string | null>(
+    initialView.mode === "reconnect-replica" ? initialView.nodeId : null,
+  );
   const [busyNodeId, setBusyNodeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rename, setRename] = useState<NodeRenameState | null>(null);
@@ -60,7 +83,9 @@ export function LauncherPanel({ store, onEnterWorkspace, variant = "full" }: Lau
   // 这样用户即便先直连了远端、从未初始化本机，切换页也始终能启动/进入本机（交互硬规则）。
   // 顺序不可换：applyLocalRuntime 需作用于含占位行在内的本机行，占位行才能在壳内显示"未启用"。
   const rows = applyLocalRuntime(ensureLocalRow(vm.rows), rt.status, localBusy);
-  const hasLocalEntry = resolved.getState().entries.some((e) => e.kind === "local");
+  // 只认主库：注册表里仅有离线副本（role:"replica"）时不算已有本机主库，
+  // firstBooting/ensureLocalRow 仍按"无主库"补占位本机行（与 ensureLocalRow 的 role 判定同口径）。
+  const hasLocalEntry = resolved.getState().entries.some((e) => isPrimaryEntry(e));
   const firstBooting =
     localBusy && ((!!rt.status?.added && !rt.status.initialized) || !hasLocalEntry);
   const bootHint = localBusy
@@ -69,9 +94,29 @@ export function LauncherPanel({ store, onEnterWorkspace, variant = "full" }: Lau
       : "正在启动本机…"
     : null;
 
+  // reconnect-replica 视图的只读预填目标：据 reconnectNodeId 从注册表回查副本条目。
+  // 找不到（条目已删 / 状态漂移）回落 null → 表单以普通新增形态渲染（可重填），fail-open 不卡死。
+  const reconnectTarget: ExistingReplica | null =
+    view.mode === "reconnect-replica" && reconnectNodeId
+      ? (() => {
+          const entry = resolved
+            .getState()
+            .entries.find((e) => e.nodeId === reconnectNodeId && isReplicaEntry(e));
+          if (!entry || !entry.replica) return null;
+          return {
+            nodeId: entry.nodeId,
+            remoteBaseUrl: entry.replica.remoteBaseUrl,
+            label: entry.label ?? null,
+          };
+        })()
+      : null;
+
   // 切到添加/重连等非列表视图时退出编辑态，避免回来仍停在改名框。
+  // 同时统一维护重连目标：仅 reconnect-replica 携带 nodeId；切到任何其它视图都清空，
+  // 避免断开/取消回到列表后 reconnectNodeId 残留把下一次新增误渲染成只读重连。
   function openView(next: View) {
     setRename(null);
+    setReconnectNodeId(next.mode === "reconnect-replica" ? next.nodeId : null);
     setView(next);
   }
 
@@ -217,6 +262,26 @@ export function LauncherPanel({ store, onEnterWorkspace, variant = "full" }: Lau
                 onCancel={() => openView({ mode: "list" })}
               />
             </section>
+          ) : view.mode === "add-replica" || view.mode === "reconnect-replica" ? (
+            // 第三入口：把这台电脑作为本机离线副本接入远端服务器。
+            // 新增（add-replica）收网址/令牌/名称；既有副本重连（reconnect-replica）只读回显
+            // 网址/名称、只收令牌（令牌零持久化，见 AddReplicaNodeForm）。
+            <section className="gx-launcher-rise">
+              <div className="mb-3 text-gx-14 font-medium text-gx-text-primary">
+                {view.mode === "reconnect-replica" && reconnectTarget
+                  ? "重新连接副本"
+                  : "添加本机副本"}
+              </div>
+              <AddReplicaNodeForm
+                store={resolved}
+                existingReplica={reconnectTarget}
+                onConnected={(nodeId) => {
+                  openView({ mode: "list" });
+                  handleActive(nodeId);
+                }}
+                onCancel={() => openView({ mode: "list" })}
+              />
+            </section>
           ) : vm.isEmpty ? (
             <div className="flex flex-col gap-2.5">
               {/* 主 CTA：品牌暖→玫红渐变卡（色值见 index.css「桌面启动器动效」段注释），
@@ -273,6 +338,37 @@ export function LauncherPanel({ store, onEnterWorkspace, variant = "full" }: Lau
                   className="gx-launcher-arrow shrink-0 text-gx-text-faint"
                 />
               </button>
+              {/* 第三入口：把这台 Mac 作为本机离线副本接入远端服务器（切片 3b）。
+                  与第二张远端卡同为描边次要卡，仅文案/动作不同，避免与主 CTA 争强调色。 */}
+              <button
+                type="button"
+                disabled={busyNodeId !== null}
+                onClick={() => openView({ mode: "add-replica" })}
+                style={{ animationDelay: "140ms" }}
+                className={
+                  "gx-launcher-cta gx-launcher-rise relative flex w-full items-center gap-3 rounded-gx-2xl border border-gx-hairline bg-gx-surface px-4 py-3 text-left " +
+                  "hover:border-gx-accent/40 hover:bg-gx-row-hover " +
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gx-accent/50 " +
+                  "disabled:cursor-not-allowed disabled:opacity-50"
+                }
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-gx-lg bg-gx-accent-bg text-gx-accent">
+                  <BrandMark tone="mono" className="h-[18px] w-[18px]" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-gx-14 font-medium text-gx-text-primary">
+                    把这台电脑作为副本接入
+                  </span>
+                  <span className="mt-0.5 block text-gx-12 text-gx-text-tertiary">
+                    本机留一份，离线也能看，联网自动同步
+                  </span>
+                </span>
+                <Icon
+                  name="chevronRight"
+                  size={15}
+                  className="gx-launcher-arrow shrink-0 text-gx-text-faint"
+                />
+              </button>
             </div>
           ) : (
             <>
@@ -282,6 +378,10 @@ export function LauncherPanel({ store, onEnterWorkspace, variant = "full" }: Lau
                 rename={rename}
                 onConnectLocal={() => void connectLocal()}
                 onEnterLocal={() => enterLocal()}
+                onEnterReplica={(nodeId) => handleActive(nodeId)}
+                onReconnectReplica={(nodeId) =>
+                  openView({ mode: "reconnect-replica", nodeId })
+                }
                 onStartLocal={() => void handleStartLocal()}
                 onStopLocal={() => void handleStopLocal()}
                 onConnectRemote={(nodeId) => {
@@ -297,9 +397,16 @@ export function LauncherPanel({ store, onEnterWorkspace, variant = "full" }: Lau
                 onRenameCommit={commitRename}
                 onRenameCancel={() => setRename(null)}
               />
-              <div>
+              <div className="flex flex-wrap items-center gap-2">
                 <Button variant="secondary" icon="plus" onClick={() => openView({ mode: "add" })}>
                   添加网络节点
+                </Button>
+                <Button
+                  variant="secondary"
+                  icon="plus"
+                  onClick={() => openView({ mode: "add-replica" })}
+                >
+                  添加本机副本
                 </Button>
               </div>
             </>

@@ -27,6 +27,10 @@ export interface NodeListProps {
   onConnectLocal?: () => void;
   /** 本机已是活动节点（使用中）时点「进入」直接进工作区，不重连、不重启内核。 */
   onEnterLocal?: () => void;
+  /** 活动副本行点「进入」直接进该副本工作区（已通电，不重连、不再要令牌）。 */
+  onEnterReplica?: (nodeId: string) => void;
+  /** 非活动副本行点「进入副本」：打开重连表单，重输连接令牌后通电并进入。 */
+  onReconnectReplica?: (nodeId: string) => void;
   /** 独立启动本机内核（不进入）；未注入或 runtime 未知时不渲染启停按钮。 */
   onStartLocal?: () => void;
   /** 独立停止本机内核（不断开活动指针）。 */
@@ -39,12 +43,17 @@ export interface NodeListProps {
 
 function statusText(row: NodeRow): string {
   if (row.active) return "使用中";
+  if (row.role === "replica") {
+    // 副本无内核实时相位：只表达注册表/分键会话层面是否已通电。
+    // 已连通（壳内已为该 nodeId 建立会话但非活动）可免密进入；未连接需重输令牌。
+    return row.connected ? "已连通，可进入" : "未连接";
+  }
   if (row.kind === "remote") {
     // 纯选路后两种非活动态只描述该节点记住的会话：点「进入」都会切到该远端，
     // 有记住会话直接进业务壳，无会话打开它自己的登录页（remote-empty）。
     return row.connected ? "已记住登录" : "需要登录";
   }
-  // 本地行：壳内四态走实时相位；unknown（非壳/未注入）回落期望态旧推导。
+  // 本地主库行：壳内四态走实时相位；unknown（非壳/未注入）回落期望态旧推导。
   switch (row.runtime) {
     case "ready":
       return "运行中";
@@ -78,9 +87,11 @@ function RuntimeDot({ phase }: { phase: LocalRuntimePhase | undefined }) {
   );
 }
 
-/** 清空自定义名后回落的默认名（本地「本机」；远端取 host）。 */
+/** 清空自定义名后回落的默认名（主库「本机」、副本「本机副本」；远端取 host）。 */
 function defaultName(row: NodeRow): string {
-  return row.kind === "local" ? "本机" : hostLabel(row.baseURL) || row.nodeId;
+  if (row.role === "primary") return "本机";
+  if (row.role === "replica") return "本机副本";
+  return hostLabel(row.baseURL) || row.nodeId;
 }
 
 /**
@@ -154,6 +165,8 @@ export function NodeList({
   onRemove,
   onConnectLocal,
   onEnterLocal,
+  onEnterReplica,
+  onReconnectReplica,
   onStartLocal,
   onStopLocal,
   onStartRename,
@@ -171,13 +184,14 @@ export function NodeList({
   return (
     <ul className="flex flex-col gap-1.5">
       {rows.map((row, idx) => {
-        // 面板本地 busy id 形如 "local-enter"/"local-start"（旧测试直接传 "local"）；远端 id 为 hex。
-        const localBusy =
-          row.kind === "local" && !!busyNodeId && busyNodeId.startsWith("local");
+        // 身份以 row.role 为真源：primary=本机主库（busy id 形如 local-enter/local-start，
+        // 旧测试直接传 "local"）；replica/远端一律按 nodeId 精确匹配，不再用 kind 二分。
+        const isPrimary = row.role === "primary";
+        const isReplica = row.role === "replica";
+        const localBusy = isPrimary && !!busyNodeId && busyNodeId.startsWith("local");
         const busy = busyNodeId === row.nodeId || localBusy;
         const editing = rename?.nodeId === row.nodeId;
-        // 统一品牌 G：本机行用彩色品牌带，远端行用单色 currentColor（活动行随 gx-accent）。
-        const isLocal = row.kind === "local";
+        // 统一品牌 G：主库行用彩色品牌带，副本/远端行用单色 currentColor（活动行随 gx-accent）。
         return (
           <li
             key={row.nodeId}
@@ -197,14 +211,14 @@ export function NodeList({
             )}
             <span
               className={
-                isLocal
+                isPrimary
                   ? "shrink-0"
                   : row.active
                     ? "shrink-0 text-gx-accent"
                     : "shrink-0 text-gx-text-tertiary"
               }
             >
-              <BrandMark tone={isLocal ? "color" : "mono"} className="h-4 w-4" />
+              <BrandMark tone={isPrimary ? "color" : "mono"} className="h-4 w-4" />
             </span>
 
             <div className="min-w-0 flex-1">
@@ -232,7 +246,7 @@ export function NodeList({
                 />
               ) : (
                 <div className="flex items-center gap-1.5">
-                  {row.kind === "local" && <RuntimeDot phase={row.runtime} />}
+                  {isPrimary && <RuntimeDot phase={row.runtime} />}
                   <span className="truncate text-gx-14 font-medium text-gx-text-primary">
                     {row.title}
                   </span>
@@ -254,9 +268,17 @@ export function NodeList({
                 </div>
               )}
               <div className="truncate text-gx-12 text-gx-text-tertiary">
-                {row.kind === "remote" ? row.subtitle : statusText(row)}
-                {row.kind === "remote" && row.account ? ` · ${row.account}` : ""}
-                {row.kind === "remote" && !row.active ? ` · ${statusText(row)}` : ""}
+                {(() => {
+                  // 主库：直接显实时相位/期望态；副本/远端：显基址，再按账号/连接态追加后缀。
+                  if (!isReplica && row.kind !== "remote") return statusText(row);
+                  const parts: string[] = [];
+                  if (row.subtitle) parts.push(row.subtitle);
+                  if (row.kind === "remote" && row.account) parts.push(row.account);
+                  if (!row.active && (isReplica || row.kind === "remote")) {
+                    parts.push(statusText(row));
+                  }
+                  return parts.join(" · ");
+                })()}
               </div>
             </div>
 
@@ -278,13 +300,35 @@ export function NodeList({
                     onClick={() => onRenameCancel?.()}
                   />
                 </>
-              ) : row.active && row.kind === "local" ? (
+              ) : row.active && isPrimary ? (
                 <>
                   <Button
                     size="sm"
                     variant="primary"
                     disabled={busy}
                     onClick={() => onEnterLocal?.()}
+                  >
+                    进入
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    loading={busy}
+                    disabled={busy}
+                    onClick={() => onDisconnect?.(row.nodeId)}
+                  >
+                    断开
+                  </Button>
+                </>
+              ) : row.active && isReplica ? (
+                // 活动副本：已通电（active 指针指向它），「进入」直进副本工作区，不再要令牌；
+                // 「断开」释放该副本活动指针。令牌永不回填，故此处不出现重输令牌入口。
+                <>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={busy}
+                    onClick={() => onEnterReplica?.(row.nodeId)}
                   >
                     进入
                   </Button>
@@ -320,7 +364,7 @@ export function NodeList({
                     断开
                   </Button>
                 </>
-              ) : row.kind === "local" ? (
+              ) : isPrimary ? (
                 <LocalActions
                   runtime={row.runtime}
                   busy={localBusy}
@@ -328,6 +372,18 @@ export function NodeList({
                   onStartLocal={onStartLocal}
                   onStopLocal={onStopLocal}
                 />
+              ) : isReplica ? (
+                // 非活动副本：档案已入册但当前未通电。主按钮「进入副本」打开重连表单，
+                // 重输连接令牌后 connectReplica 通电并进入（令牌零持久化，故每次都要重给）。
+                <Button
+                  size="sm"
+                  variant="primary"
+                  loading={busy}
+                  disabled={busy}
+                  onClick={() => onReconnectReplica?.(row.nodeId)}
+                >
+                  进入副本
+                </Button>
               ) : (
                 <Button
                   size="sm"

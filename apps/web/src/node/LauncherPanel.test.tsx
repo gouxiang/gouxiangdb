@@ -101,4 +101,100 @@ describe("LauncherPanel", () => {
     // 本地 + 远端各一枚重命名按钮。
     expect(html.match(/aria-label="重命名"/g)?.length).toBe(2);
   });
+
+  // ── 切片 3b：第三入口（本机离线副本）可见可点接线 ─────────────────────────────
+  it("空注册表欢迎页出现第三张卡「把这台电脑作为副本接入」（含副文案），但初始不展开任何表单", () => {
+    const store = makeStore();
+    const html = renderToStaticMarkup(
+      React.createElement(LauncherPanel, { store }),
+    );
+    expect(html).toContain("把这台电脑作为副本接入");
+    expect(html).toContain("本机留一份，离线也能看，联网自动同步");
+    // 三张卡同屏：主库 CTA + 远端次卡 + 副本次卡。
+    expect(html).toContain("在这台电脑上开始");
+    expect(html).toContain("连接到网络上的另一台电脑");
+    // 欢迎态不内联副本表单：令牌字段不应出现。
+    expect(html).not.toContain("连接令牌");
+    expect(html).not.toContain("粘贴服务器管理员给的连接令牌");
+  });
+
+  it("以 add-replica 初始视图打开：出现副本表单的令牌字段与提交钮，且不混入远端表单", () => {
+    const store = makeStore();
+    const html = renderToStaticMarkup(
+      React.createElement(LauncherPanel, {
+        store,
+        initialView: { mode: "add-replica" },
+      }),
+    );
+    // 副本表单特征：分区标题、令牌标签/占位、新副本提交文案。
+    expect(html).toContain("添加本机副本");
+    expect(html).toContain("连接令牌");
+    expect(html).toContain("粘贴服务器管理员给的连接令牌");
+    expect(html).toContain("服务器网址");
+    expect(html).toContain(">添加并进入<");
+    // 远端添加表单（AddRemoteNodeForm）不应同屏出现。
+    expect(html).not.toContain("节点网址");
+  });
+
+  it("非空列表底部并排出现「添加本机副本」与「添加网络节点」两个按钮", () => {
+    const store = makeStore();
+    store.addRemote({ nodeId: "abc123def456", baseURL: "http://nas:3001", label: "公司库" });
+    const html = renderToStaticMarkup(
+      React.createElement(LauncherPanel, { store }),
+    );
+    expect(html).toContain("添加本机副本");
+    expect(html).toContain("添加网络节点");
+  });
+
+  it("注册表里只有离线副本、没有本机主库：列表仍补占位主库行，副本行给「进入副本」重连入口", () => {
+    const store = makeStore();
+    // 仅登记一个离线副本（不 connectLocal、不加远端），复现"先加了副本、从未初始化本机主库"。
+    store.addReplica({
+      nodeId: "replica-1",
+      label: "办公本-副本",
+      remoteBaseUrl: "http://nas:3001",
+    });
+    const html = renderToStaticMarkup(
+      React.createElement(LauncherPanel, { store }),
+    );
+    // 占位主库行恒在（hasLocalEntry 只认 primary → ensureLocalRow 仍补占位）。
+    expect(html).toContain("使用本机");
+    // 副本行标题 + 远端基址副标题 + 未连接态 + 重连主按钮。
+    expect(html).toContain("办公本-副本");
+    expect(html).toContain("http://nas:3001");
+    expect(html).toContain("未连接");
+    expect(html).toContain(">进入副本<");
+    // 列表底部仍给新增副本入口。
+    expect(html).toContain("添加本机副本");
+  });
+
+  it("副本行重连视图：服务器网址/名称只读预填，令牌留空每次重输，提交钮为「连接并进入」", () => {
+    const store = makeStore();
+    store.addReplica({
+      nodeId: "replica-1",
+      label: "办公本-副本",
+      remoteBaseUrl: "http://nas:3001",
+    });
+    const html = renderToStaticMarkup(
+      React.createElement(LauncherPanel, {
+        store,
+        initialView: { mode: "reconnect-replica", nodeId: "replica-1" },
+      }),
+    );
+    // 重连分区标题 + 只读提交文案。
+    expect(html).toContain("重新连接副本");
+    expect(html).toContain(">连接并进入<");
+    // 网址预填该副本的规范化裸 origin。
+    expect(html).toContain('value="http://nas:3001"');
+    // 名称预填。
+    expect(html).toContain('value="办公本-副本"');
+    // 网址与名称两个只读字段（aria-readonly 由 Input 只读态落属性），令牌字段不预填、不锁定。
+    expect(html.match(/aria-readonly="true"/g)?.length).toBe(2);
+    // 令牌占位仍在（每次重输），且密码框无任何非空 value（零持久化/零回填）。
+    const pwdInput = html.match(/<input[^>]*type="password"[^>]*>/u)?.[0] ?? "";
+    expect(pwdInput).toContain('placeholder="粘贴服务器管理员给的连接令牌"');
+    expect(pwdInput).not.toMatch(/value="[^"]+"/);
+    // 不混入远端添加表单。
+    expect(html).not.toContain("节点网址");
+  });
 });
