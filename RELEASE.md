@@ -1,4 +1,102 @@
-# 构想工作台 v0.2.6 发版说明（首个含 macOS 桌面客户端的正式收口版）
+# 构想工作台 v0.2.7 发版说明（修好 macOS「重启后远端连接丢失」的正式版）
+
+- **对外版本名 / Git tag**：`v0.2.7`（**正式版，非预发布**）
+- **内部包版本号**：`0.2.7`（版本单一真源＝根 `package.json` 的 `version`；与 fpk `manifest.version`、Tauri `tauri.conf.json`、esbuild `GX_VERSION` 同源，禁止硬编码）
+- **展示名**：构想工作台（技术标识 `gouxiangdb`）；macOS bundle id `cc.gouxiang.desktop`
+- **封版日期**：2026-10-24；**Git 基线**：封版 `6a45409` ＋ 本版桌面壳固定口修复 `c7154b2`（tag `v0.2.7` 指向含发版文档的最新头）
+- **Gitea Release 性质**：**正式 Release（不勾预发布）**；上传 fpk + dmg + 两个 `.sha256`，**不传 `update-manifest.json`**。
+- **本轮主题**：①头等修复 **macOS 重启电脑后远端节点「失忆」**（桌面壳端口随机改固定 `47831`，localStorage origin 稳定，远端地址 / 登录态跨重启保留）；②权限收口（管理员看得到超管建的库、非超管不能授予管理员）；③远端连接用户菜单分槽；④详情页编辑体验返工。基于 0.2.6，**无数据库迁移、前端与服务端零改动**（仅 Mac 桌面 Rust 壳）。
+
+> 对外发布说明：`docs/release-notes/0.2.7.md`；上一版 0.2.6 完整发版说明见本文件下方归档。
+
+---
+
+## 〇、给非技术同事的一句话
+
+这一版专门修好苹果电脑客户端最烦的毛病：**以前重启电脑后，之前连过的服务器会凭空消失，得重新手打地址、重新登录**；现在它会牢牢记住，重启后自动回到上次连的服务器、不用重登。同版还修好几个权限问题。只动了 Mac 客户端的「外壳」，**没碰任何业务数据、无数据库迁移**，老数据原样保留；Mac App 仍是 Apple 芯片专用、未买苹果签名，**第一次右键 → 打开**。
+
+---
+
+## 一、相对 0.2.6 的关键变化
+
+1. **头等修复：macOS 重启后远端连接「失忆」（桌面壳固定口）**。根因：壳冷启动绑 `127.0.0.1:0` 随机口，WebView localStorage 按 origin（含端口）隔离，端口每变一次记忆就整屋丢失。修法：壳口固定回环主口 **47831**，占用则在 **47832–47836** 依次回退，全占才 `:0` 保底（保启动）。仅 Rust 壳（`main.rs` 端口绑定 + `shell_server.rs`/`commands.rs` 注释同步），前端 / 服务端零改动；新增 4 个端口选择 headless 测试，壳 headless 共 31 全绿。门牌号稳定后远端注册表、`gx-node-session:*` 登录令牌（不含密码）、本机登录态全部跨重启保留。
+2. **权限收口（#1046/#1046b/#1046c）**：零投影老库库门兜底 + nav 库门改判 `enter`；启动对老库权限投影**幂等自愈补齐**（重装 / 升级自动补全）；后端提权硬闸（非超管不得授予管理员 / 超管）＋前端对非超管隐藏入口，前后端双保险。
+3. **远端连接用户菜单（#1056，`22f5db4`）**：连远端时右上角用户菜单可点开；退出登录 / 个人资料按当前会话节点分槽，不再串机。
+4. **详情页编辑体验（#1047，多提交）**：消「框中框」、输入框不再跳动；编辑 / 只读统一为同一张卡；ghost 融入卡全字段类型适配。
+
+---
+
+## 二、安装包指纹
+
+### 飞牛 fnOS（x86_64）
+- 文件：`gouxiangdb-0.2.7-x86.fpk`
+- 大小：**60,831,523 B（58.01 MiB）**
+- sha256：**`8cd964c05d8dd65f066c1de692762ca28d24acfdb7e49c8f6149d33792ec5085`**
+- VM15（`192.168.31.15`，Debian12 x86_64，Node v22，fnpack 1.2.0）构建；`manifest.version=0.2.7/platform=x86/service_port=9527`；**44 枚迁移**（与 0.2.6 同，无新增）；Prisma query engine 与 better-sqlite3 原生件均 ELF x86-64；`node_modules` hoisted 零软链；禁带扫描、入口一致性、六处图标 md5 自检全过；不内置更新只读令牌。本版唯一代码差异（Mac 壳固定口）不进 Linux fpk，fpk 内容＝0.2.7 封版树。
+
+### macOS（arm64 / Apple 芯片）
+- 文件：`构想工作台_0.2.7_aarch64.dmg`
+- 大小：**109,620,131 B（104.54 MiB）**
+- sha256：**`c72e8ffe7655097dd4aa68f43c6df447109670c7a1620f8693e266032a04d66e`**
+- **签名形态（双层，刻意为之）**：外层 `.app` 为**完整 ad-hoc（flags=0x2，带资源封条）**——tauri 直出仅 linker-signed 且缺资源封条，故只对外层 `codesign --force --sign -`（**不带 --deep**）重签；随包官方 Node 运行时 gxnode **保留苹果官方签名 TeamIdentifier=HX7739G8FX** 不被破坏；Prisma / better-sqlite3 等 `.node` 为链接期 ad-hoc。`codesign --verify --deep --strict` 通过（valid on disk / satisfies Designated Requirement）。
+- 规格：arm64 thin、macOS 11+（`LSMinimumSystemVersion=11.0`）、identifier `cc.gouxiang.desktop`、`CFBundleShortVersionString=0.2.7`；UDZO 压缩（zlib-9）；未公证，**首次右键 → 打开**（`spctl --assess` rejected 为 ad-hoc 常态，同 0.2.6）。
+- 随包内容挂载实测：**44 枚迁移**、`native/darwin-arm64/vec0.dylib` Mach-O arm64、api dist 四件、门控前端 `public/assets/index-DFihveSz.js`（base=/）、随包 Node v22.22.2 arm64；stage 真建库 `migrate deploy` + 随包 Node `/readyz` 五探针全过。
+- 构建链：门控前端 dist-shell（重 vite）与 api esbuild 均在 **VM15** 构建后回传，不占本机内存；Mac 侧仅 stage 组装 ＋ Tauri CLI **2.12.3** `build --bundles app,dmg`（不带 `--target`，复用宿主热缓存，`CARGO_BUILD_JOBS=2`，全程内存空闲 ≥35%），重签后用重签 `.app` 经 `ditto` + `hdiutil create … UDZO` 重压。
+
+> 两包归档本机 `release/0.2.7/`（gitignored），各附 `.sha256` sidecar。
+
+---
+
+## 三、质量门实数（VM15 四门 + Mac 壳增量）
+
+| 门 | 结果 |
+|---|---|
+| 四包 `tsc --noEmit`（shared-types/canvas/api/web） | **0 错误** |
+| 四包 eslint | **0 error**（各自阈值内） |
+| `@gx/shared-types` 全量 | **10 文件 / 181 用例全绿** |
+| `@gx/canvas` 全量 | **2 文件 / 51 用例全绿** |
+| `apps/api` 全量 | **349 文件 / 3670 通过 + 14 跳过（共 3684），0 失败** |
+| `apps/web` 全量 | **202 文件 / 2538 用例全绿** |
+| Mac 壳 headless | **31 全绿**（含 4 个新增端口选择用例：主口命中 / 占用回退 / 全占保底 / 生产序列） |
+| Mac 壳 clippy | **0 warning / 0 error** |
+| 迁移 | **44 / 44**（本版无新增迁移，只增不改旧表） |
+| TLS 供应链红线 | **aws-lc-rs = 0**，统一 rustls 0.23.46 + ring 0.17（macOS 钥匙串信任根） |
+
+> 补充实证：壳门控前端构建产物 index.html base=/ 硬校验通过；fpk 与 dmg stage 打包冒烟（migrate deploy + /readyz 五探针）全过；dmg 挂载 deep-strict 签名 VALID + 44 迁移 + vec0 arm64 + 门控前端齐备。全量测试 / 重 vite / esbuild 只在 VM15 跑；16GB 本机仅做 Mac 壳**增量**编译（复用热缓存、限 2 并发，全程内存空闲 ≥35%），不跑全量、不挤爆内存。
+
+---
+
+## 四、升级 / 数据须知
+
+- **从 0.2.6 升级**：本版无数据库迁移、无数据结构变更，存量数据 / 登录令牌 / 附件 / 品牌设置原样保留。
+- **macOS**：新 dmg 拖入替换旧 `.app`。升级后第一次启动若旧版当时恰好用随机口，其 localStorage 挂在旧随机 origin 下读不回来——**这是最后一次**；从本版起端口固定 47831，今后所有重启延续同一记忆。数据落点不变：`~/Library/Application Support/cc.gouxiang.desktop/`，钥匙串 service `cc.gouxiang.desktop`。
+- **飞牛覆盖安装**：appcenter 无 upgrade，先 `uninstall`（保留数据与 env）再 `install-fpk -e <向导文件>`，然后 `start`；要求 Node **v22**；同版本号不能覆盖安装。
+
+---
+
+## 五、诚实缺口：本版【没有】什么
+
+1. **桌面离线编辑 / 断网双向同步仍不含**（侧车 + outbox + 冲突双栏手选为后续 beta.2 内测形态）。
+2. **桌面在线自动更新未正式接通**：不带 update-manifest，菜单「检查更新」暂不可用，需手动下载。
+3. **无 Apple 开发者签名 / 公证**：仅 ad-hoc，首次右键打开；仅 arm64，无 Intel / Windows / Linux 桌面包。
+4. **dmg 真机 GUI 两次冷启动冒烟待产品负责人在场**：固定口逻辑已由 31 条 headless 测试证明，但真机「添加远端 → 退出 → 重启 App → 远端地址仍在 / 免重登」目验会与戴总正在运行的 0.2.6 争同一数据目录与 47831 端口，故不擅自拉起，换装新 dmg 后首验（顺带目验 Finder 卷宗图标）。飞牛 183 真机换装亦待在场执行（先备份、保数据）。
+5. **帮助中心 Wiki 版本号文案**在外部 Gitea Wiki 仓库维护，代码仓改不到，需另行更新。
+
+---
+
+## 六、发布动作
+
+1. 壳固定口修复代码精确提交（**仅** `apps/desktop/src-tauri/` 的 `main.rs`/`shell_server.rs`/`commands.rs`/`headless_tests.rs`/`Cargo.lock` 5 文件，精确 add，**不碰队友 beta.2 Rust WIP**：license.rs/vault.rs/secret.rs/sidecar.rs/gx-shell.toml 等）。
+2. 发版文档提交（本文件 + `docs/release-notes/0.2.7.md`）。
+3. fast-forward 推送 `main`（本地 release/0.2.7 领先 origin/main 10 提交、origin/main 为祖先，可 FF；不强推、不覆盖）。
+4. 打 annotated tag `v0.2.7` 并推送。
+5. Gitea 建**正式 Release**，上传 fpk + dmg + 两 `.sha256` + 发布说明，**不传 update-manifest.json**；核对仓库 default_branch=main。
+6. 戴总在场真机冒烟（见诚实缺口 4）。
+
+---
+---
+
+# 【归档】构想工作台 v0.2.6 发版说明（首个含 macOS 桌面客户端的正式收口版）
 
 - **对外版本名 / Git tag**：`v0.2.6`（**正式版，非预发布**）
 - **内部包版本号**：`0.2.6`（版本单一真源＝根 `package.json` 的 `version`；与 fpk `manifest.version`、Tauri `tauri.conf.json`、esbuild `GX_VERSION` 同源，禁止硬编码）
