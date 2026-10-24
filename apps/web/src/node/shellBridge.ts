@@ -1,6 +1,6 @@
 // apps/web/src/node/shellBridge.ts
 // 成品 Mac 壳桥（IMPL-0.2.5-beta.md §3 冻结命令契约）：WebView 经 Tauri v2 全局命令通道
-// `window.__TAURI_INTERNALS__.invoke` 调用 Rust 侧 7 条 gx:* 命令。
+// `window.__TAURI_INTERNALS__.invoke` 调用 Rust 侧 10 条 gx:* 命令。
 //
 // 铁律（§2/§3）：
 //   - **零 npm 依赖**：不 import @tauri-apps/api（withGlobalTauri=true 已把通道挂到 window）；
@@ -31,6 +31,9 @@ export const CMD = {
   setActiveUpstream: "gx:set_active_upstream",
   beginProbe: "gx:begin_probe",
   endProbe: "gx:end_probe",
+  startReplica: "gx:start_replica",
+  stopReplica: "gx:stop_replica",
+  replicaStatus: "gx:replica_status",
 } as const;
 
 // ── §3 返回/入参类型（与 Rust 侧签名逐字段对齐）──────────────────────────────────
@@ -57,6 +60,28 @@ export interface LocalStatus {
 export type StartLocalResult =
   | { ok: true; kernelPort: number; initialized: boolean }
   | { ok: false; error: string };
+
+/**
+ * gx:start_replica 入参（字段名 lowerCamelCase，Tauri v2 自动映射到 Rust snake_case 形参）。
+ * remoteToken 只在当次调用经 IPC 传给 Rust 注入子进程 env，**浏览器侧/注册表均不持久化**。
+ */
+export interface StartReplicaArg {
+  /** 必填，规范化 origin（远端服务器地址）。 */
+  remoteBaseUrl: string;
+  /** 必填，副本名（与 Rust sanitize_node_id 同口径的白名单单段名）。 */
+  nodeId: string;
+  /** 可空；仅当次调用经 IPC 传给 Rust 注入子进程 env。 */
+  remoteToken?: string;
+  clientId?: string | null;
+  syncIntervalMs?: number | null;
+}
+
+/** gx:start_replica：成功带回内核端口/是否已初始化/回显 nodeId；失败带中文 error（非 reject）。 */
+export type StartReplicaResult =
+  | { ok: true; kernelPort: number; initialized: boolean; nodeId: string }
+  | { ok: false; error: string };
+
+/** gx:replica_status 与 gx:local_status 同 DTO，直接复用 LocalStatus。 */
 
 /** gx:set_active_upstream 入参。 */
 export interface ActiveUpstreamArg {
@@ -176,4 +201,32 @@ export function beginProbe(baseURL: string): Promise<BeginProbeResult> {
 /** gx:end_probe：立即注销 probeId（幂等）。 */
 export function endProbe(probeId: string): Promise<EndProbeResult> {
   return invokeGx<EndProbeResult>(CMD.endProbe, { probeId });
+}
+
+// ── 离线副本（#828）三条命令的类型化包装 ─────────────────────────────────────────
+
+/**
+ * gx:start_replica。Rust 以 {ok:false,error} 表达可展示的业务失败（节点名非法 / 主库在跑 /
+ * 远端配置非法等，非 reject），故与 startLocal 同口径：不抛错、原样返回联合结果，由编排层收口。
+ * 只透传 arg 中实际存在的键，不凭空造字段；remoteToken 不落浏览器侧任何持久化。
+ */
+export function startReplica(arg: StartReplicaArg): Promise<StartReplicaResult> {
+  const args: Record<string, unknown> = {
+    remoteBaseUrl: arg.remoteBaseUrl,
+    nodeId: arg.nodeId,
+  };
+  if (arg.remoteToken !== undefined) args.remoteToken = arg.remoteToken;
+  if (arg.clientId !== undefined) args.clientId = arg.clientId;
+  if (arg.syncIntervalMs !== undefined) args.syncIntervalMs = arg.syncIntervalMs;
+  return invokeGx<StartReplicaResult>(CMD.startReplica, args);
+}
+
+/** gx:stop_replica（无入参，优雅停副本内核、不删隔离数据）。 */
+export function stopReplica(): Promise<OkResult> {
+  return invokeGx<OkResult>(CMD.stopReplica);
+}
+
+/** gx:replica_status：与 gx:local_status 同 DTO（四态），入参为副本 nodeId。 */
+export function replicaStatus(nodeId: string): Promise<LocalStatus> {
+  return invokeGx<LocalStatus>(CMD.replicaStatus, { nodeId });
 }
