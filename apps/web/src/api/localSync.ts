@@ -7,6 +7,9 @@
 // 端点形态（桌面副本：浏览器同源只打【本地侧车】）：
 //   GET  /api/local-sync/status                      本地侧车运行时聚合（离线也准），
 //                                                    404/SYNC_DISABLED 静默收敛为 disabled。
+//   POST /api/local-sync/sync-now                    立即触发一轮同步；triggered=false 表示
+//                                                    已有一轮在跑/引擎未起（不报错，交 UI 提示），
+//                                                    404 不收敛（门关时交 UI 处理，与 status 不同）。
 //   GET  /api/local-sync/conflicts?status=<csv>      冲突/隔离明细（侧车代理远端，需在线）。
 //   POST /api/local-sync/conflicts/:id/retry         :id＝sync_incoming 行 id（列表项 id）。
 //   POST /api/local-sync/conflicts/:id/discard       body {confirm:true}。
@@ -90,6 +93,8 @@ export interface LocalSyncStatus {
   inFlight: boolean;
   stage: string | null;
   nodeId: string | null;
+  /** 最近一次同步运行结束时间（ISO 串）；侧车未上报时缺省，归一为 null。 */
+  lastRunAt?: string | null;
 }
 
 /** 功能不可用时的规范空报告（404/SYNC_DISABLED 或解析失败的收敛值）。 */
@@ -108,6 +113,7 @@ export function disabledSyncStatus(): LocalSyncStatus {
     inFlight: false,
     stage: null,
     nodeId: null,
+    lastRunAt: null,
   };
 }
 
@@ -148,6 +154,7 @@ export function normalizeSyncStatus(raw: unknown): LocalSyncStatus {
     inFlight: r.inFlight === true,
     stage: asOptString(r.stage),
     nodeId: asOptString(r.nodeId),
+    lastRunAt: asTimestamp(r.lastRunAt),
   };
 }
 
@@ -167,6 +174,35 @@ export async function getLocalSyncStatus(init?: { signal?: AbortSignal }): Promi
     if (isSyncDisabledError(e)) return disabledSyncStatus();
     throw e;
   }
+}
+
+/**
+ * POST /sync-now 的即时回执（形状与运行时 status 投影同构，额外带 triggered 判定位）。
+ * triggered=false 不是错误：表示已有一轮在跑（inFlight/running）或引擎尚未起，
+ * 调用方按「已有一轮同步在进行」提示即可，绝不当成失败刷红。
+ */
+export interface SyncNowResult {
+  /** true=本次调用新触发了一轮；false=未触发（已有一轮在飞或引擎未起）。 */
+  triggered: boolean;
+  running: boolean;
+  inFlight: boolean;
+  stage: string | null;
+  lastError: string | null;
+  lastRunAt: string | null;
+}
+
+/**
+ * 立即触发一轮同步（通电按钮）。走侧车本地端点，POST 空 JSON 体；apiFetch 自动带
+ * Content-Type / X-GX-Token，无需手拼头。与 getLocalSyncStatus 不同：404（门关/无该端点）
+ * 【不】收敛，照常抛出交 UI 处理——门控后正常不会命中，命中即真实配置异常，不能静默成成功。
+ * 透传 {signal} 供抽屉卸载/切源时中止在飞请求。
+ */
+export async function triggerSyncNow(init?: { signal?: AbortSignal }): Promise<SyncNowResult> {
+  return apiFetch<SyncNowResult>("/api/local-sync/sync-now", {
+    method: "POST",
+    body: JSON.stringify({}),
+    ...(init?.signal ? { signal: init.signal } : {}),
+  });
 }
 
 // ──────────────────────────────── 同步中心：隔离 / 冲突项 ────────────────────────────────

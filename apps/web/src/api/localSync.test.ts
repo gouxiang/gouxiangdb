@@ -7,6 +7,7 @@ import {
   retryIncoming,
   discardIncoming,
   resolveSyncConflict,
+  triggerSyncNow,
   normalizeSyncStatus,
   disabledSyncStatus,
   isSyncDisabledError,
@@ -98,6 +99,16 @@ describe("normalizeSyncStatus 容错", () => {
     expect(d.enabled).toBe(false);
     expect(d.bases).toEqual([]);
   });
+
+  it("lastRunAt：有值原样吸收 / 缺失归 null / 非串归 null", () => {
+    const withTs = normalizeSyncStatus({ enabled: true, lastRunAt: "2026-10-20T08:30:00.000Z" });
+    expect(withTs.lastRunAt).toBe("2026-10-20T08:30:00.000Z");
+    const missing = normalizeSyncStatus({ enabled: true });
+    expect(missing.lastRunAt).toBeNull();
+    const bad = normalizeSyncStatus({ enabled: true, lastRunAt: 1729413000 });
+    expect(bad.lastRunAt).toBeNull();
+    expect(disabledSyncStatus().lastRunAt).toBeNull();
+  });
 });
 
 describe("incoming 包封与归一", () => {
@@ -155,6 +166,60 @@ describe("写操作方法与侧车代理路径", () => {
     const [url, init] = f.mock.calls[0]!;
     expect(String(url)).toContain("/api/local-sync/conflicts/i1/discard");
     expect(JSON.parse(init!.body as string)).toEqual({ confirm: true });
+  });
+});
+
+describe("triggerSyncNow（POST /sync-now）", () => {
+  it("POST 空 JSON 体到 /api/local-sync/sync-now，并原样返回六字段", async () => {
+    const payload = {
+      triggered: true,
+      running: true,
+      inFlight: true,
+      stage: "push",
+      lastError: null,
+      lastRunAt: "2026-10-20T09:00:00.000Z",
+    };
+    const f: Mock<typeof fetch> = vi.fn(async () => jsonResponse(payload));
+    vi.stubGlobal("fetch", f);
+    const r = await triggerSyncNow();
+    const [url, init] = f.mock.calls[0]!;
+    expect(String(url)).toContain("/api/local-sync/sync-now");
+    expect(init!.method).toBe("POST");
+    expect(JSON.parse(init!.body as string)).toEqual({});
+    expect(r).toEqual(payload);
+  });
+
+  it("triggered=false（已有一轮在跑）原样返回、不报错", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({ triggered: false, running: true, inFlight: true, stage: "pull", lastError: null, lastRunAt: null }),
+      ),
+    );
+    const r = await triggerSyncNow();
+    expect(r.triggered).toBe(false);
+    expect(r.inFlight).toBe(true);
+  });
+
+  it("404 不收敛（与 getLocalSyncStatus 不同），照常抛出交 UI", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error: "同步服务未启用", code: "SYNC_DISABLED" }, 404)));
+    await expect(triggerSyncNow()).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("502 上游不通照常抛出（不当成功、不当 disabled）", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ code: "SYNC_UPSTREAM_UNREACHABLE" }, 502)));
+    await expect(triggerSyncNow()).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("透传 AbortSignal（抽屉卸载可中止）", async () => {
+    const f: Mock<typeof fetch> = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.signal).toBe(signal);
+      return jsonResponse({ triggered: true, running: false, inFlight: false, stage: null, lastError: null, lastRunAt: null });
+    });
+    vi.stubGlobal("fetch", f);
+    const signal = new AbortController().signal;
+    await triggerSyncNow({ signal });
+    expect(f).toHaveBeenCalledOnce();
   });
 });
 

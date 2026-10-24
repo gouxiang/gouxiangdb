@@ -126,6 +126,8 @@ function renderPanel(over: Partial<SyncCenterPanelProps> & {
     onSelectTab: over.onSelectTab ?? (() => {}),
     onClose: over.onClose ?? (() => {}),
     onIncomingChange: over.onIncomingChange ?? (() => {}),
+    syncNowBusy: over.syncNowBusy ?? false,
+    onSyncNow: over.onSyncNow ?? (() => {}),
   };
   return renderToStaticMarkup(<SyncCenterPanel {...props} />);
 }
@@ -160,6 +162,52 @@ describe("SyncCenterDrawer 五分区（SSR 直渲染纯面板）", () => {
     const html = renderPanel({ tab: "incoming", online: false });
     expect(html).toContain("当前离线，隔离区为只读");
     expect(html).toContain("联网后处理冲突");
+  });
+});
+
+describe("状态分区「立即同步」按钮（纯面板 SSR，不发请求）", () => {
+  // 在静态 markup 里抓「立即同步」所在的 <button …>，断言其 disabled/aria-busy/title。
+  function syncNowButton(report: LocalSyncStatus, syncNowBusy = false): string {
+    const html = renderPanel({ tab: "status", online: true, report, syncNowBusy });
+    const idx = html.indexOf("立即同步");
+    expect(idx).toBeGreaterThan(-1); // 同步启用时按钮默认可见
+    const start = html.lastIndexOf("<button", idx);
+    const end = html.indexOf(">", idx);
+    return html.slice(start, end);
+  }
+
+  it("启用态默认可见可点（无 disabled/aria-busy 属性）", () => {
+    const tag = syncNowButton({ ...disabledSyncStatus(), enabled: true });
+    // 注意：className 恒含 Tailwind 的 disabled: 工具类前缀，故断言属性 token 而非子串 "disabled"。
+    expect(tag).not.toContain('disabled=""');
+    expect(tag).not.toContain("aria-busy");
+  });
+
+  it("inFlight=true 时置灰并给原因", () => {
+    const tag = syncNowButton({ ...disabledSyncStatus(), enabled: true, inFlight: true });
+    expect(tag).toContain('disabled=""');
+    expect(tag).toContain("有一轮同步正在进行");
+  });
+
+  it("running=true 时置灰", () => {
+    const tag = syncNowButton({ ...disabledSyncStatus(), enabled: true, running: true });
+    expect(tag).toContain('disabled=""');
+  });
+
+  it("syncNowBusy=true 时置灰且 aria-busy（loading）", () => {
+    const tag = syncNowButton({ ...disabledSyncStatus(), enabled: true }, true);
+    expect(tag).toContain('disabled=""');
+    expect(tag).toContain('aria-busy="true"');
+  });
+
+  it("点击接线在容器侧（onSyncNow 透传），纯面板自身不 import/调用网络层", () => {
+    // SSR 无法触发 React onClick，故以源码护栏确认接线与分层纪律：
+    const src = readFileSync(new URL("./SyncCenterDrawer.tsx", import.meta.url), "utf8");
+    expect(src).toContain("onSyncNow={() => void handleSyncNow()}");
+    expect(src).toContain("await triggerSyncNow()");
+    // triggerSyncNow 只在容器函数体内出现（StatusSection/Panel 纯展示不发请求）。
+    const panelSection = src.slice(src.indexOf("function StatusSection"), src.indexOf("export function SyncCenterDrawer"));
+    expect(panelSection).not.toContain("triggerSyncNow(");
   });
 });
 

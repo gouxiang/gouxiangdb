@@ -24,6 +24,8 @@ import {
   listIncoming,
   retryIncoming,
   discardIncoming,
+  triggerSyncNow,
+  getLocalSyncStatus,
   isSyncUpstreamError,
   type IncomingItem,
   type LocalSyncStatus,
@@ -154,11 +156,15 @@ function StatusSection({
   phase,
   online,
   lastFetchedAt,
+  syncNowBusy,
+  onSyncNow,
 }: {
   report: LocalSyncStatus;
   phase: SyncPhase | null;
   online: boolean;
   lastFetchedAt: number | null;
+  syncNowBusy: boolean;
+  onSyncNow: () => void;
 }) {
   const rows: Array<[string, string]> = [
     ["当前状态", phase ? PHASE_TEXT[phase] ?? "—" : online ? "在线" : "离线"],
@@ -168,6 +174,8 @@ function StatusSection({
     ["同步节点", report.nodeId ?? "—"],
     ["本次刷新", lastFetchedAt ? fmtTime(new Date(lastFetchedAt).toISOString()) : "—"],
   ];
+  // 已有一轮在飞（运行态）或本次触发请求在途时置灰；通电按钮默认可见可点。
+  const inProgress = report.inFlight === true || report.running === true;
   return (
     <div>
       <dl className="divide-y divide-gx-hairline">
@@ -198,6 +206,16 @@ function StatusSection({
           </ul>
         </div>
       ) : null}
+      <Button
+        variant="primary"
+        className="m-3 w-[calc(100%-1.5rem)]"
+        loading={syncNowBusy}
+        disabled={syncNowBusy || inProgress}
+        disabledReason={inProgress ? "有一轮同步正在进行" : undefined}
+        onClick={onSyncNow}
+      >
+        立即同步
+      </Button>
     </div>
   );
 }
@@ -298,6 +316,9 @@ export interface SyncCenterPanelProps {
   onSelectTab: (tab: SyncCenterTab) => void;
   onClose: () => void;
   onIncomingChange: () => void;
+  /** 立即同步按钮：请求在途标志 + 点击回调（容器发请求，纯面板只渲染/透传）。 */
+  syncNowBusy: boolean;
+  onSyncNow: () => void;
 }
 
 /** 纯展示面板：不读 store、不发请求，只按 props 渲染（容器负责状态与网络）。 */
@@ -305,6 +326,7 @@ export function SyncCenterPanel(props: SyncCenterPanelProps) {
   const {
     tab, online, report, phase, conflicts, lastFetchedAt,
     incomingItems, incomingError, closing, onSelectTab, onClose, onIncomingChange,
+    syncNowBusy, onSyncNow,
   } = props;
 
   const badgeFor = (id: SyncCenterTab): number | null => {
@@ -376,7 +398,14 @@ export function SyncCenterPanel(props: SyncCenterPanelProps) {
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           {tab === "status" ? (
-            <StatusSection report={report} phase={phase} online={online} lastFetchedAt={lastFetchedAt} />
+            <StatusSection
+              report={report}
+              phase={phase}
+              online={online}
+              lastFetchedAt={lastFetchedAt}
+              syncNowBusy={syncNowBusy}
+              onSyncNow={onSyncNow}
+            />
           ) : null}
           {tab === "outbox" ? <OutboxSection pending={report.pendingOutbox} /> : null}
           {tab === "conflicts" ? <ConflictsSection conflicts={conflicts} online={online} /> : null}
@@ -406,12 +435,15 @@ export function SyncCenterDrawer() {
   const conflicts = useSyncStore((s) => s.conflicts);
   const lastFetchedAt = useSyncStore((s) => s.lastFetchedAt);
   const replaceConflicts = useSyncStore((s) => s.replaceConflicts);
+  const setSyncSnapshot = useSyncStore((s) => s.setSyncSnapshot);
 
   const [closing, setClosing] = useState(false);
   // 隔离区明细（容器内的本地视图状态；纯展示面板只消费）。
   const [incomingItems, setIncomingItems] = useState<IncomingItem[] | null>(null);
   const [incomingError, setIncomingError] = useState<string | null>(null);
   const [incomingVersion, setIncomingVersion] = useState(0);
+  // 「立即同步」触发请求在途标志（容器持有，纯面板只消费 loading/disabled）。
+  const [syncNowBusy, setSyncNowBusy] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -473,6 +505,34 @@ export function SyncCenterDrawer() {
     window.setTimeout(() => setClosing(false), DRAWER_ANIM_MS);
   }
 
+  // 「立即同步」：触发后轮询前先重拉一次 status 投影，让用户立刻看到运行态，不等 5s 轮询。
+  async function handleSyncNow() {
+    if (syncNowBusy) return; // 防重入。
+    setSyncNowBusy(true);
+    try {
+      const r = await triggerSyncNow();
+      // 立即刷新状态投影（best-effort）：status 拉取失败不应盖掉触发结果的提示——
+      // 触发已成功时，状态会在下一次 5s 轮询自然追上。
+      try {
+        const fresh = await getLocalSyncStatus();
+        // 只接受「仍启用」的投影：触发刚成功，侧车必然在线；若即时重拉意外收敛成
+        // disabled（瞬时 404），不拿它覆盖当前活体面板，留待下一次轮询校正。
+        if (fresh.enabled) setSyncSnapshot(fresh, online);
+      } catch {
+        // 忽略即时重拉错误（含 502）；不改变下面对触发结果的 toast 分支。
+      }
+      if (r.triggered) toast("已开始同步", "success");
+      else toast("已有一轮同步在进行", "info");
+    } catch (e) {
+      toast(
+        isSyncUpstreamError(e) ? "无法连接远端服务器，联网后再试" : "触发同步失败，请稍后再试",
+        "error",
+      );
+    } finally {
+      setSyncNowBusy(false);
+    }
+  }
+
   const panel = (
     <SyncCenterPanel
       tab={tab}
@@ -487,6 +547,8 @@ export function SyncCenterDrawer() {
       onSelectTab={setTab}
       onClose={closeWithAnim}
       onIncomingChange={() => setIncomingVersion((v) => v + 1)}
+      syncNowBusy={syncNowBusy}
+      onSyncNow={() => void handleSyncNow()}
     />
   );
 
