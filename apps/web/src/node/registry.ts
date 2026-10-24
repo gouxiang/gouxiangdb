@@ -37,7 +37,11 @@ export type NodeRole = "primary" | "replica";
  * （副本流量走壳内 loopback，上游令牌只在 gx:start_replica 当次经 IPC 传给 Rust，注册表不存）。
  */
 export interface ReplicaBinding {
-  /** 远端服务器规范化 origin（仅展示/重绑，绝不参与浏览器 fetch）。 */
+  /**
+   * 远端服务器规范化**裸 origin**（scheme://host[:port]，与 Rust upstream.rs normalize_http_base
+   * 严格一致：丢弃 path/query/fragment 与内嵌凭证、无尾斜杠）。仅用于展示/重绑，绝不参与浏览器
+   * fetch；同步服务器按根部署，用户误填的子路径在此被剥离。
+   */
   remoteBaseUrl: string;
   clientId?: string | null;
   syncIntervalMs?: number | null;
@@ -221,7 +225,7 @@ export interface AddReplicaInput {
   /** 副本名（trim 后作为 nodeId，须过 isValidReplicaNodeId）。 */
   nodeId: string;
   label?: string | null;
-  /** 远端服务器地址（用户输入；内部走 normalizeNodeUrl 规范化后存 origin/baseURL）。 */
+  /** 远端服务器地址（用户输入；内部走 normalizeNodeUrl 取裸 origin 后存储）。 */
   remoteBaseUrl: string;
   clientId?: string | null;
   syncIntervalMs?: number | null;
@@ -231,7 +235,9 @@ export interface AddReplicaInput {
  * 添加一个离线副本条目（浏览器眼里是「壳口同源的本地侧车」：kind=local、baseURL 恒 ""）。
  *   - nodeId 非法 → REPLICA_ID_INVALID；
  *   - nodeId 已被任意条目（主库/副本/远端）占用 → REPLICA_PROFILE_EXISTS；
- *   - remoteBaseUrl 无法规范化 → REPLICA_REMOTE_INVALID（存规范化后的 baseURL 仅供展示/重绑）。
+ *   - remoteBaseUrl 无法规范化 → REPLICA_REMOTE_INVALID；
+ *     存下的是规范化**裸 origin**（normalized.origin = scheme://host[:port]，剥离用户误填的子路径，
+ *     与 Rust upstream.rs normalize_http_base 同口径），仅供展示/重绑、绝不参与浏览器 fetch。
  * 添加后不自动连接。副本可多个、可删除，与唯一不可删的本机主库区分。
  */
 export function addReplicaNode(
@@ -257,7 +263,7 @@ export function addReplicaNode(
     label: input.label ?? null,
     lastConnectedAt: null,
     replica: {
-      remoteBaseUrl: normalized.baseURL,
+      remoteBaseUrl: normalized.origin,
       clientId: input.clientId ?? null,
       syncIntervalMs: input.syncIntervalMs ?? null,
     },
@@ -378,13 +384,19 @@ function isKind(v: unknown): v is NodeKind {
  *   - 只挑白名单字段（remoteBaseUrl/clientId/syncIntervalMs），**任何 token/password 等额外键
  *     在此天然被丢弃**，绝不保留；
  *   - remoteBaseUrl 必须为非空字符串，否则视为无绑定（返回 null，条目仍按副本保留）；
+ *     存的是**裸 origin**——过一遍 normalizeNodeUrl 取 .origin 做兜底收敛（剥离旧数据/手改里可能
+ *     残留的子路径，与 Rust normalize_http_base 同口径）；万一规范化失败则保留原字符串，宁可展示
+ *     原始值也不丢绑定（持久化值正常由 addReplicaNode 保证已为 origin）；
  *   - clientId 非字符串/为空 → 省略；syncIntervalMs 非有限数字 → 省略。
  */
 function parseReplicaBinding(raw: unknown): ReplicaBinding | null {
   if (typeof raw !== "object" || raw === null) return null;
   const rec = raw as Record<string, unknown>;
   if (typeof rec.remoteBaseUrl !== "string" || rec.remoteBaseUrl.trim() === "") return null;
-  const binding: ReplicaBinding = { remoteBaseUrl: rec.remoteBaseUrl };
+  const normalized = normalizeNodeUrl(rec.remoteBaseUrl);
+  const binding: ReplicaBinding = {
+    remoteBaseUrl: normalized ? normalized.origin : rec.remoteBaseUrl,
+  };
   if (typeof rec.clientId === "string" && rec.clientId.length > 0) {
     binding.clientId = rec.clientId;
   }

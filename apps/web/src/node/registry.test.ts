@@ -298,7 +298,7 @@ describe("isValidReplicaNodeId 边界（与 Rust sanitize_node_id 同口径）",
 });
 
 describe("addReplicaNode：形状、与主库并存、错误码", () => {
-  it("副本=kind local+role replica+baseURL 空，binding 存规范化 baseURL，不自动连接", () => {
+  it("副本=kind local+role replica+baseURL 空，binding 存规范化裸 origin，不自动连接", () => {
     const r = addReplicaNode(withLocal(), {
       nodeId: "office-1",
       remoteBaseUrl: "http://192.168.1.5:3001/",
@@ -312,9 +312,28 @@ describe("addReplicaNode：形状、与主库并存、错误码", () => {
       baseURL: "",
       lastConnectedAt: null,
     });
-    expect(e?.replica?.remoteBaseUrl).toBe("http://192.168.1.5:3001"); // 去尾斜杠
+    expect(e?.replica?.remoteBaseUrl).toBe("http://192.168.1.5:3001"); // 裸 origin、去尾斜杠
     expect(r.state.activeNodeId).toBeNull(); // 添加≠连接
     expect(r.state.localDesired).toBe("running"); // 主库期望态不受影响
+  });
+
+  it("只存裸 origin：用户误填子路径/查询时剥离到 scheme://host[:port]（对齐 Rust normalize_http_base）", () => {
+    const r = addReplicaNode(emptyRegistry(), {
+      nodeId: "office-1",
+      remoteBaseUrl: "http://h.example.com:3001/gx/",
+    });
+    expect(r.error).toBeNull();
+    expect(getEntry(r.state, "office-1")?.replica?.remoteBaseUrl).toBe(
+      "http://h.example.com:3001",
+    );
+    // query/fragment 也剥离；无显式端口时不带尾冒号
+    const r2 = addReplicaNode(emptyRegistry(), {
+      nodeId: "office-2",
+      remoteBaseUrl: "https://hub.example/app/gouxiangdb?x=1#frag",
+    });
+    expect(getEntry(r2.state, "office-2")?.replica?.remoteBaseUrl).toBe(
+      "https://hub.example",
+    );
   });
 
   it("主库唯一且与多副本并存：hasLocal/localEntry 只认 primary，replicaEntries 收副本", () => {
@@ -458,6 +477,24 @@ describe("副本持久化：不含 token + roundtrip + 老数据兼容", () => {
     expect(JSON.stringify(rep)).not.toMatch(/token/i);
     expect(JSON.stringify(rep)).not.toMatch(/password/i);
     expect(s.activeNodeId).toBe("office-1");
+  });
+
+  it("parse 对旧数据残留子路径的绑定兜底收敛为裸 origin", () => {
+    const raw = JSON.stringify({
+      version: 1,
+      entries: [
+        {
+          kind: "local",
+          role: "replica",
+          nodeId: "office-1",
+          baseURL: "",
+          replica: { remoteBaseUrl: "http://h.example.com:3001/gx/sub/" },
+        },
+      ],
+    });
+    expect(getEntry(parseRegistry(raw), "office-1")?.replica?.remoteBaseUrl).toBe(
+      "http://h.example.com:3001",
+    );
   });
 
   it("parse 多副本按 nodeId 去重、允许并存；非法副本名被丢弃", () => {
