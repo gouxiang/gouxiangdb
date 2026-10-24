@@ -18,6 +18,7 @@
 import type { ActiveDataSource, NodeKind } from "./datasource";
 import { LOCAL_NODE_ID, toWsOrigin, normalizeNodeUrl } from "./resolve";
 import type { StoredNodeEntry } from "./registry";
+import { isPrimaryEntry } from "./registry";
 import { deriveActiveDataSource } from "./launcher";
 
 /** probe 显式目标转发的同源路径前缀（IMPL §3：/__gx/probe/<probeId>/<api 路径...>）。 */
@@ -74,12 +75,14 @@ export function normalizeProbeBaseURL(baseURL: string): string {
  * 壳模式「同源化」活动数据源构建器（与 launcher.deriveActiveDataSource 同形，可整体替换注入）。
  *
  * 与现状唯一推导点的差别**仅且只能**是地址面：
- *   - local：现状 baseURL=本地相对前缀、wsOrigin=页面 origin+前缀；壳内 baseURL=""、wsOrigin=壳口；
+ *   - local primary：现状 baseURL=本地相对前缀、wsOrigin=页面 origin+前缀；壳内 baseURL=""、wsOrigin=壳口；
+ *   - local replica（离线副本，kind 仍 "local"、nodeId 为副本名）：与 primary 同走壳口根（baseURL="",
+ *     wsOrigin=壳口），但**保留副本自有 nodeId**（不坍成 "local"），以便会话/401 按副本名分键分流；
  *   - remote：现状 baseURL=远端绝对 URL、wsOrigin=远端 origin；壳内 baseURL=""、wsOrigin=壳口。
- * nodeId / kind / token 三个身份字段逐字节保留（local nodeId 仍恒为 "local"）。
+ * nodeId / kind / token 三个身份字段逐字节保留（仅 primary 的 nodeId 恒为 "local"）。
  *
  * @param entry     活动节点条目（remote 的真实绝对 baseURL 在 entry 上，但不放进数据源）
- * @param token     当前会话 JWT（远端已登录 token；local 未登录可为 null）
+ * @param token     当前会话 JWT（远端/副本为各自分键 token；主库为 gx-auth，未登录可 null）
  * @param getOrigin 页面同源 origin（生产传 window.location.origin，即壳口；测试注入）
  * @returns 无活动节点 → null（与 deriveActiveDataSource 一致）
  */
@@ -90,10 +93,17 @@ export function deriveShellActiveDataSource(
 ): ActiveDataSource | null {
   if (!entry) return null;
   const kind: NodeKind = entry.kind === "local" ? "local" : "remote";
+  // 主库（primary）nodeId 恒 "local"；离线副本保留自有 nodeId（≠"local"）；远端用其哈希 id。
+  const nodeId =
+    kind === "local"
+      ? isPrimaryEntry(entry)
+        ? LOCAL_NODE_ID
+        : entry.nodeId
+      : entry.nodeId;
   return {
-    nodeId: kind === "local" ? LOCAL_NODE_ID : entry.nodeId,
+    nodeId,
     kind,
-    baseURL: "", // 壳口根同源；local/remote 一切业务请求都经壳代理按当前上游转发
+    baseURL: "", // 壳口根同源；primary/replica/remote 一切业务请求都经壳代理按当前上游转发
     token,
     // 与 resolver.wsHostOrigin()（wsHostOriginFor("", origin)）同口径：纯壳口 host，不含 basePath。
     wsOrigin: toWsOrigin(getOrigin()),

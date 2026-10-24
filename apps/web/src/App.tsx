@@ -70,14 +70,14 @@ function RequirePasswordChanged({ children }: { children: ReactNode }) {
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  // 活动会话视图：本地槽认 gx-auth token；远端槽认 resolver 当前数据源的 token
-  //（remote-empty 选路态 authenticated=false）。门控关时 session 即纯本地视图，与今天一致。
+  // 活动会话视图：主库认 gx-auth token；非主库独立账号源（远端或离线副本）认 resolver 当前
+  // 数据源的 token（empty 选路态 authenticated=false）。门控关时 session 恒主库视图，与今天一致。
   const session = useActiveSession();
   if (session.authenticated) return <>{children}</>;
-  // 桌面未认证：已选路到远端（remote-empty）→ 去该远端自己的登录页；连节点都没选 → 回启动器。
-  // 现网门控关 → 回本地登录页（原行为）。
+  // 桌面未认证：已选路到非主库源（remote/replica-empty）→ 去该侧车自己的登录页；
+  // 主库/无活动 → 回启动器。现网门控关 → 回本地登录页（原行为）。
   if (launcherEnabled()) {
-    return <Navigate to={session.kind === "remote" ? "/login" : "/launcher"} replace />;
+    return <Navigate to={!session.primary ? "/login" : "/launcher"} replace />;
   }
   return <Navigate to="/login" replace />;
 }

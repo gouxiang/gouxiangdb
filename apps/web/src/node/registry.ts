@@ -120,7 +120,7 @@ function fail(prev: NodeRegistryState, code: RegistryErrorCode, message: string)
 // ── 选择器（纯读）─────────────────────────────────────────────────────────────
 
 /** 是否为唯一本机主库：kind=local 且非 replica（缺省 role 一律按 primary）。 */
-function isPrimaryEntry(e: StoredNodeEntry): boolean {
+export function isPrimaryEntry(e: StoredNodeEntry): boolean {
   return e.kind === "local" && e.role !== "replica";
 }
 

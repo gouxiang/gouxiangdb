@@ -46,6 +46,10 @@ function remoteDs(nodeId: string, token: string | null) {
     wsOrigin: "ws://nas:3001",
   };
 }
+// 离线副本：传输语义仍 kind:"local"（经壳口同源代理），但 nodeId 是副本白名单名（≠"local"）。
+function replicaDs(nodeId: string, token: string | null) {
+  return { nodeId, kind: "local" as const, baseURL: "", token, wsOrigin: "ws://x" };
+}
 
 describe("deriveActiveSession 纯选择器", () => {
   it("门控关：即便 ds 是远端也强制按 local 读（现网零变化）", () => {
@@ -59,7 +63,8 @@ describe("deriveActiveSession 纯选择器", () => {
       enabled: false,
       kind: "local",
       nodeId: LOCAL_NODE_ID,
-      token: null, // ds.kind=remote → 不取其 token
+      primary: true,
+      token: null, // ds.nodeId 非 local → 不取其 token
       user: null,
       authenticated: false,
     });
@@ -115,6 +120,57 @@ describe("deriveActiveSession 纯选择器", () => {
     expect(v.authenticated).toBe(true);
     expect(v.user?.id).toBe("u1");
     expect(v.user?.mustChangePassword).toBe(true);
+  });
+
+  it("门控开 + 副本 ds 无 token：primary=false、kind 视图仍 'local'、user/token 空", () => {
+    const v = deriveActiveSession({
+      enabled: true,
+      ds: replicaDs("office-1", null),
+      localUser: user({ id: "local-user" }), // 主库即便已登录也不算副本认证
+      remoteSession: null,
+    });
+    expect(v).toMatchObject({
+      enabled: true,
+      kind: "local", // 传输语义保留 local，不能改成 remote（否则地址面被误判）
+      nodeId: "office-1",
+      primary: false,
+      token: null,
+      user: null,
+      authenticated: false,
+    });
+  });
+
+  it("门控开 + 副本 ds 带 token + 副本分键 user：读副本会话、不读 gx-auth", () => {
+    const repUser = user({ id: "rep-user", mustChangePassword: true });
+    const v = deriveActiveSession({
+      enabled: true,
+      ds: replicaDs("office-1", "rep-jwt"),
+      localUser: user({ id: "local-user" }),
+      remoteSession: { nodeId: "office-1", token: "rep-jwt", user: repUser },
+    });
+    expect(v.primary).toBe(false);
+    expect(v.kind).toBe("local");
+    expect(v.nodeId).toBe("office-1");
+    expect(v.token).toBe("rep-jwt");
+    expect(v.user?.id).toBe("rep-user");
+    expect(v.authenticated).toBe(true);
+  });
+
+  it("门控关即便 ds 是副本（kind:local,nodeId=副本名）也强制主库视图 primary:true", () => {
+    const v = deriveActiveSession({
+      enabled: false,
+      ds: replicaDs("office-1", "rep-jwt"),
+      localUser: null,
+      remoteSession: null,
+    });
+    expect(v).toMatchObject({
+      enabled: false,
+      kind: "local",
+      nodeId: LOCAL_NODE_ID,
+      primary: true,
+      token: null,
+      authenticated: false,
+    });
   });
 });
 

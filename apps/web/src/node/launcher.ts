@@ -8,7 +8,10 @@
 //     承担，成功后由 activeAuth 调 commitRemoteSession 把 JWT 写入该节点分键。deps.loginRemote
 //     仅为旧装配/测试保留的可注入项，纯选路路径不再调用；
 //   - 本层不碰 DOM/localStorage 具体实现，存储与时钟均注入；
-//   - 本地节点 token 真相源是 gx-auth（注入 getLocalToken），远端 token 存 remoteSessions 分键；
+//   - 账号/会话归属按 nodeId 二分（2026-10 第三入口）：唯一本机主库（primary，nodeId 恒 "local"）
+//     的 token 真相源是 gx-auth（注入 getLocalToken）；远端节点与离线副本（kind 虽为 "local"、
+//     nodeId 为副本名）都属"非主库独立账号源"，会话 JWT 一律走 remoteSessions 按 nodeId 分键
+//     （gx-node-session:<id>）。传输/地址仍看 kind（副本与主库同为 kind:"local"、经壳口同源代理）。
 //   - 仍不接 client.ts 主路径、默认关；resolver 单例在浏览器/fnOS 面 S1 行为（恒 local）不变，
 //     只有桌面启动器显式 newLauncherController 后才会驱动 setActive。
 
@@ -28,6 +31,8 @@ import {
   renameNode as regRename,
   getEntry,
   activeEntry,
+  hasLocal,
+  isPrimaryEntry,
 } from "./registry";
 import {
   type KvStorage,
@@ -92,7 +97,15 @@ export interface SwitchOutcome {
 
 /**
  * 纯函数：由活动节点条目 + 凭据推导要交给 resolver 的数据源。
- * 无活动节点 → null。本地节点 baseURL 用注入的本地 base（桌面接线可指向内核回环口）。
+ * 无活动节点 → null。
+ *
+ * 传输/地址看 kind；账号归属看 nodeId：
+ *   - primary（本机主库，isPrimaryEntry，nodeId 恒 "local"）：baseURL 用注入的本地相对前缀
+ *     （桌面接线可指向内核回环口），wsOrigin=本地 base+页面 origin，token 来自 gx-auth；
+ *   - replica（离线副本，kind 仍 "local"、nodeId 为副本名）：浏览器眼里是壳口同源的本地侧车，
+ *     非壳构建器给 baseURL=""（等同本地同源根），wsOrigin 回落页面 origin（壳口），token 是该副本
+ *     自己分键的会话 JWT（由 applyActive 读出后传入，绝不取 gx-auth）；
+ *   - remote：用远端绝对 baseURL 与 toWsOrigin(baseURL)。
  */
 export function deriveActiveDataSource(
   entry: StoredNodeEntry | null,
@@ -102,13 +115,23 @@ export function deriveActiveDataSource(
 ): ActiveDataSource | null {
   if (!entry) return null;
   if (entry.kind === "local") {
-    const baseURL = getLocalBase();
+    if (isPrimaryEntry(entry)) {
+      const baseURL = getLocalBase();
+      return {
+        nodeId: LOCAL_NODE_ID,
+        kind: "local",
+        baseURL,
+        token,
+        wsOrigin: localWsOrigin(baseURL, getOrigin()),
+      };
+    }
+    // 离线副本：保留自有 nodeId（≠"local"），传输仍 kind:"local"，地址同源根、ws 回落壳口。
     return {
-      nodeId: LOCAL_NODE_ID,
+      nodeId: entry.nodeId,
       kind: "local",
-      baseURL,
+      baseURL: "",
       token,
-      wsOrigin: localWsOrigin(baseURL, getOrigin()),
+      wsOrigin: toWsOrigin(getOrigin()),
     };
   }
   return {
@@ -153,6 +176,14 @@ export interface LauncherController {
    * 可毫秒级往返、可随时离开；节点不存在或不是远端 → active=null 且不切换。
    */
   connectRemote(nodeId: string, creds?: RemoteCredentials): Promise<SwitchOutcome>;
+  /**
+   * 按 nodeId 纯选路（不发登录请求、不吃凭据）：regConnect 后重推活动数据源。
+   * 供副本壳编排（2b）复用——remote 的在线选路仍走 connectRemote（签名兼容保留）；
+   * 本方法对 primary/remote/replica 都自洽：primary 与 replica 允许空 token 激活（副本走自己
+   * 分键会话、无会话即 token=null 进其登录引导），remote 也按在线选路 allowEmpty 处理。
+   * 节点不存在 → active=null 且不切换。
+   */
+  connectNodeById(nodeId: string): SwitchOutcome;
   /**
    * 远端登录/注册成功后，把该节点签发的 JWT + user 写入它自己的会话分键（gx-node-session:<id>）。
    * 若该节点正是当前活动节点，重推带 token 的活动数据源（remote-empty → 已登录远端）；
@@ -221,9 +252,11 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
   let state: NodeRegistryState = deps.initialRegistry ?? emptyRegistry();
 
   /**
-   * @param allowEmptyRemote 在线「只选路」connectRemote 传 true：远端无会话也激活 token=null 的
-   *   远端数据源（remote-empty，界面随即展示远端自己的登录页）。缺省 false 保持旧语义
-   *   （restore/disconnect：远端无会话不自动激活，回落 active=null → resolver 惰性回 local）。
+   * @param allowEmptyRemote 在线「只选路」connectRemote/connectNodeById 传 true：非主库独立账号源
+   *   （远端或副本）无会话也激活 token=null 的数据源（*-empty，界面随即展示该侧车自己的登录页）。
+   *   缺省 false 保持旧语义（仅作用于 remote 的 restore/disconnect：远端无会话不自动激活，回落
+   *   active=null → resolver 惰性回 local）。**副本始终允许空 token 激活**，不受此开关影响——
+   *   副本在浏览器眼里是本地侧车，未登录要进它自己的 /login 引导，等同在线 remote-empty。
    */
   function applyActive(
     nextState: NodeRegistryState,
@@ -234,9 +267,17 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
       resolver.setActive(null);
       return { state: nextState, active: null };
     }
-    if (entry.kind === "local") {
-      // 本地允许 token=null（未登录/首启初始化页仍需数据源指向本地内核）。
+    if (isPrimaryEntry(entry)) {
+      // 本机主库：允许 token=null（未登录/首启初始化页仍需数据源指向本地内核）；token 真相源是 gx-auth。
       const ds = deriveDs(entry, getLocalToken());
+      resolver.setActive(ds);
+      return { state: nextState, active: ds };
+    }
+    if (entry.kind === "local") {
+      // 离线副本：token 读该副本自己的分键会话（gx-node-session:<副本名>），**绝不取 gx-auth**。
+      // 始终允许空 token 激活（副本自己的登录引导），不受 restore fail-closed 影响。
+      const token = readRemoteSession(deps.storage, entry.nodeId)?.token ?? null;
+      const ds = deriveDs(entry, token);
       resolver.setActive(ds);
       return { state: nextState, active: ds };
     }
@@ -262,7 +303,7 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
 
     connectLocal() {
       let next = state;
-      if (!state.entries.some((e) => e.kind === "local")) {
+      if (!hasLocal(state)) {
         const r = addLocalNode(state);
         if (r.error) return { state, active: null };
         next = r.state;
@@ -272,17 +313,27 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
       return applyActive(next);
     },
 
+    // 纯选路（同步）：regConnect 后按 applyActive 重推。primary 读 gx-auth、副本读自己分键会话
+    // （两者均允许空 token），remote 按在线选路 allowEmpty 激活（无会话也切，登录交给远端页面）。
+    connectNodeById(nodeId) {
+      const entry = getEntry(state, nodeId);
+      if (!entry) return { state, active: null };
+      const next = regConnect(state, nodeId, now()).state;
+      state = next;
+      return applyActive(next, true);
+    },
+
     ensureLocalRegistered() {
-      if (state.entries.some((e) => e.kind === "local")) return state;
+      if (hasLocal(state)) return state;
       const r = addLocalNode(state);
-      // addLocalNode 仅在已存在 local 时失败；上一行已排除，error 必为 null。
+      // addLocalNode 仅在已存在主库时失败；上一行已排除，error 必为 null。
       if (!r.error) state = r.state;
       return state;
     },
 
     setLocalDesiredOnly(desired) {
-      // 无本地条目：localDesired 无意义，安全 no-op（不改 active、不调 resolver）。
-      if (!state.entries.some((e) => e.kind === "local")) return state;
+      // 无本机主库条目（可能只有副本）：localDesired 无意义，安全 no-op（不改 active、不调 resolver）。
+      if (!hasLocal(state)) return state;
       if (state.localDesired === desired) return state;
       state = { ...state, localDesired: desired };
       return state;
@@ -311,14 +362,15 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
 
     commitRemoteSession(nodeId, token, user) {
       const entry = getEntry(state, nodeId);
-      if (!entry || entry.kind !== "remote") {
-        // 非远端/未知节点：不写会话（writeRemoteSession 自身也拒 local），活动源不变。
+      // 准入＝非主库的独立账号源（远端或离线副本）。主库（gx-auth）永不进分键会话存储；
+      // writeRemoteSession 自身也拒 nodeId==="local"（纵深防御）。方法名沿用历史 "remote" 槽位命名。
+      if (!entry || isPrimaryEntry(entry)) {
         return applyActive(state);
       }
       // writeRemoteSession 拒绝空 token、拒绝 local；失败 throw，调用方（登录页）按错误提示。
       writeRemoteSession(deps.storage, { nodeId, token, user: user ?? null });
-      // 仅当该节点是当前活动节点时才重推数据源（remote-empty → 已登录远端）；
-      // 给非活动节点"记住账号"不改当前看的源。
+      // 仅当该节点是当前活动节点时才重推数据源（empty → 已登录）；
+      // 给非活动节点"记住账号"不改当前看的源。副本活动时同样重推（带副本 JWT，非空/空皆由源决定）。
       if (state.activeNodeId === nodeId) return applyActive(state, true);
       return { state, active: activeEntry(state) ? resolver.current() : null };
     },
@@ -335,14 +387,15 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
 
     deauthenticateRemote(nodeId) {
       const entry = getEntry(state, nodeId);
-      if (!entry || entry.kind !== "remote") {
+      // 准入＝非主库独立账号源（远端或离线副本）；主库无分键可清（其真相源是 gx-auth）。
+      if (!entry || isPrimaryEntry(entry)) {
         return applyActive(state);
       }
-      // 清该远端会话，但**保持选路态**：不 regDisconnect、activeNodeId 不变。
+      // 清该侧车会话，但**保持选路态**：不 regDisconnect、activeNodeId 不变。
       clearRemoteSession(deps.storage, nodeId);
       if (state.activeNodeId === nodeId) {
-        // 活动节点：重推 token=null 远端数据源（remote-empty），守卫送回远端自己的登录页，
-        // 壳上游仍指向该远端（installLauncher/store 在此不改 set_upstream）。
+        // 活动节点：重推 token=null 的数据源（*-empty），守卫送回该侧车自己的登录页，
+        // 壳上游仍指向它（installLauncher/store 在此不改 set_upstream）。副本分支无视 allowEmpty 也会空激活。
         return applyActive(state, true);
       }
       // 非活动节点：仅清会话，当前活动数据源无需变动。
@@ -352,7 +405,8 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
     disconnect(nodeId) {
       const entry = getEntry(state, nodeId);
       if (!entry) return applyActive(state);
-      if (entry.kind === "remote") clearRemoteSession(deps.storage, nodeId);
+      // 非主库独立账号源（远端或副本）断开都清它自己的分键会话；主库断开走期望停止、不删 gx-auth。
+      if (!isPrimaryEntry(entry)) clearRemoteSession(deps.storage, nodeId);
       const next = regDisconnect(state, nodeId).state;
       state = next;
       return applyActive(next);
@@ -360,7 +414,8 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
 
     removeRemote(nodeId) {
       const entry = getEntry(state, nodeId);
-      if (entry?.kind === "remote") clearRemoteSession(deps.storage, nodeId);
+      // 远端或副本删除都清其分键；主库永久不可删（regRemove 会拒绝，这里也不清 gx-auth）。
+      if (entry && !isPrimaryEntry(entry)) clearRemoteSession(deps.storage, nodeId);
       const r = regRemove(state, nodeId);
       if (!r.error) state = r.state;
       return state;
@@ -378,9 +433,10 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
 
     refreshActiveLocal() {
       const entry = activeEntry(state);
-      // 仅本机活动节点需要随 gx-auth 登录态刷新；无活动或当前是远端 → 不动（返回 null 表示未刷新）。
-      if (!entry || entry.kind !== "local") return null;
-      // 复用 applyActive：它对 local 分支每次实时 getLocalToken() 重新 deriveDs 并 setActive。
+      // 仅本机主库活动节点需要随 gx-auth 登录态刷新；无活动、当前是远端**或离线副本** → 不动
+      //（返回 null 表示未刷新）。副本 gx-auth 变化绝不能灌进副本数据源（防串主库令牌）。
+      if (!entry || !isPrimaryEntry(entry)) return null;
+      // 复用 applyActive：primary 分支每次实时 getLocalToken() 重新 deriveDs 并 setActive。
       // 注册表 state 不变，仅 resolver 内冻结的 token 快照被替换；nodeId 不变，切源桥不清缓存。
       return applyActive(state);
     },

@@ -51,6 +51,16 @@ const remoteEntry = (baseURL = "http://nas:3001"): StoredNodeEntry => ({
   label: "公司库",
   lastConnectedAt: null,
 });
+// 离线副本：kind 仍 local、baseURL 空，但 nodeId 是副本名 + role:replica。
+const replicaEntry = (nodeId = "office-1"): StoredNodeEntry => ({
+  kind: "local",
+  role: "replica",
+  nodeId,
+  baseURL: "",
+  label: "办公室副本",
+  lastConnectedAt: null,
+  replica: { remoteBaseUrl: "http://nas:3001", clientId: null, syncIntervalMs: null },
+});
 
 afterEach(() => {
   __resetShellBridgeForTest();
@@ -85,6 +95,25 @@ describe("壳模式同源化数据源 deriveShellActiveDataSource", () => {
 
   it("local 未登录 token=null 原样保留（首 boot 初始化页仍需数据源指向壳代理）", () => {
     const ds = deriveShellActiveDataSource(localEntry, null, () => PAGE_ORIGIN_HTTP);
+    expect(ds?.token).toBeNull();
+    expect(ds?.baseURL).toBe("");
+  });
+
+  it("replica：baseURL=''、wsOrigin=壳口，但 nodeId 保留副本名（不坍成 local），kind 仍 local", () => {
+    const ds = deriveShellActiveDataSource(replicaEntry("office-1"), "rep-jwt", () => PAGE_ORIGIN_HTTP);
+    expect(ds).toEqual({
+      nodeId: "office-1",
+      kind: "local",
+      baseURL: "",
+      token: "rep-jwt",
+      wsOrigin: "ws://127.0.0.1:5809",
+    });
+  });
+
+  it("replica 未登录 token=null 也保留副本 nodeId（空令牌侧车登录引导）", () => {
+    const ds = deriveShellActiveDataSource(replicaEntry("office-2"), null, () => PAGE_ORIGIN_HTTP);
+    expect(ds?.nodeId).toBe("office-2");
+    expect(ds?.kind).toBe("local");
     expect(ds?.token).toBeNull();
     expect(ds?.baseURL).toBe("");
   });

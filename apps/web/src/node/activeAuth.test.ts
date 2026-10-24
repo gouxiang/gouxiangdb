@@ -9,7 +9,7 @@ import {
   patchActiveRemoteUser,
   refreshActiveSourceUser,
   deauthenticateActiveSource,
-  isActiveRemoteSource,
+  isActiveIsolatedSource,
 } from "./activeAuth";
 import { dataSourceResolver } from "./datasource";
 import {
@@ -61,8 +61,8 @@ describe("activeAuth（门控关 / 本地：现网零变化）", () => {
     useAuthStore.setState({ token: null, user: null });
   });
 
-  it("门控关：isActiveRemoteSource=false，commit 返回 false（由调用方写本地 gx-auth）", () => {
-    expect(isActiveRemoteSource()).toBe(false);
+  it("门控关：isActiveIsolatedSource=false，commit 返回 false（由调用方写本地 gx-auth）", () => {
+    expect(isActiveIsolatedSource()).toBe(false);
     expect(commitLoginForActiveSource("jwt", user())).toBe(false);
     expect(useAuthStore.getState().token).toBeNull();
   });
@@ -82,7 +82,7 @@ describe("activeAuth（门控关 / 本地：现网零变化）", () => {
       token: "local-jwt",
       wsOrigin: "ws://x",
     });
-    expect(isActiveRemoteSource()).toBe(false);
+    expect(isActiveIsolatedSource()).toBe(false);
     const r = refreshActiveSourceUser(user({ mustChangePassword: false }));
     expect(r.handled).toBe(false);
     expect(r.token).toBe("local-jwt");
@@ -123,7 +123,7 @@ describe("activeAuth（门控开 + 活动远端，单例 store）", () => {
 
   it("remote-empty 即算活动远端；登录提交 → commit 写分键并重推带 token 数据源", async () => {
     const store = await setupRoutedRemote();
-    expect(isActiveRemoteSource()).toBe(true);
+    expect(isActiveIsolatedSource()).toBe(true);
     expect(dataSourceResolver.current().token).toBeNull();
 
     const handled = commitLoginForActiveSource("remote-jwt", user());
@@ -196,5 +196,100 @@ describe("activeAuth（门控开 + 活动远端，单例 store）", () => {
     });
     expect(() => refreshActiveSourceUser(user())).toThrow(/token/);
     expect(ghost.getItem("gx-node-session:ghost")).toBeNull();
+  });
+});
+
+describe("activeAuth（门控开 + 活动离线副本：JWT 走副本分键，绝不写 gx-auth）", () => {
+  let storage: MemStorage;
+
+  beforeEach(() => {
+    storage = new MemStorage();
+    vi.stubEnv("VITE_NODE_LAUNCHER", "1");
+    stubWindow(storage);
+    __resetLauncherStoreForTest();
+    dataSourceResolver.setActive(null);
+    useAuthStore.setState({ token: null, user: null });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    __resetLauncherStoreForTest();
+    dataSourceResolver.setActive(null);
+    useAuthStore.setState({ token: null, user: null });
+  });
+
+  /** 构造一份"活动节点是副本 office-1"的注册表并预置进 storage，再由 store restore 驱动 resolver。 */
+  function setupRoutedReplica() {
+    // 手工构造 version:1 注册表（含主库 primary + 副本 replica，active=副本）。
+    const registry = {
+      version: 1,
+      activeNodeId: "office-1",
+      localDesired: "running",
+      entries: [
+        { kind: "local", role: "primary", nodeId: "local", baseURL: "", label: "本机", lastConnectedAt: null },
+        {
+          kind: "local",
+          role: "replica",
+          nodeId: "office-1",
+          baseURL: "",
+          label: "办公室副本",
+          lastConnectedAt: null,
+          replica: { remoteBaseUrl: "http://nas:3001", clientId: null, syncIntervalMs: null },
+        },
+      ],
+    };
+    storage.setItem("gx-node-launcher", JSON.stringify(registry));
+    const store = getLauncherStore({
+      resolver: dataSourceResolver,
+      getLocalBase: () => "",
+      getOrigin: () => "http://127.0.0.1:7788",
+      getLocalToken: () => "primary-jwt",
+    });
+    return store;
+  }
+
+  it("副本 ds kind='local' 但 nodeId=副本名 → isActiveIsolatedSource=true（不按 kind 误判为主库）", () => {
+    setupRoutedReplica();
+    const ds = dataSourceResolver.current();
+    expect(ds.kind).toBe("local");
+    expect(ds.nodeId).toBe("office-1");
+    expect(ds.token).toBeNull(); // 副本无分键会话 → 空 token 也激活
+    expect(isActiveIsolatedSource()).toBe(true);
+  });
+
+  it("登录提交：JWT 落 gx-node-session:office-1，重推副本数据源，不写 gx-auth", () => {
+    const store = setupRoutedReplica();
+    const handled = commitLoginForActiveSource("rep-jwt", user());
+    expect(handled).toBe(true);
+    expect(storage.getItem("gx-node-session:office-1")).toContain("rep-jwt");
+    expect(useAuthStore.getState().token).toBeNull(); // 主库 gx-auth 不被污染
+    const ds = dataSourceResolver.current();
+    expect(ds.nodeId).toBe("office-1");
+    expect(ds.kind).toBe("local");
+    expect(ds.token).toBe("rep-jwt");
+    expect(store.getRemoteSession("office-1")?.user?.id).toBe("u1");
+  });
+
+  it("deauthenticate：清副本分键、保持选路态（仍指副本，token=null），不动 gx-auth", async () => {
+    const store = setupRoutedReplica();
+    commitLoginForActiveSource("rep-jwt", user());
+    expect(deauthenticateActiveSource()).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.getRemoteSession("office-1")).toBeNull();
+    expect(dataSourceResolver.current().nodeId).toBe("office-1");
+    expect(dataSourceResolver.current().kind).toBe("local");
+    expect(dataSourceResolver.current().token).toBeNull();
+    expect(useAuthStore.getState().token).toBeNull();
+  });
+
+  it("refreshActiveSourceUser：副本改密后用副本 token 重写副本分键", () => {
+    setupRoutedReplica();
+    commitLoginForActiveSource("rep-jwt", user({ mustChangePassword: true }));
+    const r = refreshActiveSourceUser(user({ mustChangePassword: false }));
+    expect(r.handled).toBe(true);
+    expect(r.token).toBe("rep-jwt");
+    expect(JSON.parse(storage.getItem("gx-node-session:office-1") as string).user.mustChangePassword).toBe(false);
   });
 });

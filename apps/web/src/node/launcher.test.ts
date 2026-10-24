@@ -11,8 +11,14 @@ import { newLauncherController, deriveActiveDataSource } from "./launcher";
 import type { RemoteLoginFn } from "./launcher";
 import type { KvStorage } from "./remoteSessions";
 import { LOCAL_NODE_ID } from "./resolve";
-import { addLocalNode, connectNode, addRemoteNode, emptyRegistry } from "./registry";
-import type { NodeRegistryState } from "./registry";
+import {
+  addLocalNode,
+  connectNode,
+  addRemoteNode,
+  addReplicaNode,
+  emptyRegistry,
+} from "./registry";
+import type { NodeRegistryState, StoredNodeEntry } from "./registry";
 import { createDataSourceResolver } from "./datasource";
 
 class MemStorage implements KvStorage {
@@ -411,5 +417,158 @@ describe("跨重启 restore", () => {
     const out = controller.restore();
     expect(out.active?.kind).toBe("local");
     expect(out.active?.token).toBe("local-jwt");
+  });
+});
+
+// ── 离线副本（第三入口 2a）：账号/令牌按 nodeId 与主库分流，传输仍 kind:local ─────────────
+
+const replicaEntry = (nodeId: string): StoredNodeEntry => ({
+  kind: "local",
+  role: "replica",
+  nodeId,
+  baseURL: "",
+  label: "办公室副本",
+  lastConnectedAt: null,
+  replica: { remoteBaseUrl: "http://nas:3001", clientId: null, syncIntervalMs: null },
+});
+
+/** 注册表：仅一个副本、无主库。 */
+function replicaOnlyState(nodeId = "office-1"): NodeRegistryState {
+  return addReplicaNode(emptyRegistry(), { nodeId, remoteBaseUrl: "http://nas:3001" }).state;
+}
+/** 注册表：主库 + 一个副本（active 可分别指向）。 */
+function primaryAndReplicaState(nodeId = "office-1"): NodeRegistryState {
+  const withPrimary = addLocalNode(emptyRegistry()).state;
+  return addReplicaNode(withPrimary, { nodeId, remoteBaseUrl: "http://nas:3001" }).state;
+}
+
+describe("deriveActiveDataSource 副本（非壳构建器）", () => {
+  it("replica：nodeId 保留副本名、kind='local'、baseURL=''、wsOrigin 回落页面 origin，不被改成 local", () => {
+    const lb = () => "/app/gouxiangdb"; // 即便注入本地子路径前缀，副本也不使用（恒同源根）
+    const og = () => "http://127.0.0.1:5999";
+    const ds = deriveActiveDataSource(replicaEntry("office-1"), "rep-jwt", lb, og);
+    expect(ds).toEqual({
+      nodeId: "office-1",
+      kind: "local",
+      baseURL: "",
+      token: "rep-jwt",
+      wsOrigin: "ws://127.0.0.1:5999",
+    });
+  });
+});
+
+describe("applyActive 副本：空 token 也激活，绝不读 gx-auth", () => {
+  it("无分键会话 → 活动副本 ds.token=null（不回 null、不取本地 token）", () => {
+    // 注册表只有副本、active=副本
+    let s = replicaOnlyState();
+    s = connectNode(s, "office-1", "t").state;
+    const { controller } = makeController(s); // getLocalToken 恒 "local-jwt"
+    const out = controller.restore();
+    expect(out.active).not.toBeNull();
+    expect(out.active?.nodeId).toBe("office-1");
+    expect(out.active?.kind).toBe("local");
+    expect(out.active?.token).toBeNull(); // 不是 "local-jwt"！证明不串主库令牌
+    expect(controller.resolver().current().token).toBeNull();
+  });
+
+  it("主库 gx-auth 有 token 但副本分键为空：活动副本 ds.token 仍为 null", () => {
+    let s = primaryAndReplicaState();
+    s = connectNode(s, "office-1", "t").state;
+    const { controller } = makeController(s);
+    const out = controller.restore();
+    expect(out.active?.nodeId).toBe("office-1");
+    expect(out.active?.token).toBeNull();
+  });
+
+  it("commitRemoteSession(副本名) 写 gx-node-session:<副本名>，随后活动副本 ds 带该 token；主库 gx-auth 不受影响", () => {
+    let s = primaryAndReplicaState();
+    s = connectNode(s, "office-1", "t").state;
+    const { controller, storage, getLocalToken } = makeController(s);
+    const out = controller.commitRemoteSession("office-1", "rep-jwt", null);
+    expect(out.active?.nodeId).toBe("office-1");
+    expect(out.active?.token).toBe("rep-jwt");
+    expect(storage.getItem("gx-node-session:office-1")).toContain("rep-jwt");
+    // 主库 gx-auth 是注入的 getLocalToken（本测试内存里不存在 gx-auth 键），副本写绝不动它
+    expect(getLocalToken).not.toHaveBeenCalled(); // 副本 derive 不读 gx-auth
+  });
+
+  it("refreshActiveLocal：活动是副本时返回 null，且数据源 token 不随 gx-auth 变化", () => {
+    let s = primaryAndReplicaState();
+    s = connectNode(s, "office-1", "t").state;
+    const { controller } = makeController(s);
+    expect(controller.getActiveNode()?.nodeId).toBe("office-1");
+    const before = controller.resolver().current().token;
+    expect(controller.refreshActiveLocal()).toBeNull();
+    expect(controller.resolver().current().token).toBe(before);
+  });
+});
+
+describe("connectNodeById / connectLocal 在'仅副本无主库'下的主库补建", () => {
+  it("connectNodeById(副本名)：纯选路激活副本（空 token），不补建主库", () => {
+    const { controller } = makeController(replicaOnlyState());
+    const out = controller.connectNodeById("office-1");
+    expect(out.active?.nodeId).toBe("office-1");
+    expect(out.active?.kind).toBe("local");
+    expect(out.active?.token).toBeNull();
+    expect(controller.getState().entries.some((e) => e.nodeId === LOCAL_NODE_ID)).toBe(false);
+  });
+
+  it("connectNodeById 未知节点 → active=null 不切换", () => {
+    const { controller } = makeController(replicaOnlyState());
+    expect(controller.connectNodeById("nope").active).toBeNull();
+  });
+
+  it("仅副本注册表里 connectLocal/ensureLocalRegistered/setLocalDesiredOnly 仍会补建/识别 primary", () => {
+    const { controller } = makeController(replicaOnlyState());
+    // ensureLocalRegistered：只有副本时应补建主库
+    const ensured = controller.ensureLocalRegistered();
+    expect(ensured.entries.filter((e) => e.kind === "local")).toHaveLength(2); // 主库 + 副本
+    expect(ensured.localDesired).toBe("running");
+
+    // 新控制器（仅副本）验证 setLocalDesiredOnly 无主库时 no-op，补建后才生效
+    const c2 = makeController(replicaOnlyState()).controller;
+    expect(c2.setLocalDesiredOnly("stopped").localDesired).toBeNull(); // 无主库 no-op
+    const out = c2.connectLocal(); // 补建主库并连接
+    expect(out.active?.nodeId).toBe(LOCAL_NODE_ID);
+    expect(c2.getState().localDesired).toBe("running");
+    // 副本条目仍在
+    expect(c2.getNode("office-1")?.role).toBe("replica");
+  });
+});
+
+describe("副本 disconnect / remove 清其分键、不动主库", () => {
+  it("disconnect 副本：清 gx-node-session:副本名，活动回落；主库条目/期望态不受影响", () => {
+    let s = primaryAndReplicaState();
+    s = connectNode(s, "office-1", "t").state;
+    const { controller, storage } = makeController(s);
+    controller.commitRemoteSession("office-1", "rep-jwt", null);
+    expect(storage.getItem("gx-node-session:office-1")).toContain("rep-jwt");
+    const out = controller.disconnect("office-1");
+    expect(out.active).toBeNull();
+    expect(storage.getItem("gx-node-session:office-1")).toBeNull();
+    // 主库仍在、其期望态不被副本断开改动（连副本本就不改 localDesired）
+    expect(controller.getNode(LOCAL_NODE_ID)?.role).toBe("primary");
+  });
+
+  it("removeRemote(副本名)：移除副本条目并清分键；主库不可删", () => {
+    const s = primaryAndReplicaState();
+    const { controller, storage } = makeController(s);
+    controller.commitRemoteSession("office-1", "rep-jwt", null);
+    controller.removeRemote("office-1");
+    expect(controller.getNode("office-1")).toBeNull();
+    expect(storage.getItem("gx-node-session:office-1")).toBeNull();
+    expect(controller.getNode(LOCAL_NODE_ID)).not.toBeNull(); // 主库保留
+  });
+
+  it("deauthenticateRemote(副本名)：清副本分键但保持选路态（仍指副本、token=null）", () => {
+    let s = primaryAndReplicaState();
+    s = connectNode(s, "office-1", "t").state;
+    const { controller, storage } = makeController(s);
+    controller.commitRemoteSession("office-1", "rep-jwt", null);
+    const out = controller.deauthenticateRemote("office-1");
+    expect(controller.getActiveNode()?.nodeId).toBe("office-1"); // 不 regDisconnect
+    expect(out.active?.nodeId).toBe("office-1");
+    expect(out.active?.token).toBeNull();
+    expect(storage.getItem("gx-node-session:office-1")).toBeNull();
   });
 });

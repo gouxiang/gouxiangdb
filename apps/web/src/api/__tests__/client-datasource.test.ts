@@ -33,6 +33,15 @@ const REMOTE: ActiveDataSource = {
   wsOrigin: "ws://remote.example:3001",
 };
 
+// 离线副本：传输语义 kind:"local"（经壳口同源代理，baseURL=""），但 nodeId 是副本名（≠"local"）。
+const REPLICA: ActiveDataSource = {
+  nodeId: "office-1",
+  kind: "local",
+  baseURL: "",
+  token: "replica-jwt",
+  wsOrigin: "ws://127.0.0.1:5809",
+};
+
 function jsonResponse(body: unknown, init?: { status?: number }) {
   return new Response(JSON.stringify(body), { status: init?.status ?? 200 });
 }
@@ -262,6 +271,29 @@ describe("S2-7：401 按数据源 kind 分流", () => {
     fetchMock.mockResolvedValue(jsonResponse({ error: "x" }, { status: 401 }));
     await expect(apiFetch("/api/bases")).rejects.toMatchObject({ status: 401 });
     expect(useAuthStore.getState().token).toBeNull();
+  });
+
+  it("副本 401（kind:local, nodeId=副本名）：走 isolated 通知带副本 nodeId，不清 gx-auth、不跳本地登录", async () => {
+    dataSourceResolver.__setActiveForTest(REPLICA);
+    const assign = vi.fn();
+    vi.stubGlobal("window", {
+      location: { origin: "http://127.0.0.1:5809", pathname: "/bases/b1", search: "", assign },
+    });
+    const handler = vi.fn();
+    registerRemoteUnauthorizedHandler(handler);
+    fetchMock.mockResolvedValue(
+      jsonResponse({ error: "replica token expired" }, { status: 401 }),
+    );
+
+    await expect(apiFetch("/api/bases")).rejects.toMatchObject({ status: 401 });
+
+    // 走非主库分流通告，nodeId 是副本名（不是 local）
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith("office-1");
+    // 关键串号防护：主库 gx-auth 登录态原样保留、不跳本地登录页
+    expect(useAuthStore.getState().token).toBe("local-tok");
+    expect(assign).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });
 

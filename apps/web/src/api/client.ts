@@ -93,6 +93,7 @@ import { saveSessionFrom } from "../lib/session-from";
 // authHeaders(<auth store token>) 逐字节同口径（见 node/datasource.test.ts golden），故本次接线
 // 对浏览器/fnOS 现网零行为变化；S2+ 启动器经 setActive 放入远端后，主路径自动跟随，无需再改调用点。
 import { dataSourceResolver } from "../node/datasource";
+import { isLocalNodeId } from "../node/session";
 import { notifyRemoteUnauthorized } from "../node/unauthorizedBridge";
 
 // API 同源前缀解析：
@@ -257,11 +258,13 @@ function handleUnauthorized(): void {
     }, 3000);
     return;
   }
-  // 节点模式 S2：按当前数据源分流。远端节点 401 只代表该远端会话失效——
-  // 通知启动器清该节点会话/回连接界面，绝不清本地 gx-auth、不跳本地登录页。
-  // （401 判定发生在 await fetch 之后，此处同步读当前活动数据源；local 分支逐字节保留旧行为。）
+  // 节点模式 S2 + 第三入口：按当前数据源的账号归属分流（看 nodeId，而非 kind）。
+  // 非主库独立账号源（远端节点或离线副本；副本 kind 仍是 "local" 但 nodeId 是副本名）的 401
+  // 只代表该侧车会话失效——通知启动器清该 nodeId 分键会话/回其登录界面，绝不清本地 gx-auth、
+  // 不跳本地登录页（否则副本 401 会误清主库令牌＝串号）。（401 判定在 await fetch 之后，此处同步读
+  // 当前活动数据源；主库 local（nodeId==="local"）分支逐字节保留旧行为。）
   const ds = dataSourceResolver.current();
-  if (ds.kind === "remote") {
+  if (!isLocalNodeId(ds.nodeId)) {
     notifyRemoteUnauthorized(ds.nodeId);
     setTimeout(() => {
       unauthorizedHandled = false;
