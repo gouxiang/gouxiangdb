@@ -26,6 +26,20 @@ const remote = (over: Partial<StoredNodeEntry> & { nodeId: string }): StoredNode
   lastConnectedAt: null,
   ...over,
 });
+// 离线副本条目（kind:"local" + 显式 role:"replica"），nodeId 走白名单副本名（绝不收中文）。
+const replica = (
+  nodeId: string,
+  over: Partial<StoredNodeEntry> = {},
+): StoredNodeEntry => ({
+  kind: "local",
+  role: "replica",
+  nodeId,
+  baseURL: "",
+  label: null,
+  lastConnectedAt: null,
+  replica: { remoteBaseUrl: "http://nas.example:3001" },
+  ...over,
+});
 const session = (nodeId: string, user: RemoteSessionView["user"]): RemoteSessionView => ({
   nodeId,
   token: "t",
@@ -120,6 +134,93 @@ describe("buildNodeRows", () => {
     const rows = buildNodeRows(state, new Map()).map((r) => r.nodeId);
     expect(rows).toEqual(["local", "new", "old", "never"]);
   });
+
+  it("副本行：保留自身 nodeId（P0：不被串成 local）、role/默认标题/副标题/可删可改名/无期望态无 runtime", () => {
+    const state: NodeRegistryState = {
+      ...emptyRegistry(),
+      entries: [local(), replica("replica-1", { lastConnectedAt: "2026-09-01T00:00:00Z" })],
+      activeNodeId: null,
+    };
+    const rows = buildNodeRows(state, new Map());
+    const repRow = rows.find((r) => r.nodeId === "replica-1");
+    expect(repRow).toMatchObject({
+      kind: "local",
+      role: "replica",
+      nodeId: "replica-1", // 旧码在此硬编码 LOCAL_NODE_ID，会把副本串成主库
+      title: "本机副本",
+      label: null,
+      subtitle: "http://nas.example:3001",
+      baseURL: "",
+      active: false,
+      connected: false,
+      account: null,
+      localDesired: null,
+      removable: true,
+      canRename: true,
+      lastConnectedAt: "2026-09-01T00:00:00Z",
+    });
+    // 副本不承载壳内实时相位/端口（runtime 只属于主库行）。
+    expect(repRow!.runtime).toBeUndefined();
+    expect(repRow!.kernelPort).toBeUndefined();
+  });
+
+  it("副本行：自定义名优先；成为活动节点或有分键会话时 connected=true 且 account 取分键会话", () => {
+    const state: NodeRegistryState = {
+      ...emptyRegistry(),
+      entries: [replica("replica-2", { label: "办公室副本" })],
+      activeNodeId: "replica-2",
+    };
+    const sessions = new Map([
+      ["replica-2", session("replica-2", { id: "u", email: "r@b.com" } as never)],
+    ]);
+    const [row] = buildNodeRows(state, sessions);
+    expect(row!.title).toBe("办公室副本");
+    expect(row!.label).toBe("办公室副本");
+    expect(row!.active).toBe(true);
+    expect(row!.connected).toBe(true);
+    expect(row!.account).toBe("r@b.com");
+
+    // 非活动但该副本 nodeId 已有分键会话：仍 connected=true（按 entry.nodeId 分键，不串主库）。
+    const idle: NodeRegistryState = { ...state, activeNodeId: null };
+    const [idleRow] = buildNodeRows(idle, sessions);
+    expect(idleRow!.active).toBe(false);
+    expect(idleRow!.connected).toBe(true);
+    expect(idleRow!.account).toBe("r@b.com");
+  });
+
+  it("排序：主库 0 → 副本 1 → 远端 2，角色权重压过连接时间", () => {
+    const state: NodeRegistryState = {
+      ...emptyRegistry(),
+      entries: [
+        remote({ nodeId: "r-old", lastConnectedAt: "2026-08-01T00:00:00Z" }),
+        replica("replica-b", { lastConnectedAt: "2026-09-01T00:00:00Z" }),
+        local(),
+        replica("replica-a", { lastConnectedAt: "2026-10-01T00:00:00Z" }),
+        remote({ nodeId: "r-new", lastConnectedAt: "2026-12-01T00:00:00Z" }),
+      ],
+    };
+    // 即便远端 r-new 时间最新，也因权重 2 排到全部副本（权重 1）之后。
+    expect(buildNodeRows(state, new Map()).map((r) => r.nodeId)).toEqual([
+      "local",
+      "replica-a", // 副本组内 10月 > 9月
+      "replica-b",
+      "r-new", // 远端组内 12月 > 8月
+      "r-old",
+    ]);
+  });
+
+  it("排序：同角色都从未连接时按 nodeId 升序兜底（确定性）", () => {
+    const state: NodeRegistryState = {
+      ...emptyRegistry(),
+      entries: [replica("replica-3"), local(), replica("replica-1"), replica("replica-2")],
+    };
+    expect(buildNodeRows(state, new Map()).map((r) => r.nodeId)).toEqual([
+      "local",
+      "replica-1",
+      "replica-2",
+      "replica-3",
+    ]);
+  });
 });
 
 describe("buildLauncherViewModel", () => {  it("汇总标记：空/有本地/有活动", () => {
@@ -137,6 +238,19 @@ describe("buildLauncherViewModel", () => {  it("汇总标记：空/有本地/有
     const vm2 = buildLauncherViewModel(active, new Map());
     expect(vm2.hasActive).toBe(true);
     expect(vm2.activeNodeId).toBe("local");
+  });
+
+  it("hasLocal 只认真主库：仅有离线副本（哪怕是活动副本）时仍为 false", () => {
+    const replicaOnly: NodeRegistryState = {
+      ...emptyRegistry(),
+      entries: [replica("replica-1")],
+      activeNodeId: "replica-1",
+    };
+    const vm = buildLauncherViewModel(replicaOnly, new Map());
+    expect(vm.hasLocal).toBe(false); // kind:"local" 但 role:"replica" 不算本机主库
+    expect(vm.isEmpty).toBe(false); // 有副本就不是全新空态
+    expect(vm.hasActive).toBe(true); // 活动指针可以指向副本
+    expect(vm.activeRow?.role).toBe("replica");
   });
 });
 
@@ -173,6 +287,21 @@ describe("ensureLocalRow", () => {
     expect(rows[1]!.active).toBe(true);
   });
 
+  it("仅有离线副本、无主库：仍在最前补占位主库（副本不是『进入本机』入口）", () => {
+    const state: NodeRegistryState = {
+      ...emptyRegistry(),
+      entries: [replica("replica-1", { label: "办公室副本" })],
+      activeNodeId: "replica-1",
+    };
+    const rows = ensureLocalRow(buildNodeRows(state, new Map()));
+    expect(rows.map((r) => r.nodeId)).toEqual(["local", "replica-1"]);
+    const p = rows[0]!;
+    expect(p.role).toBe("primary");
+    expect(p.canRename).toBe(false); // 占位主库不可改名
+    expect(p.active).toBe(false); // 不顶替当前活动副本
+    expect(rows[1]!.active).toBe(true);
+  });
+
   it("空行：仍补一个占位本机行（全新装欢迎页本身不消费它，仅保证函数全情形有本机入口）", () => {
     const rows = ensureLocalRow([]);
     expect(rows).toHaveLength(1);
@@ -197,6 +326,9 @@ describe("applyLocalRuntime", () => {
   const vmLike = (over: Partial<NodeRow> = {}): NodeRow =>
     ({
       kind: "local",
+      // role 是 applyLocalRuntime 的运行时判别真源（as 断言绕过 tsc 但绕不过运行时）：
+      // 缺它则 role===undefined !== "primary" 提前 return，所有本地相位用例都会挂。
+      role: "primary",
       nodeId: "local",
       title: "本机",
       label: null,
@@ -213,6 +345,7 @@ describe("applyLocalRuntime", () => {
   const remoteRow = (): NodeRow =>
     ({
       kind: "remote",
+      role: null, // 同上：role 是运行时判别字段，字面量必须显式给。
       nodeId: "abc",
       title: "nas:3001",
       label: null,
@@ -282,5 +415,32 @@ describe("applyLocalRuntime", () => {
   it("结果未变化时返回同一数组引用（幂等）", () => {
     const rows = applyLocalRuntime([vmLike()], st(), false);
     expect(applyLocalRuntime(rows, st(), false)).toBe(rows);
+  });
+
+  it("副本行（kind:local + role:replica）不被实时相位映射，任意 status 都原样返回同一引用", () => {
+    const replicaRow: NodeRow = {
+      kind: "local",
+      role: "replica",
+      nodeId: "replica-1",
+      title: "本机副本",
+      label: null,
+      subtitle: "http://nas.example:3001",
+      baseURL: "",
+      active: false,
+      connected: false,
+      account: null,
+      localDesired: null,
+      removable: true,
+      canRename: true,
+      lastConnectedAt: null,
+    };
+    // 主库在 ready，副本也不得被染上 runtime/kernelPort。
+    const out = applyLocalRuntime([vmLike(), replicaRow], st(), false);
+    expect(out[1]).toBe(replicaRow);
+    expect(out[1]!.runtime).toBeUndefined();
+    expect(out[1]!.kernelPort).toBeUndefined();
+    // status=null（非壳/首拍未回）同样原样返回副本。
+    const nullOut = applyLocalRuntime([replicaRow], null, false);
+    expect(nullOut[0]).toBe(replicaRow);
   });
 });

@@ -6,6 +6,7 @@
 // Tauri command / 健康探测另提供，本层只表达注册表层面确定的状态（活动/期望态/是否已登录）。
 
 import type { NodeRegistryState, StoredNodeEntry } from "./registry";
+import { hasLocal, isPrimaryEntry, isReplicaEntry } from "./registry";
 import { LOCAL_NODE_ID } from "./resolve";
 import type { RemoteSessionView } from "./remoteSessions";
 
@@ -31,6 +32,13 @@ export interface LocalRuntimeLike {
 /** 单个节点在列表里的展示模型。 */
 export interface NodeRow {
   kind: "local" | "remote";
+  /**
+   * 本地侧角色（身份判别真源，勿再只看 kind——kind:"local" 同时涵盖主库与副本）：
+   *   - "primary"：唯一本机主库（nodeId 恒 LOCAL_NODE_ID，不可删，承载 localDesired/实时 runtime）；
+   *   - "replica"：离线副本（nodeId 为白名单副本名，baseURL 恒 ""，无 localDesired/runtime）；
+   *   - null：远端节点（kind:"remote"）。
+   */
+  role: "primary" | "replica" | null;
   nodeId: string;
   /** 主标题：自定义名称优先；本地缺省「本机」，远端缺省取其 host。 */
   title: string;
@@ -89,9 +97,10 @@ function toRow(
   sessions: ReadonlyMap<string, RemoteSessionView>,
 ): NodeRow {
   const active = entry.nodeId === activeNodeId;
-  if (entry.kind === "local") {
+  if (isPrimaryEntry(entry)) {
     return {
       kind: "local",
+      role: "primary",
       nodeId: LOCAL_NODE_ID,
       title: entry.label?.trim() || "本机",
       label: entry.label,
@@ -106,9 +115,32 @@ function toRow(
       lastConnectedAt: entry.lastConnectedAt,
     };
   }
+  if (isReplicaEntry(entry)) {
+    // 副本是「壳口同源的本地侧车」：浏览器侧无独立会话，但它成为活动节点或壳内已为该 nodeId
+    // 建立分键会话时，同样表达「已连通/可免密进入」。身份必须保留 entry.nodeId（P0：旧码在此
+    // 硬编码 LOCAL_NODE_ID，会把所有副本行串成主库）。
+    const replicaSession = sessions.get(entry.nodeId);
+    return {
+      kind: "local",
+      role: "replica",
+      nodeId: entry.nodeId,
+      title: entry.label?.trim() || "本机副本",
+      label: entry.label,
+      subtitle: entry.replica?.remoteBaseUrl ?? "",
+      baseURL: "",
+      active,
+      connected: active || Boolean(replicaSession),
+      account: userDisplay(replicaSession),
+      localDesired: null,
+      removable: true,
+      canRename: true,
+      lastConnectedAt: entry.lastConnectedAt,
+    };
+  }
   const session = sessions.get(entry.nodeId);
   return {
     kind: "remote",
+    role: null,
     nodeId: entry.nodeId,
     title: entry.label?.trim() || hostLabel(entry.baseURL) || entry.nodeId,
     label: entry.label,
@@ -126,8 +158,18 @@ function toRow(
 }
 
 /**
- * 派生节点列表行模型（稳定排序：本地在前，其后远端按最近连接时间倒序、从未连接垫底）。
- * 不就地改入参。
+ * 行排序的角色权重：本机主库 0（永远最前）、离线副本 1（主库之后、远端之前）、远端 2。
+ * 角色以 registry 选择器为真源，不看 kind（kind:"local" 同时含主库与副本）。
+ */
+function rowOrderWeight(entry: StoredNodeEntry): number {
+  if (isPrimaryEntry(entry)) return 0;
+  if (isReplicaEntry(entry)) return 1;
+  return 2;
+}
+
+/**
+ * 派生节点列表行模型（稳定排序：主库 → 副本 → 远端；同角色内按最近连接时间倒序、从未连接垫底、
+ * 再以 nodeId 兜底，保证次序确定）。不就地改入参。
  */
 export function buildNodeRows(
   state: NodeRegistryState,
@@ -135,7 +177,8 @@ export function buildNodeRows(
 ): NodeRow[] {
   return [...state.entries]
     .sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === "local" ? -1 : 1;
+      const weightDiff = rowOrderWeight(a) - rowOrderWeight(b);
+      if (weightDiff !== 0) return weightDiff;
       if (a.lastConnectedAt && b.lastConnectedAt) {
         return a.lastConnectedAt < b.lastConnectedAt ? 1 : -1;
       }
@@ -159,6 +202,7 @@ export function buildNodeRows(
 export function placeholderLocalRow(): NodeRow {
   return {
     kind: "local",
+    role: "primary",
     nodeId: LOCAL_NODE_ID,
     title: "本机",
     label: null,
@@ -180,7 +224,8 @@ export function placeholderLocalRow(): NodeRow {
  * 故此处只在"有远端、无本机"时真正产生差异，修复"直连远端后回不去/起不了本机"的交互缺口。
  */
 export function ensureLocalRow(rows: readonly NodeRow[]): NodeRow[] {
-  if (rows.some((r) => r.kind === "local")) return [...rows];
+  // 只认主库行：仅有副本（role:"replica"）时仍须补占位主库，保证「进入本机」入口恒在。
+  if (rows.some((r) => r.role === "primary")) return [...rows];
   return [placeholderLocalRow(), ...rows];
 }
 
@@ -206,7 +251,8 @@ export function buildLauncherViewModel(
     rows,
     activeNodeId,
     hasActive: activeNodeId !== null,
-    hasLocal: state.entries.some((e) => e.kind === "local"),
+    // 只认主库（registry 选择器真源）：仅有离线副本不算「已有本机主库」。
+    hasLocal: hasLocal(state),
     isEmpty: state.entries.length === 0,
     activeRow: activeNodeId ? (rows.find((r) => r.nodeId === activeNodeId) ?? null) : null,
   };
@@ -231,7 +277,8 @@ export function localPhase(
 /**
  * 把壳内 localStatus 实时探测结果映射到本地行的 runtime 相位（W2 四态）。
  *
- * 纯函数：返回**新数组**、不改入参；只作用于 kind==="local" 行，远端行原样返回（引用可比）。
+ * 纯函数：返回**新数组**、不改入参；只作用于 role==="primary" 的本机主库行，副本行与远端行
+ * 原样返回（引用可比，测试以 toBe 断言）。
  * status===null（壳内探测未回首拍 / 非壳未接线）→ 本地行 "unknown"，UI 回落 localDesired
  * 旧推导，保证 SSR 首拍与非壳形态零变化。
  */
@@ -244,7 +291,8 @@ export function applyLocalRuntime(
   const kernelPort = status?.kernelPort ?? null;
   let changed = false;
   const next = rows.map((row) => {
-    if (row.kind !== "local") return row;
+    // 实时相位只属于主库；副本行（kind:"local" 但 role:"replica"）与远端行一律原样返回。
+    if (row.role !== "primary") return row;
     if (row.runtime === phase && row.kernelPort === kernelPort) return row;
     changed = true;
     return { ...row, runtime: phase, kernelPort };

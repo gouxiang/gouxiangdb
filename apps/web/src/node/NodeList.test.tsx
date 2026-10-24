@@ -7,6 +7,9 @@ import type { NodeRow } from "./launcherViewModel";
 
 function row(over: Partial<NodeRow> & Pick<NodeRow, "nodeId" | "kind">): NodeRow {
   return {
+    // NodeRow.role 必填（3a 副本行模型）：测试工厂默认 local=主库、remote=null；
+    // over 显式给 role 时以其为准（...over 在后覆盖）。
+    role: over.kind === "local" ? "primary" : null,
     title: over.nodeId,
     label: null,
     subtitle: "",
