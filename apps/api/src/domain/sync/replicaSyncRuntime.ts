@@ -56,7 +56,7 @@ export interface ReplicaRuntimeDeps {
   pullTransport?: ReplicaPullTransport;
   pushTransport?: ReplicaPushTransport;
   visibilityTransport?: ReplicaVisibilityTransport;
-  /** 拉远端可见 base id 列表（测试注入）；缺省 GET {remoteUrl}/api/bases/。 */
+  /** 拉远端可见 base id 列表（测试注入）；缺省 GET {remoteUrl}/api/bases。 */
   listRemoteBaseIds?: () => Promise<string[]>;
   hostname?: string;
   now?: () => Date;
@@ -86,13 +86,13 @@ function errMsg(e: unknown): string {
   return m.length > MAX_ERR ? m.slice(0, MAX_ERR) : m;
 }
 
-/** 默认远端 base 列表：GET /api/bases/ → {bases:[{id}]}（X-GX-Token 鉴权，错误归一为 ReplicaTransportError）。 */
-function makeRemoteBaseLister(cfg: ReplicaSyncConfig): () => Promise<string[]> {
+/** 默认远端 base 列表：GET /api/bases → {bases:[{id}]}（X-GX-Token 鉴权，错误归一为 ReplicaTransportError）。 */
+export function makeRemoteBaseLister(cfg: ReplicaSyncConfig): () => Promise<string[]> {
   const base = cfg.remoteUrl.replace(/\/+$/, "");
   return async () => {
     let res: Response;
     try {
-      res = await fetch(`${base}/api/bases/`, {
+      res = await fetch(`${base}/api/bases`, {
         method: "GET",
         headers: { "X-GX-Token": cfg.remoteToken, "content-type": "application/json" },
       });

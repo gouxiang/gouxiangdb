@@ -4,8 +4,9 @@
 // ★ 挂载纪律：刻意挂在 /api/local-sync，【绝不挂进 /api/v1/sync 组】——后者是本节点作为【服务端】
 //   对其它设备暴露的同步面（GX_SYNC_SERVER 门）；本端点反映的是本机作为【副本/侧车】的引擎态
 //   （GX_OFFLINE_REPLICA + GX_REPLICA_REMOTE_URL 门）。两个角色/开关互相独立，不可共用一个门。
-//   本地冲突裁决（conflicts/resolve/retry/discard）在独立文件 routes/localSyncActions.ts，由统一装配，
-//   本文件只暴露只读 GET /status，不新建任何写端点。
+//   本地冲突裁决（conflicts/resolve/retry/discard）在独立文件 routes/localSyncActions.ts，由统一装配。
+//   本文件暴露 GET /status（只读）+ POST /sync-now（同步触发一轮）：后者只调用引擎 runReplicaSyncOnce()，
+//   真正的写库发生在引擎内部经 withWriteTx 串行执行，端点自身不直接写任何表；不改变 fail-closed 门控。
 //
 // 可达性（默认关闭，fail-closed）：与服务端同步面同款「恒挂载 + 请求期闸门」——
 //   路由恒挂到 mount，但组首中间件每次请求现场解析 replicaSyncConfig()：
@@ -14,7 +15,8 @@
 //   只有配置齐全（与 startReplicaSync 的启动判定同一真源）才继续鉴权与取数。
 //
 // 鉴权：requireActiveUser（resolveActiveAuth 同时认 Authorization: Bearer 与 X-GX-Token 两头，
-//   飞牛 CGI 网关吞 Authorization 时前端走 X-GX-Token）。本端点纯只读，不触发任何同步写。
+//   飞牛 CGI 网关吞 Authorization 时前端走 X-GX-Token）。GET /status 纯只读不触发同步；
+//   POST /sync-now 仅触发引擎跑一轮（引擎内部经 withWriteTx 串行写），复用组首两道闸、不另加门。
 
 import fs from "node:fs";
 import { Hono } from "hono";
@@ -24,7 +26,7 @@ import { offlineNodeId } from "../configOfflineReplica.js";
 import { HttpError } from "../httpError.js";
 import { requireActiveUser } from "../middleware/authActive.js";
 import { prisma } from "../db.js";
-import { replicaSyncRuntimeStatus } from "../domain/sync/replicaSyncRuntime.js";
+import { replicaSyncRuntimeStatus, runReplicaSyncOnce } from "../domain/sync/replicaSyncRuntime.js";
 
 export const localSyncRoutes = new Hono();
 
@@ -110,5 +112,21 @@ localSyncRoutes.get("/status", async (c) => {
     lastError: rt.lastError,
     lastRunAt: rt.lastRunAt,
     bases,
+  });
+});
+
+// ④ 手动触发一轮：直接 await runReplicaSyncOnce()（不 sleep、不另起定时器）。复用组首两道闸
+//    （配置门 + requireActiveUser），不新增任何门；端点自身不直接写库，写库由引擎内部 withWriteTx 串行完成。
+//    引擎未启动（未 startReplicaSync）时 runReplicaSyncOnce 返回 false（triggered=false），仍 200 回当前态。
+localSyncRoutes.post("/sync-now", async (c) => {
+  const triggered = await runReplicaSyncOnce();
+  const rt = replicaSyncRuntimeStatus();
+  return c.json({
+    triggered,
+    running: rt.running,
+    inFlight: rt.inFlight,
+    stage: rt.stage,
+    lastError: rt.lastError,
+    lastRunAt: rt.lastRunAt,
   });
 });
