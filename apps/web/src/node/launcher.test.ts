@@ -457,27 +457,49 @@ describe("deriveActiveDataSource 副本（非壳构建器）", () => {
   });
 });
 
-describe("applyActive 副本：空 token 也激活，绝不读 gx-auth", () => {
-  it("无分键会话 → 活动副本 ds.token=null（不回 null、不取本地 token）", () => {
-    // 注册表只有副本、active=副本
+describe("applyActive 副本：冷启动 fail-closed、在线空令牌可激活，绝不读 gx-auth", () => {
+  it("冷启动 restore() 无分键会话 → fail-closed 不激活（active=null），绝不自动连入副本", () => {
+    // 注册表只有副本、active=副本（模拟上次退出时停在副本；store 层另会在构造前把 activeNodeId 归一化 null）。
     let s = replicaOnlyState();
     s = connectNode(s, "office-1", "t").state;
     const { controller } = makeController(s); // getLocalToken 恒 "local-jwt"
+    // restore 走 applyActive(state) 默认 allowEmptyRemote=false：副本无会话必须 fail-closed。
     const out = controller.restore();
-    expect(out.active).not.toBeNull();
-    expect(out.active?.nodeId).toBe("office-1");
-    expect(out.active?.kind).toBe("local");
-    expect(out.active?.token).toBeNull(); // 不是 "local-jwt"！证明不串主库令牌
-    expect(controller.resolver().current().token).toBeNull();
+    expect(out.active).toBeNull();
+    expect(controller.getActiveNode()?.nodeId).toBe("office-1"); // 注册表活动指针未被 restore 改写
+    // 但在线显式 connectNodeById(true) 允许空令牌激活进副本自己的登录引导：
+    const online = controller.connectNodeById("office-1");
+    expect(online.active).not.toBeNull();
+    expect(online.active?.nodeId).toBe("office-1");
+    expect(online.active?.kind).toBe("local");
+    expect(online.active?.token).toBeNull(); // 不是 "local-jwt"！证明在线空激活也不串主库令牌
   });
 
-  it("主库 gx-auth 有 token 但副本分键为空：活动副本 ds.token 仍为 null", () => {
+  it("主库 gx-auth 有 token 但副本分键为空：restore fail-closed，在线选路空令牌仍可激活", () => {
     let s = primaryAndReplicaState();
     s = connectNode(s, "office-1", "t").state;
     const { controller } = makeController(s);
+    // 冷启动：即使主库 gx-auth 有 token，副本无自己的分键会话也不激活。
+    expect(controller.restore().active).toBeNull();
+    // 在线纯选路：副本空令牌槽（token=null），绝不拿主库 gx-auth 顶替。
+    const online = controller.connectNodeById("office-1");
+    expect(online.active?.nodeId).toBe("office-1");
+    expect(online.active?.token).toBeNull();
+  });
+
+  it("restore() 副本有自己分键会话 → 正常激活并带该 token（不读 gx-auth）", () => {
+    let s = primaryAndReplicaState();
+    s = connectNode(s, "office-1", "t").state;
+    const { controller, storage, getLocalToken } = makeController(s);
+    // 预置副本自己的分键会话（信封 version:1；冷启动唯一应自动激活副本的情形）。
+    storage.setItem(
+      "gx-node-session:office-1",
+      JSON.stringify({ version: 1, token: "rep-jwt", user: null }),
+    );
     const out = controller.restore();
     expect(out.active?.nodeId).toBe("office-1");
-    expect(out.active?.token).toBeNull();
+    expect(out.active?.token).toBe("rep-jwt");
+    expect(getLocalToken).not.toHaveBeenCalled(); // 副本 derive 不读 gx-auth
   });
 
   it("commitRemoteSession(副本名) 写 gx-node-session:<副本名>，随后活动副本 ds 带该 token；主库 gx-auth 不受影响", () => {
@@ -570,5 +592,41 @@ describe("副本 disconnect / remove 清其分键、不动主库", () => {
     expect(out.active?.nodeId).toBe("office-1");
     expect(out.active?.token).toBeNull();
     expect(storage.getItem("gx-node-session:office-1")).toBeNull();
+  });
+});
+
+describe("controller.addReplica：仅入册、不自动激活", () => {
+  it("成功返回新建副本条目（kind=local/role=replica/baseURL 空），但 activeNodeId 不变、resolver 不切", () => {
+    const { controller } = makeController(primaryAndReplicaState()); // 已含主库 + office-1
+    expect(controller.getState().activeNodeId).toBeNull(); // 初始无活动
+    const created = controller.addReplica({
+      nodeId: "branch-2",
+      label: "分公司副本",
+      remoteBaseUrl: "https://nas.example.com:3001/sub/path", // 子路径应被剥成裸 origin
+    });
+    expect(created.role).toBe("replica");
+    expect(created.kind).toBe("local");
+    expect(created.nodeId).toBe("branch-2");
+    expect(created.baseURL).toBe("");
+    expect(created.replica?.remoteBaseUrl).toBe("https://nas.example.com:3001");
+    // 不自动激活：注册表活动指针仍为 null，活动数据源不被改成新副本。
+    expect(controller.getState().activeNodeId).toBeNull();
+    expect(controller.getActiveNode()).toBeNull();
+  });
+
+  it("重名 / 非法 id / 非法远端地址 → throw 中文 Error，state 不变", () => {
+    const { controller } = makeController(replicaOnlyState());
+    const entriesBefore = controller.getState().entries.length;
+    expect(() =>
+      controller.addReplica({ nodeId: "office-1", remoteBaseUrl: "http://nas:3001" }),
+    ).toThrowError(/同名副本/);
+    expect(() =>
+      controller.addReplica({ nodeId: "bad/id", remoteBaseUrl: "http://nas:3001" }),
+    ).toThrowError();
+    // 含裸空格的地址必无法规范化（REPLICA_REMOTE_INVALID）。
+    expect(() =>
+      controller.addReplica({ nodeId: "branch-9", remoteBaseUrl: "http://bad host:3001" }),
+    ).toThrowError();
+    expect(controller.getState().entries).toHaveLength(entriesBefore);
   });
 });

@@ -11,6 +11,10 @@ import {
   LAUNCHER_REGISTRY_STORAGE_KEY,
   type NodeRegistryState,
   type StoredNodeEntry,
+  type AddReplicaInput,
+  activeEntry,
+  isPrimaryEntry,
+  isReplicaEntry,
   parseRegistry,
   remoteEntries,
   serializeRegistry,
@@ -39,9 +43,15 @@ import { launcherEnabled } from "./desktopGate";
 import {
   hasShell,
   localStatus,
+  replicaStatus as replicaStatusCmd,
   setActiveUpstream,
   startLocal,
+  startReplica,
+  stopReplica as stopReplicaCmd,
   stopLocal as stopLocalCmd,
+  type LocalStatus,
+  type StartReplicaArg,
+  type StartReplicaResult,
 } from "./shellBridge";
 import { deriveShellActiveDataSource, normalizeProbeBaseURL } from "./shellRouting";
 import { probeLoginRemote, probePerformHandshake } from "./shellProbe";
@@ -79,6 +89,20 @@ export interface ShellStoreHooks {
   startLocalOnly(): Promise<{ firstBoot: boolean }>;
   /** 独立「停止」：gx:stop_local 优雅停进程。不动活动指针/壳上游（注册表侧已先落 stopped）。 */
   stopLocalOnly(): Promise<void>;
+  /**
+   * 拉起一个离线副本侧车（gx:start_replica）。成功时 Rust 壳内**已**把代理上游置为
+   * Upstream::Replica{port}，故连接副本的编排成功后**绝不**再调 syncUpstream（那会错切主库）。
+   * remoteToken 只作本次入参经 IPC 注入子进程 env，钩子实现/注册表/store state 都不得持久化它。
+   * 与 startLocal 同口径：业务失败以 {ok:false,error} 返回（非 reject），由 store 收口成中文 throw。
+   */
+  startReplica(arg: StartReplicaArg): Promise<StartReplicaResult>;
+  /**
+   * 停掉副本侧车（gx:stop_replica）：仅复位壳内 Replica 槽、优雅停副本进程，不删隔离数据。
+   * 仅当 disconnect 目标确为副本条目时由 store 调用；主库断开走 stopLocal、远端断开不停任何进程。
+   */
+  stopReplica(): Promise<void>;
+  /** 查副本内核状态（gx:replica_status，与 local_status 同 DTO），入参为副本 nodeId。 */
+  replicaStatus(nodeId: string): Promise<LocalStatus>;
 }
 
 export interface LauncherStoreDeps extends ResolverDeps {
@@ -149,7 +173,26 @@ export interface LauncherStore {
    */
   connectLocal(): Promise<SwitchOutcome>;
   addRemote(input: { nodeId: string; baseURL: string; label?: string | null }): void;
+  /**
+   * 添加一个离线副本档案（薄包 controller.addReplica）：仅入册 + 持久化 + 通知，
+   * **不自动激活**、不拉起任何进程、不落任何令牌。连接另由 connectReplica 触发。
+   */
+  addReplica(input: AddReplicaInput): void;
   connectRemote(nodeId: string, creds?: RemoteCredentials): Promise<SwitchOutcome>;
+  /**
+   * 连接（拉起并进入）一个离线副本——第三入口 2b 核心编排：
+   *   1. 校验 nodeId 确为已入册副本，否则中文 throw，不做任何变更；
+   *   2. 仅成品壳可用：无 deps.shell 中文 throw（浏览器/fnOS 无副本侧车可拉）；
+   *   3. 调 shell.startReplica({remoteBaseUrl,nodeId,remoteToken,clientId?,syncIntervalMs?})，
+   *      只透传实际存在的键；**remoteToken 只作本次入参经 IPC 注入子进程 env，绝不写入
+   *      注册表/storage/log/store state，也不跨重启**；
+   *   4. start_replica 返回 {ok:false,error} → 中文 throw：不切 active、不 persist running、
+   *      不 emit（失败原子性，storage 不留该副本任何 running 痕迹）；
+   *   5. 成功时壳内**已**置 Upstream::Replica，故只调 controller.connectNodeById(nodeId)
+   *      做在线纯选路（副本无会话也允许空 token 激活），persist+emit；
+   *      **绝不调 syncUpstream**（那会错切到主库 local 上游），也不调 stopLocal/stopReplica。
+   */
+  connectReplica(nodeId: string, remoteToken: string): Promise<SwitchOutcome>;
   /**
    * 远端登录/注册成功后，把 JWT+user 写入该节点会话分键；活动节点同时重推带 token 的数据源
    * （remote-empty → 已登录远端）。会话写在 remoteSessions 分键，**不**改注册表，故无需 persist
@@ -210,6 +253,15 @@ function browserStorage(): KvStorage | null {
 /** 构造启动器仓库（注入式，纯 node 可测）。 */
 export function createLauncherStore(deps: LauncherStoreDeps): LauncherStore {
   const initial = parseRegistry(deps.storage.getItem(LAUNCHER_REGISTRY_STORAGE_KEY));
+  // 冷启动副本 fail-closed 第一道保险（注册表层）：上游不跨进程持久化、remoteToken 不跨重启，
+  // 若上次活动节点是离线副本，重启后绝不自动拉起/连入——把活动指针归一化为 null（条目保留，
+  // 用户可回启动器手动重连并重输服务器令牌）。只改 activeNodeId，不删条目、不停任何进程、
+  // 不调 start_replica/syncUpstream；归一化结果由构造末既有的去脏 persist() 自然落盘（零新增写盘点）。
+  // 第二道保险在 controller.applyActive 副本分支（restore 默认 allowEmptyRemote=false 亦 fail-closed）。
+  const initialActive = activeEntry(initial);
+  if (initialActive && isReplicaEntry(initialActive)) {
+    initial.activeNodeId = null;
+  }
   const controller = newLauncherController({ ...deps, initialRegistry: initial });
   // 跨重启：构造即按注册表活动节点 + 已存会话重建活动数据源（resolver setActive）。
   const restored = controller.restore();
@@ -300,6 +352,48 @@ export function createLauncherStore(deps: LauncherStoreDeps): LauncherStore {
       controller.addRemote(input);
       afterAction(undefined);
     },
+    addReplica(input) {
+      // 仅入册（失败 controller 已中文 throw）；不自动激活、不拉进程、afterAction 统一 persist+emit。
+      controller.addReplica(input);
+      afterAction(undefined);
+    },
+    async connectReplica(nodeId, remoteToken) {
+      // 1) 校验：必须是已入册的离线副本（变更前，任何失败都不触达壳/storage）。
+      const entry = controller.getNode(nodeId);
+      if (!entry || !isReplicaEntry(entry) || !entry.replica) {
+        throw new Error("副本节点不存在或不是离线副本");
+      }
+      // 2) 副本侧车只能由成品壳拉起；非壳（浏览器/fnOS/服务器）fail-closed。
+      if (!deps.shell) {
+        throw new Error("当前环境不支持连接离线副本");
+      }
+      // 3) 组 IPC 入参：remoteBaseUrl 是入册时规范化的裸 origin；remoteToken 仅本次入参，
+      //    不读/不写任何持久层；clientId/syncIntervalMs 仅在绑定里实际有值时才透传。
+      const arg: StartReplicaArg = {
+        remoteBaseUrl: entry.replica.remoteBaseUrl,
+        nodeId: entry.nodeId,
+        remoteToken,
+      };
+      if (entry.replica.clientId !== null && entry.replica.clientId !== undefined) {
+        arg.clientId = entry.replica.clientId;
+      }
+      if (entry.replica.syncIntervalMs !== null && entry.replica.syncIntervalMs !== undefined) {
+        arg.syncIntervalMs = entry.replica.syncIntervalMs;
+      }
+      // 4) 壳拉起副本。业务失败 {ok:false,error}（主库在跑互斥/配置非法等）→ 中文 throw。
+      //    此刻尚未改 controller、未 persist、未 emit，故 storage 里不留该副本任何 running 痕迹。
+      const r = await deps.shell.startReplica(arg);
+      if (!r.ok) {
+        throw new Error(r.error || "副本启动失败");
+      }
+      // 5) 成功：Rust 已把代理上游置为 Upstream::Replica{port}。这里只做在线纯选路
+      //    （connectNodeById→applyActive(true)，副本无会话也允许空 token 激活进其登录引导）。
+      //    绝不 syncUpstream（会错切主库 local），也不调 stopLocal/stopReplica。
+      const outcome = controller.connectNodeById(nodeId);
+      persist();
+      emit();
+      return outcome;
+    },
     async connectRemote(nodeId, creds) {
       const outcome = await controller.connectRemote(nodeId, creds);
       persist();
@@ -329,14 +423,18 @@ export function createLauncherStore(deps: LauncherStoreDeps): LauncherStore {
       return outcome;
     },
     async disconnect(nodeId) {
-      // 先判条目类型（控制器变更前），决定是否需要停本地内核。
-      const wasLocal = controller.getNode(nodeId)?.kind === "local";
+      // 变更前判条目身份（不能只看 kind==="local"：副本 kind 也是 local），三分决定停哪个进程：
+      //   主库 isPrimaryEntry → stopLocal；副本 isReplicaEntry → stopReplica；远端 → 不停任何进程。
+      const pre = controller.getNode(nodeId);
+      const wasPrimary = pre ? isPrimaryEntry(pre) : false;
+      const wasReplica = pre ? isReplicaEntry(pre) : false;
       const outcome = controller.disconnect(nodeId);
       persist();
       if (deps.shell) {
-        // 注册表/数据源已回落（active=null，resolver 惰性回 local 兜底）。本地断开先优雅停内核，
-        // 再把壳上游置 none（§3：停后上游不得再指向 Local）；远端断开直接 none（回 503 引导回启动器）。
-        if (wasLocal) await deps.shell.stopLocal();
+        // 注册表/数据源已回落（active=null）。主库/副本断开先优雅停各自内核，
+        // 再统一把壳上游置 none（停后上游不得再指向 Local/Replica；远端断开直接 none→503 引导回启动器）。
+        if (wasPrimary) await deps.shell.stopLocal();
+        else if (wasReplica) await deps.shell.stopReplica();
         await deps.shell.syncUpstream(null, null);
       }
       emit();
@@ -454,9 +552,18 @@ function shellDefaultDeps(): Omit<LauncherStoreDeps, "storage"> {
           await setActiveUpstream({ kind: "none" });
           return;
         }
-        if (entry.kind === "local") {
+        // 只认真正的本机主库（isPrimaryEntry）：副本 kind 也是 "local"，但它的上游由
+        // start_replica 成功时壳内自置 Upstream::Replica，绝不能经本口错切成 local（主库）。
+        // 2b 起副本连接路径刻意不调 syncUpstream，此收紧是纵深防御。
+        if (isPrimaryEntry(entry)) {
           // 无 target：Rust 读当前 kernelPort（ensureLocalReady 已就绪）。
           await setActiveUpstream({ kind: "local" });
+          return;
+        }
+        // 副本（kind:"local" 但非 primary）不应进入本口：其上游由 start_replica 壳内自置。
+        // 纵深防御——既非主库也非远端（即副本误入）时回落 none，绝不拿空 baseURL 错切 remote。
+        if (entry.kind !== "remote") {
+          await setActiveUpstream({ kind: "none" });
           return;
         }
         // target 必须是规范化 http(s) 绝对基址；entry.baseURL 已在入册时规范化，这里再 fail-closed。
@@ -464,6 +571,16 @@ function shellDefaultDeps(): Omit<LauncherStoreDeps, "storage"> {
           kind: "remote",
           target: normalizeProbeBaseURL(entry.baseURL),
         });
+      },
+      async startReplica(arg) {
+        // 原样返回联合结果（{ok:false,error} 非 reject），由 store.connectReplica 收口成中文 throw。
+        return startReplica(arg);
+      },
+      async stopReplica() {
+        await stopReplicaCmd();
+      },
+      async replicaStatus(nodeId) {
+        return replicaStatusCmd(nodeId);
       },
       async stopLocal() {
         await stopLocalCmd();

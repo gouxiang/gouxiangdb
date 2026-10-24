@@ -219,12 +219,16 @@ describe("activeAuth（门控开 + 活动离线副本：JWT 走副本分键，�
     useAuthStore.setState({ token: null, user: null });
   });
 
-  /** 构造一份"活动节点是副本 office-1"的注册表并预置进 storage，再由 store restore 驱动 resolver。 */
+  /**
+   * 构造一份含主库 + 副本 office-1 的注册表（冷启动 activeNodeId 必须为 null：2b 起活动副本
+   * 在构造前被归一化、restore 也 fail-closed，不再跨重启自动激活），随后用**在线**纯选路
+   * controller.connectNodeById("office-1")（applyActive(true)，允许空令牌）把副本激活进 resolver。
+   */
   function setupRoutedReplica() {
-    // 手工构造 version:1 注册表（含主库 primary + 副本 replica，active=副本）。
+    // 手工构造 version:1 注册表（主库 primary + 副本 replica，冷启动无活动节点）。
     const registry = {
       version: 1,
-      activeNodeId: "office-1",
+      activeNodeId: null,
       localDesired: "running",
       entries: [
         { kind: "local", role: "primary", nodeId: "local", baseURL: "", label: "本机", lastConnectedAt: null },
@@ -246,6 +250,9 @@ describe("activeAuth（门控开 + 活动离线副本：JWT 走副本分键，�
       getOrigin: () => "http://127.0.0.1:7788",
       getLocalToken: () => "primary-jwt",
     });
+    // 在线激活副本（无会话也允许空 token，进副本自己的登录引导），等价于用户在启动器点进该副本。
+    const outcome = store.controller.connectNodeById("office-1");
+    expect(outcome.active?.nodeId).toBe("office-1");
     return store;
   }
 
@@ -254,7 +261,7 @@ describe("activeAuth（门控开 + 活动离线副本：JWT 走副本分键，�
     const ds = dataSourceResolver.current();
     expect(ds.kind).toBe("local");
     expect(ds.nodeId).toBe("office-1");
-    expect(ds.token).toBeNull(); // 副本无分键会话 → 空 token 也激活
+    expect(ds.token).toBeNull(); // 在线激活副本、无分键会话 → 空 token 槽（不串主库 gx-auth）
     expect(isActiveIsolatedSource()).toBe(true);
   });
 

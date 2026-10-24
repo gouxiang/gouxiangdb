@@ -63,6 +63,20 @@ function makeWiring(): Wiring {
     stopLocal,
     startLocalOnly: vi.fn(async () => ({ firstBoot: false })),
     stopLocalOnly: vi.fn(async () => undefined),
+    startReplica: vi.fn(async () => ({
+      ok: true as const,
+      kernelPort: 41000,
+      initialized: true,
+      nodeId: "office-1",
+    })),
+    stopReplica: vi.fn(async () => undefined),
+    replicaStatus: vi.fn(async () => ({
+      added: true,
+      initialized: true,
+      running: true,
+      ready: true,
+      kernelPort: 41000,
+    })),
     syncUpstream: vi.fn(async (active, entry: StoredNodeEntry | null) => {
       // emit 必须发生在壳上游切换期间之外：进入 sync 时记录通知数，体内不应新增。
       const atEntry = emitCount;
@@ -271,6 +285,20 @@ describe("壳本机登录态刷新（先连本机、后登录）", () => {
         stopLocal: vi.fn(async () => undefined),
         startLocalOnly: vi.fn(async () => ({ firstBoot: false })),
         stopLocalOnly: vi.fn(async () => undefined),
+        startReplica: vi.fn(async () => ({
+          ok: true as const,
+          kernelPort: 41000,
+          initialized: true,
+          nodeId: "office-1",
+        })),
+        stopReplica: vi.fn(async () => undefined),
+        replicaStatus: vi.fn(async () => ({
+          added: true,
+          initialized: true,
+          running: true,
+          ready: true,
+          kernelPort: 41000,
+        })),
         syncUpstream: vi.fn(async () => undefined),
       },
       watchLocalToken: (onChange) => {
@@ -317,6 +345,20 @@ describe("壳本机登录态刷新（先连本机、后登录）", () => {
         stopLocal: vi.fn(async () => undefined),
         startLocalOnly: vi.fn(async () => ({ firstBoot: false })),
         stopLocalOnly: vi.fn(async () => undefined),
+        startReplica: vi.fn(async () => ({
+          ok: true as const,
+          kernelPort: 41000,
+          initialized: true,
+          nodeId: "office-1",
+        })),
+        stopReplica: vi.fn(async () => undefined),
+        replicaStatus: vi.fn(async () => ({
+          added: true,
+          initialized: true,
+          running: true,
+          ready: true,
+          kernelPort: 41000,
+        })),
         syncUpstream: vi.fn(async () => undefined),
       },
       watchLocalToken: (onChange) => {

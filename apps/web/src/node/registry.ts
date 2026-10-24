@@ -125,7 +125,7 @@ export function isPrimaryEntry(e: StoredNodeEntry): boolean {
 }
 
 /** 是否为离线副本：kind=local 且显式 role=replica。 */
-function isReplicaEntry(e: StoredNodeEntry): boolean {
+export function isReplicaEntry(e: StoredNodeEntry): boolean {
   return e.kind === "local" && e.role === "replica";
 }
 

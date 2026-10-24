@@ -22,9 +22,11 @@ import { localWsOrigin, LOCAL_NODE_ID, toWsOrigin } from "./resolve";
 import {
   type NodeRegistryState,
   type StoredNodeEntry,
+  type AddReplicaInput,
   emptyRegistry,
   addLocalNode,
   addRemoteNode as regAddRemote,
+  addReplicaNode as regAddReplica,
   removeNode as regRemove,
   connectNode as regConnect,
   disconnectNode as regDisconnect,
@@ -167,6 +169,14 @@ export interface LauncherController {
   /** 添加远端档案（不连接）。nodeId/baseURL 由 resolve 层规范化后传入。 */
   addRemote(input: { nodeId: string; baseURL: string; label?: string | null }): NodeRegistryState;
   /**
+   * 添加一个离线副本档案（薄包 registry.addReplicaNode）：
+   *   - 仅入册，**不自动激活**、不切活动指针、不重推数据源（activeNodeId 不变）；
+   *   - 不落任何 remoteToken（注册表副本绑定类型上就无 token 字段）；
+   *   - 成功返回新建条目；失败（id 非法/重名/远端地址非法）throw 中文 Error，state 不变。
+   * 随后的拉起/连接由 store.connectReplica 经壳 gx:start_replica + connectNodeById 完成。
+   */
+  addReplica(input: AddReplicaInput): StoredNodeEntry;
+  /**
    * 连接远端＝**只选路**（2026-10 拍板，覆盖旧"带账号密码登录"语义）：
    *   - 不发任何登录请求、不读不写远端会话、不吃 creds（形参保留只为调用签名兼容，显式忽略）；
    *   - 仅把活动指针指向该节点（regConnect）并重推活动数据源；
@@ -252,11 +262,12 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
   let state: NodeRegistryState = deps.initialRegistry ?? emptyRegistry();
 
   /**
-   * @param allowEmptyRemote 在线「只选路」connectRemote/connectNodeById 传 true：非主库独立账号源
-   *   （远端或副本）无会话也激活 token=null 的数据源（*-empty，界面随即展示该侧车自己的登录页）。
-   *   缺省 false 保持旧语义（仅作用于 remote 的 restore/disconnect：远端无会话不自动激活，回落
-   *   active=null → resolver 惰性回 local）。**副本始终允许空 token 激活**，不受此开关影响——
-   *   副本在浏览器眼里是本地侧车，未登录要进它自己的 /login 引导，等同在线 remote-empty。
+   * @param allowEmptyRemote 在线「只选路」connectRemote/connectNodeById（含副本 connectReplica 成功后
+   *   走的 connectNodeById）传 true：非主库独立账号源（远端或副本）无会话也激活 token=null 的数据源
+   *   （*-empty，界面随即展示该侧车自己的登录页）。缺省 false 为 fail-closed 恢复语义：restore/disconnect
+   *   路径上远端**或副本**无已存会话都不自动激活，回落 active=null（resolver 惰性回 local）。
+   *   2b 拍板：副本上游不跨进程持久化、remoteToken 不跨重启，冷启动绝不能凭空调起一个副本侧车，
+   *   故副本与远端共用此开关——在线可空激活进其登录引导，冷启动无会话必须 fail-closed。
    */
   function applyActive(
     nextState: NodeRegistryState,
@@ -273,19 +284,12 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
       resolver.setActive(ds);
       return { state: nextState, active: ds };
     }
-    if (entry.kind === "local") {
-      // 离线副本：token 读该副本自己的分键会话（gx-node-session:<副本名>），**绝不取 gx-auth**。
-      // 始终允许空 token 激活（副本自己的登录引导），不受 restore fail-closed 影响。
-      const token = readRemoteSession(deps.storage, entry.nodeId)?.token ?? null;
-      const ds = deriveDs(entry, token);
-      resolver.setActive(ds);
-      return { state: nextState, active: ds };
-    }
-    // 远端：token 取该节点记住的会话 JWT；没有会话则为 null（remote-empty）。
-    // 在线纯选路（allowEmptyRemote）允许空 token 激活——壳上游仍切到该远端，登录交给远端页面；
-    // 恢复/断开路径（缺省）维持旧的"无会话不自动连"，回落 active=null。
+    // 至此为非主库独立账号源：离线副本（isReplicaEntry，kind 仍 "local"）或远端（kind "remote"）。
+    // token 都读该节点自己的分键会话（gx-node-session:<id>），**绝不取 gx-auth**。
     const token = readRemoteSession(deps.storage, entry.nodeId)?.token ?? null;
     if (!token && !allowEmptyRemote) {
+      // fail-closed：恢复/断开路径无会话不自动激活（冷启动副本归一化后 activeNodeId 已为 null，
+      // 这里是纵深第二道保险）；在线纯选路传 true 时才允许 token=null 的 *-empty 槽。
       resolver.setActive(null);
       return { state: nextState, active: null };
     }
@@ -343,6 +347,17 @@ export function newLauncherController(deps: LauncherDeps): LauncherController {
       const r = regAddRemote(state, input);
       if (!r.error) state = r.state;
       return state;
+    },
+
+    addReplica(input) {
+      // 薄包 registry.addReplicaNode：仅入册，不 regConnect、不 applyActive、activeNodeId 不变。
+      const r = regAddReplica(state, input);
+      if (r.error) throw new Error(r.error.message);
+      state = r.state;
+      const created = getEntry(state, input.nodeId.trim());
+      // addReplicaNode 成功必已写入该条目；防御性兜底（理论不可达）。
+      if (!created) throw new Error("副本添加失败");
+      return created;
     },
 
     async connectRemote(nodeId, creds) {
