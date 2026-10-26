@@ -1,3 +1,88 @@
+# 构想工作台 v0.2.7-beta+775a35c 测试版发版说明（本机副本 / 离线同步「通电」版）
+
+- **对外版本名 / Git tag**：`v0.2.7-beta+775a35c`（**预发布 prerelease=true，Gitea Release id=14**）
+- **代码内版本号仍是纯 `0.2.7`**（根 `package.json` / `Cargo.toml` / `tauri.conf.json` 三处单源；semver `+build` 不被 Cargo 与 macOS CFBundleVersion 接受，故短码只落在 **tag 名与 Release 名**，沿用 0.2.5-beta.1 实证模式）
+- **基线与提交**：自正式版 `v0.2.7`（`3bed9d4`）起 **fast-forward 10 个提交**到封版 `775a35c`（origin/main 线性前进，无强推；正式 tag `v0.2.7` 原样保留指向 `3bed9d4`）。
+- **本轮主题（戴总指令「直接通上电」）**：把此前已做好但缺最后一道接线的**离线副本/双向同步**端到端接通——欢迎页/节点列表可「添加本机副本」、同步中心可「立即同步」、副本可进入/断开/删除；Rust 壳新增 4 条 Tauri 命令真正驱动副本内核起停与状态。基于 0.2.7，**无数据库迁移（仍 44 枚），不改表结构**。
+- **对外客户向说明（三段式：新增/改进/升级须知）**：`docs/release-notes/0.2.7-beta.md`；该三段式已立为**以后所有发布说明的编撰规范**（见 `docs/release-notes/README.md`）。
+- **Gitea Release 性质**：**预发布（勾选 prerelease）**，传 dmg + fpk + 两个 `.sha256` 共 4 资产，**不传 `update-manifest.json`**（在线自动更新仍不接通）。
+
+> 与正式 0.2.7 的关系：同一 0.2.7 代码线之上叠加「副本通电」10 提交，仅作测试版分发；正式版 Release（id=13）与渠道不受影响。
+
+---
+
+## 一、本测试版相对正式 0.2.7 实际改了什么（代码事实，非客户文案）
+
+1. **Rust 壳新增 4 条 Tauri 命令**（`apps/desktop/src-tauri/src/commands.rs`，注册于 `main.rs`）：`gx_local_status`（本机内核四态）、`gx_start_replica`（起副本内核）、`gx_stop_replica`（停副本）、`gx_replica_status`（副本状态）。退出时 `replica().shutdown_if_running(8s)` 在 main.rs 三处收口。
+2. **`sidecar.rs` 大改（+769/-132）**：副本内核规划器（`ReplicaKernelPlanner`）注入 6 个 env、副本数据库按 node 隔离、**连接令牌脱敏不进命令行/日志**；副本数据路径强约束在 replicas 根内（`replica_data_path` / `replica_data_dir`）。内嵌 3 个单测：路径隔离、远端默认值、规划器 env 注入+DB 隔离+令牌脱敏。
+3. **前端「通电」**：欢迎页第三张卡 + 节点列表「添加本机副本」表单（服务器网址/连接令牌/副本名称；令牌只当次用、成败即清空、零持久化）；同步中心抽屉「立即同步」+ 状态/待发/冲突/隔离区；副本行进入/断开/删除（断开才允许删除），重连只需重输令牌。主库/服务器/副本身份与登录态按节点精确分流不串号；网址末尾多斜杠容错。
+4. **服务端**：同步 YN0–YN9 路由此前已落库（`GX_SYNC_SERVER` 默认 off，整组 404、不建表），本测试版**不打开服务端开关**；副本以客户端身份对接，待管理员显式开启同步能力。
+
+---
+
+## 二、安装包指纹
+
+### macOS（arm64 / Apple 芯片）
+- 文件：`构想工作台_0.2.7-beta+775a35c_aarch64.dmg`
+- 大小：**106,014,059 B（101.10 MiB）**
+- sha256：**`923b30557a5835ed7fe101c19e0a8d7ee63cdc8ce8c13adb5b5bf126a83839d8`**
+- 签名形态与正式版一致：外层 `.app` ad-hoc 重封（`codesign --force --sign -`，**不带 --deep**，flags=0x2 带资源封条）；随包官方 Node 运行时 gxnode **保留苹果官方签名 TeamIdentifier=HX7739G8FX**；可写副本 `codesign --verify --deep --strict` **通过（valid on disk / satisfies Designated Requirement）**；壳二进制 Mach-O arm64 thin、macOS 11+。未公证，**首次右键 → 打开**。
+- 随包实测：**44 枚迁移**（stage 真建库 migrate deploy + 随包 Node /readyz 五探针全 true、首页可达）、api dist 四入口、`native/darwin-arm64/vec0.dylib` arm64、门控前端在 `server/public`（主入口 `assets/index-ChvmVu0w.js`，base=/，VITE_NODE_LAUNCHER 门控）、随包 Node v22.22.2 arm64。
+- **DMG 重压关键修正（本版踩坑并修复，值得固化）**：直接 `hdiutil create -srcfolder -fs HFS+`（含 Tauri 直出）会给 Resources 下**全部 5212 个文件烤上 `com.apple.FinderInfo`**，导致 `codesign --strict` 报 detritus（正式版为 0）。**正确链＝先建可写 HFS+ 镜像 → 用不带 `-E` 的 `rsync -a` 灌入（不传播扩展属性，卷内 FinderInfo=0、strict RC0）→ `hdiutil convert -format UDZO -imagekey zlib-level=9` 压缩**。最终镜像 HFS 卷、FinderInfo=0、strict RC0，与正式 0.2.7 同标准。
+- 构建链：门控前端 dist-shell（重 vite）+ api esbuild + fpk 全在 **VM15** 跑后回传；Mac 仅 stage 组装 + Tauri CLI **2.12.3** `build --bundles app,dmg`（不带 --target、CARGO_BUILD_JOBS=2），因本版未改 Cargo.toml/Cargo.lock/tauri.conf.json，**复用暖 Rust target（2521 deps 全命中），只重编 `gouxiangdb-desktop` 本 crate，release 45.5s**，本机内存空闲始终 ≥2500MB 红线。
+
+### 飞牛 fnOS（x86_64）
+- 文件：`gouxiangdb-0.2.7-x86.fpk`（注：build-fpk 脚本按 rootPkg.version 取名，不支持短码后缀，故文件名仍是 0.2.7；与正式版同名但 Gitea 挂在不同 Release id=14 下互不冲突）
+- 大小：**60,836,458 B（58.02 MiB）**
+- sha256：**`cb4affdc6742bed0ac8cc65ec35cebe34cfdfab30bdb57897bc9326415f6ebe0`**
+- VM15（Debian12 x86_64，Node v22，fnpack 1.2.x，PATH 补 `~/bin`）构建；`manifest.version=0.2.7/platform=x86/service_port=9527`；**44 枚迁移零新增**；占位符 `__GX_UPDATE_TOKEN__` 双检在位（无令牌泄漏）；不内置更新只读令牌。
+- **本测试版不建议升级飞牛 183 正式环境**（戴总本轮不动 NAS）；飞牛同版本号不能覆盖安装，需先卸载（保留数据）。
+
+---
+
+## 三、质量门实数（封版 775a35c，VM15 权威隔离池）
+
+| 门 | 结果 |
+|---|---|
+| `apps/api` 全量（`vitest --maxWorkers=2` 权威隔离池） | **351 文件 / 3678 通过 + 14 跳过（共 3692），0 失败** |
+| `apps/web` 全量（同上） | **205 文件 / 2666 通过，0 失败** |
+| 六包 `tsc --noEmit` | **0 错误** |
+| eslint | **0 error**（web 98 warning 阈值 114；api 1 warning 阈值 5） |
+| prisma generate / api dist 四件 | **0 错误 / 全成功**（GX_VERSION=0.2.7） |
+| 迁移 | **44 / 44**，本版零新增（只增不改旧表） |
+| TLS 供应链红线 | **aws-lc-rs = 0**（rustls 0.23.46 / ring 0.17.14 / tokio 1.53.3 / reqwest 0.13.5） |
+| Mac 壳单测（`cargo test`，dev 热缓存仅重编本 crate） | **35 通过 / 0 失败**（含本版新增副本 3 例：路径隔离、远端默认值、规划器 env+令牌脱敏；另含 sanitize_node_id 防路径穿越；较正式版 31 例净增 4） |
+| Mac 壳 clippy（`--all-targets -D warnings`） | **0 warning / 0 error** |
+| Mac stage 冒烟 | migrate deploy + 随包 Node /readyz 五探针 + 同源首页，**全过** |
+| Mac dmg 签名 | deep-strict **VALID**，gxnode 官方签 **HX7739G8FX**，FinderInfo **0** |
+
+> **singleFork 假失败甄别记录（重要，勿再踩）**：内存紧时若用 `vitest --pool=forks --singleFork --maxForks=1` 跑全量，会因 node/jsdom 环境与全局态在单进程内串行互串而制造 api 7 文件 11 例 + web 6 文件 11 例的**假红**（web 典型 `document.createElement is not a function`）。对 7 个 api 红文件改用权威隔离池 `--maxWorkers=2` 单跑 → 46 例全绿（含副本 yn11），证伪真实回归。**权威结论以默认隔离池 `--maxWorkers=2` 为准，singleFork 不作数。**
+
+---
+
+## 四、诚实缺口 / 待戴总在场首验
+
+1. **真机断网 / 冲突 E2E 本轮跳过**（戴总明确「暂时不方便做断网测试，先发布、实际使用中体验」）。副本离线编辑→联网自动双向同步、YN6 冲突双栏手选、失权本地擦除等路径仅由单测/逻辑门覆盖，**未经真机断网演练**——这正是本版标「测试版」、建议备用机体验的原因。
+2. **服务端同步开关默认关**：要让副本真正连上同步，服务器须管理员先开 `GX_SYNC_SERVER` 同步能力；本轮未在 183 开启。
+3. **Mac dmg 真机 GUI 冒烟待戴总在场**：换装后首验「添加本机副本 → 同步中心立即同步 → 退出重进副本仍在/免重输」，顺带目验卷宗图标；不擅自拉起以免与正在运行的正式版争数据目录/47831 口。
+4. **在线自动更新仍不接通**：不带 update-manifest，菜单「检查更新」暂不可用，需手动下载测试版。
+5. **无 Apple 开发者签名/公证**，仅 arm64 ad-hoc，首次右键打开；无 Intel/Windows/Linux 桌面包。
+
+---
+
+## 五、发布动作（实际执行留痕）
+
+1. 独立工作树 `~/Desktop/GouXiangDB-replica`（分支 feat/replica-wire-027，封版 775a35c），与主工作树队友 beta.2 Rust WIP、rel027 树三树隔离，零误伤。
+2. `git push origin 775a35c:main`（3bed9d4..775a35c，FF，已推）；打 annotated tag `v0.2.7-beta+775a35c` 并推送（不覆盖正式 `v0.2.7`）。
+3. VM15 `~/gx-rel027-beta`（git archive 净树灌入）跑全量质量门 + dist-shell + fpk；产物回传 Mac。
+4. Mac stage（darwin-arm64 原生件自检+建库冒烟过）→ Tauri 2.12.3 增量编译 app,dmg → 外层 ad-hoc 重签（gxnode 保官方签）→ 可写 HFS rsync 无 xattr 灌入 + convert UDZO 重压 → sha256。
+5. Gitea 建 **prerelease Release id=14**（tag `v0.2.7-beta+775a35c`，正文＝0.2.7-beta.md 三段式），传 4 资产；首个 106MB 资产经 node fetch 一次性上传时遭遇网络中断（HTTP 0），改用 curl 分文件、同名先删幂等、`--retry --speed-limit` 长超时逐传，全部回读 size 校验一致。**不传 update-manifest.json。**
+6. 本台账（RELEASE.md 顶部 beta 段）。
+
+---
+
+---
+
 # 构想工作台 v0.2.7 发版说明（修好 macOS「重启后远端连接丢失」的正式版）
 
 - **对外版本名 / Git tag**：`v0.2.7`（**正式版，非预发布**）

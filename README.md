@@ -4,7 +4,8 @@
 >
 > 适合想用飞书多维表格 / Airtable / Notion，又希望数据完全自控的个人、家庭与小团队。
 
-- **当前版本**：**`v0.2.7`**（正式版：修好 **macOS 重启电脑后远端连接「失忆」**——桌面壳端口由随机改为固定 `47831`，远端地址与登录态跨重启保留；并收口权限（非超管不能授管理员）、修远端连接用户菜单与详情页编辑。相比 0.2.6 **无数据库迁移、前端/服务端零改动**，仅 Mac 桌面 Rust 壳；离线双向同步服务端地基 YN0–YN9 仍由 `GX_SYNC_SERVER` 默认关闭，桌面离线侧车为后续内测形态）
+- **当前版本**：**`v0.2.7`**（正式版：修好 **macOS 重启电脑后远端连接「失忆」**——桌面壳端口由随机改为固定 `47831`，远端地址与登录态跨重启保留；并收口权限（非超管不能授管理员）、修远端连接用户菜单与详情页编辑。相比 0.2.6 **无数据库迁移、前端/服务端零改动**，仅 Mac 桌面 Rust 壳）
+- **测试通道**：**`v0.2.7-beta+775a35c`**（已在 Gitea 标记为预发布：把「本机副本 / 离线同步」接线通电，可添加本机副本、进入 / 断开 / 删除副本，并在同步中心手动立即同步；服务端仍须管理员显式开启 `GX_SYNC_SERVER`，断网与冲突真机 E2E 待实际试用打磨）。稳定日常使用请继续用正式版 **v0.2.7**。
 - **产品名**：构想工作台。技术标识（飞牛应用包名 / 目录 / 仓库名）为 `gouxiangdb`，仅用于开发与安装包，界面一律显示「构想工作台」。
 - **运行形态**：单进程同时提供 Web 界面与后端接口，内置 SQLite 数据库，**无需外部数据库 / Redis**；浏览器打开即用，电脑、平板、手机自适应。
 
@@ -150,6 +151,9 @@ bash scripts/ci-quality.sh                     # CI 质量门
 
 | 包 | 实测值 | 记录日期 | 来源 |
 |---|---|---|---|
+| `apps/web` | **2666 passed / 0 failed**（205 files） | 2026-10-26 | v0.2.7-beta+775a35c 封版全量四门（VM15，`--maxWorkers=2`） |
+| `apps/api` | **3678 passed / 0 failed / 14 skipped**（351 files，共 3692） | 2026-10-26 | v0.2.7-beta+775a35c 封版全量四门（VM15，`--maxWorkers=2`） |
+| Mac 壳 headless | **35 passed / 0 failed**（含副本路径隔离、远端默认值、规划器 env 与令牌脱敏） | 2026-10-26 | v0.2.7-beta+775a35c 桌面壳（本机增量，clippy `-D warnings` 清零） |
 | `apps/web` | **2538 passed / 0 failed**（202 files） | 2026-10-24 | v0.2.7 封版全量四门（VM15） |
 | `apps/api` | **3670 passed / 0 failed / 14 skipped**（349 files，共 3684） | 2026-10-24 | v0.2.7 封版全量四门（VM15） |
 | `@gx/canvas` | **51 passed / 0 failed**（2 files） | 2026-10-24 | v0.2.7 质量门（VM15） |
@@ -168,7 +172,7 @@ bash scripts/ci-quality.sh                     # CI 质量门
 | `@gx/shared-types` | 172 passed / 0 failed（9 files） | 2026-10-14 | v0.2.4 质量门 |
 | `@gx/canvas` | 51 passed / 0 failed（2 files） | 2026-10-14 | v0.2.4 质量门 |
 
-本表是历史记录、非当前断言。**v0.2.7 封版实数（VM15，2026-10-24，封版 `6a45409` ＋ 桌面壳固定口修复）**：四包 `tsc --noEmit` 零错误、`eslint` 0 error；迁移仍 **44 枚**（本版无新增迁移，仅 Mac 桌面 Rust 壳，前端/服务端零改动）；Mac 壳 headless **31** 全绿、clippy 清零、aws-lc-rs=0。双安装包：`gouxiangdb-0.2.7-x86.fpk`（60,831,523 B，sha256 `8cd964c0…5085`）与 `构想工作台_0.2.7_aarch64.dmg`（109,620,131 B，sha256 `c72e8ffe…d66e`，外层完整 ad-hoc 重签、随包 gxnode 保留苹果官方签 HX7739G8FX、deep-strict 通过）；dmg 真机两次冷启动冒烟待产品负责人在场，详见根 `RELEASE.md`。v0.2.6 封版实数（VM15，2026-10-23，基线 `3ea1f65`）：三包 `tsc --noEmit` 零错误、`eslint` 0 error、web build 成功；迁移 **44 枚**（`prisma migrate deploy` 幂等只增；同步面 `GX_SYNC_SERVER` 默认关闭、不触数据）。双安装包已构建并在飞牛真机 192.168.31.183 换装实证（旧 bundle marker=0 → 新 marker=1，JWT 不踢、数据零丢失、P0 匿名公开表真机通过，详见根 `RELEASE.md`）：`gouxiangdb-0.2.6-x86.fpk`（60,822,956 B，sha256 `be4ebea6…d0a`）与 `构想工作台_0.2.6_aarch64.dmg`（108,586,466 B，sha256 `90aabec9…03bc`）。v0.2.5 收口实数 gate-025f（2026-10-16）：迁移 42 枚（只增 1 枚 `sync_server_foundation` 建四张 `sync_*` 表）。v0.2.4 为 41 枚（注册开关复用 `app_settings` KV，零新增迁移）。内存 / 压测 / 全量测试类重活不在本机跑，放预览机 VM15；权威出口数字见 `docs/baseline/`。
+本表是历史记录、非当前断言。**v0.2.7-beta+775a35c 测试版实数（VM15，2026-10-26，封版 `775a35c`）**：API **351 文件 / 3678 通过 + 14 跳过、0 失败**，Web **205 文件 / 2666 通过、0 失败**（均以默认隔离池 `vitest --maxWorkers=2` 为权威；singleFork 会制造 node/jsdom 串环境假红）；六包 `tsc --noEmit` 0 错误、eslint 0 error；迁移仍 **44 枚**零新增；aws-lc-rs=0；Mac 壳单测 **35/0**、clippy 0 warning/error；stage 真建库 + 随包 Node `/readyz` 五探针通过；dmg deep-strict 通过、gxnode 保苹果官方签 HX7739G8FX、FinderInfo=0。测试包：`gouxiangdb-0.2.7-x86.fpk`（60,836,458 B，sha256 `cb4affdc…ebe0`）与 `构想工作台_0.2.7-beta+775a35c_aarch64.dmg`（106,014,059 B，sha256 `923b3055…39d8`），均已匿名下载复验哈希一致；Gitea Release id=14（prerelease，不传 update-manifest）。**v0.2.7 封版实数（VM15，2026-10-24，封版 `6a45409` ＋ 桌面壳固定口修复）**：四包 `tsc --noEmit` 零错误、`eslint` 0 error；迁移仍 **44 枚**（本版无新增迁移，仅 Mac 桌面 Rust 壳，前端/服务端零改动）；Mac 壳 headless **31** 全绿、clippy 清零、aws-lc-rs=0。双安装包：`gouxiangdb-0.2.7-x86.fpk`（60,831,523 B，sha256 `8cd964c0…5085`）与 `构想工作台_0.2.7_aarch64.dmg`（109,620,131 B，sha256 `c72e8ffe…d66e`，外层完整 ad-hoc 重签、随包 gxnode 保留苹果官方签 HX7739G8FX、deep-strict 通过）；dmg 真机两次冷启动冒烟待产品负责人在场，详见根 `RELEASE.md`。v0.2.6 封版实数（VM15，2026-10-23，基线 `3ea1f65`）：三包 `tsc --noEmit` 零错误、`eslint` 0 error、web build 成功；迁移 **44 枚**（`prisma migrate deploy` 幂等只增；同步面 `GX_SYNC_SERVER` 默认关闭、不触数据）。双安装包已构建并在飞牛真机 192.168.31.183 换装实证（旧 bundle marker=0 → 新 marker=1，JWT 不踢、数据零丢失、P0 匿名公开表真机通过，详见根 `RELEASE.md`）：`gouxiangdb-0.2.6-x86.fpk`（60,822,956 B，sha256 `be4ebea6…d0a`）与 `构想工作台_0.2.6_aarch64.dmg`（108,586,466 B，sha256 `90aabec9…03bc`）。v0.2.5 收口实数 gate-025f（2026-10-16）：迁移 42 枚（只增 1 枚 `sync_server_foundation` 建四张 `sync_*` 表）。v0.2.4 为 41 枚（注册开关复用 `app_settings` KV，零新增迁移）。内存 / 压测 / 全量测试类重活不在本机跑，放预览机 VM15；权威出口数字见 `docs/baseline/`。
 
 </details>
 
