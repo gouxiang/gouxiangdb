@@ -44,18 +44,13 @@ artifacts/
 screenshots/
 .zwork/
 
-# ============ WorkBuddy 项目记忆 ============
-# 规则：知识“文本”随仓走（跨机继承约定/方案/技能/报告），重型二进制与机器本地数据忽略。
-# 保留：memory/**/*.md、skills/**/*.md、顶层 *.md 报告
-# 忽略：截图、verify 调试产物、临时文本
-.workbuddy/verify/
-.workbuddy/**/*.png
-.workbuddy/**/*.jpg
-.workbuddy/**/*.jpeg
-.workbuddy/**/*.gif
-.workbuddy/**/*.zip
-.workbuddy/**/*.log
-.workbuddy/**/*.tmp
+# ============ WorkBuddy 内部工作目录（AI 工作日志/本地数据，私有，不进开源仓）============
+# 整个目录均为内部协作产物（含内部运维记录），不随开源仓分发。
+.workbuddy/
+
+# ============ 在线授权后台（独立私有项目，仅本地嵌套，不属于本开源仓）============
+# 见 docs/design/2026-10-license/CLIENT-LICENSE-INTEGRATION.md
+license-server/
 
 # ============ S8 裸机发布物（构建机本地产物，由 deploy/bin/package-release.mjs 生成）============
 /release/
