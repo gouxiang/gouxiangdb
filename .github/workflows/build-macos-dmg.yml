@@ -69,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           COUNT=$(grep -c "aws-lc" apps/desktop/src-tauri/Cargo.lock || true)
-          echo "aws-lc 出现次数=$COUNT（期望 0）"
+          echo "aws-lc 出现次数=${COUNT}（期望 0）"
           test "$COUNT" -eq 0
 
       - name: 安装根 workspace 依赖（frozen，含 pnpm patchedDependencies）
@@ -152,13 +152,13 @@ jobs:
           shasum -a 256 "$DMG" | tee "release-out/${DMG_NAME}.dmg.sha256"
           # 迁移必须仍是 44 枚（本版零新增迁移）
           MIG_COUNT=$(find apps/api/prisma/migrations -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
-          echo "迁移目录数=$MIG_COUNT（期望 44）"
+          echo "迁移目录数=${MIG_COUNT}（期望 44）"
           test "$MIG_COUNT" -eq 44
           # 挂载抽检卷内 FinderInfo 必须为 0
           MNT="$(mktemp -d)"
           hdiutil attach "$DMG" -mountpoint "$MNT" -nobrowse -quiet
           DOT_UNDERSCORE=$(find "$MNT" -name "._*" | wc -l | tr -d ' ')
-          echo "卷内 ._ 文件数=$DOT_UNDERSCORE（期望 0）"
+          echo "卷内 ._ 文件数=${DOT_UNDERSCORE}（期望 0）"
           test "$DOT_UNDERSCORE" -eq 0
           hdiutil detach "$MNT" -quiet
 
