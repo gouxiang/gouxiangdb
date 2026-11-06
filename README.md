@@ -4,8 +4,9 @@
 >
 > 适合想用飞书多维表格 / Airtable / Notion，又希望数据完全自控的个人、家庭与小团队。
 
-- **当前版本**：**`v0.2.7`**（正式版：修好 **macOS 重启电脑后远端连接「失忆」**——桌面壳端口由随机改为固定 `47831`，远端地址与登录态跨重启保留；并收口权限（非超管不能授管理员）、修远端连接用户菜单与详情页编辑。相比 0.2.6 **无数据库迁移、前端/服务端零改动**，仅 Mac 桌面 Rust 壳）
-- **测试通道**：**`v0.2.7-beta+775a35c`**（已在 Gitea 标记为预发布：把「本机副本 / 离线同步」接线通电，可添加本机副本、进入 / 断开 / 删除副本，并在同步中心手动立即同步；服务端仍须管理员显式开启 `GX_SYNC_SERVER`，断网与冲突真机 E2E 待实际试用打磨）。稳定日常使用请继续用正式版 **v0.2.7**。
+- **当前版本**：**`v0.3.0`**（开源归一版：项目以 **GNU AGPLv3** 全量开源，并采用「**开源许可 + 商业许可**」双授权——**5 人及以下团队免费自由使用**，超出免费档或需闭源商用再购买商业许可；客户端内置授权层（仅含 Ed25519 验签公钥、席位门控与授权界面），授权签发后台保持私有。同时叠接三处真机缺陷修复，详见 [`docs/release-notes/0.3.0.md`](docs/release-notes/0.3.0.md)）
+- **开源与授权**：完整协议见根目录 [`LICENSE`](LICENSE)（AGPLv3 全文）与 [`docs/legal/DUAL-LICENSE.md`](docs/legal/DUAL-LICENSE.md)（双授权说明）。本仓库不含授权签发服务与签名私钥。
+- **上一稳定版**：**`v0.2.7`**（修好 macOS 重启后远端连接「失忆」，桌面壳端口固定 `47831`；无数据库迁移，仅 Mac 桌面 Rust 壳）。历史发布说明归档于 [`docs/release-notes/`](docs/release-notes/)。
 - **产品名**：构想工作台。技术标识（飞牛应用包名 / 目录 / 仓库名）为 `gouxiangdb`，仅用于开发与安装包，界面一律显示「构想工作台」。
 - **运行形态**：单进程同时提供 Web 界面与后端接口，内置 SQLite 数据库，**无需外部数据库 / Redis**；浏览器打开即用，电脑、平板、手机自适应。
 
@@ -46,7 +47,7 @@
 ### 🔒 数据与更新
 
 - 数据库与上传附件全部保存在你选定的存储空间，**不向任何第三方上传数据**；
-- 更新机制（迁移自动备份、卸载重装数据保留）已内置；**0.2.7 在线更新通道暂未接通**，本版升级请手动下载新包（飞牛先 uninstall 再装新 fpk，数据保留；macOS 重新拖入新版 dmg）。
+- 更新机制（迁移自动备份、卸载重装数据保留）已内置；**0.3.0 在线更新通道暂未接通**，本版升级请手动下载新包（飞牛先 uninstall 再装新 fpk，数据保留；macOS 重新拖入新版 dmg）。
 
 ---
 
@@ -77,12 +78,12 @@
 
 ## 快速开始（macOS 桌面客户端）
 
-1. 在 [Gitea Releases](https://gitea0.hn.takin.cc/GouXiang/gouxiangdb/releases) 下载 `构想工作台_0.2.7_aarch64.dmg`（**仅 Apple 芯片 / arm64、macOS 11+**，Intel 芯片与 Windows/Linux 暂不支持）；
+1. 在 [Gitea Releases](https://gitea0.hn.takin.cc/GouXiang/gouxiangdb/releases) 下载 `构想工作台_0.3.0_aarch64.dmg`（**仅 Apple 芯片 / arm64、macOS 11+**，Intel 芯片与 Windows/Linux 暂不支持）；
 2. 双击打开 dmg，把「构想工作台」拖入「应用程序」；
 3. 应用为 ad-hoc 自签名、**未做 Apple 公证**：首次启动在「应用程序」里**右键 → 打开**（直接双击会被 Gatekeeper 拦截），确认后即可；
 4. 打开后在启动器选择「本地节点」（本机起服务、空册即用）或「远程节点」（填团队服务器地址 + 账号）。
 
-> 局限：dmg 真机 GUI 两次冷启动冒烟待产品负责人在场（固定口逻辑已由壳 headless 测试覆盖）、附件大文件上传未压测、应用内「检查更新」在本版为占位（请手动下载新版）。详见 [`docs/release-notes/0.2.7.md`](docs/release-notes/0.2.7.md)「诚实缺口」。
+> 局限：dmg 真机 GUI 两次冷启动冒烟待产品负责人在场（固定口逻辑已由壳 headless 测试覆盖）、附件大文件上传未压测、应用内「检查更新」在本版为占位（请手动下载新版）。详见 [`docs/release-notes/0.3.0.md`](docs/release-notes/0.3.0.md)「诚实缺口」。
 
 其余部署形态（裸机 systemd、Docker）见下方「[部署形态](#部署形态)」。
 
@@ -230,7 +231,7 @@ v1 为 Swift 实现，与当前版本零代码依赖。核心模型（字段、h
 | **运维手册** | `docs/runbooks/`（deploy / backup / restore / ci / m5-search / mcp / authz-*） |
 | **接口契约** | `docs/api/openapi.yaml`（冻结）+ `docs/api/m4-error-codes.md` |
 | **出口证据 / 实测基线** | `docs/baseline/` |
-| **发版记录** | 根目录 **`RELEASE.md`**（现行＝v0.2.7，修 macOS 重启远端失忆；历史归档 `docs/release-notes/`，0.2.6、0.2.5-beta.1 等） |
+| **发版记录** | 根目录 **`RELEASE.md`**（现行＝v0.3.0，开源归一 / AGPLv3 双授权；历史归档 `docs/release-notes/`，0.2.7、0.2.6、0.2.5-beta.1 等） |
 | **已知问题 / Bug 回归清单** | 根目录 **`KNOWN-ISSUES.md`**（发版前按表回归；条数以该文件标题行实时统计为准） |
 | **待裁决事项（含瘦身清理）** | 根目录 `PENDING-DECISIONS.md` |
 | **历史归档（M0–M6 计划、被取代报告）** | 根目录 `ARCHIVE-LOG.md`（索引摘要）→ 全文副本 `docs/_archive/originals/` |
