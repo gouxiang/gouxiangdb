@@ -37,12 +37,21 @@ interface SnapshotInfo {
 }
 
 // 在线一致性备份到一个全新文件（WAL 自动合并，不 cp -wal/-shm）。
+//
+// ★ 必须以【只读】打开正在服务的源库（2026-11-04 P0，飞牛正式机 88 每启必复发的 522/转圈）：
+// 此前用默认读写连接，scope-backfill 在 server 进程内（Prisma 连接池仍持有同一活库、
+// 且存在尚未 checkpoint 的提交）调用本函数；该读写连接 close() 会做 WAL checkpoint/reset，
+// 在 fnOS/btrfs 上按路径 unlink 活的 -wal/-shm，而 POSIX unlink 对同进程 Prisma 已打开的 fd
+// 照常成功 —— 旧连接永久粘在 "(deleted) wal"、新连接对磁盘路径重开出空 wal，连接池分裂，
+// 写/checkpoint 撞空 wal 即 SQLite 522 disk I/O error；backfill 每次检出同缺口、每启必病。
+// 只读连接 close() 不做 checkpoint/reset/unlink，.backup() 经只读连接读到的页同样含 WAL
+// 已提交内容并合并进目标快照，备份一致性不变。已在飞牛测试机 183 真机 A/B 对照实证。
 export async function backupDatabase(
   sourceFile: string,
   destFile: string,
 ): Promise<void> {
   fs.mkdirSync(path.dirname(destFile), { recursive: true });
-  const src = new Database(sourceFile);
+  const src = new Database(sourceFile, { readonly: true, fileMustExist: true });
   try {
     await src.backup(destFile);
   } finally {

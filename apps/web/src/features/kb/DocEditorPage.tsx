@@ -34,9 +34,12 @@ import { useShortcuts } from "./hooks/useShortcuts";
  * 阶段 2 协同总闸。**默认关闭**：未开启时房间 id 为 null → 连接层不建连、三个叠加层一律返回
  * null，单机行为与引入前逐字一致（D6 UI 冻结的机械判据）。
  *
- * 开启前必须确认后端已具备文档冷归结能力（房间的 Y.Doc 内容并回 kb_docs）：当前
- * `apps/api/src/collab/room.ts` 的 doc flusher 尚未注册，开启后内容只会热持久化到
- * collab_docs，不会并回正文表 —— 那时"保存"看起来正常、实际没落库。
+ * 后端文档冷归结已就绪：`apps/api/src/collab/index.ts` 在模块初始化时即调用
+ * registerDocFlusher() 注册 doc flusher。热路径先把房间 Y.Doc 持久化到 collab_docs；
+ * 房间空置或进程关闭触发冷归结时，经 Y.Doc → Block[] → blocksToMd（@gx/blocks 唯一真源）
+ * → withWriteTx("collab.flush") 内的 saveDocContentTx 并回 kb_docs 正文表（含快照/outbox/nav），
+ * 已不存在「看着保存成功、实际没落库」的缺口。前端是否建连仍由本闸 VITE_COLLAB 与下方
+ * 离线门 VITE_OFFLINE_Y（Y_OFFLINE）共同决定，普通浏览器构建两者默认皆关、行为与引入前一致。
  */
 const COLLAB_ENABLED = import.meta.env.VITE_COLLAB === "1";
 /**

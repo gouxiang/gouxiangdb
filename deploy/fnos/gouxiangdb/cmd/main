@@ -20,6 +20,12 @@ LOG_FILE="${TRIM_PKGVAR}/app.log"
 ENV_FILE="${TRIM_PKGETC}/gouxiangdb.env"
 DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
 
+# 触库前清旧内核孤儿的共享实现（install/upgrade/main/uninstall 四回调共用）。
+# 真机回调落在 /var/apps/<app>/cmd/，与本文件同目录；source 幂等失败不致命。
+GX_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)"
+# shellcheck source=reap-kernel-helper
+[ -f "$GX_SCRIPT_DIR/reap-kernel-helper" ] && source "$GX_SCRIPT_DIR/reap-kernel-helper" || true
+
 alive() { kill -0 "$1" 2>/dev/null; }
 
 status_app() {
@@ -34,6 +40,10 @@ status_app() {
 start_app() {
   if status_app; then exit 0; fi
   mkdir -p "$TRIM_PKGVAR" "$DATA_DIR/uploads" "$DATA_DIR/backups"
+  # 启动前先清掉同目录旧内核孤儿（必须在下方 migrate / 起新内核之前）。
+  # pid 文件已被 uninstall 删掉、旧内核却以 ppid=1 残留时，status_app 探不到它，
+  # 不靠这一道，旧连接会持已删 WAL/SHM 句柄与新实例争库 → 间歇 SQLite 522、界面转圈。
+  gx_reap_stale_kernel
   if [ ! -f "$ENV_FILE" ]; then
     echo "Missing $ENV_FILE; reinstall the app to initialize config." > "$TRIM_TEMP_LOGFILE"
     exit 1
@@ -56,6 +66,28 @@ start_app() {
   # 应用更新机制的通道标识（设计稿 docs/design/2026-10-app-update/DESIGN.md §3.4）：
   # node 进程读不到 TRIM_* 变量，必须在此显式声明「我是飞牛 fpk 安装」。
   export GX_DEPLOY_CHANNEL="fnos-fpk"
+  # 商业授权通电（0.3.0）：fpk 的 API 进程本身就是授权客户端。
+  #  - dist 须为 GX_LICENSE_PROD=1 构建（只内置生产公钥 ff02db72，mode 下限 verify 永不 off）；
+  #  - URL 默认正式授权中心，允许在 $ENV_FILE(gouxiangdb.env) 覆盖；
+  #  - MODE 首发 verify；要收紧可在 $ENV_FILE 改 GX_LICENSE_MODE=enforce 后重启（换芯免重打包），
+  #    也可在 $DATA_DIR 放 license.mode 文件热切 verify/enforce（off 不被采信）；
+  #  - PLATFORM/PACKAGE_TYPE 必须精确匹配授权中心 zod 枚举 desktop|fnos|docker / dmg|...|fpk。
+  export GX_LICENSE_URL="${GX_LICENSE_URL:-https://gouxiang.hn.takin.cc}"
+  export GX_LICENSE_MODE="${GX_LICENSE_MODE:-verify}"
+  export GX_LICENSE_PLATFORM="fnos"
+  export GX_PACKAGE_TYPE="fpk"
+  # 启动前幂等迁移兜底（0.3.0 P0 修复）：正规路径由 install/upgrade_callback 迁移，
+  # 但 fnOS appcenter 覆盖装＝先 uninstall（数据保留）再 install，且个别情况下回调可能
+  # 未执行；若此处不兜底，旧库停在旧迁移，/readyz migrations 探针恒 503 → 界面永久转圈。
+  # migrate deploy 只增不删、已应用自动跳过（幂等），故每次启动执行对最新库零副作用。
+  # 失败必须阻断启动（写日志 exit 1），否则起来的也是个 readyz 不过的半死实例。
+  if ! node node_modules/prisma/build/index.js migrate deploy --schema=prisma/schema.prisma >> "$LOG_FILE" 2>&1; then
+    echo "prisma migrate deploy failed on start; aborting boot (data preserved)" > "$TRIM_TEMP_LOGFILE"
+    exit 1
+  fi
+  # 迁移后重算非根节点 path/depth（幂等；失败不阻断，运行期可修复）。
+  node dist/nav-reconcile.js --apply >> "$LOG_FILE" 2>&1 || \
+    echo "nav-reconcile non-zero on start (non-fatal)" >> "$LOG_FILE"
   node dist/index.js >> "$LOG_FILE" 2>&1 &
   echo "$!" > "$PID_FILE"
 }

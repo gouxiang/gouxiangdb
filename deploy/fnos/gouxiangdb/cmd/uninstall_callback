@@ -2,6 +2,65 @@
 # GouXiangDB fnOS 卸载回调：默认【保留用户数据】。
 # 数据库/上传/备份位于 data-share（TRIM_DATA_SHARE_PATHS），卸载只清运行态；
 # 用户确认彻底删除时再手动删除数据共享目录 gouxiangdb/data。
-set -euo pipefail
+#
+# ★ 必须真正停止运行中的内核，不能只删 pid/sock（2026-11-04 正式机 88 事故根因）：
+#   fnOS 覆盖安装＝先 uninstall（旧 uninstall_callback 不杀进程）再 install。旧内核以
+#   ppid=1 孤儿残留并持续持有 data-share 的 app.db/WAL；随后 install 回调对活库 migrate、
+#   main start 又起第二个内核，旧连接命中被替换/删除的 WAL/SHM 句柄，间歇报 SQLite
+#   disk I/O error(522)，界面转圈。
+#
+# 注意：覆盖安装时先跑的是【旧包自带的本脚本】，旧版本若没有 reap 逻辑仍救不了存量孤儿；
+#   真正兜底在新版 install_callback / main 触库前的 gx_reap_stale_kernel（身份锚点兼容
+#   cwd 被删重建后的 " (deleted)"，并以进程持有 data-share/app.db* 句柄为跨重装不变锚点）。
+set -uo pipefail
+
+APP_DIR="${TRIM_APPDEST}/server"
+DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+LOG_FILE="${TRIM_PKGVAR}/app.log"
+
+# 与 install/upgrade/main 同源的清旧内核实现（提供 gx_reap_stale_kernel / gx__reap_terminate）。
+GX_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)"
+# shellcheck source=reap-kernel-helper
+[ -f "$GX_SCRIPT_DIR/reap-kernel-helper" ] && source "$GX_SCRIPT_DIR/reap-kernel-helper" || true
+
+log() { echo "[uninstall] $*" >> "$LOG_FILE" 2>/dev/null || true; }
+
+# 1) 先按 pid 文件优雅停掉正规实例（helper 不可用时退化为原始 TERM/KILL）。
+if [ -f "$PID_FILE" ]; then
+  old_pid="$(head -n1 "$PID_FILE" | tr -d '[:space:]')"
+  if [ -n "$old_pid" ]; then
+    log "按 app.pid 停止内核 $old_pid"
+    if declare -F gx__reap_terminate >/dev/null 2>&1; then
+      gx__reap_terminate "$old_pid"
+    elif kill -0 "$old_pid" 2>/dev/null; then
+      kill -TERM "$old_pid" 2>/dev/null || true
+      i=0
+      while kill -0 "$old_pid" 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+      kill -KILL "$old_pid" 2>/dev/null || true
+    fi
+  fi
+fi
+
+# 2) 兜底扫孤儿：身份锚点＝cwd==$APP_DIR（含 " (deleted)"）或 fd 持有 $DATA_DIR/app.db*，
+#    且 cmdline 含 dist/index.js；自动排除本回调同进程组。覆盖 pid 文件缺失/过期、应用目录
+#    被删重建等所有漏网情形，绝不误伤其它应用。
+if declare -F gx_reap_stale_kernel >/dev/null 2>&1; then
+  gx_reap_stale_kernel
+else
+  # helper 缺失（异常旧布局）时的最小兜底：仅按 cwd 严格匹配扫一遍。
+  if [ -d "$APP_DIR" ]; then
+    for procdir in /proc/[0-9]*; do
+      p="${procdir#/proc/}"; [ "$p" = "$$" ] && continue
+      cwd="$(readlink "$procdir/cwd" 2>/dev/null)" || continue
+      { [ "$cwd" = "$APP_DIR" ] || [ "$cwd" = "$APP_DIR (deleted)" ]; } || continue
+      case "$(tr '\0' ' ' < "$procdir/cmdline" 2>/dev/null)" in
+        *"dist/index.js"*) log "helper 缺失，按 cwd 兜底停止 $p"; kill -TERM "$p" 2>/dev/null || true ;;
+      esac
+    done
+  fi
+fi
+
+# 3) 最后再清运行态句柄文件（数据共享目录不动）。
 rm -f "${TRIM_APPDEST}/app.sock" "${TRIM_PKGVAR}/app.pid"
 exit 0

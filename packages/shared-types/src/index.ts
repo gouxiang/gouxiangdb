@@ -39,3 +39,4 @@ export * from "./layoutVersion.js";
 export * from "./sync.js";
 export * from "./update.js";
 export * from "./branding.js";
+export * from "./license.js";

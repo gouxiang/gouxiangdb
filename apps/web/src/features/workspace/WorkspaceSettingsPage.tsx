@@ -38,13 +38,16 @@ import { useEnterpriseOrgFlag } from "../settings/pat-hooks";
 import { UploadLimitsPanel } from "../kb/UploadLimitsPanel";
 import { UpdatePanel } from "../update/UpdatePanel";
 import { BrandingSettingsPanel } from "../branding/BrandingSettingsPanel";
+import { LicenseStatusPanel } from "../license/LicenseStatusPanel";
+import { LicenseAdvanced } from "../license/LicenseAdvanced";
+import { FeedbackCenter } from "../license/FeedbackCenter";
 import { toast } from "../../components/ui";
 
 // 「通讯录」分区已移除：一级导航底部已有通讯录入口（/workspace/contacts），设置里不再重复。
 // 「资产」分区已移除：单个库/知识库的深度设置改由一级导航条目行尾的「…」菜单进入。
 // 「回收站」分区已移除：与数据库（/base/:id/trash）、知识库（/kb/:id/trash）各自的回收站重复，
 //   聚合入口不再列；两个模块自己的回收站页面与其侧边栏就近入口保留不动。
-type Section = "general" | "branding" | "authz" | "search" | "mcp" | "update";
+type Section = "general" | "branding" | "authz" | "search" | "mcp" | "update" | "license";
 
 const SECTIONS: {
   key: Section;
@@ -103,6 +106,15 @@ const SECTIONS: {
     icon: "download",
     desc: "检查并下载新版本安装包",
     ownerOnly: true,
+  },
+  // 全员可见（不设 ownerOnly/manageOnly/enterpriseOnly）：普通成员也要看得到自己的授权状态、
+  // 宽限提示与官方反馈中心；LicenseAdvanced 管理操作区内部再按 status.isAdmin 显隐，
+  // 后端每个写端点仍独立 403 鉴权（LICENSE_ADMIN_ONLY）。
+  {
+    key: "license",
+    label: "授权与席位",
+    icon: "shield",
+    desc: "商业授权、席位与官方反馈",
   },
 ];
 
@@ -388,6 +400,21 @@ export function WorkspaceSettingsPage() {
 
           {effectiveSection === "update" && (
             <UpdatePanel onUnregistered={() => setUpdateUnregistered(true)} />
+          )}
+
+          {/* 授权与席位：状态面板全员可见；管理操作区内部按 isAdmin 显隐；反馈中心全员可用。 */}
+          {effectiveSection === "license" && (
+            <div className="flex flex-col gap-6">
+              <div>
+                <h2 className="text-gx-18 font-semibold text-gx-text-primary">授权与席位</h2>
+                <p className="mt-1 text-gx-13 text-gx-text-tertiary">
+                  查看商业授权状态与席位使用，管理员可激活、续费与导入授权；任何成员都可通过官方反馈通道联系官方。
+                </p>
+              </div>
+              <LicenseStatusPanel />
+              <LicenseAdvanced />
+              <FeedbackCenter />
+            </div>
           )}
         </div>
       </div>

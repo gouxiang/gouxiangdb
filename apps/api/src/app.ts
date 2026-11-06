@@ -51,6 +51,8 @@ import { secureHeadersMiddleware } from "./middleware/secureHeaders.js";
 import { bodyLimitDispatch } from "./middleware/bodyLimit.js";
 import { rateLimitMiddleware } from "./middleware/rateLimit.js";
 import { mustChangePasswordMiddleware } from "./middleware/mustChangePassword.js";
+import { licenseSeatGateMiddleware } from "./middleware/licenseSeatGate.js";
+import { licenseRoutes } from "./routes/license.js";
 import { benchMetricsMiddleware } from "./ops/benchMetrics.js";
 import { createWebStaticMiddleware, resolveWebDist } from "./ops/serveWeb.js";
 import { getBranding, DEFAULT_PRODUCT_NAME } from "./domain/branding/store.js";
@@ -148,6 +150,10 @@ function createMount(webRoot: string | null): Hono {
   // 只拦已登录且 users.mustChangePassword=true 的请求，白名单外的 /api 一律 403；
   // 未登录/坏令牌放行交给各路由自己的 401（详见 middleware/mustChangePassword.ts）。
   mount.use("/api/*", mustChangePasswordMiddleware);
+  // 授权闸门②（登录态软挂起）：紧随改密闸，必须在业务路由之前。off/verify/未启动时其内部
+  // getLicenseHandles()=null 直接放行（零查询）；仅 enforce 且 verdict∈expired/invalid 才挂人。
+  // /api/license/* 在其中间件白名单内（挂起页要读状态/发反馈、管理员要能续费）。
+  mount.use("/api/*", licenseSeatGateMiddleware);
 
   // 运维健康端点（根级、不鉴权）；/api/health 保留为兼容别名（桌面壳与旧脚本在用）。
   mount.route("/healthz", healthz);
@@ -240,6 +246,11 @@ function createMount(webRoot: string | null): Hono {
   //   用引擎 remoteToken 纯转发远端 /api/v1/sync/incoming|resolve。与上面只读 /status 不撞路径
   //   （proxy 自带同款 replicaSyncConfig() 配置门 + requireActiveUser，默认 404，零本地表访问）。
   mount.route("/api/local-sync/conflicts", localSyncProxyRoutes);
+
+  // 官方商业授权 BFF（恒挂载 + 请求期闸门）：mode=off 时 GET /status 回 available:false、
+  // 其余写端点 404 LICENSE_DISABLED，默认零出网、零行为变化；不放进企业 v1（与 Mac/节点能力
+  // 正交），子路由自带 requireActiveUser。必须挂在 v1 全局 requireActiveUser 之外。
+  mount.route("/api/license", licenseRoutes);
 
   // M2/M3 企业面：/api/v1 与 /api 平级独立实例；两个 flag 任一 on 即挂载，
   // 子路由在 v1/index.ts 内按各自 flag 条件挂载，未启用的子面请求落入 notFound 404。

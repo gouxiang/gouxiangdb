@@ -1,17 +1,24 @@
 // apps/web/src/features/kb/useDocPersistence.ts
 // 文档/画布统一持久化 hook（协同解决"保存"与"不丢内容"）：
 //  - markDirty(content)：内容每次变更调用（画布 onValueChange / 文档 onChange），内部防抖自动保存 + 写本地草稿
-//  - saveNow()：手动"保存"按钮，立即 PUT 到后端（绝不触发本地下载），成功 toast + 清草稿
-//  - beforeunload / pagehide / 路由卸载：若有未落库内容，尽力同步 flush（sendBeacon 兜底）
+//  - saveNow()：手动"保存"按钮，立即把最新内容送入串行保存链（绝不触发本地下载），成功 toast + 清草稿
+//  - beforeunload / pagehide / 路由卸载：若有未落库内容，尽力同步 flush（keepalive fetch 兜底）
 //  - 加载时若存在比服务端更新的本地草稿，提供 recoveredDraft 供 UI 提示恢复
 //  - status: saved | saving | unsaved，驱动顶栏反馈
-
+//
+// ★ 在途串行化（修复 A，根治单人假 409）：
+//   同一 docId 任意时刻最多只有一个 PUT 在途（inFlightRef 互斥）。防抖自动保存、手动保存、
+//   冲突后「保留我的版本」全部汇入唯一的 drain()；在途期间的新内容只覆盖 pending.current，
+//   待在途 PUT 回来后再以「最新内容 + 刚回写的最新 baseVersion」发下一个 PUT。N 次快速改动
+//   因此塌缩成一条串行链，绝不并发两个携带相同 baseVersion 的 PUT，从根上消除单人无协作却
+//   自撞乐观锁 409 的问题。冲突（409）待裁决期间 drain 暂停，不自动续发，避免重复刷冲突框。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "../../components/ui";
 import { KbApi, ApiError, type KbDocDTO } from "../../api/client";
 import { dataSourceResolver } from "../../node/datasource";
 import { saveDraft, loadDraft, clearDraft, hasRecoverableDraft, type Draft } from "./draft";
+import { extractCanvasEmbeds, extractTableEmbeds } from "./mentions";
 
 /**
  * saved   —— 已整篇 PUT 落库（单机/协同不可用时的路径）。
@@ -21,6 +28,29 @@ import { saveDraft, loadDraft, clearDraft, hasRecoverableDraft, type Draft } fro
  *     文案用「已同步」，与「已保存」的持久化承诺区分开。
  */
 export type SaveStatus = "saved" | "synced" | "saving" | "unsaved";
+
+/** 单文档正文缓存键（与 kb-hooks.ts 的 QK.doc 完全一致，精确 3 键，避免误命中 4 键 share 查询）。 */
+const docQueryKey = (id: string) => ["kb", "doc", id] as const;
+
+/**
+ * 覆盖前的画布/数据表内嵌引用防丢比对（A3）：
+ * 服务端最新正文里存在、但本地待覆盖正文里缺失的引用集合。非空即意味着「保留我的版本」
+ * 会抹掉别人已保存的画布/表格引用，必须拦截。纯函数，便于单测。
+ */
+export function missingEmbeds(serverSrc: string, localSrc: string): {
+  canvas: string[];
+  tables: { tableId: string; viewId: string | null }[];
+} {
+  const localCanvas = new Set(extractCanvasEmbeds(localSrc));
+  const localTableKeys = new Set(
+    extractTableEmbeds(localSrc).map((t) => `${t.tableId}:${t.viewId ?? ""}`),
+  );
+  const canvas = extractCanvasEmbeds(serverSrc).filter((id) => !localCanvas.has(id));
+  const tables = extractTableEmbeds(serverSrc).filter(
+    (t) => !localTableKeys.has(`${t.tableId}:${t.viewId ?? ""}`),
+  );
+  return { canvas, tables };
+}
 
 export function useDocPersistence(
   docId: string,
@@ -45,21 +75,33 @@ export function useDocPersistence(
   /**
    * 阶段 4 · R-D-18 冲突（409）：保存撞上他人已保存时置位，由页面就地渲染
    * `<ConflictNotice>`（「查看最新版本 / 保留我的版本」二选一），禁止静默覆盖。
-   * 带上服务端回给的 currentVersion，供「保留我的版本」以新版本号为基线重写。
+   * conflictRef 是事件循环内同步维护的权威值（state 仅驱动 UI），drain 在同一次 await
+   * 链路里据此立即暂停；conflict state 镜像供渲染，二者一起置位/清零。
    */
-  const [conflict, setConflict] = useState<{ currentVersion: number | null } | null>(null);
+  const [conflict, setConflictState] = useState<{ currentVersion: number | null } | null>(null);
   const conflictRef = useRef<{ currentVersion: number | null } | null>(null);
-  conflictRef.current = conflict;
+  const setConflict = useCallback((next: { currentVersion: number | null } | null) => {
+    conflictRef.current = next;
+    setConflictState(next);
+  }, []);
 
-  const pending = useRef<string | null>(null); // 待保存的最新内容
+  const pending = useRef<string | null>(null); // 待保存的最新内容（在途期间被新编辑持续覆盖）
   const lastSaved = useRef<string>(serverContent ?? ""); // 已成功落库的内容
   const baseContent = useRef<string>(serverContent ?? ""); // 服务端基线（草稿对比用）
   // S-1 乐观锁：当前已知的服务端版本；保存携带 baseVersion，409=他人已保存
   const versionRef = useRef<number | undefined>(serverVersion);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const saving = useRef(false);
+  // ★ 修复 A：同 docId 单在途 PUT 互斥位。取代旧的死变量 saving（旧变量只写不读，无互斥效果）。
+  const inFlightRef = useRef(false);
+  // 强制下一轮 PUT 即使内容与 lastSaved 字面相同也要发出（冲突后「保留我的版本」覆盖写）。
+  const forceRef = useRef(false);
+  // 链上是否挂着一次手动保存的成功提示：排空后统一弹一次，避免在途合并时漏提示或多轮重复弹。
+  const manualNotifyRef = useRef(false);
   const docIdRef = useRef(docId);
   docIdRef.current = docId;
+  // canEdit 用 ref 读，drain/flush 不必把它放进依赖、也不会因权限变化换回调引用。
+  const canEditRef = useRef(canEdit);
+  canEditRef.current = canEdit;
 
   // 保存成功后，把最新 content 同步写回 React Query 的单文档缓存。
   // 根因：useDoc 设置了 staleTime 5 分钟且不做窗口聚焦 refetch，文档切换时 useDoc
@@ -69,7 +111,7 @@ export function useDocPersistence(
   // 编辑器正在持有的本地状态。DocEditorPage 与 CanvasEditorPage 共用本 hook，一并修复。
   const syncDocCache = useCallback(
     (id: string, content: string, contentVersion?: number | null) => {
-      qc.setQueryData<KbDocDTO>(["kb", "doc", id], (old) =>
+      qc.setQueryData<KbDocDTO>(docQueryKey(id), (old) =>
         old ? { ...old, content, ...(contentVersion != null ? { contentVersion } : {}) } : old,
       );
     },
@@ -90,46 +132,86 @@ export function useDocPersistence(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId, serverContent === undefined ? "" : serverContent, serverVersion]);
 
-  const persist = useCallback(
-    async (content: string, opts: { manual?: boolean; force?: boolean } = {}) => {
-      if (!canEdit) return;
-      // force：冲突后「保留我的版本」重写时，内容可能与 lastSaved 字面相同，必须跳过短路
-      if (!opts.force && content === lastSaved.current) {
-        pending.current = null;
-        setStatus("saved");
-        return;
-      }
-      saving.current = true;
-      setStatus("saving");
-      try {
-        const res = await KbApi.saveContent(docIdRef.current, { content, baseVersion: versionRef.current });
-        lastSaved.current = content;
-        if (res.contentVersion != null) versionRef.current = res.contentVersion;
-        pending.current = null;
-        setStatus("saved");
-        clearDraft(docIdRef.current);
-        syncDocCache(docIdRef.current, content, res.contentVersion);
-        if (opts.manual) toast("已保存到云端", "success");
-      } catch (e) {
-        setStatus("unsaved");
-        // 落库失败：内容留在本地草稿，绝不丢
-        saveDraft(docIdRef.current, { content, baseContent: baseContent.current });
-        // S-1：版本冲突（他人已保存）——本地内容已入草稿；置位冲突态让页面就地提示，
-        // 由用户二选一（R-D-18），不再只用一条 toast 把决定权静默交给"刷新"。
-        const conflictErr = e instanceof ApiError && e.status === 409;
-        if (conflictErr) {
-          const cur = (e.body as { currentVersion?: number | null } | undefined)?.currentVersion ?? null;
-          setConflict({ currentVersion: cur });
-          void qc.invalidateQueries({ queryKey: ["kb", "doc", docIdRef.current] });
-        } else if (opts.manual) {
-          toast(e instanceof Error ? `保存失败：${e.message}` : "保存失败，已保留本地草稿", "error");
+  /**
+   * 唯一的串行保存泵（修复 A 核心）。
+   * 入口若已有 PUT 在途直接 return——本次新内容已由 markDirty/saveNow 写进 pending.current，
+   * 会被在途那一轮的 while 循环顺带消费，绝不发出第二个并发 PUT。
+   * while 每轮只在「有待保存内容、相对上次落库有变化、可编辑、无冲突待裁决」时发 PUT；
+   * 成功后回写版本与 lastSaved、清草稿、同步缓存；若在途期间又涌入新内容则继续下一轮，
+   * 且下一轮携带的是上一轮刚回写的最新 baseVersion（杜绝相同 baseVersion 的并发/连发）。
+   */
+  const drain = useCallback(async () => {
+    if (inFlightRef.current) return;
+    if (!canEditRef.current) return;
+    inFlightRef.current = true;
+    try {
+      while (
+        canEditRef.current &&
+        conflictRef.current == null &&
+        (forceRef.current ||
+          (pending.current != null && pending.current !== lastSaved.current))
+      ) {
+        const content = pending.current ?? lastSaved.current;
+        setStatus("saving");
+        try {
+          const res = await KbApi.saveContent(docIdRef.current, {
+            content,
+            baseVersion: versionRef.current,
+          });
+          lastSaved.current = content;
+          forceRef.current = false;
+          if (res.contentVersion != null) versionRef.current = res.contentVersion;
+          // 仅当在途期间没有涌入更新的内容时才清空 pending，否则保留最新内容供下一轮发送
+          if (pending.current === content) pending.current = null;
+          clearDraft(docIdRef.current);
+          syncDocCache(docIdRef.current, content, res.contentVersion);
+          // 手动保存的成功提示在整条链排空后统一给出一次（见 while 之后），不在每轮重复弹。
+        } catch (e) {
+          forceRef.current = false;
+          setStatus("unsaved");
+          // 落库失败：内容留在本地草稿，绝不丢
+          saveDraft(docIdRef.current, { content, baseContent: baseContent.current });
+          const conflictErr = e instanceof ApiError && e.status === 409;
+          if (conflictErr) {
+            // S-1 版本冲突（他人已保存）：本地内容已入草稿。置位冲突态并暂停 drain，
+            // 由用户在「查看最新版本 / 保留我的版本」间二选一（R-D-18），不自动重发。
+            const cur =
+              (e.body as { currentVersion?: number | null } | undefined)?.currentVersion ?? null;
+            setConflict({ currentVersion: cur });
+            void qc.invalidateQueries({ queryKey: docQueryKey(docIdRef.current) });
+          } else {
+            toast(e instanceof Error ? `保存失败：${e.message}` : "保存失败，已保留本地草稿", "error");
+          }
+          // 无论 409 还是网络错误都跳出：409 待裁决；网络错误退避（下次 markDirty/saveNow 再触发）
+          break;
         }
-      } finally {
-        saving.current = false;
       }
-    },
-    [canEdit, qc],
-  );
+      // 正常排空（无冲突、无新内容）→ 已落库；若仍有 pending 说明是冲突/出错跳出，保持 unsaved
+      const drained =
+        conflictRef.current == null &&
+        !forceRef.current &&
+        (pending.current == null || pending.current === lastSaved.current);
+      if (drained) {
+        setStatus("saved");
+        // 链排空后才兑现手动保存提示：在途合并、多轮塌缩都只弹这一次。
+        if (manualNotifyRef.current) {
+          manualNotifyRef.current = false;
+          toast("已保存到云端", "success");
+        }
+      }
+    } finally {
+      inFlightRef.current = false;
+      // 在途期间又有新编辑、且当前没有冲突待裁决：补一轮把最新内容发出去（仍是单在途，不并发）
+      if (
+        conflictRef.current == null &&
+        canEditRef.current &&
+        (forceRef.current ||
+          (pending.current != null && pending.current !== lastSaved.current))
+      ) {
+        void drain();
+      }
+    }
+  }, [qc, setConflict, syncDocCache]);
 
   /**
    * R-D-18「查看最新版本」：丢弃本地未落库内容，基线跟到服务端最新版本号。
@@ -143,24 +225,66 @@ export function useDocPersistence(
     clearDraft(docIdRef.current);
     setConflict(null);
     setStatus("saved");
-  }, []);
+  }, [setConflict]);
 
   /**
    * R-D-18「保留我的版本」：以服务端最新版本号为新基线，把本地内容覆盖写回。
-   * 走 force 跳过「与上次已保存内容相同」的短路，确保这一次一定会发出 PUT。
+   * ★ A3 覆盖前 embed 防丢：先确保单文档缓存是服务端最新正文，比对其中的画布/数据表
+   *   内嵌引用是否有「服务端有、本地无」的缺失；有缺失则拦截，不发任何 PUT、保留冲突态，
+   *   引导用户改走「查看最新版本」或补回引用后再保存，防止静默抹掉别人已保存的引用。
+   *   无缺失时把基线挪到 currentVersion，再经 drain 发 force 保存（仍走单在途串行链）。
+   * @returns 是否放行（true=已进入覆盖保存；false=被拦截，调用方无需额外处理，提示已就地给出）
    */
-  const keepMineVersion = useCallback(async () => {
+  const keepMineVersion = useCallback(async (): Promise<boolean> => {
     const cur = conflictRef.current;
-    if (cur?.currentVersion != null) versionRef.current = cur.currentVersion;
+    if (cur == null) return false;
+    const id = docIdRef.current;
+    const key = docQueryKey(id);
+
+    // 先确保拿到服务端最新正文：409 时已 invalidate，这里 refetch/ensure 一次；取不到不盲目覆盖。
+    let serverDoc: KbDocDTO | undefined;
+    try {
+      serverDoc = await qc.ensureQueryData<KbDocDTO>({
+        queryKey: key,
+        queryFn: () => KbApi.doc(id).then((r) => r.doc),
+        staleTime: 0,
+      });
+    } catch {
+      toast("暂时无法获取服务端最新内容，请稍后重试「保留我的版本」", "error");
+      return false;
+    }
+    const serverSrc = serverDoc?.content;
+    if (typeof serverSrc !== "string") {
+      toast("服务端最新内容暂不可用，为避免丢失已阻止覆盖，请稍后重试", "error");
+      return false;
+    }
+
+    const localSrc = pending.current ?? lastSaved.current;
+    const { canvas, tables } = missingEmbeds(serverSrc, localSrc);
+    const missingCount = canvas.length + tables.length;
+    if (missingCount > 0) {
+      // 拦截：不挪基线、不清冲突、不发 PUT，ConflictNotice 保持在屏幕上供用户改选。
+      toast(
+        `本地版本缺少 ${missingCount} 个画布/表格引用，为避免丢失已阻止覆盖，请改用「查看最新版本」或重新插入后再保存`,
+        "error",
+      );
+      return false;
+    }
+
+    // 无引用丢失：基线跟到服务端最新版本，清冲突，把本地内容作为待保存项交给串行链强制发出。
+    if (cur.currentVersion != null) versionRef.current = cur.currentVersion;
     setConflict(null);
-    const content = pending.current ?? lastSaved.current;
-    await persist(content, { manual: true, force: true });
-  }, [persist]);
+    pending.current = localSrc;
+    // 本地内容可能与 lastSaved 字面相同（冲突期间未再编辑），置 force 保证这一次一定发出 PUT。
+    forceRef.current = true;
+    void drain();
+    return true;
+  }, [drain, qc, setConflict]);
 
   // 内容变更（编辑中高频调用）
   const markDirty = useCallback(
     (content: string) => {
-      if (!canEdit) return;
+      if (!canEditRef.current) return;
       pending.current = content;
       if (content !== lastSaved.current) setStatus("unsaved");
       // 本地草稿（节流写，崩溃/刷新兜底）—— 协同接通时也照写：草稿是崩溃兜底，不是落库手段
@@ -172,15 +296,18 @@ export function useDocPersistence(
         setStatus("synced");
         return;
       }
+      // 冲突待裁决期间不自动续发：只更新 pending 与草稿，等用户二选一后再保存，避免重复 409。
+      if (conflictRef.current != null) return;
       if (debounce.current) clearTimeout(debounce.current);
       debounce.current = setTimeout(() => {
-        if (pending.current != null) void persist(pending.current);
+        void drain();
       }, 1200);
     },
-    [canEdit, persist],
+    [drain],
   );
 
-  // 手动保存（按钮）
+  // 手动保存（按钮）：把最新内容送入串行链；若已有 PUT 在途，drain 入口直接 return，
+  // 最新内容已在 pending 中，会被在途链顺带消费——绝不与在途 PUT 并行发第二个请求。
   const saveNow = useCallback(async () => {
     if (debounce.current) clearTimeout(debounce.current);
     // 协同可用：内容随打随同步，服务端统一落库 —— 不再发整篇 PUT。
@@ -190,18 +317,28 @@ export function useDocPersistence(
       toast("已在协同中实时同步，无需手动保存", "success");
       return;
     }
+    if (conflictRef.current != null) return; // 冲突待裁决：不绕过冲突态强发
+    if (!canEditRef.current) return;
     const content = pending.current ?? lastSaved.current;
-    await persist(content, { manual: true });
-  }, [persist]);
+    pending.current = content;
+    // 挂一次手动保存成功提示：无论本次是否并入已在途的链，排空时都只兑现一次 toast。
+    manualNotifyRef.current = true;
+    await drain();
+  }, [drain]);
 
-  // 同步 flush（卸载/切路由/关页面）：用 keepalive fetch 尽力带走，页面不阻塞；草稿已先行兜底
+  // 同步 flush（卸载/切路由/关页面）：用 keepalive fetch 尽力带走，页面不阻塞；草稿已先行兜底。
+  // ★ A2：若 drain 正有 PUT 在途，直接返回——绝不再发一个携带相同 baseVersion 的 PUT 自撞 409；
+  //   在途那一轮本身就带着最新 pending，成功后会清草稿/同步缓存，flush 无需重复。
   const flush = useCallback(() => {
+    if (inFlightRef.current) return;
     const content = pending.current;
-    if (content == null || content === lastSaved.current || !canEdit) return;
+    if (content == null || content === lastSaved.current || !canEditRef.current) return;
     // 先留草稿兜底（即使网络请求没发出去也不丢）
     saveDraft(docIdRef.current, { content, baseContent: baseContent.current });
     // 协同可用：整篇 PUT 会让本地快照与 CRDT 抢写（DESIGN §3.3），flush 一并让位
     if (collabActiveRef.current) return;
+    // 冲突待裁决：卸载兜底也不得绕过乐观锁强发，交由草稿在下次打开时恢复/裁决。
+    if (conflictRef.current != null) return;
     try {
       // S2：同步读当前数据源拼 URL/头（flush 可能在卸载关页时触发，不能 async 化）。
       const dsUrl = dataSourceResolver.baseFor(
@@ -217,35 +354,46 @@ export function useDocPersistence(
         .then(async (r) => {
           if (r.ok) {
             lastSaved.current = content;
+            let cv: number | null = null;
             try {
               const j = (await r.json()) as { contentVersion?: number | null };
-              if (j.contentVersion != null) versionRef.current = j.contentVersion;
+              if (j.contentVersion != null) {
+                versionRef.current = j.contentVersion;
+                cv = j.contentVersion;
+              }
             } catch { /* 版本号缺失不影响 */ }
             clearDraft(docIdRef.current);
-            syncDocCache(docIdRef.current, content);
+            // A2 补第三参：连同 contentVersion 一起回写缓存，避免切回时读到旧版本号
+            syncDocCache(docIdRef.current, content, cv);
           }
         })
         .catch(() => {});
     } catch {
       /* 草稿已兜底 */
     }
-  }, [canEdit, syncDocCache]);
+  }, [syncDocCache]);
 
-  // 卸载 / 关闭页面前 flush
+  // 卸载 / 关闭页面前 flush：先清掉挂起的防抖定时器，避免卸载后定时器再触发 drain，
+  // 再做一次同步 flush 尽力带走未落库内容。
   useEffect(() => {
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (debounce.current) clearTimeout(debounce.current);
       flush();
       if (pending.current != null && pending.current !== lastSaved.current) {
         e.preventDefault();
         e.returnValue = "";
       }
     };
-    const onHide = () => flush();
+    const onHide = () => {
+      if (debounce.current) clearTimeout(debounce.current);
+      flush();
+    };
     window.addEventListener("beforeunload", onBeforeUnload);
     window.addEventListener("pagehide", onHide);
     return () => {
       window.removeEventListener("beforeunload", onBeforeUnload);
       window.removeEventListener("pagehide", onHide);
+      if (debounce.current) clearTimeout(debounce.current);
       flush(); // 路由切换卸载时
     };
   }, [flush]);
@@ -272,6 +420,7 @@ export function useDocPersistence(
   // 新文档 / 新版本基线：清掉上一份文档遗留的冲突态，避免串台误报
   useEffect(() => {
     setConflict(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId]);
 
   return {

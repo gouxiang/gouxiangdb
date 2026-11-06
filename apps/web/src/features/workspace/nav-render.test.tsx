@@ -41,6 +41,10 @@ vi.mock("../kb/kb-hooks", () => ({
   useKb: () => ({ data: { role: "owner" } }),
   useCreateDoc: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useMoveDoc: () => ({ mutateAsync: vi.fn() }),
+  // 行菜单（重命名 / 图标与颜色 / 删除）回挂后无条件调用，SSR 回归只给桩
+  useRenameDoc: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteDoc: () => ({ mutateAsync: vi.fn() }),
+  useRestoreDoc: () => ({ mutateAsync: vi.fn() }),
 }));
 
 import { PrimaryNav } from "./PrimaryNav";

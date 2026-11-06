@@ -14,6 +14,10 @@ import { DEFAULT_WORKSPACE_ID } from "./domain/org/workspace.js";
 import { config } from "./config.js";
 import { publicSignupAllowedByKv, publicSignupOpen } from "./configSignup.js";
 import { BRANDING_KEYS } from "./domain/branding/defaults.js";
+// 授权闸门①：off/verify/未启动时 getActiveSeatGate()=null，注册路径零拦截；仅 enforce 满员拦。
+import { getActiveSeatGate, assertSeatAddAllowedTx, assertSeatAddAllowed } from "./domain/license/seatGate.js";
+// 登录成功后非阻塞补一次授权心跳（off 时内部 no-op），让桌面端尽快拿到/续期单据。
+import { triggerLicenseHeartbeat } from "./domain/license/runtime.js";
 
 // token 有效期常量与 JWT/状态解析核心已下沉到 domain/org/authState.ts（旧 /api 与 v1 共享）。
 export type Role = "owner" | "creator" | "editor" | "commenter" | "viewer";
@@ -81,10 +85,14 @@ auth.post("/signup", async (c) => {
     return c.json({ error: "Email already registered" }, 409);
   }
   const passwordHash = await bcrypt.hash(password, 10);
+  // 闸门①预算：off/verify/未启动 -> null 放行；空库首位 owner 在事务内 COUNT=0<5 亦天然通过，
+  // 与"首用户引导永不被锁死"一致。gate 快照事务内二次 COUNT 断言，防并发双造。
+  const seatGate = await getActiveSeatGate();
   if (config.enterpriseOrg) {
     // 组织面开启：新注册者归入默认工作区（ACTIVE/tv0）；若为工作区首位用户则同事务自举 owner
     // （计划 §5-D.4 运行时兜底）。全部在一个写事务内，回调只用 tx。
     const user = await withWriteTx("auth.signup.bootstrap", async (tx) => {
+      await assertSeatAddAllowedTx(tx, seatGate);
       const created = await tx.user.create({
         data: { email, displayName, passwordHash, workspaceId: DEFAULT_WORKSPACE_ID },
       });
@@ -95,12 +103,16 @@ auth.post("/signup", async (c) => {
     });
     const token = await issueToken(user.id, user.tokenVersion);
     recordAudit(c, { event: "signup", status: 200, actorId: user.id });
+    triggerLicenseHeartbeat();
     return c.json({ token, user: publicUser(user) });
   }
+  // 企业面关闭的裸 create 分支（无包裹事务）：用非事务版现算占席过闸门①。
+  await assertSeatAddAllowed(seatGate);
   const user = await prisma.user.create({ data: { email, displayName, passwordHash } });
   // 注册直接 ACTIVE（status 默认），tokenVersion=0。
   const token = await issueToken(user.id, user.tokenVersion);
   recordAudit(c, { event: "signup", status: 200, actorId: user.id });
+  triggerLicenseHeartbeat();
   return c.json({ token, user: publicUser(user) });
 });
 
@@ -138,6 +150,8 @@ auth.post("/login", async (c) => {
   }
   const token = await issueToken(user.id, user.tokenVersion);
   recordAudit(c, { event: "login_success", status: 200, actorId: user.id });
+  // 登录成功非阻塞补一次授权心跳（off 时 no-op）：桌面端开机首登即可尽快刷新单据/挂起态。
+  triggerLicenseHeartbeat();
   return c.json({ token, user: publicUser(user) });
 });
 

@@ -9,7 +9,15 @@ set -euo pipefail
 export PATH=/var/apps/nodejs_v22/target/bin:$PATH
 
 APP_DIR="${TRIM_APPDEST}/server"
+DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
 ENV_FILE="${TRIM_PKGETC}/gouxiangdb.env"
+LOG_FILE="${TRIM_PKGVAR}/app.log"
+
+# 触库前清旧内核孤儿的共享实现（与 install/main/uninstall 同源）。下方第 1 步在线备份会最先
+# 打开数据库，必须在它之前清掉残留旧内核，避免旧连接持 WAL 句柄与 backup/migrate 争库（522）。
+GX_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)"
+# shellcheck source=reap-kernel-helper
+[ -f "$GX_SCRIPT_DIR/reap-kernel-helper" ] && source "$GX_SCRIPT_DIR/reap-kernel-helper" || true
 
 [ -f "$ENV_FILE" ] || { echo "Missing $ENV_FILE during upgrade" > "$TRIM_TEMP_LOGFILE"; exit 1; }
 
@@ -65,6 +73,9 @@ fi
 # shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
 cd "$APP_DIR"
+
+# ★ 任何触库动作（下方在线备份最先打开数据库）之前，先清掉残留旧内核孤儿，避免争库 522。
+gx_reap_stale_kernel
 
 # 1) 发布前在线快照（better-sqlite3 .backup()，零额外二进制）。
 if [ -f "scripts/backup/online-backup.mjs" ]; then

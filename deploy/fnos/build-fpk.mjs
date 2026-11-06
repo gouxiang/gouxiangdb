@@ -104,8 +104,15 @@ const version = rootPkg.version || "0.0.0-dev";
 log(`版本 ${version}，目标 arch=${arch}（linux/${wantArch}），独立端口入口（默认 ${DEFAULT_PORT}，根路径构建）`);
 
 // --- 1) 构建 api（esbuild）与 web（根路径，独立端口同源） -----------------------------------
-log("构建 @gx/api（esbuild）");
-run("pnpm", ["--filter", "@gx/api", "run", "build"]);
+log("构建 @gx/api（esbuild，GX_LICENSE_PROD=1：信任根物理换源为生产公钥 ff02db72）");
+// ★ 必须显式注入：api 的 build.mjs 仅在 GX_LICENSE_PROD=1 时经 esbuild onResolve 把
+// keyring.dev 换成 keyring.prod。漏注入（本脚本 2026-11-04 前的状态）会把【开发公钥
+// da469cd3】打进生产 fpk——正式授权中心用生产私钥签的信封会 KID_MISMATCH，verify 下只
+// 告警、切 enforce 即全站拒止，且开发私钥若泄露可伪造授权。run() 的 env 为整体替换，须带
+// ...process.env，否则会丢掉 PATH 导致 pnpm 找不到。
+run("pnpm", ["--filter", "@gx/api", "run", "build"], {
+  env: { ...process.env, GX_LICENSE_PROD: "1" },
+});
 log("构建 @gx/web（根路径 base=/，独立端口下页面与 /api 同源）");
 run("pnpm", ["--filter", "@gx/web", "run", "build"], {
   env: { ...process.env, VITE_BASE_PATH: "/" },
@@ -248,6 +255,37 @@ run("node", [
 // 临时端口 + 临时数据目录（不碰 server 真实/挂载数据）+ 30s 预算 + 收尸，并静态扫描全部产物。
 log("产物冒烟：真跑 dist/index.js 到 /readyz + 静态扫描 dist/*.js");
 run("node", [path.join(serverDir, "scripts", "smoke-dist.mjs")], { cwd: serverDir });
+
+// --- 5.4.1) 信任根产物断言（防 GX_LICENSE_PROD 漏注入回退到开发钥） --------------------
+// 直接扫最终组装进包的 server/dist/index.js：必须含生产公钥主体、绝不能含开发公钥主体。
+// 从源码 keyring.{prod,dev}.ts 动态抽取 PEM 的 base64 主体，密钥轮换时本断言自适应。
+(() => {
+  const licDir = path.join(repoRoot, "apps", "api", "src", "domain", "license");
+  const bodyOf = (file) => {
+    const txt = fs.readFileSync(file, "utf8");
+    const m = txt.match(/pem:\s*`([^`]+)`/);
+    if (!m) fail(`无法从 ${file} 抽取 PEM`);
+    const b64 = m[1].match(/[A-Za-z0-9+/=]{40,}/);
+    if (!b64) fail(`无法从 ${file} 的 PEM 抽取 base64 主体`);
+    return b64[0];
+  };
+  const prodBody = bodyOf(path.join(licDir, "keyring.prod.ts"));
+  const devBody = bodyOf(path.join(licDir, "keyring.dev.ts"));
+  const bundle = fs.readFileSync(path.join(serverDir, "dist", "index.js"), "utf8");
+  if (!bundle.includes(prodBody)) {
+    fail(
+      "信任根断言失败：server/dist/index.js 不含生产公钥（kid=ff02db72）。" +
+        "通常是构建 api 时漏了 GX_LICENSE_PROD=1，产物回退成开发信任环——禁止打包。",
+    );
+  }
+  if (bundle.includes(devBody)) {
+    fail(
+      "信任根断言失败：server/dist/index.js 残留开发公钥（kid=da469cd3）。" +
+        "生产包物理不得含开发钥，开发私钥一旦泄露即可伪造授权——禁止打包。",
+    );
+  }
+  log("信任根断言通过：dist 仅含生产公钥 ff02db72，无开发钥 da469cd3");
+})();
 
 // --- 5.5) 入口一致性自检（白屏闸门） ----------------------------------------------
 // 独立端口服务（0.2.5 起）下，空白页的主要来源在这里堵死：

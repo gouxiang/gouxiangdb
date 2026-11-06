@@ -30,6 +30,10 @@ const SAMPLES: Array<{ name: string; md: string }> = [
   { name: "⑧ 分隔线 + 多个段落", md: "第一段\n\n第二段\n\n---\n\n第三段\n" },
   { name: "⑨ 混合长文（表格+列表+代码+图片）", md: "# 报告\n\n| 项 | 值 |\n| --- | --- |\n| A | 1 |\n\n- 要点一\n- 要点二\n\n```js\nrun();\n```\n\n![图](https://example.com/b.png)\n" },
   { name: "⑩ 空文档与纯空白", md: "" },
+  // 内嵌画布/数据表围栏：协同防丢链路依赖 lang + 体内稳定 id 往返不被规范化破坏，纳入 golden 基线。
+  { name: "⑪ 画布内嵌围栏（canvas-embed + docId）", md: "```canvas-embed\ndocAbC123\n```\n" },
+  { name: "⑫ 数据表内嵌围栏（table-embed + tableId/viewId）", md: "```table-embed\ntblXy01\nvewZ9\n```\n" },
+  { name: "⑬ 数据表内嵌围栏（无 viewId，体内仅 tableId）", md: "```table-embed\ntblOnly7\n```\n" },
 ];
 
 describe("S5-1 文档块 round-trip golden（搬运前基线）", () => {
@@ -75,5 +79,37 @@ describe("S5-1 文档块 round-trip golden（搬运前基线）", () => {
     const { blocks } = rt(input);
     const p = blocks.find((b) => b.type === "p" && (b.text ?? "").includes("居中段落"));
     expect(p?.align, `blocks=${JSON.stringify(blocks.map((b) => ({ t: b.type, a: b.align })))}`).toBe("center");
+  });
+
+  it("画布内嵌围栏往返保真（lang=canvas-embed，体内 docId 不被规范化）", () => {
+    const input = "```canvas-embed\ndocAbC123\n```\n";
+    const { blocks, md1, md2 } = rt(input);
+    const fence = blocks.filter((b) => b.type === "code");
+    expect(fence).toHaveLength(1);
+    expect(fence[0]?.lang).toBe("canvas-embed");
+    expect(fence[0]?.code).toBe("docAbC123");
+    // 稳定形态必须仍能被 mentions.extractCanvasEmbeds 的围栏协议识别（逐字节保留）。
+    expect(md1).toBe("```canvas-embed\ndocAbC123\n```\n");
+    expect(md2).toBe(md1);
+  });
+
+  it("数据表内嵌围栏往返保真（含 viewId：体内两行 tableId/viewId 完整保留）", () => {
+    const input = "```table-embed\ntblXy01\nvewZ9\n```\n";
+    const { blocks, md1, md2 } = rt(input);
+    const fence = blocks.filter((b) => b.type === "code" && b.lang === "table-embed");
+    expect(fence).toHaveLength(1);
+    expect(fence[0]?.code).toBe("tblXy01\nvewZ9");
+    expect(md1).toBe(input);
+    expect(md2).toBe(md1);
+  });
+
+  it("数据表内嵌围栏往返保真（无 viewId：体内仅 tableId，不被补出空行）", () => {
+    const input = "```table-embed\ntblOnly7\n```\n";
+    const { blocks, md1, md2 } = rt(input);
+    const fence = blocks.filter((b) => b.type === "code" && b.lang === "table-embed");
+    expect(fence).toHaveLength(1);
+    expect(fence[0]?.code).toBe("tblOnly7");
+    expect(md1).toBe(input);
+    expect(md2).toBe(md1);
   });
 });

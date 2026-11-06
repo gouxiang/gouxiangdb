@@ -14,6 +14,9 @@ import { getDefaultWorkspaceId } from "./workspace.js";
 import { USER_STATUS } from "./authState.js";
 import { assertWorkspaceHasOwnerTx } from "./lifecycle.js";
 import { RESTRICTED_ROLE_ID, SUPER_ADMIN_ROLE_ID } from "./roles.js";
+// 闸门①（新增账号席位）：off/verify 或运行时未启动时 getActiveSeatGate() 返回 null，
+// 事务内断言直接放行——默认逐字节同今天；仅 enforce 且满员才 403 LICENSE_SEAT_LIMIT。
+import { getActiveSeatGate, assertSeatAddAllowedTx } from "../license/seatGate.js";
 
 // 只读 DTO/查询从 memberDirectory 再导出，调用方可只从 members 一处导入。
 export type {
@@ -176,11 +179,15 @@ export async function createInvitedUser(input: {
   if (displayName.length === 0 || displayName.length > 60) throw new HttpError(400, "姓名不能为空且不超过 60 字");
 
   const workspaceId = await getDefaultWorkspaceId();
+  // 闸门①预算（事务外只读一次；off/verify/未启动 -> null 零拦截）。事务回调内会用同一
+  // gate 快照在 COUNT 上二次断言，防并发双造把第 6 人写进去。
+  const seatGate = await getActiveSeatGate();
   const { plain, hash } = newInviteToken();
   // INVITED 账号无真密码：放随机不可登录占位（接受邀请时才设真密码）。
   const placeholderHash = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), BCRYPT_ROUNDS);
 
   return withWriteTx("org.member.invite", async (tx) => {
+    await assertSeatAddAllowedTx(tx, seatGate);
     const dup = await tx.user.findUnique({ where: { email }, select: { id: true } });
     if (dup) throw new HttpError(409, "该邮箱已被使用");
     const user = await tx.user.create({
@@ -219,8 +226,11 @@ export async function createActiveUser(input: {
   if (password.length < 8 || password.length > 72) throw new HttpError(400, "初始密码至少 8 位、不超过 72 位");
 
   const workspaceId = await getDefaultWorkspaceId();
+  // 闸门①预算（口径同邀请：off/verify/未启动 -> null 放行）。
+  const seatGate = await getActiveSeatGate();
   const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
   return withWriteTx("org.member.create", async (tx) => {
+    await assertSeatAddAllowedTx(tx, seatGate);
     const dup = await tx.user.findUnique({ where: { email }, select: { id: true } });
     if (dup) throw new HttpError(409, "该邮箱已被使用");
     const user = await tx.user.create({

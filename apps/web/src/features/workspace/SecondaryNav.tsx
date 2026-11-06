@@ -192,6 +192,8 @@ export function SecondaryNav({
     tab: kbTab === "canvas" ? "canvas" : "doc",
     navigate,
     docs: entries,
+    // 仅知识库路由下有当前文档/画布；base 容器下恒为 null（kb 行菜单也不会被触发）。
+    activeDocId: docMatch?.params.docId ?? canvasMatch?.params.docId ?? null,
   });
 
   /** kb 才有的 doc 层级：子文档折叠由 expandedDocs 控制。 */
@@ -305,6 +307,7 @@ export function SecondaryNav({
           数据库没有第二种子内容，改为渲染「+ 新建数据表」（.gx-l2-new 自带 10px 边距）。
           tablist 只包住两个 tab，新建按钮是它的兄弟节点——它不是选项卡，不该进 tablist。 */}
       {container.kind === "kb" ? (
+        <>
         <div className="mt-1.5 flex items-center gap-1 px-2.5">
           <div className="flex items-center gap-1" role="tablist" aria-label="知识库内容类型">
             {KB_TABS.map((t) => (
@@ -327,6 +330,10 @@ export function SecondaryNav({
           </div>
           <div className="ml-auto flex shrink-0 items-center">{kbOps.createNode}</div>
         </div>
+        {/* 文档 / 画布行菜单的重命名 / 图标与颜色弹窗（删除确认走全局 ConfirmHost）。
+            两个 Modal 在 open=false 时返回 null，常驻挂载不产生 DOM。 */}
+        {kbOps.menuNode}
+        </>
       ) : (
         tableOps.panelNode
       )}
@@ -382,7 +389,8 @@ export function SecondaryNav({
                   active={currentResource === row.entry.id}
                   onToggleDoc={toggleDoc}
                   onNavigate={(href) => navigate(href)}
-                  // 表行菜单（无 canManageSchema 时 rowMenuItems 返回 [] → 不渲染三点）。
+                  // 表行 → 表操作菜单；文档 / 画布行 → KB 行菜单（重命名 / 图标与颜色 / 删除）。
+                  // 无对应写权限时各自的 rowMenuItems 返回 [] → RowMoreMenu 只占位不渲染三点。
                   // 透传当前自定义图标，供「图标与颜色」项弹窗回显。
                   menu={
                     row.kind === "table"
@@ -392,9 +400,20 @@ export function SecondaryNav({
                           icon: row.entry.icon,
                           iconColor: row.entry.iconColor,
                         })
-                      : undefined
+                      : kbOps.rowMenuItems({
+                          id: row.entry.id,
+                          name: row.entry.name,
+                          kind: row.kind,
+                          icon: row.entry.icon,
+                          iconColor: row.entry.iconColor,
+                        })
                   }
-                  menuLabel={row.kind === "table" ? `${row.entry.name} 表操作菜单` : undefined}
+                  // P3-a11y：按行类型给具体作用名（同旧壳 KbTree「文档/画布操作菜单」口径）。
+                  menuLabel={
+                    row.kind === "table"
+                      ? `${row.entry.name} 表操作菜单`
+                      : `${row.entry.name} ${row.kind === "canvas" ? "画布" : "文档"}操作菜单`
+                  }
                   // 文档行：拖拽改层级（画布行不给）
                   drag={row.kind === "doc" ? kbOps.rowDrag(row.entry.id) : undefined}
                 />

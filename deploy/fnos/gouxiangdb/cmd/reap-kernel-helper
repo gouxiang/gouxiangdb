@@ -1,0 +1,101 @@
+#!/bin/bash
+# GouXiangDB fnOS 共享库：在「任何会打开数据库的动作（migrate / 在线备份 / 起新内核）之前」
+# 清掉本应用残留的旧内核孤儿。由 install_callback / upgrade_callback / main / uninstall_callback
+# source 后调用：
+#
+#   APP_DIR=... DATA_DIR=... LOG_FILE=...   # 由调用方提供（缺失则用 TRIM_* 默认值）
+#   source "$(同目录)/reap-kernel-helper"
+#   gx_reap_stale_kernel
+#
+# 背景（2026-11-04 正式机 88 事故）：fnOS 覆盖安装＝先 uninstall（旧 uninstall_callback 不杀
+# 进程）再 install。旧内核以 ppid=1 孤儿残留，持续持有 data-share 的 app.db/WAL/SHM；随后
+# install_callback 对活库 migrate、main start 又起第二个内核，旧连接命中被替换/删除的 WAL
+# 句柄，间歇 SQLite disk I/O error(522)，readyz 因命中好连接而假绿、界面转圈。
+#
+# ★ fnOS 应用回调的 /proc 可见性限制（2026-11-04 在真机 183 用黑匣子实测，决定判定方式）：
+#   appcenter 以【包用户 gouxiangdb(euid=993)】执行回调。该上下文对【其它】进程：
+#     - 可读：/proc/<pid> 目录本身及其属主(stat -c %u)、/proc/<pid>/cmdline、ps(pgid)、kill；
+#     - 不可读：/proc/<pid>/cwd 符号链接与 /proc/<pid>/fd（ptrace 级限制，readlink/ls 返回空）。
+#   因此不能把判定建立在 cwd/fd 上（在非受限 shell 里好用，真实回调里双双失效）。
+#   跨重装、且在受限上下文仍可靠的身份三元组是：
+#     1) cmdline 含本应用内核入口 "dist/index.js"（可读）；
+#     2) 进程 uid == 回调自身 uid（stat /proc/<pid> 属主，可读）——天然隔离授权中心(gouxianglic)
+#        与一切其它应用；
+#     3) pgid != 回调自身进程组（ps 可读）——排除本轮回调管道里的 node/prisma/grep。
+#   cwd/fd 仅作非受限上下文的补充加固（读得到就额外收紧，读不到自动回退到 uid 三元组）。
+# 同机授权中心入口是 "dist/src/server.js"、运行用户是 gouxianglic，与本判定两条都不重合。
+# 容错：任何异常都 return 0，绝不阻断安装/升级/启动回调。
+
+gx__reap_log() {
+  if [ -n "${LOG_FILE:-}" ]; then
+    echo "[reap] $*" >> "$LOG_FILE" 2>/dev/null || true
+  fi
+}
+
+# 先 TERM 优雅退出（≤10s，给 WAL checkpoint 留时间），仍活则 KILL。
+gx__reap_terminate() {
+  local pid="$1"
+  [ -n "$pid" ] || return 0
+  kill -0 "$pid" 2>/dev/null || return 0
+  kill -TERM "$pid" 2>/dev/null || true
+  local i=0
+  while kill -0 "$pid" 2>/dev/null && [ $i -lt 10 ]; do
+    sleep 1; i=$((i + 1))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
+}
+
+gx_reap_stale_kernel() {
+  [ -d /proc ] || return 0
+  local app_dir data_dir self_pgid self_uid
+  app_dir="${APP_DIR:-${TRIM_APPDEST:+${TRIM_APPDEST}/server}}"
+  data_dir="${DATA_DIR:-${TRIM_DATA_SHARE_PATHS%%:*}}"
+  self_uid="$(id -u 2>/dev/null | tr -d '[:space:]')"
+  self_pgid="$(ps -o pgid= -p $$ 2>/dev/null | tr -d '[:space:]')"
+
+  local procdir p puid pgid cwd cmdline ident
+  for procdir in /proc/[0-9]*; do
+    p="${procdir#/proc/}"
+
+    # 排除本回调所在进程组（含 helper 自身、调用 shell、同组 node/prisma/grep 等）。
+    pgid="$(ps -o pgid= -p "$p" 2>/dev/null | tr -d '[:space:]')"
+    [ -n "$pgid" ] || continue
+    [ "$pgid" = "$self_pgid" ] && continue
+
+    cmdline="$(tr '\0' ' ' < "$procdir/cmdline" 2>/dev/null)"
+    case "$cmdline" in
+      *"dist/index.js"*) ;;
+      *) continue ;;
+    esac
+
+    # 锚点 U（主，fnOS 受限回调里唯一可靠）：进程 uid 必须等于本包回调 uid。
+    # /proc/<pid> 目录属主在受限上下文可读（实测），优先 stat，失败回退 ps。
+    puid="$(stat -c %u "$procdir" 2>/dev/null | tr -d '[:space:]')"
+    [ -n "$puid" ] || puid="$(ps -o uid= -p "$p" 2>/dev/null | tr -d '[:space:]')"
+    ident=""
+    if [ -n "$puid" ] && [ -n "$self_uid" ] && [ "$puid" = "$self_uid" ]; then
+      ident="uid=$puid"
+    fi
+
+    # 锚点 A/B（非受限上下文的补充收紧）：cwd 命中应用目录（含 deleted）或 fd 持本应用 db。
+    # fnOS 真实回调里这两项读不到（返回空），此处自然落空、回退由上面的 uid 锚点兜底。
+    if [ -z "$ident" ]; then
+      cwd="$(readlink "$procdir/cwd" 2>/dev/null || true)"
+      if [ -n "$app_dir" ] && { [ "$cwd" = "$app_dir" ] || [ "$cwd" = "$app_dir (deleted)" ]; }; then
+        ident="cwd=$cwd"
+      fi
+    fi
+    if [ -z "$ident" ] && [ -n "$data_dir" ]; then
+      if ls -l "$procdir/fd" 2>/dev/null | grep -F "$data_dir/app.db" >/dev/null 2>&1; then
+        ident="fd=$data_dir/app.db"
+      fi
+    fi
+    [ -n "$ident" ] || continue
+
+    gx__reap_log "检测到旧内核进程 $p（$ident, cmd=$cmdline），触库前先停止"
+    gx__reap_terminate "$p"
+  done
+  return 0
+}

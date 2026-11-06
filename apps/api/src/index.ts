@@ -16,6 +16,8 @@ import { prisma } from "./db.js";
 import { runScopeBackfillBoot } from "./ops/scopeBackfillBoot.js";
 import { startSearchWorker, stopSearchWorker } from "./domain/search/workerRuntime.js";
 import { startReplicaSync, stopReplicaSync } from "./domain/sync/replicaSyncRuntime.js";
+import { loadLicenseConfig } from "./domain/license/configLicense.js";
+import { bootLicenseRuntime, stopLicenseRuntime } from "./domain/license/runtime.js";
 // 协同：WS 通道挂在每个 http.Server 的 upgrade 上，两处 createServer 都要挂（§8-1）。
 import { attachCollab, flushAllAndClose } from "./collab/index.js";
 
@@ -52,6 +54,29 @@ function bootReplicaSync(): void {
     });
 }
 
+/**
+ * 官方商业授权心跳运行时启动（门控全在 parseLicenseConfig/runtime 内）。
+ * GX_LICENSE_MODE 默认 off -> start 第一道闸直接 false：不建 timer、不建身份、不出网、不查库，
+ * 既有启动姿态逐字节不变。dataDir 复用内核数据目录（.license/ 落在其下）。
+ * 失败只 warn，绝不影响监听与业务读写。
+ */
+function bootLicense(): void {
+  try {
+    // loadLicenseConfig 读 <dataDir>/license.mode 热切文件后再解析；
+    // 生产授权构建下 mode 永不 off（下限 verify），见 configLicense.ts。
+    const cfg = loadLicenseConfig(process.env, config.dataDir);
+    void bootLicenseRuntime(cfg)
+      .then((ok) => {
+        if (ok) console.log(`[GouXiangDB API] 授权心跳已启动 mode=${cfg.mode} url=${cfg.url}`);
+      })
+      .catch((e) => {
+        console.warn("[license] start failed", e);
+      });
+  } catch (e) {
+    console.warn("[license] boot skipped:", (e as Error).message);
+  }
+}
+
 const { app, webRoot } = createApp();
 
 const port = config.port;
@@ -67,6 +92,7 @@ function startTcp(): void {
     console.log(`[GouXiangDB API] http://localhost:${port}${hostNote}${prefixNote}${webNote}`);
     bootSearchWorker();
     bootReplicaSync();
+    bootLicense();
   });
 
   // 优雅关闭：停止接收 → 排空在途请求 → 关闭 Prisma/SQLite 连接（释放热 WAL 帧，避免重启/升级
@@ -92,6 +118,8 @@ function startTcp(): void {
         stopSearchWorker();
         // 同步引擎同理：先停 timer/释放单写者锁（其内部用 prisma 续期），再断连接。
         await stopReplicaSync();
+        // 授权心跳：纯内存 timer，停它不涉及 DB 事务，放在断 Prisma 之前即可。
+        stopLicenseRuntime();
         try {
           await prisma.$disconnect();
         } catch {
@@ -126,6 +154,7 @@ function startUnixSocket(socketPath: string): void {
     console.log(`[GouXiangDB API] unix:${socketPath}${prefixNote}${webNote}`);
     bootSearchWorker();
     bootReplicaSync();
+    bootLicense();
   });
 
   // 优雅关闭：停止接收 → 排空在途请求 → 删除 socket 文件。10s 兜底强退防 keep-alive 悬挂。
@@ -146,6 +175,7 @@ function startUnixSocket(socketPath: string): void {
       server.close(async () => {
         stopSearchWorker(); // 同上：先停 worker 再断 Prisma。
         await stopReplicaSync(); // 同步引擎：先停 timer/释放锁，再断连接。
+        stopLicenseRuntime(); // 授权心跳：停 timer。
         try {
           fs.rmSync(socketPath, { force: true });
           await prisma.$disconnect();

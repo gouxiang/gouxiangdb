@@ -117,6 +117,37 @@ const distSrc = path.join(srcApi, "dist");
 for (const entry of ["index.js", "mcp-stdio.js", "nav-reconcile.js", "init-admin.js"]) {
   if (!fs.existsSync(path.join(distSrc, entry))) fail(`缺少 apps/api/dist/${entry}（先 pnpm --filter @gx/api build）`);
 }
+
+// 信任根硬门：桌面成品随包的 api dist 必须是 GX_LICENSE_PROD=1 构建（内置生产公钥
+// ff02db72、物理不含开发钥 da469cd3）。本脚本只消费调用方先 build 好的 dist，若不在这里
+// 拦截，任何漏注入的手动 build 都会把开发信任根打进 dmg（与 fpk 2026-11-04 同类事故）。
+// 从源码 keyring.{prod,dev}.ts 动态抽 PEM base64 主体，密钥轮换时自适应。
+{
+  const licDir = path.join(srcApi, "src", "domain", "license");
+  const keyBody = (file) => {
+    const txt = fs.readFileSync(file, "utf8");
+    const pem = txt.match(/pem:\s*`([^`]+)`/);
+    const b64 = pem?.[1].match(/[A-Za-z0-9+/=]{40,}/);
+    if (!b64) fail(`无法从 ${file} 抽取信任根 PEM 主体`);
+    return b64[0];
+  };
+  const prodBody = keyBody(path.join(licDir, "keyring.prod.ts"));
+  const devBody = keyBody(path.join(licDir, "keyring.dev.ts"));
+  const apiBundle = fs.readFileSync(path.join(distSrc, "index.js"), "utf8");
+  if (!apiBundle.includes(prodBody)) {
+    fail(
+      "桌面侧车信任根校验失败：apps/api/dist/index.js 不含生产公钥 ff02db72。" +
+        "请改用 GX_LICENSE_PROD=1 pnpm --filter @gx/api run build 重新构建后再 stage（禁止把开发信任根打进 dmg）。",
+    );
+  }
+  if (apiBundle.includes(devBody)) {
+    fail(
+      "桌面侧车信任根校验失败：apps/api/dist/index.js 残留开发公钥 da469cd3。" +
+        "请用 GX_LICENSE_PROD=1 pnpm --filter @gx/api run build 重新构建（生产包物理不得含开发钥）。",
+    );
+  }
+  log("信任根校验通过：api dist 仅含生产公钥 ff02db72，无开发钥 da469cd3");
+}
 log(`前端产物目录：${webDist}`);
 if (webDistOpt) log("使用自定义前端产物（桌面壳门控构建）");
 if (!fs.existsSync(path.join(webDist, "index.html"))) fail(`缺少 ${path.relative(repoRoot, path.join(webDist, "index.html"))}（先构建前端；默认跑 pnpm --filter @gx/web build，桌面壳跑 build:web:shell 后用 --web-dist 指向其产物，base='/'）`);

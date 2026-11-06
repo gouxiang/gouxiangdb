@@ -1,0 +1,86 @@
+{
+  "_comment": "授权状态机判定测试向量。客户端开源仓与授权中心各自跑同一份；改规则必须同时改本文件。时间均为 unix 秒，expiresAt 相对 epoch 常量。",
+  "constants": { "FREE_SEATS": 5, "GRACE_SECONDS": 2592000, "T0": 1800000000 },
+  "vectors": [
+    {
+      "id": "free-under-5",
+      "desc": "从未付费，人数未超 5",
+      "input": { "mode": "enforce", "hasEntitlement": false, "everCommercial": false, "grandfathered": false, "now": "T0" },
+      "expect": { "verdict": "free", "seats": 5 }
+    },
+    {
+      "id": "grandfathered-no-suspend",
+      "desc": "升级前已 10 人的老团队，从未付费：只拦新增，不挂老号",
+      "input": { "mode": "enforce", "hasEntitlement": false, "everCommercial": false, "grandfathered": true, "now": "T0" },
+      "expect": { "verdict": "grandfathered", "seats": 5 }
+    },
+    {
+      "id": "licensed",
+      "desc": "单据有效期内",
+      "input": { "mode": "enforce", "hasEntitlement": true, "revoked": false, "seats": 10, "expiresAt": "T0+400d", "everCommercial": true, "grandfathered": false, "now": "T0" },
+      "expect": { "verdict": "licensed", "seats": 10 }
+    },
+    {
+      "id": "grace-day-10",
+      "desc": "过期 10 天，宽限内：全员可用，仅提醒",
+      "input": { "mode": "enforce", "hasEntitlement": true, "seats": 10, "expiresAt": "T0-10d", "now": "T0" },
+      "expect": { "verdict": "grace", "seats": 10 }
+    },
+    {
+      "id": "expired-suspend",
+      "desc": "过期 31 天：回落 5，挂起超额",
+      "input": { "mode": "enforce", "hasEntitlement": true, "seats": 10, "expiresAt": "T0-31d", "now": "T0" },
+      "expect": { "verdict": "expired", "seats": 5 }
+    },
+    {
+      "id": "deleted-entitlement-ever-commercial",
+      "desc": "曾付费，删本地单据：仍按 expired 挂起（防删痕迹逃逸）",
+      "input": { "mode": "enforce", "hasEntitlement": false, "everCommercial": true, "grandfathered": false, "now": "T0" },
+      "expect": { "verdict": "expired", "seats": 5 }
+    },
+    {
+      "id": "revoked-fallback",
+      "desc": "收到吊销单据（已验签、带 revoked 标记）：invalid，回落 5；客户端清商业缓存但保留 everCommercial",
+      "input": { "mode": "enforce", "hasEntitlement": true, "revoked": true, "seats": 10, "expiresAt": "T0+400d", "everCommercial": true, "now": "T0" },
+      "expect": { "verdict": "invalid", "seats": 5 }
+    },
+    {
+      "id": "mode-off-bypass",
+      "desc": "开关 off：与今天行为一致",
+      "input": { "mode": "off", "hasEntitlement": false, "everCommercial": false, "grandfathered": false, "now": "T0" },
+      "expect": { "verdict": "bypassed", "seats": "Infinity" }
+    }
+  ],
+  "suspendList": [
+    {
+      "id": "keep-earliest-5",
+      "desc": "10 人、seats=5：按建号顺序保留最早 5 人",
+      "users": [
+        { "id": "u1", "createdAt": 1, "role": "member" },
+        { "id": "u2", "createdAt": 2, "role": "member" },
+        { "id": "u3", "createdAt": 3, "role": "member" },
+        { "id": "u4", "createdAt": 4, "role": "member" },
+        { "id": "u5", "createdAt": 5, "role": "member" },
+        { "id": "u6", "createdAt": 6, "role": "member" },
+        { "id": "u7", "createdAt": 7, "role": "member" }
+      ],
+      "seats": 5,
+      "expect": { "keep": ["u1", "u2", "u3", "u4", "u5"], "suspend": ["u6", "u7"] }
+    },
+    {
+      "id": "admin-guarantee",
+      "desc": "前 5 名无管理员：owner 顶替最末非管理员，保证有人能登录续费",
+      "users": [
+        { "id": "u1", "createdAt": 1, "role": "member" },
+        { "id": "u2", "createdAt": 2, "role": "member" },
+        { "id": "u3", "createdAt": 3, "role": "member" },
+        { "id": "u4", "createdAt": 4, "role": "member" },
+        { "id": "u5", "createdAt": 5, "role": "member" },
+        { "id": "u6", "createdAt": 6, "role": "member" },
+        { "id": "owner", "createdAt": 99, "role": "owner" }
+      ],
+      "seats": 5,
+      "expect": { "keepContains": ["u1", "u2", "u3", "u4", "owner"], "suspendContains": ["u5"] }
+    }
+  ]
+}

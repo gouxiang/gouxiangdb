@@ -189,8 +189,9 @@ export interface SecondaryRowDrag {
 
 /**
  * 二级实体行（第三批）：点整行进对应的表 / 文档 / 画布。行尾三点菜单按行类型回挂：
- * 表行 → 重命名 / 编辑表单 / 复制表×2 / 清空数据 / 删除表（见 SecondaryNavTableOps）；文档行 → 拖拽
- * 改层级（见 SecondaryNavKbOps），菜单不挂（后端无文档级其它行操作）。菜单由调用点给出，不给不渲染。
+ * 表行 → 重命名 / 编辑表单 / 复制表×2 / 清空数据 / 删除表（见 SecondaryNavTableOps）；
+ * 文档 / 画布行 → 重命名 / 图标与颜色 / 删除（见 SecondaryNavKbOps），其中文档行另挂拖拽改层级、
+ * 画布行不参与。菜单由调用点给出，不给或给空数组都不渲染三点（无权限即不渲染，不做禁用假入口）。
  */
 export function SecondaryRow({
   kind,

@@ -41,6 +41,8 @@ import { BrandingTitle } from "./features/branding/BrandingTitle";
 import { WorkspaceSettingsPage } from "./features/workspace/WorkspaceSettingsPage";
 import PermPanel from "./features/authz/PermPanel";
 import { NodeLauncherGate } from "./node/NodeLauncherGate";
+import { LicenseGateHost } from "./features/license/LicenseGateHost";
+import { GraceBanner } from "./features/license/GraceBanner";
 import { launcherEnabled } from "./node/desktopGate";
 import { useActiveSession } from "./node/activeSession";
 import { useHasActiveNode, isNodeGateExemptPath } from "./node/useHasActiveNode";
@@ -165,6 +167,9 @@ export default function App() {
     <div className="gx-shell-app flex h-full flex-col">
       {/* R-D-19 离线横幅：在线时渲染 null（零布局影响）；恢复后自动消失 */}
       <OfflineBanner />
+      {/* 授权宽限/到期非阻塞横幅：grace/expired/invalid 且未挂起时出现，推动内容而非悬浮遮挡；
+          组件内部按认证态与豁免路径（/login、/launcher、/s、/share、/join、/invite）门控。 */}
+      <GraceBanner />
       {/* 浏览器标题跟随后台品牌产品名（所有路由共享，含登录页/公开分享页） */}
       <BrandingTitle />
       {/* 主内容区：壳内 flex:1 自适应，把底部一行让给 ShellStatusDock（见 index.css
@@ -220,6 +225,12 @@ export default function App() {
             <RequireAuth>
               <RequirePasswordChanged>
                 <ErrorBoundary key={`shell-${boundaryKey}`}>
+                  {/*
+                    授权闸门全局宿主（挂起全屏页 + 满员弹窗）：位于受保护布局路由内，
+                    只覆盖登录后业务页；/login、/launcher、/s、/share、/join、/invite 不挂载。
+                    fixed 覆盖层与具体壳无关，三个业务壳（Workspace/App/Kb）都被覆盖。
+                  */}
+                  <LicenseGateHost />
                   <ShellGate />
                 </ErrorBoundary>
               </RequirePasswordChanged>

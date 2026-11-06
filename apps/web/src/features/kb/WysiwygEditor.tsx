@@ -10,7 +10,10 @@ import { Fragment, memo, useCallback, useEffect, useRef, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom";
 import { Icon, type IconName } from "../../components/icons";
 import { ContextMenu, type ContextMenuItem, toast } from "../../components/ui";
+import { confirmAction } from "../../components/feedback";
 import { ColorPicker } from "../../components/ColorPicker";
+// 远端结构回放防丢兜底：本地有、Y 回放缺失的画布/表格围栏块在此被克隆补回，绝不静默抹掉。
+import { reconcileRemoteBlocks } from "./embed-reconcile";
 import { EntityPicker, type PickedEntity } from "../../components/EntityPicker";
 import { internalHref } from "../../lib/internal-links";
 import { COPY_FAIL_HINT_LINK, copyText } from "../../lib/clipboard";
@@ -432,12 +435,18 @@ export function WysiwygEditor({
 
   useEffect(() => {
     if (!collabBinding) return;
-    return onRemoteStructure((next) => {
+    return onRemoteStructure((incoming) => {
       // 组词中绝不动 DOM（会把浏览器维护的 composition span 冲掉）
       if (isComposingRef.current) return;
-      blocksRef.current = next;
-      setBlocks(next);
-      onChange(blocksToMd(next));
+      // P0 防丢：重连回放/远端结构变更若缺了本地已插入的画布/表格围栏块，先保守补回，
+      // 只在本地编辑器侧对齐结构、不回写 Y（避免与对端互踢引发回放风暴）。
+      const { blocks: merged, recovered } = reconcileRemoteBlocks(blocksRef.current, incoming);
+      if (recovered.length > 0) {
+        toast(`已保留 ${recovered.length} 个同步过程中缺失的画布/表格引用，避免内容丢失`, "success");
+      }
+      blocksRef.current = merged;
+      setBlocks(merged);
+      onChange(blocksToMd(merged));
     });
   }, [collabBinding, onRemoteStructure, onChange]);
 
@@ -941,6 +950,22 @@ export function WysiwygEditor({
       if (el) placeCaretEnd(el);
       else rootRef.current?.focus();
     });
+  }
+
+  /**
+   * 移除画布内嵌引用：二次确认后才真正删除块。
+   * deleteBlock 只动当前文档的围栏块，不会删除被引用的画布本体；用户取消则原样保留，防误触丢引用。
+   * 注意：stopPropagation 必须在 await 之前的同步阶段执行（异步回调里事件早已冒泡完毕，拦不住）。
+   */
+  async function requestRemoveCanvasEmbed(id: string) {
+    const ok = await confirmAction({
+      title: "移除画布引用",
+      confirmText: "移除画布引用",
+      level: 2,
+      description: "仅移除本文档里的引用，不会删除被引用的画布本体。",
+    });
+    if (!ok) return;
+    deleteBlock(id);
   }
 
   /** 在原子块下方插入一个空段落并聚焦，保证光标总能落到预览组件之后 */
@@ -2130,7 +2155,11 @@ export function WysiwygEditor({
                     className="kb-wy-embed-del"
                     title="移除画布引用"
                     contentEditable={false}
-                    onClick={(e) => { e.stopPropagation(); deleteBlock(b.id); }}
+                    // stopPropagation 须在同步阶段完成；确认弹窗在异步函数内，用户取消则不删除。
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void requestRemoveCanvasEmbed(b.id);
+                    }}
                   >
                     <Icon name="close" size={13} />
                   </button>
@@ -2138,6 +2167,32 @@ export function WysiwygEditor({
               </div>
             );
           }
+          // 围栏体内 docId 缺失/损坏：不再静默回落成普通代码框（那会让用户误以为引用还在），
+          // 显式渲染失效卡；「移除」为直删免确认（本就是损坏引用，无再次确认价值），只读态隐藏该按钮。
+          return (
+            <div key={b.id} data-block={b.id} className="kb-wy-block kb-wy-canvas-embed" contentEditable={false}>
+              <div className="mb-3 flex items-center gap-2 rounded-gx-lg border border-dashed border-gx-border bg-gx-bg px-3 py-4 text-gx-12 text-gx-text-hint">
+                <Icon name="alertCircle" size={15} />
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="font-medium text-gx-text-secondary">失效的画布引用</span>
+                  <span className="text-gx-text-hint">画布 id 缺失或已损坏</span>
+                </div>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    className="inline-flex h-7 shrink-0 items-center rounded-gx-sm border border-gx-border bg-gx-surface px-2.5 text-gx-12 text-gx-text-secondary transition-colors duration-150 hover:bg-gx-bg"
+                    contentEditable={false}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteBlock(b.id);
+                    }}
+                  >
+                    移除
+                  </button>
+                )}
+              </div>
+            </div>
+          );
         }
         return (
           <div key={b.id} data-block={b.id} className="kb-wy-block kb-wy-code" data-focus={b.id} tabIndex={-1}>

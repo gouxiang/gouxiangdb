@@ -16,7 +16,13 @@ describe("GET /healthz", () => {
     };
     expect(body.status).toBe("ok");
     expect(body.service).toBe("gouxiangdb-api");
-    expect(body.version).toMatch(/^\d+\.\d+\.\d+$/);
+    // version 原样透传版本单源（根 package.json）。0.3.0 起根版本带 semver 构建短串
+    //（如 0.3.0+b863f29），healthz 不得剥离——否则会与 fpk manifest / 关于页产生版本漂移；
+    // 存活契约只要求「规范版本、非游离硬编码」，故允许 -prerelease / +build，
+    // 字符集与 src/__tests__/version.test.ts、packages/shared-types/src/update.ts VERSION_RE 对齐。
+    expect(body.version).toMatch(
+      /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+    );
     expect(Number.isNaN(Date.parse(body.time))).toBe(false);
   });
 });

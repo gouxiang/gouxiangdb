@@ -8,6 +8,7 @@
 //   ③ KB 新建文档 / 画布按当前 tab 建对类型
 //   ④ 导入导出收敛：工具栏常驻按钮 + L2 / 更多菜单不再重复
 //   ⑤ 列表末尾回收站行按容器直跳
+//   ⑥ KB 文档 / 画布行尾菜单（重命名 / 图标与颜色 / 删除）回挂，表行行为不变
 //
 // hooks 全部给桩：本文件只断言「拿到数据/权限后渲染什么」与「动作接到哪个 mutation」，
 // 不牵扯取数与真实网络。
@@ -48,6 +49,10 @@ vi.mock("../kb/kb-hooks", () => ({
   useKb: () => ({ data: { role: kbRole } }),
   useCreateDoc: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useMoveDoc: () => ({ mutateAsync: vi.fn() }),
+  // 行菜单（重命名 / 图标与颜色 / 删除）回挂后，KbOps 无条件调用这三个 hook；SSR 回归只给桩。
+  useRenameDoc: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteDoc: () => ({ mutateAsync: vi.fn() }),
+  useRestoreDoc: () => ({ mutateAsync: vi.fn() }),
 }));
 
 import { SecondaryNav, type SecondaryContainer } from "./SecondaryNav";
@@ -235,5 +240,87 @@ describe("⑤ 回收站入口：按当前容器直跳", () => {
     const app = read("./../../App.tsx");
     expect(app).toContain('path="/base/:baseId/trash"');
     expect(app).toContain('path="/kb/:kbId/trash"');
+  });
+});
+
+describe("⑥ KB 文档 / 画布行尾菜单：重命名 / 图标与颜色 / 删除回挂（表行行为不变）", () => {
+  const kbOpsSrc = read("./SecondaryNavKbOps.tsx");
+  const sectionsSrc = read("./SecondaryNavSections.tsx");
+  const navSrc = read("./SecondaryNav.tsx");
+
+  it("三项菜单齐全、图标语义正确，删除为 danger 且排在最后", () => {
+    for (const label of ["重命名", "图标与颜色", "删除"]) {
+      expect(kbOpsSrc).toContain(label);
+    }
+    // 内置 Icon 体系（非 emoji）：edit / palette / trash，删除走 danger 红字
+    expect(kbOpsSrc).toContain('icon: "edit"');
+    expect(kbOpsSrc).toContain('icon: "palette"');
+    expect(kbOpsSrc).toContain('icon: "trash", label: "删除", danger: true');
+  });
+
+  it("全部复用 kb-hooks 现成能力与全局确认/撤销，不新造 fetch", () => {
+    // 改名 / 图标走同一个 useRenameDoc 的字符串 patch 与对象 patch 双通道
+    expect(kbOpsSrc).toContain("useRenameDoc(");
+    expect(kbOpsSrc).toContain("mutateAsync(renaming.name.trim())");
+    expect(kbOpsSrc).toContain("mutateAsync({ icon: next.icon, iconColor: next.iconColor })");
+    // 删除：L2 可恢复确认 + useDeleteDoc + 撤销 toast（useRestoreDoc），与旧壳 KbTree.doDelete 同源
+    expect(kbOpsSrc).toContain("useDeleteDoc(");
+    expect(kbOpsSrc).toContain("useRestoreDoc(");
+    expect(kbOpsSrc).toContain("confirmSoftDelete({");
+    expect(kbOpsSrc).toContain("toastDeleted({");
+    // 无目标时用哨兵 id 占位（同 KbTree），避免 useRenameDoc 指向真实文档
+    expect(kbOpsSrc).toContain('"__none__"');
+    // 删的是当前所在项 → 回跳库首页，不停死路由
+    expect(kbOpsSrc).toContain('navigate(`/kb/${bid}`)');
+    // 不允许裸 fetch
+    expect(code("./SecondaryNavKbOps.tsx")).not.toContain("fetch(");
+  });
+
+  it("无写权限（viewer）时 rowMenuItems 恒返回 []，行尾不渲染三点（非 disabled 假入口）", () => {
+    expect(kbOpsSrc).toContain("if (!canCreate) return [];");
+  });
+
+  it("行尾触发按钮用内置 moreVertical 图标，空 items 只渲染占位（显隐不改行宽）", () => {
+    expect(sectionsSrc).toContain('<Icon name="moreVertical" size={14} />');
+    expect(sectionsSrc).toContain("if (items.length === 0) return <span aria-hidden");
+  });
+
+  it("SecondaryNav 把 doc/canvas 行接到 kbOps.rowMenuItems，并按族给 a11y 菜单名", () => {
+    expect(navSrc).toContain("kbOps.rowMenuItems({");
+    expect(navSrc).toContain('${row.kind === "canvas" ? "画布" : "文档"}操作菜单');
+  });
+
+  it("有权限：doc 行与 canvas 行都渲染行尾三点触发按钮（按当前 tab 各自出现）", () => {
+    docs = [
+      { id: "d1", kind: "doc", title: "上线手册", parentId: null },
+      { id: "c9", kind: "canvas", title: "架构草图", parentId: null },
+    ];
+    // 文档 tab：文档行有「文档操作菜单」触发按钮，画布行不在本 tab 列表
+    const docTab = render(KB, "/kb/k1/doc/d1");
+    expect(docTab).toContain('aria-label="上线手册 文档操作菜单"');
+    expect(docTab).not.toContain("画布操作菜单");
+
+    // 画布 tab：画布行有「画布操作菜单」触发按钮
+    const canvasTab = render(KB, "/kb/k1/canvas/c9");
+    expect(canvasTab).toContain('aria-label="架构草图 画布操作菜单"');
+    expect(canvasTab).not.toContain("文档操作菜单");
+  });
+
+  it("无写权限（viewer）：doc/canvas 行尾都不渲染三点入口", () => {
+    kbRole = "viewer";
+    docs = [
+      { id: "d1", kind: "doc", title: "上线手册", parentId: null },
+      { id: "c9", kind: "canvas", title: "架构草图", parentId: null },
+    ];
+    expect(render(KB, "/kb/k1/doc/d1")).not.toContain("文档操作菜单");
+    expect(render(KB, "/kb/k1/canvas/c9")).not.toContain("画布操作菜单");
+  });
+
+  it("表行菜单行为不变：base 容器仍是表操作菜单，且不泄漏 KB 菜单标签", () => {
+    tables = [{ id: "t1", baseId: "b1", name: "数据表 1", icon: null, iconColor: null }];
+    const html = render(BASE, "/base/b1/table/t1");
+    expect(html).toContain('aria-label="数据表 1 表操作菜单"');
+    expect(html).not.toContain("文档操作菜单");
+    expect(html).not.toContain("画布操作菜单");
   });
 });

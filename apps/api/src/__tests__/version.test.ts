@@ -30,7 +30,11 @@ describe("VERSION 单源", () => {
     expect(VERSION).not.toBe("0.0.0-dev");
   });
 
-  it("符合 semver x.y.z 形态", () => {
-    expect(VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+  it("符合 semver x.y.z 形态（允许 -prerelease / +build）", () => {
+    // 0.3.0 起根版本带构建短串（如 0.3.0+b863f29），渠道/dist 可区分同一核心版本的不同构建；
+    // 字符集与 packages/shared-types/src/update.ts 的 VERSION_RE 对齐。
+    expect(VERSION).toMatch(
+      /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+    );
   });
 });

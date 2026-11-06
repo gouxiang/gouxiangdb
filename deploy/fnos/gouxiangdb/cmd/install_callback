@@ -10,6 +10,14 @@ export PATH=/var/apps/nodejs_v22/target/bin:$PATH
 APP_DIR="${TRIM_APPDEST}/server"
 DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
 ENV_FILE="${TRIM_PKGETC}/gouxiangdb.env"
+LOG_FILE="${TRIM_PKGVAR}/app.log"
+
+# 触库前清旧内核孤儿的共享实现（与 upgrade/main/uninstall 同源）。覆盖安装走的是【旧包的
+# uninstall_callback】（旧版不杀进程），旧内核会活到本回调；必须在下方 migrate 打开数据库
+# 之前清掉，否则旧连接持已删 WAL/SHM 与 migrate 争库 → 间歇 SQLite 522。
+GX_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)"
+# shellcheck source=reap-kernel-helper
+[ -f "$GX_SCRIPT_DIR/reap-kernel-helper" ] && source "$GX_SCRIPT_DIR/reap-kernel-helper" || true
 
 mkdir -p "$DATA_DIR/uploads" "$DATA_DIR/backups" "${TRIM_PKGVAR}/log"
 
@@ -47,6 +55,9 @@ fi
 cd "$APP_DIR"
 # shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
+# ★ migrate 打开数据库前，先清掉覆盖安装时旧 uninstall_callback 没杀掉、仍持 app.db/WAL 的
+#   旧内核孤儿（含 pid 文件缺失、应用目录被删重建致 cwd 带 (deleted) 的情形）。
+gx_reap_stale_kernel
 node node_modules/prisma/build/index.js migrate deploy --schema=prisma/schema.prisma \
   || { echo "prisma migrate deploy failed on install" > "$TRIM_TEMP_LOGFILE"; exit 1; }
 

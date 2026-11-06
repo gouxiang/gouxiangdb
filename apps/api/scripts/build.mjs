@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash, createPublicKey } from "node:crypto";
 import esbuild from "esbuild";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -23,6 +24,52 @@ if (typeof rootPkg.version !== "string" || !rootPkg.version) {
   console.error("[build] 根 package.json 缺少 version，无法注入 GX_VERSION");
   process.exit(1);
 }
+
+// 商业授权成品构建开关：GX_LICENSE_PROD=1 时把信任根【物理换源】为生产环（keyring.prod.ts，
+// 只内置生产公钥 ff02db72），开发钥 keyring.dev.ts 根本不进入模块图；并由 configLicense 据此
+// 把授权模式下限钳到 verify、默认生产 URL。默认 false：vitest/tsx/0.2.7 等非授权渠道行为
+// 逐字节不变（开发钥 da469cd3 + 默认 off）。
+//
+// 为什么用 onResolve 换源而非全局 define + 死分支：默认（非 minify）esbuild 不保证折叠/消除
+// 未命中常量分支，实测两把 PEM 会同时残留在产物里。onResolve 让开发钥文件在生产构建中压根
+// 不被解析，剔除是确定性的、不依赖压缩器行为。
+const licenseProd = ["1", "true", "yes"].includes(
+  (process.env.GX_LICENSE_PROD ?? "").trim().toLowerCase(),
+);
+
+const licenseDir = path.join(apiRoot, "src/domain/license");
+const devRingId = path.join(licenseDir, "keyring.dev.ts");
+const prodRingId = path.join(licenseDir, "keyring.prod.ts");
+
+if (licenseProd) {
+  // 构建期独立核对生产信任根：从 keyring.prod.ts 单一事实源抽取 PEM，自派生 kid 必须为
+  // ff02db72，否则中止构建（宁可打包失败也不内置错钥匙）。
+  const prodSrc = fs.readFileSync(prodRingId, "utf8");
+  const m = prodSrc.match(/pem:\s*`([^`]+)`/);
+  if (!m) {
+    console.error("[build] GX_LICENSE_PROD=1 但 keyring.prod.ts 未找到生产 PEM");
+    process.exit(1);
+  }
+  const der = createPublicKey(m[1]).export({ type: "spki", format: "der" });
+  const kid = createHash("sha256").update(der).digest("hex").slice(0, 8);
+  if (kid !== "ff02db72") {
+    console.error(`[build] 生产公钥 kid 自检失败：期望 ff02db72，实得 ${kid}`);
+    process.exit(1);
+  }
+  // 同时确认开发钥确实不参与生产（双保险：换源后即便有别处误引 dev 也在此显式可见）。
+  console.log("[build] 商业授权成品构建：信任根物理换源为生产环，kid=ff02db72 自检通过");
+}
+
+/** 生产构建：把对 keyring.dev 的引用重定向到 keyring.prod（含 .js/.ts 两种说明符）。 */
+const licenseKeyringSwapPlugin = {
+  name: "gx-license-keyring-swap",
+  setup(build) {
+    if (!licenseProd) return;
+    build.onResolve({ filter: /\/keyring\.dev(\.js)?$/ }, (args) => ({
+      path: prodRingId,
+    }));
+  },
+};
 
 const distDir = path.join(apiRoot, "dist");
 const outFile = path.join(distDir, "index.js");
@@ -85,6 +132,8 @@ await esbuild.build({
   // 这里只外置下列运行时/原生依赖，@gx/shared-types 经 tsconfig paths 内化。
   external,
   logLevel: "info",
+  // 生产授权构建：onResolve 把信任根换源为 keyring.prod（开发钥不进模块图）。
+  plugins: [licenseKeyringSwapPlugin],
   define: {
     "process.env.GX_VERSION": JSON.stringify(rootPkg.version),
   },
@@ -112,5 +161,5 @@ const stdioStat = fs.statSync(stdioOutFile);
 const navReconcileStat = fs.statSync(navReconcileOutFile);
 const initAdminStat = fs.statSync(initAdminOutFile);
 console.log(
-  `[build] OK dist/index.js ${(stat.size / 1024).toFixed(1)} KiB, dist/mcp-stdio.js ${(stdioStat.size / 1024).toFixed(1)} KiB, dist/nav-reconcile.js ${(navReconcileStat.size / 1024).toFixed(1)} KiB, dist/init-admin.js ${(initAdminStat.size / 1024).toFixed(1)} KiB, GX_VERSION=${rootPkg.version}`,
+  `[build] OK dist/index.js ${(stat.size / 1024).toFixed(1)} KiB, dist/mcp-stdio.js ${(stdioStat.size / 1024).toFixed(1)} KiB, dist/nav-reconcile.js ${(navReconcileStat.size / 1024).toFixed(1)} KiB, dist/init-admin.js ${(initAdminStat.size / 1024).toFixed(1)} KiB, GX_VERSION=${rootPkg.version}, GX_LICENSE_PROD=${licenseProd}`,
 );

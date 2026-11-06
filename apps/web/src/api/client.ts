@@ -95,6 +95,8 @@ import { saveSessionFrom } from "../lib/session-from";
 import { dataSourceResolver } from "../node/datasource";
 import { isLocalNodeId } from "../node/session";
 import { notifyRemoteUnauthorized } from "../node/unauthorizedBridge";
+// 授权闸门收口：!res.ok 时在 throw 前旁路通知（store 不反向依赖本文件，无循环依赖）。
+import { notifyLicenseError } from "../store/licenseGate";
 
 // API 同源前缀解析：
 //  - 显式 VITE_API_URL（非空）→ 绝对来源，去尾斜杠（保留跨域/独立域名能力）
@@ -243,7 +245,7 @@ export function isSelfCredential401Path(path: string): boolean {
 /** 并发请求可能同时 401，只处理一次，避免重复跳转/重复通知 */
 let unauthorizedHandled = false;
 
-function handleUnauthorized(): void {
+export function handleUnauthorized(): void {
   if (unauthorizedHandled) return;
   unauthorizedHandled = true;
   // 纵深防御：匿名公开分享页（/s/:token/...）本就免登录，其上任何私有接口 401
@@ -347,6 +349,10 @@ export async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T>
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    // 授权两道闸门（LICENSE_SEAT_SUSPENDED/LICENSE_SEAT_LIMIT）旁路收口：在 throw 前
+    // 通知全局授权闸门 store，由 LicenseGateHost 渲染挂起页/满员弹窗；不改变下面的 throw
+    // 与 401 既有行为（调用方仍照常拿到 ApiError 走自己的错误分支）。
+    notifyLicenseError(body);
     // 登录态失效（token 过期 / 被移除 / 服务端重启换密钥）：清理本地凭据并回登录页
     if (res.status === 401 && !isSelfCredential401Path(path)) handleUnauthorized();
     throw new ApiError(res.status, body, parseRetryAfter(res.headers.get("Retry-After")));

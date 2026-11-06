@@ -538,19 +538,38 @@ impl LocalKernelPlanner {
     }
 }
 
+/// 桌面主内核的商业授权通电变量（0.3.0）：本地侧车本身就是授权客户端，壳必须显式注入，
+/// 否则侧车按默认 off 启动、零心跳零闸门，桌面端直接绕过商业授权。
+/// - URL：正式授权中心（与内置生产公钥 ff02db72 配套，dist 须为 GX_LICENSE_PROD=1 构建）；
+/// - MODE：首发 verify（全通电、闸门只提示不锁人）；可在 dataDir 放 license.mode=enforce 热切收紧；
+/// - PLATFORM/PACKAGE_TYPE：desktop/dmg，心跳枚举须精确匹配授权中心 zod 校验。
+/// 仅经 build_kernel_plan 的 extra_daemon_env 注入常驻 dist/index.js，绝不进 migrate/nav 子进程。
+fn local_license_daemon_env() -> Vec<(String, String)> {
+    vec![
+        (
+            "GX_LICENSE_URL".to_string(),
+            "https://gouxiang.hn.takin.cc".to_string(),
+        ),
+        ("GX_LICENSE_MODE".to_string(), "verify".to_string()),
+        ("GX_LICENSE_PLATFORM".to_string(), "desktop".to_string()),
+        ("GX_PACKAGE_TYPE".to_string(), "dmg".to_string()),
+    ]
+}
+
 impl KernelPlanner for LocalKernelPlanner {
     fn data_dir(&self) -> &Path {
         &self.data_dir
     }
 
     fn plan(&self, port: u16) -> Result<StartPlan, String> {
-        // 主库：无额外常驻 env（不注入任何副本变量）。
+        // 主库：注入商业授权 4 变量（不携带任何副本变量）。经 extra_daemon_env 只进常驻
+        // dist/index.js，绝不进 migrate/nav 子进程（与副本变量同一隔离机制）。
         build_kernel_plan(
             &self.resource_dir,
             &self.data_dir,
             self.secrets.as_ref(),
             port,
-            &[],
+            &local_license_daemon_env(),
         )
     }
 }
