@@ -1,3 +1,56 @@
+# 构想工作台 v0.3.0 正式版发版说明（开源归一版：AGPLv3 双授权 + 授权客户端层 + 三修复）
+
+- **对外版本名 / Git tag（拟）**：`v0.3.0`（正式版，**非预发布**；是否在 tag/Release 名追加构建短串由发布决策点定，代码内版本号保持纯 `0.3.0`）
+- **代码内版本号**：纯 `0.3.0`（根 `package.json` / `tauri.conf.json` / `Cargo.toml` / `Cargo.lock` 四处单源，本地提交 `bd17e7d3`；semver `+build` 不被 Cargo 与 macOS CFBundleVersion 接受，短串只落 tag/Release 名）。
+- **封版提交链（本地，未 push）**：`a96d7a8f`（0.3.0 发布文档）→ `bd17e7d3`（版本封版）→ `863e5292`（开源归一：授权客户端层仅验签公钥 + 席位门控 + 三修复叠接 AGPL main）→ `e5bfed88`（AGPLv3 + 双授权 + 忽略 `.workbuddy`/私有 `license-server`）。
+- **本版主题**：① 项目以 **GNU AGPLv3 全量开源**，采用「开源许可 + 商业许可」双授权，**5 人及以下免费**；② 客户端授权层随公开仓（仅 Ed25519 验签公钥、席位门控、授权 UI），**授权签发后台 `license-server/` 与签名私钥保持私有、不在本仓**；③ 叠接三处真机缺陷修复（文档连写防丢 / 远端嵌入防丢 / 导航丢失入口接回）。**无数据库迁移（仍 44 枚），授权信息走 KV 不建表。**
+- **对外客户向说明（三段式）**：`docs/release-notes/0.3.0.md`；授权口径以 `docs/legal/DUAL-LICENSE.md` 与根 `LICENSE`（AGPLv3 全文）为准。
+
+## 〇、授权层关键事实（发布前必读，防误锁用户）
+
+- **普通开源构建默认 `GX_LICENSE_MODE=off`**：零闸门、不出网、行为逐字节同旧版。
+- **双端发布包经 `GX_LICENSE_PROD=1` 物理换入生产信任根**（fpk `build-fpk.mjs`、dmg `stage-node-sidecar.mjs` 均硬钉并做产物断言）：内置公钥仅生产钥 **kid=`ff02db72`**，开发钥 `da469cd3` 物理不进 bundle（构建期 esbuild 换源，非运行时分支）。
+- **生产包模式下限为 `verify`（只提示、不拦截）**：授权 UI 全通电可见，但 `seatAddBlockReason` 在非 enforce 恒返回 null——**不锁账号、不中断使用**；仅 `enforce` 才真拦第 6 席（闸门①造人 403、闸门②软挂起，软挂起不落库不改 status）。
+- **免费档 5 席**：占席 = ACTIVE+INVITED；超 5 人老团队首次启用一次性记 grandfathered，老号永不挂、仅新增需商业席位。
+- 授权中心默认 `https://gouxiang.hn.takin.cc`；心跳仅核授权/席位，不涉业务数据；连不上只显示未核验、不锁定。
+
+## 一、质量门实数（封版 863e5292 + 版本/文档两提交，VM15 权威）
+
+| 门 | 结果 | 证据 |
+|---|---|---|
+| ① HEAD 权威 8 步质量门 | **全 PASS，CI_EXIT_CODE=0**（工具版本/frozen install/prisma generate/typecheck/生产构建+冒烟/全量测试/lint/migrate dry-run） | `/tmp/gx-head-ci.log` |
+| ② 全量测试（HEAD） | api **365 文件 / 3840 通过 +15 跳过（3855），0 失败**；web **211 文件 / 2738 通过，0 失败**；canvas 51、shared-types 181 全绿 | head-ci 汇总行 |
+| ② 全量测试（BASE=e5bfed88 对照） | api **349 文件 / 3675 通过 +16 跳过（3692）**、web **205 文件 / 2666 全绿**；唯一初红 `smoke-dist` 系裸跑未 build 的环境假红，build 后单跑 **4/4 转绿** | `/tmp/gx-base-full-rerun.log` |
+| ③ 三包 tsc / eslint | tsc `--noEmit` **0 错误**；eslint **0 error**（仅阈值内 warning：api≤5、web≤114、shared=0） | head-ci step4/7，整体 exit 0 |
+| ④ 迁移 | **44/44** migrate dry-run 成功，integrity_check=ok，**本版零新增** | head-ci step8 |
+| 附：测试收集数恒等 | BASE 571 → HEAD 593 测试文件；**BASE 有 HEAD 无 = 空集**（只增不减），净增 22 个全属授权域（14 license + 1 seatGate）与三修复/授权 UI（7 web） | `/tmp/gx-collect-parity.txt` |
+| 附：S0 旧三表决策 golden | base/head 两树各 **2 文件 / 16 用例全过、逐一对称**（authz characterization，非 verify-golden.mjs 升级演练） | `/tmp/gx-base-s0-golden.log`、`gx-head-s0-golden.log` |
+| 供应链红线 | 生产包信任根断言通过：dist **仅含 ff02db72、无 da469cd3**；aws-lc-rs 计数须保持 0（Rust 壳，dmg 重打时复核） | fpk 构建日志 5.4.1 |
+
+## 二、安装包指纹
+
+### 飞牛 fnOS（x86_64）— 已构建定版（VM15，2026-11-06）
+- 文件：`gouxiangdb-0.3.0-x86.fpk`
+- 大小：**60,892,906 B（58.07 MiB）**
+- sha256：**`c7a62fcaf0e7187d212930fa107dea210ddb3bc971149d3027308e7d3cb97267`**（sidecar `*.fpk.sha256` 同值）
+- 构建：VM15 隔离纯树 `~/gx-rel030/gx-rel030`（Mac `git archive HEAD=a96d7a8f` 导出，无 `.git`/`.workbuddy`/`license-server`/`.env`）；`node deploy/fnos/build-fpk.mjs --arch x86`，FPK_EXIT=0。
+- 关键自检全过：`GX_VERSION=0.3.0 GX_LICENSE_PROD=true`；manifest.platform=x86/version=0.3.0；hoisted 布局 node_modules **零软链**、.bin 实体化 5 个；vec0.so linux-x64 ELF 在位；better-sqlite3 原生 .node 在位；产物冒烟 `/readyz` checks 全 true；信任根/入口一致性/品牌图标/禁带文件四项断言通过；不含更新只读令牌。
+- 已知良性告警：vite/esbuild css minify 两条 `Unexpected "/"`，源自源码中文注释内 `*/` 字符，**非本版回归**，构建 exit 0、2506 模块正常、冒烟通过。
+
+### macOS（arm64 / Apple 芯片）— 待重打（需戴总授权本机豁免）
+- **状态：尚未构建。** dmg 为 arm64 macOS 产物，VM15（x86 Linux）无法产出；Mac 本机 `scripts/guard/local-mem-guard.sh` 硬拦 cargo/rustc/tauri/vite/esbuild。**须戴总在场并显式豁免本机内存红线后**，按 0.2.7 实证链重打（门控 dist-shell + api esbuild 在 VM15 回传，Mac 仅 stage + Tauri CLI 2.12.3 `build --bundles app,dmg`，CARGO_BUILD_JOBS=2，外层 `codesign --force --sign -` 不带 --deep，ditto + hdiutil UDZO 重压保 FinderInfo=0）。
+- 文件名拟 `构想工作台_0.3.0_aarch64.dmg`；大小 / sha256 / deep-strict / gxnode 官方签 HX7739G8FX **待重打后回填本节**。
+
+## 三、诚实缺口 / 待戴总终审与授权
+
+1. **dmg 缺件 + 真机冒烟**：Mac 包未打；换装后两次冷启动冒烟（固定口/记忆跨重启）与卷宗图标目验待戴总在场。
+2. **不可逆发布动作未执行**：本地两个提交**仅本地、未 push**；tag、Gitea 公开 Release、双端包上传均待戴总终审 + 显式授权。
+3. **构建短串事实须当面明示**：三修复红线提交 `dbd9ebf/fb41114/6860341` 在仓库但位于旁支、**不在 open/0.3.0-merge 线性链**（链顶为 863e5292）；其**内容已手工并入 HEAD 树**并有配套测试（useDocPersistence 在途互斥 / embed-reconcile / SecondaryNav kbOps）。故代码内只用纯 0.3.0，不得在发布指纹写线性链上不存在的 hash；tag 短串若要用，应取真实线性提交。
+4. **AGPL 源码对应义务**：公开 Release 二进制须能对应公开源码（含授权客户端层）；本仓已含完整客户端授权层与公钥，满足；私有 `license-server/` 不随二进制分发、无开源义务。
+5. **在线自动更新仍不接通**：不带 update-manifest，菜单「检查更新」占位，手动下载。
+
+---
+
 # 构想工作台 v0.2.7-beta+775a35c 测试版发版说明（本机副本 / 离线同步「通电」版）
 
 - **对外版本名 / Git tag**：`v0.2.7-beta+775a35c`（**预发布 prerelease=true，Gitea Release id=14**）
