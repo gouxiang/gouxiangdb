@@ -1,0 +1,174 @@
+# 构想工作台 macOS arm64 dmg 云端构建（GitHub Actions 云 Mac）
+#
+# 为什么存在：本机是 16GB MacBook，cargo/tauri/vite/esbuild 重活受本地内存红线硬拦。
+# 本 workflow 把 0.2.7 已实证的 dmg 链路（stage -> Tauri build -> 外层 ad-hoc 重签 -> UDZO 重压）
+# 原样搬到 GitHub 托管的 Apple Silicon macOS runner 上执行，本机零重活，只负责下载产物比对哈希。
+#
+# 安全姿态：
+#   - workflow_dispatch 手动触发，不随 push 自动跑（公开仓标准 macOS runner 虽免费，仍避免误触）。
+#   - 零 secret：ad-hoc 签名（codesign -s -）无需 Apple Developer 账号；内置的只是公开 Ed25519 验签公钥。
+#   - GITHUB_TOKEN 权限收紧到只读；本流程不 push、不发 Release，只产 artifact。
+#   - 私有签发服务 license-server/ 与签名私钥不在本仓（.gitignore 已排除），云端拉到的是纯开源树。
+#
+# 与本地 release-artifacts/0.3.0/DMG-REBUILD-RUNBOOK.md 逐段对应；改链路时两处一起改。
+
+name: build-macos-dmg
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_artifact:
+        description: "构建完成后是否上传 dmg 为 workflow artifact"
+        type: boolean
+        default: true
+
+# 最小权限：本作业只读仓库、只传 artifact，不需要写权限。
+permissions:
+  contents: read
+
+# 单作业兜底超时（GitHub 单 job 硬上限 6h；本链路实测远低于此）。
+concurrency:
+  group: macos-dmg-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-dmg:
+    name: 构建 macOS arm64 dmg
+    runs-on: macos-15 # GitHub 托管 Apple Silicon（arm64）真机，stage 的 darwin/arm64 硬守卫原生通过
+    timeout-minutes: 90
+    env:
+      NODE_VERSION: "22.22.2" # 与随包 gxnode、better-sqlite3 NAPI 版本严格对齐
+      PNPM_VERSION: "9.0.0" # 与根 package.json packageManager 对齐
+      TAURI_CLI_VERSION: "2.12.3" # 0.2.7 实证版本；infoPlist 键以该版 schema 为准
+      CARGO_BUILD_JOBS: "2" # 限并发，贴近本地红线口径
+      GX_LICENSE_PROD: "1" # 生产信任根物理换源（kid=ff02db72，开发钥不进 bundle）
+      CODEBUDDY_SAFE_DELETE_ENABLED: "0"
+      DMG_NAME: "构想工作台_0.3.0_aarch64"
+
+    steps:
+      - name: 检出开源树
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: 安装 Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: 安装 Rust 工具链（aarch64-apple-darwin）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: 红线预检 - Cargo.lock 不得含 aws-lc-rs
+        run: |
+          set -euo pipefail
+          COUNT=$(grep -c "aws-lc" apps/desktop/src-tauri/Cargo.lock || true)
+          echo "aws-lc 出现次数=$COUNT（期望 0）"
+          test "$COUNT" -eq 0
+
+      - name: 安装根 workspace 依赖（frozen，含 pnpm patchedDependencies）
+        run: pnpm install --frozen-lockfile
+
+      - name: 预备随包官方 Node 运行时（darwin-arm64）到 stage 缓存路径
+        run: |
+          set -euo pipefail
+          CACHE_ROOT="$HOME/Library/Caches/gouxiangdb-desktop/node-runtime"
+          mkdir -p "$CACHE_ROOT"
+          cd "$CACHE_ROOT"
+          TARBALL="node-v${NODE_VERSION}-darwin-arm64.tar.gz"
+          curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/${TARBALL}"
+          tar -xzf "$TARBALL"
+          rm -f "$TARBALL"
+          test -x "node-v${NODE_VERSION}-darwin-arm64/bin/node"
+          "node-v${NODE_VERSION}-darwin-arm64/bin/node" -v
+
+      - name: 构建生产 API（GX_LICENSE_PROD=1 物理换源信任根）
+        run: pnpm --filter @gx/api run build
+
+      - name: 信任根硬断言（含生产公钥 ff02db72、绝不含开发钥 da469cd3）
+        run: |
+          set -euo pipefail
+          BUNDLE="apps/api/dist/index.js"
+          grep -qF "MCowBQYDK2VwAyEA3H50rDLJ72deqZxzrkq01i3aGAac7qKVVdoNMQmQtqQ=" "$BUNDLE" \
+            && echo "prod key ff02db72 OK"
+          if grep -qF "MCowBQYDK2VwAyEAt6uZnu9pde3XWPmkhFyN6q1SCvrPgyoMpHBTcvER5P4=" "$BUNDLE"; then
+            echo "::error::生产 bundle 残留开发公钥 da469cd3，中止"
+            exit 1
+          fi
+          echo "dev key absent OK"
+
+      - name: 构建桌面壳门控前端（dist-shell，base=/）
+        run: node apps/desktop/scripts/build-web-shell.mjs
+
+      - name: 安装 Tauri CLI 到临时工具目录（不改 package.json）
+        run: |
+          set -euo pipefail
+          CLI_DIR="$RUNNER_TEMP/tauri-cli"
+          npm install --prefix "$CLI_DIR" "@tauri-apps/cli@${TAURI_CLI_VERSION}"
+          test -f "$CLI_DIR/node_modules/@tauri-apps/cli/tauri.js"
+          echo "TAURI_JS=$CLI_DIR/node_modules/@tauri-apps/cli/tauri.js" >> "$GITHUB_ENV"
+
+      - name: stage 组装 sidecar 运行树（hoisted + arm64 硬自检 + 真建库冒烟 + 信任根硬门）
+        run: node apps/desktop/scripts/stage-node-sidecar.mjs --web-dist apps/web/dist-shell
+
+      - name: Tauri 构建 app 与 dmg（宿主 arm64，不带 --target）
+        working-directory: apps/desktop/src-tauri
+        run: node "$TAURI_JS" build --bundles app,dmg
+
+      - name: 外层 ad-hoc 重签（不带 --deep，保 gxnode 苹果官方签）并校验
+        run: |
+          set -euo pipefail
+          APP="$(find apps/desktop/src-tauri/target/release/bundle/macos -maxdepth 1 -name "*.app" | head -1)"
+          test -n "$APP"
+          echo "APP=$APP"
+          codesign --force --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          # gxnode 必须保留苹果官方签名 TeamIdentifier=HX7739G8FX
+          GXNODE="$APP/Contents/Resources/gxnode-aarch64-apple-darwin"
+          codesign -dv --verbose=4 "$GXNODE" 2>&1 | grep -i "TeamIdentifier=HX7739G8FX"
+          echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+
+      - name: UDZO 重压（可写 HFS+ -> rsync 不带 -E -> FinderInfo=0 -> zlib-9）
+        run: |
+          set -euo pipefail
+          STAGE="$(mktemp -d)"
+          rsync -a "$APP_PATH/" "$STAGE/构想工作台.app/"
+          hdiutil create -srcfolder "$STAGE" -fs HFS+ -volname "构想工作台" -ov /tmp/gx030-rw.dmg
+          mkdir -p release-out
+          hdiutil convert /tmp/gx030-rw.dmg -format UDZO -imagekey zlib-level=9 \
+            -o "release-out/${DMG_NAME}.dmg"
+
+      - name: 产物验收（指纹 + 迁移数 + 卷宗 FinderInfo）
+        run: |
+          set -euo pipefail
+          DMG="release-out/${DMG_NAME}.dmg"
+          ls -la "$DMG"
+          shasum -a 256 "$DMG" | tee "release-out/${DMG_NAME}.dmg.sha256"
+          # 迁移必须仍是 44 枚（本版零新增迁移）
+          MIG_COUNT=$(find apps/api/prisma/migrations -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+          echo "迁移目录数=$MIG_COUNT（期望 44）"
+          test "$MIG_COUNT" -eq 44
+          # 挂载抽检卷内 FinderInfo 必须为 0
+          MNT="$(mktemp -d)"
+          hdiutil attach "$DMG" -mountpoint "$MNT" -nobrowse -quiet
+          DOT_UNDERSCORE=$(find "$MNT" -name "._*" | wc -l | tr -d ' ')
+          echo "卷内 ._ 文件数=$DOT_UNDERSCORE（期望 0）"
+          test "$DOT_UNDERSCORE" -eq 0
+          hdiutil detach "$MNT" -quiet
+
+      - name: 上传 dmg 与 sha256 为 artifact
+        if: inputs.upload_artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gouxiangdb-030-macos-arm64-dmg
+          path: |
+            release-out/*.dmg
+            release-out/*.sha256
+          retention-days: 14
+          if-no-files-found: error
