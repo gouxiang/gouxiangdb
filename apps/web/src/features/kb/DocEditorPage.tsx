@@ -140,10 +140,16 @@ export default function DocEditorPage() {
     { rootRef: editorAreaRef },
   );
 
+  // 新文档基线重置：doc.id 变化（跨文档导航）时复位会话态。MarkdownEditor 的 key 含 doc.id，
+  // doc.id 一变整棵编辑器即 remount、其内部 mode 复位 wysiwyg（MarkdownEditor 的 useState 初值），
+  // 宿主 editorMode 必须同步复位——否则上一文档若停在 source，本文档的普通 wysiwyg 编辑会被第 8 参
+  // sourceMode 误打 sourceUnmerged（与重挂载分叉同因同果，触发路径为跨文档导航）。仅以 doc?.id 为
+  // 触发源：同文档内 id 不变、effect 不重跑，用户在当前文档切 source/wysiwyg 的模式选择不受影响。
   useEffect(() => {
     if (doc) {
       setTitle(doc.title);
       setOverrideContent(null);
+      setEditorMode("wysiwyg");
     }
   }, [doc?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
