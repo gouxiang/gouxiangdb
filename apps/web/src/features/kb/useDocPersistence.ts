@@ -12,6 +12,22 @@
 //   待在途 PUT 回来后再以「最新内容 + 刚回写的最新 baseVersion」发下一个 PUT。N 次快速改动
 //   因此塌缩成一条串行链，绝不并发两个携带相同 baseVersion 的 PUT，从根上消除单人无协作却
 //   自撞乐观锁 409 的问题。冲突（409）待裁决期间 drain 暂停，不自动续发，避免重复刷冲突框。
+//
+// ★ Y 通道接管（yOwned，修复 0.3.0 两个真机 bug 的统一根因）：
+//   桌面壳构建注入 VITE_OFFLINE_Y=1，文档页建立真实 Yjs 协同会话。此时整篇 Markdown 草稿与
+//   REST 乐观锁 PUT 仍是单机语义，与 Y 通道并存会出两类事故：
+//     · Bug A（草稿恢复条反复复活）：Y 远端回放无条件 onChange→markDirty→saveDraft，而协同态
+//       不发 PUT、drain 成功后的 clearDraft 永不触发，重进页面加载 effect 又据残留草稿弹恢复条。
+//     · Bug B（单人假 409）：服务端协同冷归结抬高 contentVersion 却无版本回灌，WS 掉线时
+//       collabActive 变 false 误降级走 REST PUT，携带过期 baseVersion 撞条件更新 count=0 → 409。
+//   yOwned 与第 6 参 collabActive 的语义差别（二者不可互换）：
+//     · collabActive 仅 status==="connected"，掉线（reconnecting/offline）即 false；
+//     · yOwned = isCollabBindingStatus(status, Y_OFFLINE)，覆盖所有「Y 已绑定并接管本文档持久化」
+//       的状态（门控开时含 connecting/reconnecting/offline），与 WysiwygEditor 的 Y 绑定真值同源。
+//   yOwned=true 时本 hook 全面让位：不发任何整篇 REST PUT（markDirty 防抖/flush keepalive/saveNow）、
+//   加载时不据本地草稿弹恢复条。仅保留 markDirty 的 saveDraft 作「源码态」崩溃兜底——源码模式
+//   （SourceEditor 纯 textarea，无 Y 绑定）下的文字改动在切回所见即所得前不进 Y.Doc，这份整篇
+//   草稿是其唯一落地兜底；它在 Y 接管期间不弹条，由 localMergedTick 合并后清理（见 DocEditorPage）。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "../../components/ui";
@@ -65,10 +81,22 @@ export function useDocPersistence(
    * 本地草稿照写不误：它是崩溃兜底，与谁负责落库无关。
    */
   collabActive = false,
+  /**
+   * Y 通道是否已绑定并接管本文档持久化（默认 false，与引入前逐字一致）。
+   * 与 collabActive 的关键差别：collabActive 仅认 "connected"，WS 短暂掉线即 false（会误降级走
+   * REST PUT 携带过期 baseVersion 撞假 409，即 Bug B）；yOwned 由 isCollabBindingStatus 计算，
+   * 门控开时覆盖 connecting/reconnecting/offline 全部 Y 绑定态，语义＝「Y 已接管，REST 必须让位」。
+   * 传 true 时：不发任何整篇 PUT、不排防抖/keepalive、加载时不弹草稿恢复条；仅保留 markDirty 的
+   * saveDraft 作源码态（无 Y 绑定窗口）崩溃兜底。非 Y 接管路径（false）行为逐字不变。
+   */
+  yOwned = false,
 ) {
   // 用 ref 读取，避免把 collabActive 变成下面所有回调的依赖（否则每次协同状态变化都会换引用）
   const collabActiveRef = useRef(collabActive);
   collabActiveRef.current = collabActive;
+  // 同理用 ref 读 yOwned：协同状态（含掉线/重连）频繁变化不应让 markDirty/flush/saveNow 换引用。
+  const yOwnedRef = useRef(yOwned);
+  yOwnedRef.current = yOwned;
   const qc = useQueryClient();
   const [status, setStatus] = useState<SaveStatus>("saved");
   const [recovered, setRecovered] = useState<Draft | null>(null);
@@ -126,8 +154,12 @@ export function useDocPersistence(
     versionRef.current = serverVersion;
     pending.current = null;
     setStatus("saved");
-    // 检查可恢复草稿
-    const d = hasRecoverableDraft(docId, serverContent);
+    // 检查可恢复草稿。
+    // ★ yOwned（Y 通道接管）时不据本地草稿弹恢复条（Bug A 根治）：Y 远端回放会无条件回流
+    //   onChange→markDirty→saveDraft 产生残留草稿，但内容的真源已是 Y.Doc，弹「恢复草稿」会让用户
+    //   在 CRDT 内容与整篇旧草稿间二选一，既误导又可能覆盖协同结果。源码态兜底草稿仍由 saveDraft
+    //   落盘（防真崩溃），只是不在此打扰用户；合并确认后由页面 localMergedTick 清掉该草稿键。
+    const d = yOwnedRef.current ? null : hasRecoverableDraft(docId, serverContent);
     setRecovered(d);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId, serverContent === undefined ? "" : serverContent, serverVersion]);
@@ -286,6 +318,17 @@ export function useDocPersistence(
     (content: string) => {
       if (!canEditRef.current) return;
       pending.current = content;
+      // ★ yOwned（Y 通道接管，含掉线/重连窗口）：内容真源是 Y.Doc，REST 全面让位（根治 Bug B
+      //   掉线误降级、携带过期 baseVersion 撞假 409）。不排防抖 drain、不发 PUT，状态直接 synced。
+      //   仍保留一次 saveDraft 作「源码态」崩溃兜底：源码模式（SourceEditor 纯 textarea，无 Y 绑定）
+      //   的文字改动在切回所见即所得前不进 Y.Doc，这份整篇草稿是其唯一落地兜底；Y 接管期间不弹
+      //   恢复条（见加载 effect），内容经 Y 合并确认后由页面 localMergedTick 清掉该草稿键。
+      if (yOwnedRef.current) {
+        if (debounce.current) clearTimeout(debounce.current);
+        saveDraft(docIdRef.current, { content, baseContent: baseContent.current });
+        setStatus("synced");
+        return;
+      }
       if (content !== lastSaved.current) setStatus("unsaved");
       // 本地草稿（节流写，崩溃/刷新兜底）—— 协同接通时也照写：草稿是崩溃兜底，不是落库手段
       saveDraft(docIdRef.current, { content, baseContent: baseContent.current });
@@ -310,9 +353,11 @@ export function useDocPersistence(
   // 最新内容已在 pending 中，会被在途链顺带消费——绝不与在途 PUT 并行发第二个请求。
   const saveNow = useCallback(async () => {
     if (debounce.current) clearTimeout(debounce.current);
+    // ★ yOwned（Y 通道接管，含掉线/重连）：绝不发整篇 PUT——即便此刻 collabActive 因 WS 短暂掉线
+    //   为 false 也不放行（Bug B 正是这个窗口用过期 baseVersion 撞假 409）。给协同态反馈即可。
     // 协同可用：内容随打随同步，服务端统一落库 —— 不再发整篇 PUT。
     // 但必须给反馈：按钮点了没反应是"反馈缺失"，用户会怀疑没保存上。
-    if (collabActiveRef.current) {
+    if (yOwnedRef.current || collabActiveRef.current) {
       setStatus("synced");
       toast("已在协同中实时同步，无需手动保存", "success");
       return;
@@ -331,6 +376,10 @@ export function useDocPersistence(
   //   在途那一轮本身就带着最新 pending，成功后会清草稿/同步缓存，flush 无需重复。
   const flush = useCallback(() => {
     if (inFlightRef.current) return;
+    // ★ yOwned（Y 通道接管，含掉线/重连窗口）：卸载/切路由/关页面也绝不发整篇 keepalive PUT——
+    //   既避免本地快照与 CRDT 抢写（DESIGN §3.3），也杜绝用过期 baseVersion 在冷归结后撞假 409。
+    //   最新内容已由 markDirty 逐次 saveDraft 落盘（源码态崩溃安全网），此处无需再写草稿，直接返回。
+    if (yOwnedRef.current) return;
     const content = pending.current;
     if (content == null || content === lastSaved.current || !canEditRef.current) return;
     // 先留草稿兜底（即使网络请求没发出去也不丢）

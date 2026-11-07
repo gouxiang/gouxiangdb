@@ -25,7 +25,7 @@ import { useDocPersistence } from "./useDocPersistence";
 import { clearDraft } from "./draft";
 // 阶段 2 · 本地光标/占用的发布口（远端光标的水源；协同关闭时内部零副作用）
 import { useDocPresence } from "./collab/useDocPresence";
-import { yOfflineEnabled } from "../collab/yOfflineGate";
+import { yOfflineEnabled, isCollabBindingStatus } from "../collab/yOfflineGate";
 import { ShareModal } from "./ShareModal";
 import { DocOutline } from "./DocOutline";
 import { useShortcuts } from "./hooks/useShortcuts";
@@ -60,6 +60,11 @@ export default function DocEditorPage() {
   const collabRoom = docId && (COLLAB_ENABLED || Y_OFFLINE) ? `doc:${docId}` : null;
   const collab = useCollabSession(collabRoom);
   const collabActive = collab.status === "connected";
+  // Y 通道是否已绑定并接管本文档持久化。**必须与 WysiwygEditor 的 Y 绑定真值逐字同源**
+  // （WysiwygEditor.tsx 的 isCollabBindingStatus(collab.status, Y_OFFLINE)）：编辑器在哪些状态下
+  // 把内容写进 Y.Doc，持久化层就得在同样的状态下让 REST/整篇草稿让位，二者口径一旦分叉就会重现
+  // 假 409（掉线窗口误发 PUT）或草稿恢复条复活。collabActive 仅认 connected，不能用于此判定。
+  const yOwned = isCollabBindingStatus(collab.status, Y_OFFLINE);
 
   const [title, setTitle] = useState("");
   const [showVersions, setShowVersions] = useState(false);
@@ -73,7 +78,7 @@ export default function DocEditorPage() {
   const getMarkdown = useCallback(() => mdRef.current, []);
 
   const canEdit = doc?.canEdit ?? true;
-  const persist = useDocPersistence(docId!, kbId!, doc?.content, canEdit, doc?.contentVersion, collabActive);
+  const persist = useDocPersistence(docId!, kbId!, doc?.content, canEdit, doc?.contentVersion, collabActive, yOwned);
 
   // gx-y 字符级更新已被服务端确认合并（首连或断线重连）：整篇 Markdown 草稿降级为纯崩溃兜底，
   // 此刻清掉对应 gx-kb-draft，避免下次进文档还弹"恢复草稿"（内容已走 CRDT 上线，无需二选一）。
@@ -83,6 +88,23 @@ export default function DocEditorPage() {
     if (collab.localMergedTick > 0) clearDraft(docId!);
     // 仅以合并次数为触发源。
   }, [collab.localMergedTick, docId]);
+
+  // Bug B 版本回灌：服务端协同冷归结（房间空置 30s / 进程关闭）经 saveDocContentTx 抬高了
+  // contentVersion，但协同帧没有版本回灌通道，前端 versionRef 仍持旧值。监听 collab.status 回到
+  // "connected" 的上升沿（ref 记前态：connected 之外的任何状态 → connected），主动 refetch 单文档，
+  // 让服务端最新 contentVersion 经 useDocPersistence 的加载 effect 回灌进 versionRef，杜绝 WS 掉线后
+  // 误降级 REST 时用过期 baseVersion 撞「内容已被他人更新」假 409。
+  // 安全边界：只 refetch React Query 缓存，绝不碰 editorKey/overrideContent——编辑器挂载后忽略
+  // initialMarkdown 变化（WysiwygEditor 挂载注释），本地编辑态不被冲；与 handleRolledBack 的显式
+  // 重挂载（setEditorKey）互不打架。门控关时房间为 null、status 恒 idle，永不进入 connected，零行为变化。
+  const prevCollabStatusRef = useRef<string>("idle");
+  useEffect(() => {
+    const prev = prevCollabStatusRef.current;
+    prevCollabStatusRef.current = collab.status;
+    if (yOwned && prev !== "connected" && collab.status === "connected") {
+      void refetch();
+    }
+  }, [collab.status, yOwned, refetch]);
 
   /**
    * 协同光标层要的是「块正文的行内 Markdown **源码**」（正文存的是 `**粗**` 这种带标记的原文，
