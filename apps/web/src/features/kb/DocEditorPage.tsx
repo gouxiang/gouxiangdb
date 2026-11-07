@@ -221,6 +221,9 @@ export default function DocEditorPage() {
     const c = persist.recoverDraft();
     if (c != null) {
       setOverrideContent(c);
+      // key 变化重挂载后 MarkdownEditor 内部 mode 复位为 wysiwyg，宿主 editorMode 必须同步对齐，
+      // 否则残留 source 会让后续所见即所得编辑被误打 sourceUnmerged 标记、草稿不被正常清理。
+      setEditorMode("wysiwyg");
       setEditorKey((k) => k + 1);
       toast("已恢复未保存的本地草稿，将自动保存到云端", "success");
     }
@@ -231,6 +234,8 @@ export default function DocEditorPage() {
     if (r.data) {
       setTitle(r.data.title);
       setOverrideContent(null);
+      // 同 recoverDraft：重挂载即回到默认编辑态，宿主 mode 与编辑器内部初值对齐。
+      setEditorMode("wysiwyg");
       setEditorKey((k) => k + 1);
     }
   }
@@ -347,6 +352,8 @@ export default function DocEditorPage() {
                 if (r.data) {
                   setTitle(r.data.title);
                   setOverrideContent(r.data.content ?? "");
+                  // 同 recoverDraft：重挂载即回到默认编辑态，宿主 mode 与编辑器内部初值对齐。
+                  setEditorMode("wysiwyg");
                   setEditorKey((k) => k + 1);
                 }
               });
