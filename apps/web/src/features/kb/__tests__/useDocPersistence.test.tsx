@@ -23,6 +23,7 @@ const h = vi.hoisted(() => ({
   saveDraft: vi.fn(),
   loadDraft: vi.fn(),
   clearDraft: vi.fn(),
+  clearDraftUnlessSourceUnmerged: vi.fn(),
   hasRecoverableDraft: vi.fn((): Draft | null => null),
   baseFor: vi.fn((p: string) => p),
   headers: vi.fn(() => ({})),
@@ -56,6 +57,7 @@ vi.mock("../draft", () => ({
   saveDraft: h.saveDraft,
   loadDraft: h.loadDraft,
   clearDraft: h.clearDraft,
+  clearDraftUnlessSourceUnmerged: h.clearDraftUnlessSourceUnmerged,
   hasRecoverableDraft: h.hasRecoverableDraft,
 }));
 
@@ -156,6 +158,7 @@ type ProbeArgs = {
   serverVersion?: number;
   collabActive?: boolean;
   yOwned?: boolean;
+  sourceMode?: boolean;
 };
 function Probe(args: ProbeArgs = {}) {
   const {
@@ -165,8 +168,18 @@ function Probe(args: ProbeArgs = {}) {
     serverVersion = 3,
     collabActive = false,
     yOwned = false,
+    sourceMode = false,
   } = args;
-  holder = useDocPersistence(docId, "k1", serverContent, canEdit, serverVersion, collabActive, yOwned);
+  holder = useDocPersistence(
+    docId,
+    "k1",
+    serverContent,
+    canEdit,
+    serverVersion,
+    collabActive,
+    yOwned,
+    sourceMode,
+  );
   return null;
 }
 /** SSR 渲染：真实跑 hook 函数体与闭包，但 useEffect 按生产 SSR 语义跳过（既有 10 用例的挂载方式）。 */
@@ -495,6 +508,158 @@ describe("yOwned（Y 通道接管）：REST 全面让位，草稿恢复条跟随
       const back = renderWith({ yOwned: false }); // 退回 REST 真源
       expect(h.hasRecoverableDraft).toHaveBeenCalledWith("d1", SERVER_BASE);
       expect(back.recovered).toEqual(D);
+    });
+  });
+});
+
+// ── 热修对抗审查 P1-1 / P1-2 / P2-1 / P2-2 回归 ─────────────────────────────────
+type UnloadEv = { preventDefault: ReturnType<typeof vi.fn>; returnValue: unknown };
+describe("热修：yOwned 四项（drain 闸门 / source 安全网 / synced 状态 / beforeunload）", () => {
+  // 捕获卸载 effect 注册的 beforeunload handler（P2-2 手动触发）。
+  const handlers: Record<string, (e: UnloadEv) => void> = {};
+  const win = {
+    addEventListener: vi.fn((ev: string, fn: (e: UnloadEv) => void) => {
+      handlers[ev] = fn;
+    }),
+    removeEventListener: vi.fn(),
+  };
+  const SOURCE_DRAFT: Draft = {
+    content: "src-unmerged",
+    baseContent: SERVER_BASE,
+    savedAt: 9,
+    sourceUnmerged: true,
+  };
+  const PLAIN_DRAFT: Draft = { content: "plain-draft", baseContent: SERVER_BASE, savedAt: 8 };
+
+  beforeEach(() => {
+    vi.stubGlobal("window", win);
+    // clearAllMocks 不清实现，这里显式重建每条用例的草稿 mock 基线，杜绝跨用例污染。
+    h.loadDraft.mockReset();
+    h.loadDraft.mockReturnValue(null);
+    h.hasRecoverableDraft.mockReset();
+    h.hasRecoverableDraft.mockReturnValue(null);
+    h.clearDraftUnlessSourceUnmerged.mockReset();
+    h.clearDraftUnlessSourceUnmerged.mockReturnValue(true);
+  });
+
+  describe("P1-1 drain 闸门：yOwned 翻转后绝不续发整篇 PUT", () => {
+    it("非协同起手在途 PUT 期间翻 true 并再 markDirty：PUT1 回来后 saveContent 仍只 1 次", async () => {
+      const d1 = deferred<{ contentVersion: number }>();
+      let n = 0;
+      h.saveContent.mockImplementation(() => {
+        n += 1;
+        return n === 1 ? d1.promise : Promise.resolve({ contentVersion: 6 });
+      });
+      const a0 = renderWith({ yOwned: false });
+      a0.markDirty("v1");
+      await vi.runAllTimersAsync(); // 防抖触发 PUT1，进入在途
+      expect(h.saveContent).toHaveBeenCalledTimes(1);
+
+      // 在途期间 WS 建连、Y 接管翻转（yOwned true），用户继续编辑：只写草稿不发 PUT
+      const a1 = renderWith({ yOwned: true });
+      a1.markDirty("v2-source");
+      expect(h.saveContent).toHaveBeenCalledTimes(1);
+
+      // PUT1 回来：while 续体与 finally 补轮都被 !yOwnedRef 拦住，不得发第二个 PUT
+      d1.resolve({ contentVersion: 5 });
+      await flushMicro();
+      await vi.runAllTimersAsync();
+      expect(h.saveContent).toHaveBeenCalledTimes(1);
+    });
+
+    it("非协同（yOwned 恒 false）串行链不回归：在途新编辑仍续发第二个 PUT", async () => {
+      const d1 = deferred<{ contentVersion: number }>();
+      let n = 0;
+      h.saveContent.mockImplementation(() => {
+        n += 1;
+        return n === 1 ? d1.promise : Promise.resolve({ contentVersion: 6 });
+      });
+      const a = renderWith({ yOwned: false });
+      a.markDirty("v1");
+      await vi.runAllTimersAsync();
+      expect(h.saveContent).toHaveBeenCalledTimes(1);
+      a.markDirty("v2"); // 在途新编辑，仍是非协同 → 闸门恒真，应续发
+      d1.resolve({ contentVersion: 5 });
+      await flushMicro();
+      expect(h.saveContent).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("P2-1 协同态不被重连 refetch 打成「已保存到云端」", () => {
+    it("yOwned=true 加载后 status 为 synced 而非 saved", () => {
+      expect(renderWith({ yOwned: true }).status).toBe("synced");
+    });
+    it("yOwned=false 加载后 status 维持 saved（默认路径不回归）", () => {
+      expect(renderWith({ yOwned: false }).status).toBe("saved");
+    });
+  });
+
+  describe("P2-2 beforeunload 离开确认", () => {
+    it("yOwned=true markDirty 后触发 beforeunload：不设 preventDefault/returnValue", () => {
+      const a = renderWith({ yOwned: true });
+      a.markDirty("edited"); // pending 被置位，但接管态不应弹离开框
+      const e: UnloadEv = { preventDefault: vi.fn(), returnValue: undefined };
+      handlers["beforeunload"](e);
+      expect(e.preventDefault).not.toHaveBeenCalled();
+      expect(e.returnValue).toBeUndefined();
+    });
+    it("非协同 yOwned=false 有未保存 pending 时 beforeunload 仍拦截（默认不回归）", () => {
+      const a = renderWith({ yOwned: false });
+      a.markDirty("unsaved-change"); // pending ≠ lastSaved
+      const e: UnloadEv = { preventDefault: vi.fn(), returnValue: undefined };
+      handlers["beforeunload"](e);
+      expect(e.preventDefault).toHaveBeenCalledTimes(1);
+      expect(e.returnValue).toBe("");
+    });
+  });
+
+  describe("P1-2 sourceUnmerged 源码安全网（不丢、可恢复、不被误清）", () => {
+    it("sourceMode=true 的 yOwned markDirty：saveDraft 带 sourceUnmerged:true", () => {
+      const a = renderWith({ yOwned: true, sourceMode: true });
+      a.markDirty("src-edit");
+      expect(h.saveDraft).toHaveBeenCalledWith("d1", {
+        content: "src-edit",
+        baseContent: SERVER_BASE,
+        sourceUnmerged: true,
+      });
+    });
+    it("sourceMode=false 的 yOwned markDirty：saveDraft 不带 sourceUnmerged（默认不回归）", () => {
+      const a = renderWith({ yOwned: true, sourceMode: false });
+      a.markDirty("wy-edit");
+      expect(h.saveDraft).toHaveBeenCalledWith("d1", {
+        content: "wy-edit",
+        baseContent: SERVER_BASE,
+      });
+    });
+    it("yOwned 挂载：loadDraft 取到 sourceUnmerged 草稿 → recovered 保留恢复入口，且不走 hasRecoverableDraft", () => {
+      h.loadDraft.mockReturnValue(SOURCE_DRAFT);
+      const a = renderWith({ yOwned: true });
+      expect(a.recovered).toEqual(SOURCE_DRAFT);
+      expect(h.hasRecoverableDraft).not.toHaveBeenCalled();
+    });
+    it("yOwned 挂载：loadDraft 仅取到普通草稿 → recovered=null（Bug A 普通残留不弹条）", () => {
+      h.loadDraft.mockReturnValue(PLAIN_DRAFT);
+      expect(renderWith({ yOwned: true }).recovered).toBeNull();
+    });
+    it("false→true 上升沿：sourceUnmerged 草稿不被收回（恢复入口保留）", () => {
+      h.hasRecoverableDraft.mockReturnValue(PLAIN_DRAFT); // 非接管首帧据普通草稿弹条
+      h.loadDraft.mockReturnValue(SOURCE_DRAFT); // 接管后本地实为 source 未合并草稿
+      expect(renderWith({ yOwned: false }).recovered).toEqual(PLAIN_DRAFT);
+      expect(renderWith({ yOwned: true }).recovered).toEqual(SOURCE_DRAFT);
+    });
+    it("false→true 上升沿：仅普通草稿（无 sourceUnmerged）→ 仍被收回为 null", () => {
+      h.hasRecoverableDraft.mockReturnValue(PLAIN_DRAFT);
+      h.loadDraft.mockReturnValue(PLAIN_DRAFT);
+      renderWith({ yOwned: false });
+      expect(renderWith({ yOwned: true }).recovered).toBeNull();
+    });
+    it("在途 PUT 成功路径走条件清理：clearDraftUnlessSourceUnmerged 以 docId 被调用", async () => {
+      h.saveContent.mockResolvedValue({ contentVersion: 5 });
+      const a = renderWith({ yOwned: false });
+      a.markDirty("v1");
+      await vi.runAllTimersAsync();
+      await flushMicro();
+      expect(h.clearDraftUnlessSourceUnmerged).toHaveBeenCalledWith("d1");
     });
   });
 });

@@ -25,19 +25,34 @@
 //     · yOwned = isCollabBindingStatus(status, Y_OFFLINE)，覆盖所有「Y 已绑定并接管本文档持久化」
 //       的状态（门控开时含 connecting/reconnecting/offline），与 WysiwygEditor 的 Y 绑定真值同源。
 //   yOwned=true 时本 hook 全面让位：不发任何整篇 REST PUT（markDirty 防抖/flush keepalive/saveNow）、
-//   加载时不据本地草稿弹恢复条。仅保留 markDirty 的 saveDraft 作「源码态」崩溃兜底——源码模式
+//   加载时普通残留草稿不弹恢复条。仅保留 markDirty 的 saveDraft 作「源码态」崩溃兜底——源码模式
 //   （SourceEditor 纯 textarea，无 Y 绑定）下的文字改动在切回所见即所得前不进 Y.Doc，这份整篇
-//   草稿是其唯一落地兜底；它在 Y 接管期间不弹条，由 localMergedTick 合并后清理（见 DocEditorPage）。
-//   恢复条与接管态的对齐分两道 effect：加载 effect 管「doc 到达晚于协同」（yOwned=true 即置 null）；
-//   另有一个依赖 [yOwned, docId] 的切换 effect 管「doc 缓存先到、协同后连」——重进页面时首帧
-//   status=idle(yOwned=false) 加载 effect 已据草稿弹条，WS 建连 yOwned 翻转时由它 setRecovered(null)
-//   收回；退回 REST(true→false) 则在正文已到位时重算，保证 REST 真源下合法草稿恢复条仍可达。
+//   草稿是其唯一落地兜底；由 localMergedTick 合并后经 clearDraftUnlessSourceUnmerged 条件清理（见
+//   DocEditorPage）。
+//   P1-2 source 模式安全网：第 8 参 sourceMode=true 时，yOwned 分支的 saveDraft 带 sourceUnmerged 标记。
+//   该标记让草稿在 Y 接管期仍保留「恢复草稿」入口（加载/接管切换 effect 的 resolveYOwnedRecovered），
+//   且不被 gx-y 合并确认或在途 PUT 成功后的条件清理误删；非 source 的 markDirty 同 key 覆盖即解除标记。
+//   P1-1 drain 闸门：drain 的 while 续体与 finally 补轮均加 !yOwnedRef——翻转前已在途的 PUT 走完，
+//   翻转后绝不凭残留 pending 再发整篇 PUT。P2-1 加载 effect 在 yOwned 下置 "synced"（非 "saved"），
+//   避免重连 refetch 回灌版本时误报「已保存到云端」。P2-2 yOwned 下 beforeunload 不弹离开确认。
+//   恢复条与接管态的对齐分两道 effect：加载 effect 管「doc 到达晚于协同」（yOwned=true 时仅保留
+//   sourceUnmerged 源码草稿、普通草稿置 null）；另有一个依赖 [yOwned, docId] 的切换 effect 管
+//   「doc 缓存先到、协同后连」——重进页面时首帧 status=idle(yOwned=false) 加载 effect 已据草稿弹条，
+//   WS 建连 yOwned 翻转时由它经 resolveYOwnedRecovered 收回普通草稿（保留 sourceUnmerged）；退回
+//   REST(true→false) 则在正文已到位时重算，保证 REST 真源下合法草稿恢复条仍可达。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "../../components/ui";
 import { KbApi, ApiError, type KbDocDTO } from "../../api/client";
 import { dataSourceResolver } from "../../node/datasource";
-import { saveDraft, loadDraft, clearDraft, hasRecoverableDraft, type Draft } from "./draft";
+import {
+  saveDraft,
+  loadDraft,
+  clearDraft,
+  clearDraftUnlessSourceUnmerged,
+  hasRecoverableDraft,
+  type Draft,
+} from "./draft";
 import { extractCanvasEmbeds, extractTableEmbeds } from "./mentions";
 
 /**
@@ -72,6 +87,16 @@ export function missingEmbeds(serverSrc: string, localSrc: string): {
   return { canvas, tables };
 }
 
+/**
+ * yOwned（Y 接管）态的恢复条决策（P1-2）：Y.Doc 是真源，普通 Y 回放产生的残留整篇草稿不得弹条；
+ * 唯独带 sourceUnmerged 标记的源码模式草稿（SourceEditor 的改动从未回流 Y.Doc）要保留恢复入口，
+ * 否则用户在源码模式的编辑会被静默清空且无入口。纯读，node 可测。
+ */
+function resolveYOwnedRecovered(docId: string): Draft | null {
+  const d = loadDraft(docId);
+  return d?.sourceUnmerged ? d : null;
+}
+
 export function useDocPersistence(
   docId: string,
   kbId: string,
@@ -94,6 +119,13 @@ export function useDocPersistence(
    * saveDraft 作源码态（无 Y 绑定窗口）崩溃兜底。非 Y 接管路径（false）行为逐字不变。
    */
   yOwned = false,
+  /**
+   * 当前是否处于源码（source）模式（默认 false，与引入前逐字一致；画布 5 参、既有测试不传即 false）。
+   * 仅在 yOwned 接管时有意义：source 模式下 SourceEditor 是无 Y 绑定的纯 textarea，其 markDirty
+   * 写的整篇草稿尚未回流 Y.Doc，需给草稿打 sourceUnmerged 标记以保留恢复入口、且不被 gx-y 合并确认
+   * （localMergedTick → clearDraftUnlessSourceUnmerged）误清。非 source 或非 yOwned 路径行为不变。
+   */
+  sourceMode = false,
 ) {
   // 用 ref 读取，避免把 collabActive 变成下面所有回调的依赖（否则每次协同状态变化都会换引用）
   const collabActiveRef = useRef(collabActive);
@@ -101,6 +133,9 @@ export function useDocPersistence(
   // 同理用 ref 读 yOwned：协同状态（含掉线/重连）频繁变化不应让 markDirty/flush/saveNow 换引用。
   const yOwnedRef = useRef(yOwned);
   yOwnedRef.current = yOwned;
+  // sourceMode 同理用 ref：模式切换不换 markDirty 等回调引用。
+  const sourceModeRef = useRef(sourceMode);
+  sourceModeRef.current = sourceMode;
   // 记录上一次渲染的 yOwned，供下方「接管态切换 effect」判 false→true / true→false 边沿。
   // 初值 false：与协同会话初始 status="idle"（yOwned 必为 false）一致，首挂载不会误判为切换。
   const prevYOwnedRef = useRef(false);
@@ -160,13 +195,18 @@ export function useDocPersistence(
     baseContent.current = serverContent;
     versionRef.current = serverVersion;
     pending.current = null;
-    setStatus("saved");
+    // P2-1：yOwned 接管态下重连 refetch 会重跑本 effect 回灌 contentVersion（Bug B 修复目的，
+    // 上面几行初始化一个都不许动），但不能因此把状态打成「已保存到云端」——协同态正文落库是服务端
+    // 冷归结的事，此刻只保证内容在房间内，应显示「已同步」。非接管态维持原「已保存」语义。
+    setStatus(yOwnedRef.current ? "synced" : "saved");
     // 检查可恢复草稿。
-    // ★ yOwned（Y 通道接管）时不据本地草稿弹恢复条（Bug A 根治）：Y 远端回放会无条件回流
-    //   onChange→markDirty→saveDraft 产生残留草稿，但内容的真源已是 Y.Doc，弹「恢复草稿」会让用户
-    //   在 CRDT 内容与整篇旧草稿间二选一，既误导又可能覆盖协同结果。源码态兜底草稿仍由 saveDraft
-    //   落盘（防真崩溃），只是不在此打扰用户；合并确认后由页面 localMergedTick 清掉该草稿键。
-    const d = yOwnedRef.current ? null : hasRecoverableDraft(docId, serverContent);
+    // ★ yOwned（Y 通道接管）时普通残留草稿不弹恢复条（Bug A 根治）：Y 远端回放会无条件回流
+    //   onChange→markDirty→saveDraft 产生残留草稿，但内容真源已是 Y.Doc，弹「恢复草稿」会让用户在
+    //   CRDT 内容与整篇旧草稿间二选一，既误导又可能覆盖协同结果。P1-2 例外：带 sourceUnmerged 标记的
+    //   源码模式草稿（从未回流 Y.Doc）必须保留恢复入口，否则源码编辑会被静默清空（resolveYOwnedRecovered）。
+    const d = yOwnedRef.current
+      ? resolveYOwnedRecovered(docId)
+      : hasRecoverableDraft(docId, serverContent);
     setRecovered(d);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId, serverContent === undefined ? "" : serverContent, serverVersion]);
@@ -177,7 +217,8 @@ export function useDocPersistence(
   //   草稿 setRecovered(非空) 弹了恢复条；随后 WS 建连 status→connecting/connected、yOwned 转 true，
   //   但加载 effect 依赖不含协同状态、不会重跑，恢复条会一直挂着。本 effect 用布尔 state 本身作依赖
   //   （不能只靠 ref，否则不触发），在 yOwned 翻转的那一渲染执行，把 recovered 与接管态对齐：
-  //     · false→true（进入 Y 接管）：Y.Doc 是真源，任何残留整篇草稿都不得再弹恢复条 → 置 null；
+  //     · false→true（进入 Y 接管）：普通残留整篇草稿收回（→ null）；唯 P1-2 带 sourceUnmerged 的
+  //       源码模式草稿保留恢复入口（resolveYOwnedRecovered），因它从未回流 Y.Doc、不能被静默清空；
   //     · true→false（协同被 denied 等终态、真源切回 REST）：若服务端正文已是 string，重新据草稿算
   //       一次，让 REST 真源下的合法草稿恢复条仍可达；正文未到（undefined）则置 null，等加载 effect。
   //   依赖用 [yOwned, docId]：docId 切换时 prev 与当前同值（均按新会话重算），不产生误切换。
@@ -189,8 +230,9 @@ export function useDocPersistence(
     prevYOwnedRef.current = nowOwned;
     if (wasOwned === nowOwned) return; // 非接管态切换：不动 recovered（避免与加载 effect 打架）
     if (nowOwned) {
-      // false→true 进入 Y 接管：Y.Doc 是真源，任何残留整篇草稿都不得再弹恢复条。
-      setRecovered(null);
+      // false→true 进入 Y 接管：普通残留草稿收回（Y.Doc 为真源）；但 P1-2 的 sourceUnmerged
+      // 源码草稿从未回流 Y.Doc，必须保留恢复入口，不能在上升沿一并抹掉。
+      setRecovered(resolveYOwnedRecovered(docId));
     } else if (typeof serverContent === "string") {
       // true→false 退回 REST 真源：服务端正文已到位则重算，让合法草稿恢复条仍可达。
       setRecovered(hasRecoverableDraft(docId, serverContent));
@@ -214,9 +256,14 @@ export function useDocPersistence(
     if (!canEditRef.current) return;
     inFlightRef.current = true;
     try {
+      // P1-1：while 续体加 !yOwnedRef 闸门。yOwned 翻转前已在途的那一轮 PUT 无法 abort、让它走完
+      // （进 while 时 yOwned 仍可能为 false）；但翻转后即便 pending 有残留也不得再发新一轮整篇 PUT，
+      // 否则会在 Y 已接管后与 CRDT 抢写、并用过期 baseVersion 撞假 409。yOwned 恒 false（画布/非协同）
+      // 时该条件恒真，行为与引入前逐字一致。
       while (
         canEditRef.current &&
         conflictRef.current == null &&
+        !yOwnedRef.current &&
         (forceRef.current ||
           (pending.current != null && pending.current !== lastSaved.current))
       ) {
@@ -232,7 +279,11 @@ export function useDocPersistence(
           if (res.contentVersion != null) versionRef.current = res.contentVersion;
           // 仅当在途期间没有涌入更新的内容时才清空 pending，否则保留最新内容供下一轮发送
           if (pending.current === content) pending.current = null;
-          clearDraft(docIdRef.current);
+          // P1-2 补强：在途 PUT 可能是 yOwned 翻转前调度、翻转后才回来（P1-1 允许它走完）。
+          // 若在途期间用户已在 source 模式写入 sourceUnmerged 草稿（从未进 Y、也不在本次 PUT 的
+          // content 里），无条件 clearDraft 会把它抹掉、违背「source 编辑不丢」。改用条件清理：
+          // 无标记时与 clearDraft 逐字等价（非协同/画布路径 sourceUnmerged 恒不存在 → 零回归）。
+          clearDraftUnlessSourceUnmerged(docIdRef.current);
           syncDocCache(docIdRef.current, content, res.contentVersion);
           // 手动保存的成功提示在整条链排空后统一给出一次（见 while 之后），不在每轮重复弹。
         } catch (e) {
@@ -270,10 +321,12 @@ export function useDocPersistence(
       }
     } finally {
       inFlightRef.current = false;
-      // 在途期间又有新编辑、且当前没有冲突待裁决：补一轮把最新内容发出去（仍是单在途，不并发）
+      // 在途期间又有新编辑、且当前没有冲突待裁决：补一轮把最新内容发出去（仍是单在途，不并发）。
+      // P1-1：同样加 !yOwnedRef 闸门——在途期间 Y 接管翻转后，finally 不得凭残留 pending 补轮发新 PUT。
       if (
         conflictRef.current == null &&
         canEditRef.current &&
+        !yOwnedRef.current &&
         (forceRef.current ||
           (pending.current != null && pending.current !== lastSaved.current))
       ) {
@@ -362,7 +415,19 @@ export function useDocPersistence(
       //   恢复条（见加载 effect），内容经 Y 合并确认后由页面 localMergedTick 清掉该草稿键。
       if (yOwnedRef.current) {
         if (debounce.current) clearTimeout(debounce.current);
-        saveDraft(docIdRef.current, { content, baseContent: baseContent.current });
+        // P1-2：source 模式（SourceEditor 纯 textarea、无 Y 绑定）下的 markDirty 改动不进 Y.Doc，
+        // 给草稿打 sourceUnmerged 标记——加载/接管切换 effect 据此保留恢复入口，且 gx-y 合并确认
+        // （clearDraftUnlessSourceUnmerged）不会误清它。非 source 的 markDirty 不带标记，同 key 再次
+        // 写入即自然解除（如切回所见即所得后 Y 回放覆盖写入普通草稿）。
+        if (sourceModeRef.current) {
+          saveDraft(docIdRef.current, {
+            content,
+            baseContent: baseContent.current,
+            sourceUnmerged: true,
+          });
+        } else {
+          saveDraft(docIdRef.current, { content, baseContent: baseContent.current });
+        }
         setStatus("synced");
         return;
       }
@@ -465,7 +530,13 @@ export function useDocPersistence(
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       if (debounce.current) clearTimeout(debounce.current);
       flush();
-      if (pending.current != null && pending.current !== lastSaved.current) {
+      // P2-2：yOwned 接管下内容归 Y/gx-y 累积、source 改动另有整篇草稿兜底，且顶栏显示「已同步」，
+      // 再弹原生「离开将丢失未保存更改」与已同步自相矛盾。故追加 !yOwnedRef，接管态绝不弹离开确认框。
+      if (
+        !yOwnedRef.current &&
+        pending.current != null &&
+        pending.current !== lastSaved.current
+      ) {
         e.preventDefault();
         e.returnValue = "";
       }

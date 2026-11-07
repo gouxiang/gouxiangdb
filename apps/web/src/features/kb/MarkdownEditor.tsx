@@ -94,6 +94,7 @@ export function MarkdownEditor({
   initialMarkdown,
   onChange,
   onSave,
+  onModeChange,
   readOnly = false,
   publicToken,
   docId,
@@ -125,6 +126,11 @@ export function MarkdownEditor({
    *   - 分享态：显式传宿主分享档位（mode==="edit"）——与「正文能否写」（看 canEdit）是两件事
    */
   embedCanEdit?: boolean;
+  /**
+   * 三态模式切换通知（P1-2）：setMode 后回调宿主当前模式。宿主据此在 source 模式给持久化层打
+   * sourceUnmerged 标记（source 编辑不进 Y.Doc，需保留整篇草稿恢复入口）。不传 = 单机/无此需求。
+   */
+  onModeChange?: (mode: "wysiwyg" | "source" | "preview") => void;
 }) {
   const [md, setMd] = useState(initialMarkdown);
   const [mode, setMode] = useState<Mode>(readOnly ? "preview" : "wysiwyg");
@@ -155,8 +161,13 @@ export function MarkdownEditor({
 
   /* 切换模式：只读用户固定预览 */
   const switchMode = (m: Mode) => {
-    if (readOnly) { setMode("preview"); return; }
+    if (readOnly) {
+      setMode("preview");
+      onModeChange?.("preview"); // readOnly 分支同样回调（P1-2），宿主据实际落地模式更新
+      return;
+    }
     setMode(m);
+    onModeChange?.(m);
   };
 
   return (

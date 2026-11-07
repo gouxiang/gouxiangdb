@@ -22,7 +22,7 @@ import { ApiError } from "../../api/client";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { VersionHistoryDrawer } from "./VersionHistoryDrawer";
 import { useDocPersistence } from "./useDocPersistence";
-import { clearDraft } from "./draft";
+import { clearDraftUnlessSourceUnmerged } from "./draft";
 // 阶段 2 · 本地光标/占用的发布口（远端光标的水源；协同关闭时内部零副作用）
 import { useDocPresence } from "./collab/useDocPresence";
 import { yOfflineEnabled, isCollabBindingStatus } from "../collab/yOfflineGate";
@@ -71,6 +71,9 @@ export default function DocEditorPage() {
   const [showShare, setShowShare] = useState(false);
   const [editorKey, setEditorKey] = useState(0);
   const [overrideContent, setOverrideContent] = useState<string | null>(null);
+  // P1-2：跟踪 MarkdownEditor 三态。source 模式下 SourceEditor 是无 Y 绑定的纯 textarea，其改动只写
+  // 整篇草稿、不进 Y.Doc；据此把 sourceMode 透传给 useDocPersistence，给草稿打 sourceUnmerged 标记。
+  const [editorMode, setEditorMode] = useState<"wysiwyg" | "source" | "preview">("wysiwyg");
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const pendingRafRef = useRef<number[]>([]);
   /** 当前整篇 Markdown：源码态下把 textarea 的字符偏移换算成块坐标要用（只写 ref，不触发重渲染）。 */
@@ -78,14 +81,26 @@ export default function DocEditorPage() {
   const getMarkdown = useCallback(() => mdRef.current, []);
 
   const canEdit = doc?.canEdit ?? true;
-  const persist = useDocPersistence(docId!, kbId!, doc?.content, canEdit, doc?.contentVersion, collabActive, yOwned);
+  // 第 8 参 sourceMode：仅 source 模式为 true（默认 false，画布 5 参与既有测试零回归）。
+  const persist = useDocPersistence(
+    docId!,
+    kbId!,
+    doc?.content,
+    canEdit,
+    doc?.contentVersion,
+    collabActive,
+    yOwned,
+    editorMode === "source",
+  );
 
   // gx-y 字符级更新已被服务端确认合并（首连或断线重连）：整篇 Markdown 草稿降级为纯崩溃兜底，
   // 此刻清掉对应 gx-kb-draft，避免下次进文档还弹"恢复草稿"（内容已走 CRDT 上线，无需二选一）。
   // 只清草稿键，不碰 useDocPersistence 的 pending（门控开但 VITE_COLLAB 关时保存仍走 REST，
   // 待防抖内容不能被清空）。门控关时 localMergedTick 恒为 0，本 effect 不产生任何行为。
+  // P1-2：改用条件清理——source 模式（无 Y 绑定）的草稿带 sourceUnmerged、从未进 Y.Doc，不能被
+  // gx-y 合并确认误清，保留它作为源码编辑的恢复入口；普通 Y 回放残留草稿才清除。
   useEffect(() => {
-    if (collab.localMergedTick > 0) clearDraft(docId!);
+    if (collab.localMergedTick > 0) clearDraftUnlessSourceUnmerged(docId!);
     // 仅以合并次数为触发源。
   }, [collab.localMergedTick, docId]);
 
@@ -362,6 +377,7 @@ export default function DocEditorPage() {
           initialMarkdown={initialContent}
           onChange={handleChange}
           onSave={() => void persist.saveNow()}
+          onModeChange={setEditorMode}
           readOnly={!canEdit}
           docId={doc.id}
           collab={collab}
