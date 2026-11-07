@@ -23,7 +23,7 @@ const h = vi.hoisted(() => ({
   saveDraft: vi.fn(),
   loadDraft: vi.fn(),
   clearDraft: vi.fn(),
-  hasRecoverableDraft: vi.fn(() => null),
+  hasRecoverableDraft: vi.fn((): Draft | null => null),
   baseFor: vi.fn((p: string) => p),
   headers: vi.fn(() => ({})),
   fetch: vi.fn(),
@@ -61,6 +61,7 @@ vi.mock("../draft", () => ({
 
 import { useDocPersistence, missingEmbeds } from "../useDocPersistence";
 import { ApiError } from "../../../api/client";
+import type { Draft } from "../draft";
 
 type Persist = ReturnType<typeof useDocPersistence>;
 type SaveCall = { content: string; baseVersion: number | undefined };
@@ -102,6 +103,13 @@ const INTERNALS = (
 
 let hookSlots: unknown[] = [];
 let hookIdx = 0;
+// 依赖感知的 effect 槽：仅 renderWith（显式开启）时收集并在每次渲染后按 deps 变化执行，
+// 忠实复现 React 的「首挂载执行 / 依赖变更先 cleanup 再重跑 / 未变跳过」。effect 按 hook 位置
+// （hookIdx）索引而非 deps 数组身份——每次渲染都传入新 deps 数组，React 实按位置比对值。
+// 默认 renderOnce 仍不跑 effect（SSR noop），既有用例的挂载语义逐字不变。
+type RegEffect = { deps: unknown[]; cleanup?: void | (() => void) };
+let effectSlots: (RegEffect | undefined)[] = [];
+let runEffects = false;
 function dispatcher() {
   return {
     useState(init: unknown) {
@@ -118,17 +126,50 @@ function dispatcher() {
       return hookSlots[i];
     },
     useCallback: (fn: unknown) => fn,
-    useEffect: () => undefined,
+    useEffect(fn: () => void | (() => void), deps?: unknown[]) {
+      const pos = hookIdx++; // 与 useState/useRef 共用稳定的 hook 位置序列
+      if (!runEffects || !deps) return undefined; // SSR seam：默认渲染不执行任何 effect
+      const existing = effectSlots[pos];
+      if (existing) {
+        const changed = deps.some((d, k) => !Object.is(d, existing.deps[k]));
+        if (changed) {
+          existing.cleanup?.();
+          existing.deps = deps;
+          existing.cleanup = fn();
+        }
+      } else {
+        effectSlots[pos] = { deps, cleanup: fn() };
+      }
+      return undefined;
+    },
     useMemo: (fn: () => unknown) => fn(),
     useDebugValue: () => undefined,
   };
 }
 
 let holder: Persist | null = null;
-function Probe() {
-  holder = useDocPersistence("d1", "k1", SERVER_BASE, true, 3);
+// 探针入参（默认值与引入第 7 参之前的既有 5 参调用逐字一致，保证既有用例零回归）。
+type ProbeArgs = {
+  docId?: string;
+  serverContent?: string;
+  canEdit?: boolean;
+  serverVersion?: number;
+  collabActive?: boolean;
+  yOwned?: boolean;
+};
+function Probe(args: ProbeArgs = {}) {
+  const {
+    docId = "d1",
+    serverContent = SERVER_BASE,
+    canEdit = true,
+    serverVersion = 3,
+    collabActive = false,
+    yOwned = false,
+  } = args;
+  holder = useDocPersistence(docId, "k1", serverContent, canEdit, serverVersion, collabActive, yOwned);
   return null;
 }
+/** SSR 渲染：真实跑 hook 函数体与闭包，但 useEffect 按生产 SSR 语义跳过（既有 10 用例的挂载方式）。 */
 function renderOnce() {
   hookIdx = 0;
   const prev = INTERNALS.ReactCurrentDispatcher.current;
@@ -148,10 +189,50 @@ const refresh = () => {
   renderOnce();
   return api();
 };
+/**
+ * 开启依赖感知 effect 的渲染：用于验证加载/接管态切换 effect（默认 SSR seam 下它们是 noop）。
+ * 首次调用按「挂载」跑全部 effect；之后按 deps 变化决定重跑，模拟同一组件实例的重渲染。
+ * effect 在 hook 函数返回后才同步触发、其 setState 写入 slot 已晚于本次 holder 快照，故再做一遍
+ * noop readback（不跑 effect）让 holder 读到被 effect 更新后的 state，忠实反映真实提交后的结果。
+ */
+function renderWith(args: ProbeArgs = {}) {
+  const runPass = (withEffects: boolean) => {
+    hookIdx = 0;
+    runEffects = withEffects;
+    const prev = INTERNALS.ReactCurrentDispatcher.current;
+    INTERNALS.ReactCurrentDispatcher.current = dispatcher();
+    try {
+      Probe(args);
+    } finally {
+      INTERNALS.ReactCurrentDispatcher.current = prev;
+      runEffects = false;
+    }
+  };
+  runPass(true); // 挂载/重渲染：跑依赖感知 effect
+  runPass(false); // readback：仅重读被 effect 更新后的 state slot，不再触发 effect
+  return api();
+}
+/** 只读快照：不跑 effect 重渲染一次，用于回调内 setState（如 markDirty→setStatus）后读最新值。 */
+function snapshot(args: ProbeArgs = {}) {
+  hookIdx = 0;
+  const prev = INTERNALS.ReactCurrentDispatcher.current;
+  INTERNALS.ReactCurrentDispatcher.current = dispatcher(); // runEffects 默认 false → effect noop
+  try {
+    Probe(args);
+  } finally {
+    INTERNALS.ReactCurrentDispatcher.current = prev;
+  }
+  return api();
+}
+/** 重置 effect 槽（配合 beforeEach 的 hookSlots 清空，模拟全新挂载）。 */
+function resetEffects() {
+  effectSlots = [];
+}
 
 beforeEach(() => {
   hookSlots = [];
   hookIdx = 0;
+  resetEffects();
   vi.clearAllMocks();
   vi.useFakeTimers();
   renderOnce();
@@ -347,5 +428,73 @@ describe("missingEmbeds 纯函数", () => {
     const r = missingEmbeds(canvas("c1") + table("t1", "v1"), table("t1", "v2"));
     expect(r.canvas).toEqual(["c1"]);
     expect(r.tables).toEqual([{ tableId: "t1", viewId: "v1" }]);
+  });
+});
+
+// renderWith 会真实跑 effect（含卸载监听 effect，其体内访问 window）；node 环境无 window，stub 之。
+describe("yOwned（Y 通道接管）：REST 全面让位，草稿恢复条跟随接管态", () => {
+  const win = { addEventListener: vi.fn(), removeEventListener: vi.fn() };
+  beforeEach(() => {
+    vi.stubGlobal("window", win);
+  });
+  const D: Draft = { content: "draft-text", baseContent: SERVER_BASE, savedAt: 1 };
+
+  describe("markDirty / flush / saveNow：接管态不发任何整篇 PUT", () => {
+    it("yOwned=true：markDirty 只留草稿不排防抖 PUT、状态 synced；flush 不发 fetch；saveNow 仅 toast", async () => {
+      const a = renderWith({ yOwned: true });
+
+      a.markDirty("edited-src"); // 模拟源码态（无 Y 绑定窗口）编辑
+      expect(h.saveContent).not.toHaveBeenCalled(); // 不发 REST PUT
+      expect(h.saveDraft).toHaveBeenCalledTimes(1); // 源码态崩溃兜底草稿保留
+      expect(h.saveDraft).toHaveBeenCalledWith("d1", {
+        content: "edited-src",
+        baseContent: SERVER_BASE,
+      });
+      expect(snapshot({ yOwned: true }).status).toBe("synced");
+
+      await vi.runAllTimersAsync(); // 没有任何防抖 PUT 被排期
+      expect(h.saveContent).not.toHaveBeenCalled();
+
+      a.flush(); // 卸载/切路由兜底也不让位出 keepalive PUT
+      expect(h.fetch).not.toHaveBeenCalled();
+
+      await a.saveNow(); // 手动保存只给协同反馈，绝不发 PUT（含掉线窗口，根治假 409）
+      expect(h.saveContent).not.toHaveBeenCalled();
+      expect(h.toast).toHaveBeenCalledWith("已在协同中实时同步，无需手动保存", "success");
+    });
+  });
+
+  describe("恢复条显隐跟随 Y 接管态（堵「doc 缓存先到、协同后连」重进时序缺口）", () => {
+    it("yOwned=true 挂载：加载逻辑短路，不消费草稿提示，recovered 恒为 null", () => {
+      h.hasRecoverableDraft.mockReturnValue(D);
+      const a = renderWith({ yOwned: true });
+      expect(h.hasRecoverableDraft).not.toHaveBeenCalled(); // 加载 effect 走 yOwned 短路，根本不读草稿
+      expect(a.recovered).toBeNull();
+    });
+
+    it("yOwned=false 挂载（默认路径不回归）：hasRecoverableDraft 的结果成为 recovered", () => {
+      h.hasRecoverableDraft.mockReturnValue(D);
+      const a = renderWith({ yOwned: false });
+      expect(h.hasRecoverableDraft).toHaveBeenCalledWith("d1", SERVER_BASE);
+      expect(a.recovered).toEqual(D);
+    });
+
+    it("false→true 上升沿：首帧据草稿弹出的恢复条在 WS 建连 Y 接管后被收回", () => {
+      h.hasRecoverableDraft.mockReturnValue(D);
+      // 重进页面：React Query 缓存命中 doc 首帧即到，而协同 status 仍 idle（yOwned=false）
+      const first = renderWith({ yOwned: false });
+      expect(first.recovered).toEqual(D); // 缺口现场：恢复条已弹
+      // WS 建连 status→connecting/connected，yOwned 翻转：切换 effect 必须收回恢复条
+      const after = renderWith({ yOwned: true });
+      expect(after.recovered).toBeNull();
+    });
+
+    it("true→false 下降沿（协同 denied、真源切回 REST）：正文已到位则重算，合法草稿恢复条仍可达", () => {
+      h.hasRecoverableDraft.mockReturnValue(D);
+      renderWith({ yOwned: true }); // 先进入接管
+      const back = renderWith({ yOwned: false }); // 退回 REST 真源
+      expect(h.hasRecoverableDraft).toHaveBeenCalledWith("d1", SERVER_BASE);
+      expect(back.recovered).toEqual(D);
+    });
   });
 });

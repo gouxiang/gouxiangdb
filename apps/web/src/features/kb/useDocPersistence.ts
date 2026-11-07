@@ -28,6 +28,10 @@
 //   加载时不据本地草稿弹恢复条。仅保留 markDirty 的 saveDraft 作「源码态」崩溃兜底——源码模式
 //   （SourceEditor 纯 textarea，无 Y 绑定）下的文字改动在切回所见即所得前不进 Y.Doc，这份整篇
 //   草稿是其唯一落地兜底；它在 Y 接管期间不弹条，由 localMergedTick 合并后清理（见 DocEditorPage）。
+//   恢复条与接管态的对齐分两道 effect：加载 effect 管「doc 到达晚于协同」（yOwned=true 即置 null）；
+//   另有一个依赖 [yOwned, docId] 的切换 effect 管「doc 缓存先到、协同后连」——重进页面时首帧
+//   status=idle(yOwned=false) 加载 effect 已据草稿弹条，WS 建连 yOwned 翻转时由它 setRecovered(null)
+//   收回；退回 REST(true→false) 则在正文已到位时重算，保证 REST 真源下合法草稿恢复条仍可达。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "../../components/ui";
@@ -97,6 +101,9 @@ export function useDocPersistence(
   // 同理用 ref 读 yOwned：协同状态（含掉线/重连）频繁变化不应让 markDirty/flush/saveNow 换引用。
   const yOwnedRef = useRef(yOwned);
   yOwnedRef.current = yOwned;
+  // 记录上一次渲染的 yOwned，供下方「接管态切换 effect」判 false→true / true→false 边沿。
+  // 初值 false：与协同会话初始 status="idle"（yOwned 必为 false）一致，首挂载不会误判为切换。
+  const prevYOwnedRef = useRef(false);
   const qc = useQueryClient();
   const [status, setStatus] = useState<SaveStatus>("saved");
   const [recovered, setRecovered] = useState<Draft | null>(null);
@@ -163,6 +170,36 @@ export function useDocPersistence(
     setRecovered(d);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId, serverContent === undefined ? "" : serverContent, serverVersion]);
+
+  // Y 接管态切换时让 recovered 的显隐真正跟随 Y 接管，而不是只在 doc 到达时算一次。
+  // ★ 堵「重进页面」时序缺口（Bug A 主场景）：React Query 缓存命中（staleTime 5 分钟内重进）时
+  //   doc 首帧即到，此时协同会话 status 仍恒为 "idle"、yOwned=false，上面的加载 effect 已据残留
+  //   草稿 setRecovered(非空) 弹了恢复条；随后 WS 建连 status→connecting/connected、yOwned 转 true，
+  //   但加载 effect 依赖不含协同状态、不会重跑，恢复条会一直挂着。本 effect 用布尔 state 本身作依赖
+  //   （不能只靠 ref，否则不触发），在 yOwned 翻转的那一渲染执行，把 recovered 与接管态对齐：
+  //     · false→true（进入 Y 接管）：Y.Doc 是真源，任何残留整篇草稿都不得再弹恢复条 → 置 null；
+  //     · true→false（协同被 denied 等终态、真源切回 REST）：若服务端正文已是 string，重新据草稿算
+  //       一次，让 REST 真源下的合法草稿恢复条仍可达；正文未到（undefined）则置 null，等加载 effect。
+  //   依赖用 [yOwned, docId]：docId 切换时 prev 与当前同值（均按新会话重算），不产生误切换。
+  useEffect(() => {
+    const wasOwned = prevYOwnedRef.current;
+    const nowOwned = yOwnedRef.current;
+    // 无论是否发生切换都先对齐 prev：本 effect 仅在 [yOwned, docId] 变化时触发，
+    // 故 docId 变化而 yOwned 未变时 wasOwned===nowOwned，直接 no-op（docId 基线归加载 effect 管）。
+    prevYOwnedRef.current = nowOwned;
+    if (wasOwned === nowOwned) return; // 非接管态切换：不动 recovered（避免与加载 effect 打架）
+    if (nowOwned) {
+      // false→true 进入 Y 接管：Y.Doc 是真源，任何残留整篇草稿都不得再弹恢复条。
+      setRecovered(null);
+    } else if (typeof serverContent === "string") {
+      // true→false 退回 REST 真源：服务端正文已到位则重算，让合法草稿恢复条仍可达。
+      setRecovered(hasRecoverableDraft(docId, serverContent));
+    } else {
+      // 正文未到：先置 null，待加载 effect 在 serverContent 到达时按非接管基线初始化。
+      setRecovered(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yOwned, docId]);
 
   /**
    * 唯一的串行保存泵（修复 A 核心）。
