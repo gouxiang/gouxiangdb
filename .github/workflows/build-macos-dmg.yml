@@ -10,7 +10,7 @@
 #   - GITHUB_TOKEN 权限收紧到只读；本流程不 push、不发 Release，只产 artifact。
 #   - 私有签发服务 license-server/ 与签名私钥不在本仓（.gitignore 已排除），云端拉到的是纯开源树。
 #
-# 与本地 release-artifacts/0.3.0/DMG-REBUILD-RUNBOOK.md 逐段对应；改链路时两处一起改。
+# 本 workflow 即 dmg 链路在仓内的唯一权威定义；本地 release-artifacts/ 已被 .gitignore 排除、不入开源树。
 
 name: build-macos-dmg
 
@@ -43,7 +43,7 @@ jobs:
       CARGO_BUILD_JOBS: "2" # 限并发，贴近本地红线口径
       GX_LICENSE_PROD: "1" # 生产信任根物理换源（kid=ff02db72，开发钥不进 bundle）
       CODEBUDDY_SAFE_DELETE_ENABLED: "0"
-      DMG_NAME: "构想工作台_0.3.0_aarch64"
+      DMG_NAME: "构想工作台_0.3.1_aarch64"
 
     steps:
       - name: 检出开源树
@@ -139,9 +139,9 @@ jobs:
           set -euo pipefail
           STAGE="$(mktemp -d)"
           rsync -a "$APP_PATH/" "$STAGE/构想工作台.app/"
-          hdiutil create -srcfolder "$STAGE" -fs HFS+ -volname "构想工作台" -ov /tmp/gx030-rw.dmg
+          hdiutil create -srcfolder "$STAGE" -fs HFS+ -volname "构想工作台" -ov /tmp/gx031-rw.dmg
           mkdir -p release-out
-          hdiutil convert /tmp/gx030-rw.dmg -format UDZO -imagekey zlib-level=9 \
+          hdiutil convert /tmp/gx031-rw.dmg -format UDZO -imagekey zlib-level=9 \
             -o "release-out/${DMG_NAME}.dmg"
 
       - name: 产物验收（指纹 + 迁移数 + 卷宗 FinderInfo）
@@ -150,10 +150,10 @@ jobs:
           DMG="release-out/${DMG_NAME}.dmg"
           ls -la "$DMG"
           shasum -a 256 "$DMG" | tee "release-out/${DMG_NAME}.dmg.sha256"
-          # 迁移必须仍是 44 枚（本版零新增迁移）
+          # 迁移必须为 45 枚（0.3.1 新增 workflow_engine 一枚，只增幂等）
           MIG_COUNT=$(find apps/api/prisma/migrations -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
-          echo "迁移目录数=${MIG_COUNT}（期望 44）"
-          test "$MIG_COUNT" -eq 44
+          echo "迁移目录数=${MIG_COUNT}（期望 45）"
+          test "$MIG_COUNT" -eq 45
           # 挂载抽检卷内 FinderInfo 必须为 0
           MNT="$(mktemp -d)"
           hdiutil attach "$DMG" -mountpoint "$MNT" -nobrowse -quiet
@@ -166,7 +166,7 @@ jobs:
         if: inputs.upload_artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gouxiangdb-030-macos-arm64-dmg
+          name: gouxiangdb-031-macos-arm64-dmg
           path: |
             release-out/*.dmg
             release-out/*.sha256
