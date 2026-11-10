@@ -280,6 +280,15 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           <Icon name="settings" size={14} />
           <span>设置</span>
         </button>
+        {/* 工作流：与新壳底部固定区同一静态入口（任何角色常显），引擎 on/off 在页内门控；旧壳回退态同样可达 */}
+        <button
+          type="button"
+          onClick={() => navigate("/workflow")}
+          className="flex w-full items-center gap-2 rounded-gx-sm px-2 py-1.5 text-gx-13 text-gx-text-primary hover:bg-gx-row-hover"
+        >
+          <Icon name="workflow" size={14} />
+          <span>工作流</span>
+        </button>
         {/* 帮助中心：与新壳底部固定区同一入口（静态项，不看角色），旧壳回退态下同样可达 */}
         <button
           type="button"

@@ -31,6 +31,9 @@ describe("parseUpdateSource", () => {
     [undefined, "gitea"],
     ["gitea", "gitea"],
     ["static", "static"],
+    ["github", "github"],
+    ["  github  ", "github"],
+    ["GITHUB", "gitea"], // 大写不识别 -> 精确小写纪律回默认
     ["STATIC", "gitea"],
     ["mirror", "gitea"],
   ])("%j -> %s", (raw, want) => {
@@ -193,6 +196,24 @@ describe("parseUpdateConfig 集成与缺省", () => {
     expect(config.allowPrerelease).toBe(true);
     expect(config.timeoutMs).toBe(5000);
     expect(warnings).toEqual([]);
+  });
+
+  it("github 源：精确小写解析为 github，repo 复用且无需 token", () => {
+    const { config, warnings } = parseUpdateConfig({
+      GX_UPDATE_SOURCE: "github",
+      GX_UPDATE_REPO: "acme/gouxiangdb-public",
+    });
+    expect(config.source).toBe("github");
+    expect(config.repo).toBe("acme/gouxiangdb-public");
+    expect(config.token).toBe("");
+    expect(warnings).toEqual([]);
+  });
+
+  it("非法源 warning 文案含三种合法值，且回退默认 gitea", () => {
+    const { config, warnings } = parseUpdateConfig({ GX_UPDATE_SOURCE: "gitlab" });
+    expect(config.source).toBe("gitea");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("gitea/static/github");
   });
 
   it("安全：token 绝不出现在任何 warning 文本中", () => {

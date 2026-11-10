@@ -27,6 +27,7 @@ const VIEW_TYPE_ENUM = z.enum([
   "calendar",
   "tree",
   "gantt",
+  "chart",
 ]);
 
 const createSchema = z.object({

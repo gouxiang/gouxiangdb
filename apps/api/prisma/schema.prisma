@@ -1074,6 +1074,86 @@ model SyncIdMap {
 }
 
 // ============================================================================
+// 自研工作流引擎（需求 #1296）刀 A 地基三表 —— 台账 #1302，只增空表、零行为。
+// 总门 GX_WORKFLOW_ENGINE 默认 off；本刀不挂路由、不接 runtime，无任何应用代码读写。
+// 列名一律 camelCase（@@map 只改表名不改列名）；不加物理外键，悬挂由应用层 deleteMany 清理。
+// ============================================================================
+
+/// 流程定义：DAG 图、触发器、版本号与启停状态（刀 A 只建表，刀 B runtime 才读写）
+model WorkflowDef {
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  /// 定义版本号，同名流程发布递增（应用层维护）
+  version       Int      @default(1)
+  /// draft | published | disabled
+  status        String   @default("draft")
+  /// manual | record_created | record_updated | scheduled（触发类型）
+  triggerType   String   @default("manual")
+  /// 触发器参数（JSON 文本，空配置为 {}）
+  triggerConfig String   @default("{}")
+  /// DAG 节点与连线定义（JSON 文本）
+  graph         String   @default("{}")
+  createdBy     String?
+  updatedBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status])
+  @@map("workflow_defs")
+}
+
+/// 流程运行实例：一次触发产生一行，记录运行状态、上下文与当前节点
+model WorkflowRun {
+  id            String    @id @default(cuid())
+  /// 归属的流程定义 id（无物理外键，定义删除后悬挂由应用层清理）
+  defId         String
+  /// pending | running | waiting_approval | succeeded | failed | canceled
+  status        String    @default("pending")
+  triggerType   String    @default("manual")
+  /// 触发所关联的实体类型/ id（可空，手动触发可无实体）
+  entityType    String?
+  entityId      String?
+  /// 触发输入（JSON 文本）
+  input         String    @default("{}")
+  /// 运行上下文/节点产出累积（JSON 文本）
+  context       String    @default("{}")
+  /// 当前停留节点 id（等待审批/失败时定位用）
+  currentNodeId String?
+  /// 失败原因（status=failed 时落，其余为空）
+  error         String?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdBy     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status])
+  @@index([defId])
+  @@map("workflow_runs")
+}
+
+/// 运行中的人工审批节点：一个审批动作一行，记录审批人、结论与意见
+model WorkflowApproval {
+  id         String    @id @default(cuid())
+  /// 归属的流程运行 id（无物理外键，悬挂由应用层清理）
+  runId      String
+  /// DAG 中对应的审批节点 id
+  nodeId     String
+  /// pending | approved | rejected
+  status     String    @default("pending")
+  approverId String?
+  comment    String?
+  decidedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([runId])
+  @@index([status])
+  @@map("workflow_approvals")
+}
+
+// ============================================================================
 // 手写维护表（不经 Prisma 管理，禁止在此添加 model）
 // ============================================================================
 // record_field_index —— M1/S3 起存在的 EAV 旁路索引（records.fields JSON 的

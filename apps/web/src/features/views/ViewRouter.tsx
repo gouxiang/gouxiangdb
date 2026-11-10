@@ -23,6 +23,7 @@ import FormView from "./FormView";
 import DetailView from "./DetailView";
 import TreeView from "../tree/TreeView";
 import GanttView from "../gantt/GanttView";
+import ChartView from "../chart/ChartView";
 import RecordDrawer from "../drawer/RecordDrawer";
 import type { ViewProps } from "./field-controls";
 
@@ -260,6 +261,8 @@ export default function ViewRouter() {
         return <TreeView {...viewProps} />;
       case "gantt":
         return <GanttView {...viewProps} />;
+      case "chart":
+        return <ChartView {...viewProps} />;
       default:
         return <div className="p-gx-lg text-gx-13 text-gx-text-tertiary">未知视图类型</div>;
     }

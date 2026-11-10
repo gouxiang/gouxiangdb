@@ -49,3 +49,39 @@ export function renderFnosUploadGuide(
     preUpgradeNote: FNOS_PRE_UPGRADE_NOTE,
   };
 }
+
+/** desktop-installer 升级前提示（本地库数据保留口径 + 备份/失败处置，两段）。 */
+const DESKTOP_PRE_UPGRADE_NOTE = [
+  "升级前请注意：安装新版不会删除您的本地数据库与上传文件，但仍建议先在设置中完成一次数据备份。",
+  "若安装过程中提示失败，请不要重复强制安装，携带本页面显示的当前版本与架构信息联系支持。",
+].join("\n\n");
+
+function desktopSteps(version: string, filename: string, productName: string): string[] {
+  return [
+    `点击上方按钮，将 ${filename} 下载到本机；`,
+    `完全退出正在运行的${productName}（含菜单栏/托盘驻留进程）；`,
+    "运行刚下载的安装包：macOS 打开 .dmg 后将应用拖入「应用程序」文件夹，"
+      + "Windows 双击 .msi 按向导完成安装；",
+    `重新打开${productName}，在本页面确认版本号已变为 ${version}。`,
+  ];
+}
+
+/**
+ * 装配桌面客户端（desktop-client）手动安装指引。
+ * @param version 目标发布版本（步骤 4 提示的版本号）。
+ * @param filename 目标 artifact 文件名；null 时用通用占位（below-min：artifact 缺席）。
+ * @param productName 品牌产品名；缺省回退默认产品名，保持纯函数既有行为。
+ */
+export function renderDesktopInstallerGuide(
+  version: string,
+  filename: string | null,
+  productName: string = DEFAULT_PRODUCT_NAME,
+): ManualInstallGuideDTO {
+  const name = filename ?? "安装包（.dmg/.msi）";
+  const safeName = productName.trim() === "" ? DEFAULT_PRODUCT_NAME : productName.trim();
+  return {
+    kind: "desktop-installer" satisfies InstallGuideKind,
+    steps: desktopSteps(version, name, safeName),
+    preUpgradeNote: DESKTOP_PRE_UPGRADE_NOTE,
+  };
+}

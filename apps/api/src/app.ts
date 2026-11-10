@@ -34,6 +34,7 @@ import { pub } from "./routes/public.js";
 import { search } from "./routes/search.js";
 import { v1 } from "./routes/v1/index.js";
 import { syncRoutes } from "./routes/v1/sync/index.js";
+import { workflowRoutes } from "./routes/v1/workflow/index.js";
 import { localSyncRoutes } from "./routes/localSync.js";
 import { localSyncProxyRoutes } from "./routes/localSyncProxy.js";
 import { adminUpdateDownloadRoutes } from "./routes/v1/adminUpdateDownload.js";
@@ -236,6 +237,14 @@ function createMount(webRoot: string | null): Hono {
   //   若 v1 先注册，未登录请求会被它先判 401，同步组自己的"off→404 在鉴权前"闸就永远到不了。
   //   同步组自带 gate + requireActiveUser 两道，路径 /api/v1/sync 与 invite/update 不重叠。
   mount.route("/api/v1/sync", syncRoutes);
+
+  // 自研工作流引擎面（#1296 刀 B2）：与企业双 flag 正交，恒挂载到 mount；是否可达由组首中间件
+  // per-request 读 GX_WORKFLOW_ENGINE 决定（默认 off → 组内首闸在任何 DB 访问前 404 WORKFLOW_DISABLED）。
+  // 刻意不放进下面的企业 if 块：工作流是独立能力，组织/导航双 flag 全 off 时仍由自己的总门决定可达性。
+  // ★ 必须挂在企业 v1【之前】（即 :258 的 if 块之外）：v1.use("*", requireActiveUser) 会拦所有
+  //   /api/v1/*（含 /workflow），若 v1 先注册，off 态请求会被它先判 401，工作流组自己的
+  //   "off→404 在鉴权前"闸就永远到不了。工作流组自带 gate + requireActiveUser 两道，路径不与现有面重叠。
+  mount.route("/api/v1/workflow", workflowRoutes);
 
   // 本机侧车定时同步引擎【只读状态】面（beta.2 B2）：挂 /api/local-sync，绝不进 /api/v1/sync 组
   // （那是服务端面，GX_SYNC_SERVER 门）。组首中间件按 replicaSyncConfig() 请求期判定，默认配置

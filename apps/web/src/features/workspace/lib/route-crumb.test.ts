@@ -26,6 +26,34 @@ describe("deriveCrumb：工作区级固定页", () => {
   it("未知工作区子路由 → []（不编造段名）", () => {
     expect(deriveCrumb({ pathname: "/workspace/nope" })).toEqual([]);
   });
+
+  it("工作流：/workflow 单段无 to；/workflow/runs 两段且首段带 to、末段无 to", () => {
+    expect(deriveCrumb({ pathname: "/workflow" })).toEqual([{ label: "工作流" }]);
+    expect(deriveCrumb({ pathname: "/workflow/runs" })).toEqual([
+      { label: "工作流", to: "/workflow" },
+      { label: "运行记录" },
+    ]);
+    // /workflow/runs/:runId：三段，首两段带 to、末段「运行详情」无 to。
+    expect(deriveCrumb({ pathname: "/workflow/runs/run_1" })).toEqual([
+      { label: "工作流", to: "/workflow" },
+      { label: "运行记录", to: "/workflow/runs" },
+      { label: "运行详情" },
+    ]);
+    // /workflow/def/:defId：静态 def 前缀与 runs 同构，精确识别为两段，末段无 to。
+    expect(deriveCrumb({ pathname: "/workflow/def/wf_1" })).toEqual([
+      { label: "工作流", to: "/workflow" },
+      { label: "流程详情" },
+    ]);
+    // /workflow/def 缺 id（seg[3] 为空）回落单段，不编造二段。
+    expect(deriveCrumb({ pathname: "/workflow/def" })).toEqual([{ label: "工作流" }]);
+    // /workflow/new：独立静态段，精确识别为两段，首段带 to、末段无 to。
+    expect(deriveCrumb({ pathname: "/workflow/new" })).toEqual([
+      { label: "工作流", to: "/workflow" },
+      { label: "新建流程" },
+    ]);
+    // 未识别的 /workflow/* 子路由只兜底单段，不编造二段。
+    expect(deriveCrumb({ pathname: "/workflow/whatever" })).toEqual([{ label: "工作流" }]);
+  });
 });
 
 describe("deriveCrumb：智能数据库", () => {
@@ -147,6 +175,7 @@ describe("deriveCrumb：杂项护栏", () => {
   it("任何输出段 label 均为非空字符串、to 仅出现在非末段", () => {
     const cases = [
       "/workspace/contacts",
+      "/workflow/runs",
       "/base/b1/table/t1/view/v1",
       "/kb/k1/canvas/d2",
       "/base/b1/trash",

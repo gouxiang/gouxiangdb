@@ -58,6 +58,41 @@ export function deriveCrumb(input: DeriveCrumbInput): CrumbSeg[] {
     return [{ label: "帮助中心" }];
   }
 
+  // —— 工作流（刀C2：工作区级固定页，无库上下文）——
+  if (root === "workflow") {
+    // /workflow/runs：首段「工作流」可点回列表，末段「运行记录」无 to。
+    // /workflow/runs/:runId：再补一段无 to 的「运行详情」（react-router v6 静态段 runs 与动态段不冲突）。
+    if (seg[2] === "runs") {
+      if (seg[3]) {
+        return [
+          { label: "工作流", to: "/workflow" },
+          { label: "运行记录", to: "/workflow/runs" },
+          { label: "运行详情" },
+        ];
+      }
+      return [
+        { label: "工作流", to: "/workflow" },
+        { label: "运行记录" },
+      ];
+    }
+    // /workflow/def/:defId：静态前缀 def 与 runs 同构，精确识别为两段；缺 id（seg[3] 空）回落单段。
+    if (seg[2] === "def" && seg[3]) {
+      return [
+        { label: "工作流", to: "/workflow" },
+        { label: "流程详情" },
+      ];
+    }
+    // /workflow/new：独立静态段（不与 def/:id 动态段冲突，react-router v6 静态段优先匹配）。
+    if (seg[2] === "new") {
+      return [
+        { label: "工作流", to: "/workflow" },
+        { label: "新建流程" },
+      ];
+    }
+    // /workflow 本身及任何未识别的 /workflow/* 子路由：只出单段，不编造二段。
+    return [{ label: "工作流" }];
+  }
+
   // —— 智能数据库 ——
   if (root === "base") {
     const id = seg[2];

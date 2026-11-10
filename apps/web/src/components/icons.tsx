@@ -28,6 +28,7 @@ export type IconName =
   | "kanban"
   | "calendar"
   | "gantt"
+  | "chart"
   | "form"
   | "detail"
   | "link"
@@ -131,6 +132,8 @@ export type IconName =
   // 离线同步：同步中心 / 合并裁决 / 失权隔离
   | "sync"
   | "merge"
+  // 工作流引擎：流程节点 + 流向连线（刀C2 导航入口/停用指引卡）
+  | "workflow"
   | "shieldOff";
 
 const PATHS: Record<IconName, string[]> = {
@@ -168,6 +171,8 @@ const PATHS: Record<IconName, string[]> = {
   kanban: ["M4 4h4v16H4z", "M10 4h4v10h-4z", "M16 4h4v13h-4z"],
   calendar: ["M3 6h18v15H3z", "M3 11h18", "M8 3v4", "M16 3v4"],
   gantt: ["M3 4h18v16H3z", "M6 7h8v2H6z", "M6 11h12v2H6z", "M6 15h6v2H6z"],
+  // 柱图：一条基线 + 三根递增竖条，24 坐标线性描边，无填充
+  chart: ["M3 21h18", "M7 21v-6", "M12 21V8", "M17 21v-9"],
   form: ["M5 3h14v18H5z", "M9 8h6", "M9 12h6", "M9 16h3"],
   detail: ["M4 6h16", "M4 12h16", "M4 18h10"],
   link: [
@@ -479,6 +484,8 @@ const PATHS: Record<IconName, string[]> = {
   ],
   // 合并裁决：两条分支汇入一条主干
   merge: ["M7 4v6a4 4 0 0 0 4 4h6", "M17 4v6", "M7 20h10"],
+  // 工作流：两个节点方块 + 一条带流向的连线（纯描边，无 fill 面）
+  workflow: ["M5 5h5v5H5z", "M14 14h5v5h-5z", "M10 7.5h3a2 2 0 0 1 2 2V14"],
   // 失权隔离：盾牌 + 斜杠
   shieldOff: [
     "M12 3l7 3v5.5c0 4.6-3 7.8-7 9-4-1.2-7-4.4-7-9V6z",
@@ -602,4 +609,5 @@ export const VIEW_ICON: Record<string, IconName> = {
   calendar: "calendar",
   tree: "sitemap",
   gantt: "gantt",
+  chart: "chart",
 };

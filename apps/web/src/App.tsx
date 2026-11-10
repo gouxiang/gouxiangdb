@@ -36,6 +36,11 @@ import ErdPage from "./features/erd/ErdPage";
 import ContactsPage from "./features/contacts/ContactsPage";
 import InviteAcceptPage from "./features/contacts/InviteAcceptPage";
 import HelpCenterPage from "./features/help/HelpCenterPage";
+import WorkflowDefsPage from "./features/workflow/WorkflowDefsPage";
+import WorkflowRunsPage from "./features/workflow/WorkflowRunsPage";
+import WorkflowDefDetailPage from "./features/workflow/WorkflowDefDetailPage";
+import WorkflowComposerPage from "./features/workflow/WorkflowComposerPage";
+import WorkflowRunDetailPage from "./features/workflow/WorkflowRunDetailPage";
 import { ShellGate } from "./features/workspace/ShellGate";
 import { BrandingTitle } from "./features/branding/BrandingTitle";
 import { WorkspaceSettingsPage } from "./features/workspace/WorkspaceSettingsPage";
@@ -259,6 +264,13 @@ export default function App() {
         <Route path="/workspace/contacts" element={<ContactsPage />} />
         <Route path="/workspace/authz" element={<PermPanel />} />
         <Route path="/workspace/settings/*" element={<WorkspaceSettingsPage />} />
+        {/* 工作流（刀C2 骨架 / 刀C3-a2-i 列表+详情）：与帮助中心同层、登录态布局内（过 RequireAuth/RequirePasswordChanged/壳/LicenseGate），
+            入口任何角色常显；引擎 on/off 的差异在页内 WorkflowGate 三态门控，默认 off 显启用指引卡。 */}
+        <Route path="/workflow" element={<WorkflowDefsPage />} />
+        <Route path="/workflow/new" element={<WorkflowComposerPage />} />
+        <Route path="/workflow/runs" element={<WorkflowRunsPage />} />
+        <Route path="/workflow/runs/:runId" element={<WorkflowRunDetailPage />} />
+        <Route path="/workflow/def/:defId" element={<WorkflowDefDetailPage />} />
         {/* 帮助中心：与其它设置页同层（登录后可看），入口在新壳底部固定区/旧壳侧栏底部 */}
         <Route path="/help" element={<HelpCenterPage />} />
       </Route>

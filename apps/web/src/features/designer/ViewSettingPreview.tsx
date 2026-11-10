@@ -57,6 +57,8 @@ function PreviewBody({ view, fields }: { view: ViewDTO; fields: FieldDTO[] }) {
       return <CalendarSkeleton />;
     case "gantt":
       return <GanttSkeleton />;
+    case "chart":
+      return <GridSkeleton fields={fields} />;
     case "tree":
       return <TreeSkeleton fields={fields} />;
     case "form":

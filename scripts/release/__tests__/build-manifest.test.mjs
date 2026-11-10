@@ -12,6 +12,10 @@ import {
   artifactsFromFiles,
   buildManifest,
   parseFpkFilename,
+  parseDesktopFilename,
+  desktopArtifactsFromFiles,
+  CHANNEL_FNOS_FPK,
+  CHANNEL_DESKTOP_CLIENT,
   KEEP_RELEASES,
 } from "../build-manifest.mjs";
 
@@ -209,4 +213,173 @@ test("buildManifest：非法输入 fail-closed", () => {
     () => buildManifest(baseArgs({ previous: { schemaVersion: 1, product: "other", channels: {} } })),
     /product/,
   );
+});
+
+// ---------------------------------------------------------------------------
+// desktop-client 通道（v0.3.1 additive）
+// ---------------------------------------------------------------------------
+
+test("parseDesktopFilename：扩展名定平台 + 架构 token 归一 + semver 提取（表驱动）", () => {
+  const cases = [
+    ["GouXiang-0.3.1-arm64.dmg", { version: "0.3.1", arch: "arm64", platform: "darwin" }],
+    ["GouXiang-0.3.1-x64.dmg", { version: "0.3.1", arch: "x64", platform: "darwin" }],
+    ["GouXiang-0.3.1-x64.msi", { version: "0.3.1", arch: "x64", platform: "win32" }],
+    ["GouXiang-0.3.1-x86_64.AppImage", { version: "0.3.1", arch: "x64", platform: "linux" }],
+    ["gouxiangdb-0.3.1-aarch64.AppImage", { version: "0.3.1", arch: "arm64", platform: "linux" }],
+    // amd64 同义 token -> x64。
+    ["GouXiang-0.3.1-amd64.msi", { version: "0.3.1", arch: "x64", platform: "win32" }],
+    // rc 版本 token。
+    ["GouXiang-0.3.2-rc1-arm64.dmg", { version: "0.3.2-rc1", arch: "arm64", platform: "darwin" }],
+    // 大小写不敏感的扩展名/架构。
+    ["GouXiang-0.3.1-ARM64.DMG", { version: "0.3.1", arch: "arm64", platform: "darwin" }],
+  ];
+  for (const [name, want] of cases) {
+    const got = parseDesktopFilename(name);
+    assert.ok(got, `应能解析：${name}`);
+    assert.equal(got.filename, name);
+    assert.equal(got.version, want.version, `${name} version`);
+    assert.equal(got.arch, want.arch, `${name} arch`);
+    assert.equal(got.platform, want.platform, `${name} platform`);
+  }
+});
+
+test("parseDesktopFilename：要素缺失/非安装包 -> null（fail-closed 不猜）", () => {
+  const bad = [
+    "GouXiang-0.3.1-arm64.fpk", // 非桌面扩展名
+    "GouXiang-0.3.1.dmg", // 缺架构 token
+    "GouXiang-arm64.msi", // 缺版本
+    "GouXiang-0.3.1-mips64.dmg", // 未知架构
+    "notes.txt",
+    "",
+  ];
+  for (const name of bad) assert.equal(parseDesktopFilename(name), null, name);
+});
+
+test("desktopArtifactsFromFiles：sha/size 实算、release-asset、signature=null、双键排序", () => {
+  const dir = tempDir();
+  const dmg = writeFpk(dir, "GouXiang-0.3.1-arm64.dmg", Buffer.from("dmg-bytes"));
+  const msi = writeFpk(dir, "GouXiang-0.3.1-x64.msi", Buffer.from("msi-bytes-longer"));
+  const app = writeFpk(dir, "GouXiang-0.3.1-x86_64.AppImage", Buffer.from("app"));
+  const arts = desktopArtifactsFromFiles([msi, dmg, app], "0.3.1");
+  // 排序：darwin -> linux -> win32。
+  assert.deepEqual(arts.map((a) => `${a.platform}/${a.arch}`), [
+    "darwin/arm64",
+    "linux/x64",
+    "win32/x64",
+  ]);
+  const dmgArt = arts[0];
+  assert.equal(dmgArt.filename, "GouXiang-0.3.1-arm64.dmg");
+  assert.equal(dmgArt.sizeBytes, Buffer.from("dmg-bytes").length);
+  assert.equal(dmgArt.sha256, sha(Buffer.from("dmg-bytes")));
+  assert.deepEqual(dmgArt.download, {
+    kind: "release-asset",
+    asset: "GouXiang-0.3.1-arm64.dmg",
+  });
+  assert.equal(dmgArt.signature, null);
+});
+
+test("desktopArtifactsFromFiles：版本不一致 / 同平台架构重复 -> 抛错", () => {
+  const dir = tempDir();
+  const wrong = writeFpk(dir, "GouXiang-0.3.0-arm64.dmg", "a");
+  assert.throws(() => desktopArtifactsFromFiles([wrong], "0.3.1"), /不一致/);
+  const d1 = writeFpk(dir, "GouXiang-0.3.1-arm64.dmg", "a");
+  const dir2 = tempDir();
+  writeFileSync(join(dir2, "GouXiang-0.3.1-arm64.dmg"), "b");
+  assert.throws(
+    () => desktopArtifactsFromFiles([d1, join(dir2, "GouXiang-0.3.1-arm64.dmg")], "0.3.1"),
+    /同一平台\/架构/,
+  );
+});
+
+function desktopArtifact(over = {}) {
+  return {
+    arch: "arm64",
+    platform: "darwin",
+    filename: "GouXiang-0.3.1-arm64.dmg",
+    sizeBytes: 9,
+    sha256: "d".repeat(64),
+    download: { kind: "release-asset", asset: "GouXiang-0.3.1-arm64.dmg" },
+    signature: null,
+    ...over,
+  };
+}
+
+test("buildManifest：传入 desktopArtifacts 时写 desktop-client 段且 fnos 段不受影响", () => {
+  const m = buildManifest({
+    ...baseArgs(),
+    desktopArtifacts: [desktopArtifact()],
+  });
+  // fnos-fpk 仍只有 fpk 一个 release（逻辑原样）。
+  assert.equal(m.channels[CHANNEL_FNOS_FPK].releases.length, 1);
+  const desk = m.channels[CHANNEL_DESKTOP_CLIENT];
+  assert.ok(desk, "必须出现 desktop-client 通道段");
+  const rel = desk.releases[0];
+  assert.equal(rel.version, "0.2.3"); // 与本次发布版本一致（baseArgs.version）
+  assert.equal(rel.artifacts[0].platform, "darwin");
+  assert.equal(rel.artifacts[0].arch, "arm64");
+  // 桌面段与 fnos 段共享版本元数据，仅 artifacts 不同。
+  assert.equal(rel.publishedAt, m.channels[CHANNEL_FNOS_FPK].releases[0].publishedAt);
+});
+
+test("buildManifest：桌面段同版本去重 + prepend + 裁 KEEP_RELEASES", () => {
+  const prevDesktop = {
+    releases: Array.from({ length: 12 }, (_, i) => ({
+      version: `0.1.${i}`,
+      publishedAt: "2026-01-01T00:00:00Z",
+      prerelease: false,
+      minVersion: null,
+      releaseNotes: { format: "markdown", zh: `n ${i}`, en: null },
+      artifacts: [desktopArtifact({ filename: `old-${i}.dmg`, sha256: "e".repeat(64) })],
+    })),
+  };
+  const previous = {
+    schemaVersion: 1,
+    product: "gouxiangdb",
+    generatedAt: "x",
+    channels: { [CHANNEL_DESKTOP_CLIENT]: prevDesktop },
+  };
+  const m = buildManifest({ ...baseArgs({ previous }), desktopArtifacts: [desktopArtifact()] });
+  const rel = m.channels[CHANNEL_DESKTOP_CLIENT].releases;
+  assert.equal(rel.length, KEEP_RELEASES);
+  assert.equal(rel[0].version, "0.2.3"); // 新条在首
+});
+
+test("buildManifest：不传 desktopArtifacts 时输出与旧版逐字节一致（无 desktop 键、旧桌面段原样保留）", () => {
+  // 1) 从零起：不含 desktop-client 键，结构为固定字面量。
+  const fresh = buildManifest(baseArgs());
+  assert.equal(CHANNEL_DESKTOP_CLIENT in fresh.channels, false);
+  assert.deepEqual(Object.keys(fresh.channels), [CHANNEL_FNOS_FPK]);
+  assert.equal(
+    JSON.stringify(fresh),
+    JSON.stringify({
+      schemaVersion: 1,
+      product: "gouxiangdb",
+      generatedAt: "2026-10-12T08:00:00Z",
+      channels: {
+        "fnos-fpk": {
+          releases: [
+            {
+              version: "0.2.3",
+              publishedAt: "2026-10-12T08:00:00Z",
+              prerelease: false,
+              minVersion: "0.1.0",
+              releaseNotes: { format: "markdown", zh: "## 0.2.3\n\n- 新增系统更新。", en: null },
+              artifacts: [makeRelease("0.2.3").artifacts[0]],
+            },
+          ],
+        },
+      },
+    }),
+  );
+
+  // 2) 旧清单里已存在 desktop-client 段：未传参时按「其它通道」原样保留（不被剔除/重建）。
+  const legacyDesktop = { releases: [{ version: "0.9.9", keep: true }] };
+  const previous = {
+    schemaVersion: 1,
+    product: "gouxiangdb",
+    generatedAt: "x",
+    channels: { [CHANNEL_DESKTOP_CLIENT]: legacyDesktop, "fnos-fpk": { releases: [makeRelease("0.2.2")] } },
+  };
+  const kept = buildManifest(baseArgs({ previous }));
+  assert.equal(kept.channels[CHANNEL_DESKTOP_CLIENT], legacyDesktop);
 });

@@ -76,6 +76,12 @@ start_app() {
   export GX_LICENSE_MODE="${GX_LICENSE_MODE:-verify}"
   export GX_LICENSE_PLATFORM="fnos"
   export GX_PACKAGE_TYPE="fpk"
+  # 离线同步服务端总门通电（0.3.1，#1294）：fpk 实例是可被桌面/其它副本订阅的远端服务端面，
+  # 必须打开 GX_SYNC_SERVER，否则 routes/v1/sync 整组在 DB 访问前短路 404、副本永远拉推不到数据
+  # （这正是「同步功能在包里却用不起来」的真正堵点）。与授权同范式：每次启动 export，覆盖装
+  # 立即生效、不依赖首装 env 文件重写；默认 on（parseSyncServerFlag 会 trim+小写化后认 on/true/1，
+  # 其余值一律关），如需关闭可在 $ENV_FILE 显式写 GX_SYNC_SERVER=off，换芯免重打包。
+  export GX_SYNC_SERVER="${GX_SYNC_SERVER:-on}"
   # 启动前幂等迁移兜底（0.3.0 P0 修复）：正规路径由 install/upgrade_callback 迁移，
   # 但 fnOS appcenter 覆盖装＝先 uninstall（数据保留）再 install，且个别情况下回调可能
   # 未执行；若此处不兜底，旧库停在旧迁移，/readyz migrations 探针恒 503 → 界面永久转圈。

@@ -10,7 +10,11 @@
 import { useMemo } from "react";
 import type { FieldDTO, ViewDTO } from "@gx/shared-types";
 import {
+  AGG_FUNC_LABEL,
   GANTT_ZOOM_LABEL,
+  canBeChartDimensionField,
+  canBeChartMetricField,
+  type AggFunc,
   type GanttZoom,
 } from "@gx/shared-types";
 import { SegmentedControl, Select } from "../../../components/ui";
@@ -100,6 +104,15 @@ export default function TypeSpecificFieldsSection({
     () => fields.filter((f) => f.type === "number" || f.type === "percent"),
     [fields],
   );
+  // 图表维度 / 指标候选：资格判定复用 shared-types 单源，不在这里手写类型清单。
+  const chartDimensions = useMemo(
+    () => fields.filter((f) => !f.isReverse && canBeChartDimensionField(f.type)),
+    [fields],
+  );
+  const chartMetrics = useMemo(
+    () => fields.filter((f) => !f.isReverse && canBeChartMetricField(f.type)),
+    [fields],
+  );
 
   return (
     <div className="flex flex-col gap-3 border-t border-gx-separator pt-3">
@@ -129,6 +142,39 @@ export default function TypeSpecificFieldsSection({
                 value: z,
                 label: GANTT_ZOOM_LABEL[z],
               }))}
+            />
+          </div>
+        </>
+      )}
+
+      {view.type === "chart" && (
+        <>
+          {fieldSelect(
+            "维度字段",
+            c.chartDimensionFieldId,
+            chartDimensions,
+            canEdit,
+            set("chartDimensionFieldId"),
+            "不设置（请选择维度）",
+          )}
+          {fieldSelect(
+            "指标字段",
+            c.chartMetricFieldId,
+            chartMetrics,
+            canEdit,
+            set("chartMetricFieldId"),
+            "不设置（按计数）",
+          )}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-gx-12 font-medium text-gx-text-secondary">聚合方式</label>
+            <Select
+              value={c.chartAggFunc}
+              disabled={!canEdit}
+              options={(Object.entries(AGG_FUNC_LABEL) as [AggFunc, string][]).map(([value, label]) => ({
+                value,
+                label,
+              }))}
+              onChange={(e) => void commitConfig({ chartAggFunc: e.target.value as AggFunc })}
             />
           </div>
         </>

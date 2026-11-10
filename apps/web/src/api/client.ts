@@ -86,6 +86,18 @@ import type { UpdatePrefetchDTO, UpdateStatusDTO } from "@gx/shared-types";
 // 品牌外观（0.2.4-rc）：匿名读 + 管理员写。契约真源 packages/shared-types/src/branding.ts，
 // 端点真源 apps/api/src/routes/branding.ts。
 import type { BrandingConfigDTO, BrandingUpdateInput } from "@gx/shared-types";
+// 自研工作流引擎（#1296 刀 C1）：契约真源 packages/shared-types/src/workflow.ts，
+// 端点真源 apps/api/src/routes/v1/workflow/index.ts（恒挂载 + GX_WORKFLOW_ENGINE 请求期总门，默认 off 404）。
+import type {
+  ApprovalDecisionRequest,
+  CreateWorkflowDefRequest,
+  PaginatedWorkflowDefs,
+  PaginatedWorkflowRuns,
+  TriggerWorkflowRequest,
+  WorkflowDefDTO,
+  WorkflowIdDTO,
+  WorkflowRunDetailDTO,
+} from "@gx/shared-types";
 import { resolveApiBase, withBase as joinBase, isPublicSharePathname } from "../lib/base";
 import { saveSessionFrom } from "../lib/session-from";
 // 节点模式 S2（DESIGN §6.1/§8.5 启动器）：API 主请求路径改读数据源解析器单例。
@@ -2098,4 +2110,144 @@ export const Branding = {
   /** 恢复内置默认广告图；返回最新 DTO。 */
   resetHero: () =>
     apiFetch<BrandingConfigDTO>("/api/admin/branding/hero", { method: "DELETE" }),
+};
+
+// ============ 自研工作流引擎 /api/v1/workflow（#1296 刀 C1；GX_WORKFLOW_ENGINE 总门，默认 off） ============
+//
+// 挂载纪律与 /api/v1/sync、/api/v1/search 同款：路由恒挂载，组首中间件请求期读 env 裁决。
+// off（出厂默认，含未设/空白/笔误）在鉴权/DB 之前直接 404 {code:"WORKFLOW_DISABLED"}；on 才走
+// 登录态与各端点。故能力探针必须【同时】满足 status===404 且 body.code==="WORKFLOW_DISABLED"
+// 才判定关闭——比 probeNavV2 只判 404 更严：workflow 面内部的 404（WORKFLOW_DEF_NOT_FOUND 等）
+// 是正常业务分支，绝不能被探针误读成「引擎关闭」。
+//
+// 两个 204 无体端点（publish/decide）不能走 apiFetch：其成功分支无条件 res.json() 会对空体抛
+// SyntaxError。照 PatsApi.revoke 手写 fetch，鉴权头仍由 dataSourceResolver.headers() 统一注入
+// X-GX-Token；res.ok 时绝不读体，!ok 才读错误信封并走 401 全局收口。
+
+/**
+ * 判定一个错误是否为「工作流引擎未启用」（总门 off 的确定性信号）。
+ * 双条件缺一不可：404 + 机器码 WORKFLOW_DISABLED，避免吞掉业务 404（定义/运行/审批单不存在）。
+ */
+export function isWorkflowNotEnabledError(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 404 && e.body?.code === "WORKFLOW_DISABLED";
+}
+
+/** 引擎能力位模块级缓存：null=未探，true/false=已决；单次部署内只探一次。 */
+let workflowFlagCache: boolean | null = null;
+
+// 能力位是「每个部署一份」：切到另一节点后旧值不可复用，订阅数据源 nodeId 变化即重置缓存。
+// 浏览器/fnOS 下 nodeId 恒 "local" 从不触发，零行为变化（同 navFlagCache 范式）。
+{
+  let lastWorkflowFlagNodeId = dataSourceResolver.current().nodeId;
+  dataSourceResolver.subscribe(() => {
+    const next = dataSourceResolver.current().nodeId;
+    if (next !== lastWorkflowFlagNodeId) {
+      lastWorkflowFlagNodeId = next;
+      workflowFlagCache = null;
+    }
+  });
+}
+
+/**
+ * 工作流引擎能力探活：GET /api/v1/workflow/defs。
+ *   200 → true；404 WORKFLOW_DISABLED（总门 off）→ false；
+ *   401 交 apiFetch 全局登出；其它 404（纵深防御，off 短路在前理论上不出现）、5xx/网络错误
+ *   一律 rethrow，绝不静默回退——默认 off 是唯一明确关闭信号，服务端异常不能让前端假装引擎不存在。
+ */
+export async function probeWorkflowEngine(): Promise<boolean> {
+  if (workflowFlagCache !== null) return workflowFlagCache;
+  try {
+    await apiFetch<PaginatedWorkflowDefs>("/api/v1/workflow/defs");
+    workflowFlagCache = true;
+  } catch (e) {
+    if (isWorkflowNotEnabledError(e)) {
+      workflowFlagCache = false;
+    } else {
+      throw e;
+    }
+  }
+  return workflowFlagCache;
+}
+
+export const WorkflowApi = {
+  /** ① POST /defs：新建定义（强制 draft），201 回 {id}；graph 必须是 JSON 字符串，坏图后端 400。 */
+  createDef: (input: CreateWorkflowDefRequest) =>
+    apiFetch<WorkflowIdDTO>("/api/v1/workflow/defs", {
+      method: "POST",
+      body: JSON.stringify(input),
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
+
+  /** ② POST /defs/:id/publish：仅 draft 可发布（非 draft 409），成功 204 无体，手写 fetch ok 不读体。 */
+  publishDef: async (id: string): Promise<void> => {
+    const res = await fetch(
+      dataSourceResolver.baseFor(`/api/v1/workflow/defs/${encodeURIComponent(id)}/publish`),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...dataSourceResolver.headers(),
+        },
+      },
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 401) handleUnauthorized();
+      throw new ApiError(res.status, body, parseRetryAfter(res.headers.get("Retry-After")));
+    }
+  },
+
+  /** ③ GET /defs：分页列出定义，裸 {items,total}；page/limit 非正整数由后端回落默认值。 */
+  listDefs: (params?: { page?: number; limit?: number }) =>
+    apiFetch<PaginatedWorkflowDefs>(
+      `/api/v1/workflow/defs${qs({ page: params?.page, limit: params?.limit })}`,
+    ),
+
+  /** ④ GET /defs/:id：取单个定义；不存在 404 WORKFLOW_DEF_NOT_FOUND。 */
+  getDef: (id: string) =>
+    apiFetch<WorkflowDefDTO>(`/api/v1/workflow/defs/${encodeURIComponent(id)}`),
+
+  /** ⑤ POST /defs/:id/trigger：手动触发（仅 published，否则 409），201 回 run {id}；body 整体可选。 */
+  triggerDef: (id: string, body: TriggerWorkflowRequest = {}) =>
+    apiFetch<WorkflowIdDTO>(`/api/v1/workflow/defs/${encodeURIComponent(id)}/trigger`, {
+      method: "POST",
+      body: JSON.stringify(body),
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }),
+
+  /** ⑥ POST /approvals/:id/decide：裁决（decision 只收 approved/rejected），204 无体，手写 fetch ok 不读体。 */
+  decideApproval: async (approvalId: string, input: ApprovalDecisionRequest): Promise<void> => {
+    const res = await fetch(
+      dataSourceResolver.baseFor(
+        `/api/v1/workflow/approvals/${encodeURIComponent(approvalId)}/decide`,
+      ),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...dataSourceResolver.headers(),
+        },
+        body: JSON.stringify(input),
+      },
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 401) handleUnauthorized();
+      throw new ApiError(res.status, body, parseRetryAfter(res.headers.get("Retry-After")));
+    }
+  },
+
+  /** ⑦ GET /runs：分页列出运行，可按 defId 过滤；空串由 qs 跳过，等价后端 trim 归一 undefined。 */
+  listRuns: (params?: { defId?: string; page?: number; limit?: number }) =>
+    apiFetch<PaginatedWorkflowRuns>(
+      `/api/v1/workflow/runs${qs({
+        defId: params?.defId,
+        page: params?.page,
+        limit: params?.limit,
+      })}`,
+    ),
+
+  /** ⑧ GET /runs/:id：取单个运行及其全部审批单 {run,approvals}（后端按 createdAt asc）；不存在 404。 */
+  getRun: (id: string) =>
+    apiFetch<WorkflowRunDetailDTO>(`/api/v1/workflow/runs/${encodeURIComponent(id)}`),
 };

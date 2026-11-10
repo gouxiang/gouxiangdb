@@ -16,6 +16,7 @@ import { prisma } from "./db.js";
 import { runScopeBackfillBoot } from "./ops/scopeBackfillBoot.js";
 import { startSearchWorker, stopSearchWorker } from "./domain/search/workerRuntime.js";
 import { startReplicaSync, stopReplicaSync } from "./domain/sync/replicaSyncRuntime.js";
+import { startWorkflowRuntime, stopWorkflowRuntime } from "./domain/workflow/runtime.js";
 import { loadLicenseConfig } from "./domain/license/configLicense.js";
 import { bootLicenseRuntime, stopLicenseRuntime } from "./domain/license/runtime.js";
 // 协同：WS 通道挂在每个 http.Server 的 upgrade 上，两处 createServer 都要挂（§8-1）。
@@ -51,6 +52,22 @@ function bootReplicaSync(): void {
     })
     .catch((e) => {
       console.warn("[replica-sync] start failed", e);
+    });
+}
+
+/**
+ * 自研工作流轮询引擎启动（#1296 刀 B2，门控全在 startWorkflowRuntime 内）。
+ * GX_WORKFLOW_ENGINE 未精确开（出厂默认，含笔误如 opn）时 start 首闸直接返回 false：
+ * 不建 timer、不查库、不抢单写者锁，既有启动姿态逐字节不变。已启动时幂等返回 true。
+ * 失败只记日志，不影响监听与在线读路径（引擎自身已吞 tick 错，这里再兜一层）。
+ */
+function bootWorkflow(): void {
+  void startWorkflowRuntime({ env: process.env })
+    .then((ok) => {
+      if (ok) console.log("[GouXiangDB API] 工作流引擎已启动");
+    })
+    .catch((e) => {
+      console.warn("[workflow] start failed", e);
     });
 }
 
@@ -93,6 +110,7 @@ function startTcp(): void {
     bootSearchWorker();
     bootReplicaSync();
     bootLicense();
+    bootWorkflow();
   });
 
   // 优雅关闭：停止接收 → 排空在途请求 → 关闭 Prisma/SQLite 连接（释放热 WAL 帧，避免重启/升级
@@ -118,6 +136,8 @@ function startTcp(): void {
         stopSearchWorker();
         // 同步引擎同理：先停 timer/释放单写者锁（其内部用 prisma 续期），再断连接。
         await stopReplicaSync();
+        // 工作流引擎同理：清 timer、best-effort 释放单写者锁（内部走 withWriteTx），再断连接。
+        await stopWorkflowRuntime();
         // 授权心跳：纯内存 timer，停它不涉及 DB 事务，放在断 Prisma 之前即可。
         stopLicenseRuntime();
         try {
@@ -155,6 +175,7 @@ function startUnixSocket(socketPath: string): void {
     bootSearchWorker();
     bootReplicaSync();
     bootLicense();
+    bootWorkflow();
   });
 
   // 优雅关闭：停止接收 → 排空在途请求 → 删除 socket 文件。10s 兜底强退防 keep-alive 悬挂。
@@ -175,6 +196,7 @@ function startUnixSocket(socketPath: string): void {
       server.close(async () => {
         stopSearchWorker(); // 同上：先停 worker 再断 Prisma。
         await stopReplicaSync(); // 同步引擎：先停 timer/释放锁，再断连接。
+        await stopWorkflowRuntime(); // 工作流引擎：清 timer/释放单写者锁，再断连接。
         stopLicenseRuntime(); // 授权心跳：停 timer。
         try {
           fs.rmSync(socketPath, { force: true });
