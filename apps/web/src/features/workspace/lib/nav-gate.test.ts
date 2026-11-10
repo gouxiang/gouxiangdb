@@ -73,13 +73,22 @@ describe("能力判定：四项各自一套口径", () => {
 });
 
 describe("visibleFooterNav：过滤即剔除，且保持定稿顺序", () => {
-  it("owner（五枚动作齐全）：三项全可见，顺序为 v6 底板通讯录 → 帮助 → 设置", () => {
+  it("owner（五枚动作齐全）：四项全可见，顺序为 v6 底板通讯录 → 工作流 → 帮助 → 设置", () => {
     const visible = visibleFooterNav(FOOTER_NAV_ITEMS, { actions: OWNER, authzManage: false });
     expect(visible.map((i) => i.path)).toEqual([
       "/workspace/contacts",
+      "/workflow",
       "/help",
       "/workspace/settings/general",
     ]);
+  });
+
+  it("工作流是静态入口：空集 / loading / OWNER 三种能力信号下都恒可见（与能力、探针解耦）", () => {
+    expect(isFooterNavVisible("/workflow", { actions: setOf(), authzManage: false })).toBe(true);
+    expect(
+      isFooterNavVisible("/workflow", { actions: setOf(), authzManage: false, loading: true }),
+    ).toBe(true);
+    expect(isFooterNavVisible("/workflow", { actions: OWNER, authzManage: false })).toBe(true);
   });
 
   it("权限管理已下线为设置分区：持有能力与 authzManage 都不再出现在底部区（P2-B1）", () => {
@@ -97,15 +106,16 @@ describe("visibleFooterNav：过滤即剔除，且保持定稿顺序", () => {
     expect(canSeeNavComposer(OWNER)).toBe(true); // 纯函数保留给「工作区设置」的兜底判定
   });
 
-  it("无任何能力的成员（viewer/commenter）：两个管理入口都不渲染，静态入口「帮助中心」仍在", () => {
+  it("无任何能力的成员（viewer/commenter）：两个管理入口都不渲染，两个静态入口（工作流、帮助中心）仍在", () => {
     expect(visibleFooterNav(FOOTER_NAV_ITEMS, { actions: setOf(), authzManage: false }).map((i) => i.path)).toEqual([
+      "/workflow",
       "/help",
     ]);
   });
 
-  it("只有权限引擎能力位（authzManage）时：底部区只剩静态入口（权限入口已迁入设置页，P2-B1）", () => {
+  it("只有权限引擎能力位（authzManage）时：底部区只剩两个静态入口（权限入口已迁入设置页，P2-B1）", () => {
     const visible = visibleFooterNav(FOOTER_NAV_ITEMS, { actions: setOf(), authzManage: true });
-    expect(visible.map((i) => i.path)).toEqual(["/help"]);
+    expect(visible.map((i) => i.path)).toEqual(["/workflow", "/help"]);
   });
 
   it("部分能力的混合账号按逐条判定，不做全有全无（静态入口始终在）；顺序照新数组", () => {
@@ -113,13 +123,14 @@ describe("visibleFooterNav：过滤即剔除，且保持定稿顺序", () => {
       actions: setOf("manage_menu"),
       authzManage: false,
     });
-    // 新数组顺序为 contacts → help → settings；本账号无 contacts 能力，
-    // 可见集按相对顺序为 help → settings。
-    expect(visible.map((i) => i.path)).toEqual(["/help", "/workspace/settings/general"]);
+    // 新数组顺序为 contacts → workflow → help → settings；本账号无 contacts 能力，
+    // 可见集按相对顺序为两个静态项（workflow、help）再到 settings。
+    expect(visible.map((i) => i.path)).toEqual(["/workflow", "/help", "/workspace/settings/general"]);
   });
 
-  it("探针未完成（loading）：管理入口一律按无能力，静态入口不受影响", () => {
+  it("探针未完成（loading）：管理入口一律按无能力，两个静态入口不受影响", () => {
     expect(visibleFooterNav(FOOTER_NAV_ITEMS, { actions: OWNER, authzManage: false, loading: true }).map((i) => i.path)).toEqual([
+      "/workflow",
       "/help",
     ]);
     expect(isFooterNavVisible("/workspace/contacts", { actions: OWNER, authzManage: true, loading: true })).toBe(false);

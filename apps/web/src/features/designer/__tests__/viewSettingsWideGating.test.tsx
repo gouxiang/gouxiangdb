@@ -21,7 +21,7 @@ describe("菜单按视图类型收敛", () => {
   });
 
   it("gallery 与其它非 form 类型都没有 form 项，且都含 display", () => {
-    for (const type of ["grid", "gallery", "kanban", "calendar", "tree", "gantt", "detail"] as const) {
+    for (const type of ["grid", "gallery", "kanban", "calendar", "tree", "gantt", "detail", "chart"] as const) {
       const keys = viewSettingsTabs(type).map((t) => t.key);
       expect(keys).not.toContain("form");
       expect(keys).toContain("display");

@@ -4,7 +4,8 @@
 // ★ 挂载纪律：刻意挂在 /api/local-sync，【绝不挂进 /api/v1/sync 组】——后者是本节点作为【服务端】
 //   对其它设备暴露的同步面（GX_SYNC_SERVER 门）；本端点反映的是本机作为【副本/侧车】的引擎态
 //   （GX_OFFLINE_REPLICA + GX_REPLICA_REMOTE_URL 门）。两个角色/开关互相独立，不可共用一个门。
-//   本地冲突裁决（conflicts/resolve/retry/discard）在独立文件 routes/localSyncActions.ts，由统一装配。
+//   本地冲突裁决（conflicts 列表/retry/discard/resolve）在独立文件 routes/localSyncProxy.ts，
+//   由 app.ts 挂到 /api/local-sync/conflicts（本文件的 localSyncRoutes 挂 /api/local-sync）。
 //   本文件暴露 GET /status（只读）+ POST /sync-now（同步触发一轮）：后者只调用引擎 runReplicaSyncOnce()，
 //   真正的写库发生在引擎内部经 withWriteTx 串行执行，端点自身不直接写任何表；不改变 fail-closed 门控。
 //

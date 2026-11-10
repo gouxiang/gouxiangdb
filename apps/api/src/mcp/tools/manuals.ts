@@ -30,7 +30,7 @@ const TABLE_LANGUAGE_MD = `# 表与记录语言
 - field.create_field：在某表新建字段（关联字段会自动建双向对），需 confirm=true。入参 tableId、name、type 及其配置、confirm。
 - field.update_field：更新字段配置（部分提交；关联字段改名会同步反向字段）。入参 fieldId 及要改的配置。
 - field.delete_field：软删字段（关联字段对称删反向字段、级联查阅/聚合/计数字段），需 confirm=true。入参 fieldId、confirm。
-- view.create_view：在某表新建视图（grid/gallery/form/detail/kanban/calendar/tree/gantt，含默认配置），需 confirm=true。入参 tableId、name、type、config、confirm。
+- view.create_view：在某表新建视图（grid/gallery/form/detail/kanban/calendar/tree/gantt/chart，含默认配置），需 confirm=true。入参 tableId、name、type、config、confirm。
 - view.update_view：更新视图名或锁定模式或排序或配置（部分提交；config 与现有配置合并，布局变更自动留快照）。入参 viewId、name、lockMode、order、config。
 - view.delete_view：物理删除视图（清布局版本，至少保留一个视图），需 confirm=true。入参 viewId、confirm。
 

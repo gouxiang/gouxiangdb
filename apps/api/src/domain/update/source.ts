@@ -23,7 +23,7 @@ export interface BuildArtifactArgs {
 }
 
 export interface UpdateSource {
-  readonly kind: "gitea" | "static";
+  readonly kind: "gitea" | "static" | "github";
   /** 拉取并解析清单；任何失败收敛为 UpdateSourceError（不透传上游响应体）。 */
   fetchManifest(signal: AbortSignal): Promise<ParsedManifest>;
   /** 依据清单 artifact 定位真实下载请求（严禁使用 API 返回的 browser_download_url）。 */

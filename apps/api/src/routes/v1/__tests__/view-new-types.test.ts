@@ -86,6 +86,33 @@ describe("POST /api/views 新类型", () => {
     expect(res.status).toBe(400);
   });
 
+  it("创建 type=chart -> 201 且含图表四键默认值", async () => {
+    const res = await createView("owner", { name: "图表视图", type: "chart" });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as NewViewBody;
+    expect(body.view.type).toBe("chart");
+    expect(body.view.config.chartType).toBe("bar");
+    expect(body.view.config.chartDimensionFieldId).toBeNull();
+    expect(body.view.config.chartMetricFieldId).toBeNull();
+    expect(body.view.config.chartAggFunc).toBe("count");
+  });
+
+  it("创建 type=chart 带 config 覆盖 -> parseViewConfig 白名单回读不丢键（P0）", async () => {
+    const res = await createView("owner", {
+      name: "图表视图-覆盖",
+      type: "chart",
+      config: { chartAggFunc: "sum", chartType: "bar", chartMetricFieldId: null },
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as NewViewBody;
+    // 覆盖值经白名单 pick 正确回读
+    expect(body.view.config.chartAggFunc).toBe("sum");
+    expect(body.view.config.chartType).toBe("bar");
+    // 未覆盖的键由 parseViewConfig 补默认值，不会因白名单漏 pick 而成 undefined
+    expect(body.view.config.chartDimensionFieldId).toBeNull();
+    expect(body.view.config.chartMetricFieldId).toBeNull();
+  });
+
   it("无 schema 权限者 -> 403", async () => {
     const res = await createView("viewer", { name: "层级视图", type: "tree" });
     expect(res.status).toBe(403);
@@ -93,13 +120,15 @@ describe("POST /api/views 新类型", () => {
 });
 
 describe("新视图下列表取数", () => {
-  it("tree / gantt 视图 GET records 均 200", async () => {
+  it("tree / gantt / chart 视图 GET records 均 200", async () => {
     const tree = await createView("owner", { name: "层级视图2", type: "tree" });
     const treeId = ((await tree.json()) as NewViewBody).view.id;
     const gantt = await createView("owner", { name: "甘特视图2", type: "gantt" });
     const ganttId = ((await gantt.json()) as NewViewBody).view.id;
+    const chart = await createView("owner", { name: "图表视图2", type: "chart" });
+    const chartId = ((await chart.json()) as NewViewBody).view.id;
 
-    for (const vid of [treeId, ganttId]) {
+    for (const vid of [treeId, ganttId, chartId]) {
       const res = await h.app.request(
         `/api/records?tableId=${tableId}&viewId=${vid}`,
         { headers: await h.auth("owner") },

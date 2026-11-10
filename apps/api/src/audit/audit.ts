@@ -96,7 +96,13 @@ export type AuditEventName =
   | "sync_push_rejected"
   | "sync_push_quarantined"
   | "sync_conflict_resolved"
-  | "sync_visibility_purged";
+  | "sync_visibility_purged"
+  // 自研工作流引擎（#1296 刀 B2）：定义创建/发布、手动触发、人工审批裁决。
+  // detail 只落 defId/runId/approvalId/decision 等标识与状态码，绝不落 graph/payload 字段明文。
+  | "workflow_def_created"
+  | "workflow_def_published"
+  | "workflow_run_triggered"
+  | "workflow_approval_decided";
 
 interface AuditInput {
   event: AuditEventName;

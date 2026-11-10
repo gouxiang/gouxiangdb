@@ -64,7 +64,7 @@ export interface ResolvedDownload {
 }
 
 export interface CheckParams {
-  /** 远程声明通道（仅 remoteDeclarable；当前注册表无此类通道，路由传值即 400）。 */
+  /** 远程声明通道（仅 remoteDeclarable；当前为 desktop-client，注册表外的 channel 传值即 400）。 */
   channel?: string;
   arch?: string;
   platform?: string;
@@ -306,7 +306,9 @@ export class UpdateService {
     version: string;
     filename: string;
   }): Promise<ResolvedDownload | null> {
-    const strategy = localStrategy(target.channel);
+    // 本地通道走本地表；声明式通道（desktop-client）走声明表兜底——否则桌面通道的下载/
+    // 预缓存会因 localStrategy 查不到而恒返回 null（下载断链修复，#1295）。
+    const strategy = localStrategy(target.channel) ?? declarableStrategy(target.channel);
     if (!strategy) return null;
 
     const identity: Identity = {
@@ -396,7 +398,7 @@ export class UpdateService {
   }
 
   /**
-   * 解析请求身份：声明通道（仅 declarable，当前必 400）或本地探测。
+   * 解析请求身份：声明通道（仅 declarable 注册表内，当前 desktop-client；其余 id 抛 400）或本地探测。
    * channelOverride 经 env 注入（GX_UPDATE_CHANNEL），探测层做注册表合法性裁决。
    */
   private resolveIdentity(params: CheckParams): Identity {

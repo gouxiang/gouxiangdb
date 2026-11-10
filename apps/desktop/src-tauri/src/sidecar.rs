@@ -6,9 +6,10 @@
 //! 分层（为了让整条生命周期能在 `cargo test` 下 headless 真实跑通，而不依赖 Tauri Builder
 //! 或随包 Node 产物）：
 //!   - [`StartPlan`]：一个要拉起的进程的纯描述（程序/参数/cwd/环境）。
-//!   - [`KernelPlanner`]：产出启动计划。生产实现 [`LocalKernelPlanner`] 在首 boot 时先做
-//!     冷备→Keychain JWT→`migrate deploy`→`nav-reconcile`，再给出跑 `dist/index.js` 的计划；
-//!     测试用「真 node 跑内联假内核」的计划，验证 spawn/进程组/readyz/收尸全链路。
+//!   - [`KernelPlanner`]：产出启动计划。生产实现 [`LocalKernelPlanner`]【每次启动】都先做
+//!     Keychain JWT→`migrate deploy`→`nav-reconcile`（0.3.0 P0：覆盖升级转圈根治，迁移幂等只增），
+//!     再给出跑 `dist/index.js` 的常驻计划；常驻 env 经 extra_daemon_env 注入授权 + 同步服务端门，
+//!     两子进程不接 extra env。测试用「真 node 跑内联假内核」的计划，验证 spawn/进程组/readyz/收尸全链路。
 //!   - [`SidecarManager`]：与「是什么内核」无关的进程生命周期 + `/readyz` 轮询 + 进程组停止。
 //!
 //! 安全/纪律：
@@ -20,6 +21,8 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::process::CommandExt;
+#[cfg(test)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -538,38 +541,45 @@ impl LocalKernelPlanner {
     }
 }
 
-/// 桌面主内核的商业授权通电变量（0.3.0）：本地侧车本身就是授权客户端，壳必须显式注入，
-/// 否则侧车按默认 off 启动、零心跳零闸门，桌面端直接绕过商业授权。
-/// - URL：正式授权中心（与内置生产公钥 ff02db72 配套，dist 须为 GX_LICENSE_PROD=1 构建）；
-/// - MODE：首发 verify（全通电、闸门只提示不锁人）；可在 dataDir 放 license.mode=enforce 热切收紧；
-/// - PLATFORM/PACKAGE_TYPE：desktop/dmg，心跳枚举须精确匹配授权中心 zod 校验。
-/// 仅经 build_kernel_plan 的 extra_daemon_env 注入常驻 dist/index.js，绝不进 migrate/nav 子进程。
-fn local_license_daemon_env() -> Vec<(String, String)> {
-    vec![
-        (
-            "GX_LICENSE_URL".to_string(),
-            "https://gouxiang.hn.takin.cc".to_string(),
-        ),
-        ("GX_LICENSE_MODE".to_string(), "verify".to_string()),
-        ("GX_LICENSE_PLATFORM".to_string(), "desktop".to_string()),
-        ("GX_PACKAGE_TYPE".to_string(), "dmg".to_string()),
-    ]
-}
-
 impl KernelPlanner for LocalKernelPlanner {
     fn data_dir(&self) -> &Path {
         &self.data_dir
     }
 
     fn plan(&self, port: u16) -> Result<StartPlan, String> {
-        // 主库：注入商业授权 4 变量（不携带任何副本变量）。经 extra_daemon_env 只进常驻
-        // dist/index.js，绝不进 migrate/nav 子进程（与副本变量同一隔离机制）。
+        // 主库【常驻内核】专属环境变量：不注入任何副本同步变量，但带两类必须通电的开关。
+        // 这些变量只经 extra_daemon_env 进入常驻 dist/index.js，绝不进 migrate/nav 子进程
+        // （build_kernel_plan 已保证两子进程不接 extra env），避免迁移期触发网络/授权。
+        //
+        // (A) 商业授权 4 枚（0.3.0 通电）：桌面单机的本地侧车就是授权客户端，否则侧车按默认
+        //     off 启动、零心跳零闸门，桌面端直接绕过商业授权。
+        //  - URL：正式授权中心（与内置生产公钥 ff02db72 配套，dist 须 GX_LICENSE_PROD=1 构建）；
+        //  - MODE：首发 verify（全通电、闸门只提示不锁人）；dataDir 放 license.mode=enforce 可热切；
+        //  - PLATFORM/PACKAGE_TYPE：desktop/dmg，心跳枚举须精确匹配授权中心 zod 校验。
+        //
+        // (B) 同步服务端总门 1 枚（0.3.1 通电，#1294）：主库内核在「自指单机」或「被其它副本
+        //     订阅为远端」时就是同步服务端面。GX_SYNC_SERVER 默认 off 时 routes/v1/sync 整组
+        //     在任何 DB 访问前短路 404、不建表——这正是离线同步长期「功能在包里却用不起来」的
+        //     真正堵点。注入规范值 on（configSync 的 parseSyncServerFlag 会 trim+小写化后认
+        //     on/true/1，大小写/首尾空白不敏感，其余值一律关），per-request 读 env、不进冻结快照。
+        //     【绝不能】加进 ReplicaKernelPlanner::daemon_env：副本是纯客户端，
+        //     其服务端门必须保持 off，只发出站订阅、不开放被订阅面。
+        let local_daemon_env: Vec<(String, String)> = vec![
+            (
+                "GX_LICENSE_URL".to_string(),
+                "https://gouxiang.hn.takin.cc".to_string(),
+            ),
+            ("GX_LICENSE_MODE".to_string(), "verify".to_string()),
+            ("GX_LICENSE_PLATFORM".to_string(), "desktop".to_string()),
+            ("GX_PACKAGE_TYPE".to_string(), "dmg".to_string()),
+            ("GX_SYNC_SERVER".to_string(), "on".to_string()),
+        ];
         build_kernel_plan(
             &self.resource_dir,
             &self.data_dir,
             self.secrets.as_ref(),
             port,
-            &local_license_daemon_env(),
+            &local_daemon_env,
         )
     }
 }
@@ -709,13 +719,46 @@ impl KernelPlanner for ReplicaKernelPlanner {
     }
 }
 
+/// 子进程失败时，从其 stdout/stderr 抽取尾部文本用于错误上报（限长，避免巨量日志刷屏）。
+fn tail_process_output(stdout: &[u8], stderr: &[u8]) -> String {
+    const MAX_CHARS: usize = 800;
+    let mut combined = String::new();
+    let push = |buf: &[u8], out: &mut String| {
+        if let Ok(s) = String::from_utf8(Vec::from(buf)) {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                if !out.is_empty() {
+                    out.push(' ');
+                }
+                out.push_str(trimmed);
+            }
+        }
+    };
+    // 报错信息通常在 stderr；stdout 补充 prisma 的迁移进度。
+    push(stderr, &mut combined);
+    push(stdout, &mut combined);
+    if combined.is_empty() {
+        return "（迁移进程无输出）".to_string();
+    }
+    if combined.chars().count() > MAX_CHARS {
+        let keep: String = combined
+            .chars()
+            .skip(combined.chars().count() - MAX_CHARS)
+            .collect();
+        format!("…{keep}")
+    } else {
+        combined
+    }
+}
+
 /// 主库 / 副本共用的内核启动编排骨架。
 ///
-/// 顺序：预检随包 node 与 dist → 建 data_dir/uploads/.audit → 冷备已有 dev.db →
-/// 取/迁/建 JWT（钥匙串按 `secrets` 区分主库/副本命名空间）→ 首 boot 同步跑
-/// `prisma migrate deploy` 与 `nav-reconcile --apply`（**不带** `extra_daemon_env`，
-/// 故迁移子进程永不携带副本同步变量）→ 产出常驻 `dist/index.js` 计划，其 env 在公共变量后
-/// 追加 `extra_daemon_env`（副本为 6 枚同步变量，主库为空）。
+/// 顺序：预检随包 node 与 dist → 建 data_dir/uploads/.audit/backups → 冷备已有 dev.db →
+/// 取/迁/建 JWT（钥匙串按 `secrets` 区分主库/副本命名空间）→【每次启动】都跑
+/// `prisma migrate deploy`（幂等，修 0.3.0 覆盖升级不迁移的 P0）与 `nav-reconcile --apply`
+/// （两者均**不带** `extra_daemon_env`，故迁移子进程永不携带副本/授权变量）→ 产出常驻
+/// `dist/index.js` 计划，其 env 在公共变量后追加 `extra_daemon_env`（副本为 6 枚同步变量，
+/// 主库为 4 枚 GX_LICENSE_* 商业授权变量）。
 fn build_kernel_plan(
     resource_dir: &Path,
     data_dir: &Path,
@@ -735,8 +778,14 @@ fn build_kernel_plan(
     std::fs::create_dir_all(data_dir).map_err(|e| format!("创建数据目录失败：{e}"))?;
     let uploads = data_dir.join("uploads");
     let audit = data_dir.join(".audit");
+    // 桌面端备份根：必须显式注入可写目录。否则内核 config 在 NODE_ENV=production 下
+    // 默认落到 Linux 的 /var/backups/gouxiangdb（config.ts），macOS 非 root 不可写，
+    // 启动期 scopeBackfillBoot 写一致性快照 EACCES → 为保护数据跳过权限投影自愈。
+    // 与 fpk cmd/main 的 BACKUP_DIR=$DATA_DIR/backups 保持同一约定。
+    let backups = data_dir.join("backups");
     std::fs::create_dir_all(&uploads).ok();
     std::fs::create_dir_all(&audit).ok();
+    std::fs::create_dir_all(&backups).ok();
 
     let db_path = data_dir.join("dev.db");
     let first_boot = !db_path.exists();
@@ -774,49 +823,68 @@ fn build_kernel_plan(
     ];
     let database_url = format!("file:{}", db_path.display());
 
-    // 首 boot 的同步步骤（已初始化则跳过——不再重建、不再要求建管理员）。
-    // 两个子进程都【不】接 extra_daemon_env：migrate/nav 期间绝不携带副本同步变量。
+    // 升级迁移修复（0.3.0 事故，P0）：旧实现仅在库文件不存在（首装）时迁移，导致
+    // 0.2.7→0.3.0 覆盖升级时真机库停在旧迁移，/readyz 的 migrations 探针恒 503 →
+    // 壳轮询失败后杀死新内核 → 前端永久转圈。现改为【每次启动都先 migrate deploy】：
+    // 已应用迁移自动跳过（天然幂等），迁移只增不删且上方已对存量库冷备，故对已是最新的
+    // 库零副作用、可回滚。两个子进程都【不】接 extra_daemon_env：migrate/nav 期间绝不携带
+    // 副本同步变量（与原首 boot 约束一致）。
+    // 1) migrate deploy（只增不删）。抓 stdout/stderr：失败时把 prisma 真实报错尾部带进 Err
+    //    （否则真机只看到「退出码 1」，无法定位锁冲突/脏迁移等具体原因）。
+    let migrate_out = Command::new(&node)
+        .current_dir(&server)
+        .arg("node_modules/prisma/build/index.js")
+        .arg("migrate")
+        .arg("deploy")
+        .arg("--schema=prisma/schema.prisma")
+        .env("DATABASE_URL", &database_url)
+        .env("GX_DATA_DIR", data_dir)
+        .envs(common_env.clone())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("启动数据库迁移失败：{e}"))?;
+    if !migrate_out.status.success() {
+        let detail = tail_process_output(&migrate_out.stdout, &migrate_out.stderr);
+        crate::dbg_log(&format!(
+            "migrate deploy 失败 {:?}：{detail}",
+            migrate_out.status.code()
+        ));
+        return Err(format!(
+            "数据库迁移失败（退出码 {}，旧库与备份均已保留）。{detail}",
+            migrate_out
+                .status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "?".into())
+        ));
+    }
     if first_boot {
-        // 1) migrate deploy（只增不删）。
-        let migrate_status = Command::new(&node)
-            .current_dir(&server)
-            .arg("node_modules/prisma/build/index.js")
-            .arg("migrate")
-            .arg("deploy")
-            .arg("--schema=prisma/schema.prisma")
-            .env("DATABASE_URL", &database_url)
-            .env("GX_DATA_DIR", data_dir)
-            .envs(common_env.clone())
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .status()
-            .map_err(|e| format!("启动数据库迁移失败：{e}"))?;
-        if !migrate_status.success() {
-            return Err(format!(
-                "数据库迁移失败（退出码 {migrate_status}，旧库与备份均已保留）"
-            ));
-        }
+        crate::dbg_log("首装迁移完成（migrate deploy）");
+    } else {
+        crate::dbg_log("启动迁移校验完成（migrate deploy，已应用自动跳过）");
+    }
 
-        // 2) nav-reconcile --apply（幂等；失败不阻断首启，导航可运行期修复）。
-        let nav = Command::new(&node)
-            .current_dir(&server)
-            .arg("dist/nav-reconcile.js")
-            .arg("--apply")
-            .env("DATABASE_URL", &database_url)
-            .env("GX_DATA_DIR", data_dir)
-            .env("GX_AUDIT_DIR", &audit)
-            .env("JWT_SECRET", &jwt_secret)
-            .envs(common_env.clone())
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .status();
-        match nav {
-            Ok(s) if s.success() => crate::dbg_log("nav-reconcile --apply ok"),
-            Ok(s) => crate::dbg_log(&format!("nav-reconcile 非零退出 {s}（不阻断首启）")),
-            Err(e) => crate::dbg_log(&format!("nav-reconcile 启动失败 {e}（不阻断首启）")),
-        }
+    // 2) nav-reconcile --apply（幂等；每次启动重算非根节点 path/depth，失败不阻断启动，
+    //    导航可在运行期修复）。
+    let nav = Command::new(&node)
+        .current_dir(&server)
+        .arg("dist/nav-reconcile.js")
+        .arg("--apply")
+        .env("DATABASE_URL", &database_url)
+        .env("GX_DATA_DIR", data_dir)
+        .env("GX_AUDIT_DIR", &audit)
+        .env("JWT_SECRET", &jwt_secret)
+        .envs(common_env.clone())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .status();
+    match nav {
+        Ok(s) if s.success() => crate::dbg_log("nav-reconcile --apply ok"),
+        Ok(s) => crate::dbg_log(&format!("nav-reconcile 非零退出 {s}（不阻断启动）")),
+        Err(e) => crate::dbg_log(&format!("nav-reconcile 启动失败 {e}（不阻断启动）")),
     }
 
     // 3) 常驻内核进程计划（PORT 用 manager 选定的回环口）；副本 6 变量仅在此追加。
@@ -825,6 +893,7 @@ fn build_kernel_plan(
         ("GX_DATA_DIR".to_string(), data_dir.display().to_string()),
         ("UPLOAD_ROOT".to_string(), uploads.display().to_string()),
         ("GX_AUDIT_DIR".to_string(), audit.display().to_string()),
+        ("BACKUP_DIR".to_string(), backups.display().to_string()),
         (
             "GX_WEB_DIST".to_string(),
             server.join("public").display().to_string(),
@@ -873,6 +942,19 @@ mod tests {
     fn system_node() -> String {
         // 用系统 node 跑内联假内核（headless 机有 node 22）。
         std::env::var("GX_TEST_NODE").unwrap_or_else(|_| "node".to_string())
+    }
+
+    #[test]
+    fn tail_process_output_prefers_stderr_and_limits_len() {
+        // 空输出给中文占位；非空时 stderr 在前；超长截断保留尾部。
+        assert_eq!(tail_process_output(b"", b""), "（迁移进程无输出）");
+        let s = tail_process_output(b"applying x", b"Boom: locked");
+        assert!(s.starts_with("Boom: locked"), "实际: {s}");
+        assert!(s.contains("applying x"));
+        let big = "x".repeat(5000);
+        let cut = tail_process_output(b"", big.as_bytes());
+        assert!(cut.starts_with('…'), "超长应前加省略号");
+        assert!(cut.chars().count() <= 801, "应截断到 800+省略号");
     }
 
     /// 内联假内核：读 PORT，起 http server，/readyz 回 200。
@@ -1197,10 +1279,17 @@ mod tests {
 
     #[test]
     fn replica_planner_plan_injects_six_env_and_isolates_db_with_token_redacted() {
-        // 假随包产物：让预检 node/dist 通过；预置 dev.db → first_boot=false，
-        // 因此 plan 不会真的 spawn migrate/nav（纯计划构造，零 node 依赖、零钥匙串）。
+        // 假随包产物：让预检 node/dist 通过；预置 dev.db → first_boot=false。
+        // 注意：build_kernel_plan 现在【每次启动】都跑 migrate deploy 与 nav-reconcile（0.3.0 P0
+        // 修复），故假 node 必须可执行且对这两个子命令都退出 0，否则 plan 会在迁移步报错。
         let res = unique_dir("rep-plan-res");
-        std::fs::write(res.join(NODE_BIN), b"#!/bin/sh\n").unwrap();
+        let fake_node = res.join(NODE_BIN);
+        std::fs::write(
+            &fake_node,
+            b"#!/bin/sh\n# 假随包 node：对 migrate/nav 子命令一律成功，其余参数也正常退出\nexit 0\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_node, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::create_dir_all(res.join(SERVER_DIR).join("dist")).unwrap();
         std::fs::write(res.join(SERVER_DIR).join("dist/index.js"), b"// kernel").unwrap();
 
@@ -1281,7 +1370,7 @@ mod tests {
         assert!(debug.contains("GX_REPLICA_REMOTE_TOKEN"), "Debug 应只列键名");
         assert!(!debug.contains("192.168.31.15"), "Debug 不应打印任何 env 值（含 URL）");
 
-        // 主库计划不带任何副本变量（对照：extra_daemon_env 为空）。
+        // 主库计划不带任何副本/离线变量（local 仅注入 GX_LICENSE_* 授权变量，见 LocalKernelPlanner::plan）。
         let local_data = unique_dir("rep-plan-local");
         std::fs::write(local_data.join("dev.db"), b"x").unwrap();
         let local = LocalKernelPlanner::with_secret_store(
@@ -1300,6 +1389,32 @@ mod tests {
                 "主库计划不得携带副本变量，却出现 {k}"
             );
         }
+        // 主库同步服务端总门必须通电（#1294）：精确小写 on，随常驻内核注入。
+        assert_eq!(
+            lp.env
+                .iter()
+                .find(|(k, _)| k == "GX_SYNC_SERVER")
+                .map(|(_, v)| v.as_str()),
+            Some("on"),
+            "主库常驻内核必须注入 GX_SYNC_SERVER=on，否则同步路由整组 404"
+        );
+        // 授权 4 枚仍在（改名 local_daemon_env 不得丢授权）。
+        for k in [
+            "GX_LICENSE_URL",
+            "GX_LICENSE_MODE",
+            "GX_LICENSE_PLATFORM",
+            "GX_PACKAGE_TYPE",
+        ] {
+            assert!(
+                lp.env.iter().any(|(ek, _)| ek == k),
+                "主库常驻内核缺少授权变量 {k}"
+            );
+        }
+        // 副本是纯客户端：其常驻 env【绝不能】携带服务端总门，否则副本会误开被订阅面。
+        assert!(
+            plan.env.iter().all(|(k, _)| k != "GX_SYNC_SERVER"),
+            "副本计划不得注入 GX_SYNC_SERVER（须保持服务端门 off，纯出站订阅）"
+        );
 
         let _ = std::fs::remove_dir_all(&res);
         let _ = std::fs::remove_dir_all(&base);

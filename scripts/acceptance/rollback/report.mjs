@@ -13,7 +13,7 @@ const FLAG_META = [
   { id: "R2", name: "GX_ENTERPRISE_NAV=off（导航面摘除）", check: "check-mounts navoff" },
   { id: "R3", name: "GX_AUTHZ_ENGINE=off 被忽略（引擎永久生效，无旧引擎可回）", check: "check-authz" },
   { id: "R4", name: "GX_M1_SIDECAR_READ/KEYSET on→off（游标键消失）", check: "check-keyset" },
-  { id: "R5", name: "GX_EMBEDDING_MODE cloud→off（纯 FTS，零外网）", check: "check-embedding" },
+  { id: "R5", name: "GX_EMBEDDING_MODE cloud→off（纯 FTS，检索/嵌入面零外网；授权心跳白名单放行）", check: "check-embedding" },
   { id: "R6", name: "outbox 回滚面：GX_SEARCH_WORKER=off 下 pending 静置不消化 + 手动 reindex 建 chunks", check: "check-outbox" },
   { id: "R6b", name: "P1 修复正立面：默认起 worker 后 outbox 自行追平 + 派生索引可读（249df44）", check: "check-outbox-drain" },
   { id: "R7", name: "GX_ENTERPRISE_ORG=off（/mcp、/pats 404，stdio 文件仍在）", check: "check-mounts orgoff + fs" },
@@ -73,13 +73,16 @@ function main() {
   }
   L.push("");
 
-  // R5 零外网证据
-  L.push("## 二、R5 零外网证据");
+  // R5 出网审计证据（禁止域零外网；授权心跳走白名单）
+  L.push("## 二、R5 出网审计证据（禁止域零外网，授权心跳白名单放行）");
   L.push("");
   if (net) {
+    const licenseEgress = net.licenseEgress ?? [];
+    const forbidden = net.forbidden ?? [];
     L.push(`- netguard 预加载（\`NODE_OPTIONS=--import netguard.mjs\`）包装 fetch/http/https/dns/tcp 出网面。`);
-    L.push(`- 服务进程探针事件总数：${net.total}；回环/本地：${net.loopback}；bootstrap 自记：${net.bootstrap}；**外网：${net.external.length}**。`);
-    L.push(`- 判定：检索全程外网出网 ${net.external.length === 0 ? "**=0**（零外网成立）" : "**非 0（不成立）**"}。`);
+    L.push(`- 服务进程探针事件总数：${net.total}；非路由/回环：${net.nonRoute ?? 0}；bootstrap 自记：${net.bootstrap}；授权白名单：${licenseEgress.length}；**禁止域：${forbidden.length}**。`);
+    L.push(`- 判定：检索/嵌入面禁止域出网 ${forbidden.length === 0 ? "**=0**（零外网成立）" : "**非 0（不成立）**"}；授权中心心跳属设计内白名单（生产成品 license 强制 verify，见 b863f29），不计入禁止域。`);
+    L.push(`- 授权白名单 host：${(net.allowHosts ?? []).join(", ") || "（无）"}；禁止域明细：${forbidden.map((e) => `${e.kind}:${e.target}`).join("; ") || "无"}。`);
   } else {
     L.push("- 未找到 net-audit.json（R5 可能未执行）。");
   }

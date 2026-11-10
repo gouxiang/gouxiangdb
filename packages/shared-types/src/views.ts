@@ -4,6 +4,7 @@
 import type { FilterNode } from "./filters.js";
 import type { FieldType } from "./fields.js";
 import type { FieldIdT } from "./ids.js";
+import { fieldTypeGroup, isNumericAggCapable } from "./type-groups.js";
 
 export type ViewType =
   | "grid"
@@ -13,7 +14,8 @@ export type ViewType =
   | "kanban"
   | "calendar"
   | "tree"
-  | "gantt";
+  | "gantt"
+  | "chart";
 
 export const VIEW_TYPES: ViewType[] = [
   "grid",
@@ -24,6 +26,7 @@ export const VIEW_TYPES: ViewType[] = [
   "calendar",
   "tree",
   "gantt",
+  "chart",
 ];
 
 export const VIEW_TYPE_LABEL: Record<ViewType, string> = {
@@ -35,6 +38,7 @@ export const VIEW_TYPE_LABEL: Record<ViewType, string> = {
   calendar: "日历",
   tree: "层级",
   gantt: "甘特",
+  chart: "图表",
 };
 
 export type LockMode = "collaborative" | "locked" | "personal";
@@ -157,6 +161,12 @@ export interface ViewConfig {
   ganttDependencyFieldId: string | null; // 同表 link：前置任务
   ganttZoom: GanttZoom;
 
+  // 图表（BI 刀2 注册通电；平铺四键，与 kanbanFieldId 同构，零嵌套信封）
+  chartType: ChartType; // 刀2 固定默认 "bar"，horizontalBar/line/pie 与类型切换留刀3
+  chartDimensionFieldId: string | null; // 维度（分桶）字段；null = 未配置
+  chartMetricFieldId: string | null; // 指标字段；null 时仅 count 族聚合有意义
+  chartAggFunc: AggFunc; // 复用既有九函数，无指标字段默认 "count"
+
   // 表单
   formFields: FormFieldConfig[];
   formTitle: string;
@@ -244,6 +254,10 @@ export function defaultViewConfig(overrides: Partial<ViewConfig> = {}): ViewConf
     ganttProgressFieldId: null,
     ganttDependencyFieldId: null,
     ganttZoom: "day",
+    chartType: "bar",
+    chartDimensionFieldId: null,
+    chartMetricFieldId: null,
+    chartAggFunc: "count",
     formFields: [],
     formTitle: "",
     formDescription: "",
@@ -318,4 +332,56 @@ export function canBeGanttProgressField(t: FieldType): boolean {
 // 该字段类型能否作为甘特前置依赖（同表 link）
 export function canBeGanttDependencyField(t: FieldType): boolean {
   return t === "links";
+}
+
+// ============ 图表视图（BI 刀2 已注册为第 9 视图） ============
+// 注册状态（刀2 完成）：
+//   - "chart" 已并入上方 ViewType 联合 / VIEW_TYPES / VIEW_TYPE_LABEL；
+//   - ViewConfig 以平铺四键（chartType/chartDimensionFieldId/chartMetricFieldId/chartAggFunc）
+//     持久化，与 kanbanFieldId 同构，defaultViewConfig 给默认值；
+//   - ViewRouter / 图标 / 后端 zod 与 MCP 枚举 / parseViewConfig 白名单均已通电。
+// 下面的 ChartType / CHART_TYPE_LABEL / ChartSpec / canBe* 是刀1 落地的纯类型与资格判定，保持不动。
+// ChartSpec 为独立规格描述，当前持久化走 ViewConfig 平铺键而非嵌套 ChartSpec。
+
+/** 图表图型：柱图 / 条形图（横向柱）/ 折线图 / 饼图。 */
+export type ChartType = "bar" | "horizontalBar" | "line" | "pie";
+
+export const CHART_TYPE_LABEL: Record<ChartType, string> = {
+  bar: "柱图",
+  horizontalBar: "条形图",
+  line: "折线图",
+  pie: "饼图",
+};
+
+/**
+ * 图表规格（纯数据，无任何渲染/颜色信息）。
+ * - dimensionFieldId：维度（分桶）字段；null = 未配置，buildChartData 返回空数组。
+ * - metricFieldId：指标字段；null 时仅 count 类聚合有意义（按整记录计数），
+ *   sum/avg/min/max 等数值聚合在无指标字段时返回 null。
+ * - aggFunc：复用既有 AggFunc 九函数，语义与 apps/api 列聚合 1:1 对齐。
+ */
+export interface ChartSpec {
+  chartType: ChartType;
+  dimensionFieldId: string | null;
+  metricFieldId: string | null;
+  aggFunc: AggFunc;
+}
+
+/**
+ * 该字段类型能否作为图表维度（分桶）字段。
+ * 规则走 fieldTypeGroup 单源分组：link / attachment / container 三组无标量分桶语义，
+ * 其余（text/number/date/bool/select）均可作维度。
+ */
+export function canBeChartDimensionField(t: FieldType): boolean {
+  const g = fieldTypeGroup(t);
+  return g !== "link" && g !== "attachment" && g !== "container";
+}
+
+/**
+ * 该字段类型能否作为图表指标字段。
+ * 数值族判定唯一复用 isNumericAggCapable（number/currency/percent/duration/rating），
+ * 禁止在本文件另造数值类型清单。count 类聚合不挑指标字段，由调用层在 metricFieldId=null 时处理。
+ */
+export function canBeChartMetricField(t: FieldType): boolean {
+  return isNumericAggCapable(t);
 }

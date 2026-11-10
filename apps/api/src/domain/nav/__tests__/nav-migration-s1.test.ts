@@ -64,14 +64,16 @@ afterAll(() => {
 });
 
 describe("迁移清单", () => {
-  it("迁移目录数为 44（历史 41 见下；YN0 sync_server_foundation +1；YN 离线客户端 offline_client_ddl +1；副本树态 replica_tree_state +1），nav DDL 落 applied，重跑 deploy 幂等", () => {
+  it("迁移目录数为 45（历史 41 见下；YN0 sync_server_foundation +1；YN 离线客户端 offline_client_ddl +1；副本树态 replica_tree_state +1；工作流 workflow_engine +1），nav DDL 落 applied，重跑 deploy 幂等", () => {
     const dirs = migDirs();
-    expect(dirs.length).toBe(44);
+    expect(dirs.length).toBe(45);
     // YN0：四张只增同步表迁移随基线落地（无 FK、camelCase 列、默认 off 不写一行）。
     expect(dirs).toContain("20261015122228_sync_server_foundation");
     // YN 离线客户端 + 副本树态：只增迁移随基线落地（默认 off 不写数据）。
     expect(dirs).toContain("20261019120000_offline_client_ddl");
     expect(dirs).toContain("20261020120000_replica_tree_state");
+    // 工作流引擎刀 A：三表只增迁移随基线落地（GX_WORKFLOW_ENGINE 默认 off，不写一行）。
+    expect(dirs).toContain("20261108120000_workflow_engine");
     expect(dirs).toContain("20260916090000_enterprise_nav_ddl");
     expect(dirs).toContain("20260916130000_owner_manage_share");
     expect(dirs).toContain("20260916140000_m5_search_outbox_ddl");
@@ -91,7 +93,7 @@ describe("迁移清单", () => {
       execSync("pnpm exec prisma migrate deploy --schema=prisma/schema.prisma", {
         cwd: process.cwd(), stdio: "ignore", env: process.env,
       })).not.toThrow();
-    // 120s：末尾重跑真实 deploy（44 迁移），默认 5s 在全量并发下会超时红。
+    // 120s：末尾重跑真实 deploy（45 迁移），默认 5s 在全量并发下会超时红。
   }, 120000);
 });
 

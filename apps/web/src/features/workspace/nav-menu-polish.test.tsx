@@ -204,14 +204,15 @@ describe("R-N-22 节奏统一", () => {
 });
 
 describe("图标语义映射（L1 全站）", () => {
-  it("底部固定区三项（导航编排、权限管理均已下线；帮助中心为新增静态项）：路径 / 图标 / 文案与 D-5 §2.2 一致（工作区设置 = settings）", () => {
+  it("底部固定区四项（导航编排、权限管理均已下线；帮助中心、工作流为静态项）：路径 / 图标 / 文案与 D-5 §2.2 一致（工作区设置 = settings）", () => {
     // P2-B1：权限管理不再是底部固定区的一项——它现在是工作区设置里的一个分区
     //（内嵌 PermPanel），路由 /workspace/authz 保留但不占 L1 固定位。
-    // 帮助中心是内容型静态入口：不看角色（门控见 lib/nav-gate.ts 的 STATIC_FOOTER_PATHS）。
-    // v6 S1 顺序照底板 RAIL_FOOT：通讯录 → 帮助中心 → 工作区设置；
-    // 通讯录图标由 building 换 users（双人剪影）。
+    // 帮助中心、工作流是内容型静态入口：不看角色（门控见 lib/nav-gate.ts 的 STATIC_FOOTER_PATHS）。
+    // v6 S1 顺序照底板 RAIL_FOOT：通讯录 → 工作流 → 帮助中心 → 工作区设置；
+    // 通讯录图标由 building 换 users（双人剪影），工作流用自建 workflow 图标。
     expect(FOOTER_NAV_ITEMS).toEqual([
       { path: "/workspace/contacts", icon: "users", label: "通讯录" },
+      { path: "/workflow", icon: "workflow", label: "工作流" },
       { path: "/help", icon: "help", label: "帮助中心" },
       { path: "/workspace/settings/general", icon: "settings", label: "工作区设置" },
     ]);
@@ -238,10 +239,10 @@ describe("图标语义映射（L1 全站）", () => {
     expect(navKindIcon("group")).toBe("group");
   });
 
-  it("菜单用到的图标全部能渲染（含 v6 通讯录 users / 帮助 help）", () => {
+  it("菜单用到的图标全部能渲染（含 v6 通讯录 users / 帮助 help / 工作流 workflow）", () => {
     const used: IconName[] = [
       "user", "home", "checkSquare", "star",
-      "building", "users", "help", "shield", "sitemap", "settings",
+      "building", "users", "help", "workflow", "shield", "sitemap", "settings",
       "folder", "folderOpen", "database", "book", "table", "doc", "canvas", "grid", "group",
       "chevronRight", "chevronDown", "moreVertical", "plus", "edit",
     ];

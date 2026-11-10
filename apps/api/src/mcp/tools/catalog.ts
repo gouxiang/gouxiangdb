@@ -123,7 +123,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
   {
     meta: {
       name: "view.create_view", title: "创建视图",
-      description: "在指定表创建视图（grid/gallery/form/detail/kanban/calendar/tree/gantt；含默认配置；需 confirm=true）。",
+      description: "在指定表创建视图（grid/gallery/form/detail/kanban/calendar/tree/gantt/chart；含默认配置；需 confirm=true）。",
       scopes: ["record:write"], family: "table", actions: ["manage_schema"], readOnly: false,
     },
     inputShape: createViewShape,

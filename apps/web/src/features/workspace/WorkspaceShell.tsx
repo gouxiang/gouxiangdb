@@ -307,10 +307,10 @@ export function WorkspaceShell() {
     setL2Peeked(false);
   }, [location.pathname]);
 
-  // 工作区级路由（/workspace/*）没有库上下文 → L2 收起为 0 宽、不占位
-  const activeContainer = location.pathname.startsWith("/workspace")
-    ? null
-    : routeContainer;
+  // 工作区级路由（/workspace/*）与工作流（/workflow/*）都没有库上下文 → L2 收起为 0 宽、不占位
+  const isWorkspaceLevel =
+    location.pathname.startsWith("/workspace") || location.pathname.startsWith("/workflow");
+  const activeContainer = isWorkspaceLevel ? null : routeContainer;
   const l2Hidden = l2Peeked ? false : resolveL2Collapsed(l2Intent, isFloatingL2Tier(tier));
   const showL2 = !!activeContainer && !l2Hidden;
 

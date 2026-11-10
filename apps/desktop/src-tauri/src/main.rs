@@ -42,21 +42,19 @@ use tauri_plugin_updater::UpdaterExt;
 const BUNDLE_ID: &str = "cc.gouxiang.desktop";
 const NODE_BIN: &str = "gxnode-aarch64-apple-darwin";
 const SERVER_DIR: &str = "server";
-/// 壳回环静态口的**固定主口**。
+/// 壳回环静态口的**固定主口**（0.2.7 修复「重启后远端连接失忆」，0.3.0 合入封版分支）。
 ///
-/// 为什么必须固定（0.2.7 修复「重启后远端连接失忆」）：WebView 的 localStorage 按
-/// origin（协议+主机+**端口**）隔离。壳若每次启动都绑 OS 随机口（`:0`），重启后
-/// 端口变化＝origin 变化，存在 localStorage 的远端节点注册表（`gx-node-launcher`）、
-/// 各远端登录会话（`gx-node-session:*`）与本机登录态（`gx-auth`）会被整体判成全新
-/// origin 而读不到，表现为「之前连的远端全丢、要重输地址」。固定主口后 origin 跨重启
-/// 稳定，存储天然延续，无需前端迁移。
+/// WebView 的 localStorage 按 origin（协议+主机+**端口**）隔离。壳若每次启动都绑 OS
+/// 随机口（`:0`），重启后端口变＝origin 变，存在 localStorage 的远端节点注册表
+/// （`gx-node-launcher`）、各远端登录会话（`gx-node-session:*`）与本机登录态（`gx-auth`）
+/// 会被判成全新 origin 而读不到，表现为「之前连的远端全丢、要重输地址」。固定主口后
+/// origin 跨重启稳定，存储天然延续，无需前端迁移。
 ///
-/// 仅绑回环 `127.0.0.1`，不对外暴露、无防火墙/权限影响。主口被占（罕见，如上一实例
-/// 尚未完全退出）时在 [`SHELL_FALLBACK_PORTS`] 内依次回退；全部被占才保底用 OS 随机口。
-const SHELL_PRIMARY_PORT: u16 = 47831;
-/// 主口被占时的候选回退口（依次尝试）。单用户机 + 关窗驻留托盘使主口常态稳定，
-/// 候选仅为健壮性兜底；落入随机口属于极端情况，该次启动不保证延续历史存储。
-const SHELL_FALLBACK_PORTS: &[u16] = &[47832, 47833, 47834, 47835, 47836];
+/// 仅绑回环 `127.0.0.1`，不对外暴露。主口被占（如上一实例尚未完全退出）时在
+/// [`SHELL_FALLBACK_PORTS`] 内依次回退；全部被占才保底用 OS 随机口（保启动）。
+pub(crate) const SHELL_PRIMARY_PORT: u16 = 47831;
+/// 主口被占时的候选回退口（依次尝试）。
+pub(crate) const SHELL_FALLBACK_PORTS: &[u16] = &[47832, 47833, 47834, 47835, 47836];
 const EXIT_LOG: &str = "/tmp/gx-desktop-exit.log";
 /// PoC-2 门控（仅自测）：GX_POC2=1 时把 sidecar 输出落盘并导航到同源探针页 /poc2.html。
 /// 默认（无此 env）行为与 PoC-1 完全一致：日志丢弃、导航到 /。
@@ -751,12 +749,54 @@ async fn bind_shell_listener() -> Result<(tokio::net::TcpListener, u16), String>
 ///
 /// 在普通系统线程中调用（与 PoC 一致），用 tauri 自带 tokio runtime 的 block_on 驱动绑定；
 /// 服务任务经 `tauri::async_runtime::spawn` 常驻，App 生命周期内不退出。
+/// 端口选择核心：在回环上按给定顺序绑定第一个空闲口；候选全被占则绑 `127.0.0.1:0`
+/// 由 OS 分配随机口保底（保证应用仍能启动，但该次不保证延续历史 localStorage）。
+///
+/// 仅把 `AddrInUse` 视为"该口被占、试下一个"；其余错误（权限/接口异常）直接返回，
+/// 避免把真故障悄悄吞成回退。抽成独立函数便于 headless 单测，不依赖 Tauri Builder。
+pub(crate) async fn bind_loopback_first_available(
+    candidates: impl Iterator<Item = u16>,
+) -> Result<(tokio::net::TcpListener, u16), String> {
+    for port in candidates {
+        match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+            Ok(listener) => {
+                let actual = listener
+                    .local_addr()
+                    .map_err(|e| format!("读壳口失败: {e}"))?
+                    .port();
+                return Ok((listener, actual));
+            }
+            // 主口/候选口被占（如上一实例尚未完全退出）→ 试下一个。
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => continue,
+            Err(e) => return Err(format!("壳口绑定失败: {e}")),
+        }
+    }
+    // 所有固定口都被占：保底随机口，先保证起得来。
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("壳口绑定失败（含随机口兜底）: {e}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("读壳口失败: {e}"))?
+        .port();
+    Ok((listener, port))
+}
+
+/// 生产入口：固定主口 → 候选回退口 → 全占保底随机口。
+pub(crate) async fn bind_shell_listener() -> Result<(tokio::net::TcpListener, u16), String> {
+    bind_loopback_first_available(
+        std::iter::once(SHELL_PRIMARY_PORT).chain(SHELL_FALLBACK_PORTS.iter().copied()),
+    )
+    .await
+}
+
 fn boot_shell(window: WebviewWindow, resource_dir: PathBuf, state: Arc<commands::ShellState>) {
     // TODO(R3): 对齐 tauri.conf frontendDist 壳静态根（R1 先用 resource_dir/server/public）。
     let web_root = resource_dir.join(SERVER_DIR).join("public");
     state.set_web_root(web_root);
 
     // 固定回环壳口（47831 → 47832..47836 → 随机保底），拿实际端口后写回状态，再起常驻服务。
+    // 稳定 origin 以延续 localStorage（远端注册表/会话/本机登录态跨重启不丢）。
     let bound = tauri::async_runtime::block_on(async {
         let (listener, port) = bind_shell_listener().await?;
         state.set_port(port);

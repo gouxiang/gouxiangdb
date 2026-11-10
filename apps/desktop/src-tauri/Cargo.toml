@@ -1,8 +1,19 @@
 [package]
 name = "gouxiangdb-desktop"
-# 仅占位：tauri build 时以 tauri.conf.json 的 version 为准覆盖此值；tauri.conf.json 与根
-# package.json 共同构成版本单源（升版三处同改：根 package.json / tauri.conf.json / 本占位）。
-version = "0.3.0"
+# ── 版本单源契约（0.3.0 起，长期有效）────────────────────────────────────
+# 升版改三处，根带 semver 构建元数据、macOS 两处保持纯数字点分：
+#   1. 根 package.json.version      = "0.3.1+3ecd4c7"
+#      → dist GX_VERSION、fpk 内部 manifest、dmg/fpk 发布文件名、Gitea Release、
+#        应用「关于」显示。短串锚定【功能代码定稿 commit】（本次=3ecd4c7），
+#        封版提交只动版本/文档，规避「版本 hash 指向改版本那次提交」的自指。
+#        + 短串让同核心版本号的不同构建可被渠道区分（飞牛 fpk 同版本号无法覆盖安装）。
+#   2. apps/desktop/src-tauri/tauri.conf.json.version = "0.3.1"（本文件同值）
+#   3. 本文件 version                 = "0.3.1"
+#      → 两者逐字写入 macOS Info.plist 的 CFBundleShortVersionString / CFBundleVersion；
+#        苹果规范只允许数字点分，带 " + " 会违规，故【绝不】带短串。
+# 版本比较器 packages/shared-types/src/update.ts 已按 semver 接受并剥离 +build，
+# 更新决策只看核心 x.y.z；tauri build 时以 tauri.conf.json 覆盖本占位值。
+version = "0.3.1"
 description = "GouXiangDB macOS desktop shell"
 edition = "2021"
 rust-version = "1.77"

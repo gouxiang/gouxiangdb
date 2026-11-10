@@ -19,6 +19,7 @@ import type { PermissionSet, ViewConfig, ViewDTO } from "@gx/shared-types";
 import { ViewShell } from "./ViewShell";
 import KanbanView from "./KanbanView";
 import FormView from "./FormView";
+import ChartView from "../chart/ChartView";
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 /** 只取代码本体：注释里保留的「考古说明」不参与判定（与 designer/field-editor-dirty 同口径）。 */
@@ -169,11 +170,16 @@ describe("③ 新建记录不再被 pointer-events-none 吞掉点击", () => {
 });
 
 describe("⑤ 真视图组合冒烟：外壳 + 非网格子视图不崩", () => {
-  /** 用真实子视图渲染（缓存为空 → 子视图走自己的加载态），只验外壳两行与子视图共存 */
-  function renderWith(child: "kanban" | "form") {
+  /** 用真实子视图渲染（缓存为空 → 子视图走自己的加载/Setup 态），只验外壳两行与子视图共存 */
+  function renderWith(child: "kanban" | "form" | "chart") {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     qc.setQueryData(["views", TABLE_ID], VIEWS);
-    const target = child === "kanban" ? view("v2", "看板视图", "kanban") : view("v4", "表单视图", "form");
+    const target =
+      child === "kanban"
+        ? view("v2", "看板视图", "kanban")
+        : child === "chart"
+          ? view("v5", "图表视图", "chart")
+          : view("v4", "表单视图", "form");
     return render(
       <QueryClientProvider client={qc}>
         <MemoryRouter initialEntries={[`/base/${BASE_ID}/table/${TABLE_ID}/view/${target.id}`]}>
@@ -184,7 +190,15 @@ describe("⑤ 真视图组合冒烟：外壳 + 非网格子视图不崩", () => 
             view={target}
             permissions={PERM_ALL}
           >
-            {() => (child === "kanban" ? <KanbanView {...baseViewProps(target)} /> : <FormView {...baseViewProps(target)} />)}
+            {() =>
+              child === "kanban" ? (
+                <KanbanView {...baseViewProps(target)} />
+              ) : child === "chart" ? (
+                <ChartView {...baseViewProps(target)} />
+              ) : (
+                <FormView {...baseViewProps(target)} />
+              )
+            }
           </ViewShell>
         </MemoryRouter>
       </QueryClientProvider>,
@@ -201,6 +215,16 @@ describe("⑤ 真视图组合冒烟：外壳 + 非网格子视图不崩", () => 
     expect(html.indexOf("新建记录")).toBeLessThan(html.indexOf("设置看板分组字段"));
   });
 
+  it("图表视图：外壳两行 + 图表 Setup 引导同屏（chart 已纳入统一外壳）", () => {
+    const html = renderWith("chart");
+    expect(html).toContain("data-gx-toolbar-view-row");
+    expect(html).toContain("新建记录");
+    expect(html).toContain("搜索此视图");
+    // 空缓存下维度字段未配置 → ChartSetup 引导渲染在外壳两行之下
+    expect(html).toContain("设置图表维度字段");
+    expect(html.indexOf("新建记录")).toBeLessThan(html.indexOf("设置图表维度字段"));
+  });
+
   it("表单视图：同样在统一框架内（外壳两行不缺席）", () => {
     const html = renderWith("form");
     expect(html).toContain("data-gx-toolbar-view-row");
@@ -210,10 +234,10 @@ describe("⑤ 真视图组合冒烟：外壳 + 非网格子视图不崩", () => 
 });
 
 describe("④ 源码护栏：外壳是六类视图的唯一框架", () => {
-  it("ViewRouter 把六类视图全部交给 ViewShell 包裹", () => {
+  it("ViewRouter 把各类视图全部交给 ViewShell 包裹", () => {
     const src = read("./ViewRouter.tsx");
     expect(src).toContain("<ViewShell");
-    for (const type of ["grid", "gallery", "kanban", "calendar", "form", "detail"]) {
+    for (const type of ["grid", "gallery", "kanban", "calendar", "form", "detail", "chart"]) {
       expect(src).toContain(`case "${type}":`);
     }
     // 旧写法（六类视图各自裸奔 + 只有 GridView 自带工具栏）已移除

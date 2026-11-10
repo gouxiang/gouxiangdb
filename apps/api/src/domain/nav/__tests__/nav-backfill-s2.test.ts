@@ -37,7 +37,7 @@ beforeAll(async () => {
   fs.mkdirSync(path.join(tmpRoot, "migrations"));
   fs.copyFileSync(path.resolve("prisma/schema.prisma"), path.join(tmpRoot, "schema-legacy.prisma"));
   const dirs = migDirs();
-  expect(dirs.length).toBe(44); // 历史累计 41（PAT/mcp_idempotency、首管初始化、实体 icon、owner create_library、通讯录五件套、权限角色模型、角色×库视野表、分享链接对象化、collab_docs 旁路表、canShare 独立分享位、表单布局版本、A3 autoNumber、A4 库名唯一、A6 shareEnabled 回填、view adminConfig、view_user_prefs、attachments、record_changes、评论 threads 扩列）；YN0 离线同步 sync_* 四表 +1；YN 离线客户端 offline_client_ddl +1；副本树态 replica_tree_state +1。注意：下面 slice(0, PRE_ORG_COUNT=12) 是构造旧库的历史切点，不可随本数改动。
+  expect(dirs.length).toBe(45); // 历史累计 41（PAT/mcp_idempotency、首管初始化、实体 icon、owner create_library、通讯录五件套、权限角色模型、角色×库视野表、分享链接对象化、collab_docs 旁路表、canShare 独立分享位、表单布局版本、A3 autoNumber、A4 库名唯一、A6 shareEnabled 回填、view adminConfig、view_user_prefs、attachments、record_changes、评论 threads 扩列）；YN0 离线同步 sync_* 四表 +1；YN 离线客户端 offline_client_ddl +1；副本树态 replica_tree_state +1；工作流 workflow_engine +1。注意：下面 slice(0, PRE_ORG_COUNT=12) 是构造旧库的历史切点，不可随本数改动。
   for (const name of dirs.slice(0, PRE_ORG_COUNT)) {
     fs.cpSync(path.resolve("prisma/migrations", name), path.join(tmpRoot, "migrations", name), { recursive: true });
   }
@@ -84,10 +84,10 @@ afterAll(async () => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-describe("12 -> 44 直升回填（nav 迁移 B SQL 首跑；历史 41，YN0 离线同步四表 +1，YN 离线客户端 +1，副本树态 +1）", () => {
-  it("迁移全 applied（44，含历史全部组织/nav/搜索/权限/视图/附件/记录变更/评论迁移、YN0 sync_* 四表、离线客户端、副本树态），活实体节点数精确，软删/无视图表不产生悬挂", async () => {
+describe("12 -> 45 直升回填（nav 迁移 B SQL 首跑；历史 41，YN0 离线同步四表 +1，YN 离线客户端 +1，副本树态 +1，工作流 workflow_engine +1）", () => {
+  it("迁移全 applied（45，含历史全部组织/nav/搜索/权限/视图/附件/记录变更/评论迁移、YN0 sync_* 四表、离线客户端、副本树态、工作流三表），活实体节点数精确，软删/无视图表不产生悬挂", async () => {
     const applied = await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) n FROM _prisma_migrations WHERE rolled_back_at IS NULL`;
-    expect(Number(applied[0].n)).toBe(44);
+    expect(Number(applied[0].n)).toBe(45);
 
     const nodes = await prisma.navNode.findMany({ where: { deletedAt: null } });
     // 活实体：b1 + t1 + t2 + v1 + k1 + d1 + d2 + c1 = 8（b2 软删不回填）。

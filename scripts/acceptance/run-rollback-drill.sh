@@ -143,10 +143,10 @@ record R4 "${P%%|*}" "$((HITS_ON+CHK_HITS))" "$RC4" "on 游标三键在(hits=$HI
 stop_stage_server r4off || die "R4-off 停服失败"
 
 # ---------------- R5：embedding off（FTS 命中 + 零外网） ----------------
-log "R5 GX_EMBEDDING_MODE=off + netguard（纯 FTS、零外网）"
+log "R5 GX_EMBEDDING_MODE=off + netguard（纯 FTS；禁止域零外网，授权心跳走白名单）"
 P="$(serve r5 1 GX_ENTERPRISE_ORG=on GX_ENTERPRISE_NAV=on GX_M5_SEARCH=on)" || die "R5 服务未就绪"
 check r5 check-embedding.mjs --net-log "$RUN_DIR/stages/r5.netlog" --audit-out "$RUN_DIR/net-audit.json"
-record R5 "${P%%|*}" "$CHK_HITS" "$CHK_RC" "旧面 FTS 命中 + netguard 外网出网计数=0"
+record R5 "${P%%|*}" "$CHK_HITS" "$CHK_RC" "旧面 FTS 命中 + netguard 禁止域出网=0（授权心跳白名单放行）"
 stop_stage_server r5 || die "R5 停服失败"
 
 # ---------------- R6：worker 关闭面 GX_SEARCH_WORKER=off -> outbox 静置 + 手动 reindex ----------------

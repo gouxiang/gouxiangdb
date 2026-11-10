@@ -220,8 +220,8 @@ describe("admin/update/status：鉴权与参数", () => {
     expect(res.status).toBe(403);
     expect((await res.json()).code).toBe("FORBIDDEN");
   });
-  it("channel 传本地/未知通道（非声明式）-> 400", async () => {
-    for (const ch of ["fnos-fpk", "desktop-client", "nope"]) {
+  it("channel 传本地/未知通道（非声明式）-> 400；desktop-client 是合法声明通道", async () => {
+    for (const ch of ["fnos-fpk", "nope"]) {
       const res = await fnosApp.request(
         `/api/v1/admin/update/status?channel=${ch}`,
         { headers: owner() },
@@ -229,6 +229,15 @@ describe("admin/update/status：鉴权与参数", () => {
       expect(res.status, ch).toBe(400);
       expect((await res.json()).code).toBe("BAD_REQUEST");
     }
+    // desktop-client 已注册为 remoteDeclarable：接受声明（清单无该通道段 -> 200 latest），不再 400。
+    const ok = await fnosApp.request(
+      "/api/v1/admin/update/status?channel=desktop-client&arch=arm64&platform=darwin",
+      { headers: owner() },
+    );
+    expect(ok.status).toBe(200);
+    const body = await ok.json();
+    expect(body.current.channel).toBe("desktop-client");
+    expect(body.update).toBeNull();
   });
   it("arch/platform/force 非法值 -> 400", async () => {
     const qs = ["arch=mips", "platform=freebsd", "force=yes", "arch=x64&platform=bad"];

@@ -13,8 +13,8 @@
 //   - URL/Repo 结构级校验，非法回默认并记 warning；
 //   - token 只做 trim 原样保留，绝不进 warning / 日志 / 错误信息。
 
-/** 更新源种类（§5.3 GX_UPDATE_SOURCE）。 */
-export type UpdateSourceKind = "gitea" | "static";
+/** 更新源种类（§5.3 GX_UPDATE_SOURCE）。github 为 v0.3.1 新增的匿名公开仓源。 */
+export type UpdateSourceKind = "gitea" | "static" | "github";
 
 /** 更新机制解析后的配置（不可变快照，由 config.ts 在启动期构建一次）。 */
 export interface UpdateConfig {
@@ -78,10 +78,11 @@ export function parseUpdateEnabled(raw: string | undefined): boolean {
   return raw?.trim() !== "off";
 }
 
-/** 源种类：仅精确小写 gitea/static，其余（含未设）回 gitea。warning 由调用方按是否「显式但非法」决定。 */
+/** 源种类：仅精确小写 gitea/static/github，其余（含未设）回 gitea。warning 由调用方按是否「显式但非法」决定。 */
 export function parseUpdateSource(raw: string | undefined): UpdateSourceKind {
   const v = raw?.trim();
   if (v === "static") return "static";
+  if (v === "github") return "github";
   return "gitea";
 }
 
@@ -163,9 +164,15 @@ export function parseUpdateConfig(env: NodeJS.ProcessEnv = process.env): {
 
   // 显式配了源但既不是 gitea 也不是 static → 回默认并 warn（未设不 warn）。
   const sourceRaw = env.GX_UPDATE_SOURCE?.trim();
-  if (sourceRaw !== undefined && sourceRaw !== "" && sourceRaw !== "gitea" && sourceRaw !== "static") {
+  if (
+    sourceRaw !== undefined
+    && sourceRaw !== ""
+    && sourceRaw !== "gitea"
+    && sourceRaw !== "static"
+    && sourceRaw !== "github"
+  ) {
     warnings.push(
-      `GX_UPDATE_SOURCE 仅支持 gitea/static（当前「${sourceRaw}」），已回退默认 gitea`,
+      `GX_UPDATE_SOURCE 仅支持 gitea/static/github（当前「${sourceRaw}」），已回退默认 gitea`,
     );
   }
   const source = parseUpdateSource(env.GX_UPDATE_SOURCE);

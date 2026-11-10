@@ -104,7 +104,7 @@ export const deleteFieldShape = {
 // ---------- 视图结构写（table 族，manage_schema） ----------
 
 const VIEW_TYPE_VALUES = [
-  "grid", "gallery", "form", "detail", "kanban", "calendar", "tree", "gantt",
+  "grid", "gallery", "form", "detail", "kanban", "calendar", "tree", "gantt", "chart",
 ] as const;
 
 /** view.create_view：建视图（table 节点 manage_schema + confirm）。 */

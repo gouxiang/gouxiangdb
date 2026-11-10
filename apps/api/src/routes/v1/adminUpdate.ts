@@ -41,7 +41,7 @@ function badRequest(message: string): never {
   throw new HttpError(400, message, "BAD_REQUEST");
 }
 
-/** 解析并校验 query；channel 合法性（须 remoteDeclarable）交给 service 裁决（当前一律 400）。 */
+/** 解析并校验 query；channel 合法性（须 remoteDeclarable，当前仅 desktop-client）交给 service 裁决，注册表外即 400。 */
 function parseQuery(q: Record<string, string | undefined>): CheckParams {
   const params: CheckParams = {};
   if (q.channel !== undefined) params.channel = q.channel;

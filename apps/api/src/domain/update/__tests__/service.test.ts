@@ -449,16 +449,22 @@ describe("UpdateService TTL 缓存 / 单飞 / force", () => {
 });
 
 describe("UpdateService 声明通道（remoteDeclarable）", () => {
-  it("当前注册表无声明式通道：channel query 传任何值 -> 400 BAD_REQUEST", async () => {
+  it("本地/未知通道传 channel -> 400；desktop-client 是合法声明通道不再 400", async () => {
     const src = new FakeSource(() => manifest({}));
     const svc = service(src);
-    for (const ch of ["fnos-fpk", "source-bare", "desktop-client", "nope"]) {
+    for (const ch of ["fnos-fpk", "source-bare", "nope"]) {
       await expect(
         svc.check({ channel: ch, arch: "x64", platform: "linux" }),
       ).rejects.toMatchObject({ status: 400, code: "BAD_REQUEST" });
     }
-    // 声明被拒绝不触网。
+    // 本地/未知通道被拒绝时零触网。
     expect(src.calls).toBe(0);
+    // desktop-client 已注册为声明式通道：接受声明并拉清单（空清单 -> latest，非 400）。
+    const r = await svc.check({ channel: "desktop-client", arch: "arm64", platform: "darwin" });
+    expect(r.dto.current.channel).toBe("desktop-client");
+    expect(r.verdict).toBe("latest");
+    expect(r.dto.update).toBeNull();
+    expect(src.calls).toBe(1);
   });
 });
 
@@ -580,6 +586,77 @@ describe("UpdateService.resolveDownload（S4 凭票现场定位）", () => {
     await svc.resolveDownload(target);
     await svc.resolveDownload(target);
     expect(src.calls).toBe(1);
+  });
+});
+
+describe("UpdateService desktop-client 声明通道（#1295 下载断链修复）", () => {
+  const dmg = () =>
+    artifact({
+      arch: "arm64",
+      platform: "darwin",
+      filename: "GouXiang-0.3.1-arm64.dmg",
+      sha256: "c".repeat(64),
+      download: { kind: "release-asset", asset: "GouXiang-0.3.1-arm64.dmg" },
+    });
+  const desktopRelease = () =>
+    release({
+      version: "0.3.1",
+      artifacts: [
+        dmg(),
+        artifact({
+          arch: "x64",
+          platform: "win32",
+          filename: "GouXiang-0.3.1-x64.msi",
+          sha256: "d".repeat(64),
+          download: { kind: "release-asset", asset: "GouXiang-0.3.1-x64.msi" },
+        }),
+      ],
+    });
+  const desktopManifest = () =>
+    manifest({ "desktop-client": { releases: [desktopRelease()] } });
+
+  it("check：声明 darwin/arm64 -> upgrade DTO，指引 kind=desktop-installer", async () => {
+    const src = new FakeSource(() => desktopManifest());
+    const svc = service(src, { nodeArch: "arm64", nodePlatform: "darwin", currentVersion: "0.3.0" });
+    const r = await svc.check({ channel: "desktop-client", arch: "arm64", platform: "darwin" });
+    expect(r.verdict).toBe("upgrade");
+    expect(r.dto.current.channel).toBe("desktop-client");
+    expect(r.dto.update).not.toBeNull();
+    expect(r.dto.update!.artifact).toMatchObject({
+      arch: "arm64",
+      platform: "darwin",
+      filename: "GouXiang-0.3.1-arm64.dmg",
+    });
+    expect(r.dto.update!.manualInstallGuide.kind).toBe("desktop-installer");
+  });
+
+  it("resolveDownload：桌面通道经 declarableStrategy 兜底成功（修复前恒 null 断链）", async () => {
+    const src = new CapturingSource(() => desktopManifest());
+    const svc = service(src, { currentVersion: "0.3.0" });
+    const r = await svc.resolveDownload({
+      channel: "desktop-client",
+      arch: "arm64",
+      platform: "darwin",
+      version: "0.3.1",
+      filename: "GouXiang-0.3.1-arm64.dmg",
+    });
+    expect(r).not.toBeNull();
+    expect(r!.version).toBe("0.3.1");
+    expect(r!.artifact.filename).toBe("GouXiang-0.3.1-arm64.dmg");
+    expect(src.built).toHaveLength(1);
+  });
+
+  it("resolveDownload：平台/架构双键不符 -> null（不跨平台兜底）", async () => {
+    const src = new FakeSource(() => desktopManifest());
+    const svc = service(src, { currentVersion: "0.3.0" });
+    const r = await svc.resolveDownload({
+      channel: "desktop-client",
+      arch: "arm64",
+      platform: "win32", // win32 只有 x64 包
+      version: "0.3.1",
+      filename: "GouXiang-0.3.1-arm64.dmg",
+    });
+    expect(r).toBeNull();
   });
 });
 

@@ -16,10 +16,19 @@ import {
   withBase,
 } from "../../api/client";
 import { prefetchActionMessage, updateErrorMessage } from "./update-copy";
+import { resolveDesktopUpdateIdentity } from "./desktopIdentity";
 
 export const UPDATE_QK = {
   status: ["admin", "update", "status"] as const,
 } as const;
+
+/**
+ * 两个共用 UPDATE_QK.status 的 useQuery 必须用【同一个】queryFn，防止同 key 身份漂移。
+ * 非壳环境 resolveDesktopUpdateIdentity() 恒为 null，status(null) 经可选链全部归 undefined，
+ * 生成的请求 URL 与历史无参调用逐字一致（现网零变化）；仅物理桌面壳内才带 channel/arch/platform。
+ */
+const statusQueryFn = async () =>
+  AdminUpdateApi.status((await resolveDesktopUpdateIdentity()) ?? undefined);
 
 /** 从 ApiError 体里取 code（与 pat-hooks.normalizePatError 同口径）。 */
 function errorCode(e: unknown): string | null {
@@ -38,7 +47,7 @@ export function isUpdateNotEnabled(e: unknown): boolean {
 export function useUpdateStatus() {
   const q = useQuery({
     queryKey: UPDATE_QK.status,
-    queryFn: () => AdminUpdateApi.status(),
+    queryFn: statusQueryFn,
     // 手动触发：挂载不请求，refetch() 即「检查更新」；后端另有 5 分钟 TTL 缓存。
     enabled: false,
     staleTime: 30_000,
@@ -64,7 +73,8 @@ export interface DownloadResult {
 export function useUpdateDownload(onNavigate?: (href: string) => void) {
   return useMutation<DownloadResult, unknown, void>({
     mutationFn: async () => {
-      const ticket = await AdminUpdateApi.createDownloadTicket();
+      const identity = (await resolveDesktopUpdateIdentity()) ?? undefined;
+      const ticket = await AdminUpdateApi.createDownloadTicket(identity);
       const href = withBase(ticket.downloadPath);
       if (onNavigate) {
         onNavigate(href);
@@ -116,7 +126,7 @@ export function useUpdatePrefetch(): UseUpdatePrefetch {
   const qc = useQueryClient();
   const statusQ = useQuery({
     queryKey: UPDATE_QK.status,
-    queryFn: () => AdminUpdateApi.status(),
+    queryFn: statusQueryFn,
     enabled: false,
     staleTime: 30_000,
     retry: false,
@@ -126,7 +136,8 @@ export function useUpdatePrefetch(): UseUpdatePrefetch {
   const running = prefetch?.state === "running";
 
   const mutation = useMutation({
-    mutationFn: () => AdminUpdateApi.startPrefetch(),
+    mutationFn: async () =>
+      AdminUpdateApi.startPrefetch((await resolveDesktopUpdateIdentity()) ?? undefined),
     onSuccess: (res) => {
       // 受理即回写：running/ready 立刻反映，避免首个 1s 轮询前的空窗。
       qc.setQueryData<UpdateStatusDTO>(UPDATE_QK.status, (old) =>
