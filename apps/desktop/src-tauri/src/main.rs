@@ -699,56 +699,6 @@ fn run_poc4(window: WebviewWindow, resource_dir: PathBuf, data_dir: PathBuf) {
     }
 }
 
-/// 端口选择核心：在回环上按给定顺序绑定第一个空闲口；候选全部被占则绑 `127.0.0.1:0`
-/// 由 OS 分配随机口保底（保证应用仍能启动，但该次不保证延续历史 localStorage）。
-///
-/// 仅把 `AddrInUse` 视为"该口被占、试下一个"；其余错误（如权限/接口异常）直接返回，
-/// 避免把真故障悄悄吞成回退。抽成独立函数便于 headless 单测，不依赖 Tauri Builder。
-async fn bind_loopback_first_available(
-    candidates: impl Iterator<Item = u16>,
-) -> Result<(tokio::net::TcpListener, u16), String> {
-    for port in candidates {
-        match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
-            Ok(listener) => {
-                let actual = listener
-                    .local_addr()
-                    .map_err(|e| format!("读壳口失败: {e}"))?
-                    .port();
-                return Ok((listener, actual));
-            }
-            // 主口/候选口被占（如上一实例尚未完全退出）→ 试下一个。
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => continue,
-            Err(e) => return Err(format!("壳口绑定失败: {e}")),
-        }
-    }
-    // 所有固定口都被占：保底随机口，先保证起得来。
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .map_err(|e| format!("壳口绑定失败（含随机口兜底）: {e}"))?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| format!("读壳口失败: {e}"))?
-        .port();
-    Ok((listener, port))
-}
-
-/// 生产入口：固定主口 → 候选回退口 → 全占保底随机口。
-async fn bind_shell_listener() -> Result<(tokio::net::TcpListener, u16), String> {
-    bind_loopback_first_available(
-        std::iter::once(SHELL_PRIMARY_PORT).chain(SHELL_FALLBACK_PORTS.iter().copied()),
-    )
-    .await
-}
-
-/// R1 默认启动路径（IMPL §4）：绑定**固定**回环壳口（主口 47831，占用则候选回退、全占才
-/// 随机保底），静态托管前端 + 反代当前活动上游，然后把主窗口导航到
-/// `http://127.0.0.1:<port>/`。R1 默认不起本地内核（R2 才命令式起停）。
-///
-/// 固定端口的原因见 [`SHELL_PRIMARY_PORT`]：稳定 origin 才能让 WebView 跨重启记住远端节点、
-/// 登录会话与本机登录态。
-///
-/// 在普通系统线程中调用（与 PoC 一致），用 tauri 自带 tokio runtime 的 block_on 驱动绑定；
-/// 服务任务经 `tauri::async_runtime::spawn` 常驻，App 生命周期内不退出。
 /// 端口选择核心：在回环上按给定顺序绑定第一个空闲口；候选全被占则绑 `127.0.0.1:0`
 /// 由 OS 分配随机口保底（保证应用仍能启动，但该次不保证延续历史 localStorage）。
 ///
@@ -790,6 +740,15 @@ pub(crate) async fn bind_shell_listener() -> Result<(tokio::net::TcpListener, u1
     .await
 }
 
+/// R1 默认启动路径（IMPL §4）：绑定**固定**回环壳口（主口 47831，占用则候选回退、全占才
+/// 随机保底），静态托管前端 + 反代当前活动上游，然后把主窗口导航到
+/// `http://127.0.0.1:<port>/`。R1 默认不起本地内核（R2 才命令式起停）。
+///
+/// 固定端口的原因见 [`SHELL_PRIMARY_PORT`]：稳定 origin 才能让 WebView 跨重启记住远端节点、
+/// 登录会话与本机登录态。
+///
+/// 在普通系统线程中调用（与 PoC 一致），用 tauri 自带 tokio runtime 的 block_on 驱动绑定；
+/// 服务任务经 `tauri::async_runtime::spawn` 常驻，App 生命周期内不退出。
 fn boot_shell(window: WebviewWindow, resource_dir: PathBuf, state: Arc<commands::ShellState>) {
     // TODO(R3): 对齐 tauri.conf frontendDist 壳静态根（R1 先用 resource_dir/server/public）。
     let web_root = resource_dir.join(SERVER_DIR).join("public");

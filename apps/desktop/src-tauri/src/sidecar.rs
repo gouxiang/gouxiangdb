@@ -1286,7 +1286,7 @@ mod tests {
         let fake_node = res.join(NODE_BIN);
         std::fs::write(
             &fake_node,
-            b"#!/bin/sh\n# 假随包 node：对 migrate/nav 子命令一律成功，其余参数也正常退出\nexit 0\n",
+            "#!/bin/sh\n# 假随包 node：对 migrate/nav 子命令一律成功，其余参数也正常退出\nexit 0\n".as_bytes(),
         )
         .unwrap();
         std::fs::set_permissions(&fake_node, std::fs::Permissions::from_mode(0o755)).unwrap();
